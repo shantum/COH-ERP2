@@ -1572,3 +1572,398 @@ export const searchRtoOrders = createServerFn({ method: 'GET' })
             })),
         };
     });
+
+// ============================================
+// LINE-LEVEL RETURN QUERIES (NEW)
+// ============================================
+// These queries work with OrderLine.return* fields directly,
+// for the new line-level returns system.
+
+import {
+    type OrderForReturn,
+    type OrderLineForReturn,
+    type ActiveReturnLine,
+    type ReturnActionQueueItem,
+    type RefundCalculationResult,
+} from '@coh/shared/schemas/returns';
+
+const RETURN_WINDOW_DAYS = 14;
+
+function getReturnEligibility(
+    line: {
+        deliveredAt: Date | null;
+        returnStatus: string | null;
+        returnQty: number | null;
+        isNonReturnable: boolean;
+    },
+    product: { isReturnable: boolean; nonReturnableReason: string | null }
+): { eligible: boolean; reason?: string; daysRemaining: number | null; windowExpiringSoon: boolean } {
+    // Check if already has active return
+    if (line.returnStatus && !['cancelled', 'complete'].includes(line.returnStatus)) {
+        return { eligible: false, reason: 'already_returned', daysRemaining: null, windowExpiringSoon: false };
+    }
+
+    // Check line-level non-returnable
+    if (line.isNonReturnable) {
+        return { eligible: false, reason: 'line_non_returnable', daysRemaining: null, windowExpiringSoon: false };
+    }
+
+    // Check product-level returnability
+    if (!product.isReturnable) {
+        return { eligible: false, reason: product.nonReturnableReason || 'product_non_returnable', daysRemaining: null, windowExpiringSoon: false };
+    }
+
+    // Check delivery status
+    if (!line.deliveredAt) {
+        return { eligible: false, reason: 'not_delivered', daysRemaining: null, windowExpiringSoon: false };
+    }
+
+    // Calculate return window
+    const daysSinceDelivery = Math.floor((Date.now() - line.deliveredAt.getTime()) / (1000 * 60 * 60 * 24));
+    const daysRemaining = RETURN_WINDOW_DAYS - daysSinceDelivery;
+    const windowExpiringSoon = daysRemaining > 0 && daysRemaining <= 2;
+
+    if (daysRemaining < 0) {
+        return { eligible: false, reason: 'window_expired', daysRemaining, windowExpiringSoon: false };
+    }
+
+    return { eligible: true, reason: 'within_window', daysRemaining, windowExpiringSoon };
+}
+
+/**
+ * Get order with lines for return initiation
+ * Includes eligibility checks for each line
+ */
+export const getOrderForReturn = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => z.object({ orderNumber: z.string() }).parse(input))
+    .handler(async ({ data }): Promise<OrderForReturn> => {
+        const prisma = await getPrisma();
+
+        const order = await prisma.order.findFirst({
+            where: {
+                OR: [
+                    { orderNumber: data.orderNumber },
+                    { shopifyCache: { orderNumber: data.orderNumber } },
+                ],
+            },
+            include: {
+                orderLines: {
+                    include: {
+                        sku: {
+                            include: {
+                                variation: {
+                                    include: {
+                                        product: true,
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        });
+
+        if (!order) {
+            throw new Error('Order not found');
+        }
+
+        const lines: OrderLineForReturn[] = order.orderLines.map((line) => {
+            const product = line.sku.variation.product;
+            const eligibility = getReturnEligibility(
+                {
+                    deliveredAt: line.deliveredAt,
+                    returnStatus: line.returnStatus,
+                    returnQty: line.returnQty,
+                    isNonReturnable: line.isNonReturnable,
+                },
+                { isReturnable: product.isReturnable, nonReturnableReason: product.nonReturnableReason }
+            );
+
+            return {
+                id: line.id,
+                orderId: line.orderId,
+                skuId: line.skuId,
+                skuCode: line.sku.skuCode,
+                size: line.sku.size,
+                qty: line.qty,
+                unitPrice: line.unitPrice,
+                lineStatus: line.lineStatus,
+                deliveredAt: line.deliveredAt,
+                returnStatus: line.returnStatus,
+                returnQty: line.returnQty,
+                eligibility,
+                productId: product.id,
+                productName: product.name,
+                colorName: line.sku.variation.colorName,
+                imageUrl: line.sku.variation.imageUrl || product.imageUrl,
+                isReturnable: product.isReturnable,
+                nonReturnableReason: product.nonReturnableReason,
+            };
+        });
+
+        return {
+            id: order.id,
+            orderNumber: order.orderNumber,
+            orderDate: order.orderDate,
+            totalAmount: order.totalAmount,
+            customerName: order.customerName,
+            customerEmail: order.customerEmail,
+            customerPhone: order.customerPhone,
+            shippingAddress: order.shippingAddress,
+            lines,
+        };
+    });
+
+/**
+ * Get all active line-level returns
+ * For returns dashboard listing
+ */
+export const getActiveLineReturns = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
+    .handler(async (): Promise<ActiveReturnLine[]> => {
+        const prisma = await getPrisma();
+
+        const lines = await prisma.orderLine.findMany({
+            where: {
+                returnStatus: {
+                    notIn: ['complete', 'cancelled'],
+                },
+            },
+            include: {
+                order: {
+                    select: {
+                        id: true,
+                        orderNumber: true,
+                        customerId: true,
+                        customerName: true,
+                        customerEmail: true,
+                        customerPhone: true,
+                    },
+                },
+                sku: {
+                    include: {
+                        variation: {
+                            include: {
+                                product: true,
+                            },
+                        },
+                    },
+                },
+            },
+            orderBy: { returnRequestedAt: 'desc' },
+        });
+
+        return lines.map((line) => ({
+            id: line.id,
+            orderId: line.orderId,
+            orderNumber: line.order.orderNumber,
+            skuId: line.skuId,
+            skuCode: line.sku.skuCode,
+            size: line.sku.size,
+            qty: line.qty,
+            unitPrice: line.unitPrice,
+            returnStatus: line.returnStatus!,
+            returnQty: line.returnQty!,
+            returnRequestedAt: line.returnRequestedAt,
+            returnReasonCategory: line.returnReasonCategory,
+            returnReasonDetail: line.returnReasonDetail,
+            returnResolution: line.returnResolution,
+            returnPickupType: line.returnPickupType,
+            returnAwbNumber: line.returnAwbNumber,
+            returnCourier: line.returnCourier,
+            returnPickupScheduledAt: line.returnPickupScheduledAt,
+            returnReceivedAt: line.returnReceivedAt,
+            returnCondition: line.returnCondition,
+            returnExchangeOrderId: line.returnExchangeOrderId,
+            customerId: line.order.customerId,
+            customerName: line.order.customerName,
+            customerEmail: line.order.customerEmail,
+            customerPhone: line.order.customerPhone,
+            productId: line.sku.variation.product.id,
+            productName: line.sku.variation.product.name,
+            colorName: line.sku.variation.colorName,
+            imageUrl: line.sku.variation.imageUrl || line.sku.variation.product.imageUrl,
+        }));
+    });
+
+/**
+ * Get return action queue (lines needing action)
+ * Prioritized list for staff to process
+ */
+export const getLineReturnActionQueue = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
+    .handler(async (): Promise<ReturnActionQueueItem[]> => {
+        const prisma = await getPrisma();
+
+        const lines = await prisma.orderLine.findMany({
+            where: {
+                returnStatus: {
+                    in: ['requested', 'pickup_scheduled', 'in_transit', 'received'],
+                },
+            },
+            include: {
+                order: {
+                    select: {
+                        id: true,
+                        orderNumber: true,
+                        customerId: true,
+                        customerName: true,
+                        customerEmail: true,
+                        customerPhone: true,
+                    },
+                },
+                sku: {
+                    include: {
+                        variation: {
+                            include: {
+                                product: true,
+                            },
+                        },
+                    },
+                },
+            },
+            orderBy: { returnRequestedAt: 'asc' },
+        });
+
+        const actionItems: ReturnActionQueueItem[] = [];
+
+        for (const line of lines) {
+            // Determine action needed based on status and resolution
+            let actionNeeded: 'schedule_pickup' | 'receive' | 'process_refund' | 'create_exchange' | 'complete';
+
+            switch (line.returnStatus) {
+                case 'requested':
+                    actionNeeded = 'schedule_pickup';
+                    break;
+                case 'pickup_scheduled':
+                case 'in_transit':
+                    actionNeeded = 'receive';
+                    break;
+                case 'received':
+                    if (line.returnResolution === 'refund' && !line.returnRefundCompletedAt) {
+                        actionNeeded = 'process_refund';
+                    } else if (line.returnResolution === 'exchange' && !line.returnExchangeOrderId) {
+                        actionNeeded = 'create_exchange';
+                    } else {
+                        actionNeeded = 'complete';
+                    }
+                    break;
+                default:
+                    continue;
+            }
+
+            const daysSinceRequest = line.returnRequestedAt
+                ? Math.floor((Date.now() - line.returnRequestedAt.getTime()) / (1000 * 60 * 60 * 24))
+                : 0;
+
+            actionItems.push({
+                id: line.id,
+                orderId: line.orderId,
+                orderNumber: line.order.orderNumber,
+                skuId: line.skuId,
+                skuCode: line.sku.skuCode,
+                size: line.sku.size,
+                qty: line.qty,
+                unitPrice: line.unitPrice,
+                returnStatus: line.returnStatus!,
+                returnQty: line.returnQty!,
+                returnRequestedAt: line.returnRequestedAt,
+                returnReasonCategory: line.returnReasonCategory,
+                returnReasonDetail: line.returnReasonDetail,
+                returnResolution: line.returnResolution,
+                returnPickupType: line.returnPickupType,
+                returnAwbNumber: line.returnAwbNumber,
+                returnCourier: line.returnCourier,
+                returnPickupScheduledAt: line.returnPickupScheduledAt,
+                returnReceivedAt: line.returnReceivedAt,
+                returnCondition: line.returnCondition,
+                returnExchangeOrderId: line.returnExchangeOrderId,
+                customerId: line.order.customerId,
+                customerName: line.order.customerName,
+                customerEmail: line.order.customerEmail,
+                customerPhone: line.order.customerPhone,
+                productId: line.sku.variation.product.id,
+                productName: line.sku.variation.product.name,
+                colorName: line.sku.variation.colorName,
+                imageUrl: line.sku.variation.imageUrl || line.sku.variation.product.imageUrl,
+                actionNeeded,
+                daysSinceRequest,
+            });
+        }
+
+        // Sort by priority: receive first, then by age
+        actionItems.sort((a, b) => {
+            const priorityOrder = ['receive', 'schedule_pickup', 'process_refund', 'create_exchange', 'complete'];
+            const aPriority = priorityOrder.indexOf(a.actionNeeded);
+            const bPriority = priorityOrder.indexOf(b.actionNeeded);
+            if (aPriority !== bPriority) return aPriority - bPriority;
+            return b.daysSinceRequest - a.daysSinceRequest;
+        });
+
+        return actionItems;
+    });
+
+/**
+ * Calculate refund amount for a return line
+ * Shows breakdown: gross, discount clawback, net
+ */
+export const calculateLineReturnRefund = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => z.object({ orderLineId: z.string().uuid() }).parse(input))
+    .handler(async ({ data }): Promise<RefundCalculationResult> => {
+        const prisma = await getPrisma();
+        const { orderLineId } = data;
+
+        const line = await prisma.orderLine.findUnique({
+            where: { id: orderLineId },
+            include: {
+                order: {
+                    select: {
+                        totalAmount: true,
+                        orderLines: {
+                            select: {
+                                id: true,
+                                qty: true,
+                                unitPrice: true,
+                                returnStatus: true,
+                                returnQty: true,
+                            },
+                        },
+                    },
+                },
+            },
+        });
+
+        if (!line) {
+            throw new Error('Order line not found');
+        }
+
+        if (!line.returnQty) {
+            throw new Error('No return quantity set');
+        }
+
+        // Calculate gross amount (line value * return qty ratio)
+        const lineTotal = line.unitPrice * line.qty;
+        const grossAmount = (line.unitPrice * line.returnQty);
+
+        // Calculate discount clawback (if order total drops below discount threshold)
+        // This is a simplified calculation - in practice, you'd check against order-level discounts
+        const discountClawback = 0;
+
+        // Check if this return would drop order below any discount threshold
+        // For now, assume no clawback (would need to implement discount rules)
+        const suggestedDeductions = 0;
+
+        const netAmount = grossAmount - discountClawback - suggestedDeductions;
+
+        return {
+            orderLineId,
+            lineTotal,
+            returnQty: line.returnQty,
+            grossAmount,
+            discountClawback,
+            suggestedDeductions,
+            netAmount,
+        };
+    });
