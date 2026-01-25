@@ -2,7 +2,7 @@
  * ModalHeader - Order header with status badges, mode tabs, and navigation
  */
 
-import { X, ShoppingBag, RefreshCw, ExternalLink, Calendar, Hash, Tag, ArrowLeft, ChevronRight, User } from 'lucide-react';
+import { X, ShoppingBag, RefreshCw, ExternalLink, Calendar, Hash, Tag, ArrowLeft, ChevronRight, User, RotateCcw } from 'lucide-react';
 import type { Order } from '../../../../types';
 import type { ModalMode, NavigationEntry } from '../types';
 
@@ -13,6 +13,7 @@ interface ModalHeaderProps {
   canEdit: boolean;
   canShip: boolean;
   canCustomer: boolean;
+  canReturn: boolean;
   hasUnsavedChanges: boolean;
   onClose: () => void;
   // Navigation props
@@ -57,6 +58,7 @@ export function ModalHeader({
   canEdit,
   canShip,
   canCustomer,
+  canReturn,
   hasUnsavedChanges,
   onClose,
   navigationHistory = [],
@@ -245,6 +247,22 @@ export function ModalHeader({
                 <User size={14} className="sm:block hidden" />
                 <span className="hidden sm:inline">Customer</span>
                 <User size={14} className="sm:hidden" />
+              </button>
+              <button
+                onClick={() => onModeChange('returns')}
+                disabled={!canReturn}
+                title={!canReturn ? 'No items eligible for return' : 'Manage returns'}
+                className={`px-2 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm font-medium rounded-md sm:rounded-lg transition-all duration-200 flex items-center gap-1 sm:gap-1.5 ${
+                  mode === 'returns'
+                    ? 'bg-white text-slate-800 shadow-sm'
+                    : canReturn
+                      ? 'text-slate-500 hover:text-slate-700'
+                      : 'text-slate-300 cursor-not-allowed'
+                }`}
+              >
+                <RotateCcw size={14} className="sm:block hidden" />
+                <span className="hidden sm:inline">Returns</span>
+                <RotateCcw size={14} className="sm:hidden" />
               </button>
             </div>
 

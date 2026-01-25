@@ -274,6 +274,7 @@ export interface OrderLine {
   pickedAt: string | null;
   packedAt: string | null;
   shippedAt: string | null;
+  deliveredAt?: string | null; // Delivery tracking
   inventoryTxnId: string | null;
   productionBatchId: string | null;
   notes: string | null;
@@ -287,6 +288,20 @@ export interface OrderLine {
   isNonReturnable?: boolean; // Cannot be returned after order shipped
   originalSkuId?: string; // Reference to base SKU before customization applied
   customizedAt?: string; // Timestamp when customization created
+  // Line-level return fields
+  returnStatus?: string | null; // 'requested'|'pickup_scheduled'|'in_transit'|'received'|'complete'|'cancelled'
+  returnQty?: number | null;
+  returnRequestedAt?: string | null;
+  returnReasonCategory?: string | null;
+  returnReasonDetail?: string | null;
+  returnResolution?: string | null; // 'refund'|'exchange'
+  returnPickupType?: string | null; // 'arranged_by_us'|'customer_shipped'
+  returnAwbNumber?: string | null;
+  returnCourier?: string | null;
+  returnPickupScheduledAt?: string | null;
+  returnReceivedAt?: string | null;
+  returnCondition?: string | null; // 'good'|'damaged'|'defective'|'wrong_item'|'used'
+  returnExchangeOrderId?: string | null;
   sku?: Sku;
   productionBatch?: ProductionBatch;
 }
