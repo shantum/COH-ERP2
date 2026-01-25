@@ -23,7 +23,7 @@
  */
 
 // Policy
-export { RETURN_POLICY, WARNING_THRESHOLD_DAYS, type ReturnPolicy } from './policy.js';
+export { RETURN_POLICY, type ReturnPolicy } from './policy.js';
 
 // Options (labeled)
 export {
@@ -54,4 +54,5 @@ export {
     type EligibilityInput,
     type EligibilityResult,
     type EligibilityReason,
+    type EligibilitySettings,
 } from './eligibility.js';

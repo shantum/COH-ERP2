@@ -1595,6 +1595,7 @@ import {
     RETURN_PICKUP_TYPES,
     RETURN_REFUND_METHODS,
     NON_RETURNABLE_REASONS,
+    type EligibilitySettings,
     toOptions,
 } from '@coh/shared/domain/returns';
 
@@ -1607,6 +1608,12 @@ export const getOrderForReturn = createServerFn({ method: 'GET' })
     .inputValidator((input: unknown) => z.object({ orderNumber: z.string() }).parse(input))
     .handler(async ({ data }): Promise<OrderForReturn> => {
         const prisma = await getPrisma();
+
+        // Fetch settings from DB (with fallback to code defaults)
+        const dbSettings = await prisma.returnSettings.findFirst({ where: { id: 'default' } });
+        const settings: EligibilitySettings = dbSettings
+            ? { windowDays: dbSettings.windowDays, windowWarningDays: dbSettings.windowWarningDays }
+            : { windowDays: RETURN_POLICY.windowDays, windowWarningDays: RETURN_POLICY.windowWarningDays };
 
         const order = await prisma.order.findFirst({
             where: {
@@ -1644,7 +1651,7 @@ export const getOrderForReturn = createServerFn({ method: 'GET' })
                 isNonReturnable: line.isNonReturnable,
                 productIsReturnable: product.isReturnable,
                 productNonReturnableReason: product.nonReturnableReason,
-            });
+            }, settings);
 
             return {
                 id: line.id,
@@ -1942,6 +1949,7 @@ export interface ReturnConfigResponse {
     windowDays: number;
     windowWarningDays: number;
     autoRejectAfterDays: number | null;
+    allowExpiredOverride: boolean;
     reasonCategories: Array<{ value: string; label: string }>;
     conditions: Array<{ value: string; label: string }>;
     resolutions: Array<{ value: string; label: string }>;
@@ -1951,18 +1959,48 @@ export interface ReturnConfigResponse {
 }
 
 /**
+ * Get return settings from DB with fallback to code defaults
+ */
+async function getReturnSettingsFromDb(): Promise<EligibilitySettings & { autoRejectAfterDays: number | null; allowExpiredOverride: boolean }> {
+    const prisma = await getPrisma();
+
+    // Try to get settings from DB
+    const dbSettings = await prisma.returnSettings.findFirst({
+        where: { id: 'default' },
+    });
+
+    if (dbSettings) {
+        return {
+            windowDays: dbSettings.windowDays,
+            windowWarningDays: dbSettings.windowWarningDays,
+            autoRejectAfterDays: dbSettings.autoRejectAfterDays,
+            allowExpiredOverride: dbSettings.allowExpiredOverride,
+        };
+    }
+
+    // Return code defaults
+    return {
+        windowDays: RETURN_POLICY.windowDays,
+        windowWarningDays: RETURN_POLICY.windowWarningDays,
+        autoRejectAfterDays: RETURN_POLICY.autoRejectAfterDays,
+        allowExpiredOverride: RETURN_POLICY.allowExpiredWithOverride,
+    };
+}
+
+/**
  * Get return configuration settings
- * Used by Returns Settings tab
- *
- * All values come from @coh/shared/domain/returns - single source of truth.
+ * Reads from DB if available, falls back to code defaults
  */
 export const getReturnConfig = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .handler(async (): Promise<ReturnConfigResponse> => {
+        const settings = await getReturnSettingsFromDb();
+
         return {
-            windowDays: RETURN_POLICY.windowDays,
-            windowWarningDays: RETURN_POLICY.windowWarningDays,
-            autoRejectAfterDays: RETURN_POLICY.autoRejectAfterDays,
+            windowDays: settings.windowDays,
+            windowWarningDays: settings.windowWarningDays,
+            autoRejectAfterDays: settings.autoRejectAfterDays,
+            allowExpiredOverride: settings.allowExpiredOverride,
             reasonCategories: toOptions(RETURN_REASONS),
             conditions: toOptions(RETURN_CONDITIONS),
             resolutions: toOptions(RETURN_RESOLUTIONS),
@@ -1970,4 +2008,48 @@ export const getReturnConfig = createServerFn({ method: 'GET' })
             refundMethods: toOptions(RETURN_REFUND_METHODS),
             nonReturnableReasons: toOptions(NON_RETURNABLE_REASONS),
         };
+    });
+
+/**
+ * Update return settings
+ */
+export const updateReturnSettings = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) =>
+        z.object({
+            windowDays: z.number().int().min(1).max(365),
+            windowWarningDays: z.number().int().min(0).max(365),
+            autoRejectAfterDays: z.number().int().min(1).max(365).nullable(),
+            allowExpiredOverride: z.boolean(),
+        }).parse(input)
+    )
+    .handler(async ({ data, context }): Promise<{ success: boolean }> => {
+        const prisma = await getPrisma();
+        const userId = context.user.id;
+
+        // Validation: windowWarningDays should be less than windowDays
+        if (data.windowWarningDays >= data.windowDays) {
+            throw new Error('Warning threshold must be less than return window');
+        }
+
+        await prisma.returnSettings.upsert({
+            where: { id: 'default' },
+            create: {
+                id: 'default',
+                windowDays: data.windowDays,
+                windowWarningDays: data.windowWarningDays,
+                autoRejectAfterDays: data.autoRejectAfterDays,
+                allowExpiredOverride: data.allowExpiredOverride,
+                updatedById: userId,
+            },
+            update: {
+                windowDays: data.windowDays,
+                windowWarningDays: data.windowWarningDays,
+                autoRejectAfterDays: data.autoRejectAfterDays,
+                allowExpiredOverride: data.allowExpiredOverride,
+                updatedById: userId,
+            },
+        });
+
+        return { success: true };
     });

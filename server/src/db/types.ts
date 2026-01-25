@@ -539,6 +539,27 @@ export type ReturnRequestLine = {
     inspectionNotes: string | null;
     unitPrice: number | null;
 };
+export type ReturnSettings = {
+    id: Generated<string>;
+    /**
+     * Days from delivery within which returns are accepted
+     */
+    windowDays: Generated<number>;
+    /**
+     * Days before window expiry to show warning (e.g., 12 means 2 days left warning)
+     */
+    windowWarningDays: Generated<number>;
+    /**
+     * Auto-reject returns after this many days (null = allow with override)
+     */
+    autoRejectAfterDays: number | null;
+    /**
+     * Allow returns after window expires with manual override
+     */
+    allowExpiredOverride: Generated<boolean>;
+    updatedAt: Timestamp;
+    updatedById: string | null;
+};
 export type ReturnShipping = {
     id: Generated<string>;
     requestId: string;
@@ -934,6 +955,7 @@ export type DB = {
     ReplacementItem: ReplacementItem;
     ReturnRequest: ReturnRequest;
     ReturnRequestLine: ReturnRequestLine;
+    ReturnSettings: ReturnSettings;
     ReturnShipping: ReturnShipping;
     ReturnStatusHistory: ReturnStatusHistory;
     Role: Role;

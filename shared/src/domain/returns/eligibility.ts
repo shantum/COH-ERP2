@@ -5,7 +5,7 @@
  * No side effects, no database calls - just logic.
  */
 
-import { RETURN_POLICY, WARNING_THRESHOLD_DAYS } from './policy.js';
+import { RETURN_POLICY } from './policy.js';
 
 // ============================================
 // TYPES
@@ -44,36 +44,46 @@ export interface EligibilityResult {
     warning?: string;
 }
 
+/** Settings that can be passed to eligibility check (from DB or defaults) */
+export interface EligibilitySettings {
+    windowDays: number;
+    windowWarningDays: number;
+}
+
 // ============================================
 // MAIN FUNCTION
 // ============================================
+
+/** Default settings from policy.ts */
+const DEFAULT_SETTINGS: EligibilitySettings = {
+    windowDays: RETURN_POLICY.windowDays,
+    windowWarningDays: RETURN_POLICY.windowWarningDays,
+};
 
 /**
  * Check if an order line is eligible for return
  *
  * @param input - Line and product information
+ * @param settings - Optional settings from DB (defaults to policy.ts values)
  * @param now - Current date (for testing)
  * @returns Eligibility result with reason and warnings
  *
  * @example
- * const result = checkEligibility({
- *   deliveredAt: new Date('2024-01-01'),
- *   returnStatus: null,
- *   isNonReturnable: false,
- *   productIsReturnable: true,
- *   productNonReturnableReason: null,
- * });
+ * // With defaults
+ * const result = checkEligibility({ deliveredAt, returnStatus, ... });
  *
- * if (result.eligible) {
- *   console.log(`${result.daysRemaining} days left to return`);
- * } else {
- *   console.log(`Cannot return: ${result.reason}`);
- * }
+ * // With DB settings
+ * const dbSettings = await getReturnSettings();
+ * const result = checkEligibility({ deliveredAt, ... }, dbSettings);
  */
 export function checkEligibility(
     input: EligibilityInput,
+    settings: EligibilitySettings = DEFAULT_SETTINGS,
     now: Date = new Date()
 ): EligibilityResult {
+    const { windowDays, windowWarningDays } = settings;
+    const warningThreshold = windowDays - windowWarningDays;
+
     // Hard block: already has active return
     if (input.returnStatus && !['cancelled', 'complete'].includes(input.returnStatus)) {
         return {
@@ -108,8 +118,8 @@ export function checkEligibility(
     const daysSinceDelivery = Math.floor(
         (now.getTime() - input.deliveredAt.getTime()) / (1000 * 60 * 60 * 24)
     );
-    const daysRemaining = RETURN_POLICY.windowDays - daysSinceDelivery;
-    const windowExpiringSoon = daysRemaining > 0 && daysRemaining <= WARNING_THRESHOLD_DAYS;
+    const daysRemaining = windowDays - daysSinceDelivery;
+    const windowExpiringSoon = daysRemaining > 0 && daysRemaining <= warningThreshold;
 
     // Soft warning: product marked non-returnable
     const warning = !input.productIsReturnable
@@ -134,28 +144,41 @@ export function checkEligibility(
  *
  * @returns Days remaining (negative if expired), null if not delivered
  */
-export function getDaysRemaining(deliveredAt: Date | null, now: Date = new Date()): number | null {
+export function getDaysRemaining(
+    deliveredAt: Date | null,
+    windowDays: number = RETURN_POLICY.windowDays,
+    now: Date = new Date()
+): number | null {
     if (!deliveredAt) return null;
     const daysSinceDelivery = Math.floor(
         (now.getTime() - deliveredAt.getTime()) / (1000 * 60 * 60 * 24)
     );
-    return RETURN_POLICY.windowDays - daysSinceDelivery;
+    return windowDays - daysSinceDelivery;
 }
 
 /**
  * Check if return window is about to expire
  */
-export function isExpiringSoon(deliveredAt: Date | null, now: Date = new Date()): boolean {
-    const daysRemaining = getDaysRemaining(deliveredAt, now);
+export function isExpiringSoon(
+    deliveredAt: Date | null,
+    settings: EligibilitySettings = DEFAULT_SETTINGS,
+    now: Date = new Date()
+): boolean {
+    const daysRemaining = getDaysRemaining(deliveredAt, settings.windowDays, now);
     if (daysRemaining === null) return false;
-    return daysRemaining > 0 && daysRemaining <= WARNING_THRESHOLD_DAYS;
+    const warningThreshold = settings.windowDays - settings.windowWarningDays;
+    return daysRemaining > 0 && daysRemaining <= warningThreshold;
 }
 
 /**
  * Check if delivery is within return window
  */
-export function isWithinWindow(deliveredAt: Date | null, now: Date = new Date()): boolean {
-    const daysRemaining = getDaysRemaining(deliveredAt, now);
+export function isWithinWindow(
+    deliveredAt: Date | null,
+    windowDays: number = RETURN_POLICY.windowDays,
+    now: Date = new Date()
+): boolean {
+    const daysRemaining = getDaysRemaining(deliveredAt, windowDays, now);
     if (daysRemaining === null) return false;
     return daysRemaining >= 0;
 }

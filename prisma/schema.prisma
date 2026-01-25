@@ -54,6 +54,8 @@ model User {
   returnRequestedLines  OrderLine[]              @relation("ReturnRequestedBy")
   returnReceivedLines   OrderLine[]              @relation("ReturnReceivedBy")
   returnClosedManuallyLines OrderLine[]          @relation("ReturnClosedManuallyBy")
+  // Settings updates
+  returnSettingsUpdates ReturnSettings[]
 
   @@index([roleId])
 }
@@ -987,6 +989,22 @@ model SystemSetting {
   key       String   @id
   value     String
   updatedAt DateTime @updatedAt
+}
+
+/// Return policy settings (singleton - only one row)
+model ReturnSettings {
+  id                    String   @id @default("default")
+  /// Days from delivery within which returns are accepted
+  windowDays            Int      @default(14)
+  /// Days before window expiry to show warning (e.g., 12 means 2 days left warning)
+  windowWarningDays     Int      @default(12)
+  /// Auto-reject returns after this many days (null = allow with override)
+  autoRejectAfterDays   Int?
+  /// Allow returns after window expires with manual override
+  allowExpiredOverride  Boolean  @default(true)
+  updatedAt             DateTime @updatedAt
+  updatedById           String?
+  updatedBy             User?    @relation(fields: [updatedById], references: [id])
 }
 
 model SyncJob {
