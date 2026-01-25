@@ -343,7 +343,7 @@ function ReturnInitiationForm({
           Resolution <span className="text-red-500">*</span>
         </label>
         <div className="flex gap-3">
-          <label className={`flex-1 flex items-center justify-center gap-2 p-3 rounded-lg border-2 cursor-pointer transition-all ${
+          <label className={`relative flex-1 flex items-center justify-center gap-2 p-3 rounded-lg border-2 cursor-pointer transition-all ${
             form.returnResolution === 'refund'
               ? 'border-sky-500 bg-sky-50 text-sky-700'
               : 'border-slate-200 hover:border-slate-300 text-slate-600'
@@ -359,7 +359,7 @@ function ReturnInitiationForm({
             <CircleDot size={16} className={form.returnResolution === 'refund' ? 'text-sky-600' : 'text-slate-400'} />
             <span className="text-sm font-medium">Refund</span>
           </label>
-          <label className={`flex-1 flex items-center justify-center gap-2 p-3 rounded-lg border-2 cursor-pointer transition-all ${
+          <label className={`relative flex-1 flex items-center justify-center gap-2 p-3 rounded-lg border-2 cursor-pointer transition-all ${
             form.returnResolution === 'exchange'
               ? 'border-sky-500 bg-sky-50 text-sky-700'
               : 'border-slate-200 hover:border-slate-300 text-slate-600'
@@ -541,9 +541,9 @@ export function ReturnsSection({
   const hasAnyDelivered = order.orderLines?.some(l => l.deliveredAt);
 
   return (
-    <div className="bg-white rounded-xl border border-slate-200/80 overflow-hidden">
+    <div className="bg-white rounded-xl border border-slate-200/80">
       {/* Header */}
-      <div className="px-4 py-3 border-b border-slate-100 bg-gradient-to-r from-slate-50 to-white">
+      <div className="px-4 py-3 border-b border-slate-100 bg-gradient-to-r from-slate-50 to-white rounded-t-xl">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <RotateCcw size={18} className="text-sky-600" />
