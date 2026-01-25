@@ -84,10 +84,14 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
         adminShip: ship.adminShip,
         unship: ship.unship,
 
-        // Delivery tracking
+        // Delivery tracking (order-level)
         markDelivered: delivery.markDelivered,
         markRto: delivery.markRto,
         receiveRto: delivery.receiveRto,
+        // Delivery tracking (line-level)
+        markLineDelivered: delivery.markLineDelivered,
+        markLineRto: delivery.markLineRto,
+        receiveLineRto: delivery.receiveLineRto,
 
         // Allocate/Pick/Pack
         allocate: workflow.allocate,

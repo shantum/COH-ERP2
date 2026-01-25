@@ -4,7 +4,7 @@
  */
 
 import { useState, useMemo, useCallback } from 'react';
-import { Package, Plus, X, RotateCcw, Square, CheckSquare, Tag, Truck, Percent, CreditCard, Pencil, Loader2 } from 'lucide-react';
+import { Package, Plus, X, RotateCcw, Square, CheckSquare, Tag, Truck, Percent, CreditCard, Pencil, Loader2, CheckCircle } from 'lucide-react';
 import type { Order, OrderLine } from '../../../../types';
 import type { ModalMode, CategorizedLines, ShipFormState } from '../types';
 import { LINE_STATUS_CONFIG, LINE_STATUS_BAR_COLORS } from '../types';
@@ -48,6 +48,7 @@ interface ItemsSectionProps {
   onCancelLine?: (lineId: string) => void;
   onUncancelLine?: (lineId: string) => void;
   onToggleLineSelection?: (lineId: string) => void;
+  onMarkLineDelivered?: (lineId: string) => void;
 }
 
 // Per-line financial info computed from Shopify data
@@ -79,6 +80,7 @@ function LineItem({
   onCancelLine,
   onUncancelLine,
   onToggleSelection,
+  onMarkLineDelivered,
 }: {
   line: OrderLine;
   mode: ModalMode;
@@ -89,6 +91,7 @@ function LineItem({
   onCancelLine?: (lineId: string) => void;
   onUncancelLine?: (lineId: string) => void;
   onToggleSelection?: () => void;
+  onMarkLineDelivered?: (lineId: string) => void;
 }) {
   const [isEditingPrice, setIsEditingPrice] = useState(false);
   const [isEditingQty, setIsEditingQty] = useState(false);
@@ -342,31 +345,46 @@ function LineItem({
           </span>
 
           {/* Actions */}
-          {mode === 'edit' && (
-            <div className="flex items-center gap-2">
-              {isCancelled ? (
-                onUncancelLine && (
+          <div className="flex items-center gap-2">
+            {/* Edit mode actions */}
+            {mode === 'edit' && (
+              <>
+                {isCancelled ? (
+                  onUncancelLine && (
+                    <button
+                      type="button"
+                      onClick={() => onUncancelLine(line.id)}
+                      className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 rounded transition-colors"
+                    >
+                      <RotateCcw size={12} />
+                      Restore
+                    </button>
+                  )
+                ) : isPending && onCancelLine && (
                   <button
                     type="button"
-                    onClick={() => onUncancelLine(line.id)}
-                    className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 rounded transition-colors"
+                    onClick={() => onCancelLine(line.id)}
+                    className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-red-600 hover:text-red-700 hover:bg-red-50 rounded transition-colors"
                   >
-                    <RotateCcw size={12} />
-                    Restore
+                    <X size={12} />
+                    Cancel
                   </button>
-                )
-              ) : isPending && onCancelLine && (
-                <button
-                  type="button"
-                  onClick={() => onCancelLine(line.id)}
-                  className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-red-600 hover:text-red-700 hover:bg-red-50 rounded transition-colors"
-                >
-                  <X size={12} />
-                  Cancel
-                </button>
-              )}
-            </div>
-          )}
+                )}
+              </>
+            )}
+
+            {/* Mark as Delivered - for shipped lines without deliveredAt */}
+            {line.lineStatus === 'shipped' && !line.deliveredAt && onMarkLineDelivered && (
+              <button
+                type="button"
+                onClick={() => onMarkLineDelivered(line.id)}
+                className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 rounded transition-colors"
+              >
+                <CheckCircle size={12} />
+                Mark Delivered
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>
@@ -386,6 +404,7 @@ export function ItemsSection({
   onCancelLine,
   onUncancelLine,
   onToggleLineSelection,
+  onMarkLineDelivered,
 }: ItemsSectionProps) {
   const lines = order.orderLines || [];
   const activeLines = lines.filter(l => l.lineStatus !== 'cancelled');
@@ -595,6 +614,7 @@ export function ItemsSection({
               onCancelLine={onCancelLine}
               onUncancelLine={onUncancelLine}
               onToggleSelection={onToggleLineSelection ? () => onToggleLineSelection(line.id) : undefined}
+              onMarkLineDelivered={onMarkLineDelivered}
             />
           );
         })}

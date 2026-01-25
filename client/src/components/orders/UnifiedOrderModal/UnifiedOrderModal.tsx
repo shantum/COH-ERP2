@@ -379,6 +379,18 @@ export function UnifiedOrderModal({
     }
   }, [mutations, handleUncancelLine]);
 
+  // Handle mark line as delivered
+  const handleMarkLineDeliveredWithMutation = useCallback(async (lineId: string) => {
+    try {
+      await mutations.markLineDelivered.mutateAsync({ lineId });
+      // Invalidate order query to refresh modal data
+      queryClient.invalidateQueries({ queryKey: ['order', order.id] });
+      onSuccess?.();
+    } catch (error) {
+      console.error('Failed to mark line as delivered:', error);
+    }
+  }, [mutations, queryClient, order.id, onSuccess]);
+
   // Handle initiate return
   const handleInitiateReturn = useCallback(async () => {
     if (!returnForm.selectedLineId || !returnForm.returnReasonCategory || returnForm.returnResolution === null) {
@@ -553,6 +565,7 @@ export function UnifiedOrderModal({
                     onCancelLine={handleCancelLineWithMutation}
                     onUncancelLine={handleUncancelLineWithMutation}
                     onToggleLineSelection={handleToggleLineSelection}
+                    onMarkLineDelivered={handleMarkLineDeliveredWithMutation}
                   />
 
                   {/* Shipping */}
