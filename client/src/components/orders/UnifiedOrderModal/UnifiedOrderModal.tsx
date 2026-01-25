@@ -28,6 +28,10 @@ import { ShippingSection } from './components/ShippingSection';
 import { TimelineSection } from './components/TimelineSection';
 import { NotesSection } from './components/NotesSection';
 import { CustomerTab } from './components/CustomerTab';
+import { ReturnsSection } from './components/ReturnsSection';
+import { initiateLineReturn, cancelLineReturn } from '../../../server/functions/returnsMutations';
+import { showReturnError, showReturnSuccess } from '../../../utils/toast';
+import { isReturnError } from '@coh/shared/errors';
 
 interface UnifiedOrderModalProps {
   order: Order;
@@ -102,6 +106,7 @@ export function UnifiedOrderModal({
     isAddingProduct,
     canEdit,
     canCustomer,
+    canReturn,
     calculatedTotal,
     categorizedLines,
     expectedAwb,
@@ -120,6 +125,12 @@ export function UnifiedOrderModal({
     handleCancelLine,
     handleUncancelLine,
     handleToggleLineSelection,
+    // Return form
+    returnForm,
+    handleReturnFieldChange,
+    handleSelectLineForReturn,
+    resetReturnForm,
+    getLineEligibility,
     // Navigation
     navigationHistory,
     canGoBack,
@@ -368,6 +379,74 @@ export function UnifiedOrderModal({
     }
   }, [mutations, handleUncancelLine]);
 
+  // Handle initiate return
+  const handleInitiateReturn = useCallback(async () => {
+    if (!returnForm.selectedLineId || !returnForm.returnReasonCategory || returnForm.returnResolution === null) {
+      return;
+    }
+
+    try {
+      const result = await initiateLineReturn({
+        data: {
+          orderLineId: returnForm.selectedLineId,
+          returnQty: returnForm.returnQty,
+          returnReasonCategory: returnForm.returnReasonCategory,
+          returnReasonDetail: returnForm.returnReasonDetail || undefined,
+          returnResolution: returnForm.returnResolution,
+        },
+      });
+
+      // Check for structured error response
+      if (isReturnError(result)) {
+        showReturnError(result, 'Initiate return');
+        return;
+      }
+
+      // Invalidate relevant queries
+      queryClient.invalidateQueries({ queryKey: ['order', order.id] });
+      queryClient.invalidateQueries({ queryKey: ['returns', 'active'] });
+      queryClient.invalidateQueries({ queryKey: ['returns', 'action-queue'] });
+
+      // Show success toast
+      showReturnSuccess(result.message || 'Return initiated successfully');
+
+      // Reset form
+      resetReturnForm();
+      onSuccess?.();
+    } catch (error) {
+      console.error('Failed to initiate return:', error);
+      showReturnError(error, 'Initiate return');
+    }
+  }, [returnForm, queryClient, order.id, resetReturnForm, onSuccess]);
+
+  // Handle cancel return
+  const handleCancelReturn = useCallback(async (lineId: string) => {
+    if (!confirm('Are you sure you want to cancel this return?')) return;
+
+    try {
+      const result = await cancelLineReturn({ data: { orderLineId: lineId } });
+
+      // Check for structured error response
+      if (isReturnError(result)) {
+        showReturnError(result, 'Cancel return');
+        return;
+      }
+
+      // Invalidate relevant queries
+      queryClient.invalidateQueries({ queryKey: ['order', order.id] });
+      queryClient.invalidateQueries({ queryKey: ['returns', 'active'] });
+      queryClient.invalidateQueries({ queryKey: ['returns', 'action-queue'] });
+
+      // Show success toast
+      showReturnSuccess(result.message || 'Return cancelled');
+
+      onSuccess?.();
+    } catch (error) {
+      console.error('Failed to cancel return:', error);
+      showReturnError(error, 'Cancel return');
+    }
+  }, [queryClient, order.id, onSuccess]);
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4"
@@ -391,6 +470,7 @@ export function UnifiedOrderModal({
           canEdit={canEdit}
           canShip={canShip}
           canCustomer={canCustomer}
+          canReturn={canReturn}
           hasUnsavedChanges={hasUnsavedChanges}
           onClose={onClose}
           navigationHistory={navigationHistory}
@@ -425,8 +505,21 @@ export function UnifiedOrderModal({
                 />
               )}
 
+              {/* Returns Tab - Return management */}
+              {mode === 'returns' && (
+                <ReturnsSection
+                  order={order}
+                  returnForm={returnForm}
+                  getLineEligibility={getLineEligibility}
+                  onReturnFieldChange={handleReturnFieldChange}
+                  onSelectLineForReturn={handleSelectLineForReturn}
+                  onInitiateReturn={handleInitiateReturn}
+                  onCancelReturn={handleCancelReturn}
+                />
+              )}
+
               {/* Other modes: View, Edit, Ship */}
-              {mode !== 'customer' && (
+              {mode !== 'customer' && mode !== 'returns' && (
                 <>
                   {/* Customer & Address */}
                   <CustomerSection

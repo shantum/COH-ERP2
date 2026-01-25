@@ -280,8 +280,14 @@ export default function Returns() {
     const createExchangeMutation = useMutation({
         mutationFn: createExchangeFn,
         onSuccess: (data) => {
+            // Handle structured result
+            if (!data.success) {
+                setError(data.error.message);
+                setTimeout(() => setError(''), 5000);
+                return;
+            }
             queryClient.invalidateQueries({ queryKey: ['returns'] });
-            setSuccessMessage(`Exchange order ${data.exchangeOrderNumber} created`);
+            setSuccessMessage(`Exchange order ${data.data?.exchangeOrderNumber} created`);
             setTimeout(() => setSuccessMessage(''), 3000);
         },
         onError: (err: Error) => {

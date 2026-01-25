@@ -10,6 +10,7 @@
 
 import { toast } from 'sonner';
 import type { ZodError } from 'zod';
+import { getReturnErrorMessage, isReturnErrorCode } from '@coh/shared/errors';
 
 /**
  * Format Zod validation errors into user-friendly messages
@@ -123,4 +124,135 @@ export function showMutationError(
  */
 export function dismissAllToasts() {
     toast.dismiss();
+}
+
+// ============================================
+// RETURNS-SPECIFIC ERROR HANDLING
+// ============================================
+
+/**
+ * Type guard for structured error responses from server functions
+ */
+interface StructuredError {
+    code: string;
+    message?: string;
+}
+
+interface ErrorResult {
+    success: false;
+    error: StructuredError;
+}
+
+function isErrorResult(value: unknown): value is ErrorResult {
+    return (
+        typeof value === 'object' &&
+        value !== null &&
+        'success' in value &&
+        value.success === false &&
+        'error' in value &&
+        typeof (value as ErrorResult).error === 'object'
+    );
+}
+
+function isStructuredError(value: unknown): value is StructuredError {
+    return (
+        typeof value === 'object' &&
+        value !== null &&
+        'code' in value &&
+        typeof (value as StructuredError).code === 'string'
+    );
+}
+
+/**
+ * Check if an error message looks like a Prisma/technical error
+ * that should be sanitized before showing to users
+ */
+function isTechnicalError(message: string): boolean {
+    const technicalPatterns = [
+        'prisma',
+        'Invalid `',
+        'ECONNREFUSED',
+        'ETIMEDOUT',
+        'ENOTFOUND',
+        'at Object.',
+        'at Module.',
+        'at async',
+        'TypeError:',
+        'ReferenceError:',
+        'SyntaxError:',
+        'PrismaClientKnownRequestError',
+        'PrismaClientValidationError',
+        'unique constraint',
+        'foreign key constraint',
+    ];
+
+    const lowerMessage = message.toLowerCase();
+    return technicalPatterns.some((pattern) => lowerMessage.includes(pattern.toLowerCase()));
+}
+
+/**
+ * Show a returns-specific error toast with proper messaging
+ *
+ * Handles multiple error formats:
+ * - Structured error results: { success: false, error: { code, message } }
+ * - Structured errors: { code, message }
+ * - Standard Error objects
+ * - Unknown errors
+ *
+ * Technical/Prisma errors are sanitized to show user-friendly messages.
+ */
+export function showReturnError(
+    error: unknown,
+    operation?: string
+): void {
+    const title = operation ? `${operation} failed` : 'Return Error';
+    let userMessage: string;
+
+    // Handle structured error result from server function
+    if (isErrorResult(error)) {
+        const { code, message } = error.error;
+        userMessage = isReturnErrorCode(code)
+            ? getReturnErrorMessage(code, message)
+            : message || 'An error occurred';
+    }
+    // Handle structured error object
+    else if (isStructuredError(error)) {
+        const { code, message } = error;
+        userMessage = isReturnErrorCode(code)
+            ? getReturnErrorMessage(code, message)
+            : message || 'An error occurred';
+    }
+    // Handle standard Error
+    else if (error instanceof Error) {
+        if (isTechnicalError(error.message)) {
+            userMessage = 'A database error occurred. Please try again.';
+            // Log technical details for debugging
+            console.error('[Returns] Technical error:', error.message);
+        } else {
+            userMessage = error.message;
+        }
+    }
+    // Unknown error
+    else {
+        userMessage = 'An unexpected error occurred';
+        console.error('[Returns] Unknown error:', error);
+    }
+
+    toast.error(title, {
+        duration: 5000,
+        description: userMessage,
+    });
+}
+
+/**
+ * Show a returns success toast
+ */
+export function showReturnSuccess(
+    message: string,
+    options?: { description?: string }
+): void {
+    toast.success(message, {
+        duration: 3000,
+        description: options?.description,
+    });
 }
