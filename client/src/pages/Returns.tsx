@@ -33,6 +33,13 @@ import type {
     ReturnActionQueueItem as ServerReturnActionQueueItem,
     OrderForReturn,
 } from '@coh/shared/schemas/returns';
+import {
+    RETURN_REASONS,
+    RETURN_CONDITIONS,
+    RETURN_RESOLUTIONS,
+    toOptions,
+    getLabel,
+} from '@coh/shared/domain/returns';
 import { useState } from 'react';
 import {
     Plus, X, Search, Package, Truck, Check,
@@ -52,32 +59,20 @@ interface ActiveReturnLine extends ServerActiveReturnLine {
 }
 
 // ============================================
-// CONSTANTS
+// CONSTANTS & UI STYLING
 // ============================================
 
-const RETURN_REASON_CATEGORIES = [
-    { value: 'fit_size', label: 'Fit / Size Issue' },
-    { value: 'product_quality', label: 'Product Quality' },
-    { value: 'product_different', label: 'Product Different from Description' },
-    { value: 'wrong_item_sent', label: 'Wrong Item Sent' },
-    { value: 'damaged_in_transit', label: 'Damaged in Transit' },
-    { value: 'changed_mind', label: 'Changed Mind' },
-    { value: 'other', label: 'Other' },
-] as const;
+// Use shared module for dropdown options (single source of truth)
+const reasonOptions = toOptions(RETURN_REASONS);
+const conditionOptions = toOptions(RETURN_CONDITIONS);
+const resolutionOptions = toOptions(RETURN_RESOLUTIONS);
 
-const RETURN_RESOLUTIONS = [
-    { value: 'refund', label: 'Refund', color: 'bg-red-100 text-red-800' },
-    { value: 'exchange', label: 'Exchange', color: 'bg-blue-100 text-blue-800' },
-    { value: 'rejected', label: 'Rejected', color: 'bg-gray-100 text-gray-800' },
-] as const;
-
-const RETURN_CONDITIONS = [
-    { value: 'good', label: 'Good Condition', description: 'Item is in resellable condition', color: 'green' },
-    { value: 'damaged', label: 'Damaged', description: 'Item is damaged', color: 'red' },
-    { value: 'defective', label: 'Defective', description: 'Manufacturing defect', color: 'orange' },
-    { value: 'wrong_item', label: 'Wrong Item', description: 'Different item than ordered', color: 'orange' },
-    { value: 'used', label: 'Used', description: 'Item shows signs of use', color: 'yellow' },
-] as const;
+// UI-specific styling (keyed by shared values)
+const RESOLUTION_COLORS: Record<string, string> = {
+    refund: 'bg-red-100 text-red-800',
+    exchange: 'bg-blue-100 text-blue-800',
+    rejected: 'bg-gray-100 text-gray-800',
+};
 
 const WRITE_OFF_REASONS = [
     { value: 'damaged', label: 'Damaged - Not Repairable' },
@@ -108,8 +103,10 @@ const getStatusBadge = (status: string) => {
 
 const getResolutionBadge = (resolution: string | null) => {
     if (!resolution) return { label: 'Pending', color: 'bg-gray-100 text-gray-800' };
-    const item = RETURN_RESOLUTIONS.find((r) => r.value === resolution);
-    return item || { label: resolution, color: 'bg-gray-100 text-gray-800' };
+    return {
+        label: getLabel(RETURN_RESOLUTIONS, resolution),
+        color: RESOLUTION_COLORS[resolution] || 'bg-gray-100 text-gray-800',
+    };
 };
 
 const computeAgeDays = (requestedAt: Date | string | null) => {
@@ -727,7 +724,7 @@ function ActionQueueTab({
                                         className="px-3 py-2 border border-gray-300 rounded text-sm"
                                     >
                                         <option value="">Select Condition</option>
-                                        {RETURN_CONDITIONS.map((c) => (
+                                        {conditionOptions.map((c) => (
                                             <option key={c.value} value={c.value}>
                                                 {c.label}
                                             </option>
@@ -1271,7 +1268,7 @@ function InitiateReturnModal({
                                     className="w-full px-4 py-2 border border-gray-300 rounded-lg"
                                 >
                                     <option value="">Select reason...</option>
-                                    {RETURN_REASON_CATEGORIES.map((cat) => (
+                                    {reasonOptions.map((cat) => (
                                         <option key={cat.value} value={cat.value}>
                                             {cat.label}
                                         </option>
@@ -1292,7 +1289,7 @@ function InitiateReturnModal({
                             <div>
                                 <label className="block text-sm font-medium mb-2">Resolution</label>
                                 <div className="flex gap-2">
-                                    {RETURN_RESOLUTIONS.map((res) => (
+                                    {resolutionOptions.map((res) => (
                                         <button
                                             key={res.value}
                                             onClick={() => setReturnResolution(res.value as any)}

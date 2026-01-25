@@ -42,33 +42,6 @@ export {
     calculateReorderQuantity,
 } from './inventory.js';
 
-// Return Thresholds
-export {
-    RETURN_WINDOW_DAYS,
-    RETURN_WINDOW_WARNING_DAYS,
-    RETURN_AUTO_REJECT_AFTER_DAYS,
-    RETURN_REASON_CATEGORIES,
-    RETURN_CONDITIONS,
-    RETURN_RESOLUTIONS,
-    RETURN_STATUSES,
-    RETURN_PICKUP_TYPES,
-    RETURN_REFUND_METHODS,
-    NON_RETURNABLE_REASONS,
-    RETURN_CONFIG,
-    isWithinReturnWindow,
-    getReturnWindowDaysRemaining,
-    isReturnWindowExpiringSoon,
-    getReturnStatusLabel,
-    getReturnReasonLabel,
-    getReturnConditionLabel,
-    getReturnResolutionLabel,
-} from './returns.js';
-export type {
-    ReturnReasonCategoryValue,
-    ReturnConditionValue,
-    ReturnResolutionValue,
-    ReturnStatusValue,
-    ReturnPickupTypeValue,
-    ReturnRefundMethodValue,
-    NonReturnableReasonValue,
-} from './returns.js';
+// Return Thresholds - DEPRECATED
+// All returns config is now in @coh/shared/domain/returns
+// Keeping this comment for reference during migration
