@@ -802,3 +802,651 @@ export const processRepackingQueueItem = createServerFn({ method: 'POST' })
             };
         }
     });
+
+// ============================================
+// LINE-LEVEL RETURN MUTATIONS (NEW)
+// ============================================
+// These mutations work on OrderLine.return* fields directly,
+// following the existing RTO pattern on OrderLine.
+
+import {
+    InitiateReturnInputSchema,
+    ScheduleReturnPickupInputSchema,
+    MarkReturnInTransitInputSchema,
+    ReceiveReturnInputSchema,
+    ProcessReturnRefundInputSchema,
+    CloseReturnManuallyInputSchema,
+    CreateExchangeOrderInputSchema,
+    type InitiateReturnInput,
+    type ScheduleReturnPickupInput,
+    type MarkReturnInTransitInput,
+    type ReceiveReturnInput,
+    type ProcessReturnRefundInput,
+    type CloseReturnManuallyInput,
+    type CreateExchangeOrderInput,
+} from '@coh/shared/schemas/returns';
+
+// Helper to get Prisma instance (reduces duplication)
+async function getPrismaInstance(): Promise<PrismaClient> {
+    const { PrismaClient: PClient } = await import('@prisma/client');
+    const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
+    const prisma = globalForPrisma.prisma ?? new PClient();
+    if (process.env.NODE_ENV !== 'production') {
+        globalForPrisma.prisma = prisma;
+    }
+    return prisma;
+}
+
+// Return window check (14 days from delivery)
+const RETURN_WINDOW_DAYS = 14;
+
+function isWithinReturnWindow(deliveredAt: Date | null): boolean {
+    if (!deliveredAt) return false;
+    const daysSinceDelivery = Math.floor(
+        (Date.now() - deliveredAt.getTime()) / (1000 * 60 * 60 * 24)
+    );
+    return daysSinceDelivery <= RETURN_WINDOW_DAYS;
+}
+
+/**
+ * Initiate a return on an order line
+ * Sets returnStatus = 'requested' and captures return details
+ */
+export const initiateLineReturn = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown): InitiateReturnInput => InitiateReturnInputSchema.parse(input))
+    .handler(async ({ data, context }: { data: InitiateReturnInput; context: { user: AuthUser } }) => {
+        const prisma = await getPrismaInstance();
+        const { orderLineId, returnQty, returnReasonCategory, returnReasonDetail, returnResolution, returnNotes, exchangeSkuId } = data;
+
+        // Get order line with product info
+        const line = await prisma.orderLine.findUnique({
+            where: { id: orderLineId },
+            include: {
+                order: true,
+                sku: {
+                    include: {
+                        variation: {
+                            include: {
+                                product: true,
+                            },
+                        },
+                    },
+                },
+            },
+        });
+
+        if (!line) {
+            throw new Error('Order line not found');
+        }
+
+        // Check if already has an active return
+        if (line.returnStatus && !['cancelled', 'complete'].includes(line.returnStatus)) {
+            throw new Error('Line already has an active return');
+        }
+
+        // Check return qty doesn't exceed line qty
+        if (returnQty > line.qty) {
+            throw new Error(`Return qty (${returnQty}) cannot exceed line qty (${line.qty})`);
+        }
+
+        // Check product returnability
+        const product = line.sku.variation.product;
+        if (!product.isReturnable) {
+            throw new Error(`Product is not returnable: ${product.nonReturnableReason || 'marked as non-returnable'}`);
+        }
+
+        // Check line returnability
+        if (line.isNonReturnable) {
+            throw new Error('This order line is marked as non-returnable');
+        }
+
+        // Check return window (warn but allow with override - staff can proceed)
+        const withinWindow = isWithinReturnWindow(line.deliveredAt);
+        if (!withinWindow && !line.deliveredAt) {
+            throw new Error('Item has not been delivered yet');
+        }
+
+        // Validate exchange SKU if exchange resolution
+        if (returnResolution === 'exchange') {
+            if (!exchangeSkuId) {
+                throw new Error('Exchange SKU is required for exchange resolution');
+            }
+            const exchangeSku = await prisma.sku.findUnique({
+                where: { id: exchangeSkuId },
+                select: { id: true, skuCode: true, mrp: true },
+            });
+            if (!exchangeSku) {
+                throw new Error('Exchange SKU not found');
+            }
+        }
+
+        // Update order line with return details
+        const now = new Date();
+        await prisma.orderLine.update({
+            where: { id: orderLineId },
+            data: {
+                returnStatus: 'requested',
+                returnQty,
+                returnRequestedAt: now,
+                returnRequestedById: context.user.id,
+                returnReasonCategory,
+                returnReasonDetail: returnReasonDetail || null,
+                returnResolution,
+                returnNotes: returnNotes || null,
+                returnExchangeSkuId: exchangeSkuId || null,
+            },
+        });
+
+        // Update customer return count
+        if (line.order.customerId) {
+            await prisma.customer.update({
+                where: { id: line.order.customerId },
+                data: { returnCount: { increment: 1 } },
+            });
+        }
+
+        // Update SKU return count
+        await prisma.sku.update({
+            where: { id: line.skuId },
+            data: { returnCount: { increment: returnQty } },
+        });
+
+        return {
+            success: true,
+            message: `Return initiated for ${line.sku.skuCode}`,
+            orderLineId,
+            returnStatus: 'requested',
+            withinWindow,
+        };
+    });
+
+/**
+ * Schedule pickup for a return
+ */
+export const scheduleReturnPickup = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown): ScheduleReturnPickupInput => ScheduleReturnPickupInputSchema.parse(input))
+    .handler(async ({ data }: { data: ScheduleReturnPickupInput }) => {
+        const prisma = await getPrismaInstance();
+        const { orderLineId, pickupType, courier, awbNumber, scheduledAt } = data;
+
+        const line = await prisma.orderLine.findUnique({
+            where: { id: orderLineId },
+            select: { id: true, returnStatus: true },
+        });
+
+        if (!line) {
+            throw new Error('Order line not found');
+        }
+
+        if (line.returnStatus !== 'requested') {
+            throw new Error(`Cannot schedule pickup: current status is '${line.returnStatus}'`);
+        }
+
+        await prisma.orderLine.update({
+            where: { id: orderLineId },
+            data: {
+                returnStatus: 'pickup_scheduled',
+                returnPickupType: pickupType,
+                returnCourier: courier || null,
+                returnAwbNumber: awbNumber || null,
+                returnPickupScheduledAt: scheduledAt || new Date(),
+            },
+        });
+
+        return { success: true, message: 'Pickup scheduled', orderLineId };
+    });
+
+/**
+ * Mark return as in transit
+ */
+export const markReturnInTransit = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown): MarkReturnInTransitInput => MarkReturnInTransitInputSchema.parse(input))
+    .handler(async ({ data }: { data: MarkReturnInTransitInput }) => {
+        const prisma = await getPrismaInstance();
+        const { orderLineId, awbNumber, courier } = data;
+
+        const line = await prisma.orderLine.findUnique({
+            where: { id: orderLineId },
+            select: { id: true, returnStatus: true },
+        });
+
+        if (!line) {
+            throw new Error('Order line not found');
+        }
+
+        const allowedStatuses = ['requested', 'pickup_scheduled'];
+        if (!allowedStatuses.includes(line.returnStatus || '')) {
+            throw new Error(`Cannot mark in transit: current status is '${line.returnStatus}'`);
+        }
+
+        const updateData: Record<string, unknown> = {
+            returnStatus: 'in_transit',
+            returnPickupAt: new Date(),
+        };
+        if (awbNumber) updateData.returnAwbNumber = awbNumber;
+        if (courier) updateData.returnCourier = courier;
+
+        await prisma.orderLine.update({
+            where: { id: orderLineId },
+            data: updateData,
+        });
+
+        return { success: true, message: 'Marked as in transit', orderLineId };
+    });
+
+/**
+ * Receive return at warehouse and add to QC queue
+ */
+export const receiveLineReturn = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown): ReceiveReturnInput => ReceiveReturnInputSchema.parse(input))
+    .handler(async ({ data, context }: { data: ReceiveReturnInput; context: { user: AuthUser } }) => {
+        const prisma = await getPrismaInstance();
+        const { orderLineId, condition, conditionNotes } = data;
+
+        const line = await prisma.orderLine.findUnique({
+            where: { id: orderLineId },
+            select: {
+                id: true,
+                returnStatus: true,
+                returnQty: true,
+                skuId: true,
+            },
+        });
+
+        if (!line) {
+            throw new Error('Order line not found');
+        }
+
+        const allowedStatuses = ['requested', 'pickup_scheduled', 'in_transit'];
+        if (!allowedStatuses.includes(line.returnStatus || '')) {
+            throw new Error(`Cannot receive: current status is '${line.returnStatus}'`);
+        }
+
+        const now = new Date();
+
+        // Update line and create repacking queue item in transaction
+        await prisma.$transaction(async (tx) => {
+            await tx.orderLine.update({
+                where: { id: orderLineId },
+                data: {
+                    returnStatus: 'received',
+                    returnReceivedAt: now,
+                    returnReceivedById: context.user.id,
+                    returnCondition: condition,
+                    returnConditionNotes: conditionNotes || null,
+                },
+            });
+
+            // Add to repacking queue for QC
+            await tx.repackingQueueItem.create({
+                data: {
+                    skuId: line.skuId,
+                    qty: line.returnQty || 1,
+                    orderLineId: orderLineId,
+                    status: 'pending',
+                    condition: condition,
+                    inspectionNotes: conditionNotes || null,
+                },
+            });
+        });
+
+        return { success: true, message: 'Return received and added to QC queue', orderLineId };
+    });
+
+/**
+ * Process refund for a return
+ */
+export const processLineReturnRefund = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown): ProcessReturnRefundInput => ProcessReturnRefundInputSchema.parse(input))
+    .handler(async ({ data }: { data: ProcessReturnRefundInput }) => {
+        const prisma = await getPrismaInstance();
+        const { orderLineId, grossAmount, discountClawback, deductions, deductionNotes, refundMethod } = data;
+
+        const line = await prisma.orderLine.findUnique({
+            where: { id: orderLineId },
+            select: { id: true, returnStatus: true, returnResolution: true },
+        });
+
+        if (!line) {
+            throw new Error('Order line not found');
+        }
+
+        if (line.returnResolution !== 'refund') {
+            throw new Error('This return is not marked for refund');
+        }
+
+        const netAmount = grossAmount - discountClawback - deductions;
+
+        await prisma.orderLine.update({
+            where: { id: orderLineId },
+            data: {
+                returnGrossAmount: grossAmount,
+                returnDiscountClawback: discountClawback,
+                returnDeductions: deductions,
+                returnDeductionNotes: deductionNotes || null,
+                returnNetAmount: netAmount,
+                returnRefundMethod: refundMethod || null,
+                // Also update legacy refund fields for compatibility
+                refundAmount: netAmount,
+                refundReason: 'customer_return',
+            },
+        });
+
+        return {
+            success: true,
+            message: 'Refund processed',
+            orderLineId,
+            netAmount,
+        };
+    });
+
+/**
+ * Send refund link to customer
+ */
+export const sendReturnRefundLink = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => z.object({ orderLineId: z.string().uuid() }).parse(input))
+    .handler(async ({ data }: { data: { orderLineId: string } }) => {
+        const prisma = await getPrismaInstance();
+        const { orderLineId } = data;
+
+        const line = await prisma.orderLine.findUnique({
+            where: { id: orderLineId },
+            select: { id: true, returnNetAmount: true, returnRefundMethod: true },
+        });
+
+        if (!line) {
+            throw new Error('Order line not found');
+        }
+
+        if (!line.returnNetAmount) {
+            throw new Error('Refund amount not calculated');
+        }
+
+        // TODO: Integrate with Razorpay to create payment link
+        // For now, just mark as sent
+        const linkId = `REFUND_LINK_${Date.now()}`;
+
+        await prisma.orderLine.update({
+            where: { id: orderLineId },
+            data: {
+                returnRefundLinkSentAt: new Date(),
+                returnRefundLinkId: linkId,
+            },
+        });
+
+        return { success: true, message: 'Refund link sent', orderLineId, linkId };
+    });
+
+/**
+ * Mark refund as completed
+ */
+export const completeLineReturnRefund = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => z.object({
+        orderLineId: z.string().uuid(),
+        reference: z.string().optional(),
+    }).parse(input))
+    .handler(async ({ data }: { data: { orderLineId: string; reference?: string } }) => {
+        const prisma = await getPrismaInstance();
+        const { orderLineId, reference } = data;
+
+        const now = new Date();
+
+        await prisma.orderLine.update({
+            where: { id: orderLineId },
+            data: {
+                returnRefundCompletedAt: now,
+                returnRefundReference: reference || null,
+                refundedAt: now, // Also update legacy field
+            },
+        });
+
+        return { success: true, message: 'Refund completed', orderLineId };
+    });
+
+/**
+ * Complete a return (final status)
+ */
+export const completeLineReturn = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => z.object({ orderLineId: z.string().uuid() }).parse(input))
+    .handler(async ({ data }: { data: { orderLineId: string } }) => {
+        const prisma = await getPrismaInstance();
+        const { orderLineId } = data;
+
+        const line = await prisma.orderLine.findUnique({
+            where: { id: orderLineId },
+            select: {
+                id: true,
+                returnStatus: true,
+                returnResolution: true,
+                returnRefundCompletedAt: true,
+                returnExchangeOrderId: true,
+            },
+        });
+
+        if (!line) {
+            throw new Error('Order line not found');
+        }
+
+        if (line.returnStatus !== 'received') {
+            throw new Error(`Cannot complete: current status is '${line.returnStatus}', expected 'received'`);
+        }
+
+        // Validate completion criteria based on resolution
+        if (line.returnResolution === 'refund' && !line.returnRefundCompletedAt) {
+            throw new Error('Refund has not been completed');
+        }
+
+        if (line.returnResolution === 'exchange' && !line.returnExchangeOrderId) {
+            throw new Error('Exchange order has not been created');
+        }
+
+        await prisma.orderLine.update({
+            where: { id: orderLineId },
+            data: { returnStatus: 'complete' },
+        });
+
+        return { success: true, message: 'Return completed', orderLineId };
+    });
+
+/**
+ * Cancel a return
+ */
+export const cancelLineReturn = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => z.object({
+        orderLineId: z.string().uuid(),
+        reason: z.string().optional(),
+    }).parse(input))
+    .handler(async ({ data, context }: { data: { orderLineId: string; reason?: string }; context: { user: AuthUser } }) => {
+        const prisma = await getPrismaInstance();
+        const { orderLineId, reason } = data;
+
+        const line = await prisma.orderLine.findUnique({
+            where: { id: orderLineId },
+            select: {
+                id: true,
+                returnStatus: true,
+                returnQty: true,
+                skuId: true,
+                order: { select: { customerId: true } },
+            },
+        });
+
+        if (!line) {
+            throw new Error('Order line not found');
+        }
+
+        const terminalStatuses = ['complete', 'cancelled'];
+        if (terminalStatuses.includes(line.returnStatus || '')) {
+            throw new Error(`Cannot cancel: return is already '${line.returnStatus}'`);
+        }
+
+        await prisma.$transaction(async (tx) => {
+            await tx.orderLine.update({
+                where: { id: orderLineId },
+                data: {
+                    returnStatus: 'cancelled',
+                    returnClosedManually: true,
+                    returnClosedManuallyAt: new Date(),
+                    returnClosedManuallyById: context.user.id,
+                    returnClosedReason: reason || 'Cancelled by staff',
+                },
+            });
+
+            // Decrement return counts
+            if (line.order.customerId) {
+                await tx.customer.update({
+                    where: { id: line.order.customerId },
+                    data: { returnCount: { decrement: 1 } },
+                });
+            }
+
+            await tx.sku.update({
+                where: { id: line.skuId },
+                data: { returnCount: { decrement: line.returnQty || 1 } },
+            });
+        });
+
+        return { success: true, message: 'Return cancelled', orderLineId };
+    });
+
+/**
+ * Close return manually (for edge cases)
+ */
+export const closeLineReturnManually = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown): CloseReturnManuallyInput => CloseReturnManuallyInputSchema.parse(input))
+    .handler(async ({ data, context }: { data: CloseReturnManuallyInput; context: { user: AuthUser } }) => {
+        const prisma = await getPrismaInstance();
+        const { orderLineId, reason } = data;
+
+        await prisma.orderLine.update({
+            where: { id: orderLineId },
+            data: {
+                returnStatus: 'complete',
+                returnClosedManually: true,
+                returnClosedManuallyAt: new Date(),
+                returnClosedManuallyById: context.user.id,
+                returnClosedReason: reason,
+            },
+        });
+
+        return { success: true, message: 'Return closed manually', orderLineId };
+    });
+
+/**
+ * Create exchange order from a return line
+ * Staff-initiated - can be done at any point during the return process
+ */
+export const createExchangeOrder = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown): CreateExchangeOrderInput => CreateExchangeOrderInputSchema.parse(input))
+    .handler(async ({ data }: { data: CreateExchangeOrderInput }) => {
+        const prisma = await getPrismaInstance();
+        const { orderLineId, exchangeSkuId, exchangeQty } = data;
+
+        // Get original order line with order details
+        const line = await prisma.orderLine.findUnique({
+            where: { id: orderLineId },
+            include: {
+                order: true,
+                sku: { select: { mrp: true } },
+            },
+        });
+
+        if (!line) {
+            throw new Error('Order line not found');
+        }
+
+        if (!line.returnStatus) {
+            throw new Error('This line does not have an active return');
+        }
+
+        if (line.returnExchangeOrderId) {
+            throw new Error('Exchange order already created for this line');
+        }
+
+        // Get exchange SKU
+        const exchangeSku = await prisma.sku.findUnique({
+            where: { id: exchangeSkuId },
+            select: { id: true, skuCode: true, mrp: true },
+        });
+
+        if (!exchangeSku) {
+            throw new Error('Exchange SKU not found');
+        }
+
+        // Calculate price difference
+        const originalValue = line.unitPrice * (line.returnQty || line.qty);
+        const exchangeValue = exchangeSku.mrp * exchangeQty;
+        const priceDiff = exchangeValue - originalValue;
+
+        // Generate exchange order number
+        const count = await prisma.order.count({ where: { isExchange: true } });
+        const exchangeOrderNumber = `EXC${String(count + 1).padStart(5, '0')}`;
+
+        // Create exchange order in transaction
+        const exchangeOrder = await prisma.$transaction(async (tx) => {
+            // Create the exchange order
+            const newOrder = await tx.order.create({
+                data: {
+                    orderNumber: exchangeOrderNumber,
+                    channel: 'exchange',
+                    customerId: line.order.customerId,
+                    customerName: line.order.customerName,
+                    customerEmail: line.order.customerEmail,
+                    customerPhone: line.order.customerPhone,
+                    shippingAddress: line.order.shippingAddress,
+                    orderDate: new Date(),
+                    totalAmount: exchangeValue,
+                    isExchange: true,
+                    originalOrderId: line.orderId,
+                    status: 'open',
+                    orderLines: {
+                        create: {
+                            skuId: exchangeSkuId,
+                            qty: exchangeQty,
+                            unitPrice: exchangeSku.mrp,
+                            lineStatus: 'pending',
+                        },
+                    },
+                },
+            });
+
+            // Update original line with exchange reference
+            await tx.orderLine.update({
+                where: { id: orderLineId },
+                data: {
+                    returnExchangeOrderId: newOrder.id,
+                    returnExchangeSkuId: exchangeSkuId,
+                    returnExchangePriceDiff: priceDiff,
+                },
+            });
+
+            // Update customer exchange count
+            if (line.order.customerId) {
+                await tx.customer.update({
+                    where: { id: line.order.customerId },
+                    data: { exchangeCount: { increment: 1 } },
+                });
+            }
+
+            return newOrder;
+        });
+
+        return {
+            success: true,
+            message: `Exchange order ${exchangeOrderNumber} created`,
+            exchangeOrderId: exchangeOrder.id,
+            exchangeOrderNumber,
+            priceDiff,
+        };
+    });

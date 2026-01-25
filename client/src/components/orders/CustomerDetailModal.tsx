@@ -481,13 +481,13 @@ export function CustomerDetailModal({
 
     return (
         <div
-            className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+            className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-2 sm:p-4"
             onClick={(e) => e.target === e.currentTarget && onClose()}
         >
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[95vh] sm:max-h-[90vh] overflow-hidden flex flex-col">
                 {/* Header */}
-                <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-gradient-to-r from-slate-50 to-white">
-                    <h2 className="text-lg font-bold text-slate-900 tracking-tight">Customer Profile</h2>
+                <div className="flex items-center justify-between px-4 sm:px-6 py-3 sm:py-4 border-b border-slate-100 bg-gradient-to-r from-slate-50 to-white">
+                    <h2 className="text-base sm:text-lg font-bold text-slate-900 tracking-tight">Customer Profile</h2>
                     <button
                         onClick={onClose}
                         className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
@@ -504,9 +504,9 @@ export function CustomerDetailModal({
                         </div>
                     </div>
                 ) : customer ? (
-                    <div className="flex flex-1 overflow-hidden">
+                    <div className="flex flex-col md:flex-row flex-1 overflow-hidden">
                         {/* Left Panel - Identity */}
-                        <div className="w-72 flex-shrink-0 bg-gradient-to-br from-slate-50 via-white to-slate-50 border-r border-slate-100 p-6 flex flex-col">
+                        <div className="w-full md:w-72 flex-shrink-0 bg-gradient-to-br from-slate-50 via-white to-slate-50 md:border-r border-b md:border-b-0 border-slate-100 p-4 sm:p-6 flex flex-col">
                             {/* Avatar */}
                             <div className="flex flex-col items-center mb-6">
                                 <div className="relative">
@@ -655,16 +655,16 @@ export function CustomerDetailModal({
 
                         {/* Right Panel - Details */}
                         <div className="flex-1 overflow-y-auto bg-slate-50/50">
-                            <div className="p-6 space-y-6">
+                            <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
                                 {/* Health Score + LTV Section */}
-                                <div className="flex gap-6">
+                                <div className="flex flex-col sm:flex-row gap-4 sm:gap-6">
                                     {/* Health Score */}
-                                    <div className="bg-white rounded-xl p-5 border border-slate-100 shadow-sm">
+                                    <div className="bg-white rounded-xl p-4 sm:p-5 border border-slate-100 shadow-sm flex justify-center sm:block">
                                         <HealthScoreGauge score={healthScore} />
                                     </div>
 
                                     {/* LTV Hero */}
-                                    <div className="flex-1 bg-gradient-to-br from-sky-500 to-sky-600 rounded-xl p-5 text-white relative overflow-hidden">
+                                    <div className="flex-1 bg-gradient-to-br from-sky-500 to-sky-600 rounded-xl p-4 sm:p-5 text-white relative overflow-hidden">
                                         {/* Subtle pattern overlay */}
                                         <div className="absolute inset-0 opacity-10" style={{
                                             backgroundImage: 'radial-gradient(circle at 2px 2px, white 1px, transparent 0)',
@@ -672,10 +672,10 @@ export function CustomerDetailModal({
                                         }} />
                                         <div className="relative">
                                             <div className="text-xs uppercase tracking-wider text-sky-100 mb-1">Lifetime Value</div>
-                                            <div className="text-4xl font-bold tabular-nums">
+                                            <div className="text-2xl sm:text-4xl font-bold tabular-nums">
                                                 ₹{Number(customer.lifetimeValue || 0).toLocaleString()}
                                             </div>
-                                            <div className="mt-3 flex items-center gap-4 text-sky-100 text-sm">
+                                            <div className="mt-2 sm:mt-3 flex items-center gap-3 sm:gap-4 text-sky-100 text-xs sm:text-sm">
                                                 <div>
                                                     <span className="font-semibold text-white">{customer.totalOrders || 0}</span> {pluralize(customer.totalOrders || 0, 'order')}
                                                 </div>
@@ -688,7 +688,7 @@ export function CustomerDetailModal({
                                 </div>
 
                                 {/* Stats Grid */}
-                                <div className="grid grid-cols-4 gap-4">
+                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-4">
                                     <StatCard
                                         label="Total Orders"
                                         value={customer.totalOrders || 0}
@@ -722,7 +722,7 @@ export function CustomerDetailModal({
                                             <AlertTriangle size={14} />
                                             Risk Indicators
                                         </h4>
-                                        <div className="grid grid-cols-2 gap-2">
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                             {risks.map((risk, i) => (
                                                 <RiskAlert key={i} {...risk} />
                                             ))}

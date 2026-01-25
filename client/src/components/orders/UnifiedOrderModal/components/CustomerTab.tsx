@@ -32,27 +32,29 @@ interface OrderLine {
   id: string;
   qty: number;
   sku?: {
-    size?: string;
+    size?: string | null;
     variation?: {
-      colorName?: string;
-      imageUrl?: string;
-      product?: { name?: string; imageUrl?: string };
-    };
-  };
+      colorName?: string | null;
+      colorHex?: string | null;
+      imageUrl?: string | null;
+      product?: { name?: string | null; imageUrl?: string | null } | null;
+      fabricColour?: { fabric?: { name?: string | null } | null } | null;
+    } | null;
+  } | null;
 }
 
 interface OrderSummary {
   id: string;
   orderNumber: string;
   status: string;
-  totalAmount: number;
-  orderDate: string;
+  totalAmount?: number | null;
+  orderDate: string | Date;
   orderLines?: OrderLine[];
 }
 
 // Extended CustomerData with affinities and orders
 interface CustomerData extends BaseCustomerData {
-  colorAffinity?: Array<{ color: string; qty: number; hex?: string }> | null;
+  colorAffinity?: Array<{ color: string; qty: number; hex?: string | null }> | null;
   productAffinity?: Array<{ productName: string; qty: number }> | null;
   fabricAffinity?: Array<{ fabricType: string; qty: number }> | null;
   orders?: OrderSummary[] | null;
@@ -315,11 +317,11 @@ export function CustomerTab({ customer, currentOrderId, onSelectOrder, isLoading
   const tierConfig = getTierConfig(customer.customerTier || 'bronze');
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4 sm:space-y-5">
       {/* Header: Customer Info + Quick Stats */}
-      <div className="flex gap-4">
+      <div className="flex flex-col sm:flex-row gap-4">
         {/* Left: Customer Identity */}
-        <div className="bg-gradient-to-br from-slate-50 via-white to-slate-50 rounded-xl p-4 border border-slate-100 min-w-[240px]">
+        <div className="bg-gradient-to-br from-slate-50 via-white to-slate-50 rounded-xl p-4 border border-slate-100 w-full sm:min-w-[240px] sm:w-auto">
           <div className="flex items-center gap-3 mb-3">
             <div className={`w-12 h-12 rounded-full flex items-center justify-center ${tierConfig.bg} text-white text-lg font-bold shadow-md`}>
               {getInitials(customer.firstName, customer.lastName)}
@@ -385,21 +387,21 @@ export function CustomerTab({ customer, currentOrderId, onSelectOrder, isLoading
         </div>
 
         {/* Right: Stats Grid */}
-        <div className="flex-1 space-y-3">
+        <div className="flex-1 space-y-2 sm:space-y-3">
           {/* LTV + Health Score Row */}
-          <div className="flex gap-3">
+          <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
             {/* LTV Card */}
-            <div className="flex-1 bg-gradient-to-br from-sky-500 to-sky-600 rounded-xl p-4 text-white relative overflow-hidden">
+            <div className="flex-1 bg-gradient-to-br from-sky-500 to-sky-600 rounded-xl p-3 sm:p-4 text-white relative overflow-hidden">
               <div className="absolute inset-0 opacity-10" style={{
                 backgroundImage: 'radial-gradient(circle at 2px 2px, white 1px, transparent 0)',
                 backgroundSize: '16px 16px'
               }} />
               <div className="relative">
                 <div className="text-[10px] uppercase tracking-wider text-sky-100 mb-0.5">Lifetime Value</div>
-                <div className="text-2xl font-bold tabular-nums">
+                <div className="text-xl sm:text-2xl font-bold tabular-nums">
                   {(customer.lifetimeValue || 0).toLocaleString('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 })}
                 </div>
-                <div className="mt-2 flex items-center gap-3 text-sky-100 text-xs">
+                <div className="mt-1.5 sm:mt-2 flex items-center gap-3 text-sky-100 text-xs">
                   <div>
                     <span className="font-semibold text-white">{customer.totalOrders || 0}</span> orders
                   </div>
@@ -411,13 +413,13 @@ export function CustomerTab({ customer, currentOrderId, onSelectOrder, isLoading
             </div>
 
             {/* Health Score */}
-            <div className="bg-white rounded-xl p-4 border border-slate-100 flex items-center justify-center">
+            <div className="bg-white rounded-xl p-3 sm:p-4 border border-slate-100 flex items-center justify-center">
               <CompactHealthGauge score={healthScore} />
             </div>
           </div>
 
           {/* Quick Stats Grid */}
-          <div className="grid grid-cols-4 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             <QuickStatCard label="Orders" value={customer.totalOrders || 0} icon={ShoppingBag} color="sky" />
             <QuickStatCard label="Return Rate" value={`${(customer.returnRate || 0).toFixed(1)}%`} icon={RotateCcw} color={(customer.returnRate || 0) > 20 ? 'red' : 'slate'} />
             <QuickStatCard label="Exchanges" value={customer.exchangeCount || 0} icon={Package} color="amber" />
@@ -426,7 +428,7 @@ export function CustomerTab({ customer, currentOrderId, onSelectOrder, isLoading
 
           {/* Risk Alerts */}
           {risks.length > 0 && (
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {risks.slice(0, 2).map((risk, i) => (
                 <RiskAlert key={i} {...risk} />
               ))}
@@ -458,8 +460,8 @@ export function CustomerTab({ customer, currentOrderId, onSelectOrder, isLoading
               </div>
             )}
 
-            {/* Products + Fabrics inline */}
-            <div className="flex gap-6">
+            {/* Products + Fabrics - stack on mobile */}
+            <div className="flex flex-col sm:flex-row gap-4 sm:gap-6">
               {customer.productAffinity && customer.productAffinity.length > 0 && (
                 <div className="flex-1">
                   <div className="text-[9px] uppercase tracking-wider text-slate-500 mb-2 flex items-center gap-1">

@@ -50,6 +50,10 @@ model User {
   rtoInwardedLines      OrderLine[]              @relation("RtoInwardedBy")
   customizedLines       OrderLine[]              @relation("CustomizedBy")
   recordedPayments      OrderPayment[]           // Payments recorded by this user
+  // Return tracking relations
+  returnRequestedLines  OrderLine[]              @relation("ReturnRequestedBy")
+  returnReceivedLines   OrderLine[]              @relation("ReturnReceivedBy")
+  returnClosedManuallyLines OrderLine[]          @relation("ReturnClosedManuallyBy")
 
   @@index([roleId])
 }
@@ -96,6 +100,8 @@ model Product {
   defaultFabricConsumption Float?
   imageUrl                 String?
   isActive                 Boolean     @default(true)
+  isReturnable             Boolean     @default(true)
+  nonReturnableReason      String?     // 'sale_item', 'hygiene', 'custom_made', etc.
   createdAt                DateTime    @default(now())
   updatedAt                DateTime    @updatedAt
   shopifyProductId         String?     @unique
@@ -485,6 +491,7 @@ model Order {
   exchangeRequests     ReturnRequest[]    @relation("ExchangeOrder")
   originalOrder        Order?             @relation("ExchangeOriginalOrder", fields: [originalOrderId], references: [id])
   exchangeOrders       Order[]            @relation("ExchangeOriginalOrder")
+  exchangeSourceLines  OrderLine[]        @relation("ExchangeOrderLine") // Lines that created this exchange order
 
   @@index([customerId])
   @@index([status])
@@ -577,6 +584,61 @@ model OrderLine {
   refundedAt           DateTime?
   // Custom shipping address (for multi-destination orders)
   shippingAddress      String?
+
+  // === RETURN LIFECYCLE ===
+  returnStatus              String?       // 'requested', 'pickup_scheduled', 'in_transit', 'received', 'complete', 'cancelled'
+  returnQty                 Int?          // qty being returned (supports partial returns)
+  returnRequestedAt         DateTime?
+  returnRequestedById       String?
+
+  // === PICKUP/LOGISTICS ===
+  returnPickupType          String?       // 'arranged_by_us', 'customer_shipped'
+  returnAwbNumber           String?
+  returnCourier             String?
+  returnPickupScheduledAt   DateTime?
+  returnPickupAt            DateTime?
+  returnReceivedAt          DateTime?
+  returnReceivedById        String?
+
+  // === CONDITION & QC ===
+  returnCondition           String?       // 'good', 'damaged', 'defective', 'wrong_item', 'used'
+  returnConditionNotes      String?
+
+  // === REASON ===
+  returnReasonCategory      String?       // 'fit_size', 'product_quality', 'product_different', 'wrong_item_sent', 'damaged_in_transit', 'changed_mind', 'other'
+  returnReasonDetail        String?
+
+  // === RESOLUTION ===
+  returnResolution          String?       // 'refund', 'exchange', 'rejected'
+
+  // === REFUND CALCULATION ===
+  returnGrossAmount         Decimal?      @db.Decimal(10, 2)
+  returnDiscountClawback    Decimal?      @db.Decimal(10, 2)
+  returnDeductions          Decimal?      @db.Decimal(10, 2)
+  returnDeductionNotes      String?
+  returnNetAmount           Decimal?      @db.Decimal(10, 2)
+
+  // === REFUND EXECUTION (enhances existing refund fields) ===
+  returnRefundLinkSentAt    DateTime?
+  returnRefundLinkId        String?
+  returnRefundCompletedAt   DateTime?
+  returnRefundMethod        String?       // 'payment_link', 'bank_transfer', 'store_credit'
+  returnRefundReference     String?
+
+  // === EXCHANGE ===
+  returnExchangeOrderId     String?       // FK to the exchange Order
+  returnExchangeSkuId       String?       // what they're exchanging to
+  returnExchangePriceDiff   Decimal?      @db.Decimal(10, 2)
+
+  // === MANUAL CLOSE (edge cases) ===
+  returnClosedManually      Boolean?
+  returnClosedManuallyAt    DateTime?
+  returnClosedManuallyById  String?
+  returnClosedReason        String?
+
+  // === INTERNAL ===
+  returnNotes               String?
+
   // Relations
   customizedBy         User?               @relation("CustomizedBy", fields: [customizedById], references: [id])
   order                Order               @relation(fields: [orderId], references: [id])
@@ -585,6 +647,10 @@ model OrderLine {
   sku                  Sku                 @relation(fields: [skuId], references: [id])
   repackingQueueItems  RepackingQueueItem[] @relation("OrderLineToRepacking")
   returnRequestLines   ReturnRequestLine[]
+  returnRequestedBy    User?               @relation("ReturnRequestedBy", fields: [returnRequestedById], references: [id])
+  returnReceivedBy     User?               @relation("ReturnReceivedBy", fields: [returnReceivedById], references: [id])
+  returnClosedManuallyBy User?             @relation("ReturnClosedManuallyBy", fields: [returnClosedManuallyById], references: [id])
+  returnExchangeOrder  Order?              @relation("ExchangeOrderLine", fields: [returnExchangeOrderId], references: [id])
 
   @@index([orderId])
   @@index([skuId])
@@ -603,6 +669,15 @@ model OrderLine {
   @@index([lineStatus, allocatedAt])
   @@index([trackingStatus])
   @@index([orderId, trackingStatus])
+  // Return indexes
+  @@index([returnStatus])
+  @@index([returnStatus, orderId])
+  @@index([returnAwbNumber])
+  @@index([returnRequestedAt])
+  @@index([returnRequestedById])
+  @@index([returnReceivedById])
+  @@index([returnClosedManuallyById])
+  @@index([returnExchangeOrderId])
 }
 
 model ReturnRequest {

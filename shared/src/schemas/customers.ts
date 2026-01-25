@@ -42,15 +42,60 @@ export type CustomersListResult = z.infer<typeof customersListResultSchema>;
 // DETAIL SCHEMAS
 // ============================================
 
+export const orderLineSchema = z.object({
+    id: z.string(),
+    qty: z.number(),
+    sku: z.object({
+        size: z.string().nullable(),
+        variation: z.object({
+            colorName: z.string().nullable(),
+            colorHex: z.string().nullable(),
+            imageUrl: z.string().nullable(),
+            product: z.object({
+                name: z.string().nullable(),
+                imageUrl: z.string().nullable(),
+            }).nullable(),
+            fabricColour: z.object({
+                fabric: z.object({
+                    name: z.string().nullable(),
+                }).nullable(),
+            }).nullable(),
+        }).nullable(),
+    }).nullable(),
+});
+
+export type OrderLineDetail = z.infer<typeof orderLineSchema>;
+
 export const recentOrderSchema = z.object({
     id: z.string(),
     orderNumber: z.string(),
     totalAmount: z.number().nullable(),
     status: z.string(),
     orderDate: z.coerce.date(),
+    orderLines: z.array(orderLineSchema).optional(),
 });
 
 export type RecentOrder = z.infer<typeof recentOrderSchema>;
+
+export const colorAffinitySchema = z.object({
+    color: z.string(),
+    hex: z.string().optional(),
+    qty: z.number(),
+});
+
+export const productAffinitySchema = z.object({
+    productName: z.string(),
+    qty: z.number(),
+});
+
+export const fabricAffinitySchema = z.object({
+    fabricType: z.string(),
+    qty: z.number(),
+});
+
+export type ColorAffinity = z.infer<typeof colorAffinitySchema>;
+export type ProductAffinity = z.infer<typeof productAffinitySchema>;
+export type FabricAffinity = z.infer<typeof fabricAffinitySchema>;
 
 export const customerDetailResultSchema = z.object({
     id: z.string(),
@@ -58,12 +103,29 @@ export const customerDetailResultSchema = z.object({
     firstName: z.string().nullable(),
     lastName: z.string().nullable(),
     phone: z.string().nullable(),
-    tier: z.string(),
+    tier: z.string().nullable(),
+    customerTier: z.string().nullable(),
     tags: z.string().nullable(),
     createdAt: z.coerce.date(),
     updatedAt: z.coerce.date(),
-    ordersCount: z.number(),
-    recentOrders: z.array(recentOrderSchema),
+    // Stats
+    totalOrders: z.number(),
+    lifetimeValue: z.number(),
+    avgOrderValue: z.number(),
+    returnRate: z.number(),
+    returnCount: z.number(),
+    exchangeCount: z.number(),
+    rtoCount: z.number(),
+    firstOrderDate: z.coerce.date().nullable(),
+    lastOrderDate: z.coerce.date().nullable(),
+    acceptsMarketing: z.boolean(),
+    defaultAddress: z.any().nullable(),
+    // Style DNA
+    colorAffinity: z.array(colorAffinitySchema).nullable(),
+    productAffinity: z.array(productAffinitySchema).nullable(),
+    fabricAffinity: z.array(fabricAffinitySchema).nullable(),
+    // Orders with lines for size preferences
+    orders: z.array(recentOrderSchema).nullable(),
 });
 
 export type CustomerDetailResult = z.infer<typeof customerDetailResultSchema>;

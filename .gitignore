@@ -54,3 +54,5 @@ server/coverage/
 
 # Auto Claude data directory
 .auto-claude/
+
+Claude_Code_-_CLI_Quickstart-oauth-credentials.txt
