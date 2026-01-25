@@ -1962,20 +1962,25 @@ export interface ReturnConfigResponse {
  * Get return settings from DB with fallback to code defaults
  */
 async function getReturnSettingsFromDb(): Promise<EligibilitySettings & { autoRejectAfterDays: number | null; allowExpiredOverride: boolean }> {
-    const prisma = await getPrisma();
+    try {
+        const prisma = await getPrisma();
 
-    // Try to get settings from DB
-    const dbSettings = await prisma.returnSettings.findFirst({
-        where: { id: 'default' },
-    });
+        // Try to get settings from DB
+        const dbSettings = await prisma.returnSettings.findFirst({
+            where: { id: 'default' },
+        });
 
-    if (dbSettings) {
-        return {
-            windowDays: dbSettings.windowDays,
-            windowWarningDays: dbSettings.windowWarningDays,
-            autoRejectAfterDays: dbSettings.autoRejectAfterDays,
-            allowExpiredOverride: dbSettings.allowExpiredOverride,
-        };
+        if (dbSettings) {
+            return {
+                windowDays: dbSettings.windowDays,
+                windowWarningDays: dbSettings.windowWarningDays,
+                autoRejectAfterDays: dbSettings.autoRejectAfterDays,
+                allowExpiredOverride: dbSettings.allowExpiredOverride,
+            };
+        }
+    } catch (error) {
+        // Table might not exist yet - fall back to defaults
+        console.warn('Failed to load return settings from DB, using defaults:', error);
     }
 
     // Return code defaults
