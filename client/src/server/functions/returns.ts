@@ -1586,59 +1586,18 @@ import {
     type ReturnActionQueueItem,
     type RefundCalculationResult,
 } from '@coh/shared/schemas/returns';
-
-const RETURN_WINDOW_DAYS = 14;
-
-function getReturnEligibility(
-    line: {
-        deliveredAt: Date | null;
-        returnStatus: string | null;
-        returnQty: number | null;
-        isNonReturnable: boolean;
-    },
-    product: { isReturnable: boolean; nonReturnableReason: string | null }
-): { eligible: boolean; reason?: string; daysRemaining: number | null; windowExpiringSoon: boolean; warning?: string } {
-    // Check if already has active return (HARD BLOCK)
-    if (line.returnStatus && !['cancelled', 'complete'].includes(line.returnStatus)) {
-        return { eligible: false, reason: 'already_returned', daysRemaining: null, windowExpiringSoon: false };
-    }
-
-    // Check line-level non-returnable (HARD BLOCK)
-    if (line.isNonReturnable) {
-        return { eligible: false, reason: 'line_non_returnable', daysRemaining: null, windowExpiringSoon: false };
-    }
-
-    // Check delivery status (HARD BLOCK - can't return what wasn't delivered)
-    if (!line.deliveredAt) {
-        return { eligible: false, reason: 'not_delivered', daysRemaining: null, windowExpiringSoon: false };
-    }
-
-    // Calculate return window
-    const daysSinceDelivery = Math.floor((Date.now() - line.deliveredAt.getTime()) / (1000 * 60 * 60 * 24));
-    const daysRemaining = RETURN_WINDOW_DAYS - daysSinceDelivery;
-    const windowExpiringSoon = daysRemaining > 0 && daysRemaining <= 2;
-
-    // Collect warnings (soft conditions - allow with warning)
-    let warning: string | undefined;
-
-    // Check product-level returnability (SOFT WARNING)
-    if (!product.isReturnable) {
-        warning = product.nonReturnableReason || 'product_marked_non_returnable';
-    }
-
-    // Check window expiry (SOFT WARNING - allow override)
-    if (daysRemaining < 0) {
-        warning = warning ? `${warning}, window_expired` : 'window_expired';
-    }
-
-    return {
-        eligible: true,
-        reason: daysRemaining >= 0 ? 'within_window' : 'window_expired_override',
-        daysRemaining,
-        windowExpiringSoon,
-        warning
-    };
-}
+import {
+    checkEligibility,
+    RETURN_POLICY,
+    RETURN_REASONS,
+    RETURN_CONDITIONS,
+    RETURN_RESOLUTIONS,
+    RETURN_PICKUP_TYPES,
+    RETURN_REFUND_METHODS,
+    NON_RETURNABLE_REASONS,
+    type EligibilitySettings,
+    toOptions,
+} from '@coh/shared/domain/returns';
 
 /**
  * Get order with lines for return initiation
@@ -1649,6 +1608,12 @@ export const getOrderForReturn = createServerFn({ method: 'GET' })
     .inputValidator((input: unknown) => z.object({ orderNumber: z.string() }).parse(input))
     .handler(async ({ data }): Promise<OrderForReturn> => {
         const prisma = await getPrisma();
+
+        // Fetch settings from DB (with fallback to code defaults)
+        const dbSettings = await prisma.returnSettings.findFirst({ where: { id: 'default' } });
+        const settings: EligibilitySettings = dbSettings
+            ? { windowDays: dbSettings.windowDays, windowWarningDays: dbSettings.windowWarningDays }
+            : { windowDays: RETURN_POLICY.windowDays, windowWarningDays: RETURN_POLICY.windowWarningDays };
 
         const order = await prisma.order.findFirst({
             where: {
@@ -1680,15 +1645,13 @@ export const getOrderForReturn = createServerFn({ method: 'GET' })
 
         const lines: OrderLineForReturn[] = order.orderLines.map((line) => {
             const product = line.sku.variation.product;
-            const eligibility = getReturnEligibility(
-                {
-                    deliveredAt: line.deliveredAt,
-                    returnStatus: line.returnStatus,
-                    returnQty: line.returnQty,
-                    isNonReturnable: line.isNonReturnable,
-                },
-                { isReturnable: product.isReturnable, nonReturnableReason: product.nonReturnableReason }
-            );
+            const eligibility = checkEligibility({
+                deliveredAt: line.deliveredAt,
+                returnStatus: line.returnStatus,
+                isNonReturnable: line.isNonReturnable,
+                productIsReturnable: product.isReturnable,
+                productNonReturnableReason: product.nonReturnableReason,
+            }, settings);
 
             return {
                 id: line.id,
@@ -1986,6 +1949,7 @@ export interface ReturnConfigResponse {
     windowDays: number;
     windowWarningDays: number;
     autoRejectAfterDays: number | null;
+    allowExpiredOverride: boolean;
     reasonCategories: Array<{ value: string; label: string }>;
     conditions: Array<{ value: string; label: string }>;
     resolutions: Array<{ value: string; label: string }>;
@@ -1995,78 +1959,102 @@ export interface ReturnConfigResponse {
 }
 
 /**
+ * Get return settings from DB with fallback to code defaults
+ */
+async function getReturnSettingsFromDb(): Promise<EligibilitySettings & { autoRejectAfterDays: number | null; allowExpiredOverride: boolean }> {
+    try {
+        const prisma = await getPrisma();
+
+        // Try to get settings from DB
+        const dbSettings = await prisma.returnSettings.findFirst({
+            where: { id: 'default' },
+        });
+
+        if (dbSettings) {
+            return {
+                windowDays: dbSettings.windowDays,
+                windowWarningDays: dbSettings.windowWarningDays,
+                autoRejectAfterDays: dbSettings.autoRejectAfterDays,
+                allowExpiredOverride: dbSettings.allowExpiredOverride,
+            };
+        }
+    } catch (error) {
+        // Table might not exist yet - fall back to defaults
+        console.warn('Failed to load return settings from DB, using defaults:', error);
+    }
+
+    // Return code defaults
+    return {
+        windowDays: RETURN_POLICY.windowDays,
+        windowWarningDays: RETURN_POLICY.windowWarningDays,
+        autoRejectAfterDays: RETURN_POLICY.autoRejectAfterDays,
+        allowExpiredOverride: RETURN_POLICY.allowExpiredWithOverride,
+    };
+}
+
+/**
  * Get return configuration settings
- * Used by Returns Settings tab
- *
- * NOTE: These values mirror /server/src/config/thresholds/returns.ts
- * When editing, update both places until we move config to shared package
+ * Reads from DB if available, falls back to code defaults
  */
 export const getReturnConfig = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .handler(async (): Promise<ReturnConfigResponse> => {
-        // Return window settings
-        const windowDays = 14;
-        const windowWarningDays = 12;
-        const autoRejectAfterDays: number | null = null;
-
-        // Reason categories
-        const reasonCategories = [
-            { value: 'fit_size', label: 'Size/Fit Issue' },
-            { value: 'product_quality', label: 'Quality Issue' },
-            { value: 'product_different', label: 'Different from Listing' },
-            { value: 'wrong_item_sent', label: 'Wrong Item Sent' },
-            { value: 'damaged_in_transit', label: 'Damaged in Transit' },
-            { value: 'changed_mind', label: 'Changed Mind' },
-            { value: 'other', label: 'Other' },
-        ];
-
-        // Item conditions
-        const conditions = [
-            { value: 'good', label: 'Good - Restockable' },
-            { value: 'damaged', label: 'Damaged' },
-            { value: 'defective', label: 'Defective' },
-            { value: 'wrong_item', label: 'Wrong Item Received' },
-            { value: 'used', label: 'Used/Worn' },
-        ];
-
-        // Resolutions
-        const resolutions = [
-            { value: 'refund', label: 'Refund' },
-            { value: 'exchange', label: 'Exchange' },
-            { value: 'rejected', label: 'Rejected' },
-        ];
-
-        // Pickup types
-        const pickupTypes = [
-            { value: 'arranged_by_us', label: 'Arranged by Us' },
-            { value: 'customer_shipped', label: 'Customer Shipped' },
-        ];
-
-        // Refund methods
-        const refundMethods = [
-            { value: 'payment_link', label: 'Payment Link (Razorpay)' },
-            { value: 'bank_transfer', label: 'Bank Transfer' },
-            { value: 'store_credit', label: 'Store Credit' },
-        ];
-
-        // Non-returnable reasons
-        const nonReturnableReasons = [
-            { value: 'sale_item', label: 'Sale Item' },
-            { value: 'hygiene', label: 'Hygiene Product' },
-            { value: 'custom_made', label: 'Custom Made' },
-            { value: 'clearance', label: 'Clearance Item' },
-            { value: 'final_sale', label: 'Final Sale' },
-        ];
+        const settings = await getReturnSettingsFromDb();
 
         return {
-            windowDays,
-            windowWarningDays,
-            autoRejectAfterDays,
-            reasonCategories,
-            conditions,
-            resolutions,
-            pickupTypes,
-            refundMethods,
-            nonReturnableReasons,
+            windowDays: settings.windowDays,
+            windowWarningDays: settings.windowWarningDays,
+            autoRejectAfterDays: settings.autoRejectAfterDays,
+            allowExpiredOverride: settings.allowExpiredOverride,
+            reasonCategories: toOptions(RETURN_REASONS),
+            conditions: toOptions(RETURN_CONDITIONS),
+            resolutions: toOptions(RETURN_RESOLUTIONS),
+            pickupTypes: toOptions(RETURN_PICKUP_TYPES),
+            refundMethods: toOptions(RETURN_REFUND_METHODS),
+            nonReturnableReasons: toOptions(NON_RETURNABLE_REASONS),
         };
+    });
+
+/**
+ * Update return settings
+ */
+export const updateReturnSettings = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) =>
+        z.object({
+            windowDays: z.number().int().min(1).max(365),
+            windowWarningDays: z.number().int().min(0).max(365),
+            autoRejectAfterDays: z.number().int().min(1).max(365).nullable(),
+            allowExpiredOverride: z.boolean(),
+        }).parse(input)
+    )
+    .handler(async ({ data, context }): Promise<{ success: boolean }> => {
+        const prisma = await getPrisma();
+        const userId = context.user.id;
+
+        // Validation: windowWarningDays should be less than windowDays
+        if (data.windowWarningDays >= data.windowDays) {
+            throw new Error('Warning threshold must be less than return window');
+        }
+
+        await prisma.returnSettings.upsert({
+            where: { id: 'default' },
+            create: {
+                id: 'default',
+                windowDays: data.windowDays,
+                windowWarningDays: data.windowWarningDays,
+                autoRejectAfterDays: data.autoRejectAfterDays,
+                allowExpiredOverride: data.allowExpiredOverride,
+                updatedById: userId,
+            },
+            update: {
+                windowDays: data.windowDays,
+                windowWarningDays: data.windowWarningDays,
+                autoRejectAfterDays: data.autoRejectAfterDays,
+                allowExpiredOverride: data.allowExpiredOverride,
+                updatedById: userId,
+            },
+        });
+
+        return { success: true };
     });

@@ -13,10 +13,12 @@ import type {
   ModalMode,
   EditFormState,
   ShipFormState,
+  ReturnFormState,
   AddressData,
   ExpandedSections,
   CategorizedLines,
   NavigationState,
+  LineReturnEligibility,
 } from '../types';
 
 // Parse JSON address string to AddressData object
@@ -72,12 +74,17 @@ export function useUnifiedOrderModal({ order, initialMode, onNavigateToOrder }: 
     order.orderLines?.some(l => l.lineStatus === 'packed');
   const canCustomer = !!order.customerId;
 
+  // Returns tab: always enabled for debugging (was: only if delivered lines exist)
+  // TODO: Restore stricter check after debugging
+  const canReturn = (order.orderLines?.length ?? 0) > 0;
+
   // Initialize mode - default to view, or provided initial mode if available
   const getInitialMode = (): ModalMode => {
     if (initialMode) {
       if (initialMode === 'edit' && canEdit) return 'edit';
       if (initialMode === 'ship' && canShip) return 'ship';
       if (initialMode === 'customer' && canCustomer) return 'customer';
+      if (initialMode === 'returns' && canReturn) return 'returns';
     }
     return 'view';
   };
@@ -111,6 +118,15 @@ export function useUnifiedOrderModal({ order, initialMode, onNavigateToOrder }: 
     courier: '',
     selectedLineIds: new Set(),
     bypassVerification: false,
+  });
+
+  // Return form state
+  const [returnForm, setReturnForm] = useState<ReturnFormState>({
+    selectedLineId: null,
+    returnQty: 1,
+    returnReasonCategory: '',
+    returnReasonDetail: '',
+    returnResolution: null,
   });
 
   // Address form state
@@ -259,8 +275,20 @@ export function useUnifiedOrderModal({ order, initialMode, onNavigateToOrder }: 
     if (newMode === 'edit' && !canEdit) return;
     if (newMode === 'ship' && !canShip) return;
     if (newMode === 'customer' && !canCustomer) return;
+    if (newMode === 'returns' && !canReturn) return;
 
     setMode(newMode);
+
+    // Reset return form when leaving returns mode
+    if (mode === 'returns' && newMode !== 'returns') {
+      setReturnForm({
+        selectedLineId: null,
+        returnQty: 1,
+        returnReasonCategory: '',
+        returnReasonDetail: '',
+        returnResolution: null,
+      });
+    }
 
     // Update navigation history when switching to customer tab
     if (newMode === 'customer') {
@@ -280,7 +308,7 @@ export function useUnifiedOrderModal({ order, initialMode, onNavigateToOrder }: 
         };
       });
     }
-  }, [canEdit, canShip, canCustomer, order.id, order.orderNumber]);
+  }, [canEdit, canShip, canCustomer, canReturn, order.id, order.orderNumber, mode]);
 
   // Track the order ID to detect when order changes (for navigation)
   const [previousOrderId, setPreviousOrderId] = useState(order.id);
@@ -389,6 +417,88 @@ export function useUnifiedOrderModal({ order, initialMode, onNavigateToOrder }: 
     });
   }, []);
 
+  // Return form field change
+  const handleReturnFieldChange = useCallback((field: keyof ReturnFormState, value: string | number | null) => {
+    setReturnForm(prev => ({ ...prev, [field]: value }));
+  }, []);
+
+  // Select a line for return (with default qty)
+  const handleSelectLineForReturn = useCallback((lineId: string | null, defaultQty?: number) => {
+    setReturnForm(prev => ({
+      ...prev,
+      selectedLineId: lineId,
+      returnQty: defaultQty ?? 1,
+      returnReasonCategory: '',
+      returnReasonDetail: '',
+      returnResolution: null,
+    }));
+  }, []);
+
+  // Reset return form
+  const resetReturnForm = useCallback(() => {
+    setReturnForm({
+      selectedLineId: null,
+      returnQty: 1,
+      returnReasonCategory: '',
+      returnReasonDetail: '',
+      returnResolution: null,
+    });
+  }, []);
+
+  // Calculate line return eligibility client-side
+  // DEBUG MODE: All checks are soft warnings to help debug eligibility issues
+  const RETURN_WINDOW_DAYS = 14;
+  const getLineEligibility = useCallback((line: {
+    deliveredAt?: Date | string | null;
+    returnStatus?: string | null;
+    isNonReturnable?: boolean;
+  }): LineReturnEligibility => {
+    const warnings: string[] = [];
+
+    // Soft warning: already has active return
+    if (line.returnStatus && !['cancelled', 'complete'].includes(line.returnStatus)) {
+      warnings.push(`Active return: ${line.returnStatus}`);
+    }
+
+    // Soft warning: line marked non-returnable
+    if (line.isNonReturnable) {
+      warnings.push('Non-returnable');
+    }
+
+    // Soft warning: not delivered yet
+    if (!line.deliveredAt) {
+      warnings.push('Not delivered');
+      return {
+        eligible: true, // Allow for debugging
+        reason: 'not_delivered',
+        daysRemaining: null,
+        windowExpiringSoon: false,
+        warning: warnings.join(' | '),
+      };
+    }
+
+    // Calculate window
+    const deliveredDate = typeof line.deliveredAt === 'string' ? new Date(line.deliveredAt) : line.deliveredAt;
+    const daysSinceDelivery = Math.floor((Date.now() - deliveredDate.getTime()) / (1000 * 60 * 60 * 24));
+    const daysRemaining = RETURN_WINDOW_DAYS - daysSinceDelivery;
+    const windowExpiringSoon = daysRemaining > 0 && daysRemaining <= 2;
+
+    // Soft warning: window expired
+    if (daysRemaining < 0) {
+      warnings.push(`Expired ${Math.abs(daysRemaining)}d ago`);
+    } else if (windowExpiringSoon) {
+      warnings.push(`${daysRemaining}d left`);
+    }
+
+    return {
+      eligible: true, // Always eligible for debugging
+      reason: warnings.length > 0 ? 'has_warnings' : 'within_window',
+      daysRemaining,
+      windowExpiringSoon,
+      ...(warnings.length > 0 ? { warning: warnings.join(' | ') } : {}),
+    };
+  }, []);
+
   // Toggle address picker (convenience wrapper)
   const toggleAddressPicker = useCallback(() => {
     setExpandedSections(prev => ({ ...prev, addressPicker: !prev.addressPicker }));
@@ -437,6 +547,7 @@ export function useUnifiedOrderModal({ order, initialMode, onNavigateToOrder }: 
     canEdit,
     canShip,
     canCustomer,
+    canReturn,
 
     // Navigation
     navigationHistory,
@@ -464,6 +575,13 @@ export function useUnifiedOrderModal({ order, initialMode, onNavigateToOrder }: 
     expectedAwb,
     awbMatches,
     canShipOrder,
+
+    // Return form
+    returnForm,
+    handleReturnFieldChange,
+    handleSelectLineForReturn,
+    resetReturnForm,
+    getLineEligibility,
 
     // Lines
     categorizedLines,

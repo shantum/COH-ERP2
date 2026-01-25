@@ -5,7 +5,7 @@
 
 import type { Order, OrderLine } from '../../../types';
 
-export type ModalMode = 'view' | 'edit' | 'ship' | 'customer';
+export type ModalMode = 'view' | 'edit' | 'ship' | 'customer' | 'returns';
 
 // Navigation entry for order navigation within the modal
 export interface NavigationEntry {
@@ -50,6 +50,22 @@ export interface ShipFormState {
   bypassVerification: boolean;
 }
 
+export interface ReturnFormState {
+  selectedLineId: string | null;
+  returnQty: number;
+  returnReasonCategory: string;
+  returnReasonDetail: string;
+  returnResolution: 'refund' | 'exchange' | null;
+}
+
+export interface LineReturnEligibility {
+  eligible: boolean;
+  reason?: string; // 'within_window', 'already_returned', 'not_delivered', 'line_non_returnable'
+  daysRemaining: number | null;
+  windowExpiringSoon: boolean;
+  warning?: string; // Soft warnings that allow proceeding with caution
+}
+
 export interface ExpandedSections {
   timeline: boolean;
   addressPicker: boolean;
@@ -60,6 +76,7 @@ export interface UnifiedOrderModalState {
   mode: ModalMode;
   editForm: EditFormState;
   shipForm: ShipFormState;
+  returnForm: ReturnFormState;
   addressForm: AddressData;
   hasUnsavedChanges: boolean;
   expandedSections: ExpandedSections;

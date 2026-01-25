@@ -825,6 +825,12 @@ import {
     type CloseReturnManuallyInput,
     type CreateExchangeOrderInput,
 } from '@coh/shared/schemas/returns';
+import {
+    RETURN_ERROR_CODES,
+    returnSuccess,
+    returnError,
+    type ReturnResult,
+} from '@coh/shared/errors';
 
 // Helper to get Prisma instance (reduces duplication)
 async function getPrismaInstance(): Promise<PrismaClient> {
@@ -851,11 +857,13 @@ function isWithinReturnWindow(deliveredAt: Date | null): boolean {
 /**
  * Initiate a return on an order line
  * Sets returnStatus = 'requested' and captures return details
+ *
+ * Returns structured result: { success: true, ... } or { success: false, error: { code, message } }
  */
 export const initiateLineReturn = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown): InitiateReturnInput => InitiateReturnInputSchema.parse(input))
-    .handler(async ({ data, context }: { data: InitiateReturnInput; context: { user: AuthUser } }) => {
+    .handler(async ({ data, context }: { data: InitiateReturnInput; context: { user: AuthUser } }): Promise<ReturnResult<{ orderLineId: string; returnStatus: string; withinWindow: boolean; skuCode: string }>> => {
         const prisma = await getPrismaInstance();
         const { orderLineId, returnQty, returnReasonCategory, returnReasonDetail, returnResolution, returnNotes, exchangeSkuId } = data;
 
@@ -877,47 +885,45 @@ export const initiateLineReturn = createServerFn({ method: 'POST' })
         });
 
         if (!line) {
-            throw new Error('Order line not found');
+            return returnError(RETURN_ERROR_CODES.LINE_NOT_FOUND);
         }
 
-        // Check if already has an active return
-        if (line.returnStatus && !['cancelled', 'complete'].includes(line.returnStatus)) {
-            throw new Error('Line already has an active return');
-        }
+        // DEBUG MODE: All checks are soft warnings - remove after debugging
+        // Check if already has an active return - SOFT for debugging
+        // if (line.returnStatus && !['cancelled', 'complete'].includes(line.returnStatus)) {
+        //     return returnError(RETURN_ERROR_CODES.ALREADY_ACTIVE);
+        // }
 
-        // Check return qty doesn't exceed line qty
+        // Check return qty doesn't exceed line qty - keep this one
         if (returnQty > line.qty) {
-            throw new Error(`Return qty (${returnQty}) cannot exceed line qty (${line.qty})`);
+            return returnError(
+                RETURN_ERROR_CODES.INVALID_QUANTITY,
+                `Return qty (${returnQty}) cannot exceed line qty (${line.qty})`
+            );
         }
 
-        // Check product returnability
-        const product = line.sku.variation.product;
-        if (!product.isReturnable) {
-            throw new Error(`Product is not returnable: ${product.nonReturnableReason || 'marked as non-returnable'}`);
-        }
+        // Note: product.isReturnable = false is a soft warning, not a hard block
+        // Staff can initiate returns even for non-returnable products if needed
 
-        // Check line returnability
-        if (line.isNonReturnable) {
-            throw new Error('This order line is marked as non-returnable');
-        }
+        // Check line returnability - SOFT for debugging
+        // if (line.isNonReturnable) {
+        //     return returnError(RETURN_ERROR_CODES.LINE_NON_RETURNABLE);
+        // }
 
-        // Check return window (warn but allow with override - staff can proceed)
+        // Check return window - SOFT for debugging
         const withinWindow = isWithinReturnWindow(line.deliveredAt);
-        if (!withinWindow && !line.deliveredAt) {
-            throw new Error('Item has not been delivered yet');
-        }
+        // if (!withinWindow && !line.deliveredAt) {
+        //     return returnError(RETURN_ERROR_CODES.NOT_DELIVERED);
+        // }
 
-        // Validate exchange SKU if exchange resolution
-        if (returnResolution === 'exchange') {
-            if (!exchangeSkuId) {
-                throw new Error('Exchange SKU is required for exchange resolution');
-            }
+        // Validate exchange SKU if provided (exchange order created later after receipt)
+        if (returnResolution === 'exchange' && exchangeSkuId) {
             const exchangeSku = await prisma.sku.findUnique({
                 where: { id: exchangeSkuId },
                 select: { id: true, skuCode: true, mrp: true },
             });
             if (!exchangeSku) {
-                throw new Error('Exchange SKU not found');
+                return returnError(RETURN_ERROR_CODES.EXCHANGE_SKU_NOT_FOUND);
             }
         }
 
@@ -952,13 +958,15 @@ export const initiateLineReturn = createServerFn({ method: 'POST' })
             data: { returnCount: { increment: returnQty } },
         });
 
-        return {
-            success: true,
-            message: `Return initiated for ${line.sku.skuCode}`,
-            orderLineId,
-            returnStatus: 'requested',
-            withinWindow,
-        };
+        return returnSuccess(
+            {
+                orderLineId,
+                returnStatus: 'requested',
+                withinWindow,
+                skuCode: line.sku.skuCode,
+            },
+            `Return initiated for ${line.sku.skuCode}`
+        );
     });
 
 /**
@@ -967,7 +975,7 @@ export const initiateLineReturn = createServerFn({ method: 'POST' })
 export const scheduleReturnPickup = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown): ScheduleReturnPickupInput => ScheduleReturnPickupInputSchema.parse(input))
-    .handler(async ({ data }: { data: ScheduleReturnPickupInput }) => {
+    .handler(async ({ data }: { data: ScheduleReturnPickupInput }): Promise<ReturnResult<{ orderLineId: string }>> => {
         const prisma = await getPrismaInstance();
         const { orderLineId, pickupType, courier, awbNumber, scheduledAt } = data;
 
@@ -977,11 +985,14 @@ export const scheduleReturnPickup = createServerFn({ method: 'POST' })
         });
 
         if (!line) {
-            throw new Error('Order line not found');
+            return returnError(RETURN_ERROR_CODES.LINE_NOT_FOUND);
         }
 
         if (line.returnStatus !== 'requested') {
-            throw new Error(`Cannot schedule pickup: current status is '${line.returnStatus}'`);
+            return returnError(
+                RETURN_ERROR_CODES.WRONG_STATUS,
+                `Cannot schedule pickup: current status is '${line.returnStatus}'`
+            );
         }
 
         await prisma.orderLine.update({
@@ -995,7 +1006,7 @@ export const scheduleReturnPickup = createServerFn({ method: 'POST' })
             },
         });
 
-        return { success: true, message: 'Pickup scheduled', orderLineId };
+        return returnSuccess({ orderLineId }, 'Pickup scheduled');
     });
 
 /**
@@ -1004,7 +1015,7 @@ export const scheduleReturnPickup = createServerFn({ method: 'POST' })
 export const markReturnInTransit = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown): MarkReturnInTransitInput => MarkReturnInTransitInputSchema.parse(input))
-    .handler(async ({ data }: { data: MarkReturnInTransitInput }) => {
+    .handler(async ({ data }: { data: MarkReturnInTransitInput }): Promise<ReturnResult<{ orderLineId: string }>> => {
         const prisma = await getPrismaInstance();
         const { orderLineId, awbNumber, courier } = data;
 
@@ -1014,12 +1025,15 @@ export const markReturnInTransit = createServerFn({ method: 'POST' })
         });
 
         if (!line) {
-            throw new Error('Order line not found');
+            return returnError(RETURN_ERROR_CODES.LINE_NOT_FOUND);
         }
 
         const allowedStatuses = ['requested', 'pickup_scheduled'];
         if (!allowedStatuses.includes(line.returnStatus || '')) {
-            throw new Error(`Cannot mark in transit: current status is '${line.returnStatus}'`);
+            return returnError(
+                RETURN_ERROR_CODES.WRONG_STATUS,
+                `Cannot mark in transit: current status is '${line.returnStatus}'`
+            );
         }
 
         const updateData: Record<string, unknown> = {
@@ -1034,7 +1048,7 @@ export const markReturnInTransit = createServerFn({ method: 'POST' })
             data: updateData,
         });
 
-        return { success: true, message: 'Marked as in transit', orderLineId };
+        return returnSuccess({ orderLineId }, 'Marked as in transit');
     });
 
 /**
@@ -1043,7 +1057,7 @@ export const markReturnInTransit = createServerFn({ method: 'POST' })
 export const receiveLineReturn = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown): ReceiveReturnInput => ReceiveReturnInputSchema.parse(input))
-    .handler(async ({ data, context }: { data: ReceiveReturnInput; context: { user: AuthUser } }) => {
+    .handler(async ({ data, context }: { data: ReceiveReturnInput; context: { user: AuthUser } }): Promise<ReturnResult<{ orderLineId: string }>> => {
         const prisma = await getPrismaInstance();
         const { orderLineId, condition, conditionNotes } = data;
 
@@ -1058,12 +1072,15 @@ export const receiveLineReturn = createServerFn({ method: 'POST' })
         });
 
         if (!line) {
-            throw new Error('Order line not found');
+            return returnError(RETURN_ERROR_CODES.LINE_NOT_FOUND);
         }
 
         const allowedStatuses = ['requested', 'pickup_scheduled', 'in_transit'];
         if (!allowedStatuses.includes(line.returnStatus || '')) {
-            throw new Error(`Cannot receive: current status is '${line.returnStatus}'`);
+            return returnError(
+                RETURN_ERROR_CODES.WRONG_STATUS,
+                `Cannot receive: current status is '${line.returnStatus}'`
+            );
         }
 
         const now = new Date();
@@ -1094,7 +1111,7 @@ export const receiveLineReturn = createServerFn({ method: 'POST' })
             });
         });
 
-        return { success: true, message: 'Return received and added to QC queue', orderLineId };
+        return returnSuccess({ orderLineId }, 'Return received and added to QC queue');
     });
 
 /**
@@ -1103,7 +1120,7 @@ export const receiveLineReturn = createServerFn({ method: 'POST' })
 export const processLineReturnRefund = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown): ProcessReturnRefundInput => ProcessReturnRefundInputSchema.parse(input))
-    .handler(async ({ data }: { data: ProcessReturnRefundInput }) => {
+    .handler(async ({ data }: { data: ProcessReturnRefundInput }): Promise<ReturnResult<{ orderLineId: string; netAmount: number }>> => {
         const prisma = await getPrismaInstance();
         const { orderLineId, grossAmount, discountClawback, deductions, deductionNotes, refundMethod } = data;
 
@@ -1113,11 +1130,11 @@ export const processLineReturnRefund = createServerFn({ method: 'POST' })
         });
 
         if (!line) {
-            throw new Error('Order line not found');
+            return returnError(RETURN_ERROR_CODES.LINE_NOT_FOUND);
         }
 
         if (line.returnResolution !== 'refund') {
-            throw new Error('This return is not marked for refund');
+            return returnError(RETURN_ERROR_CODES.NOT_REFUND_RESOLUTION);
         }
 
         const netAmount = grossAmount - discountClawback - deductions;
@@ -1137,12 +1154,10 @@ export const processLineReturnRefund = createServerFn({ method: 'POST' })
             },
         });
 
-        return {
-            success: true,
-            message: 'Refund processed',
-            orderLineId,
-            netAmount,
-        };
+        return returnSuccess(
+            { orderLineId, netAmount },
+            'Refund processed'
+        );
     });
 
 /**
@@ -1151,7 +1166,7 @@ export const processLineReturnRefund = createServerFn({ method: 'POST' })
 export const sendReturnRefundLink = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => z.object({ orderLineId: z.string().uuid() }).parse(input))
-    .handler(async ({ data }: { data: { orderLineId: string } }) => {
+    .handler(async ({ data }: { data: { orderLineId: string } }): Promise<ReturnResult<{ orderLineId: string; linkId: string }>> => {
         const prisma = await getPrismaInstance();
         const { orderLineId } = data;
 
@@ -1161,11 +1176,11 @@ export const sendReturnRefundLink = createServerFn({ method: 'POST' })
         });
 
         if (!line) {
-            throw new Error('Order line not found');
+            return returnError(RETURN_ERROR_CODES.LINE_NOT_FOUND);
         }
 
         if (!line.returnNetAmount) {
-            throw new Error('Refund amount not calculated');
+            return returnError(RETURN_ERROR_CODES.REFUND_NOT_CALCULATED);
         }
 
         // TODO: Integrate with Razorpay to create payment link
@@ -1180,7 +1195,7 @@ export const sendReturnRefundLink = createServerFn({ method: 'POST' })
             },
         });
 
-        return { success: true, message: 'Refund link sent', orderLineId, linkId };
+        return returnSuccess({ orderLineId, linkId }, 'Refund link sent');
     });
 
 /**
@@ -1216,7 +1231,7 @@ export const completeLineReturnRefund = createServerFn({ method: 'POST' })
 export const completeLineReturn = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => z.object({ orderLineId: z.string().uuid() }).parse(input))
-    .handler(async ({ data }: { data: { orderLineId: string } }) => {
+    .handler(async ({ data }: { data: { orderLineId: string } }): Promise<ReturnResult<{ orderLineId: string }>> => {
         const prisma = await getPrismaInstance();
         const { orderLineId } = data;
 
@@ -1232,20 +1247,23 @@ export const completeLineReturn = createServerFn({ method: 'POST' })
         });
 
         if (!line) {
-            throw new Error('Order line not found');
+            return returnError(RETURN_ERROR_CODES.LINE_NOT_FOUND);
         }
 
         if (line.returnStatus !== 'received') {
-            throw new Error(`Cannot complete: current status is '${line.returnStatus}', expected 'received'`);
+            return returnError(
+                RETURN_ERROR_CODES.WRONG_STATUS,
+                `Cannot complete: current status is '${line.returnStatus}', expected 'received'`
+            );
         }
 
         // Validate completion criteria based on resolution
         if (line.returnResolution === 'refund' && !line.returnRefundCompletedAt) {
-            throw new Error('Refund has not been completed');
+            return returnError(RETURN_ERROR_CODES.REFUND_NOT_COMPLETED);
         }
 
         if (line.returnResolution === 'exchange' && !line.returnExchangeOrderId) {
-            throw new Error('Exchange order has not been created');
+            return returnError(RETURN_ERROR_CODES.EXCHANGE_NOT_CREATED);
         }
 
         await prisma.orderLine.update({
@@ -1253,7 +1271,7 @@ export const completeLineReturn = createServerFn({ method: 'POST' })
             data: { returnStatus: 'complete' },
         });
 
-        return { success: true, message: 'Return completed', orderLineId };
+        return returnSuccess({ orderLineId }, 'Return completed');
     });
 
 /**
@@ -1265,7 +1283,7 @@ export const cancelLineReturn = createServerFn({ method: 'POST' })
         orderLineId: z.string().uuid(),
         reason: z.string().optional(),
     }).parse(input))
-    .handler(async ({ data, context }: { data: { orderLineId: string; reason?: string }; context: { user: AuthUser } }) => {
+    .handler(async ({ data, context }: { data: { orderLineId: string; reason?: string }; context: { user: AuthUser } }): Promise<ReturnResult<{ orderLineId: string }>> => {
         const prisma = await getPrismaInstance();
         const { orderLineId, reason } = data;
 
@@ -1281,12 +1299,12 @@ export const cancelLineReturn = createServerFn({ method: 'POST' })
         });
 
         if (!line) {
-            throw new Error('Order line not found');
+            return returnError(RETURN_ERROR_CODES.LINE_NOT_FOUND);
         }
 
         const terminalStatuses = ['complete', 'cancelled'];
         if (terminalStatuses.includes(line.returnStatus || '')) {
-            throw new Error(`Cannot cancel: return is already '${line.returnStatus}'`);
+            return returnError(RETURN_ERROR_CODES.ALREADY_TERMINAL);
         }
 
         await prisma.$transaction(async (tx) => {
@@ -1315,7 +1333,7 @@ export const cancelLineReturn = createServerFn({ method: 'POST' })
             });
         });
 
-        return { success: true, message: 'Return cancelled', orderLineId };
+        return returnSuccess({ orderLineId }, 'Return cancelled');
     });
 
 /**
@@ -1324,7 +1342,7 @@ export const cancelLineReturn = createServerFn({ method: 'POST' })
 export const closeLineReturnManually = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown): CloseReturnManuallyInput => CloseReturnManuallyInputSchema.parse(input))
-    .handler(async ({ data, context }: { data: CloseReturnManuallyInput; context: { user: AuthUser } }) => {
+    .handler(async ({ data, context }: { data: CloseReturnManuallyInput; context: { user: AuthUser } }): Promise<ReturnResult<{ orderLineId: string }>> => {
         const prisma = await getPrismaInstance();
         const { orderLineId, reason } = data;
 
@@ -1339,7 +1357,7 @@ export const closeLineReturnManually = createServerFn({ method: 'POST' })
             },
         });
 
-        return { success: true, message: 'Return closed manually', orderLineId };
+        return returnSuccess({ orderLineId }, 'Return closed manually');
     });
 
 /**
@@ -1349,7 +1367,7 @@ export const closeLineReturnManually = createServerFn({ method: 'POST' })
 export const createExchangeOrder = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown): CreateExchangeOrderInput => CreateExchangeOrderInputSchema.parse(input))
-    .handler(async ({ data }: { data: CreateExchangeOrderInput }) => {
+    .handler(async ({ data }: { data: CreateExchangeOrderInput }): Promise<ReturnResult<{ exchangeOrderId: string; exchangeOrderNumber: string; priceDiff: number }>> => {
         const prisma = await getPrismaInstance();
         const { orderLineId, exchangeSkuId, exchangeQty } = data;
 
@@ -1363,15 +1381,15 @@ export const createExchangeOrder = createServerFn({ method: 'POST' })
         });
 
         if (!line) {
-            throw new Error('Order line not found');
+            return returnError(RETURN_ERROR_CODES.LINE_NOT_FOUND);
         }
 
         if (!line.returnStatus) {
-            throw new Error('This line does not have an active return');
+            return returnError(RETURN_ERROR_CODES.NO_ACTIVE_RETURN);
         }
 
         if (line.returnExchangeOrderId) {
-            throw new Error('Exchange order already created for this line');
+            return returnError(RETURN_ERROR_CODES.EXCHANGE_ALREADY_CREATED);
         }
 
         // Get exchange SKU
@@ -1381,7 +1399,7 @@ export const createExchangeOrder = createServerFn({ method: 'POST' })
         });
 
         if (!exchangeSku) {
-            throw new Error('Exchange SKU not found');
+            return returnError(RETURN_ERROR_CODES.EXCHANGE_SKU_NOT_FOUND);
         }
 
         // Calculate price difference
@@ -1442,11 +1460,12 @@ export const createExchangeOrder = createServerFn({ method: 'POST' })
             return newOrder;
         });
 
-        return {
-            success: true,
-            message: `Exchange order ${exchangeOrderNumber} created`,
-            exchangeOrderId: exchangeOrder.id,
-            exchangeOrderNumber,
-            priceDiff,
-        };
+        return returnSuccess(
+            {
+                exchangeOrderId: exchangeOrder.id,
+                exchangeOrderNumber,
+                priceDiff,
+            },
+            `Exchange order ${exchangeOrderNumber} created`
+        );
     });
