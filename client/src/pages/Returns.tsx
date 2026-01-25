@@ -1,48 +1,41 @@
 /**
- * Unified Returns Hub
- * Single page with 5 tabs: Action Queue, Tickets, Receive, QC Queue, Analytics
+ * Unified Returns Hub - Line-Level Returns System
+ * Single page with 3 tabs: Action Queue, All Returns, Analytics
+ *
+ * Migrated to line-level returns (OrderLine.return* fields)
+ * Replaces legacy ReturnRequest model
  */
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
-import { getCustomer } from '../server/functions/customers';
-import { getOrders } from '../server/functions/orders';
 import {
-    getReturnsAll,
-    getReturnsPending,
-    getReturnsActionQueue,
-    getReturnsAnalyticsByProduct,
-    getReturnsOrder,
-    getReturnsBySkuCode,
-    type ActionQueueItem,
-    type ReturnRequest as ServerReturnRequest,
-    type ReturnLine as ServerReturnLine,
-    type ProductReturnAnalytics,
+    getActiveLineReturns,
+    getLineReturnActionQueue,
+    getOrderForReturn,
 } from '../server/functions/returns';
 import {
-    createReturnRequest,
-    updateReturnRequest,
-    deleteReturnRequest,
-    markReverseReceived,
-    unmarkReverseReceived,
-    markForwardDelivered,
-    unmarkForwardDelivered,
-    receiveReturnItem,
+    initiateLineReturn,
+    scheduleReturnPickup,
+    receiveLineReturn,
+    processLineReturnRefund,
+    completeLineReturn,
+    cancelLineReturn,
+    createExchangeOrder,
 } from '../server/functions/returnsMutations';
 import {
-    getRepackingQueue,
-    getRepackingQueueHistory,
     processRepackingItem,
-    undoRepackingProcess,
-    deleteRepackingQueueItem,
     type QueueItem as RepackingQueueItem,
 } from '../server/functions/repacking';
-import { useState, useRef, useEffect } from 'react';
+import type {
+    ActiveReturnLine as ServerActiveReturnLine,
+    ReturnActionQueueItem as ServerReturnActionQueueItem,
+    OrderForReturn,
+} from '@coh/shared/schemas/returns';
+import { useState } from 'react';
 import {
-    AlertTriangle, Plus, X, Search, Package, Truck, Check, Trash2,
-    Crown, Medal, Eye, Scan, PackageCheck, History,
-    AlertCircle, CheckCircle, RotateCcw, ArrowRight,
-    DollarSign, Clock
+    Plus, X, Search, Package, Truck, Check,
+    PackageCheck, AlertCircle, CheckCircle,
+    ArrowRight, DollarSign, XCircle
 } from 'lucide-react';
 import { CustomerDetailModal } from '../components/orders/CustomerDetailModal';
 
@@ -50,187 +43,39 @@ import { CustomerDetailModal } from '../components/orders/CustomerDetailModal';
 // TYPES
 // ============================================
 
-interface OrderItem {
-    orderLineId: string;
-    skuId: string;
-    skuCode: string;
-    productName: string;
-    colorName: string;
-    size: string;
-    qty: number;
-    unitPrice?: number;
-    imageUrl: string | null;
-}
-
-interface OrderDetails {
-    id: string;
-    orderNumber: string;
-    shopifyOrderNumber: string | null;
-    orderDate: string;
-    shippedAt: string | null;
-    deliveredAt: string | null;
-    customer: {
-        id: string;
-        name: string;
-        email: string;
-        phone: string | null;
-    } | null;
-    items: OrderItem[];
-}
-
-interface ReturnLine {
-    id: string;
-    skuId: string;
-    qty: number;
-    unitPrice?: number;
-    itemCondition: string | null;
-    inspectionNotes?: string | null;
-    sku: {
-        id?: string;
-        skuCode: string;
-        barcode?: string | null;
-        size: string;
-        variation: {
-            colorName: string;
-            imageUrl: string | null;
-            product: {
-                name: string;
-                imageUrl: string | null;
-            };
-        };
-    };
-}
-
-/**
- * Extended ReturnRequest type for client-side use.
- *
- * This extends the server response with additional UI-specific fields.
- * Fields like ageDays, customerLtv, etc. are computed client-side or
- * may not be present in all contexts.
- */
-interface ReturnRequest {
-    id: string;
-    requestNumber: string;
-    requestType: 'return' | 'exchange';
-    resolution?: string;
-    status: string;
-    reasonCategory: string;
-    reasonDetails: string | null;
-    createdAt: string;
-    originalOrderId: string;
-    originalOrder: {
-        id: string;
-        orderNumber: string;
-        orderDate?: string;
-        shippedAt?: string;
-        deliveredAt?: string;
-        customerName?: string;
-    } | null;
-    exchangeOrderId: string | null;
-    exchangeOrder: {
-        id: string;
-        orderNumber: string;
-        status: string;
-        awbNumber?: string;
-        courier?: string;
-    } | null;
-    reverseInTransitAt?: string | null;
-    reverseReceived: boolean;
-    reverseReceivedAt: string | null;
-    forwardShippedAt?: string | null;
-    forwardDelivered: boolean;
-    forwardDeliveredAt: string | null;
-    returnValue?: number;
-    replacementValue?: number;
-    valueDifference?: number;
-    refundAmount?: number;
-    customerId: string | null;
-    customer: { id: string; name: string; firstName: string; lastName: string; email: string } | null;
-    lines: ReturnLine[];
-    shipping: Array<{ awbNumber: string; courier: string; direction?: string; notes?: string }>;
-    reverseShipping?: { courier: string; awbNumber: string } | null;
-    // Computed/enriched fields - may not always be present
-    ageDays: number;
-    customerLtv: number;
-    customerOrderCount: number;
-    customerTier: 'platinum' | 'gold' | 'silver' | 'bronze';
-    matchingLine?: ReturnLine;
-}
-
-// Use RepackingQueueItem from server functions
-
-/**
- * OrderDetailView is the combined structure for the order detail modal.
- * Contains the order info plus the flattened order lines.
- */
-interface OrderDetailLine {
-    id: string;
-    lineStatus: string | null;
-    qty: number;
-    unitPrice: number;
-    notes: string | null;
-    awbNumber: string | null;
-    courier: string | null;
-    shippedAt: string | null;
-    deliveredAt: string | null;
-    trackingStatus: string | null;
-    isCustomized: boolean;
-    productionBatchId: string | null;
-    skuId: string;
-    sku?: {
-        skuCode: string;
-        size: string;
-        variation: {
-            colorName: string;
-            imageUrl: string | null;
-            product: {
-                name: string;
-                imageUrl: string | null;
-            };
-        };
-    };
-}
-
-interface OrderDetailView {
-    id: string;
-    orderNumber: string;
-    customerName?: string;
-    orderDate?: string;
-    status?: string;
-    totalAmount?: number;
-    orderLines: OrderDetailLine[];
-}
-
-interface SkuInfo {
-    id: string;
-    skuCode: string;
-    barcode: string | null;
-    productName: string;
-    colorName: string;
-    size: string;
-    imageUrl: string | null;
+// Re-export server types with client additions
+interface ActiveReturnLine extends ServerActiveReturnLine {
+    // Client-computed fields
+    ageDays?: number;
 }
 
 // ============================================
 // CONSTANTS
 // ============================================
 
-const REASON_CATEGORIES = [
-    { value: 'size_issue', label: 'Size Issue' },
-    { value: 'color_mismatch', label: 'Color Mismatch' },
-    { value: 'quality_defect', label: 'Quality Defect' },
-    { value: 'wrong_item', label: 'Wrong Item Received' },
-    { value: 'changed_mind', label: 'Changed Mind' },
+const RETURN_REASON_CATEGORIES = [
+    { value: 'fit_size', label: 'Fit / Size Issue' },
+    { value: 'product_quality', label: 'Product Quality' },
+    { value: 'product_different', label: 'Product Different from Description' },
+    { value: 'wrong_item_sent', label: 'Wrong Item Sent' },
     { value: 'damaged_in_transit', label: 'Damaged in Transit' },
+    { value: 'changed_mind', label: 'Changed Mind' },
     { value: 'other', label: 'Other' },
-];
+] as const;
 
-const CONDITIONS = [
+const RETURN_RESOLUTIONS = [
+    { value: 'refund', label: 'Refund', color: 'bg-red-100 text-red-800' },
+    { value: 'exchange', label: 'Exchange', color: 'bg-blue-100 text-blue-800' },
+    { value: 'rejected', label: 'Rejected', color: 'bg-gray-100 text-gray-800' },
+] as const;
+
+const RETURN_CONDITIONS = [
     { value: 'good', label: 'Good Condition', description: 'Item is in resellable condition', color: 'green' },
-    { value: 'used', label: 'Used / Worn', description: 'Item shows signs of use', color: 'yellow' },
     { value: 'damaged', label: 'Damaged', description: 'Item is damaged', color: 'red' },
-    { value: 'wrong_product', label: 'Wrong Product', description: 'Different item than expected', color: 'orange' },
-];
+    { value: 'defective', label: 'Defective', description: 'Manufacturing defect', color: 'orange' },
+    { value: 'wrong_item', label: 'Wrong Item', description: 'Different item than ordered', color: 'orange' },
+    { value: 'used', label: 'Used', description: 'Item shows signs of use', color: 'yellow' },
+] as const;
 
 const WRITE_OFF_REASONS = [
     { value: 'damaged', label: 'Damaged - Not Repairable' },
@@ -239,117 +84,36 @@ const WRITE_OFF_REASONS = [
     { value: 'wrong_product', label: 'Wrong Product Received' },
     { value: 'destroyed', label: 'Destroyed / Unusable' },
     { value: 'other', label: 'Other' },
-];
+] as const;
 
-type TabType = 'actions' | 'tickets' | 'receive' | 'queue' | 'analytics';
+type TabType = 'actions' | 'all' | 'analytics';
 
 // ============================================
 // HELPERS
 // ============================================
 
-/**
- * Maps server ReturnRequest to local ReturnRequest format
- * Computes missing fields like ageDays and maps returnLines -> lines
- */
-const mapServerReturnRequest = (serverReq: ServerReturnRequest): ReturnRequest => {
-    // Compute age in days from createdAt
-    const createdDate = new Date(serverReq.createdAt);
-    const ageDays = Math.floor((Date.now() - createdDate.getTime()) / (1000 * 60 * 60 * 24));
-
-    return {
-        id: serverReq.id,
-        requestNumber: serverReq.requestNumber,
-        requestType: serverReq.requestType,
-        resolution: serverReq.resolution,
-        status: serverReq.status,
-        reasonCategory: serverReq.reasonCategory,
-        reasonDetails: serverReq.reasonDetails,
-        createdAt: serverReq.createdAt,
-        originalOrderId: serverReq.originalOrderId,
-        originalOrder: serverReq.originalOrder,
-        exchangeOrderId: serverReq.exchangeOrderId,
-        exchangeOrder: serverReq.exchangeOrder,
-        reverseInTransitAt: serverReq.reverseInTransitAt,
-        reverseReceived: serverReq.reverseReceived,
-        reverseReceivedAt: serverReq.reverseReceivedAt ?? null,
-        forwardShippedAt: undefined, // Not in server response
-        forwardDelivered: serverReq.forwardDelivered,
-        forwardDeliveredAt: serverReq.forwardDeliveredAt ?? null,
-        customerId: serverReq.customerId,
-        customer: serverReq.customerId ? {
-            id: serverReq.customerId,
-            name: serverReq.customerName,
-            firstName: serverReq.customerName.split(' ')[0] || '',
-            lastName: serverReq.customerName.split(' ').slice(1).join(' ') || '',
-            email: serverReq.customerEmail,
-        } : null,
-        lines: serverReq.returnLines.map((line: ServerReturnLine) => ({
-            ...line,
-            sku: {
-                ...line.sku,
-                barcode: null, // Server doesn't return barcode on sku
-            },
-        })),
-        shipping: [], // Not in server response
-        ageDays,
-        customerLtv: 0, // Would need separate fetch
-        customerOrderCount: 0, // Would need separate fetch
-        customerTier: 'bronze' as const, // Would need separate computation
-    };
-};
-
-const formatDate = (dateString: string | null | undefined) => {
-    if (!dateString) return null;
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
-};
-
 const getStatusBadge = (status: string) => {
     const colors: Record<string, string> = {
-        pending_pickup: 'bg-yellow-100 text-yellow-800',
         requested: 'bg-yellow-100 text-yellow-800',
-        reverse_initiated: 'bg-blue-100 text-blue-800',
+        pickup_scheduled: 'bg-blue-100 text-blue-800',
         in_transit: 'bg-purple-100 text-purple-800',
         received: 'bg-green-100 text-green-800',
-        processing: 'bg-teal-100 text-teal-800',
-        inspected: 'bg-teal-100 text-teal-800',
-        completed: 'bg-gray-100 text-gray-800',
-        resolved: 'bg-gray-100 text-gray-800',
+        complete: 'bg-gray-100 text-gray-800',
         cancelled: 'bg-red-100 text-red-800',
     };
     return colors[status] || 'bg-gray-100 text-gray-800';
 };
 
-const getResolutionBadge = (resolution: string | undefined, requestType: string) => {
-    if (!resolution) {
-        return requestType === 'return'
-            ? { label: 'Refund', color: 'bg-red-100 text-red-800' }
-            : { label: 'Exchange', color: 'bg-blue-100 text-blue-800' };
-    }
-    const badges: Record<string, { label: string; color: string }> = {
-        refund: { label: 'Refund', color: 'bg-red-100 text-red-800' },
-        exchange_same: { label: 'Exchange', color: 'bg-blue-100 text-blue-800' },
-        exchange_up: { label: 'Exchange +', color: 'bg-purple-100 text-purple-800' },
-        exchange_down: { label: 'Exchange -', color: 'bg-indigo-100 text-indigo-800' },
-    };
-    return badges[resolution] || { label: resolution, color: 'bg-gray-100 text-gray-800' };
+const getResolutionBadge = (resolution: string | null) => {
+    if (!resolution) return { label: 'Pending', color: 'bg-gray-100 text-gray-800' };
+    const item = RETURN_RESOLUTIONS.find((r) => r.value === resolution);
+    return item || { label: resolution, color: 'bg-gray-100 text-gray-800' };
 };
 
-const getTierIcon = (tier: string) => {
-    if (tier === 'platinum') return <Crown size={12} className="text-purple-600" />;
-    if (tier === 'gold') return <Medal size={12} className="text-yellow-600" />;
-    if (tier === 'silver') return <Medal size={12} className="text-gray-400" />;
-    return null;
-};
-
-const getTierBadge = (tier: string) => {
-    const colors: Record<string, string> = {
-        platinum: 'bg-purple-100 text-purple-800',
-        gold: 'bg-yellow-100 text-yellow-800',
-        silver: 'bg-gray-100 text-gray-700',
-        bronze: 'bg-orange-50 text-orange-700',
-    };
-    return colors[tier] || colors.bronze;
+const computeAgeDays = (requestedAt: Date | string | null) => {
+    if (!requestedAt) return 0;
+    const date = new Date(requestedAt);
+    return Math.floor((Date.now() - date.getTime()) / (1000 * 60 * 60 * 24));
 };
 
 // ============================================
@@ -359,1446 +123,764 @@ const getTierBadge = (tier: string) => {
 export default function Returns() {
     const queryClient = useQueryClient();
     const [tab, setTab] = useState<TabType>('actions');
-    const [showModal, setShowModal] = useState(false);
-    const [selectedRequest, setSelectedRequest] = useState<ReturnRequest | null>(null);
-    const [deleteRequest, setDeleteRequest] = useState<ReturnRequest | null>(null);
-    const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
-    const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
     const [successMessage, setSuccessMessage] = useState('');
     const [error, setError] = useState('');
 
-    // Receive tab state
-    const [scanInput, setScanInput] = useState('');
-    const [scannedSku, setScannedSku] = useState<SkuInfo | null>(null);
-    const [matchingTickets, setMatchingTickets] = useState<ReturnRequest[]>([]);
-    const [selectedTicket, setSelectedTicket] = useState<ReturnRequest | null>(null);
-    const [selectedLine, setSelectedLine] = useState<ReturnLine | null>(null);
-    const [selectedCondition, setSelectedCondition] = useState<string>('');
-    const inputRef = useRef<HTMLInputElement>(null);
+    // Modals
+    const [showInitiateModal, setShowInitiateModal] = useState(false);
+    const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
+
+    // Initiate Return Modal state
+    const [orderSearchTerm, setOrderSearchTerm] = useState('');
+    const [searchedOrder, setSearchedOrder] = useState<OrderForReturn | null>(null);
+    const [selectedLines, setSelectedLines] = useState<Set<string>>(new Set());
+    const [returnQtyMap, setReturnQtyMap] = useState<Record<string, number>>({});
+    const [returnReasonCategory, setReturnReasonCategory] = useState('');
+    const [returnReasonDetail, setReturnReasonDetail] = useState('');
+    const [returnResolution, setReturnResolution] = useState<'refund' | 'exchange' | 'rejected'>('refund');
+    const [returnNotes, setReturnNotes] = useState('');
+    const [exchangeSkuId, setExchangeSkuId] = useState('');
 
     // QC Modal state
     const [qcModalItem, setQcModalItem] = useState<RepackingQueueItem | null>(null);
     const [qcAction, setQcAction] = useState<'ready' | 'write_off'>('ready');
     const [qcComments, setQcComments] = useState('');
     const [writeOffReason, setWriteOffReason] = useState('');
-    const [historyFilter, setHistoryFilter] = useState<'all' | 'ready' | 'write_off'>('all');
-    const [queueSearchTerm, setQueueSearchTerm] = useState('');
 
     // ============================================
-    // QUERIES - Server Functions
+    // QUERIES
     // ============================================
 
-    // Get Server Function references
-    const getReturnsAllFn = useServerFn(getReturnsAll);
-    const getReturnsPendingFn = useServerFn(getReturnsPending);
-    const getRepackingQueueFn = useServerFn(getRepackingQueue);
-    const getRepackingQueueHistoryFn = useServerFn(getRepackingQueueHistory);
-    const getReturnsAnalyticsFn = useServerFn(getReturnsAnalyticsByProduct);
-    const getReturnsActionQueueFn = useServerFn(getReturnsActionQueue);
-    const getCustomerFn = useServerFn(getCustomer);
-    const getOrdersFn = useServerFn(getOrders);
+    const getActiveLineReturnsFn = useServerFn(getActiveLineReturns);
+    const getLineReturnActionQueueFn = useServerFn(getLineReturnActionQueue);
+    const getOrderForReturnFn = useServerFn(getOrderForReturn);
 
-    const { data: returns = [], isLoading } = useQuery({
-        queryKey: ['returns'],
+    const { data: activeReturns = [], isLoading: loadingReturns } = useQuery({
+        queryKey: ['returns', 'active'],
         queryFn: async () => {
-            const serverData = await getReturnsAllFn();
-            return serverData.map(mapServerReturnRequest);
+            const data = await getActiveLineReturnsFn();
+            return data.map((item: ServerActiveReturnLine) => ({
+                ...item,
+                ageDays: computeAgeDays(item.returnRequestedAt),
+            }));
         },
+        enabled: tab === 'all',
     });
 
-    const { data: pendingTickets = [], isLoading: loadingTickets } = useQuery({
-        queryKey: ['returns', 'pending'],
-        queryFn: () => getReturnsPendingFn(),
-    });
-
-    const { data: queueResponse, isLoading: loadingQueue } = useQuery({
-        queryKey: ['repacking-queue'],
-        queryFn: () => getRepackingQueueFn({ data: { limit: 100 } }),
-    });
-    const queueItems = queueResponse?.items || [];
-
-    const { data: historyResponse, isLoading: loadingHistory } = useQuery({
-        queryKey: ['repacking-history', historyFilter],
-        queryFn: () =>
-            getRepackingQueueHistoryFn({
-                data: {
-                    limit: 100,
-                    status: historyFilter === 'all' ? 'all' : historyFilter === 'ready' ? 'approved' : 'written_off',
-                },
-            }),
-        enabled: tab === 'queue',
-    });
-    const historyItems = historyResponse?.items || [];
-
-    const { data: analytics } = useQuery({
-        queryKey: ['returnAnalytics'],
-        queryFn: () => getReturnsAnalyticsFn(),
-        enabled: tab === 'analytics',
-    });
-
-    // Action queue dashboard data - Server Function returns ActionQueueItem[]
-    const { data: actionQueueItems = [] } = useQuery({
-        queryKey: ['actionQueue'],
-        queryFn: () => getReturnsActionQueueFn(),
+    const { data: actionQueue = [], isLoading: loadingQueue } = useQuery({
+        queryKey: ['returns', 'action-queue'],
+        queryFn: () => getLineReturnActionQueueFn(),
         enabled: tab === 'actions',
         refetchInterval: 30000, // Refresh every 30 seconds
     });
 
-    const { data: customerDetail, isLoading: loadingCustomer } = useQuery({
-        queryKey: ['customer', selectedCustomerId],
-        queryFn: () => getCustomerFn({ data: { id: selectedCustomerId! } }),
-        enabled: !!selectedCustomerId,
-    });
-
-    const { data: orderDetail, isLoading: loadingOrder } = useQuery({
-        queryKey: ['order', selectedOrderId],
-        queryFn: async (): Promise<OrderDetailView | null> => {
-            const response = await getOrdersFn({
-                data: {
-                    view: 'open',
-                    orderId: selectedOrderId!,
-                },
-            });
-            // Extract first order from response
-            if (response.rows.length > 0) {
-                const flattenedLines = response.rows.filter((line) => line.order.id === selectedOrderId!);
-                if (flattenedLines.length > 0) {
-                    const firstRow = flattenedLines[0];
-                    return {
-                        id: firstRow.order.id,
-                        orderNumber: firstRow.order.orderNumber,
-                        customerName: firstRow.customerName,
-                        orderDate: firstRow.orderDate,
-                        status: firstRow.orderStatus,
-                        totalAmount: firstRow.totalAmount ?? undefined,
-                        orderLines: flattenedLines.map((row) => ({
-                            id: row.lineId || '',
-                            lineStatus: row.lineStatus,
-                            qty: row.qty,
-                            unitPrice: row.unitPrice,
-                            notes: row.lineNotes,
-                            awbNumber: row.lineAwbNumber,
-                            courier: row.lineCourier,
-                            shippedAt: row.lineShippedAt,
-                            deliveredAt: row.lineDeliveredAt,
-                            trackingStatus: row.lineTrackingStatus,
-                            isCustomized: row.isCustomized,
-                            productionBatchId: row.productionBatchId,
-                            skuId: row.skuId || '',
-                            sku: {
-                                skuCode: row.skuCode,
-                                size: row.size,
-                                variation: {
-                                    colorName: row.colorName,
-                                    imageUrl: row.imageUrl,
-                                    product: {
-                                        name: row.productName,
-                                        imageUrl: row.imageUrl,
-                                    },
-                                },
-                            },
-                        })),
-                    };
-                }
-            }
-            return null;
-        },
-        enabled: !!selectedOrderId,
-    });
-
     // ============================================
-    // COMPUTED VALUES
+    // MUTATIONS
     // ============================================
 
-    // Action queue items
-    const qcPendingCount = queueItems.length;
-    const exchangesReadyToShip = returns?.filter((r: ReturnRequest) =>
-        (r.resolution?.startsWith('exchange') || r.requestType === 'exchange') &&
-        r.reverseInTransitAt &&
-        !r.forwardShippedAt &&
-        !r.forwardDelivered
-    ) || [];
-    const refundsPending = returns?.filter((r: ReturnRequest) =>
-        (r.resolution === 'refund' || r.requestType === 'return') &&
-        r.status === 'received' &&
-        !r.refundAmount
-    ) || [];
-
-    // Compute actionQueue structure from actionQueueItems array
-    const actionQueue = {
-        summary: {
-            pendingPickup: actionQueueItems.filter(item => item.actionType === 'reverse_receive').length,
-            inTransit: 0, // Would need additional data from returns
-            qcPending: qcPendingCount,
-            exchangesReadyToShip: exchangesReadyToShip.length,
-            refundsPending: refundsPending.length,
-        },
-        actions: {
-            shipReplacements: actionQueueItems.filter(item => item.actionType === 'forward_ship'),
-            processRefunds: refundsPending, // Use computed refundsPending
-        },
-    };
-
-    const filteredQueueItems = queueSearchTerm.trim()
-        ? queueItems.filter((item) => {
-            const term = queueSearchTerm.toLowerCase();
-            return (
-                item.skuCode?.toLowerCase().includes(term) ||
-                item.productName?.toLowerCase().includes(term) ||
-                item.colorName?.toLowerCase().includes(term) ||
-                item.sourceReference?.toLowerCase().includes(term)
-            );
-        })
-        : queueItems;
-
-    // ============================================
-    // MUTATIONS - Server Functions
-    // ============================================
-
-    // Get Server Function references for mutations
-    const deleteReturnRequestFn = useServerFn(deleteReturnRequest);
-    const getReturnsBySkuCodeFn = useServerFn(getReturnsBySkuCode);
-    const receiveReturnItemFn = useServerFn(receiveReturnItem);
+    const initiateReturnFn = useServerFn(initiateLineReturn);
+    const schedulePickupFn = useServerFn(scheduleReturnPickup);
+    const receiveReturnFn = useServerFn(receiveLineReturn);
+    const processRefundFn = useServerFn(processLineReturnRefund);
+    const completeReturnFn = useServerFn(completeLineReturn);
+    const cancelReturnFn = useServerFn(cancelLineReturn);
+    const createExchangeFn = useServerFn(createExchangeOrder);
     const processRepackingItemFn = useServerFn(processRepackingItem);
-    const undoRepackingProcessFn = useServerFn(undoRepackingProcess);
-    const deleteRepackingQueueItemFn = useServerFn(deleteRepackingQueueItem);
 
-    const deleteMutation = useMutation({
-        mutationFn: (id: string) => deleteReturnRequestFn({ data: { id } }),
+    const initiateMutation = useMutation({
+        mutationFn: initiateReturnFn,
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['returns'] });
-            setDeleteRequest(null);
+            setSuccessMessage('Return initiated successfully');
+            setTimeout(() => setSuccessMessage(''), 3000);
+            setShowInitiateModal(false);
+            resetInitiateForm();
+        },
+        onError: (err: Error) => {
+            setError(err.message);
+            setTimeout(() => setError(''), 5000);
         },
     });
 
-    const searchMutation = useMutation({
-        mutationFn: (code: string) => getReturnsBySkuCodeFn({ data: { code } }),
-        onSuccess: (returnRequest: ServerReturnRequest | null, code: string) => {
-            if (returnRequest) {
-                // Map server response to local ReturnRequest type (returnLines -> lines)
-                const mappedRequest: ReturnRequest = {
-                    ...returnRequest,
-                    reverseReceivedAt: returnRequest.reverseReceivedAt ?? null,
-                    forwardDeliveredAt: returnRequest.forwardDeliveredAt ?? null,
-                    lines: returnRequest.returnLines.map((line: ServerReturnLine) => ({
-                        ...line,
-                        sku: {
-                            ...line.sku,
-                            barcode: null, // Server type doesn't have barcode on sku
-                        },
-                    })),
-                    shipping: [],
-                    ageDays: 0,
-                    customerLtv: 0,
-                    customerOrderCount: 0,
-                    customerTier: 'bronze' as const,
-                    customer: returnRequest.customerId ? {
-                        id: returnRequest.customerId,
-                        name: returnRequest.customerName,
-                        firstName: returnRequest.customerName.split(' ')[0] || '',
-                        lastName: returnRequest.customerName.split(' ').slice(1).join(' ') || '',
-                        email: returnRequest.customerEmail,
-                    } : null,
-                };
-
-                setMatchingTickets([mappedRequest]);
-                setSelectedTicket(mappedRequest);
-
-                // Find the line with this SKU
-                const matchingLine = mappedRequest.lines.find(
-                    (line: ReturnLine) => line.sku.skuCode === code || line.sku.barcode === code
-                );
-                setSelectedLine(matchingLine || null);
-                setError('');
-            } else {
-                setError('No pending return tickets found for this item. Create a return request first.');
-                setMatchingTickets([]);
-                setScannedSku(null);
-            }
+    const schedulePickupMutation = useMutation({
+        mutationFn: schedulePickupFn,
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['returns'] });
+            setSuccessMessage('Pickup scheduled successfully');
+            setTimeout(() => setSuccessMessage(''), 3000);
         },
         onError: (err: Error) => {
-            setError(err?.message || 'Failed to search');
-            setScannedSku(null);
-            setMatchingTickets([]);
+            setError(err.message);
+            setTimeout(() => setError(''), 5000);
         },
     });
 
     const receiveMutation = useMutation({
-        mutationFn: ({ requestId, lineId, condition }: { requestId: string; lineId: string; condition: string }) =>
-            receiveReturnItemFn({
-                data: {
-                    requestId,
-                    lineId,
-                    condition: condition as 'good' | 'damaged' | 'defective' | 'wrong_item',
-                },
-            }),
+        mutationFn: receiveReturnFn,
         onSuccess: () => {
-            setSuccessMessage(`Item received and added to QC queue`);
             queryClient.invalidateQueries({ queryKey: ['returns'] });
             queryClient.invalidateQueries({ queryKey: ['repacking-queue'] });
-            resetReceiveState();
-            inputRef.current?.focus();
+            setSuccessMessage('Return received and added to QC queue');
+            setTimeout(() => setSuccessMessage(''), 3000);
         },
         onError: (err: Error) => {
-            setError(err?.message || 'Failed to receive item');
+            setError(err.message);
+            setTimeout(() => setError(''), 5000);
         },
     });
 
-    const processMutation = useMutation({
-        mutationFn: ({ itemId, action, qcComments, writeOffReason }: {
-            itemId: string;
-            action: 'ready' | 'write_off';
-            qcComments?: string;
-            writeOffReason?: string
-        }) =>
-            processRepackingItemFn({
-                data: {
-                    itemId,
-                    action: action === 'ready' ? 'approve' : 'write_off',
-                    qcComments,
-                    writeOffReason,
-                },
-            }),
+    const processRefundMutation = useMutation({
+        mutationFn: processRefundFn,
         onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['repacking-queue'] });
-            queryClient.invalidateQueries({ queryKey: ['repacking-history'] });
-            setSuccessMessage('Item processed successfully');
-            closeQcModal();
+            queryClient.invalidateQueries({ queryKey: ['returns'] });
+            setSuccessMessage('Refund processed successfully');
+            setTimeout(() => setSuccessMessage(''), 3000);
         },
         onError: (err: Error) => {
-            setError(err?.message || 'Failed to process item');
+            setError(err.message);
+            setTimeout(() => setError(''), 5000);
         },
     });
 
-    const undoMutation = useMutation({
-        mutationFn: (itemId: string) => undoRepackingProcessFn({ data: { itemId } }),
+    const completeMutation = useMutation({
+        mutationFn: completeReturnFn,
         onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['repacking-queue'] });
-            queryClient.invalidateQueries({ queryKey: ['repacking-history'] });
-            setSuccessMessage('Item moved back to QC queue');
+            queryClient.invalidateQueries({ queryKey: ['returns'] });
+            setSuccessMessage('Return completed');
+            setTimeout(() => setSuccessMessage(''), 3000);
         },
         onError: (err: Error) => {
-            setError(err?.message || 'Failed to undo');
+            setError(err.message);
+            setTimeout(() => setError(''), 5000);
         },
     });
 
-    const removeFromQueueMutation = useMutation({
-        mutationFn: (itemId: string) => deleteRepackingQueueItemFn({ data: { itemId } }),
+    const cancelMutation = useMutation({
+        mutationFn: cancelReturnFn,
         onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['repacking-queue'] });
-            queryClient.invalidateQueries({ queryKey: ['returns', 'pending'] });
-            setSuccessMessage('Item removed from QC queue');
+            queryClient.invalidateQueries({ queryKey: ['returns'] });
+            setSuccessMessage('Return cancelled');
+            setTimeout(() => setSuccessMessage(''), 3000);
         },
         onError: (err: Error) => {
-            setError(err?.message || 'Failed to remove item');
+            setError(err.message);
+            setTimeout(() => setError(''), 5000);
         },
     });
 
-    // ============================================
-    // EFFECTS
-    // ============================================
+    const createExchangeMutation = useMutation({
+        mutationFn: createExchangeFn,
+        onSuccess: (data) => {
+            queryClient.invalidateQueries({ queryKey: ['returns'] });
+            setSuccessMessage(`Exchange order ${data.exchangeOrderNumber} created`);
+            setTimeout(() => setSuccessMessage(''), 3000);
+        },
+        onError: (err: Error) => {
+            setError(err.message);
+            setTimeout(() => setError(''), 5000);
+        },
+    });
 
-    useEffect(() => {
-        if (tab === 'receive') {
-            inputRef.current?.focus();
-        }
-    }, [tab]);
-
-    useEffect(() => {
-        if (successMessage) {
-            const timer = setTimeout(() => setSuccessMessage(''), 3000);
-            return () => clearTimeout(timer);
-        }
-    }, [successMessage]);
+    const processQcMutation = useMutation({
+        mutationFn: processRepackingItemFn,
+        onSuccess: (data) => {
+            queryClient.invalidateQueries({ queryKey: ['repacking-queue'] });
+            setSuccessMessage(data.message);
+            setTimeout(() => setSuccessMessage(''), 3000);
+            setQcModalItem(null);
+        },
+        onError: (err: Error) => {
+            setError(err.message);
+            setTimeout(() => setError(''), 5000);
+        },
+    });
 
     // ============================================
     // HANDLERS
     // ============================================
 
-    const handleScan = () => {
-        if (!scanInput.trim()) return;
-        searchMutation.mutate(scanInput.trim());
-        setScanInput('');
+    const handleSearchOrder = async () => {
+        if (!orderSearchTerm.trim()) return;
+        try {
+            const order = await getOrderForReturnFn({ data: { orderNumber: orderSearchTerm.trim() } });
+            setSearchedOrder(order);
+            setError('');
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Order not found');
+            setSearchedOrder(null);
+            setTimeout(() => setError(''), 5000);
+        }
     };
 
-    const handleSelectTicket = (ticket: ReturnRequest) => {
-        const line = ticket.matchingLine || ticket.lines.find((l) => l.sku?.id === scannedSku?.id && !l.itemCondition);
-        setSelectedTicket(ticket);
-        setSelectedLine(line || null);
+    const handleToggleLine = (lineId: string) => {
+        const newSelected = new Set(selectedLines);
+        if (newSelected.has(lineId)) {
+            newSelected.delete(lineId);
+        } else {
+            newSelected.add(lineId);
+        }
+        setSelectedLines(newSelected);
     };
 
-    const handleReceive = () => {
-        if (!selectedTicket || !selectedLine || !selectedCondition) {
-            setError('Please select a condition');
+    const handleInitiateReturn = () => {
+        if (selectedLines.size === 0) {
+            setError('Please select at least one line');
+            setTimeout(() => setError(''), 3000);
             return;
         }
-        receiveMutation.mutate({
-            requestId: selectedTicket.id,
-            lineId: selectedLine.id,
-            condition: selectedCondition,
+
+        if (!returnReasonCategory) {
+            setError('Please select a reason category');
+            setTimeout(() => setError(''), 3000);
+            return;
+        }
+
+        if (returnResolution === 'exchange' && !exchangeSkuId) {
+            setError('Please select an exchange SKU');
+            setTimeout(() => setError(''), 3000);
+            return;
+        }
+
+        // For each selected line, initiate return
+        selectedLines.forEach((lineId) => {
+            const qty = returnQtyMap[lineId] || 1;
+            initiateMutation.mutate({ data: {
+                orderLineId: lineId,
+                returnQty: qty,
+                returnReasonCategory: returnReasonCategory as 'fit_size' | 'product_quality' | 'product_different' | 'wrong_item_sent' | 'damaged_in_transit' | 'changed_mind' | 'other',
+                returnReasonDetail,
+                returnResolution,
+                returnNotes,
+                ...(returnResolution === 'exchange' && exchangeSkuId ? { exchangeSkuId } : {}),
+            }});
         });
     };
 
-    const resetReceiveState = () => {
-        setScannedSku(null);
-        setMatchingTickets([]);
-        setSelectedTicket(null);
-        setSelectedLine(null);
-        setSelectedCondition('');
-        setError('');
+    const resetInitiateForm = () => {
+        setOrderSearchTerm('');
+        setSearchedOrder(null);
+        setSelectedLines(new Set());
+        setReturnQtyMap({});
+        setReturnReasonCategory('');
+        setReturnReasonDetail('');
+        setReturnResolution('refund');
+        setReturnNotes('');
+        setExchangeSkuId('');
     };
 
-    const openQcModal = (item: RepackingQueueItem, action: 'ready' | 'write_off') => {
-        setQcModalItem(item);
-        setQcAction(action);
-        setQcComments('');
-        setWriteOffReason(action === 'write_off' ? 'damaged' : '');
+    const handleSchedulePickup = (lineId: string) => {
+        schedulePickupMutation.mutate({ data: {
+            orderLineId: lineId,
+            pickupType: 'arranged_by_us',
+        }});
     };
 
-    const closeQcModal = () => {
-        setQcModalItem(null);
-        setQcAction('ready');
-        setQcComments('');
-        setWriteOffReason('');
+    const handleReceive = (lineId: string, condition: 'good' | 'damaged' | 'defective' | 'wrong_item' | 'used') => {
+        receiveMutation.mutate({ data: {
+            orderLineId: lineId,
+            condition,
+        }});
     };
 
-    const handleQcSubmit = () => {
-        if (!qcModalItem) return;
-        if (qcAction === 'write_off' && !writeOffReason) {
-            setError('Please select a write-off reason');
-            return;
+    const handleProcessRefund = (lineId: string) => {
+        // For now, simplified - in full implementation would show modal to enter amounts
+        const grossAmount = 1000; // Placeholder
+        processRefundMutation.mutate({ data: {
+            orderLineId: lineId,
+            grossAmount,
+            discountClawback: 0,
+            deductions: 0,
+        }});
+    };
+
+    const handleComplete = (lineId: string) => {
+        completeMutation.mutate({ data: { orderLineId: lineId }});
+    };
+
+    const handleCancel = (lineId: string) => {
+        const reason = prompt('Reason for cancellation:');
+        if (reason !== null) {
+            cancelMutation.mutate({ data: { orderLineId: lineId, reason }});
         }
-        processMutation.mutate({
+    };
+
+    const handleCreateExchange = (lineId: string) => {
+        // For now, simplified - in full implementation would show modal to select SKU
+        const skuId = prompt('Exchange SKU ID:');
+        if (skuId) {
+            createExchangeMutation.mutate({ data: {
+                orderLineId: lineId,
+                exchangeSkuId: skuId,
+                exchangeQty: 1,
+            }});
+        }
+    };
+
+    const handleProcessQc = () => {
+        if (!qcModalItem) return;
+        processQcMutation.mutate({ data: {
             itemId: qcModalItem.id,
             action: qcAction,
-            qcComments: qcComments || undefined,
-            writeOffReason: qcAction === 'write_off' ? writeOffReason : undefined,
-        });
-    };
-
-    const canDelete = (r: ReturnRequest) => {
-        const hasReceivedItems = r.lines?.some((l) => l.itemCondition !== null);
-        return !hasReceivedItems && !['resolved', 'completed'].includes(r.status);
+            ...(qcAction === 'write_off' ? { writeOffReason } : {}),
+            qcComments,
+        }});
     };
 
     // ============================================
     // RENDER
     // ============================================
 
-    if (isLoading) {
-        return (
-            <div className="flex justify-center p-8">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
-            </div>
-        );
-    }
-
     return (
-        <div className="space-y-4 md:space-y-6">
+        <div className="p-6">
             {/* Header */}
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                <h1 className="text-xl md:text-2xl font-bold text-gray-900">Returns Hub</h1>
-                <button className="btn-primary w-full sm:w-auto justify-center" onClick={() => setShowModal(true)}>
-                    <Plus size={16} className="mr-2" />
-                    New Return Request
+            <div className="flex items-center justify-between mb-6">
+                <div>
+                    <h1 className="text-2xl font-bold">Returns Management</h1>
+                    <p className="text-sm text-gray-500 mt-1">
+                        Manage customer returns, exchanges, and QC
+                    </p>
+                </div>
+                <button
+                    onClick={() => setShowInitiateModal(true)}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2"
+                >
+                    <Plus size={16} />
+                    Initiate Return
                 </button>
             </div>
 
-            {/* Tabs */}
-            <div className="flex gap-1 border-b overflow-x-auto">
-                <button
-                    className={`px-4 py-2 font-medium whitespace-nowrap flex items-center gap-2 ${tab === 'actions' ? 'text-primary-600 border-b-2 border-primary-600' : 'text-gray-500'}`}
-                    onClick={() => setTab('actions')}
-                >
-                    <Clock size={16} />
-                    Action Queue
-                    {(qcPendingCount + exchangesReadyToShip.length + refundsPending.length) > 0 && (
-                        <span className="bg-red-500 text-white text-xs px-1.5 py-0.5 rounded-full">
-                            {qcPendingCount + exchangesReadyToShip.length + refundsPending.length}
-                        </span>
-                    )}
-                </button>
-                <button
-                    className={`px-4 py-2 font-medium whitespace-nowrap flex items-center gap-2 ${tab === 'tickets' ? 'text-primary-600 border-b-2 border-primary-600' : 'text-gray-500'}`}
-                    onClick={() => setTab('tickets')}
-                >
-                    <Package size={16} />
-                    All Tickets ({returns?.length || 0})
-                </button>
-                <button
-                    className={`px-4 py-2 font-medium whitespace-nowrap flex items-center gap-2 ${tab === 'receive' ? 'text-primary-600 border-b-2 border-primary-600' : 'text-gray-500'}`}
-                    onClick={() => setTab('receive')}
-                >
-                    <Scan size={16} />
-                    Receive Items
-                </button>
-                <button
-                    className={`px-4 py-2 font-medium whitespace-nowrap flex items-center gap-2 ${tab === 'queue' ? 'text-primary-600 border-b-2 border-primary-600' : 'text-gray-500'}`}
-                    onClick={() => setTab('queue')}
-                >
-                    <PackageCheck size={16} />
-                    QC Queue
-                    {qcPendingCount > 0 && (
-                        <span className="bg-yellow-500 text-white text-xs px-1.5 py-0.5 rounded-full">
-                            {qcPendingCount}
-                        </span>
-                    )}
-                </button>
-                <button
-                    className={`px-4 py-2 font-medium whitespace-nowrap flex items-center gap-2 ${tab === 'analytics' ? 'text-primary-600 border-b-2 border-primary-600' : 'text-gray-500'}`}
-                    onClick={() => setTab('analytics')}
-                >
-                    <AlertTriangle size={16} />
-                    Analytics
-                </button>
-            </div>
-
-            {/* Messages */}
+            {/* Success/Error Messages */}
             {successMessage && (
-                <div className="p-4 bg-green-50 border border-green-200 rounded-lg flex items-center gap-3">
-                    <CheckCircle className="text-green-500" size={20} />
-                    <span className="text-green-800">{successMessage}</span>
+                <div className="mb-4 p-3 bg-green-100 text-green-800 rounded-lg flex items-center gap-2">
+                    <CheckCircle size={16} />
+                    {successMessage}
                 </div>
             )}
             {error && (
-                <div className="p-4 bg-red-50 border border-red-200 rounded-lg flex items-center gap-3">
-                    <AlertCircle className="text-red-500" size={20} />
-                    <span className="text-red-800">{error}</span>
-                    <button onClick={() => setError('')} className="ml-auto text-red-500 hover:text-red-700">
-                        <X size={18} />
+                <div className="mb-4 p-3 bg-red-100 text-red-800 rounded-lg flex items-center gap-2">
+                    <AlertCircle size={16} />
+                    {error}
+                </div>
+            )}
+
+            {/* Tabs */}
+            <div className="border-b border-gray-200 mb-6">
+                <nav className="flex gap-4">
+                    <button
+                        onClick={() => setTab('actions')}
+                        className={`px-4 py-2 border-b-2 font-medium ${
+                            tab === 'actions'
+                                ? 'border-blue-600 text-blue-600'
+                                : 'border-transparent text-gray-500 hover:text-gray-700'
+                        }`}
+                    >
+                        Action Queue
+                        {actionQueue.length > 0 && (
+                            <span className="ml-2 px-2 py-0.5 bg-red-100 text-red-800 text-xs rounded-full">
+                                {actionQueue.length}
+                            </span>
+                        )}
                     </button>
-                </div>
-            )}
+                    <button
+                        onClick={() => setTab('all')}
+                        className={`px-4 py-2 border-b-2 font-medium ${
+                            tab === 'all'
+                                ? 'border-blue-600 text-blue-600'
+                                : 'border-transparent text-gray-500 hover:text-gray-700'
+                        }`}
+                    >
+                        All Returns
+                        {activeReturns.length > 0 && (
+                            <span className="ml-2 px-2 py-0.5 bg-gray-100 text-gray-800 text-xs rounded-full">
+                                {activeReturns.length}
+                            </span>
+                        )}
+                    </button>
+                    <button
+                        onClick={() => setTab('analytics')}
+                        className={`px-4 py-2 border-b-2 font-medium ${
+                            tab === 'analytics'
+                                ? 'border-blue-600 text-blue-600'
+                                : 'border-transparent text-gray-500 hover:text-gray-700'
+                        }`}
+                    >
+                        Analytics
+                    </button>
+                </nav>
+            </div>
 
-            {/* ============================================ */}
-            {/* TAB 1: ACTION QUEUE */}
-            {/* ============================================ */}
+            {/* Tab Content */}
             {tab === 'actions' && (
-                <div className="space-y-4 md:space-y-6">
-                    {/* Stats Cards */}
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-4">
-                        <div className="card bg-yellow-50 border-yellow-200 p-3 md:p-4">
-                            <div className="text-yellow-600 text-xs md:text-sm font-medium">Pickup Pending</div>
-                            <div className="text-xl md:text-2xl font-bold text-yellow-800">
-                                {actionQueue?.summary?.pendingPickup || 0}
-                            </div>
-                        </div>
-                        <div className="card bg-purple-50 border-purple-200 p-3 md:p-4">
-                            <div className="text-purple-600 text-xs md:text-sm font-medium">In Transit</div>
-                            <div className="text-xl md:text-2xl font-bold text-purple-800">
-                                {actionQueue?.summary?.inTransit || 0}
-                            </div>
-                        </div>
-                        <div className="card bg-blue-50 border-blue-200 p-3 md:p-4">
-                            <div className="text-blue-600 text-xs md:text-sm font-medium">QC Pending</div>
-                            <div className="text-xl md:text-2xl font-bold text-blue-800">{actionQueue?.summary?.qcPending || qcPendingCount}</div>
-                        </div>
-                        <div className="card bg-green-50 border-green-200 p-3 md:p-4">
-                            <div className="text-green-600 text-xs md:text-sm font-medium">Resolution Needed</div>
-                            <div className="text-xl md:text-2xl font-bold text-green-800">
-                                {(actionQueue?.summary?.exchangesReadyToShip || 0) + (actionQueue?.summary?.refundsPending || 0)}
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Action Sections */}
-                    {(actionQueue?.actions?.shipReplacements?.length > 0 || exchangesReadyToShip.length > 0) && (
-                        <div className="card">
-                            <h3 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
-                                <Truck size={18} className="text-blue-600" />
-                                Ship Replacements ({actionQueue?.actions?.shipReplacements?.length || exchangesReadyToShip.length} ready)
-                                <span className="text-xs font-normal text-gray-500">Reverse pickup confirmed</span>
-                            </h3>
-                            <div className="space-y-3">
-                                {(actionQueue?.actions?.shipReplacements || []).slice(0, 5).map((item: ActionQueueItem) => (
-                                    <div key={item.id} className="flex items-center justify-between p-3 bg-blue-50 rounded-lg border border-blue-100">
-                                        <div className="flex items-center gap-3">
-                                            <div>
-                                                <div className="font-medium">{item.requestNumber}</div>
-                                                <div className="text-sm text-gray-600">
-                                                    {item.customerName} • Order #{item.originalOrderNumber}
-                                                </div>
-                                                {item.exchangeOrderNumber && (
-                                                    <div className="text-xs text-gray-500">Exchange: {item.exchangeOrderNumber}</div>
-                                                )}
-                                            </div>
-                                            <span className={`badge ${getResolutionBadge(undefined, 'exchange').color}`}>
-                                                {getResolutionBadge(undefined, 'exchange').label}
-                                            </span>
-                                        </div>
-                                        <div className="flex gap-2">
-                                            <button
-                                                onClick={() => {
-                                                    const r = returns?.find((ret: ReturnRequest) => ret.id === item.id);
-                                                    if (r) setSelectedRequest(r);
-                                                }}
-                                                className="btn-sm bg-blue-600 text-white hover:bg-blue-700"
-                                            >
-                                                <Package size={14} className="mr-1" />
-                                                Ship Replacement
-                                            </button>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    )}
-
-                    {(actionQueue?.summary?.qcPending || qcPendingCount) > 0 && (
-                        <div className="card">
-                            <h3 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
-                                <PackageCheck size={18} className="text-yellow-600" />
-                                Process QC ({actionQueue?.summary?.qcPending || qcPendingCount} items)
-                            </h3>
-                            <div className="flex items-center justify-between p-3 bg-yellow-50 rounded-lg border border-yellow-100">
-                                <div className="text-gray-700">
-                                    {actionQueue?.summary?.qcPending || qcPendingCount} item{(actionQueue?.summary?.qcPending || qcPendingCount) > 1 ? 's' : ''} waiting for quality check
-                                </div>
-                                <button
-                                    onClick={() => setTab('queue')}
-                                    className="btn-sm bg-yellow-600 text-white hover:bg-yellow-700"
-                                >
-                                    Go to QC Queue
-                                    <ArrowRight size={14} className="ml-1" />
-                                </button>
-                            </div>
-                        </div>
-                    )}
-
-                    {(actionQueue?.actions?.processRefunds?.length > 0 || refundsPending.length > 0) && (
-                        <div className="card">
-                            <h3 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
-                                <DollarSign size={18} className="text-green-600" />
-                                Process Refunds ({actionQueue?.actions?.processRefunds?.length || refundsPending.length} pending)
-                            </h3>
-                            <div className="space-y-3">
-                                {(actionQueue?.actions?.processRefunds || []).slice(0, 5).map((item: ReturnRequest) => (
-                                    <div key={item.id} className="flex items-center justify-between p-3 bg-green-50 rounded-lg border border-green-100">
-                                        <div className="flex items-center gap-3">
-                                            <div>
-                                                <div className="font-medium">{item.requestNumber}</div>
-                                                <div className="text-sm text-gray-600">
-                                                    {item.customer?.name} • Order #{item.originalOrder?.orderNumber}
-                                                </div>
-                                                {item.lines && item.lines.length > 0 && (
-                                                    <div className="text-xs text-gray-500">
-                                                        {item.lines.map((l: ReturnLine) => `${l.sku.skuCode} (${l.qty})`).join(', ')}
-                                                    </div>
-                                                )}
-                                            </div>
-                                            <span className="text-sm font-medium text-green-700">
-                                                ₹{item.returnValue || item.lines?.reduce((sum: number, l: ReturnLine) => sum + ((l.unitPrice || 0) * (l.qty || 1)), 0) || 0}
-                                            </span>
-                                        </div>
-                                        <button
-                                            onClick={() => {
-                                                const r = returns?.find((ret: ReturnRequest) => ret.id === item.id);
-                                                if (r) setSelectedRequest(r);
-                                            }}
-                                            className="btn-sm bg-green-600 text-white hover:bg-green-700"
-                                        >
-                                            <DollarSign size={14} className="mr-1" />
-                                            Process Refund
-                                        </button>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    )}
-
-                    {qcPendingCount === 0 && exchangesReadyToShip.length === 0 && refundsPending.length === 0 && (
-                        <div className="card text-center py-12">
-                            <CheckCircle size={48} className="mx-auto text-green-400 mb-4" />
-                            <h3 className="text-lg font-medium text-gray-900">All caught up!</h3>
-                            <p className="text-gray-500 mt-2">No pending actions at the moment.</p>
-                        </div>
-                    )}
-                </div>
+                <ActionQueueTab
+                    items={actionQueue}
+                    loading={loadingQueue}
+                    onSchedulePickup={handleSchedulePickup}
+                    onReceive={handleReceive}
+                    onProcessRefund={handleProcessRefund}
+                    onCreateExchange={handleCreateExchange}
+                    onComplete={handleComplete}
+                    onCancel={handleCancel}
+                />
             )}
 
-            {/* ============================================ */}
-            {/* TAB 2: ALL TICKETS */}
-            {/* ============================================ */}
-            {tab === 'tickets' && (
-                <div className="card overflow-x-auto">
-                    <table className="w-full">
-                        <thead>
-                            <tr className="border-b">
-                                <th className="table-header">Request #</th>
-                                <th className="table-header">Type</th>
-                                <th className="table-header">Order</th>
-                                <th className="table-header">Customer</th>
-                                <th className="table-header">Item</th>
-                                <th className="table-header">Reason</th>
-                                <th className="table-header">AWB</th>
-                                <th className="table-header text-right">Age</th>
-                                <th className="table-header">Status</th>
-                                <th className="table-header">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {returns?.map((r: ReturnRequest) => (
-                                <tr key={r.id} className="border-b last:border-0 hover:bg-gray-50">
-                                    <td className="table-cell">
-                                        <button
-                                            onClick={() => setSelectedRequest(r)}
-                                            className="font-medium text-primary-600 hover:text-primary-800 hover:underline"
-                                        >
-                                            {r.requestNumber}
-                                        </button>
-                                    </td>
-                                    <td className="table-cell">
-                                        <span className={`badge ${getResolutionBadge(r.resolution, r.requestType).color}`}>
-                                            {getResolutionBadge(r.resolution, r.requestType).label}
-                                        </span>
-                                    </td>
-                                    <td className="table-cell">
-                                        <button
-                                            onClick={() => setSelectedOrderId(r.originalOrder?.id || null)}
-                                            className="text-primary-600 hover:text-primary-800 hover:underline font-medium"
-                                        >
-                                            {r.originalOrder?.orderNumber}
-                                        </button>
-                                    </td>
-                                    <td className="table-cell">
-                                        {r.customer ? (
-                                            <button
-                                                onClick={() => setSelectedCustomerId(r.customer?.id || null)}
-                                                className="flex items-center gap-1.5 text-primary-600 hover:text-primary-800 hover:underline"
-                                            >
-                                                {getTierIcon(r.customerTier)}
-                                                <span className="text-sm">{r.customer.firstName || r.customer.name?.split(' ')[0]}</span>
-                                                {r.customerLtv > 0 && (
-                                                    <span className={`badge text-xs ${getTierBadge(r.customerTier)}`}>
-                                                        ₹{(r.customerLtv / 1000).toFixed(0)}k
-                                                    </span>
-                                                )}
-                                            </button>
-                                        ) : (
-                                            <span className="text-gray-400">-</span>
-                                        )}
-                                    </td>
-                                    <td className="table-cell">
-                                        {r.lines?.slice(0, 1).map((l: ReturnLine, i: number) => {
-                                            const imageUrl = l.sku?.variation?.imageUrl || l.sku?.variation?.product?.imageUrl;
-                                            return (
-                                                <div key={i} className="flex items-center gap-2">
-                                                    {imageUrl && (
-                                                        <img src={imageUrl} alt="" className="w-10 h-10 object-cover rounded" />
-                                                    )}
-                                                    <div className="min-w-0">
-                                                        <div className="text-sm font-medium truncate max-w-[150px]">
-                                                            {l.sku?.variation?.product?.name}
-                                                        </div>
-                                                        <div className="text-xs text-gray-500">
-                                                            {l.sku?.variation?.colorName} / {l.sku?.size}
-                                                            {l.itemCondition && <Check size={10} className="inline ml-1 text-green-500" />}
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            );
-                                        })}
-                                        {r.lines?.length > 1 && (
-                                            <div className="text-xs text-gray-400 mt-1">+{r.lines.length - 1} more</div>
-                                        )}
-                                    </td>
-                                    <td className="table-cell text-sm">{r.reasonCategory?.replace(/_/g, ' ')}</td>
-                                    <td className="table-cell text-xs">{r.shipping?.[0]?.awbNumber || '-'}</td>
-                                    <td className="table-cell text-right">{r.ageDays}d</td>
-                                    <td className="table-cell">
-                                        <span className={`badge ${getStatusBadge(r.status)}`}>
-                                            {r.status.replace(/_/g, ' ')}
-                                        </span>
-                                    </td>
-                                    <td className="table-cell">
-                                        <div className="flex gap-1">
-                                            <button
-                                                onClick={() => setSelectedRequest(r)}
-                                                className="p-1 text-gray-400 hover:text-primary-600"
-                                                title="View / Edit"
-                                            >
-                                                <Eye size={14} />
-                                            </button>
-                                            {canDelete(r) && (
-                                                <button
-                                                    onClick={() => setDeleteRequest(r)}
-                                                    className="p-1 text-gray-400 hover:text-red-600"
-                                                    title="Delete"
-                                                >
-                                                    <Trash2 size={14} />
-                                                </button>
-                                            )}
-                                        </div>
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                    {returns?.length === 0 && (
-                        <p className="text-center py-8 text-gray-500">No returns found</p>
-                    )}
-                </div>
+            {tab === 'all' && (
+                <AllReturnsTab
+                    returns={activeReturns}
+                    loading={loadingReturns}
+                    onViewCustomer={(customerId) => setSelectedCustomerId(customerId)}
+                    onCancel={handleCancel}
+                />
             )}
 
-            {/* ============================================ */}
-            {/* TAB 3: RECEIVE ITEMS */}
-            {/* ============================================ */}
-            {tab === 'receive' && (
-                <>
-                    {/* Scan Input */}
-                    <div className="card">
-                        <div className="flex items-center gap-4">
-                            <Scan size={24} className="text-gray-400" />
-                            <input
-                                ref={inputRef}
-                                type="text"
-                                className="input flex-1 text-lg"
-                                placeholder="Scan barcode or enter SKU code..."
-                                value={scanInput}
-                                onChange={(e) => setScanInput(e.target.value)}
-                                onKeyDown={(e) => e.key === 'Enter' && handleScan()}
-                                autoFocus
-                            />
-                            <button
-                                className="btn-primary"
-                                onClick={handleScan}
-                                disabled={!scanInput.trim() || searchMutation.isPending}
-                            >
-                                {searchMutation.isPending ? 'Searching...' : 'Search'}
-                            </button>
-                        </div>
-                    </div>
+            {tab === 'analytics' && <AnalyticsTab />}
 
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                        {/* Left: Scanned Item & Matching Tickets */}
-                        <div className="space-y-4">
-                            {scannedSku && (
-                                <div className="card">
-                                    <h3 className="font-medium text-gray-900 mb-3">Scanned Item</h3>
-                                    <div className="flex items-center gap-4">
-                                        {scannedSku.imageUrl && (
-                                            <img src={scannedSku.imageUrl} alt="" className="w-16 h-16 object-cover rounded" />
-                                        )}
-                                        <div>
-                                            <div className="font-medium">{scannedSku.productName}</div>
-                                            <div className="text-sm text-gray-500">{scannedSku.colorName} / {scannedSku.size}</div>
-                                            <div className="text-sm font-mono text-gray-600">{scannedSku.skuCode}</div>
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
-
-                            {scannedSku && matchingTickets.length > 0 && (
-                                <div className="card">
-                                    <h3 className="font-medium text-gray-900 mb-3">
-                                        Matching Return Tickets ({matchingTickets.length})
-                                    </h3>
-                                    <div className="space-y-3 max-h-[400px] overflow-y-auto">
-                                        {matchingTickets.map((ticket) => (
-                                            <button
-                                                key={ticket.id}
-                                                onClick={() => handleSelectTicket(ticket)}
-                                                className={`w-full text-left p-4 border rounded-lg transition-colors ${
-                                                    selectedTicket?.id === ticket.id
-                                                        ? 'border-primary-500 bg-primary-50 ring-2 ring-primary-200'
-                                                        : 'border-gray-200 hover:bg-gray-50'
-                                                }`}
-                                            >
-                                                <div className="flex items-center justify-between mb-2">
-                                                    <span className="font-semibold">{ticket.requestNumber}</span>
-                                                    <span className={`badge ${getStatusBadge(ticket.status)}`}>
-                                                        {ticket.status.replace(/_/g, ' ')}
-                                                    </span>
-                                                </div>
-                                                <div className="text-sm text-gray-600">
-                                                    {ticket.customer?.name || ticket.originalOrder?.customerName}
-                                                    <span className="mx-2">•</span>
-                                                    Order #{ticket.originalOrder?.orderNumber}
-                                                </div>
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
-
-                            {!scannedSku && (
-                                <div className="card">
-                                    <h3 className="font-medium text-gray-900 mb-3">Pending Return Tickets</h3>
-                                    {loadingTickets ? (
-                                        <div className="flex justify-center py-8">
-                                            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" />
-                                        </div>
-                                    ) : pendingTickets?.length === 0 ? (
-                                        <p className="text-center py-8 text-gray-500">No pending tickets</p>
-                                    ) : (
-                                        <div className="space-y-3 max-h-[500px] overflow-y-auto">
-                                            {pendingTickets?.map((ticket: ServerReturnRequest) => (
-                                                <div key={ticket.id} className="p-3 border border-gray-200 rounded-lg">
-                                                    <div className="flex items-center justify-between mb-2">
-                                                        <span className="font-semibold">{ticket.requestNumber}</span>
-                                                        <span className={`badge ${getStatusBadge(ticket.status)}`}>
-                                                            {ticket.status.replace(/_/g, ' ')}
-                                                        </span>
-                                                    </div>
-                                                    <div className="text-sm text-gray-600">
-                                                        {ticket.customerName || ticket.originalOrder?.customerName}
-                                                    </div>
-                                                    <div className="text-xs text-gray-500 mt-1">
-                                                        {ticket.returnLines?.length} item{ticket.returnLines?.length > 1 ? 's' : ''}
-                                                    </div>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-                        </div>
-
-                        {/* Right: Receive Panel */}
-                        <div>
-                            {selectedTicket && selectedLine ? (
-                                <div className="card">
-                                    <h3 className="font-medium text-gray-900 mb-4">Receive Item</h3>
-
-                                    <div className="bg-gray-50 p-3 rounded-lg mb-4">
-                                        <div className="flex justify-between">
-                                            <span className="font-medium">{selectedTicket.requestNumber}</span>
-                                            <span className={`badge ${getResolutionBadge(selectedTicket.resolution, selectedTicket.requestType).color}`}>
-                                                {getResolutionBadge(selectedTicket.resolution, selectedTicket.requestType).label}
-                                            </span>
-                                        </div>
-                                        <div className="text-sm text-gray-500 mt-1">
-                                            Order #{selectedTicket.originalOrder?.orderNumber}
-                                        </div>
-                                    </div>
-
-                                    <div className="flex items-center gap-4 p-3 border border-primary-200 bg-primary-50 rounded-lg mb-4">
-                                        {selectedLine.sku.variation?.imageUrl && (
-                                            <img src={selectedLine.sku.variation.imageUrl} alt="" className="w-14 h-14 object-cover rounded" />
-                                        )}
-                                        <div>
-                                            <div className="font-medium">{selectedLine.sku.variation?.product?.name}</div>
-                                            <div className="text-sm text-gray-600">
-                                                {selectedLine.sku.variation?.colorName} / {selectedLine.sku.size}
-                                            </div>
-                                            <div className="text-sm font-mono">{selectedLine.sku.skuCode}</div>
-                                        </div>
-                                    </div>
-
-                                    <div className="mb-4">
-                                        <label className="block text-sm font-medium text-gray-700 mb-2">Item Condition *</label>
-                                        <div className="space-y-2">
-                                            {CONDITIONS.map((cond) => (
-                                                <label
-                                                    key={cond.value}
-                                                    className={`flex items-center gap-3 p-3 border rounded-lg cursor-pointer transition-colors ${
-                                                        selectedCondition === cond.value
-                                                            ? cond.color === 'green' ? 'border-green-500 bg-green-50'
-                                                            : cond.color === 'yellow' ? 'border-yellow-500 bg-yellow-50'
-                                                            : cond.color === 'red' ? 'border-red-500 bg-red-50'
-                                                            : 'border-orange-500 bg-orange-50'
-                                                            : 'border-gray-200 hover:bg-gray-50'
-                                                    }`}
-                                                >
-                                                    <input
-                                                        type="radio"
-                                                        name="condition"
-                                                        value={cond.value}
-                                                        checked={selectedCondition === cond.value}
-                                                        onChange={() => setSelectedCondition(cond.value)}
-                                                        className="h-4 w-4"
-                                                    />
-                                                    <div>
-                                                        <div className="font-medium">{cond.label}</div>
-                                                        <div className="text-sm text-gray-500">{cond.description}</div>
-                                                    </div>
-                                                </label>
-                                            ))}
-                                        </div>
-                                    </div>
-
-                                    <div className="flex gap-2">
-                                        <button className="btn-secondary" onClick={resetReceiveState}>Cancel</button>
-                                        <button
-                                            className="btn-primary flex-1"
-                                            onClick={handleReceive}
-                                            disabled={!selectedCondition || receiveMutation.isPending}
-                                        >
-                                            {receiveMutation.isPending ? (
-                                                <div className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full" />
-                                            ) : (
-                                                <>
-                                                    <Package size={16} className="mr-2" />
-                                                    Receive & Add to QC Queue
-                                                </>
-                                            )}
-                                        </button>
-                                    </div>
-                                </div>
-                            ) : (
-                                <div className="card">
-                                    <div className="text-center py-8 text-gray-500">
-                                        <Scan size={48} className="mx-auto mb-4 text-gray-300" />
-                                        <p className="font-medium">Scan an item to begin</p>
-                                        <p className="text-sm mt-2">
-                                            Scan a barcode or enter SKU code to find matching return tickets
-                                        </p>
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                </>
-            )}
-
-            {/* ============================================ */}
-            {/* TAB 4: QC QUEUE */}
-            {/* ============================================ */}
-            {tab === 'queue' && (
-                <div className="space-y-6">
-                    {/* Search Bar */}
-                    <div className="card p-4">
-                        <div className="flex items-center gap-4">
-                            <div className="flex-1 relative">
-                                <Scan className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-                                <input
-                                    type="text"
-                                    placeholder="Scan barcode or search SKU to find item in queue..."
-                                    className="input pl-10 w-full"
-                                    value={queueSearchTerm}
-                                    onChange={(e) => setQueueSearchTerm(e.target.value)}
-                                />
-                            </div>
-                            {queueSearchTerm && (
-                                <button onClick={() => setQueueSearchTerm('')} className="p-2 text-gray-400 hover:text-gray-600">
-                                    <X size={18} />
-                                </button>
-                            )}
-                        </div>
-                        {queueSearchTerm && (
-                            <div className="mt-2 text-sm text-gray-500">
-                                Showing {filteredQueueItems.length} of {queueItems.length} items
-                            </div>
-                        )}
-                    </div>
-
-                    {/* Queue Table */}
-                    <div className="card">
-                        <h3 className="text-lg font-semibold mb-4">QC Queue - Received Return Items</h3>
-                        {loadingQueue ? (
-                            <div className="flex justify-center py-8">
-                                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" />
-                            </div>
-                        ) : filteredQueueItems.length === 0 ? (
-                            <p className="text-center py-8 text-gray-500">
-                                {queueSearchTerm ? 'No items match your search' : 'No items in QC queue'}
-                            </p>
-                        ) : (
-                            <div className="overflow-x-auto">
-                                <table className="w-full">
-                                    <thead>
-                                        <tr className="border-b">
-                                            <th className="table-header">Item</th>
-                                            <th className="table-header">SKU</th>
-                                            <th className="table-header">Return Ticket</th>
-                                            <th className="table-header">Condition</th>
-                                            <th className="table-header">Received</th>
-                                            <th className="table-header">Actions</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {filteredQueueItems.map((item) => {
-                                            const isHighlighted = queueSearchTerm && (
-                                                item.skuCode?.toLowerCase().includes(queueSearchTerm.toLowerCase()) ||
-                                                item.productName?.toLowerCase().includes(queueSearchTerm.toLowerCase())
-                                            );
-                                            return (
-                                                <tr key={item.id} className={`border-b last:border-0 hover:bg-gray-50 ${isHighlighted ? 'bg-blue-50' : ''}`}>
-                                                    <td className="table-cell">
-                                                        <div className="flex items-center gap-3">
-                                                            {item.imageUrl && (
-                                                                <img src={item.imageUrl} alt="" className="w-10 h-10 object-cover rounded" />
-                                                            )}
-                                                            <div>
-                                                                <div className="font-medium text-sm">{item.productName}</div>
-                                                                <div className="text-xs text-gray-500">{item.colorName} / {item.size}</div>
-                                                            </div>
-                                                        </div>
-                                                    </td>
-                                                    <td className="table-cell font-mono text-sm">{item.skuCode}</td>
-                                                    <td className="table-cell text-sm">{item.sourceReference || '-'}</td>
-                                                    <td className="table-cell">
-                                                        <span className={`badge ${
-                                                            item.condition === 'good' ? 'bg-green-100 text-green-800' :
-                                                            item.condition === 'used' ? 'bg-yellow-100 text-yellow-800' :
-                                                            item.condition === 'damaged' ? 'bg-red-100 text-red-800' :
-                                                            'bg-orange-100 text-orange-800'
-                                                        }`}>
-                                                            {item.condition}
-                                                        </span>
-                                                    </td>
-                                                    <td className="table-cell text-sm text-gray-500">{formatDate(item.createdAt)}</td>
-                                                    <td className="table-cell">
-                                                        <div className="flex gap-1">
-                                                            <button
-                                                                onClick={() => openQcModal(item, 'ready')}
-                                                                className="p-1.5 rounded text-green-600 hover:bg-green-50"
-                                                                title="Accept - Add to Stock"
-                                                            >
-                                                                <Check size={16} />
-                                                            </button>
-                                                            <button
-                                                                onClick={() => openQcModal(item, 'write_off')}
-                                                                className="p-1.5 rounded text-red-600 hover:bg-red-50"
-                                                                title="Reject - Write Off"
-                                                            >
-                                                                <Trash2 size={16} />
-                                                            </button>
-                                                            <button
-                                                                onClick={() => {
-                                                                    if (confirm('Remove from QC queue? This will undo the receive action.')) {
-                                                                        removeFromQueueMutation.mutate(item.id);
-                                                                    }
-                                                                }}
-                                                                className="p-1.5 rounded text-gray-500 hover:bg-gray-100"
-                                                                title="Undo - Remove from queue"
-                                                            >
-                                                                <RotateCcw size={16} />
-                                                            </button>
-                                                        </div>
-                                                    </td>
-                                                </tr>
-                                            );
-                                        })}
-                                    </tbody>
-                                </table>
-                            </div>
-                        )}
-                    </div>
-
-                    {/* History Section */}
-                    <div className="card">
-                        <div className="flex items-center justify-between mb-4">
-                            <h3 className="text-lg font-semibold flex items-center gap-2">
-                                <History size={18} />
-                                Processed History
-                            </h3>
-                            <div className="flex gap-2">
-                                <button
-                                    className={`px-3 py-1 text-sm rounded ${historyFilter === 'all' ? 'bg-gray-800 text-white' : 'bg-gray-100 text-gray-700'}`}
-                                    onClick={() => setHistoryFilter('all')}
-                                >
-                                    All
-                                </button>
-                                <button
-                                    className={`px-3 py-1 text-sm rounded ${historyFilter === 'ready' ? 'bg-green-600 text-white' : 'bg-green-100 text-green-700'}`}
-                                    onClick={() => setHistoryFilter('ready')}
-                                >
-                                    Accepted
-                                </button>
-                                <button
-                                    className={`px-3 py-1 text-sm rounded ${historyFilter === 'write_off' ? 'bg-red-600 text-white' : 'bg-red-100 text-red-700'}`}
-                                    onClick={() => setHistoryFilter('write_off')}
-                                >
-                                    Rejected
-                                </button>
-                            </div>
-                        </div>
-                        {loadingHistory ? (
-                            <div className="flex justify-center py-8">
-                                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" />
-                            </div>
-                        ) : historyItems.length === 0 ? (
-                            <p className="text-center py-8 text-gray-500">No processed items</p>
-                        ) : (
-                            <div className="overflow-x-auto">
-                                <table className="w-full">
-                                    <thead>
-                                        <tr className="border-b">
-                                            <th className="table-header">Item</th>
-                                            <th className="table-header">SKU</th>
-                                            <th className="table-header">Return Ticket</th>
-                                            <th className="table-header">Result</th>
-                                            <th className="table-header">Processed</th>
-                                            <th className="table-header">Actions</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {historyItems.map((item) => (
-                                            <tr key={item.id} className="border-b last:border-0 hover:bg-gray-50">
-                                                <td className="table-cell">
-                                                    <div className="flex items-center gap-3">
-                                                        {item.imageUrl && (
-                                                            <img src={item.imageUrl} alt="" className="w-10 h-10 object-cover rounded" />
-                                                        )}
-                                                        <div>
-                                                            <div className="font-medium text-sm">{item.productName}</div>
-                                                            <div className="text-xs text-gray-500">{item.colorName} / {item.size}</div>
-                                                        </div>
-                                                    </div>
-                                                </td>
-                                                <td className="table-cell font-mono text-sm">{item.skuCode}</td>
-                                                <td className="table-cell text-sm">{item.sourceReference || '-'}</td>
-                                                <td className="table-cell">
-                                                    {item.status === 'approved' ? (
-                                                        <span className="badge bg-green-100 text-green-800">
-                                                            <Check size={12} className="inline mr-1" />
-                                                            Accepted
-                                                        </span>
-                                                    ) : (
-                                                        <span className="badge bg-red-100 text-red-800">
-                                                            <X size={12} className="inline mr-1" />
-                                                            {item.writeOffReason || 'Rejected'}
-                                                        </span>
-                                                    )}
-                                                </td>
-                                                <td className="table-cell text-sm text-gray-500">
-                                                    <div>{item.processedAt ? formatDate(item.processedAt) : '-'}</div>
-                                                </td>
-                                                <td className="table-cell">
-                                                    <button
-                                                        onClick={() => {
-                                                            if (confirm('Undo? Item will move back to QC queue.')) {
-                                                                undoMutation.mutate(item.id);
-                                                            }
-                                                        }}
-                                                        className="btn-sm bg-gray-200 hover:bg-gray-300 text-gray-700"
-                                                        title="Undo"
-                                                    >
-                                                        <RotateCcw size={14} />
-                                                    </button>
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-                        )}
-                    </div>
-                </div>
-            )}
-
-            {/* ============================================ */}
-            {/* TAB 5: ANALYTICS */}
-            {/* ============================================ */}
-            {tab === 'analytics' && (
-                <div className="card overflow-x-auto">
-                    <h2 className="text-lg font-semibold mb-4">Return Rate by Product</h2>
-                    <table className="w-full">
-                        <thead>
-                            <tr className="border-b">
-                                <th className="table-header">Product</th>
-                                <th className="table-header text-right">Sold</th>
-                                <th className="table-header text-right">Returned</th>
-                                <th className="table-header text-right">Rate</th>
-                                <th className="table-header">Alert</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {analytics?.filter((a: ProductReturnAnalytics) => a.totalQty > 0).map((a: ProductReturnAnalytics) => (
-                                <tr key={a.productId} className="border-b last:border-0">
-                                    <td className="table-cell font-medium">{a.productName}</td>
-                                    <td className="table-cell text-right">-</td>
-                                    <td className="table-cell text-right">{a.returnCount}</td>
-                                    <td className="table-cell text-right font-medium">-</td>
-                                    <td className="table-cell">
-                                        {a.returnCount > 5 && (
-                                            <AlertTriangle size={16} className="text-red-500" />
-                                        )}
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
-            )}
-
-            {/* ============================================ */}
-            {/* MODALS */}
-            {/* ============================================ */}
-
-            {/* New Return Request Modal */}
-            {showModal && (
-                <NewReturnModal
-                    onClose={() => setShowModal(false)}
-                    onSuccess={() => {
-                        setShowModal(false);
-                        queryClient.invalidateQueries({ queryKey: ['returns'] });
+            {/* Initiate Return Modal */}
+            {showInitiateModal && (
+                <InitiateReturnModal
+                    orderSearchTerm={orderSearchTerm}
+                    setOrderSearchTerm={setOrderSearchTerm}
+                    searchedOrder={searchedOrder}
+                    selectedLines={selectedLines}
+                    returnQtyMap={returnQtyMap}
+                    setReturnQtyMap={setReturnQtyMap}
+                    returnReasonCategory={returnReasonCategory}
+                    setReturnReasonCategory={setReturnReasonCategory}
+                    returnReasonDetail={returnReasonDetail}
+                    setReturnReasonDetail={setReturnReasonDetail}
+                    returnResolution={returnResolution}
+                    setReturnResolution={setReturnResolution}
+                    returnNotes={returnNotes}
+                    setReturnNotes={setReturnNotes}
+                    exchangeSkuId={exchangeSkuId}
+                    setExchangeSkuId={setExchangeSkuId}
+                    onSearchOrder={handleSearchOrder}
+                    onToggleLine={handleToggleLine}
+                    onInitiate={handleInitiateReturn}
+                    onClose={() => {
+                        setShowInitiateModal(false);
+                        resetInitiateForm();
                     }}
                 />
             )}
 
-            {/* Return Detail Modal */}
-            {selectedRequest && (
-                <ReturnDetailModal
-                    request={selectedRequest}
-                    onClose={() => setSelectedRequest(null)}
-                    onSuccess={() => {
-                        setSelectedRequest(null);
-                        queryClient.invalidateQueries({ queryKey: ['returns'] });
-                    }}
+            {/* QC Modal */}
+            {qcModalItem && (
+                <QcModal
+                    item={qcModalItem}
+                    action={qcAction}
+                    setAction={setQcAction}
+                    comments={qcComments}
+                    setComments={setQcComments}
+                    writeOffReason={writeOffReason}
+                    setWriteOffReason={setWriteOffReason}
+                    onProcess={handleProcessQc}
+                    onClose={() => setQcModalItem(null)}
                 />
-            )}
-
-            {/* Delete Confirmation */}
-            {deleteRequest && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-                    <div className="bg-white rounded-lg shadow-xl w-full max-w-md p-6">
-                        <h2 className="text-lg font-semibold text-gray-900 mb-4">Delete Return Request</h2>
-                        <p className="text-gray-600 mb-6">
-                            Are you sure you want to delete <span className="font-medium">{deleteRequest.requestNumber}</span>?
-                        </p>
-                        <div className="flex gap-3 justify-end">
-                            <button className="btn-secondary" onClick={() => setDeleteRequest(null)} disabled={deleteMutation.isPending}>
-                                Cancel
-                            </button>
-                            <button
-                                className="btn-primary bg-red-600 hover:bg-red-700"
-                                onClick={() => deleteMutation.mutate(deleteRequest.id)}
-                                disabled={deleteMutation.isPending}
-                            >
-                                {deleteMutation.isPending ? 'Deleting...' : 'Delete'}
-                            </button>
-                        </div>
-                    </div>
-                </div>
             )}
 
             {/* Customer Detail Modal */}
             {selectedCustomerId && (
                 <CustomerDetailModal
-                    customer={customerDetail}
-                    isLoading={loadingCustomer}
+                    customerId={selectedCustomerId}
                     onClose={() => setSelectedCustomerId(null)}
                 />
             )}
+        </div>
+    );
+}
 
-            {/* Order Detail Modal */}
-            {selectedOrderId && orderDetail && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-                    <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-hidden">
-                        <div className="flex items-center justify-between p-4 border-b bg-gray-50">
-                            <h2 className="text-lg font-bold text-gray-900">Order #{orderDetail.orderNumber}</h2>
-                            <button onClick={() => setSelectedOrderId(null)} className="p-2 hover:bg-gray-200 rounded-lg">
-                                <X size={20} />
-                            </button>
-                        </div>
-                        <div className="p-4 overflow-y-auto max-h-[70vh]">
-                            {loadingOrder ? (
-                                <div className="flex justify-center py-8">
-                                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" />
+// ============================================
+// ACTION QUEUE TAB
+// ============================================
+
+interface ActionQueueTabProps {
+    items: ServerReturnActionQueueItem[];
+    loading: boolean;
+    onSchedulePickup: (lineId: string) => void;
+    onReceive: (lineId: string, condition: 'good' | 'damaged' | 'defective' | 'wrong_item' | 'used') => void;
+    onProcessRefund: (lineId: string) => void;
+    onCreateExchange: (lineId: string) => void;
+    onComplete: (lineId: string) => void;
+    onCancel: (lineId: string) => void;
+}
+
+function ActionQueueTab({
+    items,
+    loading,
+    onSchedulePickup,
+    onReceive,
+    onProcessRefund,
+    onCreateExchange,
+    onComplete,
+    onCancel,
+}: ActionQueueTabProps) {
+    const [receiveConditionMap, setReceiveConditionMap] = useState<Record<string, string>>({});
+
+    if (loading) {
+        return <div className="text-center py-12">Loading action queue...</div>;
+    }
+
+    if (items.length === 0) {
+        return (
+            <div className="text-center py-12 text-gray-500">
+                <CheckCircle size={48} className="mx-auto mb-4 text-green-500" />
+                <p className="text-lg font-medium">All caught up!</p>
+                <p className="text-sm">No pending actions at the moment.</p>
+            </div>
+        );
+    }
+
+    return (
+        <div className="space-y-4">
+            {items.map((item) => (
+                <div key={item.id} className="border border-gray-200 rounded-lg p-4 bg-white">
+                    <div className="flex items-start justify-between">
+                        <div className="flex gap-4">
+                            <div className="w-16 h-16 bg-gray-100 rounded flex items-center justify-center">
+                                {item.imageUrl ? (
+                                    <img
+                                        src={item.imageUrl}
+                                        alt={item.productName || ''}
+                                        className="w-full h-full object-cover rounded"
+                                    />
+                                ) : (
+                                    <Package size={24} className="text-gray-400" />
+                                )}
+                            </div>
+                            <div>
+                                <div className="flex items-center gap-2 mb-1">
+                                    <span className="font-medium">{item.orderNumber}</span>
+                                    <span className={`px-2 py-0.5 text-xs rounded ${getStatusBadge(item.returnStatus)}`}>
+                                        {item.returnStatus}
+                                    </span>
+                                    <span className={`px-2 py-0.5 text-xs rounded ${getResolutionBadge(item.returnResolution).color}`}>
+                                        {getResolutionBadge(item.returnResolution).label}
+                                    </span>
                                 </div>
-                            ) : (
-                                <div className="space-y-4">
-                                    <div className="grid grid-cols-2 gap-4 text-sm">
-                                        <div><span className="text-gray-500">Customer:</span> <span className="ml-2 font-medium">{orderDetail.customerName}</span></div>
-                                        <div><span className="text-gray-500">Date:</span> <span className="ml-2">{orderDetail.orderDate ? new Date(orderDetail.orderDate).toLocaleDateString() : '-'}</span></div>
-                                        <div><span className="text-gray-500">Status:</span> <span className="ml-2 capitalize">{orderDetail.status}</span></div>
-                                        <div><span className="text-gray-500">Total:</span> <span className="ml-2 font-medium">₹{orderDetail.totalAmount?.toLocaleString() ?? '-'}</span></div>
+                                <div className="text-sm text-gray-600">
+                                    {item.productName} - {item.colorName} - {item.size}
+                                </div>
+                                <div className="text-sm text-gray-500">
+                                    SKU: {item.skuCode} | Qty: {item.returnQty} | Customer: {item.customerName}
+                                </div>
+                                {item.returnReasonCategory && (
+                                    <div className="text-xs text-gray-500 mt-1">
+                                        Reason: {item.returnReasonCategory}
+                                        {item.returnReasonDetail && ` - ${item.returnReasonDetail}`}
                                     </div>
-                                    <div className="border-t pt-4">
-                                        <h3 className="font-medium mb-3">Items</h3>
-                                        <div className="space-y-2">
-                                            {orderDetail.orderLines?.map((line: OrderDetailLine) => (
-                                                <div key={line.id} className="flex items-center gap-3 p-2 bg-gray-50 rounded">
-                                                    {(line.sku?.variation?.imageUrl || line.sku?.variation?.product?.imageUrl) && (
-                                                        <img src={line.sku?.variation?.imageUrl || line.sku?.variation?.product?.imageUrl || ''} alt="" className="w-12 h-12 object-cover rounded" />
-                                                    )}
-                                                    <div className="flex-1 min-w-0">
-                                                        <div className="font-medium text-sm">{line.sku?.variation?.product?.name}</div>
-                                                        <div className="text-xs text-gray-500">{line.sku?.variation?.colorName} / {line.sku?.size}</div>
-                                                    </div>
-                                                    <div className="text-right">
-                                                        <div className="text-sm font-medium">₹{line.unitPrice}</div>
-                                                        <div className="text-xs text-gray-500">Qty: {line.qty}</div>
-                                                    </div>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </div>
+                                )}
+                                <div className="text-xs text-gray-400 mt-1">
+                                    Requested {item.daysSinceRequest} days ago
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Action Buttons */}
+                        <div className="flex flex-col gap-2">
+                            {item.actionNeeded === 'schedule_pickup' && (
+                                <button
+                                    onClick={() => onSchedulePickup(item.id)}
+                                    className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center gap-2"
+                                >
+                                    <Truck size={16} />
+                                    Schedule Pickup
+                                </button>
+                            )}
+
+                            {item.actionNeeded === 'receive' && (
+                                <div className="flex flex-col gap-2">
+                                    <select
+                                        value={receiveConditionMap[item.id] || ''}
+                                        onChange={(e) =>
+                                            setReceiveConditionMap({ ...receiveConditionMap, [item.id]: e.target.value })
+                                        }
+                                        className="px-3 py-2 border border-gray-300 rounded text-sm"
+                                    >
+                                        <option value="">Select Condition</option>
+                                        {RETURN_CONDITIONS.map((c) => (
+                                            <option key={c.value} value={c.value}>
+                                                {c.label}
+                                            </option>
+                                        ))}
+                                    </select>
+                                    <button
+                                        onClick={() => {
+                                            const condition = receiveConditionMap[item.id] as 'good' | 'damaged' | 'defective' | 'wrong_item' | 'used' | undefined;
+                                            if (condition) {
+                                                onReceive(item.id, condition);
+                                            } else {
+                                                alert('Please select a condition');
+                                            }
+                                        }}
+                                        className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 flex items-center gap-2"
+                                    >
+                                        <PackageCheck size={16} />
+                                        Receive
+                                    </button>
                                 </div>
                             )}
+
+                            {item.actionNeeded === 'process_refund' && (
+                                <button
+                                    onClick={() => onProcessRefund(item.id)}
+                                    className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 flex items-center gap-2"
+                                >
+                                    <DollarSign size={16} />
+                                    Process Refund
+                                </button>
+                            )}
+
+                            {item.actionNeeded === 'create_exchange' && (
+                                <button
+                                    onClick={() => onCreateExchange(item.id)}
+                                    className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 flex items-center gap-2"
+                                >
+                                    <ArrowRight size={16} />
+                                    Create Exchange
+                                </button>
+                            )}
+
+                            {item.actionNeeded === 'complete' && (
+                                <button
+                                    onClick={() => onComplete(item.id)}
+                                    className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 flex items-center gap-2"
+                                >
+                                    <Check size={16} />
+                                    Complete
+                                </button>
+                            )}
+
+                            <button
+                                onClick={() => onCancel(item.id)}
+                                className="px-4 py-2 bg-red-100 text-red-800 rounded hover:bg-red-200 flex items-center gap-2"
+                            >
+                                <XCircle size={16} />
+                                Cancel
+                            </button>
                         </div>
                     </div>
                 </div>
-            )}
+            ))}
+        </div>
+    );
+}
 
-            {/* QC Modal */}
-            {qcModalItem && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-                    <div className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4">
-                        <div className="flex items-center justify-between p-4 border-b">
-                            <h3 className="text-lg font-semibold">
-                                {qcAction === 'ready' ? 'Accept Item' : 'Reject Item'}
-                            </h3>
-                            <button onClick={closeQcModal} className="text-gray-400 hover:text-gray-600">
-                                <X size={20} />
-                            </button>
-                        </div>
-                        <div className="p-4 space-y-4">
-                            <div className="flex items-center gap-4 p-3 bg-gray-50 rounded-lg">
-                                {qcModalItem.imageUrl && (
-                                    <img src={qcModalItem.imageUrl} alt="" className="w-14 h-14 object-cover rounded" />
-                                )}
-                                <div>
-                                    <div className="font-medium">{qcModalItem.productName}</div>
-                                    <div className="text-sm text-gray-600">{qcModalItem.colorName} / {qcModalItem.size}</div>
-                                    <div className="text-sm font-mono">{qcModalItem.skuCode}</div>
-                                </div>
-                            </div>
+// ============================================
+// ALL RETURNS TAB
+// ============================================
 
-                            <div className="flex gap-2">
-                                <button
-                                    className={`flex-1 py-2 rounded-lg font-medium ${qcAction === 'ready' ? 'bg-green-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
-                                    onClick={() => setQcAction('ready')}
-                                >
-                                    <Check size={16} className="inline mr-2" />
-                                    Accept
-                                </button>
-                                <button
-                                    className={`flex-1 py-2 rounded-lg font-medium ${qcAction === 'write_off' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
-                                    onClick={() => setQcAction('write_off')}
-                                >
-                                    <X size={16} className="inline mr-2" />
-                                    Reject
-                                </button>
-                            </div>
+interface AllReturnsTabProps {
+    returns: ActiveReturnLine[];
+    loading: boolean;
+    onViewCustomer: (customerId: string) => void;
+    onCancel: (lineId: string) => void;
+}
 
-                            {qcAction === 'write_off' && (
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">Rejection Reason *</label>
-                                    <select className="input" value={writeOffReason} onChange={(e) => setWriteOffReason(e.target.value)}>
-                                        {WRITE_OFF_REASONS.map((r) => (
-                                            <option key={r.value} value={r.value}>{r.label}</option>
-                                        ))}
-                                    </select>
-                                </div>
-                            )}
+function AllReturnsTab({ returns, loading, onViewCustomer, onCancel }: AllReturnsTabProps) {
+    const [statusFilter, setStatusFilter] = useState<string>('all');
+    const [searchTerm, setSearchTerm] = useState('');
 
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">QC Comments</label>
-                                <textarea
-                                    className="input"
-                                    rows={3}
-                                    placeholder="Add any notes..."
-                                    value={qcComments}
-                                    onChange={(e) => setQcComments(e.target.value)}
-                                />
-                            </div>
-                        </div>
-                        <div className="flex gap-2 p-4 border-t">
-                            <button className="btn-secondary flex-1" onClick={closeQcModal}>Cancel</button>
-                            <button
-                                className={`flex-1 ${qcAction === 'ready' ? 'btn-primary bg-green-600 hover:bg-green-700' : 'btn-primary bg-red-600 hover:bg-red-700'}`}
-                                onClick={handleQcSubmit}
-                                disabled={processMutation.isPending}
-                            >
-                                {processMutation.isPending ? (
-                                    <div className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full mx-auto" />
-                                ) : qcAction === 'ready' ? 'Accept & Add to Stock' : 'Reject & Write Off'}
-                            </button>
-                        </div>
-                    </div>
+    if (loading) {
+        return <div className="text-center py-12">Loading returns...</div>;
+    }
+
+    const filteredReturns = returns.filter((ret) => {
+        if (statusFilter !== 'all' && ret.returnStatus !== statusFilter) return false;
+        if (searchTerm) {
+            const term = searchTerm.toLowerCase();
+            return (
+                ret.orderNumber.toLowerCase().includes(term) ||
+                ret.skuCode.toLowerCase().includes(term) ||
+                ret.customerName.toLowerCase().includes(term)
+            );
+        }
+        return true;
+    });
+
+    return (
+        <div>
+            {/* Filters */}
+            <div className="flex gap-4 mb-4">
+                <input
+                    type="text"
+                    placeholder="Search order, SKU, customer..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="flex-1 px-4 py-2 border border-gray-300 rounded-lg"
+                />
+                <select
+                    value={statusFilter}
+                    onChange={(e) => setStatusFilter(e.target.value)}
+                    className="px-4 py-2 border border-gray-300 rounded-lg"
+                >
+                    <option value="all">All Statuses</option>
+                    <option value="requested">Requested</option>
+                    <option value="pickup_scheduled">Pickup Scheduled</option>
+                    <option value="in_transit">In Transit</option>
+                    <option value="received">Received</option>
+                </select>
+            </div>
+
+            {/* Table */}
+            {filteredReturns.length === 0 ? (
+                <div className="text-center py-12 text-gray-500">No returns found</div>
+            ) : (
+                <div className="border border-gray-200 rounded-lg overflow-hidden">
+                    <table className="w-full">
+                        <thead className="bg-gray-50">
+                            <tr>
+                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Order</th>
+                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Product</th>
+                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Qty</th>
+                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Resolution</th>
+                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Customer</th>
+                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Age</th>
+                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200">
+                            {filteredReturns.map((ret) => (
+                                <tr key={ret.id} className="hover:bg-gray-50">
+                                    <td className="px-4 py-3 text-sm">{ret.orderNumber}</td>
+                                    <td className="px-4 py-3 text-sm">
+                                        <div>{ret.productName}</div>
+                                        <div className="text-xs text-gray-500">
+                                            {ret.colorName} - {ret.size} ({ret.skuCode})
+                                        </div>
+                                    </td>
+                                    <td className="px-4 py-3 text-sm">{ret.returnQty}</td>
+                                    <td className="px-4 py-3 text-sm">
+                                        <span className={`px-2 py-1 text-xs rounded ${getStatusBadge(ret.returnStatus)}`}>
+                                            {ret.returnStatus}
+                                        </span>
+                                    </td>
+                                    <td className="px-4 py-3 text-sm">
+                                        <span className={`px-2 py-1 text-xs rounded ${getResolutionBadge(ret.returnResolution).color}`}>
+                                            {getResolutionBadge(ret.returnResolution).label}
+                                        </span>
+                                    </td>
+                                    <td className="px-4 py-3 text-sm">
+                                        <button
+                                            onClick={() => ret.customerId && onViewCustomer(ret.customerId)}
+                                            className="text-blue-600 hover:underline"
+                                        >
+                                            {ret.customerName}
+                                        </button>
+                                    </td>
+                                    <td className="px-4 py-3 text-sm text-gray-500">{ret.ageDays}d</td>
+                                    <td className="px-4 py-3 text-sm">
+                                        <button
+                                            onClick={() => onCancel(ret.id)}
+                                            className="text-red-600 hover:underline text-xs"
+                                        >
+                                            Cancel
+                                        </button>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
                 </div>
             )}
         </div>
@@ -1806,243 +888,245 @@ export default function Returns() {
 }
 
 // ============================================
-// NEW RETURN MODAL (Simplified for now - full resolution selection in Phase 4)
+// ANALYTICS TAB
 // ============================================
 
-type ResolutionType = 'refund' | 'exchange_same' | 'exchange_up' | 'exchange_down';
-
-function NewReturnModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
-    const [step, setStep] = useState<1 | 2 | 3>(1);
-    const [orderNumber, setOrderNumber] = useState('');
-    const [order, setOrder] = useState<OrderDetails | null>(null);
-    const [selectedItems, setSelectedItems] = useState<string[]>([]);
-    const [resolution, setResolution] = useState<ResolutionType>('refund');
-    const [reasonCategory, setReasonCategory] = useState('');
-    const [reasonDetails, setReasonDetails] = useState('');
-    const [courier, setCourier] = useState('');
-    const [awbNumber, setAwbNumber] = useState('');
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState('');
-    const inputRef = useRef<HTMLInputElement>(null);
-
-    // Calculate return value based on selected items
-    const returnValue = order?.items
-        .filter((item) => selectedItems.includes(item.skuId))
-        .reduce((sum, item) => sum + (item.unitPrice || 0) * item.qty, 0) || 0;
-
-    useEffect(() => {
-        if (step === 1) inputRef.current?.focus();
-    }, [step]);
-
-    const getReturnsOrderFn = useServerFn(getReturnsOrder);
-    const createReturnRequestFn = useServerFn(createReturnRequest);
-
-    const searchOrder = async () => {
-        if (!orderNumber.trim()) return;
-        setLoading(true);
-        setError('');
-        try {
-            const orderData = await getReturnsOrderFn({ data: { orderNumber: orderNumber.trim() } });
-            setOrder(orderData);
-            setStep(2);
-        } catch (err) {
-            setError(err instanceof Error ? err.message : 'Order not found');
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const toggleItem = (skuId: string) => {
-        setSelectedItems((prev) => prev.includes(skuId) ? prev.filter((id) => id !== skuId) : [...prev, skuId]);
-    };
-
-    const createMutation = useMutation({
-        mutationFn: (data: {
-            requestType: 'return' | 'exchange';
-            resolution: string;
-            originalOrderId: string;
-            reasonCategory: string;
-            reasonDetails?: string;
-            lines: { skuId: string; qty: number; unitPrice?: number }[];
-            returnValue?: number;
-            courier?: string;
-            awbNumber?: string;
-        }) => createReturnRequestFn({ data }),
-        onSuccess: () => onSuccess(),
-        onError: (err: Error) => setError(err?.message || 'Failed to create return request'),
-    });
-
-    const handleSubmit = () => {
-        if (!order || selectedItems.length === 0 || !reasonCategory) {
-            setError('Please select items and provide a reason');
-            return;
-        }
-        // Map resolution to requestType for backward compatibility
-        const requestType = resolution === 'refund' ? 'return' : 'exchange';
-
-        // Get selected item details with prices
-        const selectedItemDetails = order.items.filter((item) => selectedItems.includes(item.skuId));
-
-        createMutation.mutate({
-            requestType,
-            resolution,
-            originalOrderId: order.id,
-            reasonCategory,
-            reasonDetails: reasonDetails || undefined,
-            lines: selectedItemDetails.map((item) => ({
-                skuId: item.skuId,
-                qty: item.qty,
-                unitPrice: item.unitPrice,
-            })),
-            returnValue: returnValue || undefined,
-            courier: courier || undefined,
-            awbNumber: awbNumber || undefined,
-        });
-    };
-
+function AnalyticsTab() {
     return (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-hidden">
-                <div className="flex items-center justify-between p-4 border-b">
-                    <h2 className="text-lg font-semibold">New Return/Exchange Request</h2>
-                    <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+        <div className="text-center py-12 text-gray-500">
+            <p>Analytics coming soon...</p>
+        </div>
+    );
+}
+
+// ============================================
+// INITIATE RETURN MODAL
+// ============================================
+
+interface InitiateReturnModalProps {
+    orderSearchTerm: string;
+    setOrderSearchTerm: (val: string) => void;
+    searchedOrder: OrderForReturn | null;
+    selectedLines: Set<string>;
+    returnQtyMap: Record<string, number>;
+    setReturnQtyMap: (map: Record<string, number>) => void;
+    returnReasonCategory: string;
+    setReturnReasonCategory: (val: string) => void;
+    returnReasonDetail: string;
+    setReturnReasonDetail: (val: string) => void;
+    returnResolution: 'refund' | 'exchange' | 'rejected';
+    setReturnResolution: (val: 'refund' | 'exchange' | 'rejected') => void;
+    returnNotes: string;
+    setReturnNotes: (val: string) => void;
+    exchangeSkuId: string;
+    setExchangeSkuId: (val: string) => void;
+    onSearchOrder: () => void;
+    onToggleLine: (lineId: string) => void;
+    onInitiate: () => void;
+    onClose: () => void;
+}
+
+function InitiateReturnModal({
+    orderSearchTerm,
+    setOrderSearchTerm,
+    searchedOrder,
+    selectedLines,
+    returnQtyMap,
+    setReturnQtyMap,
+    returnReasonCategory,
+    setReturnReasonCategory,
+    returnReasonDetail,
+    setReturnReasonDetail,
+    returnResolution,
+    setReturnResolution,
+    returnNotes,
+    setReturnNotes,
+    exchangeSkuId,
+    setExchangeSkuId,
+    onSearchOrder,
+    onToggleLine,
+    onInitiate,
+    onClose,
+}: InitiateReturnModalProps) {
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+                <div className="p-6 border-b border-gray-200 flex items-center justify-between sticky top-0 bg-white">
+                    <h2 className="text-xl font-bold">Initiate Return</h2>
+                    <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
+                        <X size={24} />
+                    </button>
                 </div>
 
-                <div className="flex items-center justify-center gap-4 p-4 bg-gray-50 border-b">
-                    {[1, 2, 3].map((s) => (
-                        <div key={s} className={`flex items-center gap-2 ${step >= s ? 'text-primary-600' : 'text-gray-400'}`}>
-                            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${step >= s ? 'bg-primary-600 text-white' : 'bg-gray-200'}`}>
-                                {s}
-                            </div>
-                            <span className="text-sm font-medium">{s === 1 ? 'Find Order' : s === 2 ? 'Select Items' : 'Details'}</span>
-                            {s < 3 && <div className="w-8 h-px bg-gray-300" />}
+                <div className="p-6 space-y-6">
+                    {/* Step 1: Search Order */}
+                    <div>
+                        <label className="block text-sm font-medium mb-2">Search Order</label>
+                        <div className="flex gap-2">
+                            <input
+                                type="text"
+                                placeholder="Enter order number..."
+                                value={orderSearchTerm}
+                                onChange={(e) => setOrderSearchTerm(e.target.value)}
+                                onKeyPress={(e) => e.key === 'Enter' && onSearchOrder()}
+                                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg"
+                            />
+                            <button
+                                onClick={onSearchOrder}
+                                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                            >
+                                <Search size={16} />
+                            </button>
                         </div>
-                    ))}
-                </div>
+                    </div>
 
-                <div className="p-6 overflow-y-auto max-h-[calc(90vh-200px)]">
-                    {error && <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">{error}</div>}
-
-                    {step === 1 && (
-                        <div className="space-y-4">
-                            <p className="text-gray-600">Enter the order number to start a return or exchange request.</p>
-                            <div className="flex gap-2">
-                                <input
-                                    ref={inputRef}
-                                    type="text"
-                                    className="input flex-1"
-                                    placeholder="Order number (e.g., 63814)"
-                                    value={orderNumber}
-                                    onChange={(e) => setOrderNumber(e.target.value)}
-                                    onKeyDown={(e) => e.key === 'Enter' && searchOrder()}
-                                />
-                                <button className="btn-primary" onClick={searchOrder} disabled={loading || !orderNumber.trim()}>
-                                    {loading ? <div className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full" /> : <><Search size={16} className="mr-2" />Search</>}
-                                </button>
-                            </div>
-                        </div>
-                    )}
-
-                    {step === 2 && order && (
-                        <div className="space-y-4">
-                            <div className="bg-gray-50 p-4 rounded-lg">
-                                <div className="font-semibold text-lg">Order #{order.orderNumber}</div>
-                                {order.customer && <div className="text-sm text-gray-600">{order.customer.name} • {order.customer.email}</div>}
-                            </div>
-                            <p className="text-gray-600">Select the items being returned:</p>
+                    {/* Step 2: Select Lines */}
+                    {searchedOrder && (
+                        <div>
+                            <h3 className="text-sm font-medium mb-2">
+                                Order {searchedOrder.orderNumber} - {searchedOrder.customerName}
+                            </h3>
                             <div className="space-y-2">
-                                {order.items.map((item) => (
-                                    <label
-                                        key={item.skuId}
-                                        className={`flex items-center gap-3 p-3 border rounded-lg cursor-pointer ${selectedItems.includes(item.skuId) ? 'border-primary-500 bg-primary-50' : 'border-gray-200 hover:bg-gray-50'}`}
+                                {searchedOrder.lines.map((line) => (
+                                    <div
+                                        key={line.id}
+                                        className={`p-3 border rounded-lg ${
+                                            line.eligibility.eligible
+                                                ? 'border-gray-200 hover:border-blue-300 cursor-pointer'
+                                                : 'border-red-200 bg-red-50'
+                                        }`}
+                                        onClick={() => line.eligibility.eligible && onToggleLine(line.id)}
                                     >
-                                        <input type="checkbox" checked={selectedItems.includes(item.skuId)} onChange={() => toggleItem(item.skuId)} className="h-4 w-4" />
-                                        {item.imageUrl && <img src={item.imageUrl} alt="" className="w-12 h-12 object-cover rounded" />}
-                                        <div className="flex-1">
-                                            <div className="font-medium">{item.productName}</div>
-                                            <div className="text-sm text-gray-500">{item.colorName} / {item.size} • {item.skuCode}</div>
+                                        <div className="flex items-center gap-3">
+                                            {line.eligibility.eligible && (
+                                                <input
+                                                    type="checkbox"
+                                                    checked={selectedLines.has(line.id)}
+                                                    onChange={() => onToggleLine(line.id)}
+                                                    className="w-4 h-4"
+                                                />
+                                            )}
+                                            <div className="flex-1">
+                                                <div className="font-medium">
+                                                    {line.productName} - {line.colorName} - {line.size}
+                                                </div>
+                                                <div className="text-sm text-gray-500">
+                                                    SKU: {line.skuCode} | Qty: {line.qty}
+                                                </div>
+                                                {!line.eligibility.eligible && (
+                                                    <div className="text-sm text-red-600 mt-1">
+                                                        Not eligible: {line.eligibility.reason}
+                                                    </div>
+                                                )}
+                                            </div>
+                                            {selectedLines.has(line.id) && (
+                                                <input
+                                                    type="number"
+                                                    min="1"
+                                                    max={line.qty}
+                                                    value={returnQtyMap[line.id] || 1}
+                                                    onChange={(e) =>
+                                                        setReturnQtyMap({
+                                                            ...returnQtyMap,
+                                                            [line.id]: parseInt(e.target.value, 10),
+                                                        })
+                                                    }
+                                                    className="w-20 px-2 py-1 border border-gray-300 rounded"
+                                                    onClick={(e) => e.stopPropagation()}
+                                                />
+                                            )}
                                         </div>
-                                        {item.unitPrice && <span className="text-sm font-medium">₹{item.unitPrice}</span>}
-                                    </label>
+                                    </div>
                                 ))}
                             </div>
-                            <div className="flex gap-2 pt-4">
-                                <button className="btn-secondary" onClick={() => setStep(1)}>Back</button>
-                                <button className="btn-primary flex-1" onClick={() => setStep(3)} disabled={selectedItems.length === 0}>
-                                    Continue ({selectedItems.length} selected)
-                                </button>
-                            </div>
                         </div>
                     )}
 
-                    {step === 3 && order && (
+                    {/* Step 3: Return Details */}
+                    {selectedLines.size > 0 && (
                         <div className="space-y-4">
-                            {/* Return Value Summary */}
-                            <div className="bg-gray-50 p-4 rounded-lg">
-                                <div className="text-sm text-gray-600">Return Value</div>
-                                <div className="text-2xl font-bold text-gray-900">₹{returnValue.toLocaleString()}</div>
-                                <div className="text-xs text-gray-500">{selectedItems.length} item{selectedItems.length > 1 ? 's' : ''} selected</div>
-                            </div>
-
-                            {/* Resolution Type */}
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">What does the customer want?</label>
-                                <div className="grid grid-cols-2 gap-3">
-                                    <label className={`p-4 border-2 rounded-lg cursor-pointer transition-colors ${resolution === 'refund' ? 'border-primary-500 bg-primary-50' : 'border-gray-200 hover:bg-gray-50'}`}>
-                                        <input type="radio" className="sr-only" checked={resolution === 'refund'} onChange={() => setResolution('refund')} />
-                                        <div className="flex items-center gap-2">
-                                            <DollarSign size={20} className={resolution === 'refund' ? 'text-primary-600' : 'text-gray-400'} />
-                                            <span className="font-medium">Full Refund</span>
-                                        </div>
-                                        <div className="text-sm text-gray-500 mt-1">Refund ₹{returnValue.toLocaleString()}</div>
-                                    </label>
-                                    <label className={`p-4 border-2 rounded-lg cursor-pointer transition-colors ${resolution === 'exchange_same' ? 'border-primary-500 bg-primary-50' : 'border-gray-200 hover:bg-gray-50'}`}>
-                                        <input type="radio" className="sr-only" checked={resolution === 'exchange_same'} onChange={() => setResolution('exchange_same')} />
-                                        <div className="flex items-center gap-2">
-                                            <RotateCcw size={20} className={resolution === 'exchange_same' ? 'text-primary-600' : 'text-gray-400'} />
-                                            <span className="font-medium">Exchange</span>
-                                        </div>
-                                        <div className="text-sm text-gray-500 mt-1">Same or different item</div>
-                                    </label>
-                                </div>
-                                {resolution === 'exchange_same' && (
-                                    <div className="mt-3 p-3 bg-blue-50 rounded-lg text-sm text-blue-800">
-                                        <strong>Note:</strong> Replacement item will be selected after ticket is created. Value difference will be calculated then.
-                                    </div>
-                                )}
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Reason *</label>
-                                <select className="input w-full" value={reasonCategory} onChange={(e) => setReasonCategory(e.target.value)}>
+                                <label className="block text-sm font-medium mb-2">Reason Category</label>
+                                <select
+                                    value={returnReasonCategory}
+                                    onChange={(e) => setReturnReasonCategory(e.target.value)}
+                                    className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                                >
                                     <option value="">Select reason...</option>
-                                    {REASON_CATEGORIES.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+                                    {RETURN_REASON_CATEGORIES.map((cat) => (
+                                        <option key={cat.value} value={cat.value}>
+                                            {cat.label}
+                                        </option>
+                                    ))}
                                 </select>
                             </div>
+
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Additional Details</label>
-                                <textarea className="input w-full" rows={2} placeholder="Optional notes..." value={reasonDetails} onChange={(e) => setReasonDetails(e.target.value)} />
+                                <label className="block text-sm font-medium mb-2">Reason Detail (Optional)</label>
+                                <textarea
+                                    value={returnReasonDetail}
+                                    onChange={(e) => setReturnReasonDetail(e.target.value)}
+                                    className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                                    rows={2}
+                                />
                             </div>
-                            <div className="border-t pt-4">
-                                <h3 className="font-medium text-gray-900 mb-3 flex items-center gap-2"><Truck size={16} />Reverse Pickup (Optional)</h3>
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">Courier</label>
-                                        <input type="text" className="input w-full" placeholder="e.g., Delhivery" value={courier} onChange={(e) => setCourier(e.target.value)} />
-                                    </div>
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">AWB Number</label>
-                                        <input type="text" className="input w-full" placeholder="Tracking number" value={awbNumber} onChange={(e) => setAwbNumber(e.target.value)} />
-                                    </div>
+
+                            <div>
+                                <label className="block text-sm font-medium mb-2">Resolution</label>
+                                <div className="flex gap-2">
+                                    {RETURN_RESOLUTIONS.map((res) => (
+                                        <button
+                                            key={res.value}
+                                            onClick={() => setReturnResolution(res.value as any)}
+                                            className={`px-4 py-2 rounded-lg border ${
+                                                returnResolution === res.value
+                                                    ? 'border-blue-600 bg-blue-50 text-blue-700'
+                                                    : 'border-gray-300'
+                                            }`}
+                                        >
+                                            {res.label}
+                                        </button>
+                                    ))}
                                 </div>
                             </div>
-                            <div className="flex gap-2 pt-4">
-                                <button className="btn-secondary" onClick={() => setStep(2)}>Back</button>
-                                <button className="btn-primary flex-1" onClick={handleSubmit} disabled={!reasonCategory || createMutation.isPending}>
-                                    {createMutation.isPending ? <div className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full" /> : 'Create Return Request'}
-                                </button>
+
+                            {returnResolution === 'exchange' && (
+                                <div>
+                                    <label className="block text-sm font-medium mb-2">Exchange SKU ID</label>
+                                    <input
+                                        type="text"
+                                        value={exchangeSkuId}
+                                        onChange={(e) => setExchangeSkuId(e.target.value)}
+                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                                        placeholder="Enter SKU ID for exchange..."
+                                    />
+                                </div>
+                            )}
+
+                            <div>
+                                <label className="block text-sm font-medium mb-2">Notes (Optional)</label>
+                                <textarea
+                                    value={returnNotes}
+                                    onChange={(e) => setReturnNotes(e.target.value)}
+                                    className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                                    rows={2}
+                                />
                             </div>
                         </div>
                     )}
+                </div>
+
+                <div className="p-6 border-t border-gray-200 flex justify-end gap-2 sticky bottom-0 bg-white">
+                    <button onClick={onClose} className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50">
+                        Cancel
+                    </button>
+                    <button
+                        onClick={onInitiate}
+                        disabled={selectedLines.size === 0 || !returnReasonCategory}
+                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                    >
+                        Initiate Return
+                    </button>
                 </div>
             </div>
         </div>
@@ -2050,205 +1134,116 @@ function NewReturnModal({ onClose, onSuccess }: { onClose: () => void; onSuccess
 }
 
 // ============================================
-// RETURN DETAIL MODAL (Keeping existing for now - will update in Phase 4)
+// QC MODAL
 // ============================================
 
-function ReturnDetailModal({
-    request,
-    onClose,
-    onSuccess,
-}: {
-    request: ReturnRequest;
+interface QcModalProps {
+    item: RepackingQueueItem;
+    action: 'ready' | 'write_off';
+    setAction: (action: 'ready' | 'write_off') => void;
+    comments: string;
+    setComments: (val: string) => void;
+    writeOffReason: string;
+    setWriteOffReason: (val: string) => void;
+    onProcess: () => void;
     onClose: () => void;
-    onSuccess: () => void;
-}) {
-    const [reasonCategory, setReasonCategory] = useState(request.reasonCategory);
-    const [reasonDetails, setReasonDetails] = useState(request.reasonDetails || '');
-    const [courier, setCourier] = useState(request.shipping?.[0]?.courier || '');
-    const [awbNumber, setAwbNumber] = useState(request.shipping?.[0]?.awbNumber || '');
-    const [error, setError] = useState('');
-    const [localLines] = useState(request.lines || []);
+}
 
-    const updateReturnRequestFn = useServerFn(updateReturnRequest);
-    const markReverseReceivedFn = useServerFn(markReverseReceived);
-    const unmarkReverseReceivedFn = useServerFn(unmarkReverseReceived);
-    const markForwardDeliveredFn = useServerFn(markForwardDelivered);
-    const unmarkForwardDeliveredFn = useServerFn(unmarkForwardDelivered);
-
-    const updateMutation = useMutation({
-        mutationFn: (data: {
-            reasonCategory?: string;
-            reasonDetails?: string;
-            courier?: string;
-            awbNumber?: string;
-        }) => updateReturnRequestFn({ data: { id: request.id, ...data } }),
-        onSuccess: () => onSuccess(),
-        onError: (err: Error) => setError(err?.message || 'Failed to update'),
-    });
-
-    const markReverseReceivedMutation = useMutation({
-        mutationFn: () => markReverseReceivedFn({ data: { id: request.id } }),
-        onSuccess: () => onSuccess(),
-    });
-
-    const unmarkReverseReceivedMutation = useMutation({
-        mutationFn: () => unmarkReverseReceivedFn({ data: { id: request.id } }),
-        onSuccess: () => onSuccess(),
-    });
-
-    const markForwardDeliveredMutation = useMutation({
-        mutationFn: () => markForwardDeliveredFn({ data: { id: request.id } }),
-        onSuccess: () => onSuccess(),
-    });
-
-    const unmarkForwardDeliveredMutation = useMutation({
-        mutationFn: () => unmarkForwardDeliveredFn({ data: { id: request.id } }),
-        onSuccess: () => onSuccess(),
-    });
-
-    const handleSubmit = () => {
-        updateMutation.mutate({
-            reasonCategory,
-            reasonDetails: reasonDetails || undefined,
-            courier: courier || undefined,
-            awbNumber: awbNumber || undefined,
-        });
-    };
-
-    const canModify = !['resolved', 'cancelled', 'completed'].includes(request.status);
-    const resolutionInfo = getResolutionBadge(request.resolution, request.requestType);
-
+function QcModal({
+    item,
+    action,
+    setAction,
+    comments,
+    setComments,
+    writeOffReason,
+    setWriteOffReason,
+    onProcess,
+    onClose,
+}: QcModalProps) {
     return (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
-                <div className="flex items-center justify-between p-4 border-b bg-gray-50">
-                    <div>
-                        <h2 className="text-lg font-bold text-gray-900">{request.requestNumber}</h2>
-                        <div className="flex items-center gap-2 mt-1">
-                            <span className={`badge text-xs ${resolutionInfo.color}`}>{resolutionInfo.label}</span>
-                            <span className={`badge text-xs ${getStatusBadge(request.status)}`}>{request.status.replace(/_/g, ' ')}</span>
-                        </div>
-                    </div>
-                    <button onClick={onClose} className="p-2 hover:bg-gray-200 rounded-lg"><X size={20} /></button>
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-lg max-w-lg w-full">
+                <div className="p-6 border-b border-gray-200 flex items-center justify-between">
+                    <h2 className="text-xl font-bold">Quality Check</h2>
+                    <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
+                        <X size={24} />
+                    </button>
                 </div>
 
-                <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                    {error && <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">{error}</div>}
-
-                    {/* Customer Info */}
-                    <div className="bg-gray-50 rounded-lg p-4">
-                        <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center">
-                                <span className="text-blue-700 font-semibold">{(request.customer?.name || 'U')[0].toUpperCase()}</span>
-                            </div>
-                            <div>
-                                <div className="font-medium">{request.customer?.name || request.originalOrder?.customerName}</div>
-                                <div className="text-xs text-gray-500">Order #{request.originalOrder?.orderNumber}</div>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Items */}
+                <div className="p-6 space-y-4">
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Items ({localLines.length})</label>
-                        <div className="space-y-2">
-                            {localLines.map((line) => {
-                                const imageUrl = line.sku?.variation?.imageUrl || line.sku?.variation?.product?.imageUrl;
-                                const isReceived = !!line.itemCondition;
-                                return (
-                                    <div key={line.id} className={`flex items-center gap-3 p-3 rounded-lg ${isReceived ? 'bg-green-50' : 'bg-gray-50'}`}>
-                                        {imageUrl && <img src={imageUrl} alt="" className="w-12 h-12 object-cover rounded" />}
-                                        <div className="flex-1">
-                                            <div className="font-medium text-sm">{line.sku?.variation?.product?.name}</div>
-                                            <div className="text-xs text-gray-500">{line.sku?.variation?.colorName} • {line.sku?.size}</div>
-                                        </div>
-                                        {isReceived ? (
-                                            <span className="text-xs text-green-600 flex items-center gap-1"><Check size={12} />{line.itemCondition}</span>
-                                        ) : (
-                                            <span className="text-xs text-amber-600">Pending</span>
-                                        )}
-                                    </div>
-                                );
-                            })}
+                        <div className="font-medium">{item.productName}</div>
+                        <div className="text-sm text-gray-500">
+                            {item.colorName} - {item.size} ({item.skuCode})
                         </div>
-                    </div>
-
-                    {/* Reason */}
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Reason</label>
-                        <select className="input w-full" value={reasonCategory} onChange={(e) => setReasonCategory(e.target.value)} disabled={!canModify}>
-                            {REASON_CATEGORIES.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
-                        </select>
+                        <div className="text-sm text-gray-500">Qty: {item.qty}</div>
                     </div>
 
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Additional Details</label>
-                        <textarea className="input w-full" rows={2} value={reasonDetails} onChange={(e) => setReasonDetails(e.target.value)} disabled={!canModify} />
-                    </div>
-
-                    {/* Shipping */}
-                    <div className="border-t pt-4">
-                        <h3 className="font-medium text-gray-900 mb-3 flex items-center gap-2"><Truck size={16} />Reverse Pickup</h3>
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Courier</label>
-                                <input type="text" className="input w-full" value={courier} onChange={(e) => setCourier(e.target.value)} disabled={!canModify} />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">AWB Number</label>
-                                <input type="text" className="input w-full" value={awbNumber} onChange={(e) => setAwbNumber(e.target.value)} disabled={!canModify} />
-                            </div>
+                        <label className="block text-sm font-medium mb-2">Decision</label>
+                        <div className="flex gap-2">
+                            <button
+                                onClick={() => setAction('ready')}
+                                className={`flex-1 px-4 py-2 rounded-lg border ${
+                                    action === 'ready'
+                                        ? 'border-green-600 bg-green-50 text-green-700'
+                                        : 'border-gray-300'
+                                }`}
+                            >
+                                Ready to Sell
+                            </button>
+                            <button
+                                onClick={() => setAction('write_off')}
+                                className={`flex-1 px-4 py-2 rounded-lg border ${
+                                    action === 'write_off'
+                                        ? 'border-red-600 bg-red-50 text-red-700'
+                                        : 'border-gray-300'
+                                }`}
+                            >
+                                Write Off
+                            </button>
                         </div>
                     </div>
 
-                    {/* Exchange Tracking */}
-                    {(request.requestType === 'exchange' || request.resolution?.startsWith('exchange')) && (
-                        <div className="border-t pt-4">
-                            <h3 className="font-medium text-gray-900 mb-3 flex items-center gap-2"><Package size={16} />Exchange Tracking</h3>
-                            <div className="grid grid-cols-2 gap-4">
-                                <div className={`p-3 rounded-lg border ${request.reverseReceived ? 'bg-green-50 border-green-200' : 'bg-gray-50'}`}>
-                                    <div className="text-sm font-medium mb-2">Reverse Shipment</div>
-                                    {request.reverseReceived ? (
-                                        <div className="flex items-center justify-between">
-                                            <span className="text-xs text-green-700">Received {formatDate(request.reverseReceivedAt)}</span>
-                                            <button onClick={() => unmarkReverseReceivedMutation.mutate()} className="text-xs text-red-600">Undo</button>
-                                        </div>
-                                    ) : (
-                                        <button onClick={() => markReverseReceivedMutation.mutate()} className="w-full text-xs bg-blue-600 text-white py-1 rounded">
-                                            Mark Received
-                                        </button>
-                                    )}
-                                </div>
-                                <div className={`p-3 rounded-lg border ${request.forwardDelivered ? 'bg-green-50 border-green-200' : 'bg-gray-50'}`}>
-                                    <div className="text-sm font-medium mb-2">Forward Shipment</div>
-                                    {request.forwardDelivered ? (
-                                        <div className="flex items-center justify-between">
-                                            <span className="text-xs text-green-700">Delivered {formatDate(request.forwardDeliveredAt)}</span>
-                                            <button onClick={() => unmarkForwardDeliveredMutation.mutate()} className="text-xs text-red-600">Undo</button>
-                                        </div>
-                                    ) : (
-                                        <button onClick={() => markForwardDeliveredMutation.mutate()} className="w-full text-xs bg-blue-600 text-white py-1 rounded">
-                                            Mark Delivered
-                                        </button>
-                                    )}
-                                </div>
-                            </div>
-                            {request.reverseReceived && request.forwardDelivered && (
-                                <div className="mt-3 p-2 bg-green-100 text-green-800 text-sm rounded-lg text-center">
-                                    Exchange complete - auto-resolved
-                                </div>
-                            )}
+                    {action === 'write_off' && (
+                        <div>
+                            <label className="block text-sm font-medium mb-2">Write-off Reason</label>
+                            <select
+                                value={writeOffReason}
+                                onChange={(e) => setWriteOffReason(e.target.value)}
+                                className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                            >
+                                <option value="">Select reason...</option>
+                                {WRITE_OFF_REASONS.map((r) => (
+                                    <option key={r.value} value={r.value}>
+                                        {r.label}
+                                    </option>
+                                ))}
+                            </select>
                         </div>
                     )}
+
+                    <div>
+                        <label className="block text-sm font-medium mb-2">QC Comments (Optional)</label>
+                        <textarea
+                            value={comments}
+                            onChange={(e) => setComments(e.target.value)}
+                            className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                            rows={3}
+                        />
+                    </div>
                 </div>
 
-                <div className="flex items-center justify-end gap-3 p-4 border-t bg-gray-50">
-                    <button className="btn-secondary" onClick={onClose}>Close</button>
-                    {canModify && (
-                        <button className="btn-primary" onClick={handleSubmit} disabled={updateMutation.isPending}>
-                            {updateMutation.isPending ? 'Saving...' : 'Save Changes'}
-                        </button>
-                    )}
+                <div className="p-6 border-t border-gray-200 flex justify-end gap-2">
+                    <button onClick={onClose} className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50">
+                        Cancel
+                    </button>
+                    <button
+                        onClick={onProcess}
+                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                    >
+                        Process
+                    </button>
                 </div>
             </div>
         </div>
