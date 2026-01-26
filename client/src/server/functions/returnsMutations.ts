@@ -13,6 +13,7 @@
 'use server';
 
 import { createServerFn } from '@tanstack/react-start';
+import { getCookie } from '@tanstack/react-start/server';
 import { z } from 'zod';
 import { authMiddleware, type AuthUser } from '../middleware/auth';
 import type { PrismaClient } from '@prisma/client';
@@ -1003,9 +1004,14 @@ export const scheduleReturnPickup = createServerFn({ method: 'POST' })
         if (scheduleWithIthink) {
             try {
                 const baseUrl = process.env.VITE_API_URL || 'http://localhost:3001';
+                const authToken = getCookie('auth_token');
+                const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+                if (authToken) {
+                    headers['Authorization'] = `Bearer ${authToken}`;
+                }
                 const response = await fetch(`${baseUrl}/api/returns/schedule-pickup`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers,
                     body: JSON.stringify({ orderLineId }),
                 });
 
