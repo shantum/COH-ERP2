@@ -264,6 +264,8 @@ export const InitiateReturnBatchInputSchema = z.object({
     returnResolution: ReturnResolutionSchema,
     returnNotes: z.string().optional(),
     exchangeSkuId: z.string().uuid().optional(),
+    /** How the return will be picked up */
+    pickupType: ReturnPickupTypeSchema.optional(),
 });
 export type InitiateReturnBatchInput = z.infer<typeof InitiateReturnBatchInputSchema>;
 

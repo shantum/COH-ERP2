@@ -881,7 +881,7 @@ export const initiateLineReturn = createServerFn({ method: 'POST' })
         console.log('[initiateLineReturn] Handler started with data:', JSON.stringify(data, null, 2));
         try {
         const prisma = await getPrismaInstance();
-        const { lines, returnReasonCategory, returnReasonDetail, returnResolution, returnNotes, exchangeSkuId } = data;
+        const { lines, returnReasonCategory, returnReasonDetail, returnResolution, returnNotes, exchangeSkuId, pickupType } = data;
 
         // Fetch all lines with order and sku info
         const orderLines = await prisma.orderLine.findMany({
@@ -960,6 +960,7 @@ export const initiateLineReturn = createServerFn({ method: 'POST' })
                         returnResolution,
                         returnNotes: returnNotes || null,
                         returnExchangeSkuId: exchangeSkuId || null,
+                        returnPickupType: pickupType || null,
                     },
                 });
 

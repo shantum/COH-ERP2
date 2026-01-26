@@ -140,6 +140,7 @@ export default function Returns() {
     const [returnReasonCategory, setReturnReasonCategory] = useState('');
     const [returnReasonDetail, setReturnReasonDetail] = useState('');
     const [returnResolution, setReturnResolution] = useState<'refund' | 'exchange' | 'rejected'>('refund');
+    const [returnPickupType, setReturnPickupType] = useState<'arranged_by_us' | 'customer_shipped'>('arranged_by_us');
     const [returnNotes, setReturnNotes] = useState('');
     const [exchangeSkuId, setExchangeSkuId] = useState('');
 
@@ -390,6 +391,7 @@ export default function Returns() {
             returnReasonDetail,
             returnResolution,
             returnNotes,
+            pickupType: returnPickupType,
             ...(returnResolution === 'exchange' && exchangeSkuId ? { exchangeSkuId } : {}),
         }});
     };
@@ -402,6 +404,7 @@ export default function Returns() {
         setReturnReasonCategory('');
         setReturnReasonDetail('');
         setReturnResolution('refund');
+        setReturnPickupType('arranged_by_us');
         setReturnNotes('');
         setExchangeSkuId('');
     };
@@ -635,6 +638,8 @@ export default function Returns() {
                     setReturnReasonDetail={setReturnReasonDetail}
                     returnResolution={returnResolution}
                     setReturnResolution={setReturnResolution}
+                    returnPickupType={returnPickupType}
+                    setReturnPickupType={setReturnPickupType}
                     returnNotes={returnNotes}
                     setReturnNotes={setReturnNotes}
                     exchangeSkuId={exchangeSkuId}
@@ -1481,6 +1486,8 @@ interface InitiateReturnModalProps {
     setReturnReasonDetail: (val: string) => void;
     returnResolution: 'refund' | 'exchange' | 'rejected';
     setReturnResolution: (val: 'refund' | 'exchange' | 'rejected') => void;
+    returnPickupType: 'arranged_by_us' | 'customer_shipped';
+    setReturnPickupType: (val: 'arranged_by_us' | 'customer_shipped') => void;
     returnNotes: string;
     setReturnNotes: (val: string) => void;
     exchangeSkuId: string;
@@ -1504,6 +1511,8 @@ function InitiateReturnModal({
     setReturnReasonDetail,
     returnResolution,
     setReturnResolution,
+    returnPickupType,
+    setReturnPickupType,
     returnNotes,
     setReturnNotes,
     exchangeSkuId,
@@ -1670,6 +1679,44 @@ function InitiateReturnModal({
                                             {res.label}
                                         </button>
                                     ))}
+                                </div>
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium mb-2">Pickup Method</label>
+                                <div className="flex gap-2">
+                                    <button
+                                        onClick={() => setReturnPickupType('arranged_by_us')}
+                                        className={`flex-1 px-4 py-3 rounded-lg border text-left ${
+                                            returnPickupType === 'arranged_by_us'
+                                                ? 'border-blue-600 bg-blue-50 text-blue-700'
+                                                : 'border-gray-300'
+                                        }`}
+                                    >
+                                        <div className="flex items-center gap-2">
+                                            <Truck size={18} />
+                                            <div>
+                                                <div className="font-medium">We'll arrange pickup</div>
+                                                <div className="text-xs text-gray-500">Schedule reverse pickup via courier</div>
+                                            </div>
+                                        </div>
+                                    </button>
+                                    <button
+                                        onClick={() => setReturnPickupType('customer_shipped')}
+                                        className={`flex-1 px-4 py-3 rounded-lg border text-left ${
+                                            returnPickupType === 'customer_shipped'
+                                                ? 'border-blue-600 bg-blue-50 text-blue-700'
+                                                : 'border-gray-300'
+                                        }`}
+                                    >
+                                        <div className="flex items-center gap-2">
+                                            <Package size={18} />
+                                            <div>
+                                                <div className="font-medium">Customer ships</div>
+                                                <div className="text-xs text-gray-500">Customer will ship the item themselves</div>
+                                            </div>
+                                        </div>
+                                    </button>
                                 </div>
                             </div>
 
