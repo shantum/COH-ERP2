@@ -120,10 +120,10 @@ export function useUnifiedOrderModal({ order, initialMode, onNavigateToOrder }: 
     bypassVerification: false,
   });
 
-  // Return form state
+  // Return form state (multi-select)
   const [returnForm, setReturnForm] = useState<ReturnFormState>({
-    selectedLineId: null,
-    returnQty: 1,
+    selectedLineIds: new Set<string>(),
+    returnQtyMap: {},
     returnReasonCategory: '',
     returnReasonDetail: '',
     returnResolution: null,
@@ -282,8 +282,8 @@ export function useUnifiedOrderModal({ order, initialMode, onNavigateToOrder }: 
     // Reset return form when leaving returns mode
     if (mode === 'returns' && newMode !== 'returns') {
       setReturnForm({
-        selectedLineId: null,
-        returnQty: 1,
+        selectedLineIds: new Set<string>(),
+        returnQtyMap: {},
         returnReasonCategory: '',
         returnReasonDetail: '',
         returnResolution: null,
@@ -422,23 +422,64 @@ export function useUnifiedOrderModal({ order, initialMode, onNavigateToOrder }: 
     setReturnForm(prev => ({ ...prev, [field]: value }));
   }, []);
 
-  // Select a line for return (with default qty)
-  const handleSelectLineForReturn = useCallback((lineId: string | null, defaultQty?: number) => {
+  // Toggle line selection for return (multi-select)
+  const handleToggleReturnLineSelection = useCallback((lineId: string, defaultQty?: number) => {
+    setReturnForm(prev => {
+      const newSelectedLineIds = new Set(prev.selectedLineIds);
+      const newReturnQtyMap = { ...prev.returnQtyMap };
+
+      if (newSelectedLineIds.has(lineId)) {
+        // Deselect
+        newSelectedLineIds.delete(lineId);
+        delete newReturnQtyMap[lineId];
+      } else {
+        // Select
+        newSelectedLineIds.add(lineId);
+        newReturnQtyMap[lineId] = defaultQty ?? 1;
+      }
+
+      return {
+        ...prev,
+        selectedLineIds: newSelectedLineIds,
+        returnQtyMap: newReturnQtyMap,
+      };
+    });
+  }, []);
+
+  // Update return quantity for a specific line
+  const handleUpdateReturnQty = useCallback((lineId: string, qty: number) => {
     setReturnForm(prev => ({
       ...prev,
-      selectedLineId: lineId,
-      returnQty: defaultQty ?? 1,
-      returnReasonCategory: '',
-      returnReasonDetail: '',
-      returnResolution: null,
+      returnQtyMap: {
+        ...prev.returnQtyMap,
+        [lineId]: qty,
+      },
     }));
   }, []);
+
+  // Select a line for return (legacy single-select - for backward compatibility)
+  const handleSelectLineForReturn = useCallback((lineId: string | null, defaultQty?: number) => {
+    if (lineId === null) {
+      // Clear all selections
+      setReturnForm(prev => ({
+        ...prev,
+        selectedLineIds: new Set<string>(),
+        returnQtyMap: {},
+        returnReasonCategory: '',
+        returnReasonDetail: '',
+        returnResolution: null,
+      }));
+    } else {
+      // Toggle selection
+      handleToggleReturnLineSelection(lineId, defaultQty);
+    }
+  }, [handleToggleReturnLineSelection]);
 
   // Reset return form
   const resetReturnForm = useCallback(() => {
     setReturnForm({
-      selectedLineId: null,
-      returnQty: 1,
+      selectedLineIds: new Set<string>(),
+      returnQtyMap: {},
       returnReasonCategory: '',
       returnReasonDetail: '',
       returnResolution: null,
@@ -587,6 +628,8 @@ export function useUnifiedOrderModal({ order, initialMode, onNavigateToOrder }: 
     returnForm,
     handleReturnFieldChange,
     handleSelectLineForReturn,
+    handleToggleReturnLineSelection,
+    handleUpdateReturnQty,
     resetReturnForm,
     getLineEligibility,
 

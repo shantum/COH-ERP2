@@ -699,6 +699,23 @@ interface ActionQueueTabProps {
     onUpdateNotes: (lineId: string, notes: string) => void;
 }
 
+/**
+ * Group items by batch number for display
+ */
+function groupByBatch(items: ServerReturnActionQueueItem[]): Map<string, ServerReturnActionQueueItem[]> {
+    const groups = new Map<string, ServerReturnActionQueueItem[]>();
+
+    for (const item of items) {
+        // Use batch number if available, otherwise use order number as fallback
+        const key = item.returnBatchNumber || `single-${item.id}`;
+        const existing = groups.get(key) || [];
+        existing.push(item);
+        groups.set(key, existing);
+    }
+
+    return groups;
+}
+
 function ActionQueueTab({
     items,
     loading,
@@ -744,184 +761,226 @@ function ActionQueueTab({
         );
     }
 
+    // Group items by batch number
+    const batches = groupByBatch(items);
+
     return (
         <div className="space-y-4">
-            {items.map((item) => (
-                <div key={item.id} className="border border-gray-200 rounded-lg p-4 bg-white">
-                    <div className="flex items-start justify-between">
-                        <div className="flex gap-4">
-                            <div className="w-16 h-16 bg-gray-100 rounded flex items-center justify-center">
-                                {item.imageUrl ? (
-                                    <img
-                                        src={item.imageUrl}
-                                        alt={item.productName || ''}
-                                        className="w-full h-full object-cover rounded"
-                                    />
-                                ) : (
-                                    <Package size={24} className="text-gray-400" />
-                                )}
-                            </div>
-                            <div>
-                                <div className="flex items-center gap-2 mb-1">
-                                    <span className="font-medium">{item.orderNumber}</span>
-                                    <span className={`px-2 py-0.5 text-xs rounded ${getStatusBadge(item.returnStatus)}`}>
-                                        {item.returnStatus}
-                                    </span>
-                                    <span className={`px-2 py-0.5 text-xs rounded ${getResolutionBadge(item.returnResolution).color}`}>
-                                        {getResolutionBadge(item.returnResolution).label}
+            {Array.from(batches.entries()).map(([batchKey, batchItems]) => {
+                const firstItem = batchItems[0];
+                const isBatch = batchItems.length > 1;
+                const batchNumber = firstItem.returnBatchNumber;
+
+                // Check if all items in batch need pickup (for batch-level button)
+                const allNeedPickup = batchItems.every(i => i.actionNeeded === 'schedule_pickup');
+
+                return (
+                    <div key={batchKey} className="border border-gray-200 rounded-lg bg-white overflow-hidden">
+                        {/* Batch Header */}
+                        {isBatch && batchNumber && (
+                            <div className="px-4 py-2 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                    <span className="font-medium text-gray-700">Batch {batchNumber}</span>
+                                    <span className="text-sm text-gray-500">
+                                        {batchItems.length} items • {firstItem.customerName}
                                     </span>
                                 </div>
-                                <div className="text-sm text-gray-600">
-                                    {item.productName} - {item.colorName} - {item.size}
-                                </div>
-                                <div className="text-sm text-gray-500">
-                                    SKU: {item.skuCode} | Qty: {item.returnQty} | Customer: {item.customerName}
-                                </div>
-                                {item.returnReasonCategory && (
-                                    <div className="text-xs text-gray-500 mt-1">
-                                        Reason: {item.returnReasonCategory}
-                                        {item.returnReasonDetail && ` - ${item.returnReasonDetail}`}
-                                    </div>
+                                {/* Batch-level action button */}
+                                {allNeedPickup && (
+                                    <button
+                                        onClick={() => onSchedulePickup(firstItem.id)}
+                                        className="px-4 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center gap-2 text-sm"
+                                    >
+                                        <Truck size={14} />
+                                        Schedule Pickup for Batch
+                                    </button>
                                 )}
-                                <div className="text-xs text-gray-400 mt-1">
-                                    Requested {item.daysSinceRequest} days ago
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Action Buttons */}
-                        <div className="flex flex-col gap-2 shrink-0">
-                            {item.actionNeeded === 'schedule_pickup' && (
-                                <button
-                                    onClick={() => onSchedulePickup(item.id)}
-                                    className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center gap-2"
-                                >
-                                    <Truck size={16} />
-                                    Schedule Pickup
-                                </button>
-                            )}
-
-                            {item.actionNeeded === 'receive' && (
-                                <div className="flex flex-col gap-2">
-                                    <select
-                                        value={receiveConditionMap[item.id] || ''}
-                                        onChange={(e) =>
-                                            setReceiveConditionMap({ ...receiveConditionMap, [item.id]: e.target.value })
-                                        }
-                                        className="px-3 py-2 border border-gray-300 rounded text-sm"
-                                    >
-                                        <option value="">Select Condition</option>
-                                        {conditionOptions.map((c) => (
-                                            <option key={c.value} value={c.value}>
-                                                {c.label}
-                                            </option>
-                                        ))}
-                                    </select>
-                                    <button
-                                        onClick={() => {
-                                            const condition = receiveConditionMap[item.id] as 'good' | 'damaged' | 'defective' | 'wrong_item' | 'used' | undefined;
-                                            if (condition) {
-                                                onReceive(item.id, condition);
-                                            } else {
-                                                alert('Please select a condition');
-                                            }
-                                        }}
-                                        className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 flex items-center gap-2"
-                                    >
-                                        <PackageCheck size={16} />
-                                        Receive
-                                    </button>
-                                </div>
-                            )}
-
-                            {item.actionNeeded === 'process_refund' && (
-                                <button
-                                    onClick={() => onProcessRefund(item.id, item)}
-                                    className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 flex items-center gap-2"
-                                >
-                                    <DollarSign size={16} />
-                                    Process Refund
-                                </button>
-                            )}
-
-                            {item.actionNeeded === 'create_exchange' && (
-                                <button
-                                    onClick={() => onCreateExchange(item.id)}
-                                    className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 flex items-center gap-2"
-                                >
-                                    <ArrowRight size={16} />
-                                    Create Exchange
-                                </button>
-                            )}
-
-                            {item.actionNeeded === 'complete' && (
-                                <button
-                                    onClick={() => onComplete(item.id)}
-                                    className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 flex items-center gap-2"
-                                >
-                                    <Check size={16} />
-                                    Complete
-                                </button>
-                            )}
-
-                            <button
-                                onClick={() => onCancel(item.id)}
-                                className="px-4 py-2 bg-red-100 text-red-800 rounded hover:bg-red-200 flex items-center gap-2"
-                            >
-                                <XCircle size={16} />
-                                Cancel
-                            </button>
-                        </div>
-                    </div>
-
-                    {/* Notes Section */}
-                    <div className="mt-3 pt-3 border-t border-gray-100">
-                        {editingNotesId === item.id ? (
-                            <div className="flex gap-2">
-                                <textarea
-                                    value={editingNotesValue}
-                                    onChange={(e) => setEditingNotesValue(e.target.value)}
-                                    placeholder="Add notes about this return..."
-                                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm resize-none"
-                                    rows={2}
-                                    autoFocus
-                                />
-                                <div className="flex flex-col gap-1">
-                                    <button
-                                        onClick={() => saveNotes(item.id)}
-                                        className="px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 flex items-center gap-1"
-                                    >
-                                        <Save size={14} />
-                                        Save
-                                    </button>
-                                    <button
-                                        onClick={cancelEditNotes}
-                                        className="px-3 py-1 bg-gray-100 text-gray-600 rounded text-sm hover:bg-gray-200"
-                                    >
-                                        Cancel
-                                    </button>
-                                </div>
-                            </div>
-                        ) : (
-                            <div className="flex items-start gap-2">
-                                <MessageSquare size={14} className="text-gray-400 mt-0.5 shrink-0" />
-                                {item.returnNotes ? (
-                                    <p className="text-sm text-gray-600 flex-1">{item.returnNotes}</p>
-                                ) : (
-                                    <p className="text-sm text-gray-400 italic flex-1">No notes</p>
-                                )}
-                                <button
-                                    onClick={() => startEditNotes(item.id, item.returnNotes)}
-                                    className="text-gray-400 hover:text-blue-600 p-1"
-                                    title="Edit notes"
-                                >
-                                    <Pencil size={14} />
-                                </button>
                             </div>
                         )}
+
+                        {/* Items in batch */}
+                        <div className={isBatch ? 'divide-y divide-gray-100' : ''}>
+                            {batchItems.map((item) => (
+                                <div key={item.id} className="p-4">
+                                    <div className="flex items-start justify-between">
+                                        <div className="flex gap-4">
+                                            <div className="w-16 h-16 bg-gray-100 rounded flex items-center justify-center">
+                                                {item.imageUrl ? (
+                                                    <img
+                                                        src={item.imageUrl}
+                                                        alt={item.productName || ''}
+                                                        className="w-full h-full object-cover rounded"
+                                                    />
+                                                ) : (
+                                                    <Package size={24} className="text-gray-400" />
+                                                )}
+                                            </div>
+                                            <div>
+                                                <div className="flex items-center gap-2 mb-1">
+                                                    {!isBatch && <span className="font-medium">{item.orderNumber}</span>}
+                                                    <span className={`px-2 py-0.5 text-xs rounded ${getStatusBadge(item.returnStatus)}`}>
+                                                        {item.returnStatus}
+                                                    </span>
+                                                    <span className={`px-2 py-0.5 text-xs rounded ${getResolutionBadge(item.returnResolution).color}`}>
+                                                        {getResolutionBadge(item.returnResolution).label}
+                                                    </span>
+                                                </div>
+                                                <div className="text-sm text-gray-600">
+                                                    {item.productName} - {item.colorName} - {item.size}
+                                                </div>
+                                                <div className="text-sm text-gray-500">
+                                                    SKU: {item.skuCode} | Qty: {item.returnQty}
+                                                    {!isBatch && ` | Customer: ${item.customerName}`}
+                                                </div>
+                                                {item.returnReasonCategory && (
+                                                    <div className="text-xs text-gray-500 mt-1">
+                                                        Reason: {item.returnReasonCategory}
+                                                        {item.returnReasonDetail && ` - ${item.returnReasonDetail}`}
+                                                    </div>
+                                                )}
+                                                <div className="text-xs text-gray-400 mt-1">
+                                                    Requested {item.daysSinceRequest} days ago
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Action Buttons - show per-item only if not a batch with shared action */}
+                                        <div className="flex flex-col gap-2 shrink-0">
+                                            {item.actionNeeded === 'schedule_pickup' && !isBatch && (
+                                                <button
+                                                    onClick={() => onSchedulePickup(item.id)}
+                                                    className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center gap-2"
+                                                >
+                                                    <Truck size={16} />
+                                                    Schedule Pickup
+                                                </button>
+                                            )}
+
+                                            {item.actionNeeded === 'receive' && (
+                                                <div className="flex flex-col gap-2">
+                                                    <select
+                                                        value={receiveConditionMap[item.id] || ''}
+                                                        onChange={(e) =>
+                                                            setReceiveConditionMap({ ...receiveConditionMap, [item.id]: e.target.value })
+                                                        }
+                                                        className="px-3 py-2 border border-gray-300 rounded text-sm"
+                                                    >
+                                                        <option value="">Select Condition</option>
+                                                        {conditionOptions.map((c) => (
+                                                            <option key={c.value} value={c.value}>
+                                                                {c.label}
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                    <button
+                                                        onClick={() => {
+                                                            const condition = receiveConditionMap[item.id] as 'good' | 'damaged' | 'defective' | 'wrong_item' | 'used' | undefined;
+                                                            if (condition) {
+                                                                onReceive(item.id, condition);
+                                                            } else {
+                                                                alert('Please select a condition');
+                                                            }
+                                                        }}
+                                                        className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 flex items-center gap-2"
+                                                    >
+                                                        <PackageCheck size={16} />
+                                                        Receive
+                                                    </button>
+                                                </div>
+                                            )}
+
+                                            {item.actionNeeded === 'process_refund' && (
+                                                <button
+                                                    onClick={() => onProcessRefund(item.id, item)}
+                                                    className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 flex items-center gap-2"
+                                                >
+                                                    <DollarSign size={16} />
+                                                    Process Refund
+                                                </button>
+                                            )}
+
+                                            {item.actionNeeded === 'create_exchange' && (
+                                                <button
+                                                    onClick={() => onCreateExchange(item.id)}
+                                                    className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 flex items-center gap-2"
+                                                >
+                                                    <ArrowRight size={16} />
+                                                    Create Exchange
+                                                </button>
+                                            )}
+
+                                            {item.actionNeeded === 'complete' && (
+                                                <button
+                                                    onClick={() => onComplete(item.id)}
+                                                    className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 flex items-center gap-2"
+                                                >
+                                                    <Check size={16} />
+                                                    Complete
+                                                </button>
+                                            )}
+
+                                            <button
+                                                onClick={() => onCancel(item.id)}
+                                                className="px-4 py-2 bg-red-100 text-red-800 rounded hover:bg-red-200 flex items-center gap-2"
+                                            >
+                                                <XCircle size={16} />
+                                                Cancel
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    {/* Notes Section */}
+                                    <div className="mt-3 pt-3 border-t border-gray-100">
+                                        {editingNotesId === item.id ? (
+                                            <div className="flex gap-2">
+                                                <textarea
+                                                    value={editingNotesValue}
+                                                    onChange={(e) => setEditingNotesValue(e.target.value)}
+                                                    placeholder="Add notes about this return..."
+                                                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm resize-none"
+                                                    rows={2}
+                                                    autoFocus
+                                                />
+                                                <div className="flex flex-col gap-1">
+                                                    <button
+                                                        onClick={() => saveNotes(item.id)}
+                                                        className="px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 flex items-center gap-1"
+                                                    >
+                                                        <Save size={14} />
+                                                        Save
+                                                    </button>
+                                                    <button
+                                                        onClick={cancelEditNotes}
+                                                        className="px-3 py-1 bg-gray-100 text-gray-600 rounded text-sm hover:bg-gray-200"
+                                                    >
+                                                        Cancel
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <div className="flex items-start gap-2">
+                                                <MessageSquare size={14} className="text-gray-400 mt-0.5 shrink-0" />
+                                                {item.returnNotes ? (
+                                                    <p className="text-sm text-gray-600 flex-1">{item.returnNotes}</p>
+                                                ) : (
+                                                    <p className="text-sm text-gray-400 italic flex-1">No notes</p>
+                                                )}
+                                                <button
+                                                    onClick={() => startEditNotes(item.id, item.returnNotes)}
+                                                    className="text-gray-400 hover:text-blue-600 p-1"
+                                                    title="Edit notes"
+                                                >
+                                                    <Pencil size={14} />
+                                                </button>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
                     </div>
-                </div>
-            ))}
+                );
+            })}
         </div>
     );
 }

@@ -441,6 +441,7 @@ export const ActiveReturnLineSchema = z.object({
     qty: z.number(),
     unitPrice: z.number(),
     // Return info
+    returnBatchNumber: z.string().nullable(),
     returnStatus: z.string(),
     returnQty: z.number(),
     returnRequestedAt: z.coerce.date().nullable(),

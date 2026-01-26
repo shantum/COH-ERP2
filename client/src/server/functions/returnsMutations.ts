@@ -873,8 +873,13 @@ async function generateBatchNumber(prisma: PrismaClient, orderId: string, orderN
  */
 export const initiateLineReturn = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
-    .inputValidator((input: unknown): InitiateReturnBatchInput => InitiateReturnBatchInputSchema.parse(input))
+    .inputValidator((input: unknown): InitiateReturnBatchInput => {
+        console.log('[initiateLineReturn] Input received:', JSON.stringify(input, null, 2));
+        return InitiateReturnBatchInputSchema.parse(input);
+    })
     .handler(async ({ data, context }: { data: InitiateReturnBatchInput; context: { user: AuthUser } }): Promise<ReturnResult<{ batchNumber: string; lineCount: number; orderLineIds: string[] }>> => {
+        console.log('[initiateLineReturn] Handler started with data:', JSON.stringify(data, null, 2));
+        try {
         const prisma = await getPrismaInstance();
         const { lines, returnReasonCategory, returnReasonDetail, returnResolution, returnNotes, exchangeSkuId } = data;
 
@@ -975,6 +980,7 @@ export const initiateLineReturn = createServerFn({ method: 'POST' })
         });
 
         const skuCodes = orderLines.map(l => l.sku.skuCode).join(', ');
+        console.log('[initiateLineReturn] Success - batch:', batchNumber);
         return returnSuccess(
             {
                 batchNumber,
@@ -983,6 +989,11 @@ export const initiateLineReturn = createServerFn({ method: 'POST' })
             },
             `Return batch ${batchNumber} created for ${skuCodes}`
         );
+        } catch (error: unknown) {
+            console.error('[initiateLineReturn] Error:', error);
+            const message = error instanceof Error ? error.message : 'Unknown error';
+            return returnError(RETURN_ERROR_CODES.UNKNOWN, message);
+        }
     });
 
 /**

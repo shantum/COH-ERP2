@@ -51,8 +51,8 @@ export interface ShipFormState {
 }
 
 export interface ReturnFormState {
-  selectedLineId: string | null;
-  returnQty: number;
+  selectedLineIds: Set<string>;
+  returnQtyMap: Record<string, number>;  // lineId -> qty
   returnReasonCategory: string;
   returnReasonDetail: string;
   returnResolution: 'refund' | 'exchange' | null;

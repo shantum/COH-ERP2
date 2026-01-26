@@ -141,6 +141,8 @@ export function UnifiedOrderModal({
     returnForm,
     handleReturnFieldChange,
     handleSelectLineForReturn,
+    handleToggleReturnLineSelection,
+    handleUpdateReturnQty,
     resetReturnForm,
     getLineEligibility,
     // Navigation
@@ -403,17 +405,24 @@ export function UnifiedOrderModal({
     }
   }, [mutations, queryClient, order.id, onSuccess]);
 
-  // Handle initiate return
+  // Handle initiate return (multi-select)
   const handleInitiateReturn = useCallback(async () => {
-    if (!returnForm.selectedLineId || !returnForm.returnReasonCategory || returnForm.returnResolution === null) {
+    if (returnForm.selectedLineIds.size === 0 || !returnForm.returnReasonCategory || returnForm.returnResolution === null) {
       return;
     }
 
     try {
+      // Build lines array from selected line IDs and their quantities
+      const lines = Array.from(returnForm.selectedLineIds).map(lineId => {
+        const line = order.orderLines?.find(l => l.id === lineId);
+        const returnQty = returnForm.returnQtyMap[lineId] ?? line?.qty ?? 1;
+        return { orderLineId: lineId, returnQty };
+      });
+
       const result = await initiateLineReturn({
         data: {
-          lines: [{ orderLineId: returnForm.selectedLineId, returnQty: returnForm.returnQty }],
-          returnReasonCategory: returnForm.returnReasonCategory,
+          lines,
+          returnReasonCategory: returnForm.returnReasonCategory as 'fit_size' | 'product_quality' | 'product_different' | 'wrong_item_sent' | 'damaged_in_transit' | 'changed_mind' | 'other',
           returnReasonDetail: returnForm.returnReasonDetail || undefined,
           returnResolution: returnForm.returnResolution,
         },
@@ -431,7 +440,8 @@ export function UnifiedOrderModal({
       queryClient.invalidateQueries({ queryKey: ['returns', 'action-queue'] });
 
       // Show success toast
-      showReturnSuccess(result.message || 'Return initiated successfully');
+      const itemCount = lines.length;
+      showReturnSuccess(result.message || `Return initiated for ${itemCount} item${itemCount !== 1 ? 's' : ''}`);
 
       // Reset form
       resetReturnForm();
@@ -440,7 +450,7 @@ export function UnifiedOrderModal({
       console.error('Failed to initiate return:', error);
       showReturnError(error, 'Initiate return');
     }
-  }, [returnForm, queryClient, order.id, resetReturnForm, onSuccess]);
+  }, [returnForm, queryClient, order.id, order.orderLines, resetReturnForm, onSuccess]);
 
   // Handle cancel return
   const handleCancelReturn = useCallback(async (lineId: string) => {
@@ -691,6 +701,8 @@ export function UnifiedOrderModal({
                   getLineEligibility={getLineEligibility}
                   onReturnFieldChange={handleReturnFieldChange}
                   onSelectLineForReturn={handleSelectLineForReturn}
+                  onToggleReturnLineSelection={handleToggleReturnLineSelection}
+                  onUpdateReturnQty={handleUpdateReturnQty}
                   onInitiateReturn={handleInitiateReturn}
                   onCancelReturn={handleCancelReturn}
                   onSchedulePickup={handleSchedulePickup}
