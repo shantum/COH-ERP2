@@ -253,6 +253,8 @@ export const ScheduleReturnPickupInputSchema = z.object({
     courier: z.string().optional(),
     awbNumber: z.string().optional(),
     scheduledAt: z.coerce.date().optional(),
+    /** When true, books pickup via iThink API and auto-generates AWB */
+    scheduleWithIthink: z.boolean().default(false),
 });
 export type ScheduleReturnPickupInput = z.infer<typeof ScheduleReturnPickupInputSchema>;
 
@@ -332,6 +334,15 @@ export const CreateExchangeOrderInputSchema = z.object({
     exchangeQty: z.number().int().positive(),
 });
 export type CreateExchangeOrderInput = z.infer<typeof CreateExchangeOrderInputSchema>;
+
+/**
+ * Input for updating return notes
+ */
+export const UpdateReturnNotesInputSchema = z.object({
+    orderLineId: z.string().uuid(),
+    returnNotes: z.string().max(1000),
+});
+export type UpdateReturnNotesInput = z.infer<typeof UpdateReturnNotesInputSchema>;
 
 // ============================================
 // QUERY RESULT SCHEMAS
@@ -420,6 +431,7 @@ export const ActiveReturnLineSchema = z.object({
     returnReceivedAt: z.coerce.date().nullable(),
     returnCondition: z.string().nullable(),
     returnExchangeOrderId: z.string().nullable(),
+    returnNotes: z.string().nullable(),
     // Customer info
     customerId: z.string().nullable(),
     customerName: z.string(),

@@ -126,6 +126,7 @@ const { data } = useQuery({
 |---|------|
 | 7 | Prisma dates return Date objects: use `toDateString()` from `utils/dateHelpers.ts` |
 | 8 | Dev URLs: use `localhost` for API calls |
+| 48 | **Postgres.app requires password**: DATABASE_URL must include password. Local dev uses `coh_dev_local` as password. Set with `psql -p 5444 -c "ALTER USER shantumgupta PASSWORD 'coh_dev_local';"` |
 | 19 | Fabric hierarchy: DB enforces Material>Fabric>Colour. Variations link via `fabricColourId` |
 | 20 | Inheritance: colours inherit cost/lead/minOrder from fabric if not set |
 | 23 | Express routes: only auth, webhooks, SSE, file uploads. Everything else = Server Functions |
@@ -377,4 +378,4 @@ railway up --detach
 | `/production` | Production planning |
 
 ---
-**Updated:** `64bce27` (2026-01-23)
+**Updated:** `8a0acbe` (2026-01-26)

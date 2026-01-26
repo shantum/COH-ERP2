@@ -15,9 +15,23 @@ import {
   Truck,
   PackageCheck,
   CircleDot,
+  DollarSign,
+  Check,
+  MessageSquare,
+  Pencil,
+  Save,
 } from 'lucide-react';
 import type { Order, OrderLine } from '../../../../types';
 import type { ReturnFormState, LineReturnEligibility } from '../types';
+
+// Return conditions for receive action
+const RETURN_CONDITIONS = [
+  { value: 'good', label: 'Good Condition' },
+  { value: 'damaged', label: 'Damaged' },
+  { value: 'defective', label: 'Defective' },
+  { value: 'wrong_item', label: 'Wrong Item' },
+  { value: 'used', label: 'Used' },
+] as const;
 
 // Return reason categories (matching server config)
 const RETURN_REASON_CATEGORIES = [
@@ -52,6 +66,12 @@ interface ReturnsSectionProps {
   onSelectLineForReturn: (lineId: string | null, defaultQty?: number) => void;
   onInitiateReturn: () => Promise<void>;
   onCancelReturn?: (lineId: string) => Promise<void>;
+  onSchedulePickup?: (lineId: string) => void | Promise<void>;
+  onReceiveReturn?: (lineId: string, condition: 'good' | 'damaged' | 'defective' | 'wrong_item' | 'used') => Promise<void>;
+  onProcessRefund?: (lineId: string, grossAmount: number) => Promise<void>;
+  onCompleteReturn?: (lineId: string) => Promise<void>;
+  onCreateExchange?: (lineId: string, exchangeSkuId: string, exchangeQty: number) => Promise<void>;
+  onUpdateNotes?: (lineId: string, notes: string) => Promise<void>;
   isInitiating?: boolean;
 }
 
@@ -409,14 +429,30 @@ function ReturnInitiationForm({
   );
 }
 
-// Active return display
+// Active return display with full management capabilities
 function ActiveReturnCard({
   line,
   onCancelReturn,
+  onSchedulePickup,
+  onReceiveReturn,
+  onProcessRefund,
+  onCompleteReturn,
+  onCreateExchange,
+  onUpdateNotes,
 }: {
   line: OrderLine;
   onCancelReturn?: () => void;
+  onSchedulePickup?: () => void;
+  onReceiveReturn?: (condition: 'good' | 'damaged' | 'defective' | 'wrong_item' | 'used') => void;
+  onProcessRefund?: (grossAmount: number) => void;
+  onCompleteReturn?: () => void;
+  onCreateExchange?: (exchangeSkuId: string, exchangeQty: number) => void;
+  onUpdateNotes?: (notes: string) => void;
 }) {
+  const [receiveCondition, setReceiveCondition] = useState<string>('');
+  const [isEditingNotes, setIsEditingNotes] = useState(false);
+  const [notesValue, setNotesValue] = useState(line.returnNotes || '');
+
   const statusConfig = RETURN_STATUS_CONFIG[line.returnStatus || ''];
   if (!statusConfig) return null;
 
@@ -425,39 +461,233 @@ function ActiveReturnCard({
   const productName = sku?.variation?.product?.name || 'Unknown Product';
   const colorName = sku?.variation?.colorName || '';
   const size = sku?.size || '';
+  const skuCode = sku?.skuCode || '';
 
   // Get reason label
   const reasonLabel = RETURN_REASON_CATEGORIES.find(c => c.value === line.returnReasonCategory)?.label || line.returnReasonCategory;
 
+  // Determine what action is needed based on status
+  const getActionNeeded = () => {
+    switch (line.returnStatus) {
+      case 'requested':
+        return 'schedule_pickup';
+      case 'pickup_scheduled':
+      case 'in_transit':
+        return 'receive';
+      case 'received':
+        if (line.returnResolution === 'refund' && !line.returnRefundCompletedAt) {
+          return 'process_refund';
+        } else if (line.returnResolution === 'exchange' && !line.returnExchangeOrderId) {
+          return 'create_exchange';
+        }
+        return 'complete';
+      default:
+        return null;
+    }
+  };
+
+  const actionNeeded = getActionNeeded();
+
+  const handleSaveNotes = () => {
+    if (onUpdateNotes) {
+      onUpdateNotes(notesValue);
+    }
+    setIsEditingNotes(false);
+  };
+
+  const handleReceive = () => {
+    if (onReceiveReturn && receiveCondition) {
+      onReceiveReturn(receiveCondition as 'good' | 'damaged' | 'defective' | 'wrong_item' | 'used');
+    }
+  };
+
+  const handleProcessRefund = () => {
+    if (onProcessRefund) {
+      const grossAmount = (line.returnQty || 1) * line.unitPrice;
+      onProcessRefund(grossAmount);
+    }
+  };
+
+  const handleCreateExchange = () => {
+    if (onCreateExchange) {
+      const skuId = prompt('Enter exchange SKU ID:');
+      if (skuId) {
+        onCreateExchange(skuId, line.returnQty || 1);
+      }
+    }
+  };
+
+  // Calculate days since request
+  const daysSinceRequest = line.returnRequestedAt
+    ? Math.floor((Date.now() - new Date(line.returnRequestedAt).getTime()) / (1000 * 60 * 60 * 24))
+    : 0;
+
   return (
     <div className="p-4 bg-white rounded-xl border border-slate-200 shadow-sm">
+      {/* Header with status */}
       <div className="flex items-start justify-between gap-4">
-        <div className="flex items-start gap-3">
+        <div className="flex items-start gap-3 flex-1">
           <div className={`p-2 rounded-lg ${statusConfig.color}`}>
             <StatusIcon size={18} />
           </div>
-          <div>
+          <div className="flex-1">
             <p className="text-sm font-medium text-slate-800">
-              {productName} ({colorName} / {size})
+              {productName}
             </p>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Qty: {line.returnQty} | {reasonLabel}
+            <p className="text-xs text-slate-500">
+              {colorName} / {size} • SKU: {skuCode}
             </p>
-            <div className="flex items-center gap-2 mt-2">
+            <div className="flex items-center gap-2 mt-2 flex-wrap">
               <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusConfig.color}`}>
                 {statusConfig.label}
               </span>
-              <span className="text-xs text-slate-500">
+              <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600">
+                Qty: {line.returnQty}
+              </span>
+              <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${line.returnResolution === 'refund' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>
                 {line.returnResolution === 'refund' ? 'Refund' : 'Exchange'}
               </span>
+              {daysSinceRequest > 0 && (
+                <span className="text-xs text-slate-400">
+                  {daysSinceRequest}d ago
+                </span>
+              )}
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Return details */}
+      <div className="mt-3 pt-3 border-t border-slate-100 space-y-2">
+        <div className="text-xs text-slate-600">
+          <span className="font-medium">Reason:</span> {reasonLabel}
+          {line.returnReasonDetail && <span className="text-slate-400"> - {line.returnReasonDetail}</span>}
+        </div>
+        {line.returnAwbNumber && (
+          <div className="text-xs text-slate-600">
+            <span className="font-medium">AWB:</span> {line.returnAwbNumber}
+            {line.returnCourier && <span className="text-slate-400"> ({line.returnCourier})</span>}
+          </div>
+        )}
+        {line.returnCondition && (
+          <div className="text-xs text-slate-600">
+            <span className="font-medium">Condition:</span> {line.returnCondition}
+          </div>
+        )}
+      </div>
+
+      {/* Notes section */}
+      <div className="mt-3 pt-3 border-t border-slate-100">
+        {isEditingNotes ? (
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={notesValue}
+              onChange={(e) => setNotesValue(e.target.value)}
+              placeholder="Add notes..."
+              className="flex-1 px-2 py-1 text-sm border border-slate-200 rounded"
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleSaveNotes();
+                if (e.key === 'Escape') setIsEditingNotes(false);
+              }}
+            />
+            <button onClick={handleSaveNotes} className="p-1 text-green-600 hover:bg-green-50 rounded">
+              <Save size={14} />
+            </button>
+            <button onClick={() => setIsEditingNotes(false)} className="p-1 text-slate-400 hover:bg-slate-100 rounded">
+              <XCircle size={14} />
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 text-xs">
+            <MessageSquare size={12} className="text-slate-400" />
+            <span className="text-slate-500 flex-1">
+              {line.returnNotes || <span className="italic">No notes</span>}
+            </span>
+            {onUpdateNotes && (
+              <button
+                onClick={() => setIsEditingNotes(true)}
+                className="p-1 text-slate-400 hover:text-blue-600"
+              >
+                <Pencil size={12} />
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Action buttons */}
+      <div className="mt-3 pt-3 border-t border-slate-100 flex flex-wrap gap-2">
+        {actionNeeded === 'schedule_pickup' && onSchedulePickup && (
+          <button
+            onClick={onSchedulePickup}
+            className="px-3 py-1.5 bg-blue-600 text-white text-xs rounded-lg hover:bg-blue-700 flex items-center gap-1"
+          >
+            <Truck size={14} />
+            Schedule Pickup
+          </button>
+        )}
+
+        {actionNeeded === 'receive' && onReceiveReturn && (
+          <div className="flex items-center gap-2 flex-1">
+            <select
+              value={receiveCondition}
+              onChange={(e) => setReceiveCondition(e.target.value)}
+              className="px-2 py-1.5 text-xs border border-slate-200 rounded-lg"
+            >
+              <option value="">Select Condition</option>
+              {RETURN_CONDITIONS.map((c) => (
+                <option key={c.value} value={c.value}>{c.label}</option>
+              ))}
+            </select>
+            <button
+              onClick={handleReceive}
+              disabled={!receiveCondition}
+              className="px-3 py-1.5 bg-green-600 text-white text-xs rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+            >
+              <PackageCheck size={14} />
+              Receive
+            </button>
+          </div>
+        )}
+
+        {actionNeeded === 'process_refund' && onProcessRefund && (
+          <button
+            onClick={handleProcessRefund}
+            className="px-3 py-1.5 bg-purple-600 text-white text-xs rounded-lg hover:bg-purple-700 flex items-center gap-1"
+          >
+            <DollarSign size={14} />
+            Process Refund
+          </button>
+        )}
+
+        {actionNeeded === 'create_exchange' && onCreateExchange && (
+          <button
+            onClick={handleCreateExchange}
+            className="px-3 py-1.5 bg-indigo-600 text-white text-xs rounded-lg hover:bg-indigo-700 flex items-center gap-1"
+          >
+            <ArrowRight size={14} />
+            Create Exchange
+          </button>
+        )}
+
+        {actionNeeded === 'complete' && onCompleteReturn && (
+          <button
+            onClick={onCompleteReturn}
+            className="px-3 py-1.5 bg-slate-600 text-white text-xs rounded-lg hover:bg-slate-700 flex items-center gap-1"
+          >
+            <Check size={14} />
+            Complete
+          </button>
+        )}
+
         {line.returnStatus === 'requested' && onCancelReturn && (
           <button
             onClick={onCancelReturn}
-            className="text-xs text-slate-500 hover:text-red-600 transition-colors"
+            className="px-3 py-1.5 bg-red-50 text-red-700 text-xs rounded-lg hover:bg-red-100 flex items-center gap-1 ml-auto"
           >
+            <XCircle size={14} />
             Cancel
           </button>
         )}
@@ -474,6 +704,12 @@ export function ReturnsSection({
   onSelectLineForReturn,
   onInitiateReturn,
   onCancelReturn,
+  onSchedulePickup,
+  onReceiveReturn,
+  onProcessRefund,
+  onCompleteReturn,
+  onCreateExchange,
+  onUpdateNotes,
   isInitiating,
 }: ReturnsSectionProps) {
   const [initiatingReturn, setInitiatingReturn] = useState(false);
@@ -567,21 +803,24 @@ export function ReturnsSection({
           </div>
         )}
 
-        {/* Active Returns */}
+        {/* Active Returns - Full Management UI */}
         {activeReturns.length > 0 && (
           <div className="space-y-3">
-            <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
+            <h4 className="text-xs font-semibold text-amber-600 uppercase tracking-wide flex items-center gap-2">
+              <RotateCcw size={14} />
               Active Returns ({activeReturns.length})
             </h4>
             {activeReturns.map((line) => (
               <ActiveReturnCard
                 key={line.id}
                 line={line}
-                onCancelReturn={
-                  onCancelReturn && line.returnStatus === 'requested'
-                    ? () => onCancelReturn(line.id)
-                    : undefined
-                }
+                onCancelReturn={onCancelReturn ? () => onCancelReturn(line.id) : undefined}
+                onSchedulePickup={onSchedulePickup ? () => onSchedulePickup(line.id) : undefined}
+                onReceiveReturn={onReceiveReturn ? (condition) => onReceiveReturn(line.id, condition) : undefined}
+                onProcessRefund={onProcessRefund ? (amount) => onProcessRefund(line.id, amount) : undefined}
+                onCompleteReturn={onCompleteReturn ? () => onCompleteReturn(line.id) : undefined}
+                onCreateExchange={onCreateExchange ? (skuId, qty) => onCreateExchange(line.id, skuId, qty) : undefined}
+                onUpdateNotes={onUpdateNotes ? (notes) => onUpdateNotes(line.id, notes) : undefined}
               />
             ))}
           </div>

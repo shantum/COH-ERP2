@@ -446,7 +446,8 @@ export function useUnifiedOrderModal({ order, initialMode, onNavigateToOrder }: 
   }, []);
 
   // Calculate line return eligibility client-side
-  // DEBUG MODE: All checks are soft warnings to help debug eligibility issues
+  // Hard block: already has active return
+  // Soft warnings (but allowed): not delivered, window expired, non-returnable
   const RETURN_WINDOW_DAYS = 14;
   const getLineEligibility = useCallback((line: {
     deliveredAt?: Date | string | null;
@@ -455,43 +456,49 @@ export function useUnifiedOrderModal({ order, initialMode, onNavigateToOrder }: 
   }): LineReturnEligibility => {
     const warnings: string[] = [];
 
-    // Soft warning: already has active return
+    // HARD BLOCK: already has active return - cannot initiate another
     if (line.returnStatus && !['cancelled', 'complete'].includes(line.returnStatus)) {
-      warnings.push(`Active return: ${line.returnStatus}`);
-    }
-
-    // Soft warning: line marked non-returnable
-    if (line.isNonReturnable) {
-      warnings.push('Non-returnable');
-    }
-
-    // Soft warning: not delivered yet
-    if (!line.deliveredAt) {
-      warnings.push('Not delivered');
       return {
-        eligible: true, // Allow for debugging
-        reason: 'not_delivered',
+        eligible: false,
+        reason: 'active_return',
         daysRemaining: null,
         windowExpiringSoon: false,
-        warning: warnings.join(' | '),
+        warning: `Active return in progress: ${line.returnStatus}`,
       };
     }
 
-    // Calculate window
+    // Soft warning: line marked non-returnable (allow override)
+    if (line.isNonReturnable) {
+      warnings.push('Non-returnable item');
+    }
+
+    // Soft warning: not delivered yet (allow for pre-delivery returns)
+    if (!line.deliveredAt) {
+      warnings.push('Not yet delivered');
+      return {
+        eligible: true,
+        reason: 'not_delivered',
+        daysRemaining: null,
+        windowExpiringSoon: false,
+        ...(warnings.length > 0 ? { warning: warnings.join(' | ') } : {}),
+      };
+    }
+
+    // Calculate return window
     const deliveredDate = typeof line.deliveredAt === 'string' ? new Date(line.deliveredAt) : line.deliveredAt;
     const daysSinceDelivery = Math.floor((Date.now() - deliveredDate.getTime()) / (1000 * 60 * 60 * 24));
     const daysRemaining = RETURN_WINDOW_DAYS - daysSinceDelivery;
     const windowExpiringSoon = daysRemaining > 0 && daysRemaining <= 2;
 
-    // Soft warning: window expired
+    // Soft warning: window expired (allow manual override)
     if (daysRemaining < 0) {
-      warnings.push(`Expired ${Math.abs(daysRemaining)}d ago`);
+      warnings.push(`Window expired ${Math.abs(daysRemaining)}d ago`);
     } else if (windowExpiringSoon) {
-      warnings.push(`${daysRemaining}d left`);
+      warnings.push(`Only ${daysRemaining}d left`);
     }
 
     return {
-      eligible: true, // Always eligible for debugging
+      eligible: true, // Eligible with warnings - staff can override
       reason: warnings.length > 0 ? 'has_warnings' : 'within_window',
       daysRemaining,
       windowExpiringSoon,

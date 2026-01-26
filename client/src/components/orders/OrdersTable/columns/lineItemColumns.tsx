@@ -11,6 +11,7 @@ import {
     ProductNameCell,
     QtyStockCell,
     AssignStockCell,
+    ReturnStatusCell,
 } from '../cells';
 import { Sparkles, Edit3 } from 'lucide-react';
 
@@ -25,6 +26,15 @@ export function buildLineItemColumns(ctx: OrdersTableContext): ColumnDef<Flatten
             size: DEFAULT_COLUMN_WIDTHS.productName,
             cell: ({ row }) => <ProductNameCell row={row.original} />,
             enableSorting: true,
+        },
+
+        // Return Status
+        {
+            id: 'returnStatus',
+            header: getHeaderName('returnStatus'),
+            size: 90,
+            cell: ({ row }) => <ReturnStatusCell row={row.original} />,
+            enableSorting: false,
         },
 
         // Customize

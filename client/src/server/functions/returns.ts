@@ -998,11 +998,13 @@ export const getPendingSources = createServerFn({ method: 'GET' })
             where: { status: 'pending' },
         });
 
-        // Count pending returns (not completed/cancelled)
-        const returnsCount = await prisma.returnRequest.count({
+        // Count pending returns from OrderLine (new line-level system)
+        const returnsCount = await prisma.orderLine.count({
             where: {
-                status: { notIn: ['completed', 'cancelled'] },
-                reverseReceived: false,
+                returnStatus: {
+                    in: ['requested', 'pickup_scheduled', 'in_transit'],
+                },
+                returnReceivedAt: null,
             },
         });
 
@@ -1098,20 +1100,21 @@ export const getPendingQueue = createServerFn({ method: 'GET' })
                 });
             }
         } else if (source === 'returns') {
-            // Get pending return request lines
-            const returnLines = await prisma.returnRequestLine.findMany({
+            // Get pending returns from OrderLine (new line-level system)
+            // Items awaiting receipt at warehouse
+            const returnLines = await prisma.orderLine.findMany({
                 where: {
-                    request: {
-                        status: { notIn: ['completed', 'cancelled'] },
-                        reverseReceived: false,
+                    returnStatus: {
+                        in: ['requested', 'pickup_scheduled', 'in_transit'],
                     },
+                    returnReceivedAt: null,
                 },
                 include: {
-                    request: {
+                    order: {
                         select: {
                             id: true,
-                            requestNumber: true,
-                            reasonCategory: true,
+                            orderNumber: true,
+                            customerName: true,
                         },
                     },
                     sku: {
@@ -1124,7 +1127,7 @@ export const getPendingQueue = createServerFn({ method: 'GET' })
                         },
                     },
                 },
-                orderBy: { request: { createdAt: 'asc' } },
+                orderBy: { returnRequestedAt: 'asc' },
                 take: limit,
             });
 
@@ -1136,11 +1139,12 @@ export const getPendingQueue = createServerFn({ method: 'GET' })
                     productName: line.sku.variation.product.name,
                     colorName: line.sku.variation.colorName,
                     size: line.sku.size,
-                    qty: line.qty,
+                    qty: line.returnQty || line.qty,
                     imageUrl: line.sku.variation.imageUrl || line.sku.variation.product.imageUrl || undefined,
-                    contextLabel: 'Ticket',
-                    contextValue: line.request.requestNumber,
-                    requestNumber: line.request.requestNumber,
+                    contextLabel: 'Order',
+                    contextValue: line.order.orderNumber,
+                    customerName: line.order.customerName,
+                    orderLineId: line.id,
                 });
             }
         } else if (source === 'rto') {
@@ -1749,6 +1753,7 @@ export const getActiveLineReturns = createServerFn({ method: 'GET' })
             returnReceivedAt: line.returnReceivedAt,
             returnCondition: line.returnCondition,
             returnExchangeOrderId: line.returnExchangeOrderId,
+            returnNotes: line.returnNotes,
             customerId: line.order.customerId,
             customerName: line.order.customerName,
             customerEmail: line.order.customerEmail,
@@ -1852,6 +1857,7 @@ export const getLineReturnActionQueue = createServerFn({ method: 'GET' })
                 returnReceivedAt: line.returnReceivedAt,
                 returnCondition: line.returnCondition,
                 returnExchangeOrderId: line.returnExchangeOrderId,
+                returnNotes: line.returnNotes,
                 customerId: line.order.customerId,
                 customerName: line.order.customerName,
                 customerEmail: line.order.customerEmail,

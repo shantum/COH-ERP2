@@ -13,6 +13,7 @@
 'use server';
 
 import { createServerFn } from '@tanstack/react-start';
+import { getCookie } from '@tanstack/react-start/server';
 import { z } from 'zod';
 import { authMiddleware, type AuthUser } from '../middleware/auth';
 import type { PrismaClient } from '@prisma/client';
@@ -817,6 +818,7 @@ import {
     ProcessReturnRefundInputSchema,
     CloseReturnManuallyInputSchema,
     CreateExchangeOrderInputSchema,
+    UpdateReturnNotesInputSchema,
     type InitiateReturnInput,
     type ScheduleReturnPickupInput,
     type MarkReturnInTransitInput,
@@ -824,6 +826,7 @@ import {
     type ProcessReturnRefundInput,
     type CloseReturnManuallyInput,
     type CreateExchangeOrderInput,
+    type UpdateReturnNotesInput,
 } from '@coh/shared/schemas/returns';
 import {
     RETURN_ERROR_CODES,
@@ -888,11 +891,10 @@ export const initiateLineReturn = createServerFn({ method: 'POST' })
             return returnError(RETURN_ERROR_CODES.LINE_NOT_FOUND);
         }
 
-        // DEBUG MODE: All checks are soft warnings - remove after debugging
-        // Check if already has an active return - SOFT for debugging
-        // if (line.returnStatus && !['cancelled', 'complete'].includes(line.returnStatus)) {
-        //     return returnError(RETURN_ERROR_CODES.ALREADY_ACTIVE);
-        // }
+        // Check if already has an active return
+        if (line.returnStatus && !['cancelled', 'complete'].includes(line.returnStatus)) {
+            return returnError(RETURN_ERROR_CODES.ALREADY_ACTIVE);
+        }
 
         // Check return qty doesn't exceed line qty - keep this one
         if (returnQty > line.qty) {
@@ -971,13 +973,16 @@ export const initiateLineReturn = createServerFn({ method: 'POST' })
 
 /**
  * Schedule pickup for a return
+ *
+ * When scheduleWithIthink=true, calls the Express route to book with iThink Logistics
+ * When false, just updates DB with provided courier/AWB (manual entry)
  */
 export const scheduleReturnPickup = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown): ScheduleReturnPickupInput => ScheduleReturnPickupInputSchema.parse(input))
-    .handler(async ({ data }: { data: ScheduleReturnPickupInput }): Promise<ReturnResult<{ orderLineId: string }>> => {
+    .handler(async ({ data }: { data: ScheduleReturnPickupInput }): Promise<ReturnResult<{ orderLineId: string; awbNumber?: string; courier?: string }>> => {
         const prisma = await getPrismaInstance();
-        const { orderLineId, pickupType, courier, awbNumber, scheduledAt } = data;
+        const { orderLineId, pickupType, courier, awbNumber, scheduledAt, scheduleWithIthink } = data;
 
         const line = await prisma.orderLine.findUnique({
             where: { id: orderLineId },
@@ -995,6 +1000,50 @@ export const scheduleReturnPickup = createServerFn({ method: 'POST' })
             );
         }
 
+        // If scheduleWithIthink, call Express route to book with iThink
+        if (scheduleWithIthink) {
+            try {
+                const baseUrl = process.env.VITE_API_URL || 'http://localhost:3001';
+                const authToken = getCookie('auth_token');
+                const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+                if (authToken) {
+                    headers['Authorization'] = `Bearer ${authToken}`;
+                }
+                const response = await fetch(`${baseUrl}/api/returns/schedule-pickup`, {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify({ orderLineId }),
+                });
+
+                const result = await response.json() as {
+                    success: boolean;
+                    error?: string;
+                    data?: { orderLineId: string; awbNumber: string; courier: string };
+                };
+
+                if (!result.success) {
+                    return returnError(
+                        RETURN_ERROR_CODES.WRONG_STATUS,
+                        result.error || 'Failed to schedule pickup with courier'
+                    );
+                }
+
+                // Express route already updated the DB, just return success
+                return returnSuccess(
+                    {
+                        orderLineId,
+                        awbNumber: result.data?.awbNumber,
+                        courier: result.data?.courier,
+                    },
+                    `Pickup scheduled with ${result.data?.courier || 'courier'}`
+                );
+            } catch (error: unknown) {
+                const message = error instanceof Error ? error.message : 'Unknown error';
+                return returnError(RETURN_ERROR_CODES.WRONG_STATUS, `Failed to schedule pickup: ${message}`);
+            }
+        }
+
+        // Manual entry - just update DB
         await prisma.orderLine.update({
             where: { id: orderLineId },
             data: {
@@ -1006,7 +1055,7 @@ export const scheduleReturnPickup = createServerFn({ method: 'POST' })
             },
         });
 
-        return returnSuccess({ orderLineId }, 'Pickup scheduled');
+        return returnSuccess({ orderLineId, awbNumber: awbNumber || undefined, courier: courier || undefined }, 'Pickup scheduled');
     });
 
 /**
@@ -1467,5 +1516,47 @@ export const createExchangeOrder = createServerFn({ method: 'POST' })
                 priceDiff,
             },
             `Exchange order ${exchangeOrderNumber} created`
+        );
+    });
+
+/**
+ * Update return notes on an order line
+ * Allows staff to add/update notes at any point during the return process
+ */
+export const updateReturnNotes = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown): UpdateReturnNotesInput => UpdateReturnNotesInputSchema.parse(input))
+    .handler(async ({ data }: { data: UpdateReturnNotesInput }): Promise<ReturnResult<{ orderLineId: string }>> => {
+        const prisma = await getPrismaInstance();
+        const { orderLineId, returnNotes } = data;
+
+        // Get order line
+        const line = await prisma.orderLine.findUnique({
+            where: { id: orderLineId },
+            select: {
+                id: true,
+                returnStatus: true,
+                sku: { select: { skuCode: true } },
+            },
+        });
+
+        if (!line) {
+            return returnError(RETURN_ERROR_CODES.LINE_NOT_FOUND);
+        }
+
+        // Check if line has an active return
+        if (!line.returnStatus || ['cancelled', 'complete'].includes(line.returnStatus)) {
+            return returnError(RETURN_ERROR_CODES.NO_ACTIVE_RETURN, 'No active return on this line');
+        }
+
+        // Update notes
+        await prisma.orderLine.update({
+            where: { id: orderLineId },
+            data: { returnNotes },
+        });
+
+        return returnSuccess(
+            { orderLineId },
+            `Notes updated for ${line.sku.skuCode}`
         );
     });
