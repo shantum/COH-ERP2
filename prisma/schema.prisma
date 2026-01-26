@@ -1148,6 +1148,19 @@ model WebhookLog {
   @@index([receivedAt])
 }
 
+// Stores raw iThink API responses for debugging (max 5 per AWB, rotated)
+model TrackingApiResponse {
+  id         String   @id @default(uuid())
+  awbNumber  String
+  source     String   // 'sync' | 'manual' | 'webhook'
+  statusCode Int      // HTTP-like status (200 for success, 404 for not found, etc.)
+  response   Json     // Full raw response from iThink API
+  createdAt  DateTime @default(now())
+
+  @@index([awbNumber])
+  @@index([awbNumber, createdAt])
+}
+
 model FailedSyncItem {
   id          String    @id @default(uuid())
   itemType    String

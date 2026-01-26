@@ -14,30 +14,16 @@ import ithinkClient from './ithinkLogistics.js';
 import { recomputeOrderStatus } from '../utils/orderStatus.js';
 import { updateCustomerTier } from '../utils/tierUtils.js';
 import { trackingLogger } from '../utils/logger.js';
+import { type TrackingStatus, type PaymentMethod } from '../config/types.js';
+import type { IThinkRawTrackingResponse } from '../types/ithinkApi.js';
+import { storeTrackingResponsesBatch } from './trackingResponseStorage.js';
 
 // ============================================
 // TYPES
 // ============================================
 
-/** Tracking status values */
-type TrackingStatus =
-    | 'in_transit'
-    | 'out_for_delivery'
-    | 'delivery_delayed'
-    | 'rto_initiated'
-    | 'rto_in_transit'
-    | 'rto_delivered'
-    | 'manifested'
-    | 'picked_up'
-    | 'reached_destination'
-    | 'undelivered'
-    | 'not_picked'
-    | 'delivered'
-    | 'cancelled'
-    | null;
-
-/** Order payment method */
-type PaymentMethod = 'COD' | 'Prepaid';
+/** Nullable tracking status for database fields */
+type NullableTrackingStatus = TrackingStatus | null;
 
 /** Order status */
 type OrderStatus = 'pending' | 'open' | 'allocated' | 'picked' | 'packed' | 'shipped' | 'delivered' | 'returned' | 'cancelled' | 'archived';
@@ -50,7 +36,7 @@ interface OrderInfo {
     paymentMethod: PaymentMethod;
     customerId: string | null;
     rtoInitiatedAt: Date | null;
-    previousTrackingStatus: TrackingStatus;
+    previousTrackingStatus: NullableTrackingStatus;
 }
 
 /** Last scan details from iThink API */
@@ -66,7 +52,7 @@ interface LastScanDetails {
 interface TrackingData {
     courier: string;
     statusCode: string;
-    internalStatus: TrackingStatus;
+    internalStatus: NullableTrackingStatus;
     expectedDeliveryDate: string | null;
     ofdCount: number;
     isRto: boolean;
@@ -75,7 +61,7 @@ interface TrackingData {
 
 /** Line update data for Prisma */
 interface LineUpdateData {
-    trackingStatus: TrackingStatus;
+    trackingStatus: NullableTrackingStatus;
     lastTrackingUpdate: Date;
     deliveredAt?: Date;
     rtoInitiatedAt?: Date;
@@ -118,25 +104,7 @@ interface SyncStatus {
     lastSyncResult: SyncResult | null;
 }
 
-/** Raw tracking data from iThink API */
-interface RawTrackingData {
-    message: string;
-    logistic: string;
-    current_status: string;
-    current_status_code: string;
-    expected_delivery_date: string | null;
-    ofd_count: string | number;
-    return_tracking_no: string | null;
-    /** iThink cancel_status field - "Approved" means shipment is cancelled */
-    cancel_status?: string | null;
-    last_scan_details?: {
-        status: string;
-        scan_location: string;
-        status_date_time: string;
-        remark: string;
-        reason: string;
-    };
-}
+// RawTrackingData removed - using IThinkRawTrackingResponse from types/ithinkApi.ts
 
 // ============================================
 // CONSTANTS
@@ -402,7 +370,16 @@ async function runTrackingSync(): Promise<SyncResult | null> {
                     totalBatches: Math.ceil(awbNumbers.length / BATCH_SIZE)
                 }, 'Fetching batch');
 
-                const trackingResults = await ithinkClient.trackShipments(batch) as Record<string, RawTrackingData>;
+                const trackingResults = await ithinkClient.trackShipments(batch);
+
+                // Store raw responses for debugging (in background, don't await)
+                const responsesToStore = Object.entries(trackingResults).map(([awb, data]) => ({
+                    awbNumber: awb,
+                    source: 'sync' as const,
+                    statusCode: data.message === 'success' ? 200 : 404,
+                    response: data,
+                }));
+                storeTrackingResponsesBatch(responsesToStore).catch(() => {});
 
                 for (const [awb, rawData] of Object.entries(trackingResults)) {
                     const orderInfo = awbMap.get(awb);
@@ -431,7 +408,7 @@ async function runTrackingSync(): Promise<SyncResult | null> {
                         // Priority 1: Check cancel_status field (most authoritative for cancellations)
                         // Priority 2: Use current_status text (more reliable than codes)
                         // Priority 3: Fall back to status code
-                        let internalStatus: TrackingStatus;
+                        let internalStatus: NullableTrackingStatus;
 
                         if (rawData.cancel_status?.toLowerCase() === 'approved') {
                             // iThink cancel_status: "Approved" means shipment is definitely cancelled

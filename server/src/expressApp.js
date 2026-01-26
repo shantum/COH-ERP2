@@ -36,6 +36,7 @@ import sseRoutes from './routes/sse.js';
 import pulseRoutes from './routes/pulse.js';
 import internalRoutes from './routes/internal.js';
 import returnsRoutes from './routes/returns.js';
+import trackingRoutes from './routes/tracking.js';
 import { pulseBroadcaster } from './services/pulseBroadcaster.js';
 import scheduledSync from './services/scheduledSync.js';
 import trackingSync from './services/trackingSync.js';
@@ -136,6 +137,7 @@ export async function createExpressApp() {
   app.use('/api/pulse', pulseRoutes);
   app.use('/api/internal', internalRoutes);
   app.use('/api/returns', returnsRoutes);
+  app.use('/api/tracking', trackingRoutes);
 
   // Health check
   app.get('/api/health', (req, res) => {

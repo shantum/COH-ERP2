@@ -5,7 +5,7 @@
  * NOTE: Tracking status mapping rules are centralized in config/mappings/trackingStatus.ts
  */
 
-import axios, { AxiosRequestConfig, AxiosError } from 'axios';
+import axios, { AxiosError } from 'axios';
 import prisma from '../lib/prisma.js';
 import { shippingLogger } from '../utils/logger.js';
 import {
@@ -15,6 +15,18 @@ import {
     ITHINK_API_RETRIES,
     ITHINK_RETRY_DELAY_MS,
 } from '../config/index.js';
+import type {
+    IThinkRawTrackingResponse,
+    IThinkApiResponse,
+    IThinkOrderResult,
+    IThinkRawRateInfo,
+    IThinkRawPincodeData,
+    IThinkRawProviderInfo,
+    IThinkCancellationItem,
+    IThinkLabelRequestData,
+} from '../types/ithinkApi.js';
+import { isProviderInfo } from '../types/ithinkApi.js';
+import { storeTrackingResponse, storeTrackingResponsesBatch } from './trackingResponseStorage.js';
 
 // ============================================================================
 // Constants (from config)
@@ -233,7 +245,7 @@ export interface CustomerDetails {
 export interface ShippingLabelResult {
     success: boolean;
     labelUrl: string;
-    rawResponse: any;
+    rawResponse: unknown;
 }
 
 export interface PincodeProvider {
@@ -253,7 +265,7 @@ export interface PincodeCheckResult {
     city: string;
     state: string;
     providers: PincodeProvider[];
-    rawResponse: any;
+    rawResponse: unknown;
 }
 
 export interface RateInfo {
@@ -279,7 +291,7 @@ export interface RateCheckResult {
     zone: string;
     expectedDelivery: string;
     rates: RateInfo[];
-    rawResponse: any;
+    rawResponse: unknown;
 }
 
 export interface CancellationResult {
@@ -292,7 +304,7 @@ export interface CancellationResult {
 export interface CancelShipmentResult {
     success: boolean;
     results: Record<string, CancellationResult>;
-    rawResponse: any;
+    rawResponse: unknown;
 }
 
 export interface ConfigStatus {
@@ -474,9 +486,13 @@ class IThinkLogisticsClient {
     /**
      * Track shipments by AWB numbers
      * @param awbNumbers - Single AWB or array of AWBs (max 10)
+     * @param storeResponse - Whether to store the raw response for debugging (default: false)
      * @returns Tracking data keyed by AWB number
      */
-    async trackShipments(awbNumbers: string | string[]): Promise<Record<string, any>> {
+    async trackShipments(
+        awbNumbers: string | string[],
+        storeResponse: boolean = false
+    ): Promise<Record<string, IThinkRawTrackingResponse>> {
         if (!this.isConfigured()) {
             throw new Error('iThink Logistics credentials not configured');
         }
@@ -488,16 +504,20 @@ class IThinkLogisticsClient {
         }
 
         const response = await axiosWithRetry(
-            () => axios.post(`${this.trackingBaseUrl}/order/track.json`, {
-                data: {
-                    access_token: this.accessToken,
-                    secret_key: this.secretKey,
-                    awb_number_list: awbList.join(',')
+            () => axios.post<IThinkApiResponse<Record<string, IThinkRawTrackingResponse>>>(
+                `${this.trackingBaseUrl}/order/track.json`,
+                {
+                    data: {
+                        access_token: this.accessToken,
+                        secret_key: this.secretKey,
+                        awb_number_list: awbList.join(',')
+                    }
+                },
+                {
+                    headers: { 'Content-Type': 'application/json' },
+                    timeout: API_TIMEOUT_MS
                 }
-            }, {
-                headers: { 'Content-Type': 'application/json' },
-                timeout: API_TIMEOUT_MS
-            }),
+            ),
             `trackShipments:${awbList.join(',')}`
         );
 
@@ -511,7 +531,21 @@ class IThinkLogisticsClient {
             return {};
         }
 
-        return response.data.data;
+        const trackingData = response.data.data;
+
+        // Store responses for debugging if requested
+        if (storeResponse) {
+            const responsesToStore = Object.entries(trackingData).map(([awb, data]) => ({
+                awbNumber: awb,
+                source: 'manual' as const,
+                statusCode: data.message === 'success' ? 200 : 404,
+                response: data,
+            }));
+            // Store in background - don't await
+            storeTrackingResponsesBatch(responsesToStore).catch(() => {});
+        }
+
+        return trackingData;
     }
 
     /**
@@ -704,25 +738,17 @@ class IThinkLogisticsClient {
             displayShipperAddress,
         } = options;
 
-        const requestData: any = {
-            data: {
-                awb_numbers: awbList,
-                page_size: pageSize,
-                access_token: this.accessToken,
-                secret_key: this.secretKey,
-            }
+        const labelRequestData: IThinkLabelRequestData = {
+            awb_numbers: awbList,
+            page_size: pageSize,
+            access_token: this.accessToken,
+            secret_key: this.secretKey,
+            ...(displayCodPrepaid !== undefined && { display_cod_prepaid: displayCodPrepaid ? '1' : '0' }),
+            ...(displayShipperMobile !== undefined && { display_shipper_mobile: displayShipperMobile ? '1' : '0' }),
+            ...(displayShipperAddress !== undefined && { display_shipper_address: displayShipperAddress ? '1' : '0' }),
         };
 
-        // Add optional display settings (1 = yes, 0 = no, blank = default)
-        if (displayCodPrepaid !== undefined) {
-            requestData.data.display_cod_prepaid = displayCodPrepaid ? '1' : '0';
-        }
-        if (displayShipperMobile !== undefined) {
-            requestData.data.display_shipper_mobile = displayShipperMobile ? '1' : '0';
-        }
-        if (displayShipperAddress !== undefined) {
-            requestData.data.display_shipper_address = displayShipperAddress ? '1' : '0';
-        }
+        const requestData = { data: labelRequestData };
 
         const response = await axiosWithRetry(
             () => axios.post(`${this.orderBaseUrl}/shipping/label.json`, requestData, {
@@ -782,34 +808,30 @@ class IThinkLogisticsClient {
 
         // Parse response - data is { "pincode": { "provider": { ... } } }
         // Also contains metadata fields like remark, state_name, city_name, etc.
-        const pincodeData = response.data.data?.[pincode] || {};
+        const pincodeData = (response.data.data?.[pincode] || {}) as IThinkRawPincodeData;
         const providers: PincodeProvider[] = [];
 
-        // Metadata fields to skip (not logistics providers)
-        const metadataFields = ['remark', 'state_name', 'city_name', 'city_id', 'state_id'];
-
         for (const [providerName, details] of Object.entries(pincodeData)) {
-            // Skip metadata fields
-            if (metadataFields.includes(providerName) || typeof details !== 'object') {
-                continue;
+            // Use type guard to check if it's a provider info object
+            if (isProviderInfo(details)) {
+                const providerDetails = details as IThinkRawProviderInfo;
+                providers.push({
+                    logistics: providerName,
+                    supportsCod: providerDetails.cod === 'Y',
+                    supportsPrepaid: providerDetails.prepaid === 'Y',
+                    supportsPickup: providerDetails.pickup === 'Y',
+                    district: providerDetails.district || '',
+                    stateCode: providerDetails.state_code || '',
+                    sortCode: providerDetails.sort_code || '',
+                });
             }
-            const providerDetails = details as any;
-            providers.push({
-                logistics: providerName,
-                supportsCod: providerDetails.cod === 'Y',
-                supportsPrepaid: providerDetails.prepaid === 'Y',
-                supportsPickup: providerDetails.pickup === 'Y',
-                district: providerDetails.district || '',
-                stateCode: providerDetails.state_code || '',
-                sortCode: providerDetails.sort_code || '',
-            });
         }
 
-        // Extract metadata
+        // Extract metadata (non-provider fields)
         const metadata = {
-            stateName: pincodeData.state_name || '',
-            cityName: pincodeData.city_name || '',
-            remark: pincodeData.remark || '',
+            stateName: typeof pincodeData.state_name === 'string' ? pincodeData.state_name : '',
+            cityName: typeof pincodeData.city_name === 'string' ? pincodeData.city_name : '',
+            remark: typeof pincodeData.remark === 'string' ? pincodeData.remark : '',
         };
 
         return {
@@ -990,7 +1012,7 @@ class IThinkLogisticsClient {
             statusCode: tracking.current_status_code,
             expectedDeliveryDate: tracking.expected_delivery_date,
             promiseDeliveryDate: tracking.promise_delivery_date,
-            ofdCount: parseInt(tracking.ofd_count) || 0,
+            ofdCount: parseInt(String(tracking.ofd_count)) || 0,
             isRto: tracking.return_tracking_no ? true : false,
             rtoAwb: tracking.return_tracking_no || null,
             orderType: tracking.order_type || null,
@@ -1018,7 +1040,7 @@ class IThinkLogisticsClient {
             // Customer details with phone and address
             customerDetails: tracking.customer_details ? {
                 name: tracking.customer_details.customer_name,
-                phone: tracking.customer_details.customer_mobile || tracking.customer_details.customer_phone,
+                phone: tracking.customer_details.customer_mobile || tracking.customer_details.customer_phone || '',
                 address1: tracking.customer_details.customer_address1,
                 address2: tracking.customer_details.customer_address2,
                 city: tracking.customer_details.customer_city,
@@ -1027,7 +1049,7 @@ class IThinkLogisticsClient {
                 pincode: tracking.customer_details.customer_pincode,
             } : null,
             // Scan history - use correct field names from iThink API
-            scanHistory: (tracking.scan_details || []).map((scan: any) => ({
+            scanHistory: (tracking.scan_details || []).map((scan) => ({
                 status: scan.status,
                 statusCode: scan.status_code,
                 location: scan.status_location,      // Fixed: was 'scan_location'
