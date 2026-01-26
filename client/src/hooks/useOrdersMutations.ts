@@ -49,8 +49,6 @@ interface UseOrdersMutationsOptions {
     currentView?: string;
     /** Current page for optimistic update cache targeting */
     page?: number;
-    /** Shipped view filter (rto, cod_pending) for cache targeting */
-    shippedFilter?: 'rto' | 'cod_pending';
 }
 
 export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
@@ -58,7 +56,6 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
     const optimisticOptions = {
         currentView: options.currentView,
         page: options.page,
-        shippedFilter: options.shippedFilter,
     };
 
     // Compose all sub-hooks with optimistic update options

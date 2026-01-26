@@ -23,19 +23,17 @@ import { z } from 'zod';
  * Validates view selection, pagination, and filters
  *
  * @example
- * /orders?view=shipped&page=2&shippedFilter=rto
+ * /orders?view=shipped&page=2
  */
 export const OrdersSearchParams = z.object({
-    /** Current view: open, shipped, or cancelled */
-    view: z.enum(['open', 'shipped', 'cancelled']).catch('open'),
+    /** Current view: open, shipped, rto, or all */
+    view: z.enum(['open', 'shipped', 'rto', 'all']).catch('open'),
     /** Page number for pagination */
     page: z.coerce.number().int().positive().catch(1),
     /** Items per page (Open: 500 default, Shipped/Cancelled: 100) */
     limit: z.coerce.number().int().positive().max(2000).catch(500),
     /** Search query string */
     search: z.string().optional().catch(undefined),
-    /** Filter for shipped view: all, rto, cod_pending */
-    shippedFilter: z.enum(['all', 'rto', 'cod_pending']).optional().catch(undefined),
     /** Days filter (e.g., shipped in last N days) */
     days: z.coerce.number().int().positive().optional().catch(undefined),
     /** Sort field */

@@ -33,16 +33,15 @@ import {
 export interface UseProductionBatchMutationsOptions {
     currentView?: string;
     page?: number;
-    shippedFilter?: 'rto' | 'cod_pending';
 }
 
 export function useProductionBatchMutations(options: UseProductionBatchMutationsOptions = {}) {
-    const { currentView = 'open', page = 1, shippedFilter } = options;
+    const { currentView = 'open', page = 1 } = options;
     const queryClient = useQueryClient();
     const { invalidateOpenOrders } = useOrderInvalidation();
 
     // Build query input for cache operations
-    const queryInput = getOrdersQueryInput(currentView, page, shippedFilter);
+    const queryInput = getOrdersQueryInput(currentView, page);
 
     // Query key for TanStack Query cache operations
     const ordersQueryKey = getOrdersListQueryKey(queryInput);

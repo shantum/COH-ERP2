@@ -13,21 +13,13 @@ import { PAGE_SIZE } from './types';
  */
 export function getOrdersQueryInput(
     currentView: string,
-    page: number,
-    shippedFilter?: 'rto' | 'cod_pending'
+    page: number
 ): OrdersQueryInput {
-    const input: OrdersQueryInput = {
+    return {
         view: currentView,
         page,
         limit: PAGE_SIZE,
     };
-
-    // Only include shippedFilter for shipped view when it has a value
-    if (currentView === 'shipped' && shippedFilter) {
-        input.shippedFilter = shippedFilter;
-    }
-
-    return input;
 }
 
 /**

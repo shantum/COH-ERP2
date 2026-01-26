@@ -12,7 +12,6 @@ export interface OrdersQueryInput {
     view: string;
     page: number;
     limit: number;
-    shippedFilter?: 'rto' | 'cod_pending';
 }
 
 // Type for the orders list response (must match tRPC orders.list return type)

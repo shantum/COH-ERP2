@@ -8,7 +8,7 @@ import type { FlattenedOrderRow } from '../../../utils/orderHelpers';
 /**
  * View type for unified order views
  */
-export type OrderViewType = 'open' | 'shipped' | 'rto' | 'cod_pending' | 'archived' | 'cancelled';
+export type OrderViewType = 'open' | 'shipped' | 'rto' | 'all' | 'cancelled';
 
 /**
  * Props for customization data

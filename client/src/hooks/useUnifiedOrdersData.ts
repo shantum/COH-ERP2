@@ -5,10 +5,9 @@
  * Loading strategy (hybrid):
  * 1. Current view loads immediately
  * 2. Shipped prefetches after Open completes
- * 3. Cancelled loads on-demand when selected
+ * 3. Other views load on-demand when selected
  *
- * Views: open, shipped, cancelled (3 views)
- * Shipped view has sub-filters: all, rto, cod_pending (server-side filtering)
+ * Views: open, shipped, rto, all (4 views)
  * Pagination: 250 orders per page
  *
  * Data fetching uses TanStack Start Server Functions.
@@ -19,7 +18,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { inventoryQueryKeys } from '../constants/queryKeys';
 import { getOrdersListQueryKey } from './orders/orderMutationUtils';
-import { getOrders } from '../server/functions/orders';
+import { getOrders, getOrderViewCounts } from '../server/functions/orders';
 import { getInventoryBalances } from '../server/functions/inventory';
 import { getProductionLockedDates } from '../server/functions/production';
 import { getProductsList } from '../server/functions/products';
@@ -54,16 +53,13 @@ const GC_TIME = 5 * 60 * 1000;
 // Orders per page
 const PAGE_SIZE = 250;
 
-// All available views (3 views - RTO and COD Pending are now filter chips in Shipped)
-export type OrderView = 'open' | 'shipped' | 'cancelled';
+// All available views (4 views: Open, Shipped, RTO, All)
+export type OrderView = 'open' | 'shipped' | 'rto' | 'all';
 
 // Helper to get page size for a view
 export const getPageSize = (_view: OrderView): number => {
     return PAGE_SIZE;
 };
-
-// Shipped view sub-filters (server-side filtering)
-export type ShippedFilter = 'rto' | 'cod_pending';
 
 // Legacy type alias for backwards compatibility
 export type UnifiedOrderTab = OrderView;
@@ -74,8 +70,6 @@ interface UseUnifiedOrdersDataOptions {
     selectedCustomerId?: string | null;
     /** Whether SSE is connected - disables polling when true */
     isSSEConnected?: boolean;
-    /** Filter for shipped view (rto, cod_pending) */
-    shippedFilter?: ShippedFilter;
     /** Initial data from route loader (SSR) */
     initialData?: GetOrdersResponse | null;
 }
@@ -85,7 +79,6 @@ export function useUnifiedOrdersData({
     page,
     selectedCustomerId,
     isSSEConnected = false,
-    shippedFilter,
     initialData,
 }: UseUnifiedOrdersDataOptions) {
     const queryClient = useQueryClient();
@@ -113,9 +106,7 @@ export function useUnifiedOrdersData({
         view: currentView,
         page,
         limit: getPageSize(currentView),
-        // Pass shipped filter for server-side filtering (rto, cod_pending)
-        ...(currentView === 'shipped' && shippedFilter ? { shippedFilter } : {}),
-    }), [currentView, page, shippedFilter]);
+    }), [currentView, page]);
 
     // Server Function path - uses useServerFn hook for proper client-side calls
     const getOrdersFn = useServerFn(getOrders);
@@ -149,6 +140,18 @@ export function useUnifiedOrdersData({
     });
 
     // ==========================================
+    // VIEW COUNTS QUERY - For segmented control badges
+    // ==========================================
+
+    const getOrderViewCountsFn = useServerFn(getOrderViewCounts);
+    const viewCountsQuery = useQuery({
+        queryKey: ['orders', 'viewCounts'],
+        queryFn: () => getOrderViewCountsFn(),
+        staleTime: 30000, // 30 seconds
+        refetchOnWindowFocus: false,
+    });
+
+    // ==========================================
     // HYBRID LOADING: Prefetch adjacent pages and related views
     // ==========================================
 
@@ -157,6 +160,13 @@ export function useUnifiedOrdersData({
             // Prefetch shipped view page 1 in background
             queryClient.prefetchQuery({
                 queryKey: getOrdersListQueryKey({ view: 'shipped', page: 1, limit: getPageSize('shipped') }),
+                staleTime: STALE_TIME,
+            });
+        }
+        if (currentView === 'shipped' && page === 1 && ordersQuery.isSuccess) {
+            // Prefetch rto view page 1 in background
+            queryClient.prefetchQuery({
+                queryKey: getOrdersListQueryKey({ view: 'rto', page: 1, limit: getPageSize('rto') }),
                 staleTime: STALE_TIME,
             });
         }
@@ -172,7 +182,6 @@ export function useUnifiedOrdersData({
         const baseInput = {
             view: currentView,
             limit: getPageSize(currentView),
-            ...(currentView === 'shipped' && shippedFilter ? { shippedFilter } : {}),
         };
 
         // Prefetch next page if it exists
@@ -190,7 +199,7 @@ export function useUnifiedOrdersData({
                 staleTime: STALE_TIME,
             });
         }
-    }, [currentView, page, ordersQuery.isSuccess, ordersQuery.data?.pagination, queryClient, shippedFilter]);
+    }, [currentView, page, ordersQuery.isSuccess, ordersQuery.data?.pagination, queryClient]);
 
     // ==========================================
     // SUPPORTING DATA QUERIES
@@ -326,6 +335,10 @@ export function useUnifiedOrdersData({
         // Legacy orders for backwards compatibility
         orders,
         pagination,
+
+        // View counts for segmented control
+        viewCounts: viewCountsQuery.data,
+        viewCountsLoading: viewCountsQuery.isLoading,
 
         // Supporting data
         allSkus: allSkusQuery.data,

@@ -15,9 +15,8 @@ export const viewToQueryInput: Record<string, { view: string; limit?: number }> 
     open: { view: 'open', limit: PAGE_SIZE },
     shipped: { view: 'shipped', limit: PAGE_SIZE },
     rto: { view: 'rto', limit: PAGE_SIZE },
-    cod_pending: { view: 'cod_pending', limit: PAGE_SIZE },
+    all: { view: 'all', limit: PAGE_SIZE },
     cancelled: { view: 'cancelled', limit: PAGE_SIZE },
-    archived: { view: 'archived', limit: PAGE_SIZE },
 };
 
 // Type for mutation options (onSettled, onSuccess, onError callbacks)
@@ -36,7 +35,7 @@ export interface InvalidationContext {
  * Helper to build query key for orders.list
  * Uses Server Function format: ['orders', 'list', 'server-fn', params]
  */
-export function getOrdersListQueryKey(input: { view: string; page?: number; limit?: number; shippedFilter?: string }) {
+export function getOrdersListQueryKey(input: { view: string; page?: number; limit?: number }) {
     return ['orders', 'list', 'server-fn', input];
 }
 
