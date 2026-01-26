@@ -412,8 +412,7 @@ export function UnifiedOrderModal({
     try {
       const result = await initiateLineReturn({
         data: {
-          orderLineId: returnForm.selectedLineId,
-          returnQty: returnForm.returnQty,
+          lines: [{ orderLineId: returnForm.selectedLineId, returnQty: returnForm.returnQty }],
           returnReasonCategory: returnForm.returnReasonCategory,
           returnReasonDetail: returnForm.returnReasonDetail || undefined,
           returnResolution: returnForm.returnResolution,

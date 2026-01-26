@@ -588,6 +588,7 @@ model OrderLine {
   shippingAddress      String?
 
   // === RETURN LIFECYCLE ===
+  returnBatchNumber         String?       // Groups lines returned together, e.g., "64168/1", "64168/2"
   returnStatus              String?       // 'requested', 'pickup_scheduled', 'in_transit', 'received', 'complete', 'cancelled'
   returnQty                 Int?          // qty being returned (supports partial returns)
   returnRequestedAt         DateTime?
@@ -672,6 +673,7 @@ model OrderLine {
   @@index([trackingStatus])
   @@index([orderId, trackingStatus])
   // Return indexes
+  @@index([returnBatchNumber])
   @@index([returnStatus])
   @@index([returnStatus, orderId])
   @@index([returnAwbNumber])

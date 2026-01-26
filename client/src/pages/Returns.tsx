@@ -378,19 +378,20 @@ export default function Returns() {
             return;
         }
 
-        // For each selected line, initiate return
-        selectedLines.forEach((lineId) => {
-            const qty = returnQtyMap[lineId] || 1;
-            initiateMutation.mutate({ data: {
-                orderLineId: lineId,
-                returnQty: qty,
-                returnReasonCategory: returnReasonCategory as 'fit_size' | 'product_quality' | 'product_different' | 'wrong_item_sent' | 'damaged_in_transit' | 'changed_mind' | 'other',
-                returnReasonDetail,
-                returnResolution,
-                returnNotes,
-                ...(returnResolution === 'exchange' && exchangeSkuId ? { exchangeSkuId } : {}),
-            }});
-        });
+        // Batch all selected lines into single mutation call
+        const lines = Array.from(selectedLines).map((lineId) => ({
+            orderLineId: lineId,
+            returnQty: returnQtyMap[lineId] || 1,
+        }));
+
+        initiateMutation.mutate({ data: {
+            lines,
+            returnReasonCategory: returnReasonCategory as 'fit_size' | 'product_quality' | 'product_different' | 'wrong_item_sent' | 'damaged_in_transit' | 'changed_mind' | 'other',
+            returnReasonDetail,
+            returnResolution,
+            returnNotes,
+            ...(returnResolution === 'exchange' && exchangeSkuId ? { exchangeSkuId } : {}),
+        }});
     };
 
     const resetInitiateForm = () => {

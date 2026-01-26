@@ -363,6 +363,7 @@ export type OrderLine = {
     refundReason: string | null;
     refundedAt: Timestamp | null;
     shippingAddress: string | null;
+    returnBatchNumber: string | null;
     returnStatus: string | null;
     returnQty: number | null;
     returnRequestedAt: Timestamp | null;
