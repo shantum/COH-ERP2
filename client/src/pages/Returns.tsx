@@ -900,8 +900,8 @@ function ActionQueueTab({
                                                 </>
                                             )}
 
-                                            {/* Schedule pickup - only for single items, batch handled in header */}
-                                            {item.actionNeeded === 'schedule_pickup' && !isBatch && !batchNumber && (
+                                            {/* Schedule pickup - show if this item needs it (batch header button is just a convenience) */}
+                                            {item.actionNeeded === 'schedule_pickup' && (
                                                 <button
                                                     onClick={() => onSchedulePickup(item.id)}
                                                     className="px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-1.5 text-sm font-medium"
