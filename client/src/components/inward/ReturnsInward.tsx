@@ -11,6 +11,7 @@ import { receiveReturnItem } from '../../server/functions/returnsMutations';
 import { Search, Check, AlertTriangle, X, RotateCcw } from 'lucide-react';
 import RecentInwardsTable from './RecentInwardsTable';
 import PendingQueuePanel from './PendingQueuePanel';
+import { type ReturnCondition } from '@coh/shared/domain/returns';
 
 interface ReturnsInwardProps {
     onSuccess?: (message: string) => void;
@@ -26,12 +27,13 @@ interface MatchedReturnItem {
     customerName?: string;
 }
 
-// Condition options for return items
-const CONDITIONS = [
-    { value: 'unused', label: 'Unused / New', description: 'Item is brand new, tags attached', color: 'green' },
+// Condition options for return items - aligned with schema
+const CONDITIONS: Array<{ value: ReturnCondition; label: string; description: string; color: string }> = [
+    { value: 'good', label: 'Good - Restockable', description: 'Item is brand new, tags attached', color: 'green' },
     { value: 'used', label: 'Used / Worn', description: 'Item shows signs of use', color: 'yellow' },
-    { value: 'damaged', label: 'Damaged', description: 'Item is damaged', color: 'red' },
-    { value: 'wrong_product', label: 'Wrong Product', description: 'Different item than expected', color: 'orange' },
+    { value: 'damaged', label: 'Damaged', description: 'Item is physically damaged', color: 'red' },
+    { value: 'defective', label: 'Defective', description: 'Item has manufacturing defect', color: 'red' },
+    { value: 'wrong_item', label: 'Wrong Item', description: 'Different item than expected', color: 'orange' },
 ];
 
 export default function ReturnsInward({ onSuccess: _onSuccess, onError: _onError }: ReturnsInwardProps) {
@@ -49,7 +51,7 @@ export default function ReturnsInward({ onSuccess: _onSuccess, onError: _onError
     const [matchedReturn, setMatchedReturn] = useState<MatchedReturnItem | null>(null);
     const [scanError, setScanError] = useState<string | null>(null);
     const [successMessage, setSuccessMessage] = useState<string | null>(null);
-    const [selectedCondition, setSelectedCondition] = useState('unused');
+    const [selectedCondition, setSelectedCondition] = useState<ReturnCondition>('good');
 
     // Focus input on mount
     useEffect(() => {
@@ -108,7 +110,7 @@ export default function ReturnsInward({ onSuccess: _onSuccess, onError: _onError
                 reasonCategory: returnMatch.data.reasonCategory,
                 customerName: returnMatch.data.customerName,
             });
-            setSelectedCondition('unused');
+            setSelectedCondition('good');
         } catch (error: unknown) {
             const errMsg = error instanceof Error ? error.message : 'SKU not found';
             setScanError(errMsg);
@@ -136,7 +138,7 @@ export default function ReturnsInward({ onSuccess: _onSuccess, onError: _onError
     const clearScan = () => {
         setScanResult(null);
         setMatchedReturn(null);
-        setSelectedCondition('unused');
+        setSelectedCondition('good');
         inputRef.current?.focus();
     };
 
@@ -148,7 +150,7 @@ export default function ReturnsInward({ onSuccess: _onSuccess, onError: _onError
                 data: {
                     requestId: matchedReturn.requestId,
                     lineId: matchedReturn.lineId,
-                    condition: selectedCondition as 'unused' | 'used' | 'damaged' | 'wrong_product',
+                    condition: selectedCondition as ReturnCondition,
                 },
             });
             if (!result.success) {
@@ -285,7 +287,7 @@ export default function ReturnsInward({ onSuccess: _onSuccess, onError: _onError
                                             name="condition"
                                             value={cond.value}
                                             checked={selectedCondition === cond.value}
-                                            onChange={(e) => setSelectedCondition(e.target.value)}
+                                            onChange={(e) => setSelectedCondition(e.target.value as ReturnCondition)}
                                             className="mt-1"
                                         />
                                         <div>
