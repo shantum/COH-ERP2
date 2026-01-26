@@ -302,6 +302,7 @@ export interface OrderLine {
   returnReceivedAt?: string | null;
   returnCondition?: string | null; // 'good'|'damaged'|'defective'|'wrong_item'|'used'
   returnExchangeOrderId?: string | null;
+  returnNotes?: string | null; // Internal notes about the return
   sku?: Sku;
   productionBatch?: ProductionBatch;
 }

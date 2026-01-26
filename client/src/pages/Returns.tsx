@@ -24,6 +24,7 @@ import {
     completeLineReturn,
     cancelLineReturn,
     createExchangeOrder,
+    updateReturnNotes,
 } from '../server/functions/returnsMutations';
 import {
     processRepackingItem,
@@ -45,7 +46,8 @@ import { useState } from 'react';
 import {
     Plus, X, Search, Package, Truck, Check,
     PackageCheck, AlertCircle, CheckCircle,
-    ArrowRight, DollarSign, XCircle, Settings
+    ArrowRight, DollarSign, XCircle, Settings,
+    MessageSquare, Pencil, Save
 } from 'lucide-react';
 import { CustomerDetailModal } from '../components/orders/CustomerDetailModal';
 
@@ -192,6 +194,7 @@ export default function Returns() {
     const completeReturnFn = useServerFn(completeLineReturn);
     const cancelReturnFn = useServerFn(cancelLineReturn);
     const createExchangeFn = useServerFn(createExchangeOrder);
+    const updateNotesFn = useServerFn(updateReturnNotes);
     const processRepackingItemFn = useServerFn(processRepackingItem);
 
     const initiateMutation = useMutation({
@@ -301,6 +304,24 @@ export default function Returns() {
             setSuccessMessage(data.message);
             setTimeout(() => setSuccessMessage(''), 3000);
             setQcModalItem(null);
+        },
+        onError: (err: Error) => {
+            setError(err.message);
+            setTimeout(() => setError(''), 5000);
+        },
+    });
+
+    const updateNotesMutation = useMutation({
+        mutationFn: updateNotesFn,
+        onSuccess: (data) => {
+            if (!data.success) {
+                setError(data.error.message);
+                setTimeout(() => setError(''), 5000);
+                return;
+            }
+            queryClient.invalidateQueries({ queryKey: ['returns'] });
+            setSuccessMessage('Notes updated');
+            setTimeout(() => setSuccessMessage(''), 2000);
         },
         onError: (err: Error) => {
             setError(err.message);
@@ -439,6 +460,10 @@ export default function Returns() {
         }});
     };
 
+    const handleUpdateNotes = (lineId: string, notes: string) => {
+        updateNotesMutation.mutate({ data: { orderLineId: lineId, returnNotes: notes }});
+    };
+
     // ============================================
     // RENDER
     // ============================================
@@ -544,6 +569,7 @@ export default function Returns() {
                     onCreateExchange={handleCreateExchange}
                     onComplete={handleComplete}
                     onCancel={handleCancel}
+                    onUpdateNotes={handleUpdateNotes}
                 />
             )}
 
@@ -553,6 +579,7 @@ export default function Returns() {
                     loading={loadingReturns}
                     onViewCustomer={(customerId) => setSelectedCustomerId(customerId)}
                     onCancel={handleCancel}
+                    onUpdateNotes={handleUpdateNotes}
                 />
             )}
 
@@ -630,6 +657,7 @@ interface ActionQueueTabProps {
     onCreateExchange: (lineId: string) => void;
     onComplete: (lineId: string) => void;
     onCancel: (lineId: string) => void;
+    onUpdateNotes: (lineId: string, notes: string) => void;
 }
 
 function ActionQueueTab({
@@ -641,8 +669,27 @@ function ActionQueueTab({
     onCreateExchange,
     onComplete,
     onCancel,
+    onUpdateNotes,
 }: ActionQueueTabProps) {
     const [receiveConditionMap, setReceiveConditionMap] = useState<Record<string, string>>({});
+    const [editingNotesId, setEditingNotesId] = useState<string | null>(null);
+    const [editingNotesValue, setEditingNotesValue] = useState('');
+
+    const startEditNotes = (lineId: string, currentNotes: string | null) => {
+        setEditingNotesId(lineId);
+        setEditingNotesValue(currentNotes || '');
+    };
+
+    const saveNotes = (lineId: string) => {
+        onUpdateNotes(lineId, editingNotesValue);
+        setEditingNotesId(null);
+        setEditingNotesValue('');
+    };
+
+    const cancelEditNotes = () => {
+        setEditingNotesId(null);
+        setEditingNotesValue('');
+    };
 
     if (loading) {
         return <div className="text-center py-12">Loading action queue...</div>;
@@ -704,7 +751,7 @@ function ActionQueueTab({
                         </div>
 
                         {/* Action Buttons */}
-                        <div className="flex flex-col gap-2">
+                        <div className="flex flex-col gap-2 shrink-0">
                             {item.actionNeeded === 'schedule_pickup' && (
                                 <button
                                     onClick={() => onSchedulePickup(item.id)}
@@ -787,6 +834,53 @@ function ActionQueueTab({
                             </button>
                         </div>
                     </div>
+
+                    {/* Notes Section */}
+                    <div className="mt-3 pt-3 border-t border-gray-100">
+                        {editingNotesId === item.id ? (
+                            <div className="flex gap-2">
+                                <textarea
+                                    value={editingNotesValue}
+                                    onChange={(e) => setEditingNotesValue(e.target.value)}
+                                    placeholder="Add notes about this return..."
+                                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm resize-none"
+                                    rows={2}
+                                    autoFocus
+                                />
+                                <div className="flex flex-col gap-1">
+                                    <button
+                                        onClick={() => saveNotes(item.id)}
+                                        className="px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 flex items-center gap-1"
+                                    >
+                                        <Save size={14} />
+                                        Save
+                                    </button>
+                                    <button
+                                        onClick={cancelEditNotes}
+                                        className="px-3 py-1 bg-gray-100 text-gray-600 rounded text-sm hover:bg-gray-200"
+                                    >
+                                        Cancel
+                                    </button>
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="flex items-start gap-2">
+                                <MessageSquare size={14} className="text-gray-400 mt-0.5 shrink-0" />
+                                {item.returnNotes ? (
+                                    <p className="text-sm text-gray-600 flex-1">{item.returnNotes}</p>
+                                ) : (
+                                    <p className="text-sm text-gray-400 italic flex-1">No notes</p>
+                                )}
+                                <button
+                                    onClick={() => startEditNotes(item.id, item.returnNotes)}
+                                    className="text-gray-400 hover:text-blue-600 p-1"
+                                    title="Edit notes"
+                                >
+                                    <Pencil size={14} />
+                                </button>
+                            </div>
+                        )}
+                    </div>
                 </div>
             ))}
         </div>
@@ -802,11 +896,30 @@ interface AllReturnsTabProps {
     loading: boolean;
     onViewCustomer: (customerId: string) => void;
     onCancel: (lineId: string) => void;
+    onUpdateNotes: (lineId: string, notes: string) => void;
 }
 
-function AllReturnsTab({ returns, loading, onViewCustomer, onCancel }: AllReturnsTabProps) {
+function AllReturnsTab({ returns, loading, onViewCustomer, onCancel, onUpdateNotes }: AllReturnsTabProps) {
     const [statusFilter, setStatusFilter] = useState<string>('all');
     const [searchTerm, setSearchTerm] = useState('');
+    const [editingNotesId, setEditingNotesId] = useState<string | null>(null);
+    const [editingNotesValue, setEditingNotesValue] = useState('');
+
+    const startEditNotes = (lineId: string, currentNotes: string | null) => {
+        setEditingNotesId(lineId);
+        setEditingNotesValue(currentNotes || '');
+    };
+
+    const saveNotes = (lineId: string) => {
+        onUpdateNotes(lineId, editingNotesValue);
+        setEditingNotesId(null);
+        setEditingNotesValue('');
+    };
+
+    const cancelEditNotes = () => {
+        setEditingNotesId(null);
+        setEditingNotesValue('');
+    };
 
     if (loading) {
         return <div className="text-center py-12">Loading returns...</div>;
@@ -864,6 +977,7 @@ function AllReturnsTab({ returns, loading, onViewCustomer, onCancel }: AllReturn
                                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Resolution</th>
                                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Customer</th>
                                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Age</th>
+                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Notes</th>
                                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
                             </tr>
                         </thead>
@@ -897,6 +1011,50 @@ function AllReturnsTab({ returns, loading, onViewCustomer, onCancel }: AllReturn
                                         </button>
                                     </td>
                                     <td className="px-4 py-3 text-sm text-gray-500">{ret.ageDays}d</td>
+                                    <td className="px-4 py-3 text-sm max-w-[200px]">
+                                        {editingNotesId === ret.id ? (
+                                            <div className="flex gap-1">
+                                                <input
+                                                    type="text"
+                                                    value={editingNotesValue}
+                                                    onChange={(e) => setEditingNotesValue(e.target.value)}
+                                                    className="flex-1 px-2 py-1 border border-gray-300 rounded text-sm min-w-0"
+                                                    autoFocus
+                                                    onKeyDown={(e) => {
+                                                        if (e.key === 'Enter') saveNotes(ret.id);
+                                                        if (e.key === 'Escape') cancelEditNotes();
+                                                    }}
+                                                />
+                                                <button
+                                                    onClick={() => saveNotes(ret.id)}
+                                                    className="p-1 text-green-600 hover:bg-green-50 rounded"
+                                                    title="Save"
+                                                >
+                                                    <Save size={14} />
+                                                </button>
+                                                <button
+                                                    onClick={cancelEditNotes}
+                                                    className="p-1 text-gray-400 hover:bg-gray-100 rounded"
+                                                    title="Cancel"
+                                                >
+                                                    <X size={14} />
+                                                </button>
+                                            </div>
+                                        ) : (
+                                            <div className="flex items-center gap-1 group">
+                                                <span className="truncate text-gray-600">
+                                                    {ret.returnNotes || <span className="text-gray-400 italic">-</span>}
+                                                </span>
+                                                <button
+                                                    onClick={() => startEditNotes(ret.id, ret.returnNotes)}
+                                                    className="p-1 text-gray-400 hover:text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity"
+                                                    title="Edit notes"
+                                                >
+                                                    <Pencil size={12} />
+                                                </button>
+                                            </div>
+                                        )}
+                                    </td>
                                     <td className="px-4 py-3 text-sm">
                                         <button
                                             onClick={() => onCancel(ret.id)}

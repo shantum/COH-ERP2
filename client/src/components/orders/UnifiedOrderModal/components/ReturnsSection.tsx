@@ -451,6 +451,11 @@ function ActiveReturnCard({
                 {line.returnResolution === 'refund' ? 'Refund' : 'Exchange'}
               </span>
             </div>
+            {line.returnNotes && (
+              <p className="text-xs text-slate-500 mt-2 italic">
+                Note: {line.returnNotes}
+              </p>
+            )}
           </div>
         </div>
         {line.returnStatus === 'requested' && onCancelReturn && (

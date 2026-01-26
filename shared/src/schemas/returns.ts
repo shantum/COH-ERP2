@@ -333,6 +333,15 @@ export const CreateExchangeOrderInputSchema = z.object({
 });
 export type CreateExchangeOrderInput = z.infer<typeof CreateExchangeOrderInputSchema>;
 
+/**
+ * Input for updating return notes
+ */
+export const UpdateReturnNotesInputSchema = z.object({
+    orderLineId: z.string().uuid(),
+    returnNotes: z.string().max(1000),
+});
+export type UpdateReturnNotesInput = z.infer<typeof UpdateReturnNotesInputSchema>;
+
 // ============================================
 // QUERY RESULT SCHEMAS
 // ============================================
@@ -420,6 +429,7 @@ export const ActiveReturnLineSchema = z.object({
     returnReceivedAt: z.coerce.date().nullable(),
     returnCondition: z.string().nullable(),
     returnExchangeOrderId: z.string().nullable(),
+    returnNotes: z.string().nullable(),
     // Customer info
     customerId: z.string().nullable(),
     customerName: z.string(),

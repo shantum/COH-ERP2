@@ -817,6 +817,7 @@ import {
     ProcessReturnRefundInputSchema,
     CloseReturnManuallyInputSchema,
     CreateExchangeOrderInputSchema,
+    UpdateReturnNotesInputSchema,
     type InitiateReturnInput,
     type ScheduleReturnPickupInput,
     type MarkReturnInTransitInput,
@@ -824,6 +825,7 @@ import {
     type ProcessReturnRefundInput,
     type CloseReturnManuallyInput,
     type CreateExchangeOrderInput,
+    type UpdateReturnNotesInput,
 } from '@coh/shared/schemas/returns';
 import {
     RETURN_ERROR_CODES,
@@ -888,11 +890,10 @@ export const initiateLineReturn = createServerFn({ method: 'POST' })
             return returnError(RETURN_ERROR_CODES.LINE_NOT_FOUND);
         }
 
-        // DEBUG MODE: All checks are soft warnings - remove after debugging
-        // Check if already has an active return - SOFT for debugging
-        // if (line.returnStatus && !['cancelled', 'complete'].includes(line.returnStatus)) {
-        //     return returnError(RETURN_ERROR_CODES.ALREADY_ACTIVE);
-        // }
+        // Check if already has an active return
+        if (line.returnStatus && !['cancelled', 'complete'].includes(line.returnStatus)) {
+            return returnError(RETURN_ERROR_CODES.ALREADY_ACTIVE);
+        }
 
         // Check return qty doesn't exceed line qty - keep this one
         if (returnQty > line.qty) {
@@ -1467,5 +1468,47 @@ export const createExchangeOrder = createServerFn({ method: 'POST' })
                 priceDiff,
             },
             `Exchange order ${exchangeOrderNumber} created`
+        );
+    });
+
+/**
+ * Update return notes on an order line
+ * Allows staff to add/update notes at any point during the return process
+ */
+export const updateReturnNotes = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown): UpdateReturnNotesInput => UpdateReturnNotesInputSchema.parse(input))
+    .handler(async ({ data }: { data: UpdateReturnNotesInput }): Promise<ReturnResult<{ orderLineId: string }>> => {
+        const prisma = await getPrismaInstance();
+        const { orderLineId, returnNotes } = data;
+
+        // Get order line
+        const line = await prisma.orderLine.findUnique({
+            where: { id: orderLineId },
+            select: {
+                id: true,
+                returnStatus: true,
+                sku: { select: { skuCode: true } },
+            },
+        });
+
+        if (!line) {
+            return returnError(RETURN_ERROR_CODES.LINE_NOT_FOUND);
+        }
+
+        // Check if line has an active return
+        if (!line.returnStatus || ['cancelled', 'complete'].includes(line.returnStatus)) {
+            return returnError(RETURN_ERROR_CODES.NO_ACTIVE_RETURN, 'No active return on this line');
+        }
+
+        // Update notes
+        await prisma.orderLine.update({
+            where: { id: orderLineId },
+            data: { returnNotes },
+        });
+
+        return returnSuccess(
+            { orderLineId },
+            `Notes updated for ${line.sku.skuCode}`
         );
     });
