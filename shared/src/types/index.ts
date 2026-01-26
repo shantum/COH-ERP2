@@ -301,7 +301,11 @@ export interface OrderLine {
   returnPickupScheduledAt?: string | null;
   returnReceivedAt?: string | null;
   returnCondition?: string | null; // 'good'|'damaged'|'defective'|'wrong_item'|'used'
+  returnConditionNotes?: string | null;
+  returnPickupAt?: string | null; // When pickup actually occurred
   returnExchangeOrderId?: string | null;
+  returnExchangeSkuId?: string | null; // SKU they're exchanging to
+  returnRefundCompletedAt?: string | null; // When refund was completed
   returnNotes?: string | null; // Internal notes about the return
   sku?: Sku;
   productionBatch?: ProductionBatch;

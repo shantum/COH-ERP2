@@ -39,6 +39,7 @@ export { QtyCell } from './QtyCell';
 export { StockCell } from './StockCell';
 export { QtyStockCell } from './QtyStockCell';
 export { NotesCell } from './NotesCell';
+export { ReturnStatusCell } from './ReturnStatusCell';
 
 // Tracking cells
 export { TrackingInfoCell } from './TrackingInfoCell';

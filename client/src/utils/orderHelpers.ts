@@ -228,6 +228,10 @@ export interface FlattenedOrderRow {
     daysInRto?: number | null;
     rtoStatus?: string | null;
 
+    // Return status fields
+    returnStatus?: string | null; // 'requested'|'pickup_scheduled'|'in_transit'|'received'|'complete'|'cancelled'
+    returnQty?: number | null;
+
     // Shopify cache fields (for columns)
     discountCodes?: string | null;
     customerNotes?: string | null;
@@ -335,6 +339,9 @@ export function flattenOrders(
                 lineDeliveredAt: null,
                 lineTrackingStatus: null,
                 lineLastTrackingUpdate: null,
+                // Return status
+                returnStatus: null,
+                returnQty: null,
             });
             continue;
         }
@@ -414,6 +421,9 @@ export function flattenOrders(
                 lineDeliveredAt: line.deliveredAt || null,
                 lineTrackingStatus: line.trackingStatus || null,
                 lineLastTrackingUpdate: line.lastTrackingUpdate || null,
+                // Return status
+                returnStatus: line.returnStatus || null,
+                returnQty: line.returnQty || null,
             });
         }
     }

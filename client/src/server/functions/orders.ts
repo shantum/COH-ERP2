@@ -143,6 +143,9 @@ export interface FlattenedOrderRow {
     daysSinceDelivery: number | null;
     daysInRto: number | null;
     rtoStatus: string | null;
+    // Return fields
+    returnStatus: string | null;
+    returnQty: number | null;
     discountCodes: string | null;
     customerNotes: string | null;
     shopifyTags: string | null;
@@ -173,6 +176,9 @@ interface PrismaOrderLine {
     rtoInitiatedAt: Date | null;
     rtoReceivedAt: Date | null;
     lastScanAt: Date | null;
+    // Return fields
+    returnStatus: string | null;
+    returnQty: number | null;
     skuId: string;
     sku: {
         id: string;
@@ -505,6 +511,9 @@ function flattenOrdersToRows(orders: PrismaOrder[]): FlattenedOrderRow[] {
                 daysSinceDelivery: null,
                 daysInRto: null,
                 rtoStatus: null,
+                // Return status fields
+                returnStatus: null,
+                returnQty: null,
                 discountCodes: order.shopifyCache?.discountCodes ?? null,
                 customerNotes: order.shopifyCache?.customerNotes ?? null,
                 shopifyTags: order.shopifyCache?.tags ?? null,
@@ -595,6 +604,9 @@ function flattenOrdersToRows(orders: PrismaOrder[]): FlattenedOrderRow[] {
                 daysSinceDelivery: daysSince(line.deliveredAt),
                 daysInRto: daysSince(line.rtoInitiatedAt),
                 rtoStatus,
+                // Return status fields
+                returnStatus: line.returnStatus ?? null,
+                returnQty: line.returnQty ?? null,
                 discountCodes: order.shopifyCache?.discountCodes ?? null,
                 customerNotes: order.shopifyCache?.customerNotes ?? null,
                 shopifyTags: order.shopifyCache?.tags ?? null,
@@ -1366,6 +1378,25 @@ export const getOrderById = createServerFn({ method: 'GET' })
                     isCustomized: line.isCustomized,
                     isNonReturnable: line.isNonReturnable,
                     productionBatchId: line.productionBatchId,
+                    // Return fields
+                    returnStatus: line.returnStatus,
+                    returnQty: line.returnQty,
+                    returnRequestedAt: line.returnRequestedAt ? line.returnRequestedAt.toISOString() : null,
+                    returnReasonCategory: line.returnReasonCategory,
+                    returnReasonDetail: line.returnReasonDetail,
+                    returnResolution: line.returnResolution,
+                    returnCondition: line.returnCondition,
+                    returnConditionNotes: line.returnConditionNotes,
+                    returnPickupType: line.returnPickupType,
+                    returnAwbNumber: line.returnAwbNumber,
+                    returnCourier: line.returnCourier,
+                    returnPickupScheduledAt: line.returnPickupScheduledAt ? line.returnPickupScheduledAt.toISOString() : null,
+                    returnPickupAt: line.returnPickupAt ? line.returnPickupAt.toISOString() : null,
+                    returnReceivedAt: line.returnReceivedAt ? line.returnReceivedAt.toISOString() : null,
+                    returnNotes: line.returnNotes,
+                    returnRefundCompletedAt: line.returnRefundCompletedAt ? line.returnRefundCompletedAt.toISOString() : null,
+                    returnExchangeOrderId: line.returnExchangeOrderId,
+                    returnExchangeSkuId: line.returnExchangeSkuId,
                     sku: {
                         id: line.sku.id,
                         skuCode: line.sku.skuCode,

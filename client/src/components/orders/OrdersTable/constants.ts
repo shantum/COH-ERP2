@@ -5,7 +5,7 @@
 // All column IDs in display order
 export const ALL_COLUMN_IDS = [
     'orderInfo', 'customerInfo', 'paymentInfo', 'shipByDate',
-    'tags', 'customerNotes', 'customerTags', 'productName', 'customize', 'qty', 'assignStock', 'fabricBalance',
+    'tags', 'customerNotes', 'customerTags', 'productName', 'returnStatus', 'customize', 'qty', 'assignStock', 'fabricBalance',
     'workflow', 'pickPack', 'production', 'notes', 'cancelLine', 'adminShip',
     'shopifyTracking', 'trackingInfo', 'trackingStatus',
 ] as const;
@@ -15,7 +15,7 @@ export type ColumnId = typeof ALL_COLUMN_IDS[number];
 // Columns shown by default in Open view
 export const DEFAULT_VISIBLE_COLUMNS: ColumnId[] = [
     'orderInfo', 'customerInfo', 'paymentInfo', 'shipByDate', 'tags', 'customerNotes', 'customerTags',
-    'productName', 'qty', 'assignStock', 'workflow', 'pickPack', 'production', 'notes', 'cancelLine',
+    'productName', 'returnStatus', 'qty', 'assignStock', 'workflow', 'pickPack', 'production', 'notes', 'cancelLine',
     'shopifyTracking', 'trackingInfo',
 ];
 
@@ -29,6 +29,7 @@ export const DEFAULT_HEADERS: Record<string, string> = {
     customerNotes: 'Order Notes',
     customerTags: 'Cust Tags',
     productName: 'Product',
+    returnStatus: 'Return',
     customize: 'Custom',
     qty: 'Qty/Stock',
     assignStock: 'Allocate',
@@ -66,6 +67,7 @@ export const DEFAULT_COLUMN_WIDTHS: Partial<Record<ColumnId | string, number>> =
     customerNotes: 140,
     customerTags: 100,
     productName: 240,
+    returnStatus: 90,
     customize: 50,
     qty: 75,
     assignStock: 90,
