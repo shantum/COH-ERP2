@@ -66,7 +66,7 @@ interface ReturnsSectionProps {
   onSelectLineForReturn: (lineId: string | null, defaultQty?: number) => void;
   onInitiateReturn: () => Promise<void>;
   onCancelReturn?: (lineId: string) => Promise<void>;
-  onSchedulePickup?: (lineId: string) => Promise<void>;
+  onSchedulePickup?: (lineId: string) => void | Promise<void>;
   onReceiveReturn?: (lineId: string, condition: 'good' | 'damaged' | 'defective' | 'wrong_item' | 'used') => Promise<void>;
   onProcessRefund?: (lineId: string, grossAmount: number) => Promise<void>;
   onCompleteReturn?: (lineId: string) => Promise<void>;

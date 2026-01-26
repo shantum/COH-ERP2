@@ -29,6 +29,7 @@ import { TimelineSection } from './components/TimelineSection';
 import { NotesSection } from './components/NotesSection';
 import { CustomerTab } from './components/CustomerTab';
 import { ReturnsSection } from './components/ReturnsSection';
+import { SchedulePickupDialog } from './components/SchedulePickupDialog';
 import {
   initiateLineReturn,
   cancelLineReturn,
@@ -59,6 +60,8 @@ export function UnifiedOrderModal({
   const [isSaving, setIsSaving] = useState(false);
   const [isShipping, setIsShipping] = useState(false);
   const [updatingLineIds, setUpdatingLineIds] = useState<Set<string>>(new Set());
+  // Track which line is open for pickup scheduling dialog
+  const [pickupDialogLineId, setPickupDialogLineId] = useState<string | null>(null);
   // Track current order for navigation
   const [currentOrderId, setCurrentOrderId] = useState(initialOrder.id);
   // Keep track of last valid order for smooth transitions
@@ -468,27 +471,52 @@ export function UnifiedOrderModal({
     }
   }, [queryClient, order.id, onSuccess]);
 
-  // Handle schedule return pickup
-  const handleSchedulePickup = useCallback(async (lineId: string) => {
+  // Handle schedule return pickup - opens dialog for iThink booking
+  const handleSchedulePickup = useCallback((lineId: string) => {
+    setPickupDialogLineId(lineId);
+  }, []);
+
+  // Handle actual pickup scheduling from dialog
+  const handleSchedulePickupConfirm = useCallback(async (params: {
+    scheduleWithIthink: boolean;
+    courier?: string;
+    awbNumber?: string;
+  }): Promise<{ success: boolean; awbNumber?: string; courier?: string; error?: string }> => {
+    if (!pickupDialogLineId) {
+      return { success: false, error: 'No line selected' };
+    }
+
     try {
       const result = await scheduleReturnPickup({
-        data: { orderLineId: lineId, pickupType: 'arranged_by_us' },
+        data: {
+          orderLineId: pickupDialogLineId,
+          pickupType: params.scheduleWithIthink ? 'arranged_by_us' : 'customer_shipped',
+          scheduleWithIthink: params.scheduleWithIthink,
+          courier: params.courier,
+          awbNumber: params.awbNumber,
+        },
       });
 
       if (isReturnError(result)) {
-        showReturnError(result, 'Schedule pickup');
-        return;
+        return { success: false, error: result.error.message };
       }
 
       queryClient.invalidateQueries({ queryKey: ['order', order.id] });
       queryClient.invalidateQueries({ queryKey: ['returns'] });
       showReturnSuccess(result.message || 'Pickup scheduled');
       onSuccess?.();
+
+      return {
+        success: true,
+        awbNumber: result.data?.awbNumber,
+        courier: result.data?.courier,
+      };
     } catch (error) {
       console.error('Failed to schedule pickup:', error);
-      showReturnError(error, 'Schedule pickup');
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      return { success: false, error: message };
     }
-  }, [queryClient, order.id, onSuccess]);
+  }, [pickupDialogLineId, queryClient, order.id, onSuccess]);
 
   // Handle receive return
   const handleReceiveReturn = useCallback(async (lineId: string, condition: 'good' | 'damaged' | 'defective' | 'wrong_item' | 'used') => {
@@ -790,6 +818,21 @@ export function UnifiedOrderModal({
           </div>
         )}
       </div>
+
+      {/* Schedule Pickup Dialog */}
+      {pickupDialogLineId && (() => {
+        const pickupLine = order.orderLines?.find(l => l.id === pickupDialogLineId);
+        if (!pickupLine) return null;
+        return (
+          <SchedulePickupDialog
+            isOpen={true}
+            onClose={() => setPickupDialogLineId(null)}
+            order={order}
+            orderLine={pickupLine}
+            onSchedule={handleSchedulePickupConfirm}
+          />
+        );
+      })()}
     </div>
   );
 }

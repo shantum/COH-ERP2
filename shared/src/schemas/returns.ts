@@ -253,6 +253,8 @@ export const ScheduleReturnPickupInputSchema = z.object({
     courier: z.string().optional(),
     awbNumber: z.string().optional(),
     scheduledAt: z.coerce.date().optional(),
+    /** When true, books pickup via iThink API and auto-generates AWB */
+    scheduleWithIthink: z.boolean().default(false),
 });
 export type ScheduleReturnPickupInput = z.infer<typeof ScheduleReturnPickupInputSchema>;
 

@@ -35,6 +35,7 @@ import pincodeRoutes from './routes/pincodes.js';
 import sseRoutes from './routes/sse.js';
 import pulseRoutes from './routes/pulse.js';
 import internalRoutes from './routes/internal.js';
+import returnsRoutes from './routes/returns.js';
 import { pulseBroadcaster } from './services/pulseBroadcaster.js';
 import scheduledSync from './services/scheduledSync.js';
 import trackingSync from './services/trackingSync.js';
@@ -134,6 +135,7 @@ export async function createExpressApp() {
   app.use('/api/events', sseRoutes);
   app.use('/api/pulse', pulseRoutes);
   app.use('/api/internal', internalRoutes);
+  app.use('/api/returns', returnsRoutes);
 
   // Health check
   app.get('/api/health', (req, res) => {

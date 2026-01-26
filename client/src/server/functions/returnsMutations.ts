@@ -972,13 +972,16 @@ export const initiateLineReturn = createServerFn({ method: 'POST' })
 
 /**
  * Schedule pickup for a return
+ *
+ * When scheduleWithIthink=true, calls the Express route to book with iThink Logistics
+ * When false, just updates DB with provided courier/AWB (manual entry)
  */
 export const scheduleReturnPickup = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown): ScheduleReturnPickupInput => ScheduleReturnPickupInputSchema.parse(input))
-    .handler(async ({ data }: { data: ScheduleReturnPickupInput }): Promise<ReturnResult<{ orderLineId: string }>> => {
+    .handler(async ({ data }: { data: ScheduleReturnPickupInput }): Promise<ReturnResult<{ orderLineId: string; awbNumber?: string; courier?: string }>> => {
         const prisma = await getPrismaInstance();
-        const { orderLineId, pickupType, courier, awbNumber, scheduledAt } = data;
+        const { orderLineId, pickupType, courier, awbNumber, scheduledAt, scheduleWithIthink } = data;
 
         const line = await prisma.orderLine.findUnique({
             where: { id: orderLineId },
@@ -996,6 +999,45 @@ export const scheduleReturnPickup = createServerFn({ method: 'POST' })
             );
         }
 
+        // If scheduleWithIthink, call Express route to book with iThink
+        if (scheduleWithIthink) {
+            try {
+                const baseUrl = process.env.VITE_API_URL || 'http://localhost:3001';
+                const response = await fetch(`${baseUrl}/api/returns/schedule-pickup`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ orderLineId }),
+                });
+
+                const result = await response.json() as {
+                    success: boolean;
+                    error?: string;
+                    data?: { orderLineId: string; awbNumber: string; courier: string };
+                };
+
+                if (!result.success) {
+                    return returnError(
+                        RETURN_ERROR_CODES.WRONG_STATUS,
+                        result.error || 'Failed to schedule pickup with courier'
+                    );
+                }
+
+                // Express route already updated the DB, just return success
+                return returnSuccess(
+                    {
+                        orderLineId,
+                        awbNumber: result.data?.awbNumber,
+                        courier: result.data?.courier,
+                    },
+                    `Pickup scheduled with ${result.data?.courier || 'courier'}`
+                );
+            } catch (error: unknown) {
+                const message = error instanceof Error ? error.message : 'Unknown error';
+                return returnError(RETURN_ERROR_CODES.WRONG_STATUS, `Failed to schedule pickup: ${message}`);
+            }
+        }
+
+        // Manual entry - just update DB
         await prisma.orderLine.update({
             where: { id: orderLineId },
             data: {
@@ -1007,7 +1049,7 @@ export const scheduleReturnPickup = createServerFn({ method: 'POST' })
             },
         });
 
-        return returnSuccess({ orderLineId }, 'Pickup scheduled');
+        return returnSuccess({ orderLineId, awbNumber: awbNumber || undefined, courier: courier || undefined }, 'Pickup scheduled');
     });
 
 /**
