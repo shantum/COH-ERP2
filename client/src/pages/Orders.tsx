@@ -286,11 +286,9 @@ export default function Orders() {
     }, [openUnifiedModal]);
 
     const handleViewOrderById = useCallback((orderId: string) => {
-        const order = (orders as DerivedOrder[] | undefined)?.find((o) => o.id === orderId);
-        if (order) {
-            openUnifiedModal(order as unknown as Order, 'view');
-        }
-    }, [orders, openUnifiedModal]);
+        // Always open the modal via URL - the fallback query will fetch the order if not in local list
+        openModal('view' as OrderModalType, orderId);
+    }, [openModal]);
 
     const handleEditOrderUnified = useCallback((order: Order) => {
         openUnifiedModal(order, 'edit');
