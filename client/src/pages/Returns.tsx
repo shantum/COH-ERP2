@@ -410,6 +410,7 @@ export default function Returns() {
         schedulePickupMutation.mutate({ data: {
             orderLineId: lineId,
             pickupType: 'arranged_by_us',
+            scheduleWithIthink: true,  // Actually book with iThink Logistics
         }});
     };
 
@@ -775,26 +776,33 @@ function ActionQueueTab({
                 const allNeedPickup = batchItems.every(i => i.actionNeeded === 'schedule_pickup');
 
                 return (
-                    <div key={batchKey} className="border border-gray-200 rounded-lg bg-white overflow-hidden">
-                        {/* Batch Header */}
-                        {isBatch && batchNumber && (
-                            <div className="px-4 py-2 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
-                                <div className="flex items-center gap-3">
-                                    <span className="font-medium text-gray-700">Batch {batchNumber}</span>
-                                    <span className="text-sm text-gray-500">
-                                        {batchItems.length} items • {firstItem.customerName}
-                                    </span>
+                    <div key={batchKey} className="border border-gray-200 rounded-lg bg-white overflow-hidden shadow-sm">
+                        {/* Batch Header - always show for batch items */}
+                        {(isBatch || batchNumber) && (
+                            <div className="px-4 py-3 bg-gradient-to-r from-gray-50 to-white border-b border-gray-200">
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-3">
+                                        <span className="font-semibold text-gray-800">
+                                            {batchNumber ? `Batch ${batchNumber}` : firstItem.orderNumber}
+                                        </span>
+                                        <span className="px-2 py-0.5 bg-gray-100 text-gray-600 text-xs rounded-full">
+                                            {batchItems.length} item{batchItems.length > 1 ? 's' : ''}
+                                        </span>
+                                        <span className="text-sm text-gray-500">
+                                            {firstItem.customerName}
+                                        </span>
+                                    </div>
+                                    {/* Batch-level action button */}
+                                    {allNeedPickup && (
+                                        <button
+                                            onClick={() => onSchedulePickup(firstItem.id)}
+                                            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2 text-sm font-medium shadow-sm"
+                                        >
+                                            <Truck size={16} />
+                                            Schedule Pickup{isBatch ? ' for Batch' : ''}
+                                        </button>
+                                    )}
                                 </div>
-                                {/* Batch-level action button */}
-                                {allNeedPickup && (
-                                    <button
-                                        onClick={() => onSchedulePickup(firstItem.id)}
-                                        className="px-4 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center gap-2 text-sm"
-                                    >
-                                        <Truck size={14} />
-                                        Schedule Pickup for Batch
-                                    </button>
-                                )}
                             </div>
                         )}
 
@@ -802,70 +810,72 @@ function ActionQueueTab({
                         <div className={isBatch ? 'divide-y divide-gray-100' : ''}>
                             {batchItems.map((item) => (
                                 <div key={item.id} className="p-4">
-                                    <div className="flex items-start justify-between">
-                                        <div className="flex gap-4">
-                                            <div className="w-16 h-16 bg-gray-100 rounded flex items-center justify-center">
-                                                {item.imageUrl ? (
-                                                    <img
-                                                        src={item.imageUrl}
-                                                        alt={item.productName || ''}
-                                                        className="w-full h-full object-cover rounded"
-                                                    />
-                                                ) : (
-                                                    <Package size={24} className="text-gray-400" />
+                                    {/* Main row - Product info and action */}
+                                    <div className="flex items-start gap-4">
+                                        {/* Product Image */}
+                                        <div className="w-14 h-14 bg-gray-100 rounded-lg flex-shrink-0 overflow-hidden">
+                                            {item.imageUrl ? (
+                                                <img
+                                                    src={item.imageUrl}
+                                                    alt={item.productName || ''}
+                                                    className="w-full h-full object-cover"
+                                                />
+                                            ) : (
+                                                <div className="w-full h-full flex items-center justify-center">
+                                                    <Package size={20} className="text-gray-400" />
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {/* Product Details */}
+                                        <div className="flex-1 min-w-0">
+                                            {/* Status badges row */}
+                                            <div className="flex items-center gap-2 mb-1 flex-wrap">
+                                                <span className={`px-2 py-0.5 text-xs font-medium rounded ${getStatusBadge(item.returnStatus)}`}>
+                                                    {item.returnStatus?.replace(/_/g, ' ')}
+                                                </span>
+                                                <span className={`px-2 py-0.5 text-xs font-medium rounded ${getResolutionBadge(item.returnResolution).color}`}>
+                                                    {getResolutionBadge(item.returnResolution).label}
+                                                </span>
+                                                {item.returnAwbNumber && (
+                                                    <span className="px-2 py-0.5 text-xs bg-gray-100 text-gray-600 rounded">
+                                                        AWB: {item.returnAwbNumber}
+                                                    </span>
                                                 )}
                                             </div>
-                                            <div>
-                                                <div className="flex items-center gap-2 mb-1">
-                                                    {!isBatch && <span className="font-medium">{item.orderNumber}</span>}
-                                                    <span className={`px-2 py-0.5 text-xs rounded ${getStatusBadge(item.returnStatus)}`}>
-                                                        {item.returnStatus}
-                                                    </span>
-                                                    <span className={`px-2 py-0.5 text-xs rounded ${getResolutionBadge(item.returnResolution).color}`}>
-                                                        {getResolutionBadge(item.returnResolution).label}
-                                                    </span>
-                                                </div>
-                                                <div className="text-sm text-gray-600">
-                                                    {item.productName} - {item.colorName} - {item.size}
-                                                </div>
-                                                <div className="text-sm text-gray-500">
-                                                    SKU: {item.skuCode} | Qty: {item.returnQty}
-                                                    {!isBatch && ` | Customer: ${item.customerName}`}
-                                                </div>
+
+                                            {/* Product name */}
+                                            <div className="text-sm font-medium text-gray-800 truncate">
+                                                {item.productName} - {item.colorName} - {item.size}
+                                            </div>
+
+                                            {/* SKU and qty */}
+                                            <div className="text-xs text-gray-500 mt-0.5">
+                                                {item.skuCode} • Qty: {item.returnQty}
                                                 {item.returnReasonCategory && (
-                                                    <div className="text-xs text-gray-500 mt-1">
-                                                        Reason: {item.returnReasonCategory}
-                                                        {item.returnReasonDetail && ` - ${item.returnReasonDetail}`}
-                                                    </div>
+                                                    <> • {item.returnReasonCategory.replace(/_/g, ' ')}</>
                                                 )}
-                                                <div className="text-xs text-gray-400 mt-1">
-                                                    Requested {item.daysSinceRequest} days ago
-                                                </div>
+                                            </div>
+
+                                            {/* Time since request */}
+                                            <div className="text-xs text-gray-400 mt-1">
+                                                {item.daysSinceRequest === 0 ? 'Requested today' : `Requested ${item.daysSinceRequest}d ago`}
                                             </div>
                                         </div>
 
-                                        {/* Action Buttons - show per-item only if not a batch with shared action */}
-                                        <div className="flex flex-col gap-2 shrink-0">
-                                            {item.actionNeeded === 'schedule_pickup' && !isBatch && (
-                                                <button
-                                                    onClick={() => onSchedulePickup(item.id)}
-                                                    className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center gap-2"
-                                                >
-                                                    <Truck size={16} />
-                                                    Schedule Pickup
-                                                </button>
-                                            )}
-
+                                        {/* Action Area - Compact */}
+                                        <div className="flex items-center gap-2 flex-shrink-0">
+                                            {/* Receive action - inline select + button */}
                                             {item.actionNeeded === 'receive' && (
-                                                <div className="flex flex-col gap-2">
+                                                <>
                                                     <select
                                                         value={receiveConditionMap[item.id] || ''}
                                                         onChange={(e) =>
                                                             setReceiveConditionMap({ ...receiveConditionMap, [item.id]: e.target.value })
                                                         }
-                                                        className="px-3 py-2 border border-gray-300 rounded text-sm"
+                                                        className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm bg-white min-w-[130px]"
                                                     >
-                                                        <option value="">Select Condition</option>
+                                                        <option value="">Condition...</option>
                                                         {conditionOptions.map((c) => (
                                                             <option key={c.value} value={c.value}>
                                                                 {c.label}
@@ -881,20 +891,32 @@ function ActionQueueTab({
                                                                 alert('Please select a condition');
                                                             }
                                                         }}
-                                                        className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 flex items-center gap-2"
+                                                        disabled={!receiveConditionMap[item.id]}
+                                                        className="px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center gap-1.5 text-sm font-medium"
                                                     >
-                                                        <PackageCheck size={16} />
+                                                        <PackageCheck size={14} />
                                                         Receive
                                                     </button>
-                                                </div>
+                                                </>
+                                            )}
+
+                                            {/* Schedule pickup - only for single items, batch handled in header */}
+                                            {item.actionNeeded === 'schedule_pickup' && !isBatch && !batchNumber && (
+                                                <button
+                                                    onClick={() => onSchedulePickup(item.id)}
+                                                    className="px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-1.5 text-sm font-medium"
+                                                >
+                                                    <Truck size={14} />
+                                                    Schedule Pickup
+                                                </button>
                                             )}
 
                                             {item.actionNeeded === 'process_refund' && (
                                                 <button
                                                     onClick={() => onProcessRefund(item.id, item)}
-                                                    className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 flex items-center gap-2"
+                                                    className="px-3 py-1.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 flex items-center gap-1.5 text-sm font-medium"
                                                 >
-                                                    <DollarSign size={16} />
+                                                    <DollarSign size={14} />
                                                     Process Refund
                                                 </button>
                                             )}
@@ -902,9 +924,9 @@ function ActionQueueTab({
                                             {item.actionNeeded === 'create_exchange' && (
                                                 <button
                                                     onClick={() => onCreateExchange(item.id)}
-                                                    className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 flex items-center gap-2"
+                                                    className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center gap-1.5 text-sm font-medium"
                                                 >
-                                                    <ArrowRight size={16} />
+                                                    <ArrowRight size={14} />
                                                     Create Exchange
                                                 </button>
                                             )}
@@ -912,65 +934,64 @@ function ActionQueueTab({
                                             {item.actionNeeded === 'complete' && (
                                                 <button
                                                     onClick={() => onComplete(item.id)}
-                                                    className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 flex items-center gap-2"
+                                                    className="px-3 py-1.5 bg-gray-700 text-white rounded-lg hover:bg-gray-800 flex items-center gap-1.5 text-sm font-medium"
                                                 >
-                                                    <Check size={16} />
+                                                    <Check size={14} />
                                                     Complete
                                                 </button>
                                             )}
 
+                                            {/* Cancel - secondary button */}
                                             <button
                                                 onClick={() => onCancel(item.id)}
-                                                className="px-4 py-2 bg-red-100 text-red-800 rounded hover:bg-red-200 flex items-center gap-2"
+                                                className="px-2 py-1.5 text-red-600 hover:bg-red-50 rounded-lg text-sm"
+                                                title="Cancel return"
                                             >
                                                 <XCircle size={16} />
-                                                Cancel
                                             </button>
                                         </div>
                                     </div>
 
-                                    {/* Notes Section */}
-                                    <div className="mt-3 pt-3 border-t border-gray-100">
+                                    {/* Notes Section - Compact */}
+                                    <div className="mt-3 pt-2 border-t border-gray-50">
                                         {editingNotesId === item.id ? (
-                                            <div className="flex gap-2">
+                                            <div className="flex gap-2 items-start">
+                                                <MessageSquare size={14} className="text-gray-400 mt-2 shrink-0" />
                                                 <textarea
                                                     value={editingNotesValue}
                                                     onChange={(e) => setEditingNotesValue(e.target.value)}
-                                                    placeholder="Add notes about this return..."
-                                                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm resize-none"
+                                                    placeholder="Add notes..."
+                                                    className="flex-1 px-2 py-1.5 border border-gray-200 rounded text-sm resize-none focus:outline-none focus:ring-1 focus:ring-blue-500"
                                                     rows={2}
                                                     autoFocus
                                                 />
-                                                <div className="flex flex-col gap-1">
-                                                    <button
-                                                        onClick={() => saveNotes(item.id)}
-                                                        className="px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 flex items-center gap-1"
-                                                    >
-                                                        <Save size={14} />
-                                                        Save
-                                                    </button>
-                                                    <button
-                                                        onClick={cancelEditNotes}
-                                                        className="px-3 py-1 bg-gray-100 text-gray-600 rounded text-sm hover:bg-gray-200"
-                                                    >
-                                                        Cancel
-                                                    </button>
-                                                </div>
+                                                <button
+                                                    onClick={() => saveNotes(item.id)}
+                                                    className="px-2 py-1 bg-blue-600 text-white rounded text-xs hover:bg-blue-700"
+                                                >
+                                                    <Save size={12} />
+                                                </button>
+                                                <button
+                                                    onClick={cancelEditNotes}
+                                                    className="px-2 py-1 text-gray-500 hover:text-gray-700 text-xs"
+                                                >
+                                                    ✕
+                                                </button>
                                             </div>
                                         ) : (
-                                            <div className="flex items-start gap-2">
-                                                <MessageSquare size={14} className="text-gray-400 mt-0.5 shrink-0" />
+                                            <div className="flex items-center gap-2 text-xs">
+                                                <MessageSquare size={12} className="text-gray-400 shrink-0" />
                                                 {item.returnNotes ? (
-                                                    <p className="text-sm text-gray-600 flex-1">{item.returnNotes}</p>
+                                                    <span className="text-gray-600 flex-1 truncate">{item.returnNotes}</span>
                                                 ) : (
-                                                    <p className="text-sm text-gray-400 italic flex-1">No notes</p>
+                                                    <span className="text-gray-400 italic flex-1">No notes</span>
                                                 )}
                                                 <button
                                                     onClick={() => startEditNotes(item.id, item.returnNotes)}
-                                                    className="text-gray-400 hover:text-blue-600 p-1"
+                                                    className="text-gray-400 hover:text-blue-600 p-0.5"
                                                     title="Edit notes"
                                                 >
-                                                    <Pencil size={14} />
+                                                    <Pencil size={12} />
                                                 </button>
                                             </div>
                                         )}
