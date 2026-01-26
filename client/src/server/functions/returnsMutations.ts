@@ -1034,8 +1034,15 @@ export const scheduleReturnPickup = createServerFn({ method: 'POST' })
             );
         }
 
-        // If scheduleWithIthink, call Express route (auto-groups batch)
-        if (scheduleWithIthink) {
+        // Auto-enable iThink when:
+        // 1. pickupType is 'arranged_by_us' AND
+        // 2. No manual AWB provided AND
+        // 3. scheduleWithIthink not explicitly set to false
+        const shouldUseIthink = scheduleWithIthink === true ||
+            (pickupType === 'arranged_by_us' && !awbNumber && scheduleWithIthink !== false);
+
+        // If using iThink, call Express route (auto-groups batch)
+        if (shouldUseIthink) {
             try {
                 const baseUrl = process.env.VITE_API_URL || 'http://localhost:3001';
                 const authToken = getCookie('auth_token');
