@@ -50,6 +50,11 @@ import {
     MessageSquare, Pencil, Save
 } from 'lucide-react';
 import { CustomerDetailModal } from '../components/orders/CustomerDetailModal';
+import { useIThinkTracking } from '../hooks/useIThinkTracking';
+import ithinkLogo from '../assets/ithinklogistics.png';
+import { formatLastUpdate } from '../components/orders/OrdersTable/utils/dateFormatters';
+import { TRACKING_STATUS_STYLES } from '../components/orders/OrdersTable/rowStyling';
+import { cn } from '../lib/utils';
 
 // ============================================
 // TYPES
@@ -117,6 +122,84 @@ const computeAgeDays = (requestedAt: Date | string | null) => {
     const date = new Date(requestedAt);
     return Math.floor((Date.now() - date.getTime()) / (1000 * 60 * 60 * 24));
 };
+
+// ============================================
+// RETURN TRACKING STATUS COMPONENT
+// ============================================
+
+interface ReturnTrackingStatusProps {
+    awbNumber: string;
+}
+
+/**
+ * Displays iThink tracking status for a return shipment
+ * Shows logo, status label, and last update time
+ */
+function ReturnTrackingStatus({ awbNumber }: ReturnTrackingStatusProps) {
+    const { data: tracking, isLoading, error } = useIThinkTracking({
+        awbNumber,
+        enabled: !!awbNumber,
+    });
+
+    if (isLoading) {
+        return (
+            <div className="flex items-center gap-1.5 text-xs text-gray-400">
+                <div className="w-3 h-3 border border-gray-300 border-t-transparent rounded-full animate-spin" />
+                <span>Loading...</span>
+            </div>
+        );
+    }
+
+    if (error) {
+        return (
+            <div className="flex items-center gap-1.5 text-xs text-red-500 mt-1">
+                <span>Tracking error</span>
+            </div>
+        );
+    }
+
+    if (!tracking?.currentStatus) {
+        return null;
+    }
+
+    const style = TRACKING_STATUS_STYLES[tracking.currentStatus] || {
+        bg: 'bg-gray-100',
+        text: 'text-gray-700',
+        label: tracking.currentStatus.replace(/_/g, ' '),
+    };
+
+    // Try lastScan first, then fall back to most recent scan in history
+    const lastScanTime = tracking.lastScan?.datetime
+        || (tracking.scanHistory && tracking.scanHistory.length > 0 ? tracking.scanHistory[0].datetime : null);
+    const lastUpdate = formatLastUpdate(lastScanTime);
+    const lastLocation = tracking.lastScan?.location
+        || (tracking.scanHistory && tracking.scanHistory.length > 0 ? tracking.scanHistory[0].location : null);
+
+    return (
+        <div className="flex items-center gap-1.5 mt-1">
+            <img
+                src={ithinkLogo}
+                alt="iThink"
+                className="w-3.5 h-3.5 object-contain shrink-0"
+            />
+            <div className="flex flex-col leading-tight min-w-0">
+                <span
+                    className={cn(
+                        'font-medium whitespace-nowrap text-[11px]',
+                        style.text
+                    )}
+                >
+                    {style.label}
+                </span>
+                {(lastUpdate || lastLocation) && (
+                    <span className="text-[10px] text-gray-400 truncate max-w-[150px]">
+                        {lastUpdate}{lastUpdate && lastLocation ? ' · ' : ''}{lastLocation}
+                    </span>
+                )}
+            </div>
+        </div>
+    );
+}
 
 // ============================================
 // MAIN COMPONENT
@@ -849,6 +932,11 @@ function ActionQueueTab({
                                                 )}
                                             </div>
 
+                                            {/* iThink Tracking Status */}
+                                            {item.returnAwbNumber && (
+                                                <ReturnTrackingStatus awbNumber={item.returnAwbNumber} />
+                                            )}
+
                                             {/* Product name */}
                                             <div className="text-sm font-medium text-gray-800 truncate">
                                                 {item.productName} - {item.colorName} - {item.size}
@@ -1099,6 +1187,7 @@ function AllReturnsTab({ returns, loading, onViewCustomer, onCancel, onUpdateNot
                                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Qty</th>
                                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
                                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Resolution</th>
+                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">AWB / Tracking</th>
                                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Customer</th>
                                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Age</th>
                                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Notes</th>
@@ -1125,6 +1214,18 @@ function AllReturnsTab({ returns, loading, onViewCustomer, onCancel, onUpdateNot
                                         <span className={`px-2 py-1 text-xs rounded ${getResolutionBadge(ret.returnResolution).color}`}>
                                             {getResolutionBadge(ret.returnResolution).label}
                                         </span>
+                                    </td>
+                                    <td className="px-4 py-3 text-sm">
+                                        {ret.returnAwbNumber ? (
+                                            <div>
+                                                <div className="text-xs text-gray-600 font-mono">
+                                                    {ret.returnAwbNumber}
+                                                </div>
+                                                <ReturnTrackingStatus awbNumber={ret.returnAwbNumber} />
+                                            </div>
+                                        ) : (
+                                            <span className="text-gray-400">-</span>
+                                        )}
                                     </td>
                                     <td className="px-4 py-3 text-sm">
                                         <button

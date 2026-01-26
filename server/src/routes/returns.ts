@@ -325,4 +325,42 @@ router.post('/schedule-pickup', authenticateToken, async (req: Request, res: Res
     }
 });
 
+/**
+ * GET /api/returns/tracking/:awbNumber
+ *
+ * Get tracking status for a return shipment AWB
+ */
+router.get('/tracking/:awbNumber', authenticateToken, async (req: Request, res: Response): Promise<void> => {
+    const awbNumber = req.params.awbNumber as string;
+
+    if (!awbNumber) {
+        res.status(400).json({
+            success: false,
+            error: 'AWB number is required',
+        });
+        return;
+    }
+
+    try {
+        const trackingData = await ithinkLogistics.getTrackingStatus(awbNumber);
+
+        if (!trackingData) {
+            res.status(404).json({
+                success: false,
+                error: 'Tracking data not found',
+            });
+            return;
+        }
+
+        res.json(trackingData);
+    } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        shippingLogger.error({ error: message, awbNumber }, 'Tracking fetch failed');
+        res.status(500).json({
+            success: false,
+            error: message,
+        });
+    }
+});
+
 export default router;

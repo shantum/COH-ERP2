@@ -8,6 +8,7 @@
  */
 
 import { createServerFn } from '@tanstack/react-start';
+import { getCookie } from '@tanstack/react-start/server';
 import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth';
 
@@ -327,9 +328,15 @@ export const getAwbTracking = createServerFn({ method: 'GET' })
     .handler(async ({ data }): Promise<AwbTrackingResponse> => {
         try {
             const baseUrl = getApiBaseUrl();
-            const response = await fetch(`${baseUrl}/tracking/awb/${encodeURIComponent(data.awbNumber)}`, {
+            const authToken = getCookie('auth_token');
+            const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+            if (authToken) {
+                headers['Authorization'] = `Bearer ${authToken}`;
+            }
+
+            const response = await fetch(`${baseUrl}/returns/tracking/${encodeURIComponent(data.awbNumber)}`, {
                 method: 'GET',
-                headers: { 'Content-Type': 'application/json' },
+                headers,
             });
 
             if (!response.ok) {
