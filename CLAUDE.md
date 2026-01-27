@@ -16,10 +16,17 @@
 ## Quick Start
 
 ```bash
-cd server && npm run dev    # Port 3001
-cd client && npm run dev    # Port 5173
-npm run db:generate && npm run db:push  # From root (Prisma at /prisma/)
+# Using pnpm (recommended - workspace mode)
+cd server && pnpm dev       # Port 3001
+cd client && pnpm dev       # Port 5173
+pnpm db:generate && pnpm db:push  # From root
+
+# Using npm (works for individual packages)
+cd server && npm run dev
+cd client && npm run dev
 ```
+
+**Note:** Root uses pnpm workspace (`pnpm-workspace.yaml`). Railway builds use npm (`nixpacks.toml`).
 
 Login: `admin@coh.com` / `XOFiya@34`
 
@@ -56,7 +63,7 @@ const { data } = useQuery({
 | 4 | Shopify data: `shopifyCache.*` only, NEVER `rawData` |
 | 5 | Line fields: use pre-computed O(1) (`lineShippedAt`, `daysInTransit`), not `orderLines.find()` |
 | 10 | Mutations return immediately; side effects run async via `deferredExecutor` |
-| 16 | Page sizes: Open=500 (active), Shipped/Cancelled=100 (historical) |
+| 16 | Page sizes: All views use 250 per page (`useUnifiedOrdersData.ts` PAGE_SIZE constant) |
 | 37 | Query keys: `['domain', 'action', 'server-fn', params]`. Old tRPC format causes cache misses |
 | 39 | Use `inventoryQueryKeys.balance` from `constants/queryKeys.ts` for inventory queries |
 
@@ -68,6 +75,7 @@ const { data } = useQuery({
 | 45 | Triggers: `update_sku_balance()` for SKU, `update_fabric_colour_balance()` for fabric. Auto-update on INSERT/DELETE/UPDATE to transaction tables. |
 | 46 | `currentBalance` is PROTECTED: Guard triggers block direct UPDATEs. Only create transactions (InventoryTransaction / FabricColourTransaction). |
 | 47 | **Legacy Fabric system**: `Fabric` + `FabricTransaction` are deprecated. Use `FabricColour` + `FabricColourTransaction` for all new features. |
+| 49 | CHECK constraints enforce: `qty > 0` (OrderLine, InventoryTransaction), `txnType IN ('inward', 'outward')` |
 
 ### TypeScript & Validation
 | # | Rule |
@@ -86,7 +94,7 @@ const { data } = useQuery({
 | 26 | Cookies: `getCookie` from `@tanstack/react-start/server`, NOT `vinxi/http` |
 | 27 | API calls: production uses `http://127.0.0.1:${PORT}`, not `localhost:3001` |
 | 28 | Large payloads: `method: 'POST'` to avoid HTTP 431 header size error |
-| 34 | CANNOT import from `@server/` path alias. Use `@coh/shared/services/db` |
+| 34 | Client-side code CANNOT import `@server/`. SSR/Server Functions use externalization. For DB: `@coh/shared/services/db` |
 | 35 | Use `getKysely()` and `getPrisma()` from `@coh/shared/services/db` |
 | 36 | High-perf Kysely queries: `@coh/shared/services/db/queries` |
 
@@ -117,20 +125,25 @@ const { data } = useQuery({
 | 6 | Shipped/cancelled orders stay in Open until Release clicked |
 | 11 | Delivery/RTO mutations are line-level; orders can have mixed states |
 | 12 | Admin ship: `adminShip` mutation, requires admin role + `ENABLE_ADMIN_SHIP=true` |
-| 13 | Tracking: TEXT patterns override codes; `cancel_status="Approved"` = cancelled; "UD" code unreliable |
+| 13 | Tracking: TEXT patterns override codes; `cancel_status="Approved"` = cancelled |
 | 14 | Shopify: syncs tracking ONLY; ERP is source of truth for `shipped` |
-| 15 | Tracking sync excludes terminal statuses (`delivered`, `rto_delivered`) |
+| 15 | Tracking sync excludes terminal statuses (`delivered`, `rto_delivered`, `cancelled`, `reverse_delivered`) |
+| 50 | Tracking codes: "UD" is unreliable (used for many states). Text patterns are authoritative via `resolveTrackingStatus()` |
+| 51 | RTO detection: `cancel_status="Approved"` takes priority (110), then text patterns, then status codes |
 
 ### Infrastructure
 | # | Rule |
 |---|------|
 | 7 | Prisma dates return Date objects: use `toDateString()` from `utils/dateHelpers.ts` |
 | 8 | Dev URLs: use `localhost` for API calls |
-| 48 | **Postgres.app requires password**: DATABASE_URL must include password. Local dev uses `coh_dev_local` as password. Set with `psql -p 5444 -c "ALTER USER shantumgupta PASSWORD 'coh_dev_local';"` |
+| 48 | **Postgres.app requires password**: DATABASE_URL must include password. Local dev uses `coh_dev_local` as password. |
 | 19 | Fabric hierarchy: DB enforces Material>Fabric>Colour. Variations link via `fabricColourId` |
 | 20 | Inheritance: colours inherit cost/lead/minOrder from fabric if not set |
-| 23 | Express routes: only auth, webhooks, SSE, file uploads. Everything else = Server Functions |
+| 23 | Express routes: auth, admin, webhooks, SSE, pulse, returns, tracking, shopify, internal. Everything else = Server Functions |
 | 25 | Prisma schema at `/prisma/schema.prisma` (root). Run db commands from root |
+| 52 | `INTERNAL_API_SECRET` env var required for Server Function -> Express SSE broadcasts in production |
+| 53 | Two SSE endpoints: `/api/events` (full replay) and `/api/pulse` (lightweight, no replay) |
+| 54 | Background workers disabled via `DISABLE_BACKGROUND_WORKERS=true` for testing |
 
 ## Type Safety
 
@@ -152,66 +165,120 @@ function buildWhereClause(view: string): Prisma.OrderWhereInput { ... }
 
 ### TanStack Router Rules
 - Search params: Zod schema in `shared/src/schemas/searchParams.ts`, use `z.coerce` for numbers/booleans
+- Search params use `.catch(defaultValue)` for graceful fallback on invalid input
 - File-based routing in `client/src/routes/`. Let generator handle route tree
 - Auth: protected routes under `_authenticated` layout, use `beforeLoad` not `useEffect`
 - Redirects: old URLs need redirect file in `_redirects/` folder
+- Use `Route.useLoaderData()` for SSR initial data, `Route.useSearch()` for URL params (SSR-safe)
 
 ## Orders Architecture
 
 ### Data Model
-- Single page `/orders` with dropdown: Open, Shipped, Cancelled
+- Single page `/orders` with segmented tabs: **Open, Shipped, RTO, All**
 - Each row = one order line (server-flattened), `isFirstLine` marks header
-- Shipped filters: All, RTO, COD Pending (via `shippedFilter` param)
+- Cancelled orders visible in All view after release
 
 ### Tracking (Line-Level Only)
 
-**OrderLine is ONLY source of truth.** Order-level tracking removed.
+**OrderLine is ONLY source of truth.** Order.status only updated for terminal states (delivered/returned/cancelled).
 
 | Field | Notes |
 |-------|-------|
 | awbNumber, courier | Each line can have different AWB |
-| shippedAt, deliveredAt, trackingStatus | Line-level timestamps |
-| rtoInitiatedAt, rtoReceivedAt | RTO lifecycle |
-| lastScanAt, lastScanLocation, expectedDeliveryDate | iThink data |
+| shippedAt, deliveredAt | Line-level timestamps |
+| trackingStatus | Values: `in_transit`, `out_for_delivery`, `delivered`, `rto_initiated`, `rto_in_transit`, `rto_delivered`, `cancelled`, etc. |
+| rtoInitiatedAt, rtoReceivedAt, rtoCondition | RTO lifecycle |
+| lastScanAt, lastScanLocation, lastScanStatus | Last tracking scan details |
+| courierStatusCode, deliveryAttempts | Raw courier data |
+| expectedDeliveryDate | EDD from iThink |
+
+**TrackingStatus Values** (16 total): `manifested`, `not_picked`, `picked_up`, `in_transit`, `reached_destination`, `out_for_delivery`, `delivery_delayed`, `undelivered`, `delivered`, `cancelled`, `rto_initiated`, `rto_in_transit`, `rto_delivered`, `reverse_pickup`, `reverse_in_transit`, `reverse_delivered`
+
+**Terminal statuses**: `delivered`, `rto_delivered`, `cancelled`, `reverse_delivered`
 
 ### State Machine
 
 Source: `server/src/utils/orderStateMachine.ts`
 
-```
-pending > allocated > picked > packed > shipped
-   |          |          |        |
-cancelled  cancelled  cancelled cancelled > pending (uncancel)
-```
+**Forward Progression:** `pending > allocated > picked > packed > shipped > delivered (via tracking)`
 
-**Inventory**: `pending>allocated` creates OUTWARD; cancellation deletes it
+**Backward Corrections (each status can go back one step):**
+- `allocated > pending` (unallocate, releases inventory)
+- `picked > allocated` (unpick)
+- `packed > picked` (unpack)
+- `shipped > packed` (unship, clears AWB)
+
+**Cancellation:** Any non-shipped status can cancel. `cancelled > pending` for uncancel.
+
+**Inventory Effects:**
+- `pending > allocated`: Creates OUTWARD transaction (allocates)
+- `allocated/picked/packed > cancelled`: Deletes OUTWARD (releases)
+- Shipped lines cannot be cancelled (use RTO flow)
 
 ### Views & Release
 
+Source: `server/src/utils/orderViews.ts`
+
 | View | Condition |
 |------|-----------|
-| Open | Active OR shipped/cancelled but not released |
-| Shipped | All lines shipped AND `releasedToShipped=true` |
-| Cancelled | All lines cancelled AND `releasedToCancelled=true` |
+| Open | `isArchived=false` AND (has non-shipped/cancelled lines OR fully shipped but `releasedToShipped=false` OR fully cancelled but `releasedToCancelled=false`) |
+| Shipped | `isArchived=false`, `releasedToShipped=true`, all non-cancelled lines shipped, excludes RTO orders |
+| RTO | Has at least one line with `trackingStatus` in `[rto_initiated, rto_in_transit, rto_delivered]` |
+| All | All orders regardless of status |
+
+## Return Lifecycle
+
+OrderLine is source of truth for returns (extensive `return*` fields).
+
+| Field Group | Key Fields |
+|-------------|------------|
+| Batch | `returnBatchNumber` - groups lines returned together (e.g., "64168/1") |
+| Status | `returnStatus`: requested > pickup_scheduled > in_transit > received > complete |
+| Logistics | `returnAwbNumber`, `returnCourier`, `returnPickupType` |
+| QC | `returnCondition` (good/damaged/defective/wrong_item/used), `returnConditionNotes` |
+| Refund | `returnGrossAmount`, `returnDiscountClawback`, `returnDeductions`, `returnNetAmount` (Decimal) |
+| Resolution | `returnResolution`: refund, exchange, rejected |
+| Exchange | `returnExchangeOrderId` - FK to exchange Order |
+
+## BOM System (Bill of Materials)
+
+3-level inheritance: Product > Variation > SKU. Null values inherit from parent.
+
+| Level | Model | Purpose |
+|-------|-------|---------|
+| Product | ProductBomTemplate | Structure + defaults (trims, services) |
+| Variation | VariationBomLine | Color-specific (fabric colours, overrides) |
+| SKU | SkuBomLine | Size-specific (quantity overrides) |
+
+**Component Types**: `FABRIC`, `TRIM`, `SERVICE`
+**Roles**: `main`, `accent`, `lining`, `button`, `print` (defined in ComponentRole)
+**Catalogs**: `TrimItem` (buttons, zippers), `ServiceItem` (printing, embroidery), `Vendor`
 
 ## Caching
 
 | Cache | TTL | Location |
 |-------|-----|----------|
-| `inventoryBalanceCache` | 5 min | `@coh/shared/services/inventory` |
+| `inventoryBalanceCache` | 5 min | `@coh/shared/services/inventory/balanceCache.ts` |
+| `fabricColourBalanceCache` | 5 min | `@coh/shared/services/inventory/balanceCache.ts` |
 | `customerStatsCache` | 2 min | `server/services/customerStatsCache.ts` |
 
-**Note**: `Sku.currentBalance` is materialized via DB trigger, so balance lookups are O(1). The cache reduces DB round trips but is no longer critical for performance.
+**Note**: Both balance caches read from materialized `currentBalance` columns maintained by DB triggers. The cache reduces DB round trips but is no longer critical for performance.
 
 ```typescript
-import { inventoryBalanceCache } from '@coh/shared/services/inventory';
+import { inventoryBalanceCache, fabricColourBalanceCache } from '@coh/shared/services/inventory';
+
+// SKU balances
 const balances = await inventoryBalanceCache.get(prisma, skuIds);
-inventoryBalanceCache.invalidate(affectedSkuIds);  // CRITICAL after mutations
+inventoryBalanceCache.invalidate(affectedSkuIds);
+
+// Fabric colour balances
+const fabricBalances = await fabricColourBalanceCache.get(prisma, fabricColourIds);
+fabricColourBalanceCache.invalidate(affectedFabricColourIds);
 ```
 
 **Inventory Balance**: `SUM(inward) - SUM(outward)` using `txnType` column. Balance can be negative.
 
-**SSE**: Server `routes/sse.ts` | Client `hooks/useOrderSSE.ts`. Auto-reconnect with 100-event replay.
+**SSE**: Server `routes/sse.ts` (100-event replay) + `routes/pulse.ts` (lightweight) | Client `hooks/useOrderSSE.ts`. Auto-reconnect.
 
 ## Shopify Integration
 
@@ -219,7 +286,11 @@ inventoryBalanceCache.invalidate(affectedSkuIds);  // CRITICAL after mutations
 Source: `server/src/services/shopifyOrderProcessor.ts`
 - `processShopifyOrderToERP()` - Webhooks (DB lookup)
 - `processOrderWithContext()` - Batch (Map O(1) lookup)
-- **ERP is source of truth** for shipped/delivered. Shopify captures tracking only.
+
+**ERP as Source of Truth:**
+- Shopify fulfillment syncs AWB/courier to OrderLines but does NOT auto-ship
+- ERP workflow (allocate > pick > pack > ship) is required for lineStatus changes
+- Shopify tracking data captured for reference only
 
 ### Inventory Sync
 
@@ -239,39 +310,108 @@ Source: `server/src/config/mappings/trackingStatus.ts`
 **Resolution order**:
 1. `cancel_status="Approved"` > cancelled (priority 110)
 2. Text patterns (most reliable)
-3. Status codes (fallback, "UD" ignored)
+3. Status codes (fallback, "UD" ignored - unreliable)
 
 **Optimization**: Terminal statuses (`delivered`, `rto_delivered`) excluded from sync.
+
+## Background Workers
+
+Managed by `expressApp.js` via `startBackgroundWorkers()`:
+
+| Worker | Interval | Purpose |
+|--------|----------|---------|
+| `scheduledSync` | Configurable | Shopify order sync (24hr lookback) |
+| `trackingSync` | 30 min | iThink tracking updates |
+| `cacheProcessor` | Continuous | Cache operation processing |
+| `cacheDumpWorker` | Continuous | Cache dump to disk |
+| `pulseBroadcaster` | Continuous | SSE pulse signal broadcasting |
+| Cache cleanup | Daily 2 AM | Stale cache entry cleanup |
+
+**Environment Variables:**
+- `DISABLE_BACKGROUND_WORKERS=true` - Disables all background workers
+- `INTERNAL_API_SECRET` - Secret for internal API calls (Server Functions -> Express)
+
+## Environment Variables
+
+| Variable | Required | Default | Purpose |
+|----------|----------|---------|---------|
+| `DATABASE_URL` | Yes | - | PostgreSQL connection string |
+| `JWT_SECRET` | Yes | - | Auth signing key |
+| `PORT` | No | 3001 | Server port |
+| `NODE_ENV` | No | development | Environment |
+| `JWT_EXPIRY` | No | 7d | Token expiration |
+| `ENABLE_ADMIN_SHIP` | No | true | Admin ship feature |
+| `DISABLE_BACKGROUND_WORKERS` | No | false | Disable sync workers |
+| `INTERNAL_API_SECRET` | No | - | Server-to-server auth |
+| `SHOPIFY_ACCESS_TOKEN` | No | - | Shopify Admin API |
+| `SHOPIFY_SHOP_DOMAIN` | No | - | e.g., store.myshopify.com |
+| `SHOPIFY_WEBHOOK_SECRET` | No | - | HMAC verification |
+| `ITHINK_ACCESS_TOKEN` | No | - | iThink API |
+| `ITHINK_SECRET_KEY` | No | - | iThink secret |
+| `ITHINK_DEFAULT_LOGISTICS` | No | delhivery | Default courier |
+
+See `server/src/config/env.js` for full Zod schema with validation.
 
 ## Key Files
 
 ### Client
 ```
-pages/Orders.tsx, Products.tsx
-components/orders/OrdersGrid.tsx, ordersGrid/columns/, ordersGrid/formatting/
+routes/_authenticated/orders.tsx, products.tsx
+components/orders/OrdersTable/OrdersTable.tsx, OrdersTable/columns/, OrdersTable/cells/
 components/products/ProductsTree.tsx, SkuFlatView.tsx, cells/, detail/, unified-edit/
 components/materials/MaterialsTreeTable.tsx, cells/
-hooks/useOrdersMutations.ts, useUnifiedOrdersData.ts, orders/
+hooks/useOrdersMutations.ts, useUnifiedOrdersData.ts, useAuth.ts, useOrderSSE.ts
+hooks/orders/ (8 modular mutation hooks + optimistic/)
+constants/queryKeys.ts, sizes.ts
 ```
 
 ### Server Functions
 ```
 client/src/server/functions/
-  orders.ts, orderMutations.ts, customers.ts, customerMutations.ts
-  inventory.ts, inventoryMutations.ts, products.ts, productsMutations.ts
+  # Queries
+  orders.ts, customers.ts, inventory.ts, products.ts
   materials.ts, fabrics.ts, fabricColours.ts, tracking.ts
   production.ts, returns.ts, admin.ts, shopify.ts
+  catalog.ts, reports.ts, auth.ts, repacking.ts
+
+  # Mutations
+  orderMutations.ts, customerMutations.ts, inventoryMutations.ts
+  productsMutations.ts, materialsMutations.ts, fabricMutations.ts
+  fabricColourMutations.ts, bomMutations.ts, productionMutations.ts
+  reconciliationMutations.ts, returnsMutations.ts
+  authMutations.ts, paymentMutations.ts
 ```
 
 ### Server (Express)
 ```
 server/src/
-  production.js          # Unified SSR+API (Railway entry)
-  expressApp.js          # Express factory
-  routes/auth.ts, webhooks.ts, sse.ts, shopify/
-  services/trackingSync.ts, shopifyOrderProcessor.ts, autoArchive.ts
-  utils/orderStateMachine.ts, orderViews.ts
-  config/mappings/trackingStatus.ts
+  production.js          # Unified SSR+API entry (Railway)
+  expressApp.js          # Express factory + background worker coordination
+  lib/prisma.js          # Prisma client singleton
+  config/
+    env.js               # Zod environment validation (loaded first)
+    mappings/trackingStatus.ts, paymentGateway.ts
+    sync/ithink.ts, shopify.ts
+    thresholds/customerTiers.ts, orderTiming.ts, inventory.ts
+  routes/
+    auth.ts, admin.ts    # Auth and admin management
+    webhooks.ts, sse.ts  # Webhooks and SSE
+    pulse.ts, internal.ts # Lightweight SSE and internal APIs
+    shopify/, returns.ts, tracking.ts
+    remittance.js, pincodes.js, inventory-reconciliation.js
+  services/
+    trackingSync.ts, scheduledSync.ts  # Background sync
+    shopifyOrderProcessor.ts, autoArchive.ts
+    customerStatsCache.ts, pulseBroadcaster.ts
+    deferredExecutor.ts, shipOrderService.ts
+    ithinkLogistics.ts   # iThink API client
+  utils/
+    orderStateMachine.ts, orderViews.ts, orderEnrichment/
+    errors.ts, logger.ts, dateHelpers.ts
+    shutdownCoordinator.ts, circuitBreaker.ts
+    tierUtils.ts
+  middleware/
+    auth.ts, permissions.ts, errorHandler.ts, asyncHandler.ts
 ```
 
 ### Shared Package (@coh/shared)
@@ -280,39 +420,193 @@ server/src/
 
 ```
 shared/src/
-  schemas/           # Zod schemas + inferred types (CLIENT-SAFE)
-  services/          # SERVER-ONLY - dynamic imports only
-    db/kysely.ts, prisma.ts, queries/
-    inventory/balanceCache.ts
-    orders/shipService.ts
-  domain/, validators/, types/  # CLIENT-SAFE
+  schemas/              # Zod schemas + inferred types (CLIENT-SAFE)
+    common.ts             # Base schemas (uuid, pagination, status enums)
+    searchParams.ts       # URL search param schemas for TanStack Router
+    orders.ts, customers.ts, inventory.ts, returns.ts, products.ts
+    materials.ts, production.ts, reconciliation.ts, payments.ts
+  services/             # SERVER-ONLY - dynamic imports only
+    db/kysely.ts, prisma.ts
+    db/queries/inventory.ts, customers.ts  # High-perf Kysely queries
+    inventory/balanceCache.ts  # SKU + FabricColour balance caches
+    orders/shipService.ts      # Unified shipping service
+  domain/               # CLIENT-SAFE - Pure business logic
+    constants.ts          # GST rates (5% below 2500, 18% above)
+    customers/tiers.ts    # Customer tier calculation (platinum=50k, gold=25k, silver=10k)
+    inventory/balance.ts  # Pure balance calculation functions
+    orders/pricing.ts     # Order total calculation
+    orders/lineMutations.ts # Type definitions for line mutations
+    returns/              # Return eligibility, policy, options
+  validators/           # CLIENT-SAFE - Validation utilities
+    index.ts              # Password, AWB, format validators, sanitization
+  errors/               # CLIENT-SAFE - Error utilities
+    returns.ts            # ReturnError class, error codes, result helpers
+  types/                # CLIENT-SAFE - TypeScript interfaces
 ```
+
+### Database Triggers
+
+| Trigger | Table | Effect |
+|---------|-------|--------|
+| `trg_inventory_balance_*` | InventoryTransaction | Maintains `Sku.currentBalance` |
+| `trg_fabric_colour_balance_*` | FabricColourTransaction | Maintains `FabricColour.currentBalance` |
+| `trg_guard_sku_balance` | Sku | Blocks direct currentBalance updates |
+| `trg_guard_fabric_colour_balance` | FabricColour | Blocks direct currentBalance updates |
+| `trg_check_variation_bom_fabric_hierarchy` | VariationBomLine | Enforces BOM-Variation fabric consistency |
+| `trg_check_variation_fabric_hierarchy` | Variation | Prevents breaking BOM links on fabric change |
 
 ### Root
 ```
 prisma/schema.prisma, migrations/  # Run db commands from root
 nixpacks.toml                      # Railway build config
+pnpm-workspace.yaml                # Workspace definition
 ```
 
 ## Products & Materials
 
-**Products page** (`/products`) has 5 tabs: Products, Materials, Trims, Services, BOM
+**Products page** (`/products`) has 9 tabs:
+
+| Tab | Purpose |
+|-----|---------|
+| Products | Catalog view with tree/flat toggle |
+| Materials | Material > Fabric > FabricColour hierarchy |
+| Trims | Trim items catalog |
+| Services | Service items catalog |
+| BOM Editor | Two-panel master-detail BOM setup |
+| Consumption | Spreadsheet grid view for consumption |
+| Import | CSV import with column mapping |
+| Fabric Mapping | Assign fabrics to variations |
+| Style Codes | Inline edit style codes |
 
 ### Hierarchies
 - **Products**: Product > Variation > SKU (tree or flat view)
-- **Materials**: Material > Fabric > Colour (DB-enforced FK constraints)
+- **Materials**: Material > Fabric > FabricColour (DB-enforced FK constraints)
+
+### Variation-Fabric Linking
+- `Variation.fabricId` - Legacy link to `Fabric` (required, still in use)
+- `Variation.fabricColourId` - NEW link to specific `FabricColour` (optional, for new features)
 
 ### FabricColour System
 - Stock tracked at colour level via `FabricColourTransaction`
 - `Variation.fabricColourId` links variations to specific colours
-- Colours inherit cost/lead/minOrder from parent fabric if not set
+- Inherited fields (null = use parent Fabric value):
+  - `costPerUnit`, `leadTimeDays`, `minOrderQty`, `supplierId`
+- `FabricColour.currentBalance` is materialized by DB trigger
+
+## Express Routes (Full List)
+
+| Route | File | Purpose |
+|-------|------|---------|
+| `/api/auth` | `routes/auth.ts` | Login, logout, token refresh |
+| `/api/admin` | `routes/admin.ts` | User/role management, system settings, logs, background jobs |
+| `/api/webhooks` | `routes/webhooks.ts` | Shopify webhook handlers |
+| `/api/events` | `routes/sse.ts` | SSE stream with 100-event replay |
+| `/api/pulse` | `routes/pulse.ts` | Lightweight SSE (no replay) |
+| `/api/internal` | `routes/internal.ts` | Server-to-server SSE broadcast |
+| `/api/shopify` | `routes/shopify/index.ts` | Shopify integration endpoints |
+| `/api/returns` | `routes/returns.ts` | Reverse pickup scheduling |
+| `/api/tracking` | `routes/tracking.ts` | Admin tracking debug endpoints |
+| `/api/remittance` | `routes/remittance.js` | COD remittance |
+| `/api/pincodes` | `routes/pincodes.js` | Pincode serviceability |
+| `/api/inventory` | `routes/inventory-reconciliation.js` | Inventory reconciliation |
+| `/api/health` | inline | Health checks |
+
+## Client Hooks Architecture
+
+### Order Mutations (Modular Pattern)
+`useOrdersMutations.ts` is a facade composing 8 focused sub-hooks in `hooks/orders/`:
+
+| Hook | Purpose |
+|------|---------|
+| `useOrderWorkflowMutations` | allocate/pick/pack workflow |
+| `useOrderShipMutations` | ship operations |
+| `useOrderCrudMutations` | create/update/delete orders |
+| `useOrderStatusMutations` | cancel/uncancel |
+| `useOrderDeliveryMutations` | delivery tracking |
+| `useOrderLineMutations` | line operations + customization |
+| `useOrderReleaseMutations` | release workflows |
+| `useProductionBatchMutations` | production batches |
+
+### Optimistic Updates
+Located in `hooks/orders/optimistic/`:
+- `types.ts` - Type definitions
+- `inventoryHelpers.ts` - Inventory delta calculations
+- `cacheTargeting.ts` - Query key builders, row access
+- `statusUpdateHelpers.ts` - Optimistic transformations
+
+### Other Key Hooks
+| Hook | Purpose |
+|------|---------|
+| `useAuth.ts` | Authentication context |
+| `useUnifiedOrdersData.ts` | Order data with SSE integration |
+| `useOrderSSE.ts` | Real-time SSE subscription |
+| `useSearchOrders.ts` | Cross-view order search |
+| `useUrlModal.ts` | URL-driven modal state |
+| `useDebounce.ts` | Input debouncing |
+| `useGridState.ts` | AG-Grid state persistence |
+| `usePermissions.ts` | Role-based access control |
+| `production/useProductionData.ts` | Production queries/mutations |
+
+## Shared Domain Layer
+
+Pure functions for business logic, shared between server and client.
+
+| Domain | Functions | Notes |
+|--------|-----------|-------|
+| `customers/tiers` | `calculateTierFromLtv`, `compareTiers`, `getAmountToNextTier` | LTV thresholds: platinum=50k, gold=25k, silver=10k |
+| `inventory/balance` | `calculateBalance`, `hasEnoughStock`, `getShortfall` | Pure balance calculations, no DB |
+| `orders/pricing` | `calculateOrderTotal`, `getProductMrpForShipping` | Exchange orders always calculate from lines |
+| `orders/lineMutations` | Type definitions for line-level mutations | MutationResult, MarkLineDeliveredInput, etc. |
+| `constants` | `getGstRate`, `GST_THRESHOLD` | GST: 5% below INR 2500, 18% above |
+
+### Returns Domain (`shared/src/domain/returns/`)
+
+| Export | Purpose |
+|--------|---------|
+| `RETURN_POLICY` | Window: 14 days, warning at 2 days remaining |
+| `RETURN_REASONS`, `RETURN_CONDITIONS`, etc. | Labeled option maps for UI |
+| `checkEligibility()` | Validates return eligibility with reasons |
+| `toOptions()`, `getLabel()` | Helpers for dropdown options |
+
+### Validators (`shared/src/validators/`)
+
+| Function | Purpose |
+|----------|---------|
+| `validatePassword()` | 8+ chars, upper, lower, number, special |
+| `validateAwbFormat()` | Courier-specific AWB patterns, generic fallback |
+| `isValidEmail()`, `isValidPhone()` | Format validation (Indian phone format) |
+| `sanitizeSearchInput()` | SQL wildcard escaping |
+
+### Errors (`shared/src/errors/`)
+
+```typescript
+// Returns domain errors
+import { ReturnError, RETURN_ERROR_CODES, returnSuccess, returnError } from '@coh/shared';
+
+// Throw with structured error
+throw new ReturnError(RETURN_ERROR_CODES.NOT_DELIVERED, { context: { lineId } });
+
+// Return result pattern
+return returnError(RETURN_ERROR_CODES.WINDOW_EXPIRED);
+return returnSuccess(data, 'Return processed');
+```
 
 ## Configuration
 
 `/server/src/config/`:
-- `/mappings/` - Payment gateways, tracking status codes
-- `/thresholds/` - Customer tiers, order timing, inventory
-- `/sync/` - Shopify & iThink settings
+
+| File | Purpose |
+|------|---------|
+| `env.js` | Zod environment validation (loaded first) |
+| `index.ts` | Central config re-exports |
+| `types.ts` | Config type definitions |
+| `mappings/trackingStatus.ts` | iThink status code to internal status mapping |
+| `mappings/paymentGateway.ts` | Shopify gateway to COD/Prepaid mapping |
+| `sync/ithink.ts` | iThink API settings, batch sizes, circuit breaker |
+| `sync/shopify.ts` | Shopify sync settings |
+| `thresholds/customerTiers.ts` | LTV breakpoints for customer tiers |
+| `thresholds/orderTiming.ts` | Order timing thresholds |
+| `thresholds/inventory.ts` | Inventory alert thresholds |
 
 ## Deployment
 
@@ -345,6 +639,11 @@ railway link -e staging -s COH-ERP2 -p COH-ERP2
 railway up --detach
 ```
 
+### CI/CD
+- No GitHub Actions configured
+- Deployment: Railway auto-deploy from `develop` (staging) and `main` (production)
+- Pre-commit: Manual TypeScript check required (see Principle #6)
+
 ## UI Components
 
 - Use shadcn/ui from `client/src/components/ui/`
@@ -366,16 +665,25 @@ railway up --detach
 
 | Page | Purpose |
 |------|---------|
-| `/orders` | Order fulfillment (AG-Grid, 3 views) |
-| `/products` | Catalog + BOM (5 tabs) |
-| `/inventory` | Stock management |
+| `/` | Dashboard (index) |
+| `/orders` | Order fulfillment (AG-Grid, 4 views: Open, Shipped, RTO, All) |
+| `/order-search` | Cross-tab order search |
+| `/orders-mobile` | Mobile order management |
+| `/products` | Catalog + BOM (9 tabs) |
+| `/inventory` | Stock management (AG-Grid) |
 | `/inventory-mobile` | Mobile stock + Shopify sync |
+| `/inventory-inward` | Inventory inward processing |
+| `/inventory-count` | Physical inventory counts |
 | `/customers` | Customer management |
 | `/analytics` | Business metrics |
-| `/returns`, `/returns-rto` | Returns processing |
-| `/ledgers` | Fabric colour ledgers |
-| `/fabric-reconciliation` | Fabric count reconciliation |
+| `/returns` | Customer returns processing |
+| `/returns-rto` | RTO returns processing |
+| `/ledgers` | FabricColour transaction history (filter by hierarchy/date) |
+| `/fabric-reconciliation` | Physical fabric stock count reconciliation |
+| `/fabric-receipt` | Fabric receipt processing |
 | `/production` | Production planning |
+| `/settings` | System settings |
+| `/users` | User management |
 
 ---
-**Updated:** `8a0acbe` (2026-01-26)
+**Updated:** 2026-01-27 (comprehensive audit by 7 parallel agents)
