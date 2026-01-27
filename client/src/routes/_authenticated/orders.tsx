@@ -17,17 +17,15 @@ export const Route = createFileRoute('/_authenticated/orders')({
     loaderDeps: ({ search }) => ({
         view: search.view || 'open',
         page: search.page || 1,
-        shippedFilter: search.shippedFilter,
     }),
     // Pre-fetch orders data on server
     loader: async ({ deps }): Promise<OrdersLoaderData> => {
         try {
             const orders = await getOrders({
                 data: {
-                    view: deps.view as 'open' | 'shipped' | 'cancelled',
+                    view: deps.view as 'open' | 'shipped' | 'rto' | 'all',
                     page: deps.page,
                     limit: 250,
-                    shippedFilter: deps.shippedFilter as 'all' | 'rto' | 'cod_pending' | undefined,
                 },
             });
             return { orders, error: null };

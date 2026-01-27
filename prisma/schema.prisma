@@ -588,6 +588,7 @@ model OrderLine {
   shippingAddress      String?
 
   // === RETURN LIFECYCLE ===
+  returnBatchNumber         String?       // Groups lines returned together, e.g., "64168/1", "64168/2"
   returnStatus              String?       // 'requested', 'pickup_scheduled', 'in_transit', 'received', 'complete', 'cancelled'
   returnQty                 Int?          // qty being returned (supports partial returns)
   returnRequestedAt         DateTime?
@@ -672,6 +673,7 @@ model OrderLine {
   @@index([trackingStatus])
   @@index([orderId, trackingStatus])
   // Return indexes
+  @@index([returnBatchNumber])
   @@index([returnStatus])
   @@index([returnStatus, orderId])
   @@index([returnAwbNumber])
@@ -1144,6 +1146,19 @@ model WebhookLog {
   @@index([topic])
   @@index([resourceId])
   @@index([receivedAt])
+}
+
+// Stores raw iThink API responses for debugging (max 5 per AWB, rotated)
+model TrackingApiResponse {
+  id         String   @id @default(uuid())
+  awbNumber  String
+  source     String   // 'sync' | 'manual' | 'webhook'
+  statusCode Int      // HTTP-like status (200 for success, 404 for not found, etc.)
+  response   Json     // Full raw response from iThink API
+  createdAt  DateTime @default(now())
+
+  @@index([awbNumber])
+  @@index([awbNumber, createdAt])
 }
 
 model FailedSyncItem {

@@ -363,6 +363,7 @@ export type OrderLine = {
     refundReason: string | null;
     refundedAt: Timestamp | null;
     shippingAddress: string | null;
+    returnBatchNumber: string | null;
     returnStatus: string | null;
     returnQty: number | null;
     returnRequestedAt: Timestamp | null;
@@ -804,6 +805,14 @@ export type Tailor = {
     isActive: Generated<boolean>;
     createdAt: Generated<Timestamp>;
 };
+export type TrackingApiResponse = {
+    id: Generated<string>;
+    awbNumber: string;
+    source: string;
+    statusCode: number;
+    response: unknown;
+    createdAt: Generated<Timestamp>;
+};
 export type TrimItem = {
     id: Generated<string>;
     code: string;
@@ -970,6 +979,7 @@ export type DB = {
     SyncJob: SyncJob;
     SystemSetting: SystemSetting;
     Tailor: Tailor;
+    TrackingApiResponse: TrackingApiResponse;
     TrimItem: TrimItem;
     User: User;
     UserGridPreference: UserGridPreference;

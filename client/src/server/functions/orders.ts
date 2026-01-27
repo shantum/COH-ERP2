@@ -24,10 +24,9 @@ const searchAllInputSchema = z.object({
 export type SearchAllInput = z.infer<typeof searchAllInputSchema>;
 
 const ordersListInputSchema = z.object({
-    view: z.enum(['open', 'shipped', 'cancelled'] as const),
+    view: z.enum(['open', 'shipped', 'rto', 'all', 'cancelled'] as const),
     page: z.number().int().positive().default(1),
     limit: z.number().int().positive().max(1000).default(100),
-    shippedFilter: z.enum(['all', 'rto', 'cod_pending'] as const).optional(),
     search: z.string().optional(),
     days: z.number().int().positive().optional(),
     sortBy: z.enum(['orderDate', 'archivedAt', 'shippedAt', 'createdAt'] as const).optional(),
@@ -343,9 +342,8 @@ function parseCustomerTags(tags: string | null): string[] | null {
  * Build Prisma where clause for view filtering
  */
 function buildWhereClause(
-    view: 'open' | 'shipped' | 'cancelled',
+    view: 'open' | 'shipped' | 'rto' | 'all' | 'cancelled',
     search: string | undefined,
-    shippedFilter: 'all' | 'rto' | 'cod_pending' | undefined,
     sinceDate: Date | null
 ): Prisma.OrderWhereInput {
     const where: Prisma.OrderWhereInput = {
@@ -365,24 +363,27 @@ function buildWhereClause(
 
         case 'shipped':
             where.releasedToShipped = true;
+            // Exclude RTO orders from shipped view
+            where.NOT = {
+                orderLines: {
+                    some: {
+                        trackingStatus: { in: ['rto_in_transit', 'rto_delivered', 'rto_initiated'] },
+                    },
+                },
+            };
+            break;
 
-            if (shippedFilter === 'rto') {
-                // Orders with at least one line in RTO status
-                where.orderLines = {
-                    some: {
-                        trackingStatus: { in: ['rto_in_transit', 'rto_delivered'] },
-                    },
-                };
-            } else if (shippedFilter === 'cod_pending') {
-                where.paymentMethod = 'COD';
-                where.codRemittedAt = null;
-                // Orders with at least one delivered line
-                where.orderLines = {
-                    some: {
-                        trackingStatus: 'delivered',
-                    },
-                };
-            }
+        case 'rto':
+            // Orders with at least one line in RTO status
+            where.orderLines = {
+                some: {
+                    trackingStatus: { in: ['rto_in_transit', 'rto_delivered', 'rto_initiated'] },
+                },
+            };
+            break;
+
+        case 'all':
+            // No additional filters - shows all non-archived orders
             break;
 
         case 'cancelled':
@@ -649,7 +650,7 @@ export const getOrders = createServerFn({ method: 'GET' })
                 globalForPrisma.prisma = prisma;
             }
 
-            const { view, page, limit, shippedFilter, search, days, sortBy } = data;
+            const { view, page, limit, search, days, sortBy } = data;
             const offset = (page - 1) * limit;
 
             // Calculate date filter if days specified
@@ -660,7 +661,7 @@ export const getOrders = createServerFn({ method: 'GET' })
             }
 
             // Build where clause
-            const where = buildWhereClause(view, search, shippedFilter, sinceDate);
+            const where = buildWhereClause(view, search, sinceDate);
 
             // Determine sort field
             const sortField = sortBy || 'orderDate';
@@ -748,6 +749,96 @@ export const getOrders = createServerFn({ method: 'GET' })
             };
         } catch (error: unknown) {
             console.error('[Server Function] Error in getOrders:', error);
+            throw error;
+        }
+    });
+
+// ============================================
+// VIEW COUNTS - For OrderViewTabs
+// ============================================
+
+export interface OrderViewCounts {
+    open: number;
+    shipped: number;
+    rto: number;
+    all: number;
+}
+
+/**
+ * Server Function: Get order view counts
+ *
+ * Returns counts for each view tab for the segmented control.
+ * Uses parallel count queries for performance.
+ */
+export const getOrderViewCounts = createServerFn({ method: 'GET' })
+    .handler(async (): Promise<OrderViewCounts> => {
+        console.log('[Server Function] getOrderViewCounts called');
+
+        try {
+            // Dynamic import to prevent bundling Prisma into client
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const { PrismaClient } = (await import('@prisma/client')) as any;
+
+            // Use global singleton pattern
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const globalForPrisma = globalThis as any;
+            const prisma = globalForPrisma.prisma ?? new PrismaClient();
+            if (process.env.NODE_ENV !== 'production') {
+                globalForPrisma.prisma = prisma;
+            }
+
+            // Build where clauses for each view
+            const openWhere = {
+                isArchived: false,
+                OR: [
+                    { status: 'open' },
+                    {
+                        AND: [{ releasedToShipped: false }, { releasedToCancelled: false }],
+                    },
+                ],
+            };
+
+            const shippedWhere = {
+                isArchived: false,
+                releasedToShipped: true,
+                NOT: {
+                    orderLines: {
+                        some: {
+                            trackingStatus: { in: ['rto_in_transit', 'rto_delivered', 'rto_initiated'] },
+                        },
+                    },
+                },
+            };
+
+            const rtoWhere = {
+                isArchived: false,
+                orderLines: {
+                    some: {
+                        trackingStatus: { in: ['rto_in_transit', 'rto_delivered', 'rto_initiated'] },
+                    },
+                },
+            };
+
+            const allWhere = {
+                isArchived: false,
+            };
+
+            // Execute all count queries in parallel
+            const [openCount, shippedCount, rtoCount, allCount] = await Promise.all([
+                prisma.order.count({ where: openWhere }),
+                prisma.order.count({ where: shippedWhere }),
+                prisma.order.count({ where: rtoWhere }),
+                prisma.order.count({ where: allWhere }),
+            ]);
+
+            return {
+                open: openCount,
+                shipped: shippedCount,
+                rto: rtoCount,
+                all: allCount,
+            };
+        } catch (error: unknown) {
+            console.error('[Server Function] Error in getOrderViewCounts:', error);
             throw error;
         }
     });

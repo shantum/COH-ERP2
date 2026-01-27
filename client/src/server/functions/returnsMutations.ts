@@ -811,7 +811,7 @@ export const processRepackingQueueItem = createServerFn({ method: 'POST' })
 // following the existing RTO pattern on OrderLine.
 
 import {
-    InitiateReturnInputSchema,
+    InitiateReturnBatchInputSchema,
     ScheduleReturnPickupInputSchema,
     MarkReturnInTransitInputSchema,
     ReceiveReturnInputSchema,
@@ -819,7 +819,7 @@ import {
     CloseReturnManuallyInputSchema,
     CreateExchangeOrderInputSchema,
     UpdateReturnNotesInputSchema,
-    type InitiateReturnInput,
+    type InitiateReturnBatchInput,
     type ScheduleReturnPickupInput,
     type MarkReturnInTransitInput,
     type ReceiveReturnInput,
@@ -846,147 +846,182 @@ async function getPrismaInstance(): Promise<PrismaClient> {
     return prisma;
 }
 
-// Return window check (14 days from delivery)
-const RETURN_WINDOW_DAYS = 14;
+/**
+ * Generate the next batch number for an order
+ * Format: "{orderNumber}/{sequence}" e.g., "64168/1", "64168/2"
+ */
+async function generateBatchNumber(prisma: PrismaClient, orderId: string, orderNumber: string): Promise<string> {
+    // Count existing batches for this order
+    const existingBatches = await prisma.orderLine.findMany({
+        where: {
+            orderId,
+            returnBatchNumber: { not: null },
+        },
+        select: { returnBatchNumber: true },
+        distinct: ['returnBatchNumber'],
+    });
 
-function isWithinReturnWindow(deliveredAt: Date | null): boolean {
-    if (!deliveredAt) return false;
-    const daysSinceDelivery = Math.floor(
-        (Date.now() - deliveredAt.getTime()) / (1000 * 60 * 60 * 24)
-    );
-    return daysSinceDelivery <= RETURN_WINDOW_DAYS;
+    const nextSequence = existingBatches.length + 1;
+    return `${orderNumber}/${nextSequence}`;
 }
 
 /**
- * Initiate a return on an order line
- * Sets returnStatus = 'requested' and captures return details
+ * Initiate returns on order lines (batch)
+ * All lines initiated together share one batch number for grouped pickup
  *
  * Returns structured result: { success: true, ... } or { success: false, error: { code, message } }
  */
 export const initiateLineReturn = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
-    .inputValidator((input: unknown): InitiateReturnInput => InitiateReturnInputSchema.parse(input))
-    .handler(async ({ data, context }: { data: InitiateReturnInput; context: { user: AuthUser } }): Promise<ReturnResult<{ orderLineId: string; returnStatus: string; withinWindow: boolean; skuCode: string }>> => {
+    .inputValidator((input: unknown): InitiateReturnBatchInput => {
+        console.log('[initiateLineReturn] Input received:', JSON.stringify(input, null, 2));
+        return InitiateReturnBatchInputSchema.parse(input);
+    })
+    .handler(async ({ data, context }: { data: InitiateReturnBatchInput; context: { user: AuthUser } }): Promise<ReturnResult<{ batchNumber: string; lineCount: number; orderLineIds: string[] }>> => {
+        console.log('[initiateLineReturn] Handler started with data:', JSON.stringify(data, null, 2));
+        try {
         const prisma = await getPrismaInstance();
-        const { orderLineId, returnQty, returnReasonCategory, returnReasonDetail, returnResolution, returnNotes, exchangeSkuId } = data;
+        const { lines, returnReasonCategory, returnReasonDetail, returnResolution, returnNotes, exchangeSkuId, pickupType } = data;
 
-        // Get order line with product info
-        const line = await prisma.orderLine.findUnique({
-            where: { id: orderLineId },
+        // Fetch all lines with order and sku info
+        const orderLines = await prisma.orderLine.findMany({
+            where: { id: { in: lines.map(l => l.orderLineId) } },
             include: {
                 order: true,
-                sku: {
-                    include: {
-                        variation: {
-                            include: {
-                                product: true,
-                            },
-                        },
-                    },
-                },
+                sku: true,
             },
         });
 
-        if (!line) {
+        if (orderLines.length === 0) {
             return returnError(RETURN_ERROR_CODES.LINE_NOT_FOUND);
         }
 
-        // Check if already has an active return
-        if (line.returnStatus && !['cancelled', 'complete'].includes(line.returnStatus)) {
-            return returnError(RETURN_ERROR_CODES.ALREADY_ACTIVE);
-        }
-
-        // Check return qty doesn't exceed line qty - keep this one
-        if (returnQty > line.qty) {
+        // Validate all lines belong to the same order
+        const orderIds = new Set(orderLines.map(l => l.orderId));
+        if (orderIds.size > 1) {
             return returnError(
                 RETURN_ERROR_CODES.INVALID_QUANTITY,
-                `Return qty (${returnQty}) cannot exceed line qty (${line.qty})`
+                'All lines must belong to the same order'
             );
         }
 
-        // Note: product.isReturnable = false is a soft warning, not a hard block
-        // Staff can initiate returns even for non-returnable products if needed
+        // Check no lines have active returns
+        for (const line of orderLines) {
+            if (line.returnStatus && !['cancelled', 'complete'].includes(line.returnStatus)) {
+                return returnError(
+                    RETURN_ERROR_CODES.ALREADY_ACTIVE,
+                    `Line ${line.sku.skuCode} already has an active return`
+                );
+            }
+        }
 
-        // Check line returnability - SOFT for debugging
-        // if (line.isNonReturnable) {
-        //     return returnError(RETURN_ERROR_CODES.LINE_NON_RETURNABLE);
-        // }
+        // Validate quantities
+        const qtyMap = new Map(lines.map(l => [l.orderLineId, l.returnQty]));
+        for (const line of orderLines) {
+            const returnQty = qtyMap.get(line.id) || line.qty;
+            if (returnQty > line.qty) {
+                return returnError(
+                    RETURN_ERROR_CODES.INVALID_QUANTITY,
+                    `Return qty (${returnQty}) exceeds line qty (${line.qty}) for ${line.sku.skuCode}`
+                );
+            }
+        }
 
-        // Check return window - SOFT for debugging
-        const withinWindow = isWithinReturnWindow(line.deliveredAt);
-        // if (!withinWindow && !line.deliveredAt) {
-        //     return returnError(RETURN_ERROR_CODES.NOT_DELIVERED);
-        // }
-
-        // Validate exchange SKU if provided (exchange order created later after receipt)
+        // Validate exchange SKU if provided
         if (returnResolution === 'exchange' && exchangeSkuId) {
             const exchangeSku = await prisma.sku.findUnique({
                 where: { id: exchangeSkuId },
-                select: { id: true, skuCode: true, mrp: true },
+                select: { id: true },
             });
             if (!exchangeSku) {
                 return returnError(RETURN_ERROR_CODES.EXCHANGE_SKU_NOT_FOUND);
             }
         }
 
-        // Update order line with return details
+        const order = orderLines[0].order;
+        const batchNumber = await generateBatchNumber(prisma, order.id, order.orderNumber);
         const now = new Date();
-        await prisma.orderLine.update({
-            where: { id: orderLineId },
-            data: {
-                returnStatus: 'requested',
-                returnQty,
-                returnRequestedAt: now,
-                returnRequestedById: context.user.id,
-                returnReasonCategory,
-                returnReasonDetail: returnReasonDetail || null,
-                returnResolution,
-                returnNotes: returnNotes || null,
-                returnExchangeSkuId: exchangeSkuId || null,
-            },
+
+        // Update all lines in a transaction
+        await prisma.$transaction(async (tx) => {
+            for (const line of orderLines) {
+                const returnQty = qtyMap.get(line.id) || line.qty;
+
+                await tx.orderLine.update({
+                    where: { id: line.id },
+                    data: {
+                        returnBatchNumber: batchNumber,
+                        returnStatus: 'requested',
+                        returnQty,
+                        returnRequestedAt: now,
+                        returnRequestedById: context.user.id,
+                        returnReasonCategory,
+                        returnReasonDetail: returnReasonDetail || null,
+                        returnResolution,
+                        returnNotes: returnNotes || null,
+                        returnExchangeSkuId: exchangeSkuId || null,
+                        returnPickupType: pickupType || null,
+                    },
+                });
+
+                // Update SKU return count
+                await tx.sku.update({
+                    where: { id: line.skuId },
+                    data: { returnCount: { increment: returnQty } },
+                });
+            }
+
+            // Update customer return count (once per batch, not per line)
+            if (order.customerId) {
+                await tx.customer.update({
+                    where: { id: order.customerId },
+                    data: { returnCount: { increment: 1 } },
+                });
+            }
         });
 
-        // Update customer return count
-        if (line.order.customerId) {
-            await prisma.customer.update({
-                where: { id: line.order.customerId },
-                data: { returnCount: { increment: 1 } },
-            });
-        }
-
-        // Update SKU return count
-        await prisma.sku.update({
-            where: { id: line.skuId },
-            data: { returnCount: { increment: returnQty } },
-        });
-
+        const skuCodes = orderLines.map(l => l.sku.skuCode).join(', ');
+        console.log('[initiateLineReturn] Success - batch:', batchNumber);
         return returnSuccess(
             {
-                orderLineId,
-                returnStatus: 'requested',
-                withinWindow,
-                skuCode: line.sku.skuCode,
+                batchNumber,
+                lineCount: orderLines.length,
+                orderLineIds: orderLines.map(l => l.id),
             },
-            `Return initiated for ${line.sku.skuCode}`
+            `Return batch ${batchNumber} created for ${skuCodes}`
         );
+        } catch (error: unknown) {
+            console.error('[initiateLineReturn] Error:', error);
+            const message = error instanceof Error ? error.message : 'Unknown error';
+            return returnError(RETURN_ERROR_CODES.UNKNOWN, message);
+        }
     });
 
 /**
- * Schedule pickup for a return
+ * Schedule pickup for a return batch
  *
- * When scheduleWithIthink=true, calls the Express route to book with iThink Logistics
- * When false, just updates DB with provided courier/AWB (manual entry)
+ * When scheduleWithIthink=true, calls the Express route to book with iThink Logistics.
+ * The Express route auto-groups all lines in the same batch with status='requested'.
+ *
+ * When false, just updates DB with provided courier/AWB (manual entry for single line).
  */
 export const scheduleReturnPickup = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown): ScheduleReturnPickupInput => ScheduleReturnPickupInputSchema.parse(input))
-    .handler(async ({ data }: { data: ScheduleReturnPickupInput }): Promise<ReturnResult<{ orderLineId: string; awbNumber?: string; courier?: string }>> => {
+    .handler(async ({ data }: { data: ScheduleReturnPickupInput }): Promise<ReturnResult<{
+        orderLineId: string;
+        orderLineIds?: string[];
+        lineCount?: number;
+        batchNumber?: string;
+        awbNumber?: string;
+        courier?: string;
+    }>> => {
         const prisma = await getPrismaInstance();
         const { orderLineId, pickupType, courier, awbNumber, scheduledAt, scheduleWithIthink } = data;
 
         const line = await prisma.orderLine.findUnique({
             where: { id: orderLineId },
-            select: { id: true, returnStatus: true },
+            select: { id: true, returnStatus: true, returnBatchNumber: true },
         });
 
         if (!line) {
@@ -1000,8 +1035,15 @@ export const scheduleReturnPickup = createServerFn({ method: 'POST' })
             );
         }
 
-        // If scheduleWithIthink, call Express route to book with iThink
-        if (scheduleWithIthink) {
+        // Auto-enable iThink when:
+        // 1. pickupType is 'arranged_by_us' AND
+        // 2. No manual AWB provided AND
+        // 3. scheduleWithIthink not explicitly set to false
+        const shouldUseIthink = scheduleWithIthink === true ||
+            (pickupType === 'arranged_by_us' && !awbNumber && scheduleWithIthink !== false);
+
+        // If using iThink, call Express route (auto-groups batch)
+        if (shouldUseIthink) {
             try {
                 const baseUrl = process.env.VITE_API_URL || 'http://localhost:3001';
                 const authToken = getCookie('auth_token');
@@ -1018,7 +1060,14 @@ export const scheduleReturnPickup = createServerFn({ method: 'POST' })
                 const result = await response.json() as {
                     success: boolean;
                     error?: string;
-                    data?: { orderLineId: string; awbNumber: string; courier: string };
+                    data?: {
+                        orderLineId: string;
+                        orderLineIds: string[];
+                        lineCount: number;
+                        batchNumber: string | null;
+                        awbNumber: string;
+                        courier: string;
+                    };
                 };
 
                 if (!result.success) {
@@ -1028,14 +1077,21 @@ export const scheduleReturnPickup = createServerFn({ method: 'POST' })
                     );
                 }
 
-                // Express route already updated the DB, just return success
+                const lineCount = result.data?.lineCount || 1;
+                const message = lineCount > 1
+                    ? `Pickup scheduled for ${lineCount} items in batch ${result.data?.batchNumber}`
+                    : `Pickup scheduled with ${result.data?.courier || 'courier'}`;
+
                 return returnSuccess(
                     {
                         orderLineId,
+                        orderLineIds: result.data?.orderLineIds,
+                        lineCount: result.data?.lineCount,
+                        batchNumber: result.data?.batchNumber || undefined,
                         awbNumber: result.data?.awbNumber,
                         courier: result.data?.courier,
                     },
-                    `Pickup scheduled with ${result.data?.courier || 'courier'}`
+                    message
                 );
             } catch (error: unknown) {
                 const message = error instanceof Error ? error.message : 'Unknown error';
@@ -1043,7 +1099,7 @@ export const scheduleReturnPickup = createServerFn({ method: 'POST' })
             }
         }
 
-        // Manual entry - just update DB
+        // Manual entry - update single line only (no auto-grouping)
         await prisma.orderLine.update({
             where: { id: orderLineId },
             data: {
@@ -1055,7 +1111,15 @@ export const scheduleReturnPickup = createServerFn({ method: 'POST' })
             },
         });
 
-        return returnSuccess({ orderLineId, awbNumber: awbNumber || undefined, courier: courier || undefined }, 'Pickup scheduled');
+        return returnSuccess(
+            {
+                orderLineId,
+                batchNumber: line.returnBatchNumber || undefined,
+                awbNumber: awbNumber || undefined,
+                courier: courier || undefined,
+            },
+            'Pickup scheduled'
+        );
     });
 
 /**

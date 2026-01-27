@@ -8,9 +8,8 @@ export const orderQueryKeys = {
   open: ['openOrders'] as const,
   shipped: ['shippedOrders'] as const,
   rto: ['rtoOrders'] as const,
-  codPending: ['codPendingOrders'] as const,
+  all: ['allOrders'] as const,
   cancelled: ['cancelledOrders'] as const,
-  archived: ['archivedOrders'] as const,
   shippedSummary: ['shippedSummary'] as const,
   rtoSummary: ['rtoSummary'] as const,
 } as const;
@@ -28,7 +27,6 @@ export const orderTabInvalidationMap: Record<string, string[]> = {
   open: ['openOrders', 'inventoryBalance'],
   shipped: ['shippedOrders', 'shippedSummary'],
   rto: ['rtoOrders', 'rtoSummary'],
-  cod_pending: ['codPendingOrders'],
+  all: ['allOrders'],
   cancelled: ['cancelledOrders'],
-  archived: ['archivedOrders'],
 };

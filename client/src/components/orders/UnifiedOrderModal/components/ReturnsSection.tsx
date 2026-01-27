@@ -64,6 +64,8 @@ interface ReturnsSectionProps {
   }) => LineReturnEligibility;
   onReturnFieldChange: (field: keyof ReturnFormState, value: string | number | null) => void;
   onSelectLineForReturn: (lineId: string | null, defaultQty?: number) => void;
+  onToggleReturnLineSelection?: (lineId: string, defaultQty?: number) => void;
+  onUpdateReturnQty?: (lineId: string, qty: number) => void;
   onInitiateReturn: () => Promise<void>;
   onCancelReturn?: (lineId: string) => Promise<void>;
   onSchedulePickup?: (lineId: string) => void | Promise<void>;
@@ -150,17 +152,21 @@ function getEligibilityDisplay(reason?: string): { label: string; colorClass: st
 }
 
 
-// Single line item for returns display
+// Single line item for returns display (with checkbox for multi-select)
 function ReturnLineItem({
   line,
   eligibility,
   isSelected,
-  onSelect,
+  onToggleSelect,
+  returnQty,
+  onQtyChange,
 }: {
   line: OrderLine;
   eligibility: LineReturnEligibility;
   isSelected: boolean;
-  onSelect: () => void;
+  onToggleSelect: () => void;
+  returnQty?: number;
+  onQtyChange?: (qty: number) => void;
 }) {
   const sku = line.sku;
   const productName = sku?.variation?.product?.name || 'Unknown Product';
@@ -170,7 +176,7 @@ function ReturnLineItem({
   const imageUrl = sku?.variation?.imageUrl || sku?.variation?.product?.imageUrl;
 
   // Active return status
-  const hasActiveReturn = line.returnStatus && !['cancelled', 'complete'].includes(line.returnStatus);
+  const hasActiveReturn = !!(line.returnStatus && !['cancelled', 'complete'].includes(line.returnStatus));
   const returnStatusConfig = line.returnStatus ? RETURN_STATUS_CONFIG[line.returnStatus] : null;
   const StatusIcon = returnStatusConfig?.icon || Clock;
 
@@ -178,19 +184,51 @@ function ReturnLineItem({
   const isEligible = eligibility.eligible;
   const hasWarning = !!eligibility.warning;
 
+  const handleCheckboxClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (isEligible && !hasActiveReturn) {
+      onToggleSelect();
+    }
+  };
+
+  const handleQtyChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    e.stopPropagation();
+    const newQty = parseInt(e.target.value) || 1;
+    if (onQtyChange) {
+      onQtyChange(Math.min(Math.max(1, newQty), line.qty));
+    }
+  };
+
   return (
     <div
-      className={`relative flex items-stretch gap-4 p-4 transition-all cursor-pointer rounded-lg border ${
+      className={`relative flex items-stretch gap-3 p-4 transition-all rounded-lg border ${
         isSelected
           ? 'bg-sky-50 border-sky-300 ring-2 ring-sky-200'
           : hasActiveReturn
-            ? 'bg-amber-50/50 border-amber-200 hover:border-amber-300'
+            ? 'bg-amber-50/50 border-amber-200'
             : isEligible
               ? 'bg-white border-slate-200 hover:border-sky-300 hover:bg-sky-50/30'
-              : 'bg-slate-50 border-slate-200 opacity-60 cursor-not-allowed'
+              : 'bg-slate-50 border-slate-200 opacity-60'
       }`}
-      onClick={isEligible && !hasActiveReturn ? onSelect : undefined}
     >
+      {/* Checkbox for multi-select */}
+      <div className="flex items-center">
+        <input
+          type="checkbox"
+          checked={isSelected}
+          onChange={() => {}}
+          onClick={handleCheckboxClick}
+          disabled={!isEligible || hasActiveReturn}
+          className={`w-5 h-5 rounded border-2 transition-all cursor-pointer ${
+            isSelected
+              ? 'bg-sky-500 border-sky-500 text-white'
+              : isEligible && !hasActiveReturn
+                ? 'border-slate-300 hover:border-sky-400'
+                : 'border-slate-200 bg-slate-100 cursor-not-allowed'
+          }`}
+        />
+      </div>
+
       {/* Product image */}
       <div className="w-14 h-14 shrink-0 bg-slate-100 rounded-lg overflow-hidden">
         {imageUrl ? (
@@ -226,8 +264,8 @@ function ReturnLineItem({
           </div>
         </div>
 
-        {/* Return Status or Eligibility */}
-        <div className="mt-2 flex items-center gap-2">
+        {/* Return Status or Eligibility + Qty selector when selected */}
+        <div className="mt-2 flex items-center gap-2 flex-wrap">
           {hasActiveReturn && returnStatusConfig ? (
             <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${returnStatusConfig.color}`}>
               <StatusIcon size={12} />
@@ -248,8 +286,21 @@ function ReturnLineItem({
                     : 'Eligible'}
                 </span>
               )}
-              {isSelected && (
-                <span className="text-xs text-sky-600 font-medium">Selected</span>
+              {/* Show qty input when selected */}
+              {isSelected && onQtyChange && (
+                <div className="flex items-center gap-1.5 ml-auto">
+                  <span className="text-xs text-slate-500">Return:</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={line.qty}
+                    value={returnQty ?? line.qty}
+                    onChange={handleQtyChange}
+                    onClick={(e) => e.stopPropagation()}
+                    className="w-14 px-2 py-1 text-xs border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-sky-500"
+                  />
+                  <span className="text-xs text-slate-400">/ {line.qty}</span>
+                </div>
               )}
             </>
           ) : (() => {
@@ -268,26 +319,30 @@ function ReturnLineItem({
   );
 }
 
-// Return initiation form
+// Return initiation form (multi-line)
 function ReturnInitiationForm({
-  line,
+  selectedLines,
   form,
   onFieldChange,
   onInitiate,
   onCancel,
   isInitiating,
 }: {
-  line: OrderLine;
+  selectedLines: Array<{ line: OrderLine; returnQty: number }>;
   form: ReturnFormState;
   onFieldChange: (field: keyof ReturnFormState, value: string | number | null) => void;
   onInitiate: () => void;
   onCancel: () => void;
   isInitiating?: boolean;
 }) {
-  const maxQty = line.qty;
+  const totalItems = selectedLines.reduce((sum, { returnQty }) => sum + returnQty, 0);
+  const totalValue = selectedLines.reduce(
+    (sum, { line, returnQty }) => sum + (returnQty * line.unitPrice),
+    0
+  );
+
   const canSubmit =
-    form.returnQty > 0 &&
-    form.returnQty <= maxQty &&
+    selectedLines.length > 0 &&
     form.returnReasonCategory &&
     form.returnResolution !== null;
 
@@ -296,31 +351,34 @@ function ReturnInitiationForm({
       <div className="flex items-center justify-between">
         <h4 className="text-sm font-semibold text-slate-700 flex items-center gap-2">
           <RotateCcw size={16} className="text-sky-600" />
-          Initiate Return
+          Initiate Return ({selectedLines.length} item{selectedLines.length !== 1 ? 's' : ''})
         </h4>
         <button
           onClick={onCancel}
           className="text-xs text-slate-500 hover:text-slate-700"
         >
-          Cancel
+          Clear Selection
         </button>
       </div>
 
-      {/* Quantity */}
-      <div>
-        <label className="block text-xs font-medium text-slate-600 mb-1">
-          Quantity to Return
-        </label>
-        <div className="flex items-center gap-2">
-          <input
-            type="number"
-            min={1}
-            max={maxQty}
-            value={form.returnQty}
-            onChange={(e) => onFieldChange('returnQty', parseInt(e.target.value) || 1)}
-            className="w-20 px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent"
-          />
-          <span className="text-xs text-slate-500">of {maxQty} units</span>
+      {/* Summary of selected items */}
+      <div className="bg-white rounded-lg p-3 border border-slate-200">
+        <p className="text-xs font-medium text-slate-600 mb-2">Selected for Return:</p>
+        <div className="space-y-1.5 max-h-32 overflow-y-auto">
+          {selectedLines.map(({ line, returnQty }) => (
+            <div key={line.id} className="flex items-center justify-between text-xs">
+              <span className="text-slate-700 truncate flex-1">
+                {line.sku?.variation?.product?.name || 'Product'} - {line.sku?.size || 'Size'}
+              </span>
+              <span className="text-slate-500 ml-2">
+                {returnQty} × {formatCurrency(line.unitPrice)}
+              </span>
+            </div>
+          ))}
+        </div>
+        <div className="mt-2 pt-2 border-t border-slate-100 flex justify-between text-xs font-medium">
+          <span className="text-slate-600">{totalItems} item{totalItems !== 1 ? 's' : ''} total</span>
+          <span className="text-slate-800">{formatCurrency(totalValue)}</span>
         </div>
       </div>
 
@@ -421,7 +479,7 @@ function ReturnInitiationForm({
         ) : (
           <>
             <ArrowRight size={16} />
-            Initiate Return
+            Initiate Return for {selectedLines.length} Item{selectedLines.length !== 1 ? 's' : ''}
           </>
         )}
       </button>
@@ -702,6 +760,8 @@ export function ReturnsSection({
   getLineEligibility,
   onReturnFieldChange,
   onSelectLineForReturn,
+  onToggleReturnLineSelection,
+  onUpdateReturnQty,
   onInitiateReturn,
   onCancelReturn,
   onSchedulePickup,
@@ -715,15 +775,15 @@ export function ReturnsSection({
   const [initiatingReturn, setInitiatingReturn] = useState(false);
   const formRef = useRef<HTMLDivElement>(null);
 
-  // Scroll to form when a line is selected
+  // Scroll to form when lines are selected
   useEffect(() => {
-    if (returnForm.selectedLineId && formRef.current) {
+    if (returnForm.selectedLineIds.size > 0 && formRef.current) {
       // Small delay to allow form to render
       setTimeout(() => {
         formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       }, 100);
     }
-  }, [returnForm.selectedLineId]);
+  }, [returnForm.selectedLineIds.size]);
 
   // Categorize lines
   const { activeReturns, eligibleLines, blockedLines } = useMemo(() => {
@@ -758,11 +818,34 @@ export function ReturnsSection({
     return { activeReturns: active, eligibleLines: eligible, blockedLines: blocked };
   }, [order.orderLines, getLineEligibility]);
 
-  // Get selected line data
-  const selectedLine = useMemo(() => {
-    if (!returnForm.selectedLineId) return null;
-    return order.orderLines?.find(l => l.id === returnForm.selectedLineId) || null;
-  }, [order.orderLines, returnForm.selectedLineId]);
+  // Get selected lines data with quantities
+  const selectedLinesData = useMemo(() => {
+    const result: Array<{ line: OrderLine; returnQty: number }> = [];
+    for (const lineId of returnForm.selectedLineIds) {
+      const line = order.orderLines?.find(l => l.id === lineId);
+      if (line) {
+        result.push({
+          line,
+          returnQty: returnForm.returnQtyMap[lineId] ?? line.qty,
+        });
+      }
+    }
+    return result;
+  }, [order.orderLines, returnForm.selectedLineIds, returnForm.returnQtyMap]);
+
+  // Handle toggle selection - use dedicated handler if available, otherwise fall back
+  const handleToggleSelection = (lineId: string, defaultQty?: number) => {
+    if (onToggleReturnLineSelection) {
+      onToggleReturnLineSelection(lineId, defaultQty);
+    } else {
+      // Legacy fallback - toggle using single-select
+      if (returnForm.selectedLineIds.has(lineId)) {
+        onSelectLineForReturn(null);
+      } else {
+        onSelectLineForReturn(lineId, defaultQty);
+      }
+    }
+  };
 
   // Handle initiate return
   const handleInitiate = async () => {
@@ -829,27 +912,36 @@ export function ReturnsSection({
         {/* Eligible Lines */}
         {eligibleLines.length > 0 && (
           <div className="space-y-3">
-            <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
-              Eligible for Return ({eligibleLines.length})
-            </h4>
+            <div className="flex items-center justify-between">
+              <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                Eligible for Return ({eligibleLines.length})
+              </h4>
+              {returnForm.selectedLineIds.size > 0 && (
+                <span className="text-xs text-sky-600 font-medium">
+                  {returnForm.selectedLineIds.size} selected
+                </span>
+              )}
+            </div>
             <p className="text-xs text-slate-500 -mt-1">
-              Click on an item to initiate a return
+              Select items using checkboxes to initiate a return
             </p>
             {eligibleLines.map(({ line, eligibility }) => (
               <ReturnLineItem
                 key={line.id}
                 line={line}
                 eligibility={eligibility}
-                isSelected={returnForm.selectedLineId === line.id}
-                onSelect={() => onSelectLineForReturn(line.id, line.qty)}
+                isSelected={returnForm.selectedLineIds.has(line.id)}
+                onToggleSelect={() => handleToggleSelection(line.id, line.qty)}
+                returnQty={returnForm.returnQtyMap[line.id]}
+                onQtyChange={onUpdateReturnQty ? (qty) => onUpdateReturnQty(line.id, qty) : undefined}
               />
             ))}
 
-            {/* Return Form */}
-            {selectedLine && (
+            {/* Return Form - shows when any lines are selected */}
+            {selectedLinesData.length > 0 && (
               <div ref={formRef}>
                 <ReturnInitiationForm
-                  line={selectedLine}
+                  selectedLines={selectedLinesData}
                   form={returnForm}
                   onFieldChange={onReturnFieldChange}
                   onInitiate={handleInitiate}
@@ -873,7 +965,7 @@ export function ReturnsSection({
                 line={line}
                 eligibility={eligibility}
                 isSelected={false}
-                onSelect={() => {}}
+                onToggleSelect={() => {}}
               />
             ))}
           </div>

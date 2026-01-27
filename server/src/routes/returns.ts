@@ -3,6 +3,10 @@
  *
  * Handles return-related operations that require Express endpoints,
  * specifically for integrating with external logistics APIs.
+ *
+ * AUTO-GROUPING: When scheduling a pickup for one line, we automatically
+ * include all other lines from the same order that have returnStatus='requested'.
+ * This clubs returns together so they share one AWB and pickup.
  */
 
 import { Router } from 'express';
@@ -14,6 +18,28 @@ import type { ProductInfo, ShipmentDimensions } from '../services/ithinkLogistic
 import { shippingLogger } from '../utils/logger.js';
 
 const router: Router = Router();
+
+// ============================================================================
+// Configuration
+// ============================================================================
+
+/**
+ * Auto-group returns from same order into one pickup.
+ * When true, scheduling pickup for one line will include all sibling lines
+ * with returnStatus='requested' from the same order.
+ */
+const AUTO_GROUP_RETURNS_BY_ORDER = true;
+
+/**
+ * Default shipment dimensions for apparel returns.
+ * These scale based on number of items.
+ */
+const BASE_DIMENSIONS = {
+    length: 25,  // cm
+    width: 20,   // cm
+    height: 5,   // cm per item
+    weight: 0.3, // kg per item
+};
 
 // ============================================================================
 // Input Validation Schemas
@@ -68,8 +94,11 @@ router.post('/check-serviceability', authenticateToken, async (req: Request, res
 /**
  * POST /api/returns/schedule-pickup
  *
- * Schedule a reverse pickup with iThink Logistics
- * This books a pickup with the courier and returns an AWB number
+ * Schedule a reverse pickup with iThink Logistics.
+ *
+ * AUTO-GROUPING BEHAVIOR:
+ * When a line has a returnBatchNumber, ALL lines in that batch with status='requested'
+ * are included in the same pickup and share the AWB number.
  */
 router.post('/schedule-pickup', authenticateToken, async (req: Request, res: Response): Promise<void> => {
     try {
@@ -86,8 +115,8 @@ router.post('/schedule-pickup', authenticateToken, async (req: Request, res: Res
         const { orderLineId } = parseResult.data;
         const prisma = req.prisma;
 
-        // Fetch order line with order and customer data
-        const orderLine = await prisma.orderLine.findUnique({
+        // Fetch the trigger line with order and customer data
+        const triggerLine = await prisma.orderLine.findUnique({
             where: { id: orderLineId },
             include: {
                 order: {
@@ -107,7 +136,7 @@ router.post('/schedule-pickup', authenticateToken, async (req: Request, res: Res
             },
         });
 
-        if (!orderLine) {
+        if (!triggerLine) {
             res.status(404).json({
                 success: false,
                 error: 'Order line not found',
@@ -115,19 +144,50 @@ router.post('/schedule-pickup', authenticateToken, async (req: Request, res: Res
             return;
         }
 
-        // Validate return status
-        if (orderLine.returnStatus !== 'requested') {
+        if (triggerLine.returnStatus !== 'requested') {
             res.status(400).json({
                 success: false,
-                error: `Cannot schedule pickup: current status is '${orderLine.returnStatus}'`,
+                error: `Cannot schedule pickup: current status is '${triggerLine.returnStatus}'`,
             });
             return;
         }
 
-        const { order, sku } = orderLine;
+        // =====================================================================
+        // AUTO-GROUPING: Find all lines in the same batch with status='requested'
+        // =====================================================================
+        let batchLines: typeof triggerLine[] = [triggerLine];
+
+        if (AUTO_GROUP_RETURNS_BY_ORDER && triggerLine.returnBatchNumber) {
+            const siblingLines = await prisma.orderLine.findMany({
+                where: {
+                    returnBatchNumber: triggerLine.returnBatchNumber,
+                    returnStatus: 'requested',
+                    id: { not: triggerLine.id }, // exclude trigger line (already fetched)
+                },
+                include: {
+                    order: {
+                        include: {
+                            customer: true,
+                        },
+                    },
+                    sku: {
+                        include: {
+                            variation: {
+                                include: {
+                                    product: true,
+                                },
+                            },
+                        },
+                    },
+                },
+            });
+            batchLines = [triggerLine, ...siblingLines];
+        }
+
+        const { order } = triggerLine;
         const customer = order.customer;
 
-        // Parse shipping address (stored as JSON string)
+        // Parse shipping address
         type AddressFields = {
             address1?: string;
             address2?: string;
@@ -144,12 +204,10 @@ router.post('/schedule-pickup', authenticateToken, async (req: Request, res: Res
                     ? JSON.parse(order.shippingAddress)
                     : order.shippingAddress as AddressFields;
             } catch {
-                // If not JSON, treat as plain address string
                 shippingAddr = { address1: order.shippingAddress };
             }
         }
 
-        // Extract pincode from address
         const pincode = shippingAddr.zip || '';
         if (!pincode) {
             res.status(400).json({
@@ -161,7 +219,6 @@ router.post('/schedule-pickup', authenticateToken, async (req: Request, res: Res
 
         // Check pincode serviceability
         const serviceability = await ithinkLogistics.checkReversePickupServiceability(pincode);
-
         if (!serviceability.serviceable) {
             res.status(400).json({
                 success: false,
@@ -170,29 +227,30 @@ router.post('/schedule-pickup', authenticateToken, async (req: Request, res: Res
             return;
         }
 
-        // Build product info
-        const productName = sku?.variation?.product?.name || 'Product';
-        const products: ProductInfo[] = [{
-            name: productName,
-            sku: sku?.skuCode || orderLine.skuId,
-            quantity: orderLine.returnQty || orderLine.qty,
-            price: orderLine.unitPrice,
-        }];
+        // =====================================================================
+        // Build combined product list from all batch lines
+        // =====================================================================
+        const products: ProductInfo[] = batchLines.map(line => ({
+            name: line.sku?.variation?.product?.name || 'Product',
+            sku: line.sku?.skuCode || line.skuId,
+            quantity: line.returnQty || line.qty,
+            price: line.unitPrice,
+        }));
 
-        // Default dimensions for apparel
+        // Calculate dimensions based on number of items
+        const totalQty = batchLines.reduce((sum, line) => sum + (line.returnQty || line.qty), 0);
         const dimensions: ShipmentDimensions = {
-            length: 25,
-            width: 20,
-            height: 5,
-            weight: 0.5,
+            length: BASE_DIMENSIONS.length,
+            width: BASE_DIMENSIONS.width,
+            height: Math.max(BASE_DIMENSIONS.height, BASE_DIMENSIONS.height * Math.ceil(totalQty / 2)),
+            weight: Math.max(0.5, BASE_DIMENSIONS.weight * totalQty),
         };
 
-        // Build customer name from customer record or shipping address
+        // Build customer info
         const customerName = customer
             ? [customer.firstName, customer.lastName].filter(Boolean).join(' ') || order.customerName
             : order.customerName;
 
-        // Build customer info for pickup
         const customerInfo = {
             name: shippingAddr.name || customerName || 'Customer',
             phone: shippingAddr.phone || order.customerPhone || customer?.phone || '',
@@ -204,39 +262,54 @@ router.post('/schedule-pickup', authenticateToken, async (req: Request, res: Res
             email: customer?.email || '',
         };
 
+        // Use batch number in order reference if available
+        const orderRef = triggerLine.returnBatchNumber
+            ? `RET-${triggerLine.returnBatchNumber}`
+            : `RET-${order.orderNumber}`;
+
         // Create reverse pickup with iThink
         const pickupResult = await ithinkLogistics.createReversePickup({
-            orderNumber: `RET-${order.orderNumber}`,
+            orderNumber: orderRef,
             orderDate: order.orderDate || new Date(),
             customer: customerInfo,
             products,
             dimensions,
-            returnReason: orderLine.returnReasonCategory || undefined,
-            originalAwbNumber: orderLine.awbNumber || undefined,
+            returnReason: triggerLine.returnReasonCategory || undefined,
+            originalAwbNumber: triggerLine.awbNumber || undefined,
         });
 
-        // Update order line with AWB and status
-        await prisma.orderLine.update({
-            where: { id: orderLineId },
+        // =====================================================================
+        // Update ALL batch lines with the same AWB
+        // =====================================================================
+        const now = new Date();
+        const lineIds = batchLines.map(l => l.id);
+
+        await prisma.orderLine.updateMany({
+            where: { id: { in: lineIds } },
             data: {
                 returnStatus: 'pickup_scheduled',
                 returnPickupType: 'arranged_by_us',
                 returnCourier: pickupResult.logistics,
                 returnAwbNumber: pickupResult.awbNumber,
-                returnPickupScheduledAt: new Date(),
+                returnPickupScheduledAt: now,
             },
         });
 
         shippingLogger.info({
-            orderLineId,
+            batchNumber: triggerLine.returnBatchNumber,
+            lineIds,
+            lineCount: batchLines.length,
             orderNumber: order.orderNumber,
             awbNumber: pickupResult.awbNumber,
-        }, 'Reverse pickup scheduled successfully');
+        }, 'Reverse pickup scheduled for batch');
 
         res.json({
             success: true,
             data: {
                 orderLineId,
+                orderLineIds: lineIds,
+                lineCount: batchLines.length,
+                batchNumber: triggerLine.returnBatchNumber,
                 awbNumber: pickupResult.awbNumber,
                 courier: pickupResult.logistics,
                 estimatedPickupDate: pickupResult.estimatedPickupDate,
@@ -245,6 +318,44 @@ router.post('/schedule-pickup', authenticateToken, async (req: Request, res: Res
     } catch (error: unknown) {
         const message = error instanceof Error ? error.message : 'Unknown error';
         shippingLogger.error({ error: message }, 'Schedule pickup failed');
+        res.status(500).json({
+            success: false,
+            error: message,
+        });
+    }
+});
+
+/**
+ * GET /api/returns/tracking/:awbNumber
+ *
+ * Get tracking status for a return shipment AWB
+ */
+router.get('/tracking/:awbNumber', authenticateToken, async (req: Request, res: Response): Promise<void> => {
+    const awbNumber = req.params.awbNumber as string;
+
+    if (!awbNumber) {
+        res.status(400).json({
+            success: false,
+            error: 'AWB number is required',
+        });
+        return;
+    }
+
+    try {
+        const trackingData = await ithinkLogistics.getTrackingStatus(awbNumber);
+
+        if (!trackingData) {
+            res.status(404).json({
+                success: false,
+                error: 'Tracking data not found',
+            });
+            return;
+        }
+
+        res.json(trackingData);
+    } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        shippingLogger.error({ error: message, awbNumber }, 'Tracking fetch failed');
         res.status(500).json({
             success: false,
             error: message,

@@ -230,19 +230,44 @@ export type ReturnRefundMethod = z.infer<typeof ReturnRefundMethodSchema>;
 // ============================================
 
 /**
- * Input for initiating a return on an order line
+ * Input for initiating returns on order lines
+ * Accepts array of lines - all lines initiated together share one batch number
  */
 export const InitiateReturnInputSchema = z.object({
-    orderLineId: z.string().uuid(),
-    returnQty: z.number().int().positive(),
+    orderLineIds: z.array(z.string().uuid()).min(1),
     returnReasonCategory: ReturnReasonCategorySchema,
     returnReasonDetail: z.string().optional(),
     returnResolution: ReturnResolutionSchema,
     returnNotes: z.string().optional(),
-    // For exchange resolution
+    // For exchange resolution (applies to all lines if provided)
     exchangeSkuId: z.string().uuid().optional(),
 });
 export type InitiateReturnInput = z.infer<typeof InitiateReturnInputSchema>;
+
+/**
+ * Per-line quantity override for batch returns
+ * If not provided, defaults to full line qty
+ */
+export const LineReturnQtySchema = z.object({
+    orderLineId: z.string().uuid(),
+    returnQty: z.number().int().positive(),
+});
+export type LineReturnQty = z.infer<typeof LineReturnQtySchema>;
+
+/**
+ * Input for initiating returns with per-line quantity control
+ */
+export const InitiateReturnBatchInputSchema = z.object({
+    lines: z.array(LineReturnQtySchema).min(1),
+    returnReasonCategory: ReturnReasonCategorySchema,
+    returnReasonDetail: z.string().optional(),
+    returnResolution: ReturnResolutionSchema,
+    returnNotes: z.string().optional(),
+    exchangeSkuId: z.string().uuid().optional(),
+    /** How the return will be picked up */
+    pickupType: ReturnPickupTypeSchema.optional(),
+});
+export type InitiateReturnBatchInput = z.infer<typeof InitiateReturnBatchInputSchema>;
 
 /**
  * Input for scheduling return pickup
@@ -418,6 +443,7 @@ export const ActiveReturnLineSchema = z.object({
     qty: z.number(),
     unitPrice: z.number(),
     // Return info
+    returnBatchNumber: z.string().nullable(),
     returnStatus: z.string(),
     returnQty: z.number(),
     returnRequestedAt: z.coerce.date().nullable(),

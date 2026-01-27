@@ -107,11 +107,10 @@ interface StatusOptimisticContext extends OptimisticUpdateContext {
 export interface UseOrderStatusMutationsOptions {
     currentView?: string;
     page?: number;
-    shippedFilter?: 'rto' | 'cod_pending';
 }
 
 export function useOrderStatusMutations(options: UseOrderStatusMutationsOptions = {}) {
-    const { currentView = 'open', page = 1, shippedFilter } = options;
+    const { currentView = 'open', page = 1 } = options;
     const queryClient = useQueryClient();
     const { invalidateOpenOrders, invalidateCancelledOrders } = useOrderInvalidation();
 
@@ -122,7 +121,7 @@ export function useOrderStatusMutations(options: UseOrderStatusMutationsOptions 
     const uncancelOrderServerFn = useServerFn(uncancelOrderFn);
 
     // Build query input for cache operations
-    const queryInput = getOrdersQueryInput(currentView, page, shippedFilter);
+    const queryInput = getOrdersQueryInput(currentView, page);
     const queryKey = getOrdersListQueryKey(queryInput);
 
     // Helper to get current cache data
@@ -222,7 +221,7 @@ export function useOrderStatusMutations(options: UseOrderStatusMutationsOptions 
         },
         onMutate: async ({ orderId }) => {
             // For uncancel, we may be in cancelled view
-            const cancelledQueryInput = getOrdersQueryInput('cancelled', page, undefined);
+            const cancelledQueryInput = getOrdersQueryInput('cancelled', page);
             const cancelledQueryKey = getOrdersListQueryKey(cancelledQueryInput);
             await queryClient.cancelQueries({ queryKey: ['orders'] });
             const previousData = queryClient.getQueryData<OrdersListData>(cancelledQueryKey);

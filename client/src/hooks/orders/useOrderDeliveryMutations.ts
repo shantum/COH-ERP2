@@ -106,7 +106,7 @@ export function useOrderDeliveryMutations(options: UseOrderDeliveryMutationsOpti
         },
         onMutate: async ({ orderId }) => {
             // For delivery operations, we're typically in shipped view
-            const shippedQueryInput = getOrdersQueryInput('shipped', page, undefined);
+            const shippedQueryInput = getOrdersQueryInput('shipped', page);
             const queryKey = getOrdersListQueryKey(shippedQueryInput);
 
             await queryClient.cancelQueries({ queryKey });
@@ -153,7 +153,7 @@ export function useOrderDeliveryMutations(options: UseOrderDeliveryMutationsOpti
         },
         onMutate: async ({ orderId }) => {
             // For RTO operations, we're typically in shipped view
-            const shippedQueryInput = getOrdersQueryInput('shipped', page, undefined);
+            const shippedQueryInput = getOrdersQueryInput('shipped', page);
             const queryKey = getOrdersListQueryKey(shippedQueryInput);
 
             await queryClient.cancelQueries({ queryKey });
@@ -200,7 +200,7 @@ export function useOrderDeliveryMutations(options: UseOrderDeliveryMutationsOpti
         },
         onMutate: async ({ orderId }) => {
             // For receive RTO, we're typically in RTO view
-            const rtoQueryInput = getOrdersQueryInput('rto', page, undefined);
+            const rtoQueryInput = getOrdersQueryInput('rto', page);
             const queryKey = getOrdersListQueryKey(rtoQueryInput);
 
             await queryClient.cancelQueries({ queryKey });
@@ -252,7 +252,7 @@ export function useOrderDeliveryMutations(options: UseOrderDeliveryMutationsOpti
         },
         onMutate: async ({ lineId }) => {
             // For line delivery, update shipped view optimistically
-            const shippedQueryInput = getOrdersQueryInput('shipped', page, undefined);
+            const shippedQueryInput = getOrdersQueryInput('shipped', page);
             const queryKey = getOrdersListQueryKey(shippedQueryInput);
 
             await queryClient.cancelQueries({ queryKey: ['orders'] });
@@ -305,7 +305,7 @@ export function useOrderDeliveryMutations(options: UseOrderDeliveryMutationsOpti
             return result.data;
         },
         onMutate: async ({ lineId }) => {
-            const shippedQueryInput = getOrdersQueryInput('shipped', page, undefined);
+            const shippedQueryInput = getOrdersQueryInput('shipped', page);
             const queryKey = getOrdersListQueryKey(shippedQueryInput);
 
             await queryClient.cancelQueries({ queryKey: ['orders'] });
@@ -357,7 +357,7 @@ export function useOrderDeliveryMutations(options: UseOrderDeliveryMutationsOpti
             return result.data;
         },
         onMutate: async ({ lineId, condition }) => {
-            const rtoQueryInput = getOrdersQueryInput('rto', page, undefined);
+            const rtoQueryInput = getOrdersQueryInput('rto', page);
             const queryKey = getOrdersListQueryKey(rtoQueryInput);
 
             await queryClient.cancelQueries({ queryKey: ['orders'] });

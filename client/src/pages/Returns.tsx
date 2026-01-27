@@ -50,6 +50,11 @@ import {
     MessageSquare, Pencil, Save
 } from 'lucide-react';
 import { CustomerDetailModal } from '../components/orders/CustomerDetailModal';
+import { useIThinkTracking } from '../hooks/useIThinkTracking';
+import ithinkLogo from '../assets/ithinklogistics.png';
+import { formatLastUpdate } from '../components/orders/OrdersTable/utils/dateFormatters';
+import { TRACKING_STATUS_STYLES } from '../components/orders/OrdersTable/rowStyling';
+import { cn } from '../lib/utils';
 
 // ============================================
 // TYPES
@@ -119,6 +124,84 @@ const computeAgeDays = (requestedAt: Date | string | null) => {
 };
 
 // ============================================
+// RETURN TRACKING STATUS COMPONENT
+// ============================================
+
+interface ReturnTrackingStatusProps {
+    awbNumber: string;
+}
+
+/**
+ * Displays iThink tracking status for a return shipment
+ * Shows logo, status label, and last update time
+ */
+function ReturnTrackingStatus({ awbNumber }: ReturnTrackingStatusProps) {
+    const { data: tracking, isLoading, error } = useIThinkTracking({
+        awbNumber,
+        enabled: !!awbNumber,
+    });
+
+    if (isLoading) {
+        return (
+            <div className="flex items-center gap-1.5 text-xs text-gray-400">
+                <div className="w-3 h-3 border border-gray-300 border-t-transparent rounded-full animate-spin" />
+                <span>Loading...</span>
+            </div>
+        );
+    }
+
+    if (error) {
+        return (
+            <div className="flex items-center gap-1.5 text-xs text-red-500 mt-1">
+                <span>Tracking error</span>
+            </div>
+        );
+    }
+
+    if (!tracking?.currentStatus) {
+        return null;
+    }
+
+    const style = TRACKING_STATUS_STYLES[tracking.currentStatus] || {
+        bg: 'bg-gray-100',
+        text: 'text-gray-700',
+        label: tracking.currentStatus.replace(/_/g, ' '),
+    };
+
+    // Try lastScan first, then fall back to most recent scan in history
+    const lastScanTime = tracking.lastScan?.datetime
+        || (tracking.scanHistory && tracking.scanHistory.length > 0 ? tracking.scanHistory[0].datetime : null);
+    const lastUpdate = formatLastUpdate(lastScanTime);
+    const lastLocation = tracking.lastScan?.location
+        || (tracking.scanHistory && tracking.scanHistory.length > 0 ? tracking.scanHistory[0].location : null);
+
+    return (
+        <div className="flex items-center gap-1.5 mt-1">
+            <img
+                src={ithinkLogo}
+                alt="iThink"
+                className="w-3.5 h-3.5 object-contain shrink-0"
+            />
+            <div className="flex flex-col leading-tight min-w-0">
+                <span
+                    className={cn(
+                        'font-medium whitespace-nowrap text-[11px]',
+                        style.text
+                    )}
+                >
+                    {style.label}
+                </span>
+                {(lastUpdate || lastLocation) && (
+                    <span className="text-[10px] text-gray-400 truncate max-w-[150px]">
+                        {lastUpdate}{lastUpdate && lastLocation ? ' · ' : ''}{lastLocation}
+                    </span>
+                )}
+            </div>
+        </div>
+    );
+}
+
+// ============================================
 // MAIN COMPONENT
 // ============================================
 
@@ -140,6 +223,7 @@ export default function Returns() {
     const [returnReasonCategory, setReturnReasonCategory] = useState('');
     const [returnReasonDetail, setReturnReasonDetail] = useState('');
     const [returnResolution, setReturnResolution] = useState<'refund' | 'exchange' | 'rejected'>('refund');
+    const [returnPickupType, setReturnPickupType] = useState<'arranged_by_us' | 'customer_shipped'>('arranged_by_us');
     const [returnNotes, setReturnNotes] = useState('');
     const [exchangeSkuId, setExchangeSkuId] = useState('');
 
@@ -378,19 +462,21 @@ export default function Returns() {
             return;
         }
 
-        // For each selected line, initiate return
-        selectedLines.forEach((lineId) => {
-            const qty = returnQtyMap[lineId] || 1;
-            initiateMutation.mutate({ data: {
-                orderLineId: lineId,
-                returnQty: qty,
-                returnReasonCategory: returnReasonCategory as 'fit_size' | 'product_quality' | 'product_different' | 'wrong_item_sent' | 'damaged_in_transit' | 'changed_mind' | 'other',
-                returnReasonDetail,
-                returnResolution,
-                returnNotes,
-                ...(returnResolution === 'exchange' && exchangeSkuId ? { exchangeSkuId } : {}),
-            }});
-        });
+        // Batch all selected lines into single mutation call
+        const lines = Array.from(selectedLines).map((lineId) => ({
+            orderLineId: lineId,
+            returnQty: returnQtyMap[lineId] || 1,
+        }));
+
+        initiateMutation.mutate({ data: {
+            lines,
+            returnReasonCategory: returnReasonCategory as 'fit_size' | 'product_quality' | 'product_different' | 'wrong_item_sent' | 'damaged_in_transit' | 'changed_mind' | 'other',
+            returnReasonDetail,
+            returnResolution,
+            returnNotes,
+            pickupType: returnPickupType,
+            ...(returnResolution === 'exchange' && exchangeSkuId ? { exchangeSkuId } : {}),
+        }});
     };
 
     const resetInitiateForm = () => {
@@ -401,6 +487,7 @@ export default function Returns() {
         setReturnReasonCategory('');
         setReturnReasonDetail('');
         setReturnResolution('refund');
+        setReturnPickupType('arranged_by_us');
         setReturnNotes('');
         setExchangeSkuId('');
     };
@@ -409,6 +496,7 @@ export default function Returns() {
         schedulePickupMutation.mutate({ data: {
             orderLineId: lineId,
             pickupType: 'arranged_by_us',
+            scheduleWithIthink: true,  // Actually book with iThink Logistics
         }});
     };
 
@@ -633,6 +721,8 @@ export default function Returns() {
                     setReturnReasonDetail={setReturnReasonDetail}
                     returnResolution={returnResolution}
                     setReturnResolution={setReturnResolution}
+                    returnPickupType={returnPickupType}
+                    setReturnPickupType={setReturnPickupType}
                     returnNotes={returnNotes}
                     setReturnNotes={setReturnNotes}
                     exchangeSkuId={exchangeSkuId}
@@ -698,6 +788,23 @@ interface ActionQueueTabProps {
     onUpdateNotes: (lineId: string, notes: string) => void;
 }
 
+/**
+ * Group items by batch number for display
+ */
+function groupByBatch(items: ServerReturnActionQueueItem[]): Map<string, ServerReturnActionQueueItem[]> {
+    const groups = new Map<string, ServerReturnActionQueueItem[]>();
+
+    for (const item of items) {
+        // Use batch number if available, otherwise use order number as fallback
+        const key = item.returnBatchNumber || `single-${item.id}`;
+        const existing = groups.get(key) || [];
+        existing.push(item);
+        groups.set(key, existing);
+    }
+
+    return groups;
+}
+
 function ActionQueueTab({
     items,
     loading,
@@ -743,184 +850,251 @@ function ActionQueueTab({
         );
     }
 
+    // Group items by batch number
+    const batches = groupByBatch(items);
+
     return (
         <div className="space-y-4">
-            {items.map((item) => (
-                <div key={item.id} className="border border-gray-200 rounded-lg p-4 bg-white">
-                    <div className="flex items-start justify-between">
-                        <div className="flex gap-4">
-                            <div className="w-16 h-16 bg-gray-100 rounded flex items-center justify-center">
-                                {item.imageUrl ? (
-                                    <img
-                                        src={item.imageUrl}
-                                        alt={item.productName || ''}
-                                        className="w-full h-full object-cover rounded"
-                                    />
-                                ) : (
-                                    <Package size={24} className="text-gray-400" />
-                                )}
-                            </div>
-                            <div>
-                                <div className="flex items-center gap-2 mb-1">
-                                    <span className="font-medium">{item.orderNumber}</span>
-                                    <span className={`px-2 py-0.5 text-xs rounded ${getStatusBadge(item.returnStatus)}`}>
-                                        {item.returnStatus}
-                                    </span>
-                                    <span className={`px-2 py-0.5 text-xs rounded ${getResolutionBadge(item.returnResolution).color}`}>
-                                        {getResolutionBadge(item.returnResolution).label}
-                                    </span>
-                                </div>
-                                <div className="text-sm text-gray-600">
-                                    {item.productName} - {item.colorName} - {item.size}
-                                </div>
-                                <div className="text-sm text-gray-500">
-                                    SKU: {item.skuCode} | Qty: {item.returnQty} | Customer: {item.customerName}
-                                </div>
-                                {item.returnReasonCategory && (
-                                    <div className="text-xs text-gray-500 mt-1">
-                                        Reason: {item.returnReasonCategory}
-                                        {item.returnReasonDetail && ` - ${item.returnReasonDetail}`}
+            {Array.from(batches.entries()).map(([batchKey, batchItems]) => {
+                const firstItem = batchItems[0];
+                const isBatch = batchItems.length > 1;
+                const batchNumber = firstItem.returnBatchNumber;
+
+                // Check if all items in batch need pickup (for batch-level button)
+                const allNeedPickup = batchItems.every(i => i.actionNeeded === 'schedule_pickup');
+
+                return (
+                    <div key={batchKey} className="border border-gray-200 rounded-lg bg-white overflow-hidden shadow-sm">
+                        {/* Batch Header - always show for batch items */}
+                        {(isBatch || batchNumber) && (
+                            <div className="px-4 py-3 bg-gradient-to-r from-gray-50 to-white border-b border-gray-200">
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-3">
+                                        <span className="font-semibold text-gray-800">
+                                            {batchNumber ? `Batch ${batchNumber}` : firstItem.orderNumber}
+                                        </span>
+                                        <span className="px-2 py-0.5 bg-gray-100 text-gray-600 text-xs rounded-full">
+                                            {batchItems.length} item{batchItems.length > 1 ? 's' : ''}
+                                        </span>
+                                        <span className="text-sm text-gray-500">
+                                            {firstItem.customerName}
+                                        </span>
                                     </div>
-                                )}
-                                <div className="text-xs text-gray-400 mt-1">
-                                    Requested {item.daysSinceRequest} days ago
+                                    {/* Batch-level action button */}
+                                    {allNeedPickup && (
+                                        <button
+                                            onClick={() => onSchedulePickup(firstItem.id)}
+                                            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2 text-sm font-medium shadow-sm"
+                                        >
+                                            <Truck size={16} />
+                                            Schedule Pickup{isBatch ? ' for Batch' : ''}
+                                        </button>
+                                    )}
                                 </div>
-                            </div>
-                        </div>
-
-                        {/* Action Buttons */}
-                        <div className="flex flex-col gap-2 shrink-0">
-                            {item.actionNeeded === 'schedule_pickup' && (
-                                <button
-                                    onClick={() => onSchedulePickup(item.id)}
-                                    className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center gap-2"
-                                >
-                                    <Truck size={16} />
-                                    Schedule Pickup
-                                </button>
-                            )}
-
-                            {item.actionNeeded === 'receive' && (
-                                <div className="flex flex-col gap-2">
-                                    <select
-                                        value={receiveConditionMap[item.id] || ''}
-                                        onChange={(e) =>
-                                            setReceiveConditionMap({ ...receiveConditionMap, [item.id]: e.target.value })
-                                        }
-                                        className="px-3 py-2 border border-gray-300 rounded text-sm"
-                                    >
-                                        <option value="">Select Condition</option>
-                                        {conditionOptions.map((c) => (
-                                            <option key={c.value} value={c.value}>
-                                                {c.label}
-                                            </option>
-                                        ))}
-                                    </select>
-                                    <button
-                                        onClick={() => {
-                                            const condition = receiveConditionMap[item.id] as 'good' | 'damaged' | 'defective' | 'wrong_item' | 'used' | undefined;
-                                            if (condition) {
-                                                onReceive(item.id, condition);
-                                            } else {
-                                                alert('Please select a condition');
-                                            }
-                                        }}
-                                        className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 flex items-center gap-2"
-                                    >
-                                        <PackageCheck size={16} />
-                                        Receive
-                                    </button>
-                                </div>
-                            )}
-
-                            {item.actionNeeded === 'process_refund' && (
-                                <button
-                                    onClick={() => onProcessRefund(item.id, item)}
-                                    className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 flex items-center gap-2"
-                                >
-                                    <DollarSign size={16} />
-                                    Process Refund
-                                </button>
-                            )}
-
-                            {item.actionNeeded === 'create_exchange' && (
-                                <button
-                                    onClick={() => onCreateExchange(item.id)}
-                                    className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 flex items-center gap-2"
-                                >
-                                    <ArrowRight size={16} />
-                                    Create Exchange
-                                </button>
-                            )}
-
-                            {item.actionNeeded === 'complete' && (
-                                <button
-                                    onClick={() => onComplete(item.id)}
-                                    className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 flex items-center gap-2"
-                                >
-                                    <Check size={16} />
-                                    Complete
-                                </button>
-                            )}
-
-                            <button
-                                onClick={() => onCancel(item.id)}
-                                className="px-4 py-2 bg-red-100 text-red-800 rounded hover:bg-red-200 flex items-center gap-2"
-                            >
-                                <XCircle size={16} />
-                                Cancel
-                            </button>
-                        </div>
-                    </div>
-
-                    {/* Notes Section */}
-                    <div className="mt-3 pt-3 border-t border-gray-100">
-                        {editingNotesId === item.id ? (
-                            <div className="flex gap-2">
-                                <textarea
-                                    value={editingNotesValue}
-                                    onChange={(e) => setEditingNotesValue(e.target.value)}
-                                    placeholder="Add notes about this return..."
-                                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm resize-none"
-                                    rows={2}
-                                    autoFocus
-                                />
-                                <div className="flex flex-col gap-1">
-                                    <button
-                                        onClick={() => saveNotes(item.id)}
-                                        className="px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 flex items-center gap-1"
-                                    >
-                                        <Save size={14} />
-                                        Save
-                                    </button>
-                                    <button
-                                        onClick={cancelEditNotes}
-                                        className="px-3 py-1 bg-gray-100 text-gray-600 rounded text-sm hover:bg-gray-200"
-                                    >
-                                        Cancel
-                                    </button>
-                                </div>
-                            </div>
-                        ) : (
-                            <div className="flex items-start gap-2">
-                                <MessageSquare size={14} className="text-gray-400 mt-0.5 shrink-0" />
-                                {item.returnNotes ? (
-                                    <p className="text-sm text-gray-600 flex-1">{item.returnNotes}</p>
-                                ) : (
-                                    <p className="text-sm text-gray-400 italic flex-1">No notes</p>
-                                )}
-                                <button
-                                    onClick={() => startEditNotes(item.id, item.returnNotes)}
-                                    className="text-gray-400 hover:text-blue-600 p-1"
-                                    title="Edit notes"
-                                >
-                                    <Pencil size={14} />
-                                </button>
                             </div>
                         )}
+
+                        {/* Items in batch */}
+                        <div className={isBatch ? 'divide-y divide-gray-100' : ''}>
+                            {batchItems.map((item) => (
+                                <div key={item.id} className="p-4">
+                                    {/* Main row - Product info and action */}
+                                    <div className="flex items-start gap-4">
+                                        {/* Product Image */}
+                                        <div className="w-14 h-14 bg-gray-100 rounded-lg flex-shrink-0 overflow-hidden">
+                                            {item.imageUrl ? (
+                                                <img
+                                                    src={item.imageUrl}
+                                                    alt={item.productName || ''}
+                                                    className="w-full h-full object-cover"
+                                                />
+                                            ) : (
+                                                <div className="w-full h-full flex items-center justify-center">
+                                                    <Package size={20} className="text-gray-400" />
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {/* Product Details */}
+                                        <div className="flex-1 min-w-0">
+                                            {/* Status badges row */}
+                                            <div className="flex items-center gap-2 mb-1 flex-wrap">
+                                                <span className={`px-2 py-0.5 text-xs font-medium rounded ${getStatusBadge(item.returnStatus)}`}>
+                                                    {item.returnStatus?.replace(/_/g, ' ')}
+                                                </span>
+                                                <span className={`px-2 py-0.5 text-xs font-medium rounded ${getResolutionBadge(item.returnResolution).color}`}>
+                                                    {getResolutionBadge(item.returnResolution).label}
+                                                </span>
+                                                {item.returnAwbNumber && (
+                                                    <span className="px-2 py-0.5 text-xs bg-gray-100 text-gray-600 rounded">
+                                                        AWB: {item.returnAwbNumber}
+                                                    </span>
+                                                )}
+                                            </div>
+
+                                            {/* iThink Tracking Status */}
+                                            {item.returnAwbNumber && (
+                                                <ReturnTrackingStatus awbNumber={item.returnAwbNumber} />
+                                            )}
+
+                                            {/* Product name */}
+                                            <div className="text-sm font-medium text-gray-800 truncate">
+                                                {item.productName} - {item.colorName} - {item.size}
+                                            </div>
+
+                                            {/* SKU and qty */}
+                                            <div className="text-xs text-gray-500 mt-0.5">
+                                                {item.skuCode} • Qty: {item.returnQty}
+                                                {item.returnReasonCategory && (
+                                                    <> • {item.returnReasonCategory.replace(/_/g, ' ')}</>
+                                                )}
+                                            </div>
+
+                                            {/* Time since request */}
+                                            <div className="text-xs text-gray-400 mt-1">
+                                                {item.daysSinceRequest === 0 ? 'Requested today' : `Requested ${item.daysSinceRequest}d ago`}
+                                            </div>
+                                        </div>
+
+                                        {/* Action Area - Compact */}
+                                        <div className="flex items-center gap-2 flex-shrink-0">
+                                            {/* Receive action - inline select + button */}
+                                            {item.actionNeeded === 'receive' && (
+                                                <>
+                                                    <select
+                                                        value={receiveConditionMap[item.id] || ''}
+                                                        onChange={(e) =>
+                                                            setReceiveConditionMap({ ...receiveConditionMap, [item.id]: e.target.value })
+                                                        }
+                                                        className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm bg-white min-w-[130px]"
+                                                    >
+                                                        <option value="">Condition...</option>
+                                                        {conditionOptions.map((c) => (
+                                                            <option key={c.value} value={c.value}>
+                                                                {c.label}
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                    <button
+                                                        onClick={() => {
+                                                            const condition = receiveConditionMap[item.id] as 'good' | 'damaged' | 'defective' | 'wrong_item' | 'used' | undefined;
+                                                            if (condition) {
+                                                                onReceive(item.id, condition);
+                                                            } else {
+                                                                alert('Please select a condition');
+                                                            }
+                                                        }}
+                                                        disabled={!receiveConditionMap[item.id]}
+                                                        className="px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center gap-1.5 text-sm font-medium"
+                                                    >
+                                                        <PackageCheck size={14} />
+                                                        Receive
+                                                    </button>
+                                                </>
+                                            )}
+
+                                            {/* Schedule pickup - show if this item needs it (batch header button is just a convenience) */}
+                                            {item.actionNeeded === 'schedule_pickup' && (
+                                                <button
+                                                    onClick={() => onSchedulePickup(item.id)}
+                                                    className="px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-1.5 text-sm font-medium"
+                                                >
+                                                    <Truck size={14} />
+                                                    Schedule Pickup
+                                                </button>
+                                            )}
+
+                                            {item.actionNeeded === 'process_refund' && (
+                                                <button
+                                                    onClick={() => onProcessRefund(item.id, item)}
+                                                    className="px-3 py-1.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 flex items-center gap-1.5 text-sm font-medium"
+                                                >
+                                                    <DollarSign size={14} />
+                                                    Process Refund
+                                                </button>
+                                            )}
+
+                                            {item.actionNeeded === 'create_exchange' && (
+                                                <button
+                                                    onClick={() => onCreateExchange(item.id)}
+                                                    className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center gap-1.5 text-sm font-medium"
+                                                >
+                                                    <ArrowRight size={14} />
+                                                    Create Exchange
+                                                </button>
+                                            )}
+
+                                            {item.actionNeeded === 'complete' && (
+                                                <button
+                                                    onClick={() => onComplete(item.id)}
+                                                    className="px-3 py-1.5 bg-gray-700 text-white rounded-lg hover:bg-gray-800 flex items-center gap-1.5 text-sm font-medium"
+                                                >
+                                                    <Check size={14} />
+                                                    Complete
+                                                </button>
+                                            )}
+
+                                            {/* Cancel - secondary button */}
+                                            <button
+                                                onClick={() => onCancel(item.id)}
+                                                className="px-2 py-1.5 text-red-600 hover:bg-red-50 rounded-lg text-sm"
+                                                title="Cancel return"
+                                            >
+                                                <XCircle size={16} />
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    {/* Notes Section - Compact */}
+                                    <div className="mt-3 pt-2 border-t border-gray-50">
+                                        {editingNotesId === item.id ? (
+                                            <div className="flex gap-2 items-start">
+                                                <MessageSquare size={14} className="text-gray-400 mt-2 shrink-0" />
+                                                <textarea
+                                                    value={editingNotesValue}
+                                                    onChange={(e) => setEditingNotesValue(e.target.value)}
+                                                    placeholder="Add notes..."
+                                                    className="flex-1 px-2 py-1.5 border border-gray-200 rounded text-sm resize-none focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                                    rows={2}
+                                                    autoFocus
+                                                />
+                                                <button
+                                                    onClick={() => saveNotes(item.id)}
+                                                    className="px-2 py-1 bg-blue-600 text-white rounded text-xs hover:bg-blue-700"
+                                                >
+                                                    <Save size={12} />
+                                                </button>
+                                                <button
+                                                    onClick={cancelEditNotes}
+                                                    className="px-2 py-1 text-gray-500 hover:text-gray-700 text-xs"
+                                                >
+                                                    ✕
+                                                </button>
+                                            </div>
+                                        ) : (
+                                            <div className="flex items-center gap-2 text-xs">
+                                                <MessageSquare size={12} className="text-gray-400 shrink-0" />
+                                                {item.returnNotes ? (
+                                                    <span className="text-gray-600 flex-1 truncate">{item.returnNotes}</span>
+                                                ) : (
+                                                    <span className="text-gray-400 italic flex-1">No notes</span>
+                                                )}
+                                                <button
+                                                    onClick={() => startEditNotes(item.id, item.returnNotes)}
+                                                    className="text-gray-400 hover:text-blue-600 p-0.5"
+                                                    title="Edit notes"
+                                                >
+                                                    <Pencil size={12} />
+                                                </button>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
                     </div>
-                </div>
-            ))}
+                );
+            })}
         </div>
     );
 }
@@ -1013,6 +1187,7 @@ function AllReturnsTab({ returns, loading, onViewCustomer, onCancel, onUpdateNot
                                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Qty</th>
                                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
                                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Resolution</th>
+                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">AWB / Tracking</th>
                                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Customer</th>
                                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Age</th>
                                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Notes</th>
@@ -1039,6 +1214,18 @@ function AllReturnsTab({ returns, loading, onViewCustomer, onCancel, onUpdateNot
                                         <span className={`px-2 py-1 text-xs rounded ${getResolutionBadge(ret.returnResolution).color}`}>
                                             {getResolutionBadge(ret.returnResolution).label}
                                         </span>
+                                    </td>
+                                    <td className="px-4 py-3 text-sm">
+                                        {ret.returnAwbNumber ? (
+                                            <div>
+                                                <div className="text-xs text-gray-600 font-mono">
+                                                    {ret.returnAwbNumber}
+                                                </div>
+                                                <ReturnTrackingStatus awbNumber={ret.returnAwbNumber} />
+                                            </div>
+                                        ) : (
+                                            <span className="text-gray-400">-</span>
+                                        )}
                                     </td>
                                     <td className="px-4 py-3 text-sm">
                                         <button
@@ -1400,6 +1587,8 @@ interface InitiateReturnModalProps {
     setReturnReasonDetail: (val: string) => void;
     returnResolution: 'refund' | 'exchange' | 'rejected';
     setReturnResolution: (val: 'refund' | 'exchange' | 'rejected') => void;
+    returnPickupType: 'arranged_by_us' | 'customer_shipped';
+    setReturnPickupType: (val: 'arranged_by_us' | 'customer_shipped') => void;
     returnNotes: string;
     setReturnNotes: (val: string) => void;
     exchangeSkuId: string;
@@ -1423,6 +1612,8 @@ function InitiateReturnModal({
     setReturnReasonDetail,
     returnResolution,
     setReturnResolution,
+    returnPickupType,
+    setReturnPickupType,
     returnNotes,
     setReturnNotes,
     exchangeSkuId,
@@ -1589,6 +1780,44 @@ function InitiateReturnModal({
                                             {res.label}
                                         </button>
                                     ))}
+                                </div>
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium mb-2">Pickup Method</label>
+                                <div className="flex gap-2">
+                                    <button
+                                        onClick={() => setReturnPickupType('arranged_by_us')}
+                                        className={`flex-1 px-4 py-3 rounded-lg border text-left ${
+                                            returnPickupType === 'arranged_by_us'
+                                                ? 'border-blue-600 bg-blue-50 text-blue-700'
+                                                : 'border-gray-300'
+                                        }`}
+                                    >
+                                        <div className="flex items-center gap-2">
+                                            <Truck size={18} />
+                                            <div>
+                                                <div className="font-medium">We'll arrange pickup</div>
+                                                <div className="text-xs text-gray-500">Schedule reverse pickup via courier</div>
+                                            </div>
+                                        </div>
+                                    </button>
+                                    <button
+                                        onClick={() => setReturnPickupType('customer_shipped')}
+                                        className={`flex-1 px-4 py-3 rounded-lg border text-left ${
+                                            returnPickupType === 'customer_shipped'
+                                                ? 'border-blue-600 bg-blue-50 text-blue-700'
+                                                : 'border-gray-300'
+                                        }`}
+                                    >
+                                        <div className="flex items-center gap-2">
+                                            <Package size={18} />
+                                            <div>
+                                                <div className="font-medium">Customer ships</div>
+                                                <div className="text-xs text-gray-500">Customer will ship the item themselves</div>
+                                            </div>
+                                        </div>
+                                    </button>
                                 </div>
                             </div>
 

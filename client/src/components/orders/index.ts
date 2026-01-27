@@ -20,3 +20,7 @@ export { TrackingModal } from './TrackingModal';
 export { SummaryPanel } from './SummaryPanel';
 export { OrdersAnalyticsBar } from './OrdersAnalyticsBar';
 export { GlobalOrderSearch } from './GlobalOrderSearch';
+
+// View Controls
+export { OrderViewTabs } from './OrderViewTabs';
+export type { OrderView, ViewCounts } from './OrderViewTabs';

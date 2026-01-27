@@ -1,5 +1,8 @@
 -- Add return lifecycle columns to OrderLine
 
+-- Return Batch Number (groups lines returned together)
+ALTER TABLE "OrderLine" ADD COLUMN IF NOT EXISTS "returnBatchNumber" TEXT;
+
 -- Return Status & Basic Info
 ALTER TABLE "OrderLine" ADD COLUMN IF NOT EXISTS "returnStatus" TEXT;
 ALTER TABLE "OrderLine" ADD COLUMN IF NOT EXISTS "returnQty" INTEGER;
@@ -88,6 +91,7 @@ DO $$ BEGIN
 END $$;
 
 -- Indexes for Return Fields
+CREATE INDEX IF NOT EXISTS "OrderLine_returnBatchNumber_idx" ON "OrderLine"("returnBatchNumber");
 CREATE INDEX IF NOT EXISTS "OrderLine_returnStatus_idx" ON "OrderLine"("returnStatus");
 CREATE INDEX IF NOT EXISTS "OrderLine_returnStatus_orderId_idx" ON "OrderLine"("returnStatus", "orderId");
 CREATE INDEX IF NOT EXISTS "OrderLine_returnAwbNumber_idx" ON "OrderLine"("returnAwbNumber");

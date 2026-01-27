@@ -100,7 +100,6 @@ function rollbackInventoryUpdate(
 export interface UseOrderWorkflowMutationsOptions {
     currentView?: string;
     page?: number;
-    shippedFilter?: 'rto' | 'cod_pending';
 }
 
 /** Extended context that includes inventory rollback data */
@@ -109,7 +108,7 @@ interface WorkflowOptimisticContext extends OptimisticUpdateContext {
 }
 
 export function useOrderWorkflowMutations(options: UseOrderWorkflowMutationsOptions = {}) {
-    const { currentView = 'open', page = 1, shippedFilter } = options;
+    const { currentView = 'open', page = 1 } = options;
     const queryClient = useQueryClient();
     const { invalidateOpenOrders } = useOrderInvalidation();
 
@@ -118,7 +117,7 @@ export function useOrderWorkflowMutations(options: UseOrderWorkflowMutationsOpti
     const setLineStatusServerFn = useServerFn(setLineStatusFn);
 
     // Build query input for cache operations
-    const queryInput = getOrdersQueryInput(currentView, page, shippedFilter);
+    const queryInput = getOrdersQueryInput(currentView, page);
     const queryKey = getOrdersListQueryKey(queryInput);
 
     // Helper to get current cache data

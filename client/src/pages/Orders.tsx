@@ -9,7 +9,7 @@ import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { useQueryClient, useQuery } from '@tanstack/react-query';
 import { Route } from '../routes/_authenticated/orders';
-import { Plus, RefreshCw, ChevronDown, ChevronLeft, ChevronRight, X, Search } from 'lucide-react';
+import { Plus, RefreshCw, ChevronLeft, ChevronRight, X, Search } from 'lucide-react';
 
 // Custom hooks
 import { useUnifiedOrdersData, type OrderView } from '../hooks/useUnifiedOrdersData';
@@ -36,6 +36,7 @@ import {
     CustomizationModal,
     UnifiedOrderModal,
     GlobalOrderSearch,
+    OrderViewTabs,
 } from '../components/orders';
 import type { CustomizationType } from '../components/orders';
 import type { Order, OrderLine } from '../types';
@@ -75,16 +76,13 @@ interface UpdateBatchData {
     notes?: string;
 }
 
-// View configuration (3 views: Open, Shipped, Cancelled)
-// RTO and COD Pending are now filter chips within Shipped view
+// View configuration (4 views: Open, Shipped, RTO, All)
 const VIEW_CONFIG: Record<OrderView, { label: string; color: string }> = {
     open: { label: 'Open Orders', color: 'primary' },
     shipped: { label: 'Shipped', color: 'blue' },
-    cancelled: { label: 'Cancelled', color: 'gray' },
+    rto: { label: 'RTO', color: 'orange' },
+    all: { label: 'All Orders', color: 'gray' },
 };
-
-// Shipped view filter options
-type ShippedFilter = 'all' | 'rto' | 'cod_pending';
 
 export default function Orders() {
     const queryClient = useQueryClient();
@@ -103,17 +101,15 @@ export default function Orders() {
     const setView = useCallback((newView: OrderView) => {
         // Clear view-specific filters when changing views
         // Open view filters: allocatedFilter, productionFilter
-        // Shipped view filters: shippedFilter
         navigate({
             to: '/orders',
             search: {
                 ...search,
                 view: newView,
                 page: 1,
-                // Clear all view-specific filters when changing views
+                // Clear Open view-specific filters when changing views
                 allocatedFilter: undefined,
                 productionFilter: undefined,
-                shippedFilter: undefined,
             } satisfies OrdersSearchParams,
             replace: true,
         });
@@ -137,7 +133,6 @@ export default function Orders() {
     // This enables bookmarking and sharing filtered views
     const allocatedFilter = search.allocatedFilter || 'all';
     const productionFilter = search.productionFilter || 'all';
-    const shippedFilter = (search.shippedFilter || 'all') as ShippedFilter;
 
     const setAllocatedFilter = useCallback((value: 'all' | 'allocated' | 'pending') => {
         navigate({
@@ -151,14 +146,6 @@ export default function Orders() {
         navigate({
             to: '/orders',
             search: { ...search, productionFilter: value === 'all' ? undefined : value, page: 1 } satisfies OrdersSearchParams,
-            replace: true,
-        });
-    }, [navigate, search]);
-
-    const setShippedFilter = useCallback((value: ShippedFilter) => {
-        navigate({
-            to: '/orders',
-            search: { ...search, shippedFilter: value === 'all' ? undefined : value, page: 1 } satisfies OrdersSearchParams,
             replace: true,
         });
     }, [navigate, search]);
@@ -204,6 +191,8 @@ export default function Orders() {
         rows: serverRows,
         orders,
         pagination: viewPagination,
+        viewCounts,
+        viewCountsLoading,
         allSkus,
         inventoryBalance,
         fabricStock,
@@ -216,8 +205,6 @@ export default function Orders() {
         currentView: view,
         page,
         isSSEConnected,
-        // Pass shipped filter for server-side filtering (rto, cod_pending)
-        shippedFilter: view === 'shipped' && shippedFilter !== 'all' ? shippedFilter : undefined,
         // Pass loader data for instant SSR hydration
         initialData: loaderData?.orders ?? null,
     });
@@ -307,7 +294,6 @@ export default function Orders() {
         onEditSuccess: () => closeModal(),
         currentView: view,
         page,
-        shippedFilter: view === 'shipped' && shippedFilter !== 'all' ? shippedFilter : undefined,
     });
 
     // Enrich server-flattened rows with client-side inventory data
@@ -762,23 +748,18 @@ export default function Orders() {
                                 </button>
                             </div>
                         ) : (
-                            /* Normal Mode: View selector + filters */
+                            /* Normal Mode: View tabs + filters */
                             <>
-                                <div className="relative">
-                                    <select
-                                        value={view}
-                                        onChange={(e) => setView(e.target.value as OrderView)}
-                                        className="appearance-none text-[10px] font-medium bg-white border border-gray-200 rounded px-1.5 py-0.5 pr-5 focus:outline-none cursor-pointer"
-                                    >
-                                        <option value="open">Open{viewPagination?.total ? ` (${viewPagination.total})` : ''}</option>
-                                        <option value="shipped">Shipped</option>
-                                        <option value="cancelled">Cancelled</option>
-                                    </select>
-                                    <ChevronDown size={10} className="absolute right-1 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-                                </div>
+                                <OrderViewTabs
+                                    currentView={view}
+                                    onViewChange={setView}
+                                    counts={viewCounts}
+                                    isLoading={viewCountsLoading}
+                                />
 
                                 {view === 'open' && (
                                     <>
+                                        <div className="w-px h-4 bg-gray-200" />
                                         <select
                                             value={allocatedFilter}
                                             onChange={(e) => setAllocatedFilter(e.target.value as 'all' | 'allocated' | 'pending')}
@@ -801,52 +782,37 @@ export default function Orders() {
                                     </>
                                 )}
 
-                                {view === 'shipped' && (
-                                    <div className="flex items-center gap-0.5">
-                                        {(['all', 'rto', 'cod_pending'] as const).map((f) => (
-                                            <button
-                                                key={f}
-                                                onClick={() => setShippedFilter(f)}
-                                                className={`text-[9px] px-1.5 py-0.5 rounded font-medium ${
-                                                    shippedFilter === f
-                                                        ? f === 'rto' ? 'bg-orange-600 text-white' : f === 'cod_pending' ? 'bg-amber-600 text-white' : 'bg-blue-600 text-white'
-                                                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                                                }`}
-                                            >
-                                                {f === 'cod_pending' ? 'COD' : f.toUpperCase()}
-                                            </button>
-                                        ))}
-                                    </div>
-                                )}
-
-                                <div className="w-px h-3 bg-gray-200" />
-
                                 {/* Actions */}
-                                {view === 'open' && releasableOrderCount > 0 && (
-                                    <button
-                                        onClick={() => {
-                                            if (confirm(`Release ${releasableOrderCount} shipped orders?`)) {
-                                                mutations.releaseToShipped.mutate(undefined);
-                                            }
-                                        }}
-                                        disabled={mutations.releaseToShipped.isPending}
-                                        className="text-[9px] px-1.5 py-0.5 rounded bg-blue-600 text-white font-medium"
-                                    >
-                                        Release {releasableOrderCount}
-                                    </button>
-                                )}
-                                {view === 'open' && releasableCancelledCount > 0 && (
-                                    <button
-                                        onClick={() => {
-                                            if (confirm(`Release ${releasableCancelledCount} cancelled orders?`)) {
-                                                mutations.releaseToCancelled.mutate(undefined);
-                                            }
-                                        }}
-                                        disabled={mutations.releaseToCancelled.isPending}
-                                        className="text-[9px] px-1.5 py-0.5 rounded bg-red-600 text-white font-medium"
-                                    >
-                                        {releasableCancelledCount} Cancelled
-                                    </button>
+                                {view === 'open' && (releasableOrderCount > 0 || releasableCancelledCount > 0) && (
+                                    <>
+                                        <div className="w-px h-4 bg-gray-200" />
+                                        {releasableOrderCount > 0 && (
+                                            <button
+                                                onClick={() => {
+                                                    if (confirm(`Release ${releasableOrderCount} shipped orders?`)) {
+                                                        mutations.releaseToShipped.mutate(undefined);
+                                                    }
+                                                }}
+                                                disabled={mutations.releaseToShipped.isPending}
+                                                className="text-[9px] px-1.5 py-0.5 rounded bg-blue-600 text-white font-medium"
+                                            >
+                                                Release {releasableOrderCount}
+                                            </button>
+                                        )}
+                                        {releasableCancelledCount > 0 && (
+                                            <button
+                                                onClick={() => {
+                                                    if (confirm(`Release ${releasableCancelledCount} cancelled orders?`)) {
+                                                        mutations.releaseToCancelled.mutate(undefined);
+                                                    }
+                                                }}
+                                                disabled={mutations.releaseToCancelled.isPending}
+                                                className="text-[9px] px-1.5 py-0.5 rounded bg-red-600 text-white font-medium"
+                                            >
+                                                {releasableCancelledCount} Cancelled
+                                            </button>
+                                        )}
+                                    </>
                                 )}
                             </>
                         )}

@@ -40,11 +40,10 @@ export interface UseOrderShipMutationsOptions {
     onShipSuccess?: () => void;
     currentView?: string;
     page?: number;
-    shippedFilter?: 'rto' | 'cod_pending';
 }
 
 export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}) {
-    const { currentView = 'open', page = 1, shippedFilter, onShipSuccess } = options;
+    const { currentView = 'open', page = 1, onShipSuccess } = options;
     const queryClient = useQueryClient();
     const { invalidateOpenOrders, invalidateShippedOrders } = useOrderInvalidation();
 
@@ -58,7 +57,7 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
     const updateLineTrackingServerFn = useServerFn(updateLineTrackingFn);
 
     // Build query input for cache operations
-    const queryInput = getOrdersQueryInput(currentView, page, shippedFilter);
+    const queryInput = getOrdersQueryInput(currentView, page);
 
     // Helper to get current cache data
     const getCachedData = (): OrdersListData | undefined => {
@@ -67,7 +66,7 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
 
     // Helper to set cache data with updater function
     const setCachedData = (
-        input: { view: string; page?: number; limit?: number; shippedFilter?: string },
+        input: { view: string; page?: number; limit?: number },
         updater: (old: OrdersListData | undefined) => OrdersListData | undefined
     ) => {
         queryClient.setQueryData(getOrdersListQueryKey(input), updater);
@@ -264,7 +263,7 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
         },
         onMutate: async ({ orderId }) => {
             // For unship, we may be in shipped view
-            const shippedQueryInput = getOrdersQueryInput('shipped', page, undefined);
+            const shippedQueryInput = getOrdersQueryInput('shipped', page);
             await queryClient.cancelQueries({ queryKey: ['orders'] });
             const previousData = queryClient.getQueryData<OrdersListData>(getOrdersListQueryKey(shippedQueryInput));
 
