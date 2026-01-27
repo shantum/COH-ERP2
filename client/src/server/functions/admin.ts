@@ -15,13 +15,19 @@
 'use server';
 
 import { createServerFn } from '@tanstack/react-start';
+import { getCookie } from '@tanstack/react-start/server';
 import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth';
 
-// Type for bcrypt module (dynamic import)
-interface BcryptModule {
-    compare(data: string, encrypted: string): Promise<boolean>;
-    hash(data: string, saltOrRounds: number): Promise<string>;
+
+/**
+ * Get API base URL for internal server-to-server calls
+ */
+function getApiBaseUrl(): string {
+    const port = process.env.PORT || '3001';
+    return process.env.NODE_ENV === 'production'
+        ? `http://127.0.0.1:${port}` // Same server on Railway
+        : 'http://localhost:3001'; // Separate dev server
 }
 
 // ============================================
@@ -283,6 +289,7 @@ export const getUsers = createServerFn({ method: 'GET' })
 /**
  * Create a new user
  * Requires admin role
+ * Delegates to Express endpoint to avoid bcryptjs bundler issues
  */
 export const createUser = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
@@ -297,79 +304,67 @@ export const createUser = createServerFn({ method: 'POST' })
             };
         }
 
-        const prisma = await getPrisma();
-        // @ts-expect-error - bcryptjs is available on server via dynamic import
-        const bcrypt = (await import('bcryptjs')) as unknown as BcryptModule;
-
         const { email, password, name, roleId } = data;
 
-        // Check if email already exists
-        const existing = await prisma.user.findUnique({ where: { email } });
-        if (existing) {
-            return {
-                success: false,
-                error: { code: 'CONFLICT', message: 'Email already in use' },
-            };
-        }
+        // Delegate to Express endpoint which has bcryptjs working correctly
+        const baseUrl = getApiBaseUrl();
+        const authToken = getCookie('auth_token');
 
-        // Validate roleId if provided
-        if (roleId) {
-            const roleExists = await prisma.role.findUnique({ where: { id: roleId } });
-            if (!roleExists) {
+        try {
+            const response = await fetch(`${baseUrl}/api/admin/users`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+                },
+                body: JSON.stringify({ email, password, name, role: 'staff', roleId }),
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                const errorMessage = errorData.message || errorData.error || `Request failed with status ${response.status}`;
+
+                // Map HTTP status to error code
+                let code: 'BAD_REQUEST' | 'CONFLICT' | 'FORBIDDEN' | 'NOT_FOUND' | 'BAD_REQUEST' = 'BAD_REQUEST';
+                if (response.status === 400) code = 'BAD_REQUEST';
+                else if (response.status === 409) code = 'CONFLICT';
+                else if (response.status === 403) code = 'FORBIDDEN';
+                else if (response.status === 404) code = 'NOT_FOUND';
+
                 return {
                     success: false,
-                    error: { code: 'BAD_REQUEST', message: 'Invalid roleId - role not found' },
+                    error: { code, message: errorMessage },
                 };
             }
-        }
 
-        // Hash password
-        const hashedPassword = await bcrypt.hash(password, 10);
+            const user = await response.json();
 
-        const user = await prisma.user.create({
-            data: {
-                email,
-                password: hashedPassword,
-                name,
-                role: 'staff',
-                roleId: roleId || null,
-            },
-            select: {
-                id: true,
-                email: true,
-                name: true,
-                role: true,
-                roleId: true,
-                isActive: true,
-                createdAt: true,
-                userRole: {
-                    select: {
-                        id: true,
-                        name: true,
-                        displayName: true,
-                    },
+            return {
+                success: true,
+                data: {
+                    id: user.id,
+                    email: user.email,
+                    name: user.name,
+                    role: user.role,
+                    roleId: user.roleId,
+                    roleName: user.roleName || user.role,
+                    isActive: user.isActive,
+                    createdAt: typeof user.createdAt === 'string' ? user.createdAt : new Date(user.createdAt).toISOString(),
                 },
-            },
-        });
-
-        return {
-            success: true,
-            data: {
-                id: user.id,
-                email: user.email,
-                name: user.name,
-                role: user.role,
-                roleId: user.roleId,
-                roleName: user.userRole?.displayName || user.role,
-                isActive: user.isActive,
-                createdAt: user.createdAt.toISOString(),
-            },
-        };
+            };
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Unknown error creating user';
+            return {
+                success: false,
+                error: { code: 'BAD_REQUEST', message },
+            };
+        }
     });
 
 /**
  * Update a user
  * Requires admin role
+ * Delegates password updates to Express endpoint to avoid bcryptjs bundler issues
  */
 export const updateUser = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
@@ -384,11 +379,78 @@ export const updateUser = createServerFn({ method: 'POST' })
             };
         }
 
-        const prisma = await getPrisma();
-        // @ts-expect-error - bcryptjs is available on server via dynamic import
-        const bcrypt = (await import('bcryptjs')) as unknown as BcryptModule;
-
         const { userId, email, name, isActive, password, roleId } = data;
+
+        // If password is being updated, delegate to Express endpoint
+        // which has bcryptjs working correctly
+        if (password) {
+            const baseUrl = getApiBaseUrl();
+            const authToken = getCookie('auth_token');
+
+            try {
+                const response = await fetch(`${baseUrl}/api/admin/users/${userId}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+                    },
+                    body: JSON.stringify({ email, name, isActive, password }),
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({}));
+                    const errorMessage = errorData.message || errorData.error || `Request failed with status ${response.status}`;
+
+                    let code: 'BAD_REQUEST' | 'CONFLICT' | 'FORBIDDEN' | 'NOT_FOUND' | 'BAD_REQUEST' = 'BAD_REQUEST';
+                    if (response.status === 400) code = 'BAD_REQUEST';
+                    else if (response.status === 409) code = 'CONFLICT';
+                    else if (response.status === 403) code = 'FORBIDDEN';
+                    else if (response.status === 404) code = 'NOT_FOUND';
+
+                    return {
+                        success: false,
+                        error: { code, message: errorMessage },
+                    };
+                }
+
+                // If roleId also needs updating, do that via Prisma
+                if (roleId !== undefined) {
+                    const prisma = await getPrisma();
+                    await prisma.user.update({
+                        where: { id: userId },
+                        data: {
+                            roleId,
+                            tokenVersion: { increment: 1 },
+                        },
+                    });
+                }
+
+                const user = await response.json();
+
+                return {
+                    success: true,
+                    data: {
+                        id: user.id,
+                        email: user.email,
+                        name: user.name,
+                        role: user.role,
+                        roleId: roleId !== undefined ? roleId : user.roleId,
+                        roleName: user.roleName || user.role,
+                        isActive: user.isActive,
+                        createdAt: typeof user.createdAt === 'string' ? user.createdAt : new Date(user.createdAt).toISOString(),
+                    },
+                };
+            } catch (error) {
+                const message = error instanceof Error ? error.message : 'Unknown error updating user';
+                return {
+                    success: false,
+                    error: { code: 'BAD_REQUEST', message },
+                };
+            }
+        }
+
+        // No password update - handle directly via Prisma
+        const prisma = await getPrisma();
 
         // Get existing user
         const existing = await prisma.user.findUnique({ where: { id: userId } });
@@ -442,9 +504,6 @@ export const updateUser = createServerFn({ method: 'POST' })
         if (roleId !== undefined) {
             updateData.roleId = roleId;
             updateData.tokenVersion = { increment: 1 }; // Force re-login
-        }
-        if (password) {
-            updateData.password = await bcrypt.hash(password, 10);
         }
 
         const user = await prisma.user.update({
