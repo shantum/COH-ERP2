@@ -77,7 +77,9 @@ export const changePassword = createServerFn({ method: 'POST' })
 
             // Dynamic bcrypt import (Node.js only)
             // @ts-expect-error - bcryptjs is available on server via dynamic import
-            const bcrypt = (await import('bcryptjs')) as unknown as BcryptModule;
+            const bcryptModule = await import('bcryptjs');
+            // Handle ESM/CJS interop - bcryptjs exports may be in .default
+            const bcrypt = (bcryptModule.default || bcryptModule) as unknown as BcryptModule;
 
             // Validate token version for immediate session invalidation
             if (user.tokenVersion !== undefined) {
