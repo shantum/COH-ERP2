@@ -66,6 +66,7 @@ const { data } = useQuery({
 | 16 | Page sizes: All views use 250 per page (`useUnifiedOrdersData.ts` PAGE_SIZE constant) |
 | 37 | Query keys: `['domain', 'action', 'server-fn', params]`. Old tRPC format causes cache misses |
 | 39 | Use `inventoryQueryKeys.balance` from `constants/queryKeys.ts` for inventory queries |
+| 55 | **Two "allocated inventory" helpers** in `@coh/shared/domain`: `hasAllocatedInventory()` = `['allocated','picked','packed']` (server: inventory txn cleanup); `statusShowsInventoryAllocated()` = `['allocated','picked','packed','shipped']` (client: display/optimistic). Import both from `@coh/shared/domain` |
 
 ### Inventory (CRITICAL)
 | # | Rule |
@@ -198,7 +199,8 @@ function buildWhereClause(view: string): Prisma.OrderWhereInput { ... }
 
 ### State Machine
 
-Source: `server/src/utils/orderStateMachine.ts`
+Pure logic: `@coh/shared/domain/orders/stateMachine.ts` (LineStatus type, transitions, validation, inventory helpers)
+DB-dependent: `server/src/utils/orderStateMachine.ts` (re-exports shared + `executeTransition` with Prisma)
 
 **Forward Progression:** `pending > allocated > picked > packed > shipped > delivered (via tracking)`
 
@@ -406,7 +408,8 @@ server/src/
     deferredExecutor.ts, shipOrderService.ts
     ithinkLogistics.ts   # iThink API client
   utils/
-    orderStateMachine.ts, orderViews.ts, orderEnrichment/
+    orderStateMachine.ts   # Re-exports shared + DB-dependent executeTransition
+    orderViews.ts, orderEnrichment/
     errors.ts, logger.ts, dateHelpers.ts
     shutdownCoordinator.ts, circuitBreaker.ts
     tierUtils.ts
@@ -436,6 +439,7 @@ shared/src/
     inventory/balance.ts  # Pure balance calculation functions
     orders/pricing.ts     # Order total calculation
     orders/lineMutations.ts # Type definitions for line mutations
+    orders/stateMachine.ts  # LineStatus, transitions, validation, inventory helpers
     returns/              # Return eligibility, policy, options
   validators/           # CLIENT-SAFE - Validation utilities
     index.ts              # Password, AWB, format validators, sanitization
@@ -530,7 +534,7 @@ pnpm-workspace.yaml                # Workspace definition
 ### Optimistic Updates
 Located in `hooks/orders/optimistic/`:
 - `types.ts` - Type definitions
-- `inventoryHelpers.ts` - Inventory delta calculations
+- `inventoryHelpers.ts` - Re-exports from `@coh/shared/domain/orders/stateMachine` (no local implementation)
 - `cacheTargeting.ts` - Query key builders, row access
 - `statusUpdateHelpers.ts` - Optimistic transformations
 
@@ -557,6 +561,7 @@ Pure functions for business logic, shared between server and client.
 | `inventory/balance` | `calculateBalance`, `hasEnoughStock`, `getShortfall` | Pure balance calculations, no DB |
 | `orders/pricing` | `calculateOrderTotal`, `getProductMrpForShipping` | Exchange orders always calculate from lines |
 | `orders/lineMutations` | Type definitions for line-level mutations | MutationResult, MarkLineDeliveredInput, etc. |
+| `orders/stateMachine` | `isValidTransition`, `getTransitionDefinition`, `hasAllocatedInventory`, `statusShowsInventoryAllocated`, `calculateInventoryDelta` | Pure state machine logic, no DB deps |
 | `constants` | `getGstRate`, `GST_THRESHOLD` | GST: 5% below INR 2500, 18% above |
 
 ### Returns Domain (`shared/src/domain/returns/`)

@@ -10,26 +10,15 @@ export default {
                     module: 'NodeNext',
                     moduleResolution: 'NodeNext',
                     target: 'ES2022',
-                    allowJs: true,
+                    strict: true,
                     esModuleInterop: true,
                 },
             },
         ],
     },
     moduleNameMapper: {
-        // Handle .js imports that point to .ts files
         '^(\\.{1,2}/.*)\\.js$': '$1',
-        // Resolve @coh/shared workspace package
-        '^@coh/shared/(.*)$': '<rootDir>/../shared/src/$1',
     },
-    testMatch: ['**/__tests__/**/*.test.js', '**/__tests__/**/*.test.ts'],
-    coverageDirectory: 'coverage',
-    collectCoverageFrom: [
-        'src/**/*.js',
-        'src/**/*.ts',
-        '!src/__tests__/**',
-        '!src/index.js',
-    ],
-    // Increase timeout for database operations
+    testMatch: ['**/__tests__/**/*.test.ts'],
     testTimeout: 10000,
 };

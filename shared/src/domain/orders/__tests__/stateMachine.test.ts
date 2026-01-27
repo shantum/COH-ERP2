@@ -1,5 +1,5 @@
 /**
- * Unit tests for Order Line Status State Machine
+ * Unit tests for Order Line Status State Machine (shared domain)
  */
 
 import {
@@ -11,12 +11,15 @@ import {
     releasesInventory,
     allocatesInventory,
     hasAllocatedInventory,
+    statusShowsInventoryAllocated,
+    calculateInventoryDelta,
     buildTransitionError,
     LINE_STATUS_TRANSITIONS,
     LINE_STATUSES,
     STATUSES_WITH_ALLOCATED_INVENTORY,
+    STATUSES_SHOWING_INVENTORY_ALLOCATED,
     type LineStatus,
-} from '../orderStateMachine.js';
+} from '../stateMachine.js';
 
 describe('orderStateMachine', () => {
     describe('LINE_STATUSES constant', () => {
@@ -39,6 +42,27 @@ describe('orderStateMachine', () => {
                 'picked',
                 'packed',
             ]);
+        });
+    });
+
+    describe('STATUSES_SHOWING_INVENTORY_ALLOCATED constant', () => {
+        it('contains statuses that show inventory as allocated in the UI', () => {
+            expect(STATUSES_SHOWING_INVENTORY_ALLOCATED).toEqual([
+                'allocated',
+                'picked',
+                'packed',
+                'shipped',
+            ]);
+        });
+
+        it('includes shipped (unlike STATUSES_WITH_ALLOCATED_INVENTORY)', () => {
+            expect(STATUSES_SHOWING_INVENTORY_ALLOCATED).toContain('shipped');
+            expect(STATUSES_WITH_ALLOCATED_INVENTORY).not.toContain('shipped');
+        });
+
+        it('does not include pending or cancelled', () => {
+            expect(STATUSES_SHOWING_INVENTORY_ALLOCATED).not.toContain('pending');
+            expect(STATUSES_SHOWING_INVENTORY_ALLOCATED).not.toContain('cancelled');
         });
     });
 
@@ -140,7 +164,7 @@ describe('orderStateMachine', () => {
             expect(isValidTransition('pending', 'packed')).toBe(false);
         });
 
-        it('shipped can transition to packed (unship)', () => {
+        it('shipped can only go to packed (unship)', () => {
             expect(getValidTargetStatuses('shipped')).toEqual(['packed']);
         });
     });
@@ -183,6 +207,14 @@ describe('orderStateMachine', () => {
             expect(def?.timestamps).toContainEqual({ field: 'shippedAt', action: 'set' });
         });
 
+        it('returns correct definition for unshipping', () => {
+            const def = getTransitionDefinition('shipped', 'packed');
+            expect(def).not.toBeNull();
+            expect(def?.inventoryEffect).toBe('none');
+            expect(def?.timestamps).toContainEqual({ field: 'shippedAt', action: 'clear' });
+            expect(def?.description).toContain('Unship');
+        });
+
         it('returns correct definition for cancel with inventory', () => {
             const def = getTransitionDefinition('allocated', 'cancelled');
             expect(def).not.toBeNull();
@@ -218,7 +250,7 @@ describe('orderStateMachine', () => {
             expect(getValidTargetStatuses('packed')).toEqual(['picked', 'shipped', 'cancelled']);
         });
 
-        it('returns packed as target for shipped (unship)', () => {
+        it('returns packed as the only target for shipped (unship)', () => {
             expect(getValidTargetStatuses('shipped')).toEqual(['packed']);
         });
 
@@ -304,6 +336,80 @@ describe('orderStateMachine', () => {
         });
     });
 
+    describe('statusShowsInventoryAllocated', () => {
+        it('returns true for allocated/picked/packed/shipped', () => {
+            expect(statusShowsInventoryAllocated('allocated')).toBe(true);
+            expect(statusShowsInventoryAllocated('picked')).toBe(true);
+            expect(statusShowsInventoryAllocated('packed')).toBe(true);
+            expect(statusShowsInventoryAllocated('shipped')).toBe(true);
+        });
+
+        it('returns false for pending and cancelled', () => {
+            expect(statusShowsInventoryAllocated('pending')).toBe(false);
+            expect(statusShowsInventoryAllocated('cancelled')).toBe(false);
+        });
+
+        it('returns false for null and undefined', () => {
+            expect(statusShowsInventoryAllocated(null)).toBe(false);
+            expect(statusShowsInventoryAllocated(undefined)).toBe(false);
+        });
+
+        it('returns false for empty string', () => {
+            expect(statusShowsInventoryAllocated('')).toBe(false);
+        });
+
+        it('returns false for invalid status strings', () => {
+            expect(statusShowsInventoryAllocated('invalid')).toBe(false);
+            expect(statusShowsInventoryAllocated('SHIPPED')).toBe(false);
+        });
+    });
+
+    describe('calculateInventoryDelta', () => {
+        it('returns negative qty when transitioning to an allocated status (consuming)', () => {
+            // pending -> allocated: inventory is being consumed
+            expect(calculateInventoryDelta('pending', 'allocated', 5)).toBe(-5);
+        });
+
+        it('returns positive qty when transitioning from an allocated status to non-allocated (restoring)', () => {
+            // allocated -> pending: inventory is being restored
+            expect(calculateInventoryDelta('allocated', 'pending', 3)).toBe(3);
+            // allocated -> cancelled: inventory is being restored
+            expect(calculateInventoryDelta('allocated', 'cancelled', 10)).toBe(10);
+            // shipped -> cancelled is not a valid transition, but delta logic is pure
+            expect(calculateInventoryDelta('shipped', 'cancelled', 7)).toBe(7);
+        });
+
+        it('returns 0 when both statuses are allocated (no net change)', () => {
+            // allocated -> picked: both show inventory allocated
+            expect(calculateInventoryDelta('allocated', 'picked', 5)).toBe(0);
+            // picked -> packed
+            expect(calculateInventoryDelta('picked', 'packed', 5)).toBe(0);
+            // packed -> shipped
+            expect(calculateInventoryDelta('packed', 'shipped', 5)).toBe(0);
+        });
+
+        it('returns 0 when neither status is allocated (no net change)', () => {
+            // pending -> cancelled: neither has allocated inventory
+            expect(calculateInventoryDelta('pending', 'cancelled', 5)).toBe(0);
+            // cancelled -> pending
+            expect(calculateInventoryDelta('cancelled', 'pending', 5)).toBe(0);
+        });
+
+        it('scales with quantity', () => {
+            expect(calculateInventoryDelta('pending', 'allocated', 1)).toBe(-1);
+            expect(calculateInventoryDelta('pending', 'allocated', 100)).toBe(-100);
+            expect(calculateInventoryDelta('allocated', 'pending', 1)).toBe(1);
+            expect(calculateInventoryDelta('allocated', 'pending', 100)).toBe(100);
+        });
+
+        it('handles zero quantity', () => {
+            // With qty=0, the result is always numerically zero (may be -0 for consuming transitions)
+            expect(calculateInventoryDelta('pending', 'allocated', 0) === 0).toBe(true);
+            expect(calculateInventoryDelta('allocated', 'pending', 0) === 0).toBe(true);
+            expect(calculateInventoryDelta('pending', 'cancelled', 0) === 0).toBe(true);
+        });
+    });
+
     describe('buildTransitionError', () => {
         it('builds correct error message', () => {
             const error = buildTransitionError('pending', 'shipped');
@@ -318,7 +424,7 @@ describe('orderStateMachine', () => {
             expect(error).toContain('unknown');
         });
 
-        it('handles shipped status with packed as target', () => {
+        it('handles shipped status with only packed as target', () => {
             const error = buildTransitionError('shipped', 'cancelled');
             expect(error).toContain('packed');
         });

@@ -11,6 +11,12 @@
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth';
+import {
+    type LineStatus,
+    hasAllocatedInventory as sharedHasAllocatedInventory,
+    isValidTransition,
+    buildTransitionError,
+} from '@coh/shared/domain';
 
 // ============================================
 // INPUT SCHEMAS
@@ -329,7 +335,7 @@ export interface RemoveLineCustomizationResult {
 }
 
 // ============================================
-// CONSTANTS (matching server/src/utils/patterns/types.ts)
+// CONSTANTS
 // ============================================
 
 const TXN_TYPE = {
@@ -341,13 +347,6 @@ const TXN_REASON = {
     ORDER_ALLOCATION: 'order_allocation',
     RTO_RECEIVED: 'rto_received',
 } as const;
-
-// Statuses that have allocated inventory
-const STATUSES_WITH_ALLOCATED_INVENTORY = ['allocated', 'picked', 'packed'] as const;
-
-function hasAllocatedInventory(status: string): boolean {
-    return (STATUSES_WITH_ALLOCATED_INVENTORY as readonly string[]).includes(status);
-}
 
 // ============================================
 // PRISMA HELPER
@@ -829,7 +828,7 @@ export const cancelLine = createServerFn({ method: 'POST' })
         let inventoryReleased = false;
 
         // Release inventory if allocated
-        if (hasAllocatedInventory(line.lineStatus)) {
+        if (sharedHasAllocatedInventory(line.lineStatus)) {
             const txn = await prisma.inventoryTransaction.findFirst({
                 where: {
                     referenceId: lineId,
@@ -1388,7 +1387,7 @@ export const deleteOrder = createServerFn({ method: 'POST' })
 
         // Collect SKU IDs of lines with allocated inventory BEFORE transaction
         const affectedSkuIds = order.orderLines
-            .filter((line) => hasAllocatedInventory(line.lineStatus))
+            .filter((line) => sharedHasAllocatedInventory(line.lineStatus))
             .map((line) => line.skuId);
 
         await prisma.$transaction(async (tx) => {
@@ -1401,7 +1400,7 @@ export const deleteOrder = createServerFn({ method: 'POST' })
                     });
                 }
 
-                if (hasAllocatedInventory(line.lineStatus)) {
+                if (sharedHasAllocatedInventory(line.lineStatus)) {
                     const txn = await tx.inventoryTransaction.findFirst({
                         where: {
                             referenceId: line.id,
@@ -2189,7 +2188,7 @@ export const cancelOrder = createServerFn({ method: 'POST' })
         // Find lines with allocated inventory
         type CancelOrderLine = { id: string; lineStatus: string; skuId: string; productionBatchId: string | null };
         const linesWithInventory = order.orderLines.filter((l: CancelOrderLine) =>
-            hasAllocatedInventory(l.lineStatus)
+            sharedHasAllocatedInventory(l.lineStatus)
         );
         const affectedSkuIds = linesWithInventory.map((l: CancelOrderLine) => l.skuId);
         let inventoryReleased = false;
@@ -2410,22 +2409,13 @@ export const setLineStatus = createServerFn({ method: 'POST' })
 
         const currentStatus = line.lineStatus;
 
-        // Define valid transitions (simplified state machine)
-        const validTransitions: Record<string, string[]> = {
-            pending: ['allocated', 'cancelled'],
-            allocated: ['pending', 'picked', 'cancelled'],
-            picked: ['allocated', 'packed', 'cancelled'],
-            packed: ['picked', 'cancelled'],
-            cancelled: ['pending'],
-        };
-
-        const allowed = validTransitions[currentStatus] || [];
-        if (!allowed.includes(targetStatus)) {
+        // Validate transition using shared state machine
+        if (!isValidTransition(currentStatus as LineStatus, targetStatus as LineStatus)) {
             return {
                 success: false,
                 error: {
                     code: 'BAD_REQUEST',
-                    message: `Cannot transition from '${currentStatus}' to '${targetStatus}'. Allowed: ${allowed.join(', ') || 'none'}`,
+                    message: buildTransitionError(currentStatus, targetStatus),
                 },
             };
         }
@@ -2464,7 +2454,7 @@ export const setLineStatus = createServerFn({ method: 'POST' })
                 });
                 updateData.allocatedAt = null;
                 inventoryUpdated = true;
-            } else if (targetStatus === 'cancelled' && hasAllocatedInventory(currentStatus)) {
+            } else if (targetStatus === 'cancelled' && sharedHasAllocatedInventory(currentStatus)) {
                 // Cancel with allocated inventory: release it
                 await tx.inventoryTransaction.deleteMany({
                     where: {
