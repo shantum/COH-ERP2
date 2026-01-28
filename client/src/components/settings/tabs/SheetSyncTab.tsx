@@ -6,7 +6,7 @@
  * Shows a dry-run preview, then executes in background with progress polling.
  */
 
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import {
@@ -153,10 +153,28 @@ const ExecutionProgress = React.memo(function ExecutionProgress({
 // ============================================
 
 export function SheetSyncTab() {
-    const [inputMode, setInputMode] = useState<InputMode>('file');
-    const [sheetUrl, setSheetUrl] = useState('');
-    const [ordersGid, setOrdersGid] = useState('0');
-    const [inventoryGid, setInventoryGid] = useState('1');
+    const STORAGE_KEY = 'coh_sheet_sync';
+
+    // Load saved values from localStorage
+    const savedConfig = (() => {
+        try {
+            const raw = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null;
+            if (!raw) return null;
+            return JSON.parse(raw) as { inputMode?: InputMode; sheetUrl?: string; ordersGid?: string; inventoryGid?: string };
+        } catch { return null; }
+    })();
+
+    const [inputMode, setInputMode] = useState<InputMode>(savedConfig?.inputMode ?? 'file');
+    const [sheetUrl, setSheetUrl] = useState(savedConfig?.sheetUrl ?? '');
+    const [ordersGid, setOrdersGid] = useState(savedConfig?.ordersGid ?? '0');
+    const [inventoryGid, setInventoryGid] = useState(savedConfig?.inventoryGid ?? '1');
+    // Persist config to localStorage on change
+    useEffect(() => {
+        try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify({ inputMode, sheetUrl, ordersGid, inventoryGid }));
+        } catch { /* storage full or unavailable */ }
+    }, [inputMode, sheetUrl, ordersGid, inventoryGid]);
+
     const [ordersFile, setOrdersFile] = useState<File | null>(null);
     const [inventoryFile, setInventoryFile] = useState<File | null>(null);
     const [currentJob, setCurrentJob] = useState<SheetSyncJob | null>(null);
@@ -275,7 +293,7 @@ export function SheetSyncTab() {
         setPlanError(null);
         setOrdersFile(null);
         setInventoryFile(null);
-        setSheetUrl('');
+        // Keep sheetUrl/GIDs — they're saved config
         if (ordersInputRef.current) ordersInputRef.current.value = '';
         if (inventoryInputRef.current) inventoryInputRef.current.value = '';
     }, []);
