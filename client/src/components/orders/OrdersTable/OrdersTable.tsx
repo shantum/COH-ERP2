@@ -17,8 +17,9 @@ import { cn } from '../../../lib/utils';
 import type { OrdersTableProps, DynamicColumnHandlers, OrdersTableContext } from './types';
 import { buildAllColumns, getColumnsForView } from './columns';
 import { useOrdersTableState } from './useOrdersTableState';
-import { getRowClassName } from './rowStyling';
-import { ROW_HEIGHT, DEFAULT_HEADERS, ALL_COLUMN_IDS } from './constants';
+import { getRowClassName, resolveLineState, getCellBackground } from './rowStyling';
+import { COLUMN_INDEX } from './styleConfig';
+import { ROW_HEIGHT, DEFAULT_HEADERS, ALL_COLUMN_IDS, type ColumnId } from './constants';
 import { ColumnVisibilityDropdown } from './toolbar/ColumnVisibilityDropdown';
 import { StatusLegend } from './toolbar/StatusLegend';
 
@@ -270,6 +271,30 @@ export function OrdersTable({
 
     const { rows: tableRows } = table.getRowModel();
 
+    // Pre-compute per-order: are ALL lines at least allocated?
+    // Used for order-info column highlighting (don't trust server fulfillmentStage)
+    const orderAllAllocated = useMemo(() => {
+        const counts = new Map<string, { total: number; allocated: number }>();
+        for (const row of rows) {
+            const id = row.orderId;
+            let entry = counts.get(id);
+            if (!entry) {
+                entry = { total: 0, allocated: 0 };
+                counts.set(id, entry);
+            }
+            entry.total++;
+            const ls = row.lineStatus;
+            if (ls === 'allocated' || ls === 'picked' || ls === 'packed' || ls === 'shipped') {
+                entry.allocated++;
+            }
+        }
+        const result = new Map<string, boolean>();
+        for (const [id, { total, allocated }] of counts) {
+            result.set(id, total > 0 && allocated === total);
+        }
+        return result;
+    }, [rows]);
+
     // Virtualizer for efficient rendering of large lists
     const virtualizer = useVirtualizer({
         count: tableRows.length,
@@ -409,21 +434,33 @@ export function OrdersTable({
                             )}
                             {virtualRows.map((virtualRow) => {
                                 const row = tableRows[virtualRow.index];
-                                const rowClassName = getRowClassName(row.original);
+                                const rowData = row.original;
+                                const rowClassName = getRowClassName(rowData);
+                                const lineState = resolveLineState(rowData);
+                                const allAllocated = orderAllAllocated.get(rowData.orderId) ?? false;
                                 return (
                                     <tr
                                         key={row.id}
                                         className={cn(rowClassName)}
                                         style={{ height: ROW_HEIGHT }}
                                     >
-                                        {row.getVisibleCells().map((cell) => (
-                                            <td
-                                                key={cell.id}
-                                                className="px-1 py-0.5 text-xs overflow-hidden text-ellipsis"
-                                            >
-                                                {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                                            </td>
-                                        ))}
+                                        {row.getVisibleCells().map((cell) => {
+                                            const colIndex = COLUMN_INDEX[cell.column.id as ColumnId];
+                                            const cellBg = colIndex !== undefined
+                                                ? getCellBackground(colIndex, lineState, allAllocated)
+                                                : '';
+                                            return (
+                                                <td
+                                                    key={cell.id}
+                                                    className={cn(
+                                                        'px-1 py-0.5 text-xs overflow-hidden text-ellipsis',
+                                                        cellBg,
+                                                    )}
+                                                >
+                                                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                                                </td>
+                                            );
+                                        })}
                                     </tr>
                                 );
                             })}
