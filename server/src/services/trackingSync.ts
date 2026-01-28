@@ -235,7 +235,8 @@ async function updateLineTracking(
     }
 
     // Set RTO timestamps - use lastScan datetime from API, not current time
-    if (trackingData.isRto || trackingData.internalStatus?.startsWith('rto_')) {
+    // Only set rtoInitiatedAt if not already set (preserve original RTO initiation date)
+    if ((trackingData.isRto || trackingData.internalStatus?.startsWith('rto_')) && !orderInfo.rtoInitiatedAt) {
         lineUpdateData.rtoInitiatedAt = trackingData.lastScan?.datetime
             ? new Date(trackingData.lastScan.datetime)
             : new Date();
