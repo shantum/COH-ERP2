@@ -52,6 +52,8 @@ export type Customer = {
     exchangeCount: Generated<number>;
     returnCount: Generated<number>;
     rtoCount: Generated<number>;
+    rtoOrderCount: Generated<number>;
+    rtoValue: Generated<string>;
     orderCount: Generated<number>;
     tier: Generated<string>;
     ltv: Generated<number>;

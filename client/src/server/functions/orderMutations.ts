@@ -525,7 +525,7 @@ export const markLineRto = createServerFn({ method: 'POST' })
         const { lineId } = data;
         const now = new Date();
 
-        // Fetch line with order context
+        // Fetch line with order context and value fields
         const line = await prisma.orderLine.findUnique({
             where: { id: lineId },
             select: {
@@ -533,8 +533,17 @@ export const markLineRto = createServerFn({ method: 'POST' })
                 lineStatus: true,
                 rtoInitiatedAt: true,
                 orderId: true,
+                unitPrice: true,
+                qty: true,
                 order: {
-                    select: { id: true, customerId: true },
+                    select: {
+                        id: true,
+                        customerId: true,
+                        orderLines: {
+                            where: { rtoInitiatedAt: { not: null } },
+                            select: { id: true },
+                        },
+                    },
                 },
             },
         });
@@ -579,11 +588,18 @@ export const markLineRto = createServerFn({ method: 'POST' })
                 },
             });
 
-            // Increment customer RTO count
+            // Update customer RTO stats
             if (line.order?.customerId) {
+                const lineValue = line.unitPrice * line.qty;
+                const isFirstRtoForOrder = (line.order.orderLines?.length ?? 0) === 0;
+
                 await tx.customer.update({
                     where: { id: line.order.customerId },
-                    data: { rtoCount: { increment: 1 } },
+                    data: {
+                        rtoCount: { increment: 1 },
+                        rtoValue: { increment: lineValue },
+                        ...(isFirstRtoForOrder ? { rtoOrderCount: { increment: 1 } } : {}),
+                    },
                 });
             }
         });
@@ -3263,7 +3279,12 @@ export const markRto = createServerFn({ method: 'POST' })
                 customerId: true,
                 orderLines: {
                     where: { lineStatus: 'shipped', rtoInitiatedAt: null },
-                    select: { id: true },
+                    select: { id: true, unitPrice: true, qty: true },
+                },
+                _count: {
+                    select: {
+                        orderLines: { where: { rtoInitiatedAt: { not: null } } },
+                    },
                 },
             },
         });
@@ -3275,8 +3296,11 @@ export const markRto = createServerFn({ method: 'POST' })
             };
         }
 
-        const shippedLineIds = order.orderLines.map((l: { id: string }) => l.id);
+        const shippedLines = order.orderLines;
+        const shippedLineIds = shippedLines.map((l) => l.id);
         const linesInitiated = shippedLineIds.length;
+        const totalValue = shippedLines.reduce((sum, l) => sum + l.unitPrice * l.qty, 0);
+        const isFirstRtoForOrder = order._count.orderLines === 0;
 
         await prisma.$transaction(async (tx) => {
             // Update all shipped lines to RTO initiated
@@ -3290,11 +3314,15 @@ export const markRto = createServerFn({ method: 'POST' })
                 });
             }
 
-            // Increment customer RTO count based on number of lines
+            // Update customer RTO stats
             if (linesInitiated > 0 && order.customerId) {
                 await tx.customer.update({
                     where: { id: order.customerId },
-                    data: { rtoCount: { increment: linesInitiated } },
+                    data: {
+                        rtoCount: { increment: linesInitiated },
+                        rtoValue: { increment: totalValue },
+                        ...(isFirstRtoForOrder ? { rtoOrderCount: { increment: 1 } } : {}),
+                    },
                 });
             }
         });

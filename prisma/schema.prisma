@@ -440,7 +440,9 @@ model Customer {
   updatedAt         DateTime        @updatedAt
   exchangeCount     Int             @default(0)
   returnCount       Int             @default(0)
-  rtoCount          Int             @default(0)
+  rtoCount          Int             @default(0)  // Total lines RTO'd
+  rtoOrderCount     Int             @default(0)  // Number of orders with at least one RTO
+  rtoValue          Decimal         @default(0)  @db.Decimal(12, 2) // Total value of RTO'd items
   orderCount        Int             @default(0)  // Denormalized count of non-cancelled orders (for fast stats lookup)
   tier              String          @default("bronze")
   ltv               Int             @default(0)  // Stored LTV, updated incrementally on order changes
