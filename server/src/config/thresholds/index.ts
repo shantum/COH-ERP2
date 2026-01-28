@@ -2,18 +2,10 @@
  * Thresholds Configuration Index
  *
  * Central export for all numeric threshold configurations.
+ *
+ * NOTE: Customer tier configuration has been consolidated to @coh/shared/domain/customers/tiers.
+ * Use tierUtils.ts for server-side tier operations.
  */
-
-// Customer Tier Thresholds
-export {
-    TIER_THRESHOLDS,
-    TIER_LABELS,
-    TIER_COLORS,
-    calculateTier,
-    getTierOrder,
-    compareTiers,
-    shouldUpgradeTier,
-} from './customerTiers.js';
 
 // Order Timing Thresholds
 export {

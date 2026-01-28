@@ -14,7 +14,7 @@
  * TO FIND A SPECIFIC CONFIGURATION:
  * 1. Payment gateway rules → config/mappings/paymentGateway.ts
  * 2. Tracking status rules → config/mappings/trackingStatus.ts
- * 3. Customer tier thresholds → config/thresholds/customerTiers.ts
+ * 3. Customer tier thresholds → @coh/shared/domain/customers/tiers (or utils/tierUtils.ts)
  * 4. Order timing (archive, RTO) → config/thresholds/orderTiming.ts
  * 5. Inventory thresholds → config/thresholds/inventory.ts
  * 6. Shopify sync settings → config/sync/shopify.ts
@@ -34,10 +34,10 @@
 export type {
     TrackingStatus,
     PaymentMethod,
-    CustomerTier,
-    TierThresholds,
     BaseMappingRule,
 } from './types.js';
+
+// CustomerTier, TierThresholds - use @coh/shared/domain/customers/tiers
 
 export {
     TERMINAL_TRACKING_STATUSES,
@@ -74,16 +74,7 @@ export {
 // THRESHOLD CONFIGURATIONS
 // ============================================
 
-// Customer Tiers
-export {
-    TIER_THRESHOLDS,
-    TIER_LABELS,
-    TIER_COLORS,
-    calculateTier,
-    getTierOrder,
-    compareTiers,
-    shouldUpgradeTier,
-} from './thresholds/index.js';
+// Customer Tiers - use @coh/shared/domain/customers/tiers or utils/tierUtils.ts
 
 // Order Timing
 export {

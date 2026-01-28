@@ -73,20 +73,5 @@ export type PaymentMethod = 'COD' | 'Prepaid';
 // CUSTOMER TIER TYPES
 // ============================================
 
-/**
- * Customer tier levels based on LTV
- */
-export type CustomerTier = 'platinum' | 'gold' | 'silver' | 'bronze';
-
-/**
- * Tier thresholds configuration
- */
-export interface TierThresholds {
-    /** Minimum LTV for platinum tier */
-    platinum: number;
-    /** Minimum LTV for gold tier */
-    gold: number;
-    /** Minimum LTV for silver tier */
-    silver: number;
-    // bronze is implicit (below silver)
-}
+// Customer tier types are defined in @coh/shared/domain/customers/tiers
+// Import from there: import { CustomerTier, TierThresholds } from '@coh/shared/domain';
