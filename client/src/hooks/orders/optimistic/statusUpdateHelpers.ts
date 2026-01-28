@@ -4,7 +4,7 @@
  */
 
 import type { OrdersListData, ShipData } from './types';
-import { calculateInventoryDelta, hasAllocatedInventory } from './inventoryHelpers';
+import { calculateInventoryDelta, hasAllocatedInventory, computeOrderStatus } from './inventoryHelpers';
 
 // ============================================================================
 // LINE STATUS UPDATES
@@ -478,7 +478,8 @@ export function optimisticReceiveRto(
 
 /**
  * Optimistically cancel an entire order
- * Cancels all lines and restores inventory for allocated lines
+ * Cancels all non-shipped lines and restores inventory for allocated lines.
+ * Order status is computed from resulting line states.
  */
 export function optimisticCancelOrder(
     data: OrdersListData | undefined,
@@ -486,10 +487,19 @@ export function optimisticCancelOrder(
 ): OrdersListData | undefined {
     if (!data) return data;
 
+    // Build simulated line states after cancellation to compute order status
+    const orderRows = data.rows.filter(row => row.orderId === orderId);
+    const simulatedLines = orderRows.map(row => ({
+        lineStatus: row.lineStatus === 'shipped' ? 'shipped' : 'cancelled',
+    }));
+    const newOrderStatus = computeOrderStatus({ orderLines: simulatedLines });
+
     return {
         ...data,
         rows: data.rows.map((row) => {
             if (row.orderId !== orderId) return row;
+            // Don't cancel shipped lines
+            if (row.lineStatus === 'shipped') return row;
 
             const updatedRow = {
                 ...row,
@@ -508,11 +518,12 @@ export function optimisticCancelOrder(
                 if (order.id !== orderId) return order;
                 return {
                     ...order,
-                    status: 'cancelled',
-                    orderLines: order.orderLines?.map((line: any) => ({
-                        ...line,
-                        lineStatus: 'cancelled',
-                    })),
+                    status: newOrderStatus,
+                    orderLines: order.orderLines?.map((line: any) =>
+                        line.lineStatus === 'shipped'
+                            ? line
+                            : { ...line, lineStatus: 'cancelled' }
+                    ),
                 };
             }),
         } : {}),
@@ -521,13 +532,21 @@ export function optimisticCancelOrder(
 
 /**
  * Optimistically uncancel an entire order
- * Restores all lines to pending status
+ * Restores cancelled lines to pending status.
+ * Order status is computed from resulting line states.
  */
 export function optimisticUncancelOrder(
     data: OrdersListData | undefined,
     orderId: string
 ): OrdersListData | undefined {
     if (!data) return data;
+
+    // Build simulated line states after uncancellation to compute order status
+    const orderRows = data.rows.filter(row => row.orderId === orderId);
+    const simulatedLines = orderRows.map(row => ({
+        lineStatus: row.lineStatus === 'cancelled' ? 'pending' : row.lineStatus,
+    }));
+    const newOrderStatus = computeOrderStatus({ orderLines: simulatedLines });
 
     return {
         ...data,
@@ -547,7 +566,7 @@ export function optimisticUncancelOrder(
                 if (order.id !== orderId) return order;
                 return {
                     ...order,
-                    status: 'open',
+                    status: newOrderStatus,
                     orderLines: order.orderLines?.map((line: any) =>
                         line.lineStatus === 'cancelled'
                             ? { ...line, lineStatus: 'pending' }

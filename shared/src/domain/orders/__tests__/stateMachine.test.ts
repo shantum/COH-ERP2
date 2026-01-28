@@ -13,10 +13,13 @@ import {
     hasAllocatedInventory,
     calculateInventoryDelta,
     buildTransitionError,
+    computeOrderStatus,
     LINE_STATUS_TRANSITIONS,
     LINE_STATUSES,
     STATUSES_WITH_ALLOCATED_INVENTORY,
+    SHIPPED_OR_BEYOND,
     type LineStatus,
+    type OrderStatus,
 } from '../stateMachine.js';
 
 describe('orderStateMachine', () => {
@@ -416,6 +419,162 @@ describe('orderStateMachine', () => {
                     expect(['none', 'create_outward', 'delete_outward']).toContain(def.inventoryEffect);
                 }
             }
+        });
+    });
+
+    describe('SHIPPED_OR_BEYOND constant', () => {
+        it('contains shipped and beyond statuses', () => {
+            expect(SHIPPED_OR_BEYOND).toEqual(['shipped', 'delivered', 'rto_initiated', 'rto_received']);
+        });
+    });
+
+    describe('computeOrderStatus', () => {
+        it('throws error when order is missing orderLines', () => {
+            expect(() => computeOrderStatus({} as any)).toThrow('Order with orderLines is required');
+            expect(() => computeOrderStatus(null as any)).toThrow('Order with orderLines is required');
+        });
+
+        it('returns archived when order.isArchived is true', () => {
+            expect(computeOrderStatus({
+                isArchived: true,
+                orderLines: [{ lineStatus: 'shipped' }],
+            })).toBe('archived');
+        });
+
+        it('returns cancelled when all lines are cancelled', () => {
+            expect(computeOrderStatus({
+                orderLines: [
+                    { lineStatus: 'cancelled' },
+                    { lineStatus: 'cancelled' },
+                ],
+            })).toBe('cancelled');
+        });
+
+        it('returns cancelled when there are no lines (edge case)', () => {
+            expect(computeOrderStatus({ orderLines: [] })).toBe('cancelled');
+        });
+
+        it('returns delivered when all active lines are delivered', () => {
+            expect(computeOrderStatus({
+                orderLines: [
+                    { lineStatus: 'delivered' },
+                    { lineStatus: 'delivered' },
+                ],
+            })).toBe('delivered');
+
+            // With cancelled lines
+            expect(computeOrderStatus({
+                orderLines: [
+                    { lineStatus: 'delivered' },
+                    { lineStatus: 'cancelled' },
+                ],
+            })).toBe('delivered');
+        });
+
+        it('returns shipped when all active lines are shipped or beyond', () => {
+            expect(computeOrderStatus({
+                orderLines: [
+                    { lineStatus: 'shipped' },
+                    { lineStatus: 'shipped' },
+                ],
+            })).toBe('shipped');
+
+            // Mixed shipped and delivered still counts as shipped
+            expect(computeOrderStatus({
+                orderLines: [
+                    { lineStatus: 'shipped' },
+                    { lineStatus: 'rto_initiated' },
+                ],
+            })).toBe('shipped');
+
+            // With cancelled lines
+            expect(computeOrderStatus({
+                orderLines: [
+                    { lineStatus: 'shipped' },
+                    { lineStatus: 'cancelled' },
+                ],
+            })).toBe('shipped');
+        });
+
+        it('returns partially_shipped when some (not all) active lines are shipped or beyond', () => {
+            expect(computeOrderStatus({
+                orderLines: [
+                    { lineStatus: 'shipped' },
+                    { lineStatus: 'pending' },
+                ],
+            })).toBe('partially_shipped');
+
+            expect(computeOrderStatus({
+                orderLines: [
+                    { lineStatus: 'shipped' },
+                    { lineStatus: 'allocated' },
+                ],
+            })).toBe('partially_shipped');
+
+            expect(computeOrderStatus({
+                orderLines: [
+                    { lineStatus: 'delivered' },
+                    { lineStatus: 'packed' },
+                ],
+            })).toBe('partially_shipped');
+        });
+
+        it('returns open for orders with only pre-ship statuses', () => {
+            expect(computeOrderStatus({
+                orderLines: [{ lineStatus: 'pending' }],
+            })).toBe('open');
+
+            expect(computeOrderStatus({
+                orderLines: [
+                    { lineStatus: 'pending' },
+                    { lineStatus: 'allocated' },
+                ],
+            })).toBe('open');
+
+            expect(computeOrderStatus({
+                orderLines: [
+                    { lineStatus: 'allocated' },
+                    { lineStatus: 'picked' },
+                    { lineStatus: 'packed' },
+                ],
+            })).toBe('open');
+        });
+
+        // Critical test case from the plan: mixed shipped/non-shipped after cancel
+        it('returns shipped when cancelling leaves only shipped lines', () => {
+            // Order with shipped + allocated lines
+            // After cancel: shipped stays shipped, allocated becomes cancelled
+            const afterCancel = {
+                orderLines: [
+                    { lineStatus: 'shipped' },
+                    { lineStatus: 'cancelled' },
+                ],
+            };
+            expect(computeOrderStatus(afterCancel)).toBe('shipped');
+        });
+
+        it('returns partially_shipped when cancelling leaves shipped + pending lines', () => {
+            // Order had 3 lines: shipped, allocated, pending
+            // After cancel: shipped stays, allocated->cancelled, pending->cancelled
+            // After uncancel: shipped stays, cancelled lines restored to pending
+            const afterUncancel = {
+                orderLines: [
+                    { lineStatus: 'shipped' },
+                    { lineStatus: 'pending' },
+                    { lineStatus: 'pending' },
+                ],
+            };
+            expect(computeOrderStatus(afterUncancel)).toBe('partially_shipped');
+        });
+
+        it('returns open when uncancelling fully cancelled order', () => {
+            const afterUncancel = {
+                orderLines: [
+                    { lineStatus: 'pending' },
+                    { lineStatus: 'pending' },
+                ],
+            };
+            expect(computeOrderStatus(afterUncancel)).toBe('open');
         });
     });
 });

@@ -16,6 +16,7 @@ import {
     hasAllocatedInventory as sharedHasAllocatedInventory,
     isValidTransition,
     buildTransitionError,
+    computeOrderStatus,
 } from '@coh/shared/domain';
 
 // ============================================
@@ -771,6 +772,10 @@ export const receiveLineRto = createServerFn({ method: 'POST' })
 
 /**
  * Cancel an order line
+ *
+ * Uses state machine validation and wraps inventory release + status update
+ * in a transaction for atomicity. Production batch link is cleared via
+ * productionBatchId = null; batch queries derive linked lines from this field.
  */
 export const cancelLine = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
@@ -787,10 +792,7 @@ export const cancelLine = createServerFn({ method: 'POST' })
                 lineStatus: true,
                 skuId: true,
                 qty: true,
-                unitPrice: true,
                 orderId: true,
-                productionBatchId: true,
-                order: { select: { customerId: true } },
             },
         });
 
@@ -814,63 +816,44 @@ export const cancelLine = createServerFn({ method: 'POST' })
             };
         }
 
-        // Cannot cancel shipped lines
-        if (line.lineStatus === 'shipped') {
+        // Validate transition using state machine
+        if (!isValidTransition(line.lineStatus as LineStatus, 'cancelled')) {
             return {
                 success: false,
                 error: {
                     code: 'BAD_REQUEST',
-                    message: 'Cannot cancel shipped lines. Use RTO flow instead.',
+                    message: buildTransitionError(line.lineStatus, 'cancelled'),
                 },
             };
         }
 
-        let inventoryReleased = false;
+        // Execute in transaction for atomicity (inventory release + status update)
+        const inventoryReleased = await prisma.$transaction(async (tx) => {
+            let released = false;
 
-        // Release inventory if allocated
-        if (sharedHasAllocatedInventory(line.lineStatus)) {
-            const txn = await prisma.inventoryTransaction.findFirst({
-                where: {
-                    referenceId: lineId,
-                    txnType: TXN_TYPE.OUTWARD,
-                    reason: TXN_REASON.ORDER_ALLOCATION,
-                },
-                select: { id: true, skuId: true },
-            });
-            if (txn) {
-                await prisma.inventoryTransaction.delete({ where: { id: txn.id } });
-                inventoryReleased = true;
+            // Release inventory if allocated (state machine: delete_outward for allocated/picked/packed -> cancelled)
+            if (sharedHasAllocatedInventory(line.lineStatus)) {
+                const result = await tx.inventoryTransaction.deleteMany({
+                    where: {
+                        referenceId: lineId,
+                        txnType: TXN_TYPE.OUTWARD,
+                        reason: TXN_REASON.ORDER_ALLOCATION,
+                    },
+                });
+                released = result.count > 0;
             }
-        }
 
-        // Update line status and clear production batch link
-        await prisma.orderLine.update({
-            where: { id: lineId },
-            data: { lineStatus: 'cancelled', productionBatchId: null },
+            // Update line status and clear production batch link
+            // (batch queries use OrderLine.productionBatchId to find linked lines)
+            await tx.orderLine.update({
+                where: { id: lineId },
+                data: { lineStatus: 'cancelled', productionBatchId: null },
+            });
+
+            return released;
         });
 
-        // Handle production batch cleanup
-        if (line.productionBatchId) {
-            const otherLinesCount = await prisma.orderLine.count({
-                where: { productionBatchId: line.productionBatchId },
-            });
-
-            const batch = await prisma.productionBatch.findUnique({
-                where: { id: line.productionBatchId },
-                select: { status: true, qtyCompleted: true },
-            });
-
-            if (otherLinesCount === 0 && batch?.status === 'planned' && batch.qtyCompleted === 0) {
-                await prisma.productionBatch.delete({ where: { id: line.productionBatchId } });
-            } else {
-                await prisma.productionBatch.update({
-                    where: { id: line.productionBatchId },
-                    data: { sourceOrderLineId: null },
-                });
-            }
-        }
-
-        // Broadcast SSE update
+        // Broadcast SSE update (async, non-blocking)
         broadcastUpdate(
             {
                 type: 'line_status',
@@ -885,9 +868,8 @@ export const cancelLine = createServerFn({ method: 'POST' })
         // Invalidate inventory cache if inventory was released
         if (inventoryReleased && line.skuId) {
             try {
-                const { inventoryBalanceCache } = await import('@coh/shared/services/inventory');
-                inventoryBalanceCache.invalidate([line.skuId]);
-                console.log('[cancelLine] Invalidated cache for SKU:', line.skuId);
+                const cache = await getInventoryBalanceCache();
+                cache.invalidate([line.skuId]);
             } catch {
                 // Non-critical
             }
@@ -2193,7 +2175,10 @@ export const cancelOrder = createServerFn({ method: 'POST' })
         const affectedSkuIds = linesWithInventory.map((l: CancelOrderLine) => l.skuId);
         let inventoryReleased = false;
 
-        await prisma.$transaction(async (tx) => {
+        // Transaction returns computed status and whether inventory was released
+        const { newOrderStatus, txInventoryReleased } = await prisma.$transaction(async (tx) => {
+            let released = false;
+
             // Release inventory for allocated lines
             for (const line of linesWithInventory) {
                 const txn = await tx.inventoryTransaction.findFirst({
@@ -2205,7 +2190,7 @@ export const cancelOrder = createServerFn({ method: 'POST' })
                 });
                 if (txn) {
                     await tx.inventoryTransaction.delete({ where: { id: txn.id } });
-                    inventoryReleased = true;
+                    released = true;
                 }
             }
 
@@ -2236,17 +2221,24 @@ export const cancelOrder = createServerFn({ method: 'POST' })
                 }
             }
 
-            // Cancel all lines
+            // Cancel all non-shipped lines
             await tx.orderLine.updateMany({
                 where: { orderId, lineStatus: { not: 'shipped' } },
                 data: { lineStatus: 'cancelled', productionBatchId: null },
             });
 
-            // Update order status
+            // Compute correct order status from resulting line states
+            const updatedLines = await tx.orderLine.findMany({
+                where: { orderId },
+                select: { lineStatus: true },
+            });
+            const computedStatus = computeOrderStatus({ orderLines: updatedLines });
+
+            // Update order with computed status
             await tx.order.update({
                 where: { id: orderId },
                 data: {
-                    status: 'cancelled',
+                    status: computedStatus,
                     internalNotes: reason
                         ? order.internalNotes
                             ? `${order.internalNotes}\n\nCancelled: ${reason}`
@@ -2255,22 +2247,30 @@ export const cancelOrder = createServerFn({ method: 'POST' })
                 },
             });
 
-            // Decrement customer order count
-            if (order.customerId) {
+            // Decrement customer order count only if fully cancelled
+            if (order.customerId && computedStatus === 'cancelled') {
                 await tx.customer.update({
                     where: { id: order.customerId },
                     data: { orderCount: { decrement: 1 } },
                 });
             }
+
+            return { newOrderStatus: computedStatus, txInventoryReleased: released };
         });
 
-        // Broadcast SSE update
+        inventoryReleased = txInventoryReleased;
+
+        // Broadcast SSE update - include 'shipped' in affectedViews if order has shipped lines
+        const affectedViews = ['open', 'cancelled'];
+        if (newOrderStatus === 'shipped' || newOrderStatus === 'partially_shipped') {
+            affectedViews.push('shipped');
+        }
         broadcastUpdate(
             {
                 type: 'order_cancelled',
                 orderId,
-                affectedViews: ['open', 'cancelled'],
-                changes: { status: 'cancelled', affectedSkuIds },
+                affectedViews,
+                changes: { status: newOrderStatus, affectedSkuIds },
             },
             context.user.id
         );
@@ -2290,7 +2290,7 @@ export const cancelOrder = createServerFn({ method: 'POST' })
             success: true,
             data: {
                 orderId,
-                status: 'cancelled',
+                status: newOrderStatus,
                 linesAffected: order.orderLines.filter((l: CancelOrderLine) => l.lineStatus !== 'shipped').length,
                 inventoryReleased,
             },
@@ -2300,6 +2300,7 @@ export const cancelOrder = createServerFn({ method: 'POST' })
 /**
  * Restore cancelled order
  * - Restore all cancelled lines to 'pending'
+ * - Compute order status from resulting line states
  * - SSE broadcast
  */
 export const uncancelOrder = createServerFn({ method: 'POST' })
@@ -2332,17 +2333,25 @@ export const uncancelOrder = createServerFn({ method: 'POST' })
         type UncancelOrderLine = { id: string; lineStatus: string };
         const cancelledLines = order.orderLines.filter((l: UncancelOrderLine) => l.lineStatus === 'cancelled');
 
-        await prisma.$transaction(async (tx) => {
-            // Restore order to open status
-            await tx.order.update({
-                where: { id: orderId },
-                data: { status: 'open' },
-            });
-
+        // Transaction returns computed status
+        const newOrderStatus = await prisma.$transaction(async (tx) => {
             // Restore all cancelled lines to pending
             await tx.orderLine.updateMany({
                 where: { orderId, lineStatus: 'cancelled' },
                 data: { lineStatus: 'pending' },
+            });
+
+            // Compute correct order status from resulting line states
+            const updatedLines = await tx.orderLine.findMany({
+                where: { orderId },
+                select: { lineStatus: true },
+            });
+            const computedStatus = computeOrderStatus({ orderLines: updatedLines });
+
+            // Update order with computed status
+            await tx.order.update({
+                where: { id: orderId },
+                data: { status: computedStatus },
             });
 
             // Increment customer order count
@@ -2352,15 +2361,21 @@ export const uncancelOrder = createServerFn({ method: 'POST' })
                     data: { orderCount: { increment: 1 } },
                 });
             }
+
+            return computedStatus;
         });
 
-        // Broadcast SSE update
+        // Broadcast SSE update - include 'shipped' in affectedViews if order has shipped lines
+        const affectedViews = ['open', 'cancelled'];
+        if (newOrderStatus === 'shipped' || newOrderStatus === 'partially_shipped') {
+            affectedViews.push('shipped');
+        }
         broadcastUpdate(
             {
                 type: 'order_uncancelled',
                 orderId,
-                affectedViews: ['open', 'cancelled'],
-                changes: { status: 'open', lineStatus: 'pending' },
+                affectedViews,
+                changes: { status: newOrderStatus, lineStatus: 'pending' },
             },
             context.user.id
         );
@@ -2369,7 +2384,7 @@ export const uncancelOrder = createServerFn({ method: 'POST' })
             success: true,
             data: {
                 orderId,
-                status: 'open',
+                status: newOrderStatus,
                 linesRestored: cancelledLines.length,
             },
         };
