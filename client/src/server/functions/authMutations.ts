@@ -12,7 +12,7 @@ import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
 import { authMiddleware, type AuthUser } from '../middleware/auth';
 import { validatePassword } from '@coh/shared';
-import type { PrismaClient } from '@prisma/client';
+import { getPrisma } from '@coh/shared/services/db';
 
 // Type for bcrypt module (dynamic import)
 interface BcryptModule {
@@ -67,13 +67,7 @@ export const changePassword = createServerFn({ method: 'POST' })
             const { currentPassword, newPassword } = data;
             const user = context.user;
 
-            // Dynamic Prisma import to prevent bundling into client
-            const { PrismaClient } = await import('@prisma/client');
-            const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
-            const prisma = globalForPrisma.prisma ?? new PrismaClient();
-            if (process.env.NODE_ENV !== 'production') {
-                globalForPrisma.prisma = prisma;
-            }
+            const prisma = await getPrisma();
 
             // Dynamic bcrypt import (Node.js only)
             // @ts-expect-error - bcryptjs is available on server via dynamic import

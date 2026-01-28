@@ -14,9 +14,10 @@ import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
 import type { PrismaClient, Prisma } from '@prisma/client';
 import { authMiddleware } from '../middleware/auth';
+import { getPrisma } from '@coh/shared/services/db';
 
 // ============================================
-// PRISMA TYPE ALIAS & SINGLETON
+// PRISMA TYPE ALIAS
 // ============================================
 
 /**
@@ -24,32 +25,6 @@ import { authMiddleware } from '../middleware/auth';
  * Used for helper functions that need prisma parameter.
  */
 type PrismaInstance = InstanceType<typeof PrismaClient>;
-
-/**
- * Get Prisma singleton instance
- * Uses globalThis to cache in development, avoids multiple connections
- *
- * NOTE: If models are missing after schema changes, restart the dev server
- * to clear the globalThis cache.
- */
-async function getPrisma(): Promise<PrismaInstance> {
-    const { PrismaClient } = await import('@prisma/client');
-    const globalForPrisma = globalThis as unknown as {
-        prisma: InstanceType<typeof PrismaClient> | undefined;
-    };
-
-    // Check if cached client has the required models, if not, create a new one
-    if (globalForPrisma.prisma && !('fabricColourTransaction' in globalForPrisma.prisma)) {
-        console.log('[getPrisma] Cached client missing new models, creating fresh instance');
-        globalForPrisma.prisma = undefined;
-    }
-
-    const prisma = globalForPrisma.prisma ?? new PrismaClient();
-    if (process.env.NODE_ENV !== 'production') {
-        globalForPrisma.prisma = prisma;
-    }
-    return prisma;
-}
 
 // ============================================
 // INTERNAL TYPE DEFINITIONS FOR QUERY RESULTS

@@ -15,6 +15,7 @@ import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
 import type { PrismaClient, Prisma } from '@prisma/client';
 import { authMiddleware } from '../middleware/auth';
+import { getPrisma } from '@coh/shared/services/db';
 
 // ============================================
 // PRISMA TYPE ALIAS
@@ -718,10 +719,7 @@ export const getFabrics = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => getFabricsInputSchema.parse(input))
     .handler(async ({ data }): Promise<GetFabricsResponse> => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
-
-        try {
+        const prisma = await getPrisma();
             const where: Prisma.FabricWhereInput = {};
 
             if (data?.fabricTypeId) {
@@ -763,9 +761,6 @@ export const getFabrics = createServerFn({ method: 'GET' })
                 success: true,
                 fabrics: fabricsWithBalance,
             };
-        } finally {
-            await prisma.$disconnect();
-        }
     });
 
 /**
@@ -778,10 +773,7 @@ export const getFabricsFlat = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => getFabricsFlatInputSchema.parse(input))
     .handler(async ({ data }): Promise<GetFabricsFlatResponse> => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
-
-        try {
+        const prisma = await getPrisma();
             const view = data?.view ?? 'color';
             const search = data?.search;
             const status = data?.status;
@@ -1124,9 +1116,6 @@ export const getFabricsFlat = createServerFn({ method: 'GET' })
                     ok: items.filter((i) => i.stockStatus === 'OK').length,
                 },
             };
-        } finally {
-            await prisma.$disconnect();
-        }
     });
 
 /**
@@ -1136,10 +1125,7 @@ export const getFabricById = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => getFabricByIdInputSchema.parse(input))
     .handler(async ({ data }): Promise<GetFabricByIdResponse> => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
-
-        try {
+        const prisma = await getPrisma();
             const fabric = await prisma.fabric.findUnique({
                 where: { id: data.id },
                 include: {
@@ -1164,9 +1150,6 @@ export const getFabricById = createServerFn({ method: 'GET' })
                 success: true,
                 fabric: { ...fabric, ...balance },
             };
-        } finally {
-            await prisma.$disconnect();
-        }
     });
 
 /**
@@ -1175,10 +1158,7 @@ export const getFabricById = createServerFn({ method: 'GET' })
 export const getFabricsFilters = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .handler(async (): Promise<GetFabricsFiltersResponse> => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
-
-        try {
+        const prisma = await getPrisma();
             const [fabricTypes, suppliers] = await Promise.all([
                 prisma.fabricType.findMany({
                     select: { id: true, name: true },
@@ -1198,9 +1178,6 @@ export const getFabricsFilters = createServerFn({ method: 'GET' })
                     suppliers,
                 },
             };
-        } finally {
-            await prisma.$disconnect();
-        }
     });
 
 /**
@@ -1209,10 +1186,7 @@ export const getFabricsFilters = createServerFn({ method: 'GET' })
 export const getFabricTypes = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .handler(async (): Promise<GetFabricTypesResponse> => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
-
-        try {
+        const prisma = await getPrisma();
             const types = await prisma.fabricType.findMany({
                 include: {
                     fabrics: {
@@ -1236,9 +1210,6 @@ export const getFabricTypes = createServerFn({ method: 'GET' })
                     colorCount: t.fabrics.length,
                 })),
             };
-        } finally {
-            await prisma.$disconnect();
-        }
     });
 
 /**
@@ -1248,10 +1219,7 @@ export const getFabricSuppliers = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => getFabricSuppliersInputSchema.parse(input))
     .handler(async ({ data }): Promise<GetFabricSuppliersResponse> => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
-
-        try {
+        const prisma = await getPrisma();
             const suppliers = await prisma.supplier.findMany({
                 where: data?.activeOnly ? { isActive: true } : {},
                 orderBy: { name: 'asc' },
@@ -1261,9 +1229,6 @@ export const getFabricSuppliers = createServerFn({ method: 'GET' })
                 success: true,
                 suppliers,
             };
-        } finally {
-            await prisma.$disconnect();
-        }
     });
 
 /**
@@ -1273,10 +1238,7 @@ export const getFabricTransactions = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => getFabricTransactionsInputSchema.parse(input))
     .handler(async ({ data }): Promise<GetFabricTransactionsResponse> => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
-
-        try {
+        const prisma = await getPrisma();
             const transactions = await prisma.fabricTransaction.findMany({
                 where: { fabricId: data.fabricId },
                 include: {
@@ -1292,9 +1254,6 @@ export const getFabricTransactions = createServerFn({ method: 'GET' })
                 success: true,
                 transactions,
             };
-        } finally {
-            await prisma.$disconnect();
-        }
     });
 
 /**
@@ -1304,10 +1263,7 @@ export const getAllFabricTransactions = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => getAllTransactionsInputSchema.parse(input))
     .handler(async ({ data }): Promise<GetAllFabricTransactionsResponse> => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
-
-        try {
+        const prisma = await getPrisma();
             const startDate = new Date();
             startDate.setDate(startDate.getDate() - (data?.days ?? 30));
 
@@ -1336,9 +1292,6 @@ export const getAllFabricTransactions = createServerFn({ method: 'GET' })
                 success: true,
                 transactions,
             };
-        } finally {
-            await prisma.$disconnect();
-        }
     });
 
 /**
@@ -1350,10 +1303,7 @@ export const getTopFabrics = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => getTopFabricsInputSchema.parse(input))
     .handler(async ({ data }): Promise<GetTopFabricsResponse> => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
-
-        try {
+        const prisma = await getPrisma();
             const days = data?.days ?? 30;
             const level = data?.level ?? 'type';
             const limit = data?.limit ?? 15;
@@ -1541,9 +1491,6 @@ export const getTopFabrics = createServerFn({ method: 'GET' })
                     data: result,
                 };
             }
-        } finally {
-            await prisma.$disconnect();
-        }
     });
 
 /**
@@ -1556,10 +1503,7 @@ export const getTopFabricsForDashboard = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => getTopFabricsForDashboardInputSchema.parse(input))
     .handler(async ({ data }): Promise<DashboardTopFabricsResponse> => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
-
-        try {
+        const prisma = await getPrisma();
             const { days, level, limit } = data;
 
             const startDate = new Date();
@@ -1741,9 +1685,6 @@ export const getTopFabricsForDashboard = createServerFn({ method: 'GET' })
 
                 return { level: 'type', days, data: result };
             }
-        } finally {
-            await prisma.$disconnect();
-        }
     });
 
 /**
@@ -1753,10 +1694,7 @@ export const getFabricStockAnalysis = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => getStockAnalysisInputSchema.parse(input))
     .handler(async (): Promise<GetFabricStockAnalysisResponse> => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
-
-        try {
+        const prisma = await getPrisma();
             const fabrics = await prisma.fabric.findMany({
                 where: { isActive: true },
                 include: { fabricType: true, supplier: true },
@@ -1822,9 +1760,6 @@ export const getFabricStockAnalysis = createServerFn({ method: 'GET' })
                 success: true,
                 analysis,
             };
-        } finally {
-            await prisma.$disconnect();
-        }
     });
 
 // ============================================
@@ -1838,10 +1773,7 @@ export const getFabricReconciliationHistory = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => getReconciliationHistoryInputSchema.parse(input))
     .handler(async ({ data }): Promise<GetFabricReconciliationHistoryResponse> => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
-
-        try {
+        const prisma = await getPrisma();
             const reconciliations = await prisma.fabricReconciliation.findMany({
                 include: {
                     items: true,
@@ -1866,9 +1798,6 @@ export const getFabricReconciliationHistory = createServerFn({ method: 'GET' })
                 success: true,
                 history,
             };
-        } finally {
-            await prisma.$disconnect();
-        }
     });
 
 /**
@@ -1878,10 +1807,7 @@ export const getFabricReconciliation = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => getReconciliationByIdInputSchema.parse(input))
     .handler(async ({ data }): Promise<GetFabricReconciliationResponse> => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
-
-        try {
+        const prisma = await getPrisma();
             const reconciliation = await prisma.fabricReconciliation.findUnique({
                 where: { id: data.id },
                 include: {
@@ -1927,9 +1853,6 @@ export const getFabricReconciliation = createServerFn({ method: 'GET' })
                     })),
                 },
             };
-        } finally {
-            await prisma.$disconnect();
-        }
     });
 
 // ============================================
@@ -1946,10 +1869,7 @@ export const startFabricReconciliation = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => startFabricReconciliationInputSchema.parse(input))
     .handler(async ({ data, context }): Promise<StartFabricReconciliationResponse> => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
-
-        try {
+        const prisma = await getPrisma();
             // Get all active fabrics
             const fabrics = await prisma.fabric.findMany({
                 where: { isActive: true },
@@ -2016,9 +1936,6 @@ export const startFabricReconciliation = createServerFn({ method: 'POST' })
                     })),
                 },
             };
-        } finally {
-            await prisma.$disconnect();
-        }
     });
 
 /**
@@ -2069,10 +1986,7 @@ export const updateFabricReconciliationItems = createServerFn({ method: 'POST' }
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => updateFabricReconciliationItemsInputSchema.parse(input))
     .handler(async ({ data }): Promise<UpdateFabricReconciliationItemsResponse> => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
-
-        try {
+        const prisma = await getPrisma();
             const { reconciliationId, items } = data;
 
             const reconciliation = await prisma.fabricReconciliation.findUnique({
@@ -2155,9 +2069,6 @@ export const updateFabricReconciliationItems = createServerFn({ method: 'POST' }
                     })),
                 },
             };
-        } finally {
-            await prisma.$disconnect();
-        }
     });
 
 /**
@@ -2171,10 +2082,7 @@ export const submitFabricReconciliation = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => submitFabricReconciliationInputSchema.parse(input))
     .handler(async ({ data, context }): Promise<SubmitFabricReconciliationResponse> => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
-
-        try {
+        const prisma = await getPrisma();
             const { reconciliationId } = data;
 
             const reconciliation = await prisma.fabricReconciliation.findUnique({
@@ -2254,9 +2162,6 @@ export const submitFabricReconciliation = createServerFn({ method: 'POST' })
                     adjustmentsMade: transactionsCreated,
                 },
             };
-        } finally {
-            await prisma.$disconnect();
-        }
     });
 
 /**
@@ -2266,10 +2171,7 @@ export const deleteFabricReconciliation = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => deleteFabricReconciliationInputSchema.parse(input))
     .handler(async ({ data }): Promise<DeleteFabricReconciliationResponse> => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
-
-        try {
+        const prisma = await getPrisma();
             const { reconciliationId } = data;
 
             const reconciliation = await prisma.fabricReconciliation.findUnique({
@@ -2308,7 +2210,4 @@ export const deleteFabricReconciliation = createServerFn({ method: 'POST' })
                     deleted: true,
                 },
             };
-        } finally {
-            await prisma.$disconnect();
-        }
     });

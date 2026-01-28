@@ -11,6 +11,7 @@
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth';
+import { getPrisma } from '@coh/shared/services/db';
 
 // ============================================
 // EXPORTED RESPONSE TYPES
@@ -149,11 +150,7 @@ export const createProduct = createServerFn({ method: 'POST' })
     .inputValidator((input: unknown) => createProductSchema.parse(input))
     .handler(async ({ data }) => {
         try {
-            // Dynamic import to prevent bundling Node.js code
-            const { PrismaClient } = await import('@prisma/client');
-            const prisma = new PrismaClient();
-
-            try {
+            const prisma = await getPrisma();
                 const product = await prisma.product.create({
                     data: {
                         name: data.name,
@@ -172,9 +169,6 @@ export const createProduct = createServerFn({ method: 'POST' })
                 });
 
                 return { success: true, data: product };
-            } finally {
-                await prisma.$disconnect();
-            }
         } catch (error: unknown) {
             console.error('Create product error:', error);
             const message = error instanceof Error ? error.message : 'Failed to create product';
@@ -193,10 +187,7 @@ export const updateProduct = createServerFn({ method: 'POST' })
     .inputValidator((input: unknown) => updateProductSchema.parse(input))
     .handler(async ({ data }) => {
         try {
-            const { PrismaClient } = await import('@prisma/client');
-            const prisma = new PrismaClient();
-
-            try {
+            const prisma = await getPrisma();
                 // Build update data with only provided fields
                 const updateData: Record<string, unknown> = {};
                 if (data.name !== undefined) updateData.name = data.name;
@@ -222,9 +213,6 @@ export const updateProduct = createServerFn({ method: 'POST' })
                 });
 
                 return { success: true, data: product };
-            } finally {
-                await prisma.$disconnect();
-            }
         } catch (error: unknown) {
             console.error('Update product error:', error);
             const message = error instanceof Error ? error.message : 'Failed to update product';
@@ -242,19 +230,13 @@ export const deleteProduct = createServerFn({ method: 'POST' })
     .inputValidator((input: unknown) => deleteProductSchema.parse(input))
     .handler(async ({ data }) => {
         try {
-            const { PrismaClient } = await import('@prisma/client');
-            const prisma = new PrismaClient();
-
-            try {
+            const prisma = await getPrisma();
                 await prisma.product.update({
                     where: { id: data.id },
                     data: { isActive: false },
                 });
 
                 return { success: true, data: { message: 'Product deactivated' } };
-            } finally {
-                await prisma.$disconnect();
-            }
         } catch (error: unknown) {
             console.error('Delete product error:', error);
             const message = error instanceof Error ? error.message : 'Failed to delete product';
@@ -277,10 +259,7 @@ export const createVariation = createServerFn({ method: 'POST' })
     .inputValidator((input: unknown) => createVariationSchema.parse(input))
     .handler(async ({ data }) => {
         try {
-            const { PrismaClient } = await import('@prisma/client');
-            const prisma = new PrismaClient();
-
-            try {
+            const prisma = await getPrisma();
                 const variation = await prisma.variation.create({
                     data: {
                         productId: data.productId,
@@ -298,9 +277,6 @@ export const createVariation = createServerFn({ method: 'POST' })
                 });
 
                 return { success: true, data: variation };
-            } finally {
-                await prisma.$disconnect();
-            }
         } catch (error: unknown) {
             console.error('Create variation error:', error);
             const message = error instanceof Error ? error.message : 'Failed to create variation';
@@ -319,10 +295,7 @@ export const updateVariation = createServerFn({ method: 'POST' })
     .inputValidator((input: unknown) => updateVariationSchema.parse(input))
     .handler(async ({ data }) => {
         try {
-            const { PrismaClient } = await import('@prisma/client');
-            const prisma = new PrismaClient();
-
-            try {
+            const prisma = await getPrisma();
                 // Build update data with only provided fields
                 const updateData: Record<string, unknown> = {};
                 if (data.colorName !== undefined) updateData.colorName = data.colorName;
@@ -368,9 +341,6 @@ export const updateVariation = createServerFn({ method: 'POST' })
                 }
 
                 return { success: true, data: variation };
-            } finally {
-                await prisma.$disconnect();
-            }
         } catch (error: unknown) {
             console.error('Update variation error:', error);
             const message = error instanceof Error ? error.message : 'Failed to update variation';
@@ -393,10 +363,7 @@ export const createSku = createServerFn({ method: 'POST' })
     .inputValidator((input: unknown) => createSkuSchema.parse(input))
     .handler(async ({ data }) => {
         try {
-            const { PrismaClient } = await import('@prisma/client');
-            const prisma = new PrismaClient();
-
-            try {
+            const prisma = await getPrisma();
                 const sku = await prisma.sku.create({
                     data: {
                         variationId: data.variationId,
@@ -418,9 +385,6 @@ export const createSku = createServerFn({ method: 'POST' })
                 });
 
                 return { success: true, data: sku };
-            } finally {
-                await prisma.$disconnect();
-            }
         } catch (error: unknown) {
             console.error('Create SKU error:', error);
             const message = error instanceof Error ? error.message : 'Failed to create SKU';
@@ -438,10 +402,7 @@ export const updateSku = createServerFn({ method: 'POST' })
     .inputValidator((input: unknown) => updateSkuSchema.parse(input))
     .handler(async ({ data }) => {
         try {
-            const { PrismaClient } = await import('@prisma/client');
-            const prisma = new PrismaClient();
-
-            try {
+            const prisma = await getPrisma();
                 // Build update data with only provided fields
                 const updateData: Record<string, unknown> = {};
                 if (data.fabricConsumption !== undefined) updateData.fabricConsumption = data.fabricConsumption;
@@ -468,9 +429,6 @@ export const updateSku = createServerFn({ method: 'POST' })
                 });
 
                 return { success: true, data: sku };
-            } finally {
-                await prisma.$disconnect();
-            }
         } catch (error: unknown) {
             console.error('Update SKU error:', error);
             const message = error instanceof Error ? error.message : 'Failed to update SKU';
@@ -498,19 +456,13 @@ export const updateStyleCode = createServerFn({ method: 'POST' })
     .inputValidator((input: unknown) => updateStyleCodeSchema.parse(input))
     .handler(async ({ data }) => {
         try {
-            const { PrismaClient } = await import('@prisma/client');
-            const prisma = new PrismaClient();
-
-            try {
+            const prisma = await getPrisma();
                 const product = await prisma.product.update({
                     where: { id: data.id },
                     data: { styleCode: data.styleCode },
                 });
 
                 return { success: true as const, data: { id: product.id, styleCode: product.styleCode } };
-            } finally {
-                await prisma.$disconnect();
-            }
         } catch (error: unknown) {
             console.error('Update style code error:', error);
             const message = error instanceof Error ? error.message : 'Failed to update style code';
@@ -541,10 +493,7 @@ export const importStyleCodes = createServerFn({ method: 'POST' })
     .inputValidator((input: unknown) => importStyleCodesSchema.parse(input))
     .handler(async ({ data }) => {
         try {
-            const { PrismaClient } = await import('@prisma/client');
-            const prisma = new PrismaClient();
-
-            try {
+            const prisma = await getPrisma();
                 const { rows } = data;
 
                 // Get unique barcodes to look up
@@ -632,9 +581,6 @@ export const importStyleCodes = createServerFn({ method: 'POST' })
                     duplicates: productsAlreadySet.size,
                     errors,
                 };
-            } finally {
-                await prisma.$disconnect();
-            }
         } catch (error: unknown) {
             console.error('Import style codes error:', error);
             const message = error instanceof Error ? error.message : 'Failed to import style codes';

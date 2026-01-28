@@ -12,6 +12,7 @@ import { createServerFn } from '@tanstack/react-start';
 import { getCookie } from '@tanstack/react-start/server';
 import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth';
+import { getPrisma } from '@coh/shared/services/db';
 
 // ============================================
 // INPUT SCHEMAS
@@ -280,10 +281,7 @@ export const getCatalogProducts = createServerFn({ method: 'GET' })
     .inputValidator((input: unknown) => getCatalogProductsSchema.parse(input ?? {}))
     .handler(async ({ data }): Promise<CatalogProductsResponse> => {
         try {
-            const { PrismaClient } = await import('@prisma/client');
-            const prisma = new PrismaClient();
-
-            try {
+            const prisma = await getPrisma();
                 const { gender, category, productId, status, search, limit, offset } = data;
 
                 // Build SKU filter using Prisma-compatible where clause
@@ -522,9 +520,6 @@ export const getCatalogProducts = createServerFn({ method: 'GET' })
                         hasMore: offset + items.length < totalCount,
                     },
                 };
-            } finally {
-                await prisma.$disconnect();
-            }
         } catch (error: unknown) {
             console.error('getCatalogProducts error:', error);
             throw error;
@@ -541,10 +536,7 @@ export const getCatalogCategories = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .handler(async (): Promise<CatalogFiltersResponse> => {
         try {
-            const { PrismaClient } = await import('@prisma/client');
-            const prisma = new PrismaClient();
-
-            try {
+            const prisma = await getPrisma();
                 const [products, fabricTypes, fabrics] = await Promise.all([
                     prisma.product.findMany({
                         where: { isActive: true },
@@ -604,9 +596,6 @@ export const getCatalogCategories = createServerFn({ method: 'GET' })
                         displayName: f.name,
                     })),
                 };
-            } finally {
-                await prisma.$disconnect();
-            }
         } catch (error: unknown) {
             console.error('getCatalogCategories error:', error);
             throw error;
@@ -624,10 +613,7 @@ export const updateCatalogProduct = createServerFn({ method: 'POST' })
     .inputValidator((input: unknown) => updateCatalogProductSchema.parse(input))
     .handler(async ({ data }): Promise<CatalogMutationResponse> => {
         try {
-            const { PrismaClient } = await import('@prisma/client');
-            const prisma = new PrismaClient();
-
-            try {
+            const prisma = await getPrisma();
                 const updateData: Record<string, unknown> = {};
                 if (data.mrp !== undefined) updateData.mrp = data.mrp;
                 if (data.targetStockQty !== undefined) updateData.targetStockQty = data.targetStockQty;
@@ -648,9 +634,6 @@ export const updateCatalogProduct = createServerFn({ method: 'POST' })
                 });
 
                 return { success: true, data: sku };
-            } finally {
-                await prisma.$disconnect();
-            }
         } catch (error: unknown) {
             console.error('updateCatalogProduct error:', error);
             const message = error instanceof Error ? error.message : 'Failed to update catalog product';

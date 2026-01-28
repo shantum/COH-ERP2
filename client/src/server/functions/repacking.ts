@@ -11,6 +11,7 @@
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth';
+import { getPrisma } from '@coh/shared/services/db';
 
 // ============================================
 // INPUT SCHEMAS
@@ -74,25 +75,6 @@ export interface QueueResponse {
         offset: number;
         hasMore: boolean;
     };
-}
-
-// ============================================
-// HELPER: LAZY DATABASE IMPORTS
-// ============================================
-
-/**
- * Lazy import Prisma client to prevent bundling server code into client
- */
-async function getPrisma() {
-    const { PrismaClient } = await import('@prisma/client');
-    const globalForPrisma = globalThis as unknown as {
-        prisma: InstanceType<typeof PrismaClient> | undefined;
-    };
-    const prisma = globalForPrisma.prisma ?? new PrismaClient();
-    if (process.env.NODE_ENV !== 'production') {
-        globalForPrisma.prisma = prisma;
-    }
-    return prisma;
 }
 
 // ============================================

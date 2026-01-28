@@ -11,35 +11,8 @@
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth';
-
-// ============================================
-// IST DATE UTILITIES FOR REPORTS
-// ============================================
-
-/**
- * Get IST midnight as UTC Date for database queries.
- * IST is UTC+5:30, so IST midnight = UTC previous day 18:30.
- * @param daysOffset - Days from today (0 = today, -1 = yesterday, etc.)
- */
-function getISTMidnightAsUTC(daysOffset = 0): Date {
-    const nowUTC = new Date();
-    const istOffset = 5.5 * 60 * 60 * 1000; // 5:30 in milliseconds
-    const nowIST = new Date(nowUTC.getTime() + istOffset);
-    const istMidnight = new Date(nowIST.getFullYear(), nowIST.getMonth(), nowIST.getDate() + daysOffset);
-    return new Date(istMidnight.getTime() - istOffset);
-}
-
-/**
- * Get the first day of a month in IST as UTC Date.
- * @param monthOffset - Months from current (0 = this month, -1 = last month)
- */
-function getISTMonthStartAsUTC(monthOffset = 0): Date {
-    const nowUTC = new Date();
-    const istOffset = 5.5 * 60 * 60 * 1000;
-    const nowIST = new Date(nowUTC.getTime() + istOffset);
-    const istMonthStart = new Date(nowIST.getFullYear(), nowIST.getMonth() + monthOffset, 1);
-    return new Date(istMonthStart.getTime() - istOffset);
-}
+import { getPrisma } from '@coh/shared/services/db';
+import { getISTMidnightAsUTC, getISTMonthStartAsUTC } from '@coh/shared';
 
 // ============================================
 // INPUT SCHEMAS
@@ -135,25 +108,6 @@ export interface DashboardCustomerData {
 export interface DashboardTopCustomersResponse {
     period: string;
     data: DashboardCustomerData[];
-}
-
-// ============================================
-// HELPER: LAZY DATABASE IMPORTS
-// ============================================
-
-/**
- * Lazy import Prisma client to prevent bundling server code into client
- */
-async function getPrisma() {
-    const { PrismaClient } = await import('@prisma/client');
-    const globalForPrisma = globalThis as unknown as {
-        prisma: InstanceType<typeof PrismaClient> | undefined;
-    };
-    const prisma = globalForPrisma.prisma ?? new PrismaClient();
-    if (process.env.NODE_ENV !== 'production') {
-        globalForPrisma.prisma = prisma;
-    }
-    return prisma;
 }
 
 // ============================================

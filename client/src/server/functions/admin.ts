@@ -18,6 +18,7 @@ import { createServerFn } from '@tanstack/react-start';
 import { getCookie } from '@tanstack/react-start/server';
 import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth';
+import { getPrisma } from '@coh/shared/services/db';
 
 
 /**
@@ -179,22 +180,6 @@ export interface BackgroundJob {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     stats?: any;
     note?: string;
-}
-
-// ============================================
-// PRISMA HELPER
-// ============================================
-
-async function getPrisma() {
-    const { PrismaClient } = await import('@prisma/client');
-    const globalForPrisma = globalThis as unknown as {
-        prisma: InstanceType<typeof PrismaClient> | undefined;
-    };
-    const prisma = globalForPrisma.prisma ?? new PrismaClient();
-    if (process.env.NODE_ENV !== 'production') {
-        globalForPrisma.prisma = prisma;
-    }
-    return prisma;
 }
 
 // ============================================

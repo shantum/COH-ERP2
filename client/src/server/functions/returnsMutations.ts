@@ -16,6 +16,7 @@ import { createServerFn } from '@tanstack/react-start';
 import { getCookie } from '@tanstack/react-start/server';
 import { z } from 'zod';
 import { authMiddleware, type AuthUser } from '../middleware/auth';
+import { getPrisma } from '@coh/shared/services/db';
 import type { PrismaClient } from '@prisma/client';
 
 // ============================================
@@ -127,13 +128,7 @@ export const updateReturnStatus = createServerFn({ method: 'POST' })
             const { id, newStatus, notes } = data;
             const user = context.user;
 
-            // Dynamic Prisma import to prevent bundling into client
-            const { PrismaClient } = await import('@prisma/client');
-            const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
-            const prisma = globalForPrisma.prisma ?? new PrismaClient();
-            if (process.env.NODE_ENV !== 'production') {
-                globalForPrisma.prisma = prisma;
-            }
+            const prisma = await getPrisma();
 
             // Fetch current return request
             const returnRequest = await prisma.returnRequest.findUnique({
@@ -216,12 +211,7 @@ export const createReturnRequest = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => createReturnRequestInputSchema.parse(input))
     .handler(async ({ data }) => {
-        const { PrismaClient } = await import('@prisma/client');
-        const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
-        const prisma = globalForPrisma.prisma ?? new PrismaClient();
-        if (process.env.NODE_ENV !== 'production') {
-            globalForPrisma.prisma = prisma;
-        }
+        const prisma = await getPrisma();
 
         // Get order to extract customer
         const order = await prisma.order.findUnique({
@@ -280,12 +270,7 @@ export const updateReturnRequest = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => updateReturnRequestInputSchema.parse(input))
     .handler(async ({ data }) => {
-        const { PrismaClient } = await import('@prisma/client');
-        const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
-        const prisma = globalForPrisma.prisma ?? new PrismaClient();
-        if (process.env.NODE_ENV !== 'production') {
-            globalForPrisma.prisma = prisma;
-        }
+        const prisma = await getPrisma();
 
         const { id, ...updateData } = data;
 
@@ -308,12 +293,7 @@ export const deleteReturnRequest = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => deleteReturnRequestInputSchema.parse(input))
     .handler(async ({ data }) => {
-        const { PrismaClient } = await import('@prisma/client');
-        const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
-        const prisma = globalForPrisma.prisma ?? new PrismaClient();
-        if (process.env.NODE_ENV !== 'production') {
-            globalForPrisma.prisma = prisma;
-        }
+        const prisma = await getPrisma();
 
         await prisma.returnRequest.delete({
             where: { id: data.id },
@@ -333,12 +313,7 @@ export const markReverseReceived = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => markReverseReceivedInputSchema.parse(input))
     .handler(async ({ data }) => {
-        const { PrismaClient } = await import('@prisma/client');
-        const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
-        const prisma = globalForPrisma.prisma ?? new PrismaClient();
-        if (process.env.NODE_ENV !== 'production') {
-            globalForPrisma.prisma = prisma;
-        }
+        const prisma = await getPrisma();
 
         const returnRequest = await prisma.returnRequest.update({
             where: { id: data.id },
@@ -358,12 +333,7 @@ export const unmarkReverseReceived = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => markReverseReceivedInputSchema.parse(input))
     .handler(async ({ data }) => {
-        const { PrismaClient } = await import('@prisma/client');
-        const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
-        const prisma = globalForPrisma.prisma ?? new PrismaClient();
-        if (process.env.NODE_ENV !== 'production') {
-            globalForPrisma.prisma = prisma;
-        }
+        const prisma = await getPrisma();
 
         const returnRequest = await prisma.returnRequest.update({
             where: { id: data.id },
@@ -383,12 +353,7 @@ export const markForwardDelivered = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => markReverseReceivedInputSchema.parse(input))
     .handler(async ({ data }) => {
-        const { PrismaClient } = await import('@prisma/client');
-        const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
-        const prisma = globalForPrisma.prisma ?? new PrismaClient();
-        if (process.env.NODE_ENV !== 'production') {
-            globalForPrisma.prisma = prisma;
-        }
+        const prisma = await getPrisma();
 
         const returnRequest = await prisma.returnRequest.update({
             where: { id: data.id },
@@ -408,12 +373,7 @@ export const unmarkForwardDelivered = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => markReverseReceivedInputSchema.parse(input))
     .handler(async ({ data }) => {
-        const { PrismaClient } = await import('@prisma/client');
-        const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
-        const prisma = globalForPrisma.prisma ?? new PrismaClient();
-        if (process.env.NODE_ENV !== 'production') {
-            globalForPrisma.prisma = prisma;
-        }
+        const prisma = await getPrisma();
 
         const returnRequest = await prisma.returnRequest.update({
             where: { id: data.id },
@@ -439,12 +399,7 @@ export const receiveReturnItem = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => receiveReturnItemInputSchema.parse(input))
     .handler(async ({ data }) => {
-        const { PrismaClient } = await import('@prisma/client');
-        const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
-        const prisma = globalForPrisma.prisma ?? new PrismaClient();
-        if (process.env.NODE_ENV !== 'production') {
-            globalForPrisma.prisma = prisma;
-        }
+        const prisma = await getPrisma();
 
         // Get return line
         const returnLine = await prisma.returnRequestLine.findUnique({
@@ -539,12 +494,7 @@ export const addToRepackingQueue = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => addToQueueInputSchema.parse(input))
     .handler(async ({ data }): Promise<{ success: boolean; queueItem: RepackingQueueItemResult }> => {
-        const { PrismaClient } = await import('@prisma/client');
-        const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
-        const prisma = globalForPrisma.prisma ?? new PrismaClient();
-        if (process.env.NODE_ENV !== 'production') {
-            globalForPrisma.prisma = prisma;
-        }
+        const prisma = await getPrisma();
 
         let skuId = data.skuId;
 
@@ -615,12 +565,7 @@ export const updateRepackingQueueItem = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => updateQueueItemInputSchema.parse(input))
     .handler(async ({ data }) => {
-        const { PrismaClient } = await import('@prisma/client');
-        const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
-        const prisma = globalForPrisma.prisma ?? new PrismaClient();
-        if (process.env.NODE_ENV !== 'production') {
-            globalForPrisma.prisma = prisma;
-        }
+        const prisma = await getPrisma();
 
         const { id, ...updateData } = data;
 
@@ -657,12 +602,7 @@ export const deleteRepackingQueueItem = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => deleteQueueItemInputSchema.parse(input))
     .handler(async ({ data }) => {
-        const { PrismaClient } = await import('@prisma/client');
-        const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
-        const prisma = globalForPrisma.prisma ?? new PrismaClient();
-        if (process.env.NODE_ENV !== 'production') {
-            globalForPrisma.prisma = prisma;
-        }
+        const prisma = await getPrisma();
 
         // Verify item exists
         const existing = await prisma.repackingQueueItem.findUnique({
@@ -688,12 +628,7 @@ export const processRepackingQueueItem = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => processRepackingItemInputSchema.parse(input))
     .handler(async ({ data, context }: { data: z.infer<typeof processRepackingItemInputSchema>; context: { user: AuthUser } }) => {
-        const { PrismaClient } = await import('@prisma/client');
-        const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
-        const prisma = globalForPrisma.prisma ?? new PrismaClient();
-        if (process.env.NODE_ENV !== 'production') {
-            globalForPrisma.prisma = prisma;
-        }
+        const prisma = await getPrisma();
 
         const { itemId, action, writeOffReason, qcComments, notes } = data;
 
@@ -835,17 +770,6 @@ import {
     type ReturnResult,
 } from '@coh/shared/errors';
 
-// Helper to get Prisma instance (reduces duplication)
-async function getPrismaInstance(): Promise<PrismaClient> {
-    const { PrismaClient: PClient } = await import('@prisma/client');
-    const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
-    const prisma = globalForPrisma.prisma ?? new PClient();
-    if (process.env.NODE_ENV !== 'production') {
-        globalForPrisma.prisma = prisma;
-    }
-    return prisma;
-}
-
 /**
  * Generate the next batch number for an order
  * Format: "{orderNumber}/{sequence}" e.g., "64168/1", "64168/2"
@@ -880,7 +804,7 @@ export const initiateLineReturn = createServerFn({ method: 'POST' })
     .handler(async ({ data, context }: { data: InitiateReturnBatchInput; context: { user: AuthUser } }): Promise<ReturnResult<{ batchNumber: string; lineCount: number; orderLineIds: string[] }>> => {
         console.log('[initiateLineReturn] Handler started with data:', JSON.stringify(data, null, 2));
         try {
-        const prisma = await getPrismaInstance();
+        const prisma = await getPrisma();
         const { lines, returnReasonCategory, returnReasonDetail, returnResolution, returnNotes, exchangeSkuId, pickupType } = data;
 
         // Fetch all lines with order and sku info
@@ -1016,7 +940,7 @@ export const scheduleReturnPickup = createServerFn({ method: 'POST' })
         awbNumber?: string;
         courier?: string;
     }>> => {
-        const prisma = await getPrismaInstance();
+        const prisma = await getPrisma();
         const { orderLineId, pickupType, courier, awbNumber, scheduledAt, scheduleWithIthink } = data;
 
         const line = await prisma.orderLine.findUnique({
@@ -1129,7 +1053,7 @@ export const markReturnInTransit = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown): MarkReturnInTransitInput => MarkReturnInTransitInputSchema.parse(input))
     .handler(async ({ data }: { data: MarkReturnInTransitInput }): Promise<ReturnResult<{ orderLineId: string }>> => {
-        const prisma = await getPrismaInstance();
+        const prisma = await getPrisma();
         const { orderLineId, awbNumber, courier } = data;
 
         const line = await prisma.orderLine.findUnique({
@@ -1171,7 +1095,7 @@ export const receiveLineReturn = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown): ReceiveReturnInput => ReceiveReturnInputSchema.parse(input))
     .handler(async ({ data, context }: { data: ReceiveReturnInput; context: { user: AuthUser } }): Promise<ReturnResult<{ orderLineId: string }>> => {
-        const prisma = await getPrismaInstance();
+        const prisma = await getPrisma();
         const { orderLineId, condition, conditionNotes } = data;
 
         const line = await prisma.orderLine.findUnique({
@@ -1234,7 +1158,7 @@ export const processLineReturnRefund = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown): ProcessReturnRefundInput => ProcessReturnRefundInputSchema.parse(input))
     .handler(async ({ data }: { data: ProcessReturnRefundInput }): Promise<ReturnResult<{ orderLineId: string; netAmount: number }>> => {
-        const prisma = await getPrismaInstance();
+        const prisma = await getPrisma();
         const { orderLineId, grossAmount, discountClawback, deductions, deductionNotes, refundMethod } = data;
 
         const line = await prisma.orderLine.findUnique({
@@ -1280,7 +1204,7 @@ export const sendReturnRefundLink = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => z.object({ orderLineId: z.string().uuid() }).parse(input))
     .handler(async ({ data }: { data: { orderLineId: string } }): Promise<ReturnResult<{ orderLineId: string; linkId: string }>> => {
-        const prisma = await getPrismaInstance();
+        const prisma = await getPrisma();
         const { orderLineId } = data;
 
         const line = await prisma.orderLine.findUnique({
@@ -1321,7 +1245,7 @@ export const completeLineReturnRefund = createServerFn({ method: 'POST' })
         reference: z.string().optional(),
     }).parse(input))
     .handler(async ({ data }: { data: { orderLineId: string; reference?: string } }) => {
-        const prisma = await getPrismaInstance();
+        const prisma = await getPrisma();
         const { orderLineId, reference } = data;
 
         const now = new Date();
@@ -1345,7 +1269,7 @@ export const completeLineReturn = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => z.object({ orderLineId: z.string().uuid() }).parse(input))
     .handler(async ({ data }: { data: { orderLineId: string } }): Promise<ReturnResult<{ orderLineId: string }>> => {
-        const prisma = await getPrismaInstance();
+        const prisma = await getPrisma();
         const { orderLineId } = data;
 
         const line = await prisma.orderLine.findUnique({
@@ -1397,7 +1321,7 @@ export const cancelLineReturn = createServerFn({ method: 'POST' })
         reason: z.string().optional(),
     }).parse(input))
     .handler(async ({ data, context }: { data: { orderLineId: string; reason?: string }; context: { user: AuthUser } }): Promise<ReturnResult<{ orderLineId: string }>> => {
-        const prisma = await getPrismaInstance();
+        const prisma = await getPrisma();
         const { orderLineId, reason } = data;
 
         const line = await prisma.orderLine.findUnique({
@@ -1456,7 +1380,7 @@ export const closeLineReturnManually = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown): CloseReturnManuallyInput => CloseReturnManuallyInputSchema.parse(input))
     .handler(async ({ data, context }: { data: CloseReturnManuallyInput; context: { user: AuthUser } }): Promise<ReturnResult<{ orderLineId: string }>> => {
-        const prisma = await getPrismaInstance();
+        const prisma = await getPrisma();
         const { orderLineId, reason } = data;
 
         await prisma.orderLine.update({
@@ -1481,7 +1405,7 @@ export const createExchangeOrder = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown): CreateExchangeOrderInput => CreateExchangeOrderInputSchema.parse(input))
     .handler(async ({ data }: { data: CreateExchangeOrderInput }): Promise<ReturnResult<{ exchangeOrderId: string; exchangeOrderNumber: string; priceDiff: number }>> => {
-        const prisma = await getPrismaInstance();
+        const prisma = await getPrisma();
         const { orderLineId, exchangeSkuId, exchangeQty } = data;
 
         // Get original order line with order details
@@ -1591,7 +1515,7 @@ export const updateReturnNotes = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown): UpdateReturnNotesInput => UpdateReturnNotesInputSchema.parse(input))
     .handler(async ({ data }: { data: UpdateReturnNotesInput }): Promise<ReturnResult<{ orderLineId: string }>> => {
-        const prisma = await getPrismaInstance();
+        const prisma = await getPrisma();
         const { orderLineId, returnNotes } = data;
 
         // Get order line

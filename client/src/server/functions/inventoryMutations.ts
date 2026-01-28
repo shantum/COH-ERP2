@@ -11,6 +11,7 @@
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth';
+import { getPrisma } from '@coh/shared/services/db';
 
 // ============================================
 // INPUT SCHEMAS
@@ -276,22 +277,6 @@ const TXN_REASON = {
     RTO_RECEIVED: 'rto_received',
     ADJUSTMENT: 'adjustment',
 } as const;
-
-// ============================================
-// PRISMA HELPER
-// ============================================
-
-async function getPrisma() {
-    const { PrismaClient } = await import('@prisma/client');
-    const globalForPrisma = globalThis as unknown as {
-        prisma: InstanceType<typeof PrismaClient> | undefined;
-    };
-    const prisma = globalForPrisma.prisma ?? new PrismaClient();
-    if (process.env.NODE_ENV !== 'production') {
-        globalForPrisma.prisma = prisma;
-    }
-    return prisma;
-}
 
 /** Type alias for Prisma client instance or transaction */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

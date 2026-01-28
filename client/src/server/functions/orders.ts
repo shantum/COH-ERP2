@@ -11,6 +11,8 @@
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
 import type { Prisma } from '@prisma/client';
+import { getPrisma } from '@coh/shared/services/db';
+import { getISTMidnightAsUTC, getISTMonthStartAsUTC, getISTMonthEndAsUTC } from '@coh/shared';
 
 // ============================================
 // INPUT VALIDATION SCHEMAS
@@ -638,17 +640,7 @@ export const getOrders = createServerFn({ method: 'GET' })
         console.log('[Server Function] getOrders called with:', data);
 
         try {
-            // Dynamic import to prevent bundling Prisma into client
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const { PrismaClient } = (await import('@prisma/client')) as any;
-
-            // Use global singleton pattern
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const globalForPrisma = globalThis as any;
-            const prisma = globalForPrisma.prisma ?? new PrismaClient();
-            if (process.env.NODE_ENV !== 'production') {
-                globalForPrisma.prisma = prisma;
-            }
+            const prisma = await getPrisma();
 
             const { view, page, limit, search, days, sortBy } = data;
             const offset = (page - 1) * limit;
@@ -775,17 +767,7 @@ export const getOrderViewCounts = createServerFn({ method: 'GET' })
         console.log('[Server Function] getOrderViewCounts called');
 
         try {
-            // Dynamic import to prevent bundling Prisma into client
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const { PrismaClient } = (await import('@prisma/client')) as any;
-
-            // Use global singleton pattern
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const globalForPrisma = globalThis as any;
-            const prisma = globalForPrisma.prisma ?? new PrismaClient();
-            if (process.env.NODE_ENV !== 'production') {
-                globalForPrisma.prisma = prisma;
-            }
+            const prisma = await getPrisma();
 
             // Build where clauses for each view
             const openWhere = {
@@ -902,17 +884,7 @@ export const searchAllOrders = createServerFn({ method: 'GET' })
         console.log('[Server Function] searchAllOrders called with:', data);
 
         try {
-            // Dynamic import to prevent bundling Prisma into client
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const { PrismaClient } = (await import('@prisma/client')) as any;
-
-            // Use global singleton pattern
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const globalForPrisma = globalThis as any;
-            const prisma = globalForPrisma.prisma ?? new PrismaClient();
-            if (process.env.NODE_ENV !== 'production') {
-                globalForPrisma.prisma = prisma;
-            }
+            const prisma = await getPrisma();
 
             const { q, limit } = data;
             const searchTerm = q.trim();
@@ -1236,17 +1208,7 @@ export const searchUnifiedOrders = createServerFn({ method: 'GET' })
         console.log('[Server Function] searchUnifiedOrders called with:', data);
 
         try {
-            // Dynamic import to prevent bundling Prisma into client
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const { PrismaClient } = (await import('@prisma/client')) as any;
-
-            // Use global singleton pattern
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const globalForPrisma = globalThis as any;
-            const prisma = globalForPrisma.prisma ?? new PrismaClient();
-            if (process.env.NODE_ENV !== 'production') {
-                globalForPrisma.prisma = prisma;
-            }
+            const prisma = await getPrisma();
 
             const { q, page, pageSize } = data;
             const offset = (page - 1) * pageSize;
@@ -1355,17 +1317,7 @@ export const getOrderById = createServerFn({ method: 'GET' })
     .inputValidator((input: unknown) => getOrderByIdInputSchema.parse(input))
     .handler(async ({ data }): Promise<OrderDetail> => {
         try {
-            // Dynamic import to prevent bundling Prisma into client
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const { PrismaClient } = (await import('@prisma/client')) as any;
-
-            // Use global singleton pattern
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const globalForPrisma = globalThis as any;
-            const prisma = globalForPrisma.prisma ?? new PrismaClient();
-            if (process.env.NODE_ENV !== 'production') {
-                globalForPrisma.prisma = prisma;
-            }
+            const prisma = await getPrisma();
 
             const order = await prisma.order.findUnique({
                 where: { id: data.id },
@@ -1577,60 +1529,6 @@ export interface OrdersAnalyticsResponse {
 // ORDERS ANALYTICS - Server Function
 // ============================================
 
-// ============================================
-// IST DATE UTILITIES FOR ANALYTICS
-// ============================================
-
-/**
- * Get IST midnight as UTC Date for database queries.
- * IST is UTC+5:30, so IST midnight = UTC previous day 18:30.
- * @param daysOffset - Days from today (0 = today, -1 = yesterday, etc.)
- */
-function getISTMidnightAsUTC(daysOffset = 0): Date {
-    // Get current time in IST by adding 5:30 to UTC
-    const nowUTC = new Date();
-    const istOffset = 5.5 * 60 * 60 * 1000; // 5:30 in milliseconds
-    const nowIST = new Date(nowUTC.getTime() + istOffset);
-
-    // Get IST midnight for the target day
-    const istMidnight = new Date(nowIST.getFullYear(), nowIST.getMonth(), nowIST.getDate() + daysOffset);
-
-    // Convert IST midnight back to UTC (subtract 5:30)
-    return new Date(istMidnight.getTime() - istOffset);
-}
-
-/**
- * Get the first day of a month in IST as UTC Date.
- * @param monthOffset - Months from current (0 = this month, -1 = last month)
- */
-function getISTMonthStartAsUTC(monthOffset = 0): Date {
-    const nowUTC = new Date();
-    const istOffset = 5.5 * 60 * 60 * 1000;
-    const nowIST = new Date(nowUTC.getTime() + istOffset);
-
-    // Get first day of target month in IST
-    const istMonthStart = new Date(nowIST.getFullYear(), nowIST.getMonth() + monthOffset, 1);
-
-    // Convert to UTC
-    return new Date(istMonthStart.getTime() - istOffset);
-}
-
-/**
- * Get the last moment of a month in IST as UTC Date.
- * @param monthOffset - Months from current (0 = this month, -1 = last month)
- */
-function getISTMonthEndAsUTC(monthOffset = 0): Date {
-    const nowUTC = new Date();
-    const istOffset = 5.5 * 60 * 60 * 1000;
-    const nowIST = new Date(nowUTC.getTime() + istOffset);
-
-    // Get last moment of target month in IST (day 0 of next month = last day of target month)
-    const istMonthEnd = new Date(nowIST.getFullYear(), nowIST.getMonth() + monthOffset + 1, 0, 23, 59, 59, 999);
-
-    // Convert to UTC
-    return new Date(istMonthEnd.getTime() - istOffset);
-}
-
 /**
  * Server Function: Get orders analytics
  *
@@ -1642,17 +1540,7 @@ export const getOrdersAnalytics = createServerFn({ method: 'GET' })
         console.log('[Server Function] getOrdersAnalytics called');
 
         try {
-            // Dynamic import to prevent bundling Prisma into client
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const { PrismaClient } = (await import('@prisma/client')) as any;
-
-            // Use global singleton pattern
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const globalForPrisma = globalThis as any;
-            const prisma = globalForPrisma.prisma ?? new PrismaClient();
-            if (process.env.NODE_ENV !== 'production') {
-                globalForPrisma.prisma = prisma;
-            }
+            const prisma = await getPrisma();
 
             // Calculate date ranges in IST timezone for user-facing analytics
             // All dates are converted to UTC for database queries

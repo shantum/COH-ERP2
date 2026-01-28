@@ -10,7 +10,8 @@
 
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
-import type { Prisma, PrismaClient } from '@prisma/client';
+import type { Prisma } from '@prisma/client';
+import { getPrisma } from '@coh/shared/services/db';
 
 // Input validation schema
 const customersListInputSchema = z.object({
@@ -67,15 +68,7 @@ export const getCustomersList = createServerFn({ method: 'GET' })
         console.log('[Server Function] getCustomersList called with:', data);
 
         try {
-            // Dynamic import to prevent bundling Prisma into client
-            const { PrismaClient } = await import('@prisma/client');
-
-            // Use global singleton pattern
-            const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
-            const prisma = globalForPrisma.prisma ?? new PrismaClient();
-            if (process.env.NODE_ENV !== 'production') {
-                globalForPrisma.prisma = prisma;
-            }
+            const prisma = await getPrisma();
 
             // Build where clause
             const where: Prisma.CustomerWhereInput = {};
@@ -229,15 +222,7 @@ export interface CustomerSearchItem {
 export const searchCustomers = createServerFn({ method: 'GET' })
     .inputValidator((input: unknown) => searchCustomersInputSchema.parse(input))
     .handler(async ({ data }): Promise<CustomerSearchItem[]> => {
-        // Dynamic import to prevent bundling Prisma into client
-        const { PrismaClient } = await import('@prisma/client');
-
-        // Use global singleton pattern
-        const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
-        const prisma = globalForPrisma.prisma ?? new PrismaClient();
-        if (process.env.NODE_ENV !== 'production') {
-            globalForPrisma.prisma = prisma;
-        }
+        const prisma = await getPrisma();
 
         // Build where clause
         const where: Prisma.CustomerWhereInput = {};
@@ -301,15 +286,7 @@ export interface CustomerAddress {
 export const getCustomerAddresses = createServerFn({ method: 'GET' })
     .inputValidator((input: unknown) => getCustomerAddressesInputSchema.parse(input))
     .handler(async ({ data }): Promise<CustomerAddress[]> => {
-        // Dynamic import to prevent bundling Prisma into client
-        const { PrismaClient } = await import('@prisma/client');
-
-        // Use global singleton pattern
-        const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
-        const prisma = globalForPrisma.prisma ?? new PrismaClient();
-        if (process.env.NODE_ENV !== 'production') {
-            globalForPrisma.prisma = prisma;
-        }
+        const prisma = await getPrisma();
 
         // Get orders with shipping addresses for this customer
         const orders = await prisma.order.findMany({

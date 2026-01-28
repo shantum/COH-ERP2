@@ -11,6 +11,7 @@
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth';
+import { getPrisma } from '@coh/shared/services/db';
 import type {
     Material,
     Fabric,
@@ -219,10 +220,8 @@ export const createMaterial = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => createMaterialSchema.parse(input))
     .handler(async ({ data }): Promise<CreateMaterialResult> => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
-
         try {
+            const prisma = await getPrisma();
             const material = await prisma.material.create({
                 data: {
                     name: data.name,
@@ -240,8 +239,6 @@ export const createMaterial = createServerFn({ method: 'POST' })
                 throw new Error(`Material "${data.name}" already exists`);
             }
             throw error;
-        } finally {
-            await prisma.$disconnect();
         }
     });
 
@@ -252,10 +249,8 @@ export const updateMaterial = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => updateMaterialSchema.parse(input))
     .handler(async ({ data }): Promise<UpdateMaterialResult> => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
-
         try {
+            const prisma = await getPrisma();
             const material = await prisma.material.update({
                 where: { id: data.id },
                 data: {
@@ -279,8 +274,6 @@ export const updateMaterial = createServerFn({ method: 'POST' })
                 }
             }
             throw error;
-        } finally {
-            await prisma.$disconnect();
         }
     });
 
@@ -292,10 +285,8 @@ export const deleteMaterial = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => deleteMaterialSchema.parse(input))
     .handler(async ({ data }): Promise<DeleteMaterialResult> => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
-
         try {
+            const prisma = await getPrisma();
             await prisma.material.delete({
                 where: { id: data.id },
             });
@@ -314,8 +305,6 @@ export const deleteMaterial = createServerFn({ method: 'POST' })
                 }
             }
             throw error;
-        } finally {
-            await prisma.$disconnect();
         }
     });
 
@@ -330,10 +319,8 @@ export const createFabric = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => createFabricSchema.parse(input))
     .handler(async ({ data }): Promise<CreateFabricResult> => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
-
         try {
+            const prisma = await getPrisma();
             // Verify material exists
             const material = await prisma.material.findUnique({
                 where: { id: data.materialId },
@@ -376,8 +363,6 @@ export const createFabric = createServerFn({ method: 'POST' })
                 throw new Error(`Fabric "${data.name}" already exists under this material`);
             }
             throw error;
-        } finally {
-            await prisma.$disconnect();
         }
     });
 
@@ -388,10 +373,8 @@ export const updateFabric = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => updateFabricSchema.parse(input))
     .handler(async ({ data }): Promise<UpdateFabricResult> => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
-
         try {
+            const prisma = await getPrisma();
             const fabric = await prisma.fabric.update({
                 where: { id: data.id },
                 data: {
@@ -427,8 +410,6 @@ export const updateFabric = createServerFn({ method: 'POST' })
                 }
             }
             throw error;
-        } finally {
-            await prisma.$disconnect();
         }
     });
 
@@ -440,10 +421,8 @@ export const deleteFabric = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => deleteFabricSchema.parse(input))
     .handler(async ({ data }): Promise<DeleteFabricResult> => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
-
         try {
+            const prisma = await getPrisma();
             await prisma.fabric.delete({
                 where: { id: data.id },
             });
@@ -462,8 +441,6 @@ export const deleteFabric = createServerFn({ method: 'POST' })
                 }
             }
             throw error;
-        } finally {
-            await prisma.$disconnect();
         }
     });
 
@@ -478,10 +455,8 @@ export const createColour = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => createColourSchema.parse(input))
     .handler(async ({ data }): Promise<CreateColourResult> => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
-
         try {
+            const prisma = await getPrisma();
             // Verify fabric exists
             const fabric = await prisma.fabric.findUnique({
                 where: { id: data.fabricId },
@@ -522,8 +497,6 @@ export const createColour = createServerFn({ method: 'POST' })
                 throw new Error(`Colour "${data.colourName}" already exists for this fabric`);
             }
             throw error;
-        } finally {
-            await prisma.$disconnect();
         }
     });
 
@@ -534,10 +507,8 @@ export const updateColour = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => updateColourSchema.parse(input))
     .handler(async ({ data }): Promise<UpdateColourResult> => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
-
         try {
+            const prisma = await getPrisma();
             const colour = await prisma.fabricColour.update({
                 where: { id: data.id },
                 data: {
@@ -574,8 +545,6 @@ export const updateColour = createServerFn({ method: 'POST' })
                 }
             }
             throw error;
-        } finally {
-            await prisma.$disconnect();
         }
     });
 
@@ -587,10 +556,8 @@ export const deleteColour = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => deleteColourSchema.parse(input))
     .handler(async ({ data }): Promise<DeleteColourResult> => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
-
         try {
+            const prisma = await getPrisma();
             await prisma.fabricColour.delete({
                 where: { id: data.id },
             });
@@ -609,8 +576,6 @@ export const deleteColour = createServerFn({ method: 'POST' })
                 }
             }
             throw error;
-        } finally {
-            await prisma.$disconnect();
         }
     });
 
@@ -655,10 +620,8 @@ export const createTrim = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => createTrimSchema.parse(input))
     .handler(async ({ data }): Promise<CreateTrimResult> => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
-
         try {
+            const prisma = await getPrisma();
             const trim = await prisma.trimItem.create({
                 data: {
                     code: data.code,
@@ -685,8 +648,6 @@ export const createTrim = createServerFn({ method: 'POST' })
                 throw new Error(`Trim with code "${data.code}" already exists`);
             }
             throw error;
-        } finally {
-            await prisma.$disconnect();
         }
     });
 
@@ -697,10 +658,8 @@ export const updateTrim = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => updateTrimSchema.parse(input))
     .handler(async ({ data }): Promise<UpdateTrimResult> => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
-
         try {
+            const prisma = await getPrisma();
             // Build update data object - only include fields that were provided
             const updateData: Record<string, unknown> = {};
             if (data.code !== undefined) updateData.code = data.code;
@@ -736,8 +695,6 @@ export const updateTrim = createServerFn({ method: 'POST' })
                 }
             }
             throw error;
-        } finally {
-            await prisma.$disconnect();
         }
     });
 
@@ -748,10 +705,8 @@ export const deleteTrim = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => deleteTrimSchema.parse(input))
     .handler(async ({ data }): Promise<DeleteTrimResult> => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
-
         try {
+            const prisma = await getPrisma();
             await prisma.trimItem.delete({
                 where: { id: data.id },
             });
@@ -770,8 +725,6 @@ export const deleteTrim = createServerFn({ method: 'POST' })
                 }
             }
             throw error;
-        } finally {
-            await prisma.$disconnect();
         }
     });
 
@@ -814,10 +767,8 @@ export const createService = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => createServiceSchema.parse(input))
     .handler(async ({ data }): Promise<CreateServiceResult> => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
-
         try {
+            const prisma = await getPrisma();
             const service = await prisma.serviceItem.create({
                 data: {
                     code: data.code,
@@ -843,8 +794,6 @@ export const createService = createServerFn({ method: 'POST' })
                 throw new Error(`Service with code "${data.code}" already exists`);
             }
             throw error;
-        } finally {
-            await prisma.$disconnect();
         }
     });
 
@@ -855,10 +804,8 @@ export const updateService = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => updateServiceSchema.parse(input))
     .handler(async ({ data }): Promise<UpdateServiceResult> => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
-
         try {
+            const prisma = await getPrisma();
             // Build update data object - only include fields that were provided
             const updateData: Record<string, unknown> = {};
             if (data.code !== undefined) updateData.code = data.code;
@@ -893,8 +840,6 @@ export const updateService = createServerFn({ method: 'POST' })
                 }
             }
             throw error;
-        } finally {
-            await prisma.$disconnect();
         }
     });
 
@@ -905,10 +850,8 @@ export const deleteService = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => deleteServiceSchema.parse(input))
     .handler(async ({ data }): Promise<DeleteServiceResult> => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
-
         try {
+            const prisma = await getPrisma();
             await prisma.serviceItem.delete({
                 where: { id: data.id },
             });
@@ -927,8 +870,6 @@ export const deleteService = createServerFn({ method: 'POST' })
                 }
             }
             throw error;
-        } finally {
-            await prisma.$disconnect();
         }
     });
 
@@ -985,27 +926,21 @@ interface GetSuppliersResult {
 export const getSuppliers = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .handler(async (): Promise<GetSuppliersResult> => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
+        const prisma = await getPrisma();
+        const suppliers = await prisma.supplier.findMany({
+            where: { isActive: true },
+            select: {
+                id: true,
+                name: true,
+                email: true,
+                phone: true,
+                isActive: true,
+            },
+            orderBy: { name: 'asc' },
+        });
 
-        try {
-            const suppliers = await prisma.supplier.findMany({
-                where: { isActive: true },
-                select: {
-                    id: true,
-                    name: true,
-                    email: true,
-                    phone: true,
-                    isActive: true,
-                },
-                orderBy: { name: 'asc' },
-            });
-
-            return {
-                success: true,
-                suppliers,
-            };
-        } finally {
-            await prisma.$disconnect();
-        }
+        return {
+            success: true,
+            suppliers,
+        };
     });

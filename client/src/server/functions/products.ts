@@ -12,6 +12,7 @@ import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
 // NOTE: kysely's `sql` is imported dynamically inside functions to prevent client bundling
 import { authMiddleware } from '../middleware/auth';
+import { getPrisma } from '@coh/shared/services/db';
 import {
     productsListResultSchema,
     type ProductsListResult,
@@ -213,17 +214,7 @@ export const getProductsTree = createServerFn({ method: 'GET' })
         console.log('[Server Function] getProductsTree called with:', data);
 
         try {
-            // Dynamic import to prevent bundling Prisma into client
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const { PrismaClient } = (await import('@prisma/client')) as any;
-
-            // Use global singleton pattern
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const globalForPrisma = globalThis as any;
-            const prisma = globalForPrisma.prisma ?? new PrismaClient();
-            if (process.env.NODE_ENV !== 'production') {
-                globalForPrisma.prisma = prisma;
-            }
+            const prisma = await getPrisma();
 
             const { search } = data;
 
@@ -736,15 +727,7 @@ export const getProductById = createServerFn({ method: 'GET' })
     .inputValidator((input: unknown) => getProductByIdInputSchema.parse(input))
     .handler(async ({ data }): Promise<ProductDetailResponse> => {
         try {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const { PrismaClient } = (await import('@prisma/client')) as any;
-
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const globalForPrisma = globalThis as any;
-            const prisma = globalForPrisma.prisma ?? new PrismaClient();
-            if (process.env.NODE_ENV !== 'production') {
-                globalForPrisma.prisma = prisma;
-            }
+            const prisma = await getPrisma();
 
             // Get inventory balances for SKUs
             const balances: BalanceRow[] = await prisma.$queryRaw`
@@ -896,15 +879,7 @@ export const getCatalogFilters = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .handler(async (): Promise<CatalogFiltersResponse> => {
         try {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const { PrismaClient } = (await import('@prisma/client')) as any;
-
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const globalForPrisma = globalThis as any;
-            const prisma = globalForPrisma.prisma ?? new PrismaClient();
-            if (process.env.NODE_ENV !== 'production') {
-                globalForPrisma.prisma = prisma;
-            }
+            const prisma = await getPrisma();
 
             // Fetch fabric types (FabricType doesn't have isActive field)
             const fabricTypes = await prisma.fabricType.findMany({

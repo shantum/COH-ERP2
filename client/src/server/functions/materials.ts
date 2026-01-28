@@ -11,6 +11,7 @@
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth';
+import { getPrisma } from '@coh/shared/services/db';
 
 // ============================================
 // INPUT SCHEMAS
@@ -48,10 +49,7 @@ export const getMaterialsHierarchy = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => getMaterialsHierarchySchema.parse(input))
     .handler(async ({ data }) => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
-
-        try {
+        const prisma = await getPrisma();
             // Build where clause based on filters
             const where: any = {};
 
@@ -163,9 +161,6 @@ export const getMaterialsHierarchy = createServerFn({ method: 'GET' })
                     0
                 ),
             };
-        } finally {
-            await prisma.$disconnect();
-        }
     });
 
 /**
@@ -178,10 +173,7 @@ export const getMaterialsFlat = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => getMaterialsFlatSchema.parse(input))
     .handler(async ({ data }) => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
-
-        try {
+        const prisma = await getPrisma();
             if (data.level === 'materials') {
                 // Fetch materials
                 const materials = await prisma.material.findMany({
@@ -348,9 +340,6 @@ export const getMaterialsFlat = createServerFn({ method: 'GET' })
             }
 
             throw new Error(`Invalid level: ${data.level}`);
-        } finally {
-            await prisma.$disconnect();
-        }
     });
 
 // ============================================
@@ -372,10 +361,7 @@ export const getTrims = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => getTrimsSchema.parse(input ?? {}))
     .handler(async ({ data }) => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
-
-        try {
+        const prisma = await getPrisma();
             const trims = await prisma.trimItem.findMany({
                 where: {
                     ...(data.category && { category: data.category }),
@@ -419,9 +405,6 @@ export const getTrims = createServerFn({ method: 'GET' })
                 success: true,
                 items,
             };
-        } finally {
-            await prisma.$disconnect();
-        }
     });
 
 // ============================================
@@ -443,10 +426,7 @@ export const getServices = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => getServicesSchema.parse(input ?? {}))
     .handler(async ({ data }) => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
-
-        try {
+        const prisma = await getPrisma();
             const services = await prisma.serviceItem.findMany({
                 where: {
                     ...(data.category && { category: data.category }),
@@ -489,9 +469,6 @@ export const getServices = createServerFn({ method: 'GET' })
                 success: true,
                 items,
             };
-        } finally {
-            await prisma.$disconnect();
-        }
     });
 
 // ============================================
@@ -517,10 +494,7 @@ export interface MaterialsFiltersResponse {
 export const getMaterialsFilters = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .handler(async (): Promise<MaterialsFiltersResponse> => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
-
-        try {
+        const prisma = await getPrisma();
             // Get unique values for filters
             const [materials, constructionTypes, patterns, suppliers] = await Promise.all([
                 prisma.material.findMany({
@@ -580,9 +554,6 @@ export const getMaterialsFilters = createServerFn({ method: 'GET' })
                     suppliers: suppliers.map((s) => ({ id: s.id, name: s.name })),
                 },
             };
-        } finally {
-            await prisma.$disconnect();
-        }
     });
 
 // ============================================
@@ -603,10 +574,7 @@ export const getMaterialsTree = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => getMaterialsTreeSchema.parse(input ?? {}))
     .handler(async ({ data }) => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
-
-        try {
+        const prisma = await getPrisma();
             // For lazy loading, only fetch top-level materials
             if (data.lazyLoad) {
                 const materials = await prisma.material.findMany({
@@ -807,9 +775,6 @@ export const getMaterialsTree = createServerFn({ method: 'GET' })
                     ),
                 },
             };
-        } finally {
-            await prisma.$disconnect();
-        }
     });
 
 const getMaterialsTreeChildrenSchema = z.object({
@@ -824,10 +789,7 @@ export const getMaterialsTreeChildren = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => getMaterialsTreeChildrenSchema.parse(input))
     .handler(async ({ data }) => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
-
-        try {
+        const prisma = await getPrisma();
             if (data.parentType === 'material') {
                 // Get fabrics under this material
                 const fabrics = await prisma.fabric.findMany({
@@ -965,9 +927,6 @@ export const getMaterialsTreeChildren = createServerFn({ method: 'GET' })
 
                 return { success: true, items };
             }
-        } finally {
-            await prisma.$disconnect();
-        }
     });
 
 // ============================================
@@ -990,10 +949,7 @@ export const getColourTransactions = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => getColourTransactionsSchema.parse(input))
     .handler(async ({ data }) => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
-
-        try {
+        const prisma = await getPrisma();
             // Verify colour exists
             const colour = await prisma.fabricColour.findUnique({
                 where: { id: data.colourId },
@@ -1014,9 +970,6 @@ export const getColourTransactions = createServerFn({ method: 'GET' })
                 items: [],
                 message: 'Colour inventory tracking is not yet implemented',
             };
-        } finally {
-            await prisma.$disconnect();
-        }
     });
 
 // ============================================
@@ -1035,10 +988,7 @@ export const searchVariations = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => searchVariationsSchema.parse(input))
     .handler(async ({ data }) => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
-
-        try {
+        const prisma = await getPrisma();
             const where: Record<string, unknown> = { isActive: true };
 
             if (data.q && data.q.length >= 2) {
@@ -1107,7 +1057,4 @@ export const searchVariations = createServerFn({ method: 'GET' })
                 success: true,
                 items: results,
             };
-        } finally {
-            await prisma.$disconnect();
-        }
     });

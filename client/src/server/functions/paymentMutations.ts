@@ -11,7 +11,7 @@
 import { createServerFn } from '@tanstack/react-start';
 import { authMiddleware, type AuthUser } from '../middleware/auth';
 import { CreatePaymentSchema, type CreatePaymentInput } from '@coh/shared';
-import type { PrismaClient } from '@prisma/client';
+import { getPrisma } from '@coh/shared/services/db';
 
 // ============================================
 // RESPONSE TYPES
@@ -72,13 +72,7 @@ export const createPayment = createServerFn({ method: 'POST' })
             const { orderId, amount, paymentMethod, reference, notes } = data;
             const user = context.user;
 
-            // Dynamic Prisma import to prevent bundling into client
-            const { PrismaClient } = await import('@prisma/client');
-            const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
-            const prisma = globalForPrisma.prisma ?? new PrismaClient();
-            if (process.env.NODE_ENV !== 'production') {
-                globalForPrisma.prisma = prisma;
-            }
+            const prisma = await getPrisma();
 
             // Validate order exists and get current payment summary
             const order = await prisma.order.findUnique({

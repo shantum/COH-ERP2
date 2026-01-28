@@ -11,6 +11,7 @@
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth';
+import { getPrisma } from '@coh/shared/services/db';
 import type {
     FabricType,
     Fabric,
@@ -191,10 +192,7 @@ export const createFabricType = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => createFabricTypeSchema.parse(input))
     .handler(async ({ data }): Promise<FabricTypeSuccessResult> => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
-
-        try {
+        const prisma = await getPrisma();
             const fabricType = await prisma.fabricType.create({
                 data: {
                     name: data.name,
@@ -211,9 +209,6 @@ export const createFabricType = createServerFn({ method: 'POST' })
                 success: true,
                 fabricType,
             };
-        } finally {
-            await prisma.$disconnect();
-        }
     });
 
 /**
@@ -223,10 +218,7 @@ export const updateFabricType = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => updateFabricTypeSchema.parse(input))
     .handler(async ({ data }): Promise<FabricTypeSuccessResult | FabricTypeErrorResult> => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
-
-        try {
+        const prisma = await getPrisma();
             // Check if trying to rename Default fabric type
             const existing = await prisma.fabricType.findUnique({
                 where: { id: data.id },
@@ -263,9 +255,6 @@ export const updateFabricType = createServerFn({ method: 'POST' })
                 success: true,
                 fabricType,
             };
-        } finally {
-            await prisma.$disconnect();
-        }
     });
 
 // ============================================
@@ -279,10 +268,7 @@ export const createFabric = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => createFabricSchema.parse(input))
     .handler(async ({ data }): Promise<FabricSuccessResult | FabricErrorResult> => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
-
-        try {
+        const prisma = await getPrisma();
             // Prevent adding colors to the Default fabric type
             const fabricType = await prisma.fabricType.findUnique({
                 where: { id: data.fabricTypeId },
@@ -330,9 +316,6 @@ export const createFabric = createServerFn({ method: 'POST' })
                 success: true,
                 fabric,
             };
-        } finally {
-            await prisma.$disconnect();
-        }
     });
 
 /**
@@ -342,10 +325,7 @@ export const updateFabric = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => updateFabricSchema.parse(input))
     .handler(async ({ data }): Promise<FabricSuccessResult> => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
-
-        try {
+        const prisma = await getPrisma();
             const { fabricId, ...updateData } = data;
 
             // Build update object, handling null values for inheritance
@@ -376,9 +356,6 @@ export const updateFabric = createServerFn({ method: 'POST' })
                 success: true,
                 fabric,
             };
-        } finally {
-            await prisma.$disconnect();
-        }
     });
 
 /**
@@ -389,10 +366,7 @@ export const deleteFabric = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => deleteFabricSchema.parse(input))
     .handler(async ({ data }): Promise<DeleteFabricSuccessResult | DeleteFabricErrorResult> => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
-
-        try {
+        const prisma = await getPrisma();
             const fabric = await prisma.fabric.findUnique({
                 where: { id: data.fabricId },
                 include: {
@@ -494,9 +468,6 @@ export const deleteFabric = createServerFn({ method: 'POST' })
                 variationsReassigned,
                 fabricTypeDeleted,
             };
-        } finally {
-            await prisma.$disconnect();
-        }
     });
 
 // ============================================
@@ -510,10 +481,7 @@ export const createFabricTransaction = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => createTransactionSchema.parse(input))
     .handler(async ({ data, context }): Promise<TransactionSuccessResult> => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
-
-        try {
+        const prisma = await getPrisma();
             const transaction = await prisma.fabricTransaction.create({
                 data: {
                     fabricId: data.fabricId,
@@ -537,9 +505,6 @@ export const createFabricTransaction = createServerFn({ method: 'POST' })
                 success: true,
                 transaction,
             };
-        } finally {
-            await prisma.$disconnect();
-        }
     });
 
 /**
@@ -549,10 +514,7 @@ export const deleteFabricTransaction = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => deleteTransactionSchema.parse(input))
     .handler(async ({ data, context }): Promise<DeleteTransactionSuccessResult | TransactionErrorResult> => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
-
-        try {
+        const prisma = await getPrisma();
             // Check if user is admin
             if (context.user.role !== 'admin') {
                 return {
@@ -586,9 +548,6 @@ export const deleteFabricTransaction = createServerFn({ method: 'POST' })
                 success: true,
                 id: data.txnId,
             };
-        } finally {
-            await prisma.$disconnect();
-        }
     });
 
 // ============================================
@@ -602,10 +561,7 @@ export const createSupplier = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => createSupplierSchema.parse(input))
     .handler(async ({ data }): Promise<SupplierSuccessResult> => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
-
-        try {
+        const prisma = await getPrisma();
             const supplier = await prisma.supplier.create({
                 data: {
                     name: data.name,
@@ -620,7 +576,4 @@ export const createSupplier = createServerFn({ method: 'POST' })
                 success: true,
                 supplier,
             };
-        } finally {
-            await prisma.$disconnect();
-        }
     });

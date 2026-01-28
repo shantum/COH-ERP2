@@ -11,7 +11,7 @@
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth';
-import type { PrismaClient } from '@prisma/client';
+import { getPrisma } from '@coh/shared/services/db';
 
 // ============================================
 // INPUT SCHEMAS (Zod is source of truth)
@@ -72,13 +72,7 @@ export const updateCustomer = createServerFn({ method: 'POST' })
     .handler(async ({ data }: { data: UpdateCustomerInput }): Promise<UpdatedCustomer> => {
         const { id, ...updateData } = data;
 
-        // Dynamic Prisma import to prevent bundling into client
-        const { PrismaClient } = await import('@prisma/client');
-        const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
-        const prisma = globalForPrisma.prisma ?? new PrismaClient();
-        if (process.env.NODE_ENV !== 'production') {
-            globalForPrisma.prisma = prisma;
-        }
+        const prisma = await getPrisma();
 
         // Check if customer exists
         const existing = await prisma.customer.findUnique({
