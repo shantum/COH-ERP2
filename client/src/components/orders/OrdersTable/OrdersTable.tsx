@@ -271,11 +271,16 @@ export function OrdersTable({
 
     const { rows: tableRows } = table.getRowModel();
 
-    // Pre-compute per-order: are ALL lines at least allocated?
+    // Pre-compute per-order: are ALL non-cancelled lines at least allocated?
     // Used for order-info column highlighting (don't trust server fulfillmentStage)
+    // Cancelled lines are excluded from the calculation entirely
     const orderAllAllocated = useMemo(() => {
         const counts = new Map<string, { total: number; allocated: number }>();
         for (const row of rows) {
+            const ls = row.lineStatus;
+            // Skip cancelled lines - they shouldn't affect order-level highlighting
+            if (ls === 'cancelled') continue;
+
             const id = row.orderId;
             let entry = counts.get(id);
             if (!entry) {
@@ -283,7 +288,6 @@ export function OrdersTable({
                 counts.set(id, entry);
             }
             entry.total++;
-            const ls = row.lineStatus;
             if (ls === 'allocated' || ls === 'picked' || ls === 'packed' || ls === 'shipped') {
                 entry.allocated++;
             }

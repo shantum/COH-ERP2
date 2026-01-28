@@ -31,7 +31,7 @@ export {
 } from './constants';
 
 // Styling utilities
-export { getRowClassName, getCellClassName, TRACKING_STATUS_STYLES, PAYMENT_STYLES } from './rowStyling';
+export { getRowClassName, TRACKING_STATUS_STYLES, PAYMENT_STYLES } from './rowStyling';
 
 // Cells (for custom column builders)
 export * from './cells';

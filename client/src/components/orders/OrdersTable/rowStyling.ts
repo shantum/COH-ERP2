@@ -5,7 +5,6 @@
  * - resolveLineState(): canonical state for a row (called once per row)
  * - getRowClassName(): TR-level borders + text effects (no backgrounds)
  * - getCellBackground(): per-cell waterfall highlight (O(1) per call)
- * - getCellClassName(): status-based text color for specific columns
  *
  * All color tokens live in ./styleConfig.ts — edit there to change colors.
  */
@@ -13,7 +12,6 @@
 import type { FlattenedOrderRow } from '../../../utils/orderHelpers';
 import {
     FIRST_LINE_CLASS,
-    CELL_STATUS_TEXT,
     ROW_TR_STYLES,
     LINE_CELL_BG,
     LINE_HIGHLIGHT_CONFIG,
@@ -89,10 +87,4 @@ export function getCellBackground(
     }
 
     return '';
-}
-
-/** Get cell className based on status for specific columns */
-export function getCellClassName(status: string | null | undefined): string {
-    if (!status) return '';
-    return (CELL_STATUS_TEXT as Record<string, string>)[status] || '';
 }

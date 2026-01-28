@@ -4,6 +4,9 @@
  * All visual styling tokens for the orders table in one place.
  * Change colors here — no need to touch logic files.
  *
+ * IMPORTANT: All column references use column IDs (names), not indices.
+ * This makes the configuration immune to column reordering.
+ *
  * Tailwind classes only. Each value is a space-separated className string.
  */
 
@@ -14,27 +17,53 @@ export const COLUMN_INDEX: Record<ColumnId, number> = Object.fromEntries(
     ALL_COLUMN_IDS.map((id, i) => [id, i])
 ) as Record<ColumnId, number>;
 
-// ─── Column zones (Sets of indices for O(1) membership checks) ──────────────
-const range = (start: number, end: number): Set<number> => {
-    const s = new Set<number>();
-    for (let i = start; i <= end; i++) s.add(i);
-    return s;
+// Helper: convert array of column IDs to Set of indices
+const toIndexSet = (columns: readonly ColumnId[]): Set<number> =>
+    new Set(columns.map(id => COLUMN_INDEX[id]));
+
+// ─── Order-info zone (left columns that highlight when ALL lines are allocated+) ───
+// Excludes shipByDate because it shows a future target date, not current fulfillment state
+const ORDER_INFO_COLUMNS: readonly ColumnId[] = [
+    'orderInfo', 'channel', 'customerInfo', 'paymentInfo',
+    'tags', 'customerNotes', 'customerTags'
+];
+export const ORDER_INFO_ZONE = toIndexSet(ORDER_INFO_COLUMNS);
+
+// ─── Columns excluded from waterfall highlighting ───────────────────────────
+// returnStatus: return info is separate from fulfillment flow
+// customize: customization toggle shouldn't highlight with fulfillment
+const EXCLUDED_COLUMNS: readonly ColumnId[] = ['returnStatus', 'customize'];
+const EXCLUDED = toIndexSet(EXCLUDED_COLUMNS);
+
+// Helper: filter out excluded columns
+const excludeColumns = (columns: readonly ColumnId[]): Set<number> => {
+    const indices = toIndexSet(columns);
+    for (const excl of EXCLUDED) indices.delete(excl);
+    return indices;
 };
 
-/** Order-level columns: orderInfo through customerTags (indices 0-7), excluding shipByDate (4) */
-export const ORDER_INFO_ZONE = new Set([...range(0, 7)].filter(i => i !== 4));
+// ─── Line-level highlight zones (waterfall progression) ─────────────────────
+// Each zone represents how far the highlight "wave" extends for a given state.
+// As orders progress through fulfillment, more columns light up.
 
-/** Columns that never highlight (returnStatus=9, customize=10) */
-const EXCLUDED = new Set([9, 10]);
-const exclude = (s: Set<number>): Set<number> => new Set([...s].filter(i => !EXCLUDED.has(i)));
+const LINE_COLUMN_RANGES = {
+    // Pending states: just product info + stock assignment
+    productToStock: ['productName', 'qty', 'assignStock'] as const,
+    // Has stock: extends to fabric balance
+    productToFabric: ['productName', 'qty', 'assignStock', 'fabricBalance'] as const,
+    // Active fulfillment: extends to pick/pack controls
+    productToPickPack: ['productName', 'qty', 'assignStock', 'fabricBalance', 'workflow', 'pickPack'] as const,
+    // Full line info (not used currently but available)
+    productToNotes: ['productName', 'qty', 'assignStock', 'fabricBalance', 'workflow', 'pickPack', 'production', 'notes'] as const,
+};
 
-/** Line-level highlight zones, keyed by how far the waterfall extends */
 export const LINE_ZONES = {
-    productToStock: exclude(range(8, 12)),    // Product, Qty, AssignStock (skip return/customize)
-    productToFabric: exclude(range(8, 13)),   // + FabricBalance
-    productToPickPack: exclude(range(8, 15)), // + Workflow, PickPack
-    productToNotes: exclude(range(8, 17)),    // + Production, Notes
-    allColumns: range(0, 22),                 // Full row (terminal states keep everything)
+    productToStock: excludeColumns(LINE_COLUMN_RANGES.productToStock),
+    productToFabric: excludeColumns(LINE_COLUMN_RANGES.productToFabric),
+    productToPickPack: excludeColumns(LINE_COLUMN_RANGES.productToPickPack),
+    productToNotes: excludeColumns(LINE_COLUMN_RANGES.productToNotes),
+    // Terminal states (shipped/cancelled) highlight entire row
+    allColumns: toIndexSet(ALL_COLUMN_IDS),
 } as const;
 
 // ─── Resolved line states ────────────────────────────────────────────────────
@@ -56,14 +85,22 @@ export const LINE_CELL_BG: Record<ResolvedLineState, string> = {
 };
 
 // ─── Which zone each state highlights ────────────────────────────────────────
+// This defines the "waterfall" effect: each state highlights a specific set of columns.
+// The gap between highlighted and non-highlighted columns shows the user what action is next.
 export const LINE_HIGHLIGHT_CONFIG: Record<ResolvedLineState, Set<number>> = {
+    // Pending substates: highlight product/stock area only
     blocked: LINE_ZONES.productToStock,
-    inProduction: new Set([...LINE_ZONES.productToStock, 16]), // productToStock + production
+    inProduction: new Set([...LINE_ZONES.productToStock, COLUMN_INDEX.production]),
     customized: LINE_ZONES.productToStock,
+    // Has stock: extend highlight to fabric column
     withStock: LINE_ZONES.productToFabric,
-    allocated: new Set([...LINE_ZONES.productToFabric, 16]), // productToFabric + production
-    picked: new Set([...LINE_ZONES.productToPickPack, 16, 6]), // productToPickPack + production + customerNotes
+    // Allocated: extend to fabric + show production
+    allocated: new Set([...LINE_ZONES.productToFabric, COLUMN_INDEX.production]),
+    // Picked: extend to pick/pack + production + order notes (packer needs to see notes)
+    picked: new Set([...LINE_ZONES.productToPickPack, COLUMN_INDEX.production, COLUMN_INDEX.customerNotes]),
+    // Packed: just the pick/pack zone (ready to ship)
     packed: LINE_ZONES.productToPickPack,
+    // Terminal states: highlight entire row
     shipped: LINE_ZONES.allColumns,
     cancelled: LINE_ZONES.allColumns,
 };
@@ -83,15 +120,6 @@ export const ROW_TR_STYLES: Record<ResolvedLineState, string> = {
 
 // ─── First-line separator (top border on first line of each order) ──────────
 export const FIRST_LINE_CLASS = 'border-t border-gray-400';
-
-// ─── Cell text colors by status (used in individual columns) ────────────────
-export const CELL_STATUS_TEXT = {
-    shipped: 'text-green-700',
-    packed: 'text-green-600',
-    picked: 'text-green-500',
-    allocated: 'text-green-500',
-    cancelled: 'text-gray-400 line-through',
-} as const;
 
 // ─── Stock cell ─────────────────────────────────────────────────────────────
 export const STOCK_COLORS = {
@@ -132,6 +160,8 @@ export const FINAL_STATUS_STYLES: Record<string, string> = {
 export const FINAL_STATUS_DEFAULT = 'bg-gray-100 text-gray-600';
 
 // ─── Tracking status badges ─────────────────────────────────────────────────
+// Note: rto_delivered and rto_received both exist because different APIs/webhooks
+// return different strings for the same logical state. Both map to the same UI.
 export const TRACKING_STATUS_STYLES: Record<string, { bg: string; text: string; label: string }> = {
     in_transit: { bg: 'bg-blue-100', text: 'text-blue-700', label: 'In Transit' },
     manifested: { bg: 'bg-gray-100', text: 'text-gray-700', label: 'Manifested' },
@@ -145,7 +175,7 @@ export const TRACKING_STATUS_STYLES: Record<string, { bg: string; text: string; 
     rto_initiated: { bg: 'bg-red-100', text: 'text-red-700', label: 'RTO' },
     rto_in_transit: { bg: 'bg-orange-100', text: 'text-orange-700', label: 'RTO In Transit' },
     rto_delivered: { bg: 'bg-purple-100', text: 'text-purple-700', label: 'RTO Received' },
-    rto_received: { bg: 'bg-purple-100', text: 'text-purple-700', label: 'RTO Received' },
+    rto_received: { bg: 'bg-purple-100', text: 'text-purple-700', label: 'RTO Received' }, // Alias for rto_delivered
     cancelled: { bg: 'bg-gray-100', text: 'text-gray-700', label: 'Cancelled' },
 };
 

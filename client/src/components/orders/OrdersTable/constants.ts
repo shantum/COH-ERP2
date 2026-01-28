@@ -39,7 +39,7 @@ export const DEFAULT_HEADERS: Record<string, string> = {
     pickPack: 'Fulfillment',
     production: 'Production',
     notes: 'Notes',
-    cancelLine: 'Cance',
+    cancelLine: 'Cancel',
     adminShip: 'Admin',
     shopifyTracking: 'Shopify',
     trackingInfo: 'COH AWB',
