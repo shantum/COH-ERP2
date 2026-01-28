@@ -76,11 +76,11 @@ export const LINE_CELL_BG: Record<ResolvedLineState, string> = {
     blocked: 'bg-yellow-100',
     inProduction: 'bg-amber-100',
     customized: 'bg-orange-100',
-    withStock: 'bg-teal-100',
-    allocated: 'bg-emerald-100',
-    picked: 'bg-emerald-200',
-    packed: 'bg-emerald-300',
-    shipped: 'bg-emerald-200',
+    withStock: 'bg-green-100',
+    allocated: 'bg-green-200',
+    picked: 'bg-green-200',
+    packed: 'bg-green-200',
+    shipped: 'bg-green-200',
     cancelled: 'bg-gray-100',
 };
 
@@ -98,8 +98,8 @@ export const LINE_HIGHLIGHT_CONFIG: Record<ResolvedLineState, Set<number>> = {
     allocated: new Set([...LINE_ZONES.productToFabric, COLUMN_INDEX.production]),
     // Picked: extend to pick/pack + production + order notes (packer needs to see notes)
     picked: new Set([...LINE_ZONES.productToPickPack, COLUMN_INDEX.production, COLUMN_INDEX.customerNotes]),
-    // Packed: just the pick/pack zone (ready to ship)
-    packed: LINE_ZONES.productToPickPack,
+    // Packed: pick/pack zone + production + order notes
+    packed: new Set([...LINE_ZONES.productToPickPack, COLUMN_INDEX.production, COLUMN_INDEX.customerNotes]),
     // Terminal states: highlight entire row
     shipped: LINE_ZONES.allColumns,
     cancelled: LINE_ZONES.allColumns,
@@ -195,9 +195,9 @@ export const CUSTOMIZATION_COLORS = {
 export const STATUS_LEGEND_ITEMS = [
     { color: 'bg-yellow-100', border: 'border-yellow-300', label: 'Pending (no stock)', desc: 'Waiting for inventory' },
     { color: 'bg-amber-100', border: 'border-amber-300', label: 'In Production', desc: 'Has production date set' },
-    { color: 'bg-teal-100', border: 'border-teal-300', label: 'Ready to Allocate', desc: 'Has stock available' },
-    { color: 'bg-emerald-100', border: 'border-emerald-300', label: 'Allocated', desc: 'Stock reserved' },
-    { color: 'bg-emerald-200', border: 'border-emerald-400', label: 'Picked', desc: 'Ready to pack' },
-    { color: 'bg-emerald-300', border: 'border-emerald-500', label: 'Packed', desc: 'Ready to ship' },
-    { color: 'bg-emerald-200', border: 'border-emerald-400', label: 'Shipped', desc: 'Awaiting tracking' },
+    { color: 'bg-green-100', border: 'border-green-300', label: 'Ready to Allocate', desc: 'Has stock available' },
+    { color: 'bg-green-200', border: 'border-green-400', label: 'Allocated', desc: 'Stock reserved' },
+    { color: 'bg-green-200', border: 'border-green-400', label: 'Picked', desc: 'Ready to pack' },
+    { color: 'bg-green-200', border: 'border-green-400', label: 'Packed', desc: 'Ready to ship' },
+    { color: 'bg-green-200', border: 'border-green-400', label: 'Shipped', desc: 'Awaiting tracking' },
 ] as const;
