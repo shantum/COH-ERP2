@@ -8,6 +8,7 @@
 4. **Document as you go.** Comment undocumented code when you encounter it.
 5. **Use agents liberally.** Spawn sub-agents for parallel/complex work.
 6. **Commit early, commit often.** Small, frequent commits. **Run `cd client && npx tsc -p tsconfig.app.json --noEmit && cd ../server && npx tsc --noEmit` before committing.**
+11. **STRICT: Branch discipline.** Always work on and push to `develop`. NEVER push to `main` unless the user explicitly confirms. Commits go to `develop`; merging to `main` requires user approval.
 7. **Separate config from code.** Magic numbers, thresholds, mappings > `/config/`.
 8. **Clean architecture.** Dependencies point inward. Business logic independent of frameworks/UI/DB.
 9. **Build for the long term.** Maintainability over cleverness.
