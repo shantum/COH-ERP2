@@ -18,5 +18,8 @@ export * from './schemas/materials.js';
 // Re-export all validators
 export * from './validators/index.js';
 
+// Re-export utils (pure functions, no DB dependencies)
+export * from './utils/index.js';
+
 // Re-export services
 export * from './services/index.js';

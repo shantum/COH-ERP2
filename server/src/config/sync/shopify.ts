@@ -90,34 +90,6 @@ export const SHOPIFY_CACHE_STALE_DAYS = 90;
 export const SHOPIFY_CACHE_CLEANUP_BATCH_SIZE = 100;
 
 // ============================================
-// CONSOLIDATED EXPORT
-// ============================================
-
-/**
- * All Shopify sync configuration in one object
- */
-export const SHOPIFY_SYNC = {
-    /** API settings */
-    batchSize: SHOPIFY_BATCH_SIZE,
-    concurrencyLimit: SHOPIFY_CONCURRENCY_LIMIT,
-    previewMetafieldLimit: SHOPIFY_PREVIEW_METAFIELD_LIMIT,
-
-    /** Sync timing */
-    lookbackDays: SHOPIFY_LOOKBACK_DAYS,
-
-    /** Order update rules */
-    updateTriggerFields: ORDER_UPDATE_TRIGGER_FIELDS,
-
-    /** Customer sync rules */
-    skipCustomersWithoutOrders: SKIP_CUSTOMERS_WITHOUT_ORDERS,
-    requireCustomerEmail: REQUIRE_CUSTOMER_EMAIL,
-
-    /** Cache settings */
-    cacheStaleDays: SHOPIFY_CACHE_STALE_DAYS,
-    cacheCleanupBatchSize: SHOPIFY_CACHE_CLEANUP_BATCH_SIZE,
-} as const;
-
-// ============================================
 // SYNC WORKER CONFIGURATION
 // ============================================
 

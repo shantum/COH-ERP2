@@ -47,22 +47,6 @@ export const DEFAULT_FABRIC_CONSUMPTION = 1.5;
 export const DEFAULT_FABRIC_LEAD_TIME_DAYS = 14;
 
 // ============================================
-// CONSOLIDATED EXPORT
-// ============================================
-
-/**
- * All inventory thresholds in one object
- */
-export const INVENTORY_THRESHOLDS = {
-    /** Days of stock before reorder alert */
-    stockAlertThresholdDays: STOCK_ALERT_THRESHOLD_DAYS,
-    /** Default fabric consumption per unit (meters) */
-    defaultFabricConsumption: DEFAULT_FABRIC_CONSUMPTION,
-    /** Default fabric lead time (days) */
-    defaultFabricLeadTimeDays: DEFAULT_FABRIC_LEAD_TIME_DAYS,
-} as const;
-
-// ============================================
 // HELPER FUNCTIONS
 // ============================================
 

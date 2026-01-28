@@ -118,34 +118,6 @@ export const ITHINK_BACKFILL_DEFAULT_DAYS = 30;
 export const ITHINK_BACKFILL_DEFAULT_LIMIT = 100;
 
 // ============================================
-// CONSOLIDATED EXPORT
-// ============================================
-
-/**
- * All iThink sync configuration in one object
- */
-export const ITHINK_SYNC = {
-    /** API settings */
-    batchSize: ITHINK_TRACKING_BATCH_SIZE,
-    apiTimeoutMs: ITHINK_API_TIMEOUT_MS,
-    apiRetries: ITHINK_API_RETRIES,
-    retryDelayMs: ITHINK_RETRY_DELAY_MS,
-
-    /** Sync timing */
-    syncIntervalMinutes: ITHINK_SYNC_INTERVAL_MINUTES,
-    batchDelayMs: ITHINK_BATCH_DELAY_MS,
-    startupDelayMs: ITHINK_STARTUP_DELAY_MS,
-
-    /** Status filtering */
-    syncStatuses: ITHINK_SYNC_STATUSES,
-    terminalStatuses: ITHINK_TERMINAL_STATUSES,
-
-    /** Backfill settings */
-    backfillDefaultDays: ITHINK_BACKFILL_DEFAULT_DAYS,
-    backfillDefaultLimit: ITHINK_BACKFILL_DEFAULT_LIMIT,
-} as const;
-
-// ============================================
 // CIRCUIT BREAKER CONFIGURATION
 // ============================================
 

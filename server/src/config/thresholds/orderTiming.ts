@@ -76,32 +76,6 @@ export const RTO_URGENT_DAYS = 7;
 export const DELIVERY_DELAYED_DAYS = 7;
 
 // ============================================
-// CONSOLIDATED EXPORT
-// ============================================
-
-/**
- * All order timing thresholds in one object
- *
- * Use this for convenient access to all timing values.
- */
-export const ORDER_TIMING = {
-    /** Legacy: Days after shipping to auto-archive (no terminalStatus) */
-    autoArchiveDays: AUTO_ARCHIVE_DAYS,
-    /** Days after terminal status to auto-archive */
-    archiveTerminalDays: ARCHIVE_TERMINAL_DAYS,
-    /** Days after cancel to auto-archive */
-    archiveCancelledDays: ARCHIVE_CANCELLED_DAYS,
-    /** Days inactive before customer is at-risk */
-    atRiskInactiveDays: AT_RISK_INACTIVE_DAYS,
-    /** Days in RTO before warning */
-    rtoWarningDays: RTO_WARNING_DAYS,
-    /** Days in RTO before urgent */
-    rtoUrgentDays: RTO_URGENT_DAYS,
-    /** Days in transit before delayed */
-    deliveryDelayedDays: DELIVERY_DELAYED_DAYS,
-} as const;
-
-// ============================================
 // HELPER FUNCTIONS
 // ============================================
 
