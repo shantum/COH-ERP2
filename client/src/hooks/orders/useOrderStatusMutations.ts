@@ -141,7 +141,8 @@ export function useOrderStatusMutations(options: UseOrderStatusMutationsOptions 
             return result.data;
         },
         onMutate: async ({ orderId }) => {
-            await queryClient.cancelQueries({ queryKey: ['orders'] });
+            // Cancel only the specific query for this view (per CLAUDE.md rule #41)
+            await queryClient.cancelQueries({ queryKey });
             // Also cancel inventory balance queries to prevent stale data from overwriting
             await queryClient.cancelQueries({ queryKey: inventoryQueryKeys.balance });
 
@@ -223,7 +224,8 @@ export function useOrderStatusMutations(options: UseOrderStatusMutationsOptions 
             // For uncancel, we may be in cancelled view
             const cancelledQueryInput = getOrdersQueryInput('cancelled', page);
             const cancelledQueryKey = getOrdersListQueryKey(cancelledQueryInput);
-            await queryClient.cancelQueries({ queryKey: ['orders'] });
+            // Cancel only the specific query for this view (per CLAUDE.md rule #41)
+            await queryClient.cancelQueries({ queryKey: cancelledQueryKey });
             const previousData = queryClient.getQueryData<OrdersListData>(cancelledQueryKey);
 
             queryClient.setQueryData<OrdersListData>(
@@ -270,8 +272,8 @@ export function useOrderStatusMutations(options: UseOrderStatusMutationsOptions 
             return result.data;
         },
         onMutate: async ({ lineId }) => {
-            // Cancel inflight refetches
-            await queryClient.cancelQueries({ queryKey: ['orders'] });
+            // Cancel only the specific query for this view (per CLAUDE.md rule #41)
+            await queryClient.cancelQueries({ queryKey });
             // Also cancel inventory balance queries to prevent stale data from overwriting
             await queryClient.cancelQueries({ queryKey: inventoryQueryKeys.balance });
 
@@ -342,7 +344,8 @@ export function useOrderStatusMutations(options: UseOrderStatusMutationsOptions 
             return result.data;
         },
         onMutate: async ({ lineId }) => {
-            await queryClient.cancelQueries({ queryKey: ['orders'] });
+            // Cancel only the specific query for this view (per CLAUDE.md rule #41)
+            await queryClient.cancelQueries({ queryKey });
             const previousData = getCachedData();
 
             // Optimistically update
