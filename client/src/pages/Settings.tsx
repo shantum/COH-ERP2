@@ -5,7 +5,7 @@
 
 import { useState } from 'react';
 import {
-    Store, Settings as SettingsIcon, FileSpreadsheet, Database, Eye, DollarSign, Terminal, Calculator, RefreshCw, PanelLeft, MapPin
+    Store, Settings as SettingsIcon, FileSpreadsheet, Database, Eye, DollarSign, Terminal, Calculator, RefreshCw, PanelLeft, MapPin, Sheet
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 
@@ -22,9 +22,10 @@ import {
     BackgroundJobsTab,
     SidebarTab,
     PincodeDataTab,
+    SheetSyncTab,
 } from '../components/settings/tabs';
 
-type SettingsTab = 'general' | 'shopify' | 'importExport' | 'remittance' | 'costing' | 'database' | 'inspector' | 'logs' | 'jobs' | 'sidebar' | 'pincodes';
+type SettingsTab = 'general' | 'shopify' | 'importExport' | 'remittance' | 'costing' | 'database' | 'inspector' | 'logs' | 'jobs' | 'sidebar' | 'pincodes' | 'sheetSync';
 
 export default function Settings() {
     const { user } = useAuth();
@@ -139,6 +140,18 @@ export default function Settings() {
                 {user?.role === 'admin' && (
                     <button
                         className={`px-3 md:px-4 py-2 font-medium flex items-center gap-1.5 md:gap-2 text-sm whitespace-nowrap ${
+                            activeTab === 'sheetSync'
+                                ? 'text-primary-600 border-b-2 border-primary-600'
+                                : 'text-gray-500'
+                        }`}
+                        onClick={() => setActiveTab('sheetSync')}
+                    >
+                        <Sheet size={16} /> <span className="hidden sm:inline">Sheet Sync</span><span className="sm:hidden">Sync</span>
+                    </button>
+                )}
+                {user?.role === 'admin' && (
+                    <button
+                        className={`px-3 md:px-4 py-2 font-medium flex items-center gap-1.5 md:gap-2 text-sm whitespace-nowrap ${
                             activeTab === 'sidebar'
                                 ? 'text-primary-600 border-b-2 border-primary-600'
                                 : 'text-gray-500'
@@ -161,6 +174,7 @@ export default function Settings() {
             {activeTab === 'inspector' && <InspectorTab />}
             {activeTab === 'logs' && <ServerLogsTab />}
             {activeTab === 'jobs' && <BackgroundJobsTab />}
+            {activeTab === 'sheetSync' && <SheetSyncTab />}
             {activeTab === 'sidebar' && <SidebarTab />}
         </div>
     );
