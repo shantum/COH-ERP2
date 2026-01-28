@@ -15,6 +15,7 @@
 import { createMiddleware } from '@tanstack/react-start';
 import { getCookie, getRequestHeader } from '@tanstack/react-start/server';
 import { z } from 'zod';
+import { getPrisma } from '@coh/shared/services/db';
 
 // ============================================
 // TYPES
@@ -65,21 +66,6 @@ type JwtPayload = z.infer<typeof JwtPayloadSchema>;
 // ============================================
 // LAZY IMPORTS (avoid bundling server code)
 // ============================================
-
-/**
- * Lazy import Prisma client to prevent bundling server code into client
- */
-async function getPrisma() {
-    const { PrismaClient } = await import('@prisma/client');
-    const globalForPrisma = globalThis as unknown as {
-        prisma: InstanceType<typeof PrismaClient> | undefined;
-    };
-    const prisma = globalForPrisma.prisma ?? new PrismaClient();
-    if (process.env.NODE_ENV !== 'production') {
-        globalForPrisma.prisma = prisma;
-    }
-    return prisma;
-}
 
 /**
  * Lazy import jsonwebtoken
