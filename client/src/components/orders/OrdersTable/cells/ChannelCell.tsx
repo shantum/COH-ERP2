@@ -23,7 +23,11 @@ const CHANNEL_CONFIG: Record<string, { label: string; className: string }> = {
 export const ChannelCell = memo(function ChannelCell({ row }: ChannelCellProps) {
     if (!row.isFirstLine) return null;
 
-    const channel = row.channel?.toLowerCase() || 'shopify';
+    const raw = (row.channel || 'shopify').toLowerCase().trim();
+    // Normalize: "shopify_online" -> "shopify", "nykaa_fashion" -> "nykaa", etc.
+    const channel = Object.keys(CHANNEL_CONFIG).find(
+        (key) => raw === key || raw.startsWith(`${key}_`) || raw.startsWith(`${key}-`),
+    ) || raw;
     const config = CHANNEL_CONFIG[channel] || {
         label: channel.charAt(0).toUpperCase() + channel.slice(1),
         className: 'bg-gray-100 text-gray-600',
