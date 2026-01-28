@@ -24,6 +24,7 @@ import { Route as AuthenticatedReturnsRtoRouteImport } from './routes/_authentic
 import { Route as AuthenticatedReturnsRouteImport } from './routes/_authenticated/returns'
 import { Route as AuthenticatedProductsRouteImport } from './routes/_authenticated/products'
 import { Route as AuthenticatedProductionRouteImport } from './routes/_authenticated/production'
+import { Route as AuthenticatedOrdersSimpleRouteImport } from './routes/_authenticated/orders-simple'
 import { Route as AuthenticatedOrdersMobileRouteImport } from './routes/_authenticated/orders-mobile'
 import { Route as AuthenticatedOrdersRouteImport } from './routes/_authenticated/orders'
 import { Route as AuthenticatedOrderSearchRouteImport } from './routes/_authenticated/order-search'
@@ -111,6 +112,12 @@ const AuthenticatedProductionRoute = AuthenticatedProductionRouteImport.update({
   path: '/production',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
+const AuthenticatedOrdersSimpleRoute =
+  AuthenticatedOrdersSimpleRouteImport.update({
+    id: '/orders-simple',
+    path: '/orders-simple',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
 const AuthenticatedOrdersMobileRoute =
   AuthenticatedOrdersMobileRouteImport.update({
     id: '/orders-mobile',
@@ -200,6 +207,7 @@ export interface FileRoutesByFullPath {
   '/order-search': typeof AuthenticatedOrderSearchRoute
   '/orders': typeof AuthenticatedOrdersRoute
   '/orders-mobile': typeof AuthenticatedOrdersMobileRoute
+  '/orders-simple': typeof AuthenticatedOrdersSimpleRoute
   '/production': typeof AuthenticatedProductionRoute
   '/products': typeof AuthenticatedProductsRoute
   '/returns': typeof AuthenticatedReturnsRoute
@@ -227,6 +235,7 @@ export interface FileRoutesByTo {
   '/order-search': typeof AuthenticatedOrderSearchRoute
   '/orders': typeof AuthenticatedOrdersRoute
   '/orders-mobile': typeof AuthenticatedOrdersMobileRoute
+  '/orders-simple': typeof AuthenticatedOrdersSimpleRoute
   '/production': typeof AuthenticatedProductionRoute
   '/products': typeof AuthenticatedProductsRoute
   '/returns': typeof AuthenticatedReturnsRoute
@@ -257,6 +266,7 @@ export interface FileRoutesById {
   '/_authenticated/order-search': typeof AuthenticatedOrderSearchRoute
   '/_authenticated/orders': typeof AuthenticatedOrdersRoute
   '/_authenticated/orders-mobile': typeof AuthenticatedOrdersMobileRoute
+  '/_authenticated/orders-simple': typeof AuthenticatedOrdersSimpleRoute
   '/_authenticated/production': typeof AuthenticatedProductionRoute
   '/_authenticated/products': typeof AuthenticatedProductsRoute
   '/_authenticated/returns': typeof AuthenticatedReturnsRoute
@@ -288,6 +298,7 @@ export interface FileRouteTypes {
     | '/order-search'
     | '/orders'
     | '/orders-mobile'
+    | '/orders-simple'
     | '/production'
     | '/products'
     | '/returns'
@@ -315,6 +326,7 @@ export interface FileRouteTypes {
     | '/order-search'
     | '/orders'
     | '/orders-mobile'
+    | '/orders-simple'
     | '/production'
     | '/products'
     | '/returns'
@@ -344,6 +356,7 @@ export interface FileRouteTypes {
     | '/_authenticated/order-search'
     | '/_authenticated/orders'
     | '/_authenticated/orders-mobile'
+    | '/_authenticated/orders-simple'
     | '/_authenticated/production'
     | '/_authenticated/products'
     | '/_authenticated/returns'
@@ -471,6 +484,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedProductionRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/orders-simple': {
+      id: '/_authenticated/orders-simple'
+      path: '/orders-simple'
+      fullPath: '/orders-simple'
+      preLoaderRoute: typeof AuthenticatedOrdersSimpleRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/orders-mobile': {
       id: '/_authenticated/orders-mobile'
       path: '/orders-mobile'
@@ -571,6 +591,7 @@ interface AuthenticatedRouteChildren {
   AuthenticatedOrderSearchRoute: typeof AuthenticatedOrderSearchRoute
   AuthenticatedOrdersRoute: typeof AuthenticatedOrdersRoute
   AuthenticatedOrdersMobileRoute: typeof AuthenticatedOrdersMobileRoute
+  AuthenticatedOrdersSimpleRoute: typeof AuthenticatedOrdersSimpleRoute
   AuthenticatedProductionRoute: typeof AuthenticatedProductionRoute
   AuthenticatedProductsRoute: typeof AuthenticatedProductsRoute
   AuthenticatedReturnsRoute: typeof AuthenticatedReturnsRoute
@@ -594,6 +615,7 @@ const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedOrderSearchRoute: AuthenticatedOrderSearchRoute,
   AuthenticatedOrdersRoute: AuthenticatedOrdersRoute,
   AuthenticatedOrdersMobileRoute: AuthenticatedOrdersMobileRoute,
+  AuthenticatedOrdersSimpleRoute: AuthenticatedOrdersSimpleRoute,
   AuthenticatedProductionRoute: AuthenticatedProductionRoute,
   AuthenticatedProductsRoute: AuthenticatedProductsRoute,
   AuthenticatedReturnsRoute: AuthenticatedReturnsRoute,
