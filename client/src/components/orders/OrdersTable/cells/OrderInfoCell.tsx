@@ -36,8 +36,11 @@ export const OrderInfoCell = memo(function OrderInfoCell({ row, handlersRef }: C
                     e.stopPropagation();
                     onViewOrder(row.orderId);
                 }}
-                className="text-gray-800 hover:text-blue-600 hover:underline font-bold text-base"
-                title={`View order ${row.orderNumber}`}
+                className={cn(
+                    'hover:text-blue-600 hover:underline font-bold truncate max-w-[80px]',
+                    row.orderNumber.length > 8 ? 'text-xs text-gray-700' : 'text-base text-gray-800'
+                )}
+                title={row.orderNumber}
             >
                 {row.orderNumber}
             </button>

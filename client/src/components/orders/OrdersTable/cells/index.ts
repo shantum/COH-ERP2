@@ -15,6 +15,7 @@ export { ProductionDatePopover } from './ProductionDatePopover';
 export { WorkflowCell } from './WorkflowCell';
 
 // Order info cells
+export { ChannelCell } from './ChannelCell';
 export { OrderCell } from './OrderCell';
 export { OrderInfoCell } from './OrderInfoCell';
 export { CustomerInfoCell } from './CustomerInfoCell';

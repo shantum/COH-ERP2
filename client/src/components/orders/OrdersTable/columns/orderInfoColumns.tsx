@@ -9,6 +9,7 @@ import type { OrdersTableContext } from '../types';
 import { DEFAULT_COLUMN_WIDTHS } from '../constants';
 import {
     OrderInfoCell,
+    ChannelCell,
     CustomerInfoCell,
     PaymentInfoCell,
     ShipByDateCell,
@@ -29,6 +30,20 @@ export function buildOrderInfoColumns(ctx: OrdersTableContext): ColumnDef<Flatte
                 const dateA = new Date(a.original.orderDate).getTime();
                 const dateB = new Date(b.original.orderDate).getTime();
                 return dateA - dateB;
+            },
+        },
+
+        // Channel (Shopify, COH, Myntra, etc.)
+        {
+            id: 'channel',
+            header: getHeaderName('channel'),
+            size: DEFAULT_COLUMN_WIDTHS.channel,
+            cell: ({ row }) => <ChannelCell row={row.original} />,
+            enableSorting: true,
+            sortingFn: (a, b) => {
+                const chA = a.original.channel || 'shopify';
+                const chB = b.original.channel || 'shopify';
+                return chA.localeCompare(chB);
             },
         },
 
