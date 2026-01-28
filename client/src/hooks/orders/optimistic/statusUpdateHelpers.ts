@@ -488,7 +488,7 @@ export function optimisticCancelOrder(
     if (!data) return data;
 
     // Build simulated line states after cancellation to compute order status
-    const orderRows = data.rows.filter(row => row.orderId === orderId);
+    const orderRows = data.rows.filter(row => row.orderId === orderId && row.lineStatus);
     const simulatedLines = orderRows.map(row => ({
         lineStatus: row.lineStatus === 'shipped' ? 'shipped' : 'cancelled',
     }));
@@ -542,9 +542,9 @@ export function optimisticUncancelOrder(
     if (!data) return data;
 
     // Build simulated line states after uncancellation to compute order status
-    const orderRows = data.rows.filter(row => row.orderId === orderId);
+    const orderRows = data.rows.filter(row => row.orderId === orderId && row.lineStatus);
     const simulatedLines = orderRows.map(row => ({
-        lineStatus: row.lineStatus === 'cancelled' ? 'pending' : row.lineStatus,
+        lineStatus: row.lineStatus === 'cancelled' ? 'pending' : row.lineStatus!,
     }));
     const newOrderStatus = computeOrderStatus({ orderLines: simulatedLines });
 

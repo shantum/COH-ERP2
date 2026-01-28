@@ -300,14 +300,14 @@ export interface UnshipOrderResult {
 
 export interface CancelOrderResult {
     orderId: string;
-    status: 'cancelled';
+    status: string;  // Computed from line states - could be 'cancelled', 'shipped', 'partially_shipped', etc.
     linesAffected: number;
     inventoryReleased: boolean;
 }
 
 export interface UncancelOrderResult {
     orderId: string;
-    status: 'open';
+    status: string;  // Computed from line states - could be 'open', 'partially_shipped', etc.
     linesRestored: number;
 }
 
