@@ -3097,7 +3097,10 @@ export const unmarkShippedLine = createServerFn({ method: 'POST' })
             if (remainingShippedLines === 0) {
                 await tx.order.update({
                     where: { id: line.orderId },
-                    data: { status: 'open' },
+                    data: {
+                        status: 'open',
+                        releasedToShipped: false,
+                    },
                 });
             }
         });
