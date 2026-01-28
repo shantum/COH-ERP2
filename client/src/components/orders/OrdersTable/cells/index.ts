@@ -33,6 +33,9 @@ export { PaymentMethodCell } from './PaymentMethodCell';
 export { RtoHistoryCell } from './RtoHistoryCell';
 export { CustomerLtvCell } from './CustomerLtvCell';
 export { CustomerOrderCountCell } from './CustomerOrderCountCell';
+export { TagsCell } from './TagsCell';
+export { CustomerNotesCell } from './CustomerNotesCell';
+export { CustomerTagsCell } from './CustomerTagsCell';
 
 // Line item cells
 export { CustomizeCell } from './CustomizeCell';

@@ -12,15 +12,16 @@ export const AdminShipCell = memo(function AdminShipCell({ row, handlersRef }: C
     const { isAdmin, onForceShipLine, allocatingLines } = handlersRef.current;
     const [isPrompting, setIsPrompting] = useState(false);
 
-    // Only show for admins
-    if (!isAdmin || !onForceShipLine) return null;
-
     const lineId = row.lineId;
-    if (!lineId) return null;
-
-    // Don't show if already shipped or cancelled
     const status = row.lineStatus;
+
+    // Early exit for non-actionable states (stable conditions that won't change)
+    if (!lineId) return null;
     if (status === 'shipped' || status === 'cancelled') return null;
+
+    // Check admin status - explicitly require true to prevent flicker
+    // during hydration when isAdmin might briefly be undefined
+    if (isAdmin !== true || !onForceShipLine) return null;
 
     const isLoading = allocatingLines?.has(lineId) || false;
 

@@ -174,7 +174,7 @@ export const ORDER_VIEWS: Record<ViewName, OrderViewConfig> = {
             // Filter by line-level tracking status (has at least one RTO line)
             orderLines: {
                 some: {
-                    trackingStatus: { in: ['rto_in_transit', 'rto_delivered'] },
+                    trackingStatus: { in: ['rto_initiated', 'rto_in_transit', 'rto_delivered'] },
                 },
             },
             isArchived: false,
