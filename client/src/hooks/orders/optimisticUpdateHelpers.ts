@@ -35,10 +35,9 @@ export {
     optimisticBatchLineStatusUpdate,
     optimisticCancelLine,
     optimisticUncancelLine,
-    // Shipping updates
-    optimisticShipOrder,
+    // Shipping updates (line-level only - no order-level shipping)
     optimisticShipLines,
-    optimisticUnshipOrder,
+    optimisticUnshipLines,
     optimisticUpdateLineTracking,
     // Delivery updates
     optimisticMarkDelivered,

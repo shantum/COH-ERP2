@@ -75,8 +75,7 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
     const { invalidateAll } = useOrderInvalidation();
 
     return {
-        // Ship
-        ship: ship.ship,
+        // Ship (line-level only - no order-level ship, UI resolves to line IDs)
         shipLines: ship.shipLines,
         adminShip: ship.adminShip,
         unship: ship.unship,

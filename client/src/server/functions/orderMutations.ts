@@ -122,14 +122,6 @@ const allocateOrderSchema = z.object({
     lineIds: z.array(z.string().uuid()).optional(), // Optional: if not provided, allocate all pending lines
 });
 
-const shipOrderSchema = z.object({
-    orderId: z.string().uuid('Invalid order ID'),
-    awbNumber: z.string().min(1, 'AWB number is required').trim()
-        .transform((val) => val.toUpperCase()),
-    courier: z.string().min(1, 'Courier is required').trim(),
-    lineIds: z.array(z.string().uuid()).optional(), // Optional: if not provided, ship all packed lines
-});
-
 const adminShipOrderSchema = z.object({
     orderId: z.string().uuid('Invalid order ID'),
     awbNumber: z.string().trim()
@@ -271,16 +263,6 @@ export interface AllocateOrderResult {
     allocated: number;
     lineIds: string[];
     failed?: Array<{ lineId: string; reason: string }>;
-}
-
-export interface ShipOrderResult {
-    orderId: string;
-    shipped: number;
-    lineIds: string[];
-    awbNumber: string;
-    courier: string;
-    orderUpdated: boolean;
-    skipped?: Array<{ lineId: string; reason: string }>;
 }
 
 export interface AdminShipOrderResult {
@@ -1789,124 +1771,6 @@ export const allocateOrder = createServerFn({ method: 'POST' })
                 error: { code: 'BAD_REQUEST', message },
             };
         }
-    });
-
-/**
- * Ship order with AWB
- * - Validate lines are in 'packed' status
- * - Update shippedAt, awbNumber, courier on lines
- * - Set lineStatus='shipped'
- * - SSE broadcast
- */
-export const shipOrder = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
-    .inputValidator((input: unknown) => shipOrderSchema.parse(input))
-    .handler(async ({ data, context }): Promise<MutationResult<ShipOrderResult>> => {
-        const prisma = await getPrisma();
-        const { orderId, awbNumber, courier, lineIds } = data;
-
-        // Fetch order with lines
-        const order = await prisma.order.findUnique({
-            where: { id: orderId },
-            include: {
-                orderLines: lineIds && lineIds.length > 0
-                    ? { where: { id: { in: lineIds } } }
-                    : true,
-            },
-        });
-
-        if (!order) {
-            return {
-                success: false,
-                error: { code: 'NOT_FOUND', message: 'Order not found' },
-            };
-        }
-
-        // Filter lines that can be shipped (packed status)
-        type ShipOrderLine = { id: string; lineStatus: string };
-        const linesToShip = order.orderLines.filter((l: ShipOrderLine) => l.lineStatus === 'packed');
-        const skipped = order.orderLines
-            .filter((l: ShipOrderLine) => l.lineStatus !== 'packed' && l.lineStatus !== 'shipped')
-            .map((l: ShipOrderLine) => ({ lineId: l.id, reason: `Invalid status: ${l.lineStatus}` }));
-
-        if (linesToShip.length === 0) {
-            return {
-                success: false,
-                error: {
-                    code: 'BAD_REQUEST',
-                    message: 'No lines in packed status to ship',
-                },
-            };
-        }
-
-        const now = new Date();
-        const shippedLineIds: string[] = [];
-
-        const result = await prisma.$transaction(async (tx) => {
-            // Update all lines to shipped
-            await tx.orderLine.updateMany({
-                where: { id: { in: linesToShip.map((l: ShipOrderLine) => l.id) } },
-                data: {
-                    lineStatus: 'shipped',
-                    shippedAt: now,
-                    awbNumber,
-                    courier,
-                    trackingStatus: 'in_transit',
-                },
-            });
-
-            for (const line of linesToShip) {
-                shippedLineIds.push(line.id);
-            }
-
-            // Check if all non-cancelled lines are shipped
-            const remainingLines = await tx.orderLine.count({
-                where: {
-                    orderId,
-                    lineStatus: { notIn: ['shipped', 'cancelled'] },
-                },
-            });
-
-            let orderUpdated = false;
-            if (remainingLines === 0) {
-                await tx.order.update({
-                    where: { id: orderId },
-                    data: { status: 'shipped' },
-                });
-                orderUpdated = true;
-            }
-
-            return { orderUpdated };
-        });
-
-        // Broadcast SSE update
-        broadcastUpdate(
-            {
-                type: 'order_shipped',
-                orderId,
-                affectedViews: ['open', 'shipped'],
-                changes: {
-                    lineStatus: 'shipped',
-                    awbNumber,
-                    courier,
-                    shippedAt: now.toISOString(),
-                },
-            },
-            context.user.id
-        );
-
-        return {
-            success: true,
-            data: {
-                orderId,
-                shipped: shippedLineIds.length,
-                lineIds: shippedLineIds,
-                awbNumber,
-                courier,
-                orderUpdated: result.orderUpdated,
-                ...(skipped.length > 0 ? { skipped } : {}),
-            },
-        };
     });
 
 /**

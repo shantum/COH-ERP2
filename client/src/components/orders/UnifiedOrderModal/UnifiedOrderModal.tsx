@@ -282,7 +282,7 @@ export function UnifiedOrderModal({
     }
   }, [hasUnsavedChanges, editForm, addressForm, order, mutations, onClose]);
 
-  // Ship entire order
+  // Ship entire order (resolves to packed line IDs before calling shipLines)
   const handleShipOrder = useCallback(async () => {
     if (!shipForm.awbNumber.trim() || !shipForm.courier.trim()) {
       alert('Please enter AWB number and select a courier');
@@ -295,20 +295,28 @@ export function UnifiedOrderModal({
       return;
     }
 
+    // Get all packed line IDs from the order
+    const packedLineIds = order.orderLines
+      ?.filter((line: any) => line.lineStatus === 'packed')
+      .map((line: any) => line.id) || [];
+
+    if (packedLineIds.length === 0) {
+      alert('No packed lines to ship');
+      return;
+    }
+
     setIsShipping(true);
     try {
-      await mutations.ship.mutateAsync({
-        id: order.id,
-        data: {
-          awbNumber: shipForm.awbNumber.trim(),
-          courier: shipForm.courier.trim(),
-        },
+      await mutations.shipLines.mutateAsync({
+        lineIds: packedLineIds,
+        awbNumber: shipForm.awbNumber.trim(),
+        courier: shipForm.courier.trim(),
       });
     } catch (error) {
       setIsShipping(false);
       console.error('Failed to ship order:', error);
     }
-  }, [shipForm, expectedAwb, awbMatches, order.id, mutations]);
+  }, [shipForm, expectedAwb, awbMatches, order.orderLines, mutations]);
 
   // Ship selected lines (partial shipment)
   const handleShipLines = useCallback(async () => {

@@ -170,60 +170,9 @@ export function optimisticUncancelLine(
 // ============================================================================
 
 /**
- * Optimistically ship an entire order (all lines)
- * Updates all line statuses to shipped with tracking info
- */
-export function optimisticShipOrder(
-    data: OrdersListData | undefined,
-    orderId: string,
-    shipData: ShipData
-): OrdersListData | undefined {
-    if (!data) return data;
-
-    return {
-        ...data,
-        rows: data.rows.map((row) => {
-            if (row.orderId !== orderId) return row;
-            // Only ship non-cancelled lines
-            if (row.lineStatus === 'cancelled') return row;
-
-            return {
-                ...row,
-                lineStatus: shipData.lineStatus,
-                awbNumber: shipData.awbNumber,
-                courier: shipData.courier,
-                lineShippedAt: shipData.shippedAt,
-            };
-        }),
-        ...(data.orders ? {
-            orders: data.orders.map((order) => {
-                if (order.id !== orderId) return order;
-                return {
-                    ...order,
-                    status: 'shipped',
-                    awbNumber: shipData.awbNumber,
-                    courier: shipData.courier,
-                    shippedAt: shipData.shippedAt,
-                    orderLines: order.orderLines?.map((line: any) =>
-                        line.lineStatus === 'cancelled'
-                            ? line
-                            : {
-                                ...line,
-                                lineStatus: shipData.lineStatus,
-                                awbNumber: shipData.awbNumber,
-                                courier: shipData.courier,
-                                shippedAt: shipData.shippedAt,
-                            }
-                    ),
-                };
-            }),
-        } : {}),
-    };
-}
-
-/**
  * Optimistically ship specific lines
  * Updates specified line statuses to shipped with tracking info
+ * IMPORTANT: Only updates lines that are in 'packed' status to match server logic
  */
 export function optimisticShipLines(
     data: OrdersListData | undefined,
@@ -238,6 +187,8 @@ export function optimisticShipLines(
         ...data,
         rows: data.rows.map((row) => {
             if (!row.lineId || !lineIdSet.has(row.lineId)) return row;
+            // Only ship lines that are in 'packed' status (matching server validation)
+            if (row.lineStatus !== 'packed') return row;
 
             return {
                 ...row,
@@ -251,7 +202,7 @@ export function optimisticShipLines(
             orders: data.orders.map((order) => ({
                 ...order,
                 orderLines: order.orderLines?.map((line: any) =>
-                    lineIdSet.has(line.id)
+                    lineIdSet.has(line.id) && line.lineStatus === 'packed'
                         ? {
                             ...line,
                             lineStatus: shipData.lineStatus,
@@ -267,19 +218,21 @@ export function optimisticShipLines(
 }
 
 /**
- * Optimistically unship an order
- * Reverts all shipped lines back to packed status
+ * Optimistically unship specific lines
+ * Reverts shipped lines back to packed status
  */
-export function optimisticUnshipOrder(
+export function optimisticUnshipLines(
     data: OrdersListData | undefined,
-    orderId: string
+    lineIds: string[]
 ): OrdersListData | undefined {
     if (!data) return data;
+
+    const lineIdSet = new Set(lineIds);
 
     return {
         ...data,
         rows: data.rows.map((row) => {
-            if (row.orderId !== orderId) return row;
+            if (!row.lineId || !lineIdSet.has(row.lineId)) return row;
             if (row.lineStatus !== 'shipped') return row;
 
             return {
@@ -291,27 +244,20 @@ export function optimisticUnshipOrder(
             };
         }),
         ...(data.orders ? {
-            orders: data.orders.map((order) => {
-                if (order.id !== orderId) return order;
-                return {
-                    ...order,
-                    status: 'open',
-                    awbNumber: null,
-                    courier: null,
-                    shippedAt: null,
-                    orderLines: order.orderLines?.map((line: any) =>
-                        line.lineStatus === 'shipped'
-                            ? {
-                                ...line,
-                                lineStatus: 'packed',
-                                awbNumber: null,
-                                courier: null,
-                                shippedAt: null,
-                            }
-                            : line
-                    ),
-                };
-            }),
+            orders: data.orders.map((order) => ({
+                ...order,
+                orderLines: order.orderLines?.map((line: any) =>
+                    lineIdSet.has(line.id) && line.lineStatus === 'shipped'
+                        ? {
+                            ...line,
+                            lineStatus: 'packed',
+                            awbNumber: null,
+                            courier: null,
+                            shippedAt: null,
+                        }
+                        : line
+                ),
+            })),
         } : {}),
     };
 }

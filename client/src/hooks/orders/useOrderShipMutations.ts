@@ -1,13 +1,13 @@
 /**
  * Order ship mutations with optimistic updates
- * Handles shipping orders and line-level shipping operations
+ * Handles line-level shipping operations (no order-level ship - UI resolves to line IDs)
  *
  * Optimistic update strategy:
  * 1. onMutate: Cancel inflight queries, save previous data, update cache optimistically
  * 2. onError: Rollback to previous data + invalidate for consistency
  * 3. onSettled: Invalidate caches to confirm server state + trigger callbacks
  *
- * Server Functions: ship, adminShip, unship, shipLines, markShippedLine, unmarkShippedLine, updateLineTracking
+ * Server Functions: shipLines, adminShip, unship, markShippedLine, unmarkShippedLine, updateLineTracking
  */
 
 import { useMemo } from 'react';
@@ -17,7 +17,6 @@ import { inventoryQueryKeys } from '../../constants/queryKeys';
 import { useOrderInvalidation, getOrdersListQueryKey } from './orderMutationUtils';
 import { showError } from '../../utils/toast';
 import {
-    shipOrder as shipOrderFn,
     adminShipOrder as adminShipOrderFn,
     unshipOrder as unshipOrderFn,
     shipLines as shipLinesFn,
@@ -27,9 +26,8 @@ import {
 } from '../../server/functions/orderMutations';
 import {
     getOrdersQueryInput,
-    optimisticShipOrder,
     optimisticShipLines,
-    optimisticUnshipOrder,
+    optimisticUnshipLines,
     optimisticUpdateLineTracking,
     optimisticLineStatusUpdate,
     type OrdersListData,
@@ -48,7 +46,6 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
     const { invalidateOpenOrders, invalidateShippedOrders } = useOrderInvalidation();
 
     // Server Function wrappers
-    const shipOrderServerFn = useServerFn(shipOrderFn);
     const adminShipOrderServerFn = useServerFn(adminShipOrderFn);
     const unshipOrderServerFn = useServerFn(unshipOrderFn);
     const shipLinesServerFn = useServerFn(shipLinesFn);
@@ -73,70 +70,7 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
     };
 
     // ============================================
-    // SHIP ORDER - Server Function
-    // ============================================
-    const shipOrderMutation = useMutation({
-        mutationFn: async (input: { orderId: string; awbNumber: string; courier: string; lineIds?: string[] }) => {
-            const result = await shipOrderServerFn({ data: input });
-            if (!result.success) {
-                throw new Error(result.error?.message || 'Failed to ship order');
-            }
-            return result.data;
-        },
-        onMutate: async ({ orderId, awbNumber, courier }) => {
-            await queryClient.cancelQueries({ queryKey: ['orders'] });
-            const previousData = getCachedData();
-
-            // Optimistically update all lines to shipped
-            setCachedData(
-                queryInput,
-                (old) => optimisticShipOrder(old, orderId, {
-                    lineStatus: 'shipped',
-                    awbNumber,
-                    courier,
-                    shippedAt: new Date().toISOString(),
-                })
-            );
-
-            return { previousData, queryInput } as OptimisticUpdateContext;
-        },
-        onError: (err, _vars, context) => {
-            // Rollback on error
-            if (context?.previousData) {
-                setCachedData(context.queryInput, () => context.previousData);
-            }
-            // Invalidate after rollback to ensure consistency
-            invalidateOpenOrders();
-            invalidateShippedOrders();
-
-            const errorMsg = err instanceof Error ? err.message : String(err);
-            if (errorMsg.includes('validation')) {
-                showError('Validation failed', { description: errorMsg });
-            } else {
-                showError('Failed to ship order', { description: errorMsg });
-            }
-        },
-        onSettled: () => {
-            // Only invalidate non-SSE-synced data (inventory balance)
-            // Order list updates handled by optimistic updates + SSE
-            queryClient.invalidateQueries({ queryKey: inventoryQueryKeys.balance });
-            onShipSuccess?.();
-        }
-    });
-
-    // Wrapper for backward compatibility - useMemo ensures isPending updates reactively
-    const ship = useMemo(() => ({
-        mutate: ({ id, data }: { id: string; data: { awbNumber: string; courier: string } }) =>
-            shipOrderMutation.mutate({ orderId: id, awbNumber: data.awbNumber, courier: data.courier }),
-        mutateAsync: ({ id, data }: { id: string; data: { awbNumber: string; courier: string } }) =>
-            shipOrderMutation.mutateAsync({ orderId: id, awbNumber: data.awbNumber, courier: data.courier }),
-        isPending: shipOrderMutation.isPending,
-        isError: shipOrderMutation.isError,
-        error: shipOrderMutation.error,
-    }), [shipOrderMutation.isPending, shipOrderMutation.isError, shipOrderMutation.error]);
-
-    // ============================================
-    // SHIP LINES - Server Function
+    // SHIP LINES - Server Function (primary shipping endpoint)
     // ============================================
     const shipLinesMutation = useMutation({
         mutationFn: async (input: { lineIds: string[]; awbNumber: string; courier: string }) => {
@@ -267,9 +201,14 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
             await queryClient.cancelQueries({ queryKey: ['orders'] });
             const previousData = queryClient.getQueryData<OrdersListData>(getOrdersListQueryKey(shippedQueryInput));
 
+            // Get all shipped line IDs for this order from the cache
+            const shippedLineIds = previousData?.rows
+                .filter((row: any) => row.orderId === orderId && row.lineStatus === 'shipped' && row.lineId)
+                .map((row: any) => row.lineId as string) || [];
+
             setCachedData(
                 shippedQueryInput,
-                (old) => optimisticUnshipOrder(old, orderId)
+                (old) => optimisticUnshipLines(old, shippedLineIds)
             );
 
             return { previousData, queryInput: shippedQueryInput } as OptimisticUpdateContext;
@@ -472,7 +411,6 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
     }), [updateLineTrackingMutation.isPending, updateLineTrackingMutation.isError, updateLineTrackingMutation.error]);
 
     return {
-        ship,
         shipLines,
         adminShip,
         unship,
