@@ -117,16 +117,21 @@ export const TrackingInfoCell = memo(function TrackingInfoCell({ row, handlersRe
         setIsOpen(false);
     };
 
-    const handleClear = () => {
+    const handleClear = async () => {
         setAwbValue('');
         setCourierValue('');
+        setIsOpen(false);
         // Send empty string to clear - server converts '' to null
         // (undefined gets stripped from JSON and won't update)
-        onUpdateLineTracking(row.lineId!, {
-            awbNumber: '',
-            courier: '',
-        });
-        setIsOpen(false);
+        try {
+            await onUpdateLineTracking(row.lineId!, {
+                awbNumber: '',
+                courier: '',
+            });
+        } finally {
+            // Call onSettled for UI/DB sync (same as handleSave)
+            onSettled?.();
+        }
     };
 
     const handleKeyDown = (e: React.KeyboardEvent) => {
