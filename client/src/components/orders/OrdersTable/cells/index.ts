@@ -35,6 +35,8 @@ export { CustomerLtvCell } from './CustomerLtvCell';
 export { CustomerOrderCountCell } from './CustomerOrderCountCell';
 
 // Line item cells
+export { CustomizeCell } from './CustomizeCell';
+export { FabricBalanceCell } from './FabricBalanceCell';
 export { ProductNameCell } from './ProductNameCell';
 export { QtyCell } from './QtyCell';
 export { StockCell } from './StockCell';
