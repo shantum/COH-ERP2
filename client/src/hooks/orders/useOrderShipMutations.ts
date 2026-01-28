@@ -330,7 +330,7 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
                                 lineShippedAt: new Date().toISOString(),
                             };
                         }),
-                        orders: old.orders.map((order: any) => ({
+                        ...(old.orders ? { orders: old.orders.map((order: any) => ({
                             ...order,
                             orderLines: order.orderLines?.map((line: any) =>
                                 line.id === lineId
@@ -343,7 +343,7 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
                                     }
                                     : line
                             ),
-                        })),
+                        })) } : {}),
                     };
                 }
             );

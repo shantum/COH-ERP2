@@ -91,7 +91,21 @@ export const PickPackCell = memo(function PickPackCell({ row, handlersRef }: Pic
                     label="Ship"
                     state="active"
                     isLoading={isLoading}
-                    onClick={() => lineId && onMarkShippedLine?.(lineId)}
+                    onClick={() => {
+                        if (!lineId) return;
+                        const existingAwb = row.lineAwbNumber || row.shopifyAwb;
+                        if (existingAwb) {
+                            onMarkShippedLine?.(lineId, {
+                                awbNumber: existingAwb,
+                                courier: row.lineCourier || row.shopifyCourier || 'Unknown',
+                            });
+                        } else {
+                            const awb = prompt('AWB Number (required):');
+                            if (!awb?.trim()) return;
+                            const courier = prompt('Courier:') || 'Unknown';
+                            onMarkShippedLine?.(lineId, { awbNumber: awb.trim(), courier });
+                        }
+                    }}
                 />
             </div>
         );
