@@ -545,8 +545,8 @@ export const getProductShopifyStatuses = createServerFn({ method: 'POST' })
 
             // Get Shopify product IDs that exist
             const shopifyProductIds = products
-                .map(p => p.shopifyProductId)
-                .filter((id): id is string => Boolean(id));
+                .map((p: { id: string; shopifyProductId: string | null }) => p.shopifyProductId)
+                .filter((id: string | null): id is string => Boolean(id));
 
             // Fetch status from ShopifyProductCache
             const shopifyStatusMap = new Map<string, ShopifyProductStatus>();
@@ -555,7 +555,7 @@ export const getProductShopifyStatuses = createServerFn({ method: 'POST' })
                     where: { id: { in: shopifyProductIds } },
                     select: { id: true, rawData: true },
                 });
-                shopifyCache.forEach(cache => {
+                shopifyCache.forEach((cache: { id: string; rawData: string }) => {
                     try {
                         const cacheData = JSON.parse(cache.rawData as string) as { status?: string };
                         const status = cacheData.status || 'unknown';
@@ -567,7 +567,7 @@ export const getProductShopifyStatuses = createServerFn({ method: 'POST' })
             }
 
             // Map products to their statuses
-            const result: ProductShopifyStatus[] = products.map(product => {
+            const result: ProductShopifyStatus[] = products.map((product: { id: string; shopifyProductId: string | null }) => {
                 if (!product.shopifyProductId) {
                     return {
                         productId: product.id,

@@ -749,7 +749,7 @@ export const getFabrics = createServerFn({ method: 'GET' })
 
             // Calculate balances in batches
             const fabricsWithBalance = await chunkProcess(
-                fabrics,
+                fabrics as FabricWithType[],
                 async (fabric) => {
                     const balance = await calculateFabricBalance(prisma, fabric.id);
                     return { ...fabric, ...balance };
@@ -1198,7 +1198,7 @@ export const getFabricTypes = createServerFn({ method: 'GET' })
 
             return {
                 success: true,
-                types: types.map((t) => ({
+                types: (types as FabricTypeWithFabrics[]).map((t) => ({
                     id: t.id,
                     name: t.name,
                     composition: t.composition,

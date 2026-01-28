@@ -94,7 +94,7 @@ export const getMaterialsHierarchy = createServerFn({ method: 'GET' })
             });
 
             // Transform into tree structure with inheritance calculations
-            const tree = materials.map((material) => ({
+            const tree = materials.map((material: typeof materials[number]) => ({
                 id: material.id,
                 type: 'material' as const,
                 name: material.name,
@@ -102,7 +102,7 @@ export const getMaterialsHierarchy = createServerFn({ method: 'GET' })
                 isActive: material.isActive,
                 createdAt: material.createdAt.toISOString(),
                 updatedAt: material.updatedAt.toISOString(),
-                children: material.fabrics.map((fabric) => ({
+                children: material.fabrics.map((fabric: typeof material.fabrics[number]) => ({
                     id: fabric.id,
                     type: 'fabric' as const,
                     materialId: fabric.materialId,
@@ -122,7 +122,7 @@ export const getMaterialsHierarchy = createServerFn({ method: 'GET' })
                     supplierName: fabric.supplier?.name,
                     isActive: fabric.isActive,
                     colourCount: fabric.colours.length,
-                    children: fabric.colours.map((colour) => ({
+                    children: fabric.colours.map((colour: typeof fabric.colours[number]) => ({
                         id: colour.id,
                         type: 'colour' as const,
                         fabricId: colour.fabricId,
@@ -155,9 +155,9 @@ export const getMaterialsHierarchy = createServerFn({ method: 'GET' })
                 success: true,
                 tree,
                 totalMaterials: materials.length,
-                totalFabrics: materials.reduce((sum, m) => sum + m.fabrics.length, 0),
+                totalFabrics: materials.reduce((sum: number, m: typeof materials[number]) => sum + m.fabrics.length, 0),
                 totalColours: materials.reduce(
-                    (sum, m) => sum + m.fabrics.reduce((fSum, f) => fSum + f.colours.length, 0),
+                    (sum: number, m: typeof materials[number]) => sum + m.fabrics.reduce((fSum: number, f: typeof m.fabrics[number]) => fSum + f.colours.length, 0),
                     0
                 ),
             };
@@ -204,7 +204,7 @@ export const getMaterialsFlat = createServerFn({ method: 'GET' })
 
                 return {
                     success: true,
-                    items: materials.map((m) => ({
+                    items: materials.map((m: typeof materials[number]) => ({
                         id: m.id,
                         name: m.name,
                         description: m.description,
@@ -256,7 +256,7 @@ export const getMaterialsFlat = createServerFn({ method: 'GET' })
 
                 return {
                     success: true,
-                    items: fabrics.map((f) => ({
+                    items: fabrics.map((f: typeof fabrics[number]) => ({
                         id: f.id,
                         materialId: f.materialId,
                         materialName: f.material?.name || '',
@@ -317,7 +317,7 @@ export const getMaterialsFlat = createServerFn({ method: 'GET' })
 
                 return {
                     success: true,
-                    items: colours.map((c) => ({
+                    items: colours.map((c: typeof colours[number]) => ({
                         id: c.id,
                         fabricId: c.fabricId,
                         fabricName: c.fabric.name,
@@ -383,7 +383,7 @@ export const getTrims = createServerFn({ method: 'GET' })
                 orderBy: [{ category: 'asc' }, { name: 'asc' }],
             });
 
-            const items = trims.map((t) => ({
+            const items = trims.map((t: typeof trims[number]) => ({
                 id: t.id,
                 code: t.code,
                 name: t.name,
@@ -448,7 +448,7 @@ export const getServices = createServerFn({ method: 'GET' })
                 orderBy: [{ category: 'asc' }, { name: 'asc' }],
             });
 
-            const items = services.map((s) => ({
+            const items = services.map((s: typeof services[number]) => ({
                 id: s.id,
                 code: s.code,
                 name: s.name,
@@ -542,16 +542,16 @@ export const getMaterialsFilters = createServerFn({ method: 'GET' })
             return {
                 success: true,
                 filters: {
-                    materials: materials.map((m) => ({ id: m.id, name: m.name })),
+                    materials: materials.map((m: typeof materials[number]) => ({ id: m.id, name: m.name })),
                     constructionTypes: constructionTypes
-                        .map((ct) => ct.constructionType)
-                        .filter((ct): ct is string => ct !== null)
+                        .map((ct: typeof constructionTypes[number]) => ct.constructionType)
+                        .filter((ct: string | null): ct is string => ct !== null)
                         .sort(),
                     patterns: patterns
-                        .map((p) => p.pattern)
-                        .filter((p): p is string => p !== null)
+                        .map((p: typeof patterns[number]) => p.pattern)
+                        .filter((p: string | null): p is string => p !== null)
                         .sort(),
-                    suppliers: suppliers.map((s) => ({ id: s.id, name: s.name })),
+                    suppliers: suppliers.map((s: typeof suppliers[number]) => ({ id: s.id, name: s.name })),
                 },
             };
     });
@@ -586,7 +586,7 @@ export const getMaterialsTree = createServerFn({ method: 'GET' })
                     orderBy: { name: 'asc' },
                 });
 
-                const items = materials.map((m) => ({
+                const items = materials.map((m: typeof materials[number]) => ({
                     id: m.id,
                     type: 'material' as const,
                     name: m.name,
@@ -680,17 +680,17 @@ export const getMaterialsTree = createServerFn({ method: 'GET' })
             }
 
             // Build tree - using inline type assertions for the response
-            const items = materials.map((material) => ({
+            const items = materials.map((material: typeof materials[number]) => ({
                 id: material.id,
                 type: 'material' as const,
                 name: material.name,
                 description: material.description,
                 isActive: material.isActive,
                 fabricCount: material.fabrics.length,
-                colourCount: material.fabrics.reduce((sum, f) => sum + f.colours.length, 0),
+                colourCount: material.fabrics.reduce((sum: number, f: typeof material.fabrics[number]) => sum + f.colours.length, 0),
                 totalStock: 0, // Could calculate from inventory if needed
                 hasChildren: material.fabrics.length > 0,
-                children: material.fabrics.map((fabric) => ({
+                children: material.fabrics.map((fabric: typeof material.fabrics[number]) => ({
                     id: fabric.id,
                     type: 'fabric' as const,
                     name: fabric.name,
@@ -711,7 +711,7 @@ export const getMaterialsTree = createServerFn({ method: 'GET' })
                     isActive: fabric.isActive,
                     colourCount: fabric.colours.length,
                     hasChildren: fabric.colours.length > 0,
-                    children: fabric.colours.map((colour) => ({
+                    children: fabric.colours.map((colour: typeof fabric.colours[number]) => ({
                         id: colour.id,
                         type: 'colour' as const,
                         name: colour.colourName,
@@ -739,7 +739,7 @@ export const getMaterialsTree = createServerFn({ method: 'GET' })
                         // Extract unique products from variation BOM lines
                         connectedProducts: (() => {
                             const productMap = new Map<string, { id: string; name: string; styleCode?: string }>();
-                            colour.variationBomLines.forEach((bomLine) => {
+                            colour.variationBomLines.forEach((bomLine: typeof colour.variationBomLines[number]) => {
                                 const product = bomLine.variation?.product;
                                 if (product && !productMap.has(product.id)) {
                                     productMap.set(product.id, {
@@ -753,7 +753,7 @@ export const getMaterialsTree = createServerFn({ method: 'GET' })
                         })(),
                         productCount: (() => {
                             const productIds = new Set<string>();
-                            colour.variationBomLines.forEach((bomLine) => {
+                            colour.variationBomLines.forEach((bomLine: typeof colour.variationBomLines[number]) => {
                                 const product = bomLine.variation?.product;
                                 if (product) productIds.add(product.id);
                             });
@@ -768,9 +768,9 @@ export const getMaterialsTree = createServerFn({ method: 'GET' })
                 items,
                 summary: {
                     totalMaterials: materials.length,
-                    totalFabrics: materials.reduce((sum, m) => sum + m.fabrics.length, 0),
+                    totalFabrics: materials.reduce((sum: number, m: typeof materials[number]) => sum + m.fabrics.length, 0),
                     totalColours: materials.reduce(
-                        (sum, m) => sum + m.fabrics.reduce((fSum, f) => fSum + f.colours.length, 0),
+                        (sum: number, m: typeof materials[number]) => sum + m.fabrics.reduce((fSum: number, f: typeof m.fabrics[number]) => fSum + f.colours.length, 0),
                         0
                     ),
                 },
@@ -802,7 +802,7 @@ export const getMaterialsTreeChildren = createServerFn({ method: 'GET' })
                     orderBy: { name: 'asc' },
                 });
 
-                const items = fabrics.map((fabric) => ({
+                const items = fabrics.map((fabric: typeof fabrics[number]) => ({
                     id: fabric.id,
                     type: 'fabric' as const,
                     name: fabric.name,
@@ -853,7 +853,7 @@ export const getMaterialsTreeChildren = createServerFn({ method: 'GET' })
                 });
 
                 // Batch calculate balances for these colours
-                const colourIds = colours.map((c) => c.id);
+                const colourIds = colours.map((c: typeof colours[number]) => c.id);
                 const balanceMap = new Map<string, number>();
                 if (colourIds.length > 0) {
                     const aggregations = await prisma.fabricColourTransaction.groupBy({
@@ -880,10 +880,10 @@ export const getMaterialsTreeChildren = createServerFn({ method: 'GET' })
                     }
                 }
 
-                const items = colours.map((colour) => {
+                const items = colours.map((colour: typeof colours[number]) => {
                     // Extract unique products from variation BOM lines
                     const productMap = new Map<string, { id: string; name: string; styleCode?: string }>();
-                    colour.variationBomLines.forEach((bomLine) => {
+                    colour.variationBomLines.forEach((bomLine: typeof colour.variationBomLines[number]) => {
                         const product = bomLine.variation?.product;
                         if (product && !productMap.has(product.id)) {
                             productMap.set(product.id, {
@@ -1030,7 +1030,7 @@ export const searchVariations = createServerFn({ method: 'GET' })
                 take: data.limit,
             });
 
-            const results = variations.map((v) => {
+            const results = variations.map((v: typeof variations[number]) => {
                 const mainFabricLine = v.bomLines[0];
                 return {
                     id: v.id,

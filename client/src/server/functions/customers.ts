@@ -129,7 +129,7 @@ export const getCustomersList = createServerFn({ method: 'GET' })
             ]);
 
             // Map to result type
-            const customers: CustomerListItem[] = customersRaw.map((c) => ({
+            const customers: CustomerListItem[] = customersRaw.map((c: typeof customersRaw[number]) => ({
                 id: c.id,
                 email: c.email,
                 firstName: c.firstName,

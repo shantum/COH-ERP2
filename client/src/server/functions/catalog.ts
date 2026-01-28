@@ -11,6 +11,7 @@
 import { createServerFn } from '@tanstack/react-start';
 import { getCookie } from '@tanstack/react-start/server';
 import { z } from 'zod';
+import type { Prisma } from '@prisma/client';
 import { authMiddleware } from '../middleware/auth';
 import { getPrisma } from '@coh/shared/services/db';
 
@@ -205,6 +206,55 @@ interface BalanceRow {
     outward: bigint;
 }
 
+// Type for SKU query with nested includes
+type SkuWithRelations = Prisma.SkuGetPayload<{
+    include: {
+        variation: {
+            include: {
+                product: {
+                    include: {
+                        fabricType: true;
+                    };
+                };
+                fabric: {
+                    include: {
+                        fabricType: true;
+                    };
+                };
+            };
+        };
+        shopifyInventoryCache: true;
+    };
+}>;
+
+// Type for ShopifyProductCache query result
+type ShopifyProductCacheRow = {
+    id: string;
+    rawData: Prisma.JsonValue;
+};
+
+// Type for Product query result in getCatalogCategories
+type ProductQueryResult = {
+    id: string;
+    name: string;
+    gender: string | null;
+    category: string | null;
+};
+
+// Type for FabricType query result
+type FabricTypeQueryResult = {
+    id: string;
+    name: string;
+};
+
+// Type for Fabric query result
+type FabricQueryResult = {
+    id: string;
+    name: string;
+    colorName: string;
+    fabricTypeId: string | null;
+};
+
 // Size sort order for proper sorting (XS -> S -> M -> L -> XL -> 2XL -> etc)
 const SIZE_ORDER = ['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL', 'Free'];
 
@@ -345,7 +395,7 @@ export const getCatalogProducts = createServerFn({ method: 'GET' })
                 });
 
                 // Calculate all inventory balances in single batch query
-                const skuIds = skus.map(sku => sku.id);
+                const skuIds = skus.map((sku: SkuWithRelations) => sku.id);
                 const balances: BalanceRow[] = await prisma.$queryRaw`
                     SELECT
                         "skuId",
@@ -380,8 +430,8 @@ export const getCatalogProducts = createServerFn({ method: 'GET' })
                 const shopifyProductIds = [
                     ...new Set(
                         skus
-                            .map(sku => sku.variation.product.shopifyProductId)
-                            .filter((id): id is string => Boolean(id))
+                            .map((sku: SkuWithRelations) => sku.variation.product.shopifyProductId)
+                            .filter((id: string | null): id is string => Boolean(id))
                     ),
                 ];
                 const shopifyStatusMap = new Map<string, string>();
@@ -390,7 +440,7 @@ export const getCatalogProducts = createServerFn({ method: 'GET' })
                         where: { id: { in: shopifyProductIds } },
                         select: { id: true, rawData: true },
                     });
-                    shopifyCache.forEach(cache => {
+                    shopifyCache.forEach((cache: ShopifyProductCacheRow) => {
                         try {
                             const cacheData = JSON.parse(cache.rawData as string) as { status?: string };
                             shopifyStatusMap.set(cache.id, cacheData.status || 'unknown');
@@ -401,7 +451,7 @@ export const getCatalogProducts = createServerFn({ method: 'GET' })
                 }
 
                 // Map to flat response structure
-                let items: CatalogSkuItem[] = skus.map(sku => {
+                let items: CatalogSkuItem[] = skus.map((sku: SkuWithRelations) => {
                     const balance: InventoryBalance = balanceMap.get(sku.id) || {
                         totalInward: 0,
                         totalOutward: 0,
@@ -568,27 +618,27 @@ export const getCatalogCategories = createServerFn({ method: 'GET' })
                 ]);
 
                 // Extract unique genders and categories
-                const genders = [
-                    ...new Set(products.map(p => p.gender).filter((g): g is string => Boolean(g))),
+                const genders: string[] = [
+                    ...new Set<string>(products.map((p: ProductQueryResult) => p.gender).filter((g: string | null): g is string => Boolean(g))),
                 ].sort();
-                const categories = [
-                    ...new Set(products.map(p => p.category).filter((c): c is string => Boolean(c))),
+                const categories: string[] = [
+                    ...new Set<string>(products.map((p: ProductQueryResult) => p.category).filter((c: string | null): c is string => Boolean(c))),
                 ].sort();
 
                 return {
                     genders,
                     categories,
-                    products: products.map(p => ({
+                    products: products.map((p: ProductQueryResult) => ({
                         id: p.id,
                         name: p.name,
                         gender: p.gender,
                         category: p.category,
                     })),
-                    fabricTypes: fabricTypes.map(ft => ({
+                    fabricTypes: fabricTypes.map((ft: FabricTypeQueryResult) => ({
                         id: ft.id,
                         name: ft.name,
                     })),
-                    fabrics: fabrics.map(f => ({
+                    fabrics: fabrics.map((f: FabricQueryResult) => ({
                         id: f.id,
                         name: f.name,
                         colorName: f.colorName,

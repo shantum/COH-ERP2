@@ -11,7 +11,7 @@
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth';
-import { getPrisma } from '@coh/shared/services/db';
+import { getPrisma, type PrismaTransaction } from '@coh/shared/services/db';
 
 // ============================================
 // INPUT SCHEMAS
@@ -258,7 +258,7 @@ export const processRepackingItem = createServerFn({ method: 'POST' })
         }
 
         // Process item in transaction
-        await prisma.$transaction(async (tx) => {
+        await prisma.$transaction(async (tx: PrismaTransaction) => {
             // Update queue item
             await tx.repackingQueueItem.update({
                 where: { id: itemId },
@@ -338,7 +338,7 @@ export const undoRepackingProcess = createServerFn({ method: 'POST' })
         const originalStatus = item.status;
 
         // Undo process in transaction
-        await prisma.$transaction(async (tx) => {
+        await prisma.$transaction(async (tx: PrismaTransaction) => {
             // Reset queue item to pending
             await tx.repackingQueueItem.update({
                 where: { id: itemId },

@@ -1996,7 +1996,7 @@ export const getRoles = createServerFn({ method: 'GET' })
         });
 
         // Convert dates to ISO strings and parse permissions from JsonValue
-        const rolesWithStringDates = roles.map((role) => ({
+        const rolesWithStringDates = roles.map((role: typeof roles[number]) => ({
             id: role.id,
             name: role.name,
             displayName: role.displayName,

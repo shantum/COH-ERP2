@@ -85,7 +85,7 @@ export const createPayment = createServerFn({ method: 'POST' })
             }
 
             // Calculate current total paid
-            const totalPaid = order.payments.reduce((sum, p) => sum + p.amount, 0);
+            const totalPaid = order.payments.reduce((sum: number, p: typeof order.payments[number]) => sum + p.amount, 0);
             const newTotal = totalPaid + amount;
 
             // Allow overpayment with warning (Option B from tRPC implementation)

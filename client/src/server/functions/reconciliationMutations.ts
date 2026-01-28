@@ -17,7 +17,7 @@
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth';
-import { getPrisma } from '@coh/shared/services/db';
+import { getPrisma, type PrismaTransaction } from '@coh/shared/services/db';
 
 // ============================================
 // INPUT SCHEMAS
@@ -479,7 +479,7 @@ export const submitReconciliation = createServerFn({ method: 'POST' })
                 const batch = itemsToProcess.slice(i, i + BATCH_SIZE);
 
                 await prisma.$transaction(
-                    async (tx) => {
+                    async (tx: PrismaTransaction) => {
                         for (const item of batch) {
                             const txn = await tx.inventoryTransaction.create({
                                 data: {

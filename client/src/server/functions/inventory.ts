@@ -271,7 +271,7 @@ export const getInventoryBalances = createServerFn({ method: 'POST' })
             select: { id: true, skuCode: true, isActive: true },
         });
 
-        const skuCodeMap = new Map(skus.map((s: { id: string; skuCode: string }) => [s.id, s.skuCode]));
+        const skuCodeMap = new Map<string, string>(skus.map((s: { id: string; skuCode: string }) => [s.id, s.skuCode]));
 
         // Calculate balances directly with raw query (avoiding @server/ import)
         // Only query for SKUs that exist in database
@@ -310,7 +310,7 @@ export const getInventoryBalances = createServerFn({ method: 'POST' })
             );
         }
 
-        return skuIds.map((skuId) => {
+        return skuIds.map((skuId: string) => {
             const balance = balanceMap.get(skuId);
 
             return {
@@ -833,7 +833,7 @@ export const getInventoryTransactions = createServerFn({ method: 'GET' })
             },
         });
 
-        return transactions.map((t) => ({
+        return transactions.map((t: typeof transactions[number]) => ({
             id: t.id,
             skuId: t.skuId,
             txnType: t.txnType as 'inward' | 'outward',
@@ -957,7 +957,7 @@ export const getRecentInwards = createServerFn({ method: 'GET' })
             return mapping[reason || ''] || 'adjustment';
         };
 
-        return transactions.map((t) => ({
+        return transactions.map((t: typeof transactions[number]) => ({
             id: t.id,
             skuId: t.skuId,
             skuCode: t.sku?.skuCode || '',

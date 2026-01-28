@@ -213,7 +213,7 @@ export const getReturnsAll = createServerFn({ method: 'GET' })
             orderBy: { createdAt: 'desc' },
         });
 
-        return requests.map((req) => {
+        return requests.map((req: (typeof requests)[number]) => {
             const customerName = req.customer
                 ? [req.customer.firstName, req.customer.lastName].filter(Boolean).join(' ')
                 : 'Unknown';
@@ -265,7 +265,7 @@ export const getReturnsAll = createServerFn({ method: 'GET' })
                 customerId: req.customerId || '',
                 customerName,
                 customerEmail: req.customer?.email || '',
-                returnLines: req.lines.map((line) => ({
+                returnLines: req.lines.map((line: (typeof req.lines)[number]) => ({
                     id: line.id,
                     skuId: line.skuId,
                     qty: line.qty,
@@ -365,7 +365,7 @@ export const getReturnsPending = createServerFn({ method: 'GET' })
             orderBy: { createdAt: 'desc' },
         });
 
-        return requests.map((req) => {
+        return requests.map((req: (typeof requests)[number]) => {
             const customerName = req.customer
                 ? [req.customer.firstName, req.customer.lastName].filter(Boolean).join(' ')
                 : 'Unknown';
@@ -417,7 +417,7 @@ export const getReturnsPending = createServerFn({ method: 'GET' })
                 customerId: req.customerId || '',
                 customerName,
                 customerEmail: req.customer?.email || '',
-                returnLines: req.lines.map((line) => ({
+                returnLines: req.lines.map((line: (typeof req.lines)[number]) => ({
                     id: line.id,
                     skuId: line.skuId,
                     qty: line.qty,
@@ -491,7 +491,7 @@ export const getReturnsActionQueue = createServerFn({ method: 'GET' })
                 ? [req.customer.firstName, req.customer.lastName].filter(Boolean).join(' ')
                 : 'Unknown';
 
-            const itemCount = req.lines.reduce((sum, line) => sum + line.qty, 0);
+            const itemCount = req.lines.reduce((sum: number, line: (typeof req.lines)[number]) => sum + line.qty, 0);
 
             // Determine action type based on status
             let actionType: ActionQueueItem['actionType'];
@@ -714,7 +714,7 @@ export const getReturnsOrder = createServerFn({ method: 'GET' })
                       phone: order.customer.phone,
                   }
                 : null,
-            items: order.orderLines.map((line) => ({
+            items: order.orderLines.map((line: (typeof order.orderLines)[number]) => ({
                 orderLineId: line.id,
                 skuId: line.skuId,
                 skuCode: line.sku.skuCode,
@@ -884,7 +884,7 @@ export const getReturnsBySkuCode = createServerFn({ method: 'GET' })
             customerId: req.customerId || '',
             customerName,
             customerEmail: req.customer?.email || '',
-            returnLines: req.lines.map((line) => ({
+            returnLines: req.lines.map((line: (typeof req.lines)[number]) => ({
                 id: line.id,
                 skuId: line.skuId,
                 qty: line.qty,
@@ -1548,7 +1548,7 @@ export const searchRtoOrders = createServerFn({ method: 'GET' })
         });
 
         return {
-            orders: orders.map((order) => ({
+            orders: orders.map((order: (typeof orders)[number]) => ({
                 id: order.id,
                 orderNumber: order.orderNumber,
                 customerName: order.customerName,
@@ -1629,7 +1629,7 @@ export const getOrderForReturn = createServerFn({ method: 'GET' })
             throw new Error('Order not found');
         }
 
-        const lines: OrderLineForReturn[] = order.orderLines.map((line) => {
+        const lines: OrderLineForReturn[] = order.orderLines.map((line: (typeof order.orderLines)[number]) => {
             const product = line.sku.variation.product;
             const eligibility = checkEligibility({
                 deliveredAt: line.deliveredAt,
@@ -1713,7 +1713,7 @@ export const getActiveLineReturns = createServerFn({ method: 'GET' })
             orderBy: { returnRequestedAt: 'desc' },
         });
 
-        return lines.map((line) => ({
+        return lines.map((line: (typeof lines)[number]) => ({
             id: line.id,
             orderId: line.orderId,
             orderNumber: line.order.orderNumber,

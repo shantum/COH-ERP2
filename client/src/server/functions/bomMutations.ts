@@ -16,7 +16,7 @@
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth';
-import { getPrisma } from '@coh/shared/services/db';
+import { getPrisma, type PrismaTransaction } from '@coh/shared/services/db';
 
 // ============================================
 // INPUT SCHEMAS
@@ -955,7 +955,7 @@ export const importConsumption = createServerFn({ method: 'POST' })
             }
 
             // Batch update in transaction
-            await prisma.$transaction(async (tx) => {
+            await prisma.$transaction(async (tx: PrismaTransaction) => {
                 // Update Sku.fabricConsumption (legacy backward compat)
                 for (const update of skuUpdates) {
                     await tx.sku.update({
@@ -1059,7 +1059,7 @@ export const linkFabricToVariation = createServerFn({ method: 'POST' })
 
         try {
             // OPTIMIZED: Batch operations instead of sequential loop
-            const results = await prisma.$transaction(async (tx) => {
+            const results = await prisma.$transaction(async (tx: PrismaTransaction) => {
                 // 1. Batch update all variations' fabricId (single query)
                 await tx.variation.updateMany({
                     where: { id: { in: variationIds } },
@@ -1075,7 +1075,7 @@ export const linkFabricToVariation = createServerFn({ method: 'POST' })
                     select: { variationId: true },
                 });
 
-                const existingVariationIds = new Set(existingBomLines.map((b) => b.variationId));
+                const existingVariationIds = new Set(existingBomLines.map((b: { variationId: string }) => b.variationId));
 
                 // 3. Batch update existing BOM lines (single query)
                 if (existingVariationIds.size > 0) {
@@ -1182,7 +1182,7 @@ export const updateSizeConsumptions = createServerFn({ method: 'POST' })
         try {
             // Batch update in transaction
             let updatedCount = 0;
-            await prisma.$transaction(async (tx) => {
+            await prisma.$transaction(async (tx: PrismaTransaction) => {
                 for (const sku of skusToUpdate) {
                     const quantity = sizeQuantityMap.get(sku.size)!;
 
@@ -1495,7 +1495,7 @@ export const updateConsumptionGrid = createServerFn({ method: 'POST' })
 
             let updatedCount = 0;
 
-            await prisma.$transaction(async (tx) => {
+            await prisma.$transaction(async (tx: PrismaTransaction) => {
                 for (const update of updates) {
                     const sizeMap = productSizeSkuMap.get(update.productId);
                     if (!sizeMap) continue;
@@ -1632,7 +1632,7 @@ export const resetConsumption = createServerFn({ method: 'POST' })
             let deletedBomLines = 0;
             let resetSkus = 0;
 
-            await prisma.$transaction(async (tx) => {
+            await prisma.$transaction(async (tx: PrismaTransaction) => {
                 // Delete SKU BOM lines for main fabric role
                 if (mainFabricRole) {
                     const deleteResult = await tx.skuBomLine.deleteMany({
@@ -1878,7 +1878,7 @@ export const updateTemplate = createServerFn({ method: 'POST' })
             let updated = 0;
             let created = 0;
 
-            await prisma.$transaction(async (tx) => {
+            await prisma.$transaction(async (tx: PrismaTransaction) => {
                 // Get existing templates
                 const existing = await tx.productBomTemplate.findMany({
                     where: { productId },
@@ -1973,7 +1973,7 @@ export const updateProductBom = createServerFn({ method: 'POST' })
             }
 
             if (template) {
-                await prisma.$transaction(async (tx) => {
+                await prisma.$transaction(async (tx: PrismaTransaction) => {
                     // Clear existing templates
                     await tx.productBomTemplate.deleteMany({ where: { productId } });
 

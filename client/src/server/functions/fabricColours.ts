@@ -1065,18 +1065,18 @@ export const getFabricColourReconciliations = createServerFn({ method: 'GET' })
             });
 
             // Get unique user IDs and fetch their names
-            const userIds = [...new Set(reconciliations.map(r => r.createdBy).filter(Boolean))] as string[];
+            const userIds = [...new Set(reconciliations.map((r: typeof reconciliations[number]) => r.createdBy).filter(Boolean))] as string[];
             const users = userIds.length > 0
                 ? await prisma.user.findMany({
                     where: { id: { in: userIds } },
                     select: { id: true, name: true },
                 })
                 : [];
-            const userMap = new Map(users.map(u => [u.id, u.name]));
+            const userMap = new Map(users.map((u: { id: string; name: string }) => [u.id, u.name]));
 
-            const history = reconciliations.map((r) => {
+            const history = reconciliations.map((r: typeof reconciliations[number]) => {
                 // Calculate net change from all variances
-                const netChange = r.items.reduce((sum, item) => {
+                const netChange = r.items.reduce((sum: number, item: typeof r.items[number]) => {
                     return sum + (item.variance !== null ? Number(item.variance) : 0);
                 }, 0);
 
@@ -1086,7 +1086,7 @@ export const getFabricColourReconciliations = createServerFn({ method: 'GET' })
                     status: r.status,
                     itemsCount: r.items.length,
                     adjustments: r.items.filter(
-                        (i) => i.variance !== 0 && i.variance !== null
+                        (i: typeof r.items[number]) => i.variance !== 0 && i.variance !== null
                     ).length,
                     netChange,
                     createdByName: r.createdBy ? userMap.get(r.createdBy) || null : null,

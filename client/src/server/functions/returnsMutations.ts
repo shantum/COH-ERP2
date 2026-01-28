@@ -16,7 +16,7 @@ import { createServerFn } from '@tanstack/react-start';
 import { getCookie } from '@tanstack/react-start/server';
 import { z } from 'zod';
 import { authMiddleware, type AuthUser } from '../middleware/auth';
-import { getPrisma } from '@coh/shared/services/db';
+import { getPrisma, type PrismaTransaction } from '@coh/shared/services/db';
 import type { PrismaClient } from '@prisma/client';
 
 // ============================================
@@ -158,7 +158,7 @@ export const updateReturnStatus = createServerFn({ method: 'POST' })
             }
 
             // Update status in transaction
-            await prisma.$transaction(async (tx) => {
+            await prisma.$transaction(async (tx: PrismaTransaction) => {
                 await tx.returnRequest.update({
                     where: { id },
                     data: { status: newStatus },
@@ -660,7 +660,7 @@ export const processRepackingQueueItem = createServerFn({ method: 'POST' })
 
         if (action === 'ready') {
             // Add to stock - create inward transaction
-            await prisma.$transaction(async (tx) => {
+            await prisma.$transaction(async (tx: PrismaTransaction) => {
                 // Create inventory inward transaction
                 await tx.inventoryTransaction.create({
                     data: {
@@ -695,7 +695,7 @@ export const processRepackingQueueItem = createServerFn({ method: 'POST' })
             };
         } else {
             // Write-off - create write-off log
-            await prisma.$transaction(async (tx) => {
+            await prisma.$transaction(async (tx: PrismaTransaction) => {
                 // Create write-off log
                 await tx.writeOffLog.create({
                     data: {
@@ -821,7 +821,7 @@ export const initiateLineReturn = createServerFn({ method: 'POST' })
         }
 
         // Validate all lines belong to the same order
-        const orderIds = new Set(orderLines.map(l => l.orderId));
+        const orderIds = new Set(orderLines.map((l: typeof orderLines[number]) => l.orderId));
         if (orderIds.size > 1) {
             return returnError(
                 RETURN_ERROR_CODES.INVALID_QUANTITY,
@@ -867,7 +867,7 @@ export const initiateLineReturn = createServerFn({ method: 'POST' })
         const now = new Date();
 
         // Update all lines in a transaction
-        await prisma.$transaction(async (tx) => {
+        await prisma.$transaction(async (tx: PrismaTransaction) => {
             for (const line of orderLines) {
                 const returnQty = qtyMap.get(line.id) || line.qty;
 
@@ -904,13 +904,13 @@ export const initiateLineReturn = createServerFn({ method: 'POST' })
             }
         });
 
-        const skuCodes = orderLines.map(l => l.sku.skuCode).join(', ');
+        const skuCodes = orderLines.map((l: typeof orderLines[number]) => l.sku.skuCode).join(', ');
         console.log('[initiateLineReturn] Success - batch:', batchNumber);
         return returnSuccess(
             {
                 batchNumber,
                 lineCount: orderLines.length,
-                orderLineIds: orderLines.map(l => l.id),
+                orderLineIds: orderLines.map((l: typeof orderLines[number]) => l.id),
             },
             `Return batch ${batchNumber} created for ${skuCodes}`
         );
@@ -1123,7 +1123,7 @@ export const receiveLineReturn = createServerFn({ method: 'POST' })
         const now = new Date();
 
         // Update line and create repacking queue item in transaction
-        await prisma.$transaction(async (tx) => {
+        await prisma.$transaction(async (tx: PrismaTransaction) => {
             await tx.orderLine.update({
                 where: { id: orderLineId },
                 data: {
@@ -1344,7 +1344,7 @@ export const cancelLineReturn = createServerFn({ method: 'POST' })
             return returnError(RETURN_ERROR_CODES.ALREADY_TERMINAL);
         }
 
-        await prisma.$transaction(async (tx) => {
+        await prisma.$transaction(async (tx: PrismaTransaction) => {
             await tx.orderLine.update({
                 where: { id: orderLineId },
                 data: {
@@ -1449,7 +1449,7 @@ export const createExchangeOrder = createServerFn({ method: 'POST' })
         const exchangeOrderNumber = `EXC${String(count + 1).padStart(5, '0')}`;
 
         // Create exchange order in transaction
-        const exchangeOrder = await prisma.$transaction(async (tx) => {
+        const exchangeOrder = await prisma.$transaction(async (tx: PrismaTransaction) => {
             // Create the exchange order
             const newOrder = await tx.order.create({
                 data: {

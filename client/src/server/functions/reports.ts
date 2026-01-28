@@ -312,7 +312,7 @@ export const getTopCustomers = createServerFn({ method: 'GET' })
             stats.orderDates.push(order.orderDate);
 
             // Calculate order total from orderLines
-            const orderTotal = order.orderLines.reduce((sum, line) => sum + line.unitPrice * line.qty, 0);
+            const orderTotal = order.orderLines.reduce((sum: number, line: { unitPrice: number; qty: number }) => sum + line.unitPrice * line.qty, 0);
             stats.totalSpent += orderTotal;
         }
 
@@ -765,7 +765,7 @@ export const getCustomerOverviewStats = createServerFn({ method: 'GET' })
                     );
                 }
 
-                const orderTotal = order.orderLines.reduce((sum, line) => sum + line.unitPrice * line.qty, 0);
+                const orderTotal = order.orderLines.reduce((sum: number, line: { unitPrice: number; qty: number }) => sum + line.unitPrice * line.qty, 0);
                 totalRevenue += orderTotal;
             }
 
@@ -787,7 +787,7 @@ export const getCustomerOverviewStats = createServerFn({ method: 'GET' })
                     : 0;
 
             // Calculate average LTV from all customers
-            const totalLTV = allCustomers.reduce((sum, c) => sum + (c.ltv || 0), 0);
+            const totalLTV = allCustomers.reduce((sum: number, c: { id: string; orderCount: number | null; ltv: number | null }) => sum + (c.ltv || 0), 0);
             const avgLTV = allCustomers.length > 0 ? Math.round(totalLTV / allCustomers.length) : 0;
 
             return {
@@ -852,7 +852,16 @@ export const getHighValueCustomers = createServerFn({ method: 'GET' })
             },
         });
 
-        return customers.map((customer) => ({
+        return customers.map((customer: {
+            id: string;
+            email: string;
+            firstName: string | null;
+            lastName: string | null;
+            tier: string | null;
+            orderCount: number | null;
+            ltv: number | null;
+            orders: { orderDate: Date }[];
+        }) => ({
             id: customer.id,
             email: customer.email,
             name: [customer.firstName, customer.lastName].filter(Boolean).join(' ') || 'Unknown',
@@ -895,7 +904,16 @@ export const getAtRiskCustomers = createServerFn({ method: 'GET' })
             take: 100,
         });
 
-        return customers.map((customer) => ({
+        return customers.map((customer: {
+            id: string;
+            email: string;
+            firstName: string | null;
+            lastName: string | null;
+            tier: string | null;
+            orderCount: number | null;
+            ltv: number | null;
+            lastOrderDate: Date | null;
+        }) => ({
             id: customer.id,
             email: customer.email,
             name: [customer.firstName, customer.lastName].filter(Boolean).join(' ') || 'Unknown',
@@ -950,20 +968,33 @@ export const getFrequentReturners = createServerFn({ method: 'GET' })
             take: 100,
         });
 
+        // Define type for customer with return requests and orders
+        type ReturnerCustomer = {
+            id: string;
+            email: string;
+            firstName: string | null;
+            lastName: string | null;
+            tier: string | null;
+            orderCount: number | null;
+            ltv: number | null;
+            returnRequests: unknown[];
+            orders: { orderDate: Date }[];
+        };
+
         // Filter to customers with return rate > 10%
-        const frequentReturners = returners
-            .filter((customer) => {
+        const frequentReturners = (returners as ReturnerCustomer[])
+            .filter((customer: ReturnerCustomer) => {
                 const returnCount = customer.returnRequests.length;
                 const orderCount = customer.orderCount || 0;
                 return orderCount > 0 && returnCount / orderCount > 0.1;
             })
-            .sort((a, b) => {
+            .sort((a: ReturnerCustomer, b: ReturnerCustomer) => {
                 const aRate = a.returnRequests.length / (a.orderCount || 1);
                 const bRate = b.returnRequests.length / (b.orderCount || 1);
                 return bRate - aRate;
             });
 
-        return frequentReturners.map((customer) => ({
+        return frequentReturners.map((customer: ReturnerCustomer) => ({
             id: customer.id,
             email: customer.email,
             name: [customer.firstName, customer.lastName].filter(Boolean).join(' ') || 'Unknown',
@@ -1234,7 +1265,7 @@ export const getSalesAnalytics = createServerFn({ method: 'GET' })
         // Calculate summary
         const totalUnits = dataPoints.reduce((sum, d) => sum + d.units, 0);
         const totalRevenue = dataPoints.reduce((sum, d) => sum + d.revenue, 0);
-        const uniqueOrderIds = new Set(orderLines.map((l) => l.orderId));
+        const uniqueOrderIds = new Set(orderLines.map((l: { orderId: string }) => l.orderId));
         const totalOrders = uniqueOrderIds.size;
         const avgOrderValue = totalOrders > 0 ? Math.round((totalRevenue / totalOrders) * 100) / 100 : 0;
 

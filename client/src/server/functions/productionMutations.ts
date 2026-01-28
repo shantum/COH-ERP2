@@ -14,7 +14,7 @@
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth';
-import { getPrisma } from '@coh/shared/services/db';
+import { getPrisma, type PrismaTransaction } from '@coh/shared/services/db';
 
 // ============================================
 // INPUT SCHEMAS
@@ -704,7 +704,7 @@ export const completeBatch = createServerFn({ method: 'POST' })
 
         let autoAllocated = false;
 
-        await prisma.$transaction(async (tx) => {
+        await prisma.$transaction(async (tx: PrismaTransaction) => {
             // Update batch
             await tx.productionBatch.update({
                 where: { id: batchId },
@@ -824,7 +824,7 @@ export const uncompleteBatch = createServerFn({ method: 'POST' })
         const isCustomSkuBatch = batch.sku?.isCustomSku && batch.sourceOrderLineId;
         let allocationReversed = false;
 
-        await prisma.$transaction(async (tx) => {
+        await prisma.$transaction(async (tx: PrismaTransaction) => {
             // Check order line status for custom SKU batches
             if (isCustomSkuBatch && batch.sourceOrderLineId) {
                 const currentLine = await tx.orderLine.findUnique({
