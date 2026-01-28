@@ -67,7 +67,7 @@ const { data } = useQuery({
 | 16 | Page sizes: All views use 250 per page (`useUnifiedOrdersData.ts` PAGE_SIZE constant) |
 | 37 | Query keys: `['domain', 'action', 'server-fn', params]`. Old tRPC format causes cache misses |
 | 39 | Use `inventoryQueryKeys.balance` from `constants/queryKeys.ts` for inventory queries |
-| 55 | **Two "allocated inventory" helpers** in `@coh/shared/domain`: `hasAllocatedInventory()` = `['allocated','picked','packed']` (server: inventory txn cleanup); `statusShowsInventoryAllocated()` = `['allocated','picked','packed','shipped']` (client: display/optimistic). Import both from `@coh/shared/domain` |
+| 55 | **Allocated inventory helper**: `hasAllocatedInventory()` = `['allocated','picked','packed']`. Use for both server cleanup and client optimistic updates. Shipped lines have no OUTWARD transaction (inventory already deducted at allocation). |
 
 ### Inventory (CRITICAL)
 | # | Rule |
@@ -562,7 +562,7 @@ Pure functions for business logic, shared between server and client.
 | `inventory/balance` | `calculateBalance`, `hasEnoughStock`, `getShortfall` | Pure balance calculations, no DB |
 | `orders/pricing` | `calculateOrderTotal`, `getProductMrpForShipping` | Exchange orders always calculate from lines |
 | `orders/lineMutations` | Type definitions for line-level mutations | MutationResult, MarkLineDeliveredInput, etc. |
-| `orders/stateMachine` | `isValidTransition`, `getTransitionDefinition`, `hasAllocatedInventory`, `statusShowsInventoryAllocated`, `calculateInventoryDelta` | Pure state machine logic, no DB deps |
+| `orders/stateMachine` | `isValidTransition`, `getTransitionDefinition`, `hasAllocatedInventory`, `calculateInventoryDelta` | Pure state machine logic, no DB deps |
 | `constants` | `getGstRate`, `GST_THRESHOLD` | GST: 5% below INR 2500, 18% above |
 
 ### Returns Domain (`shared/src/domain/returns/`)

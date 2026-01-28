@@ -164,19 +164,11 @@ export const LINE_STATUSES: readonly LineStatus[] = [
 ] as const;
 
 /**
- * Statuses with allocated inventory transactions (server-side cleanup).
- * Does NOT include 'shipped' because shipped inventory is already deducted.
+ * Statuses with allocated inventory (have an OUTWARD transaction).
+ * Does NOT include 'shipped' - once shipped, inventory is already deducted.
  */
 export const STATUSES_WITH_ALLOCATED_INVENTORY: readonly LineStatus[] = [
     'allocated', 'picked', 'packed',
-] as const;
-
-/**
- * Statuses that show inventory as allocated for display purposes (client-side).
- * Includes 'shipped' because from the UI perspective, inventory is still committed.
- */
-export const STATUSES_SHOWING_INVENTORY_ALLOCATED: readonly string[] = [
-    'allocated', 'picked', 'packed', 'shipped',
 ] as const;
 
 // ============================================
@@ -224,15 +216,13 @@ export function allocatesInventory(from: LineStatus, to: LineStatus): boolean {
     return def?.inventoryEffect === 'create_outward';
 }
 
-/** For server-side inventory transaction cleanup (does NOT include shipped) */
-export function hasAllocatedInventory(status: string): boolean {
-    return (STATUSES_WITH_ALLOCATED_INVENTORY as readonly string[]).includes(status);
-}
-
-/** For client-side display (includes shipped) */
-export function statusShowsInventoryAllocated(status: string | undefined | null): boolean {
+/**
+ * Check if a status has allocated inventory (OUTWARD transaction exists).
+ * Used for both server cleanup and client optimistic updates.
+ */
+export function hasAllocatedInventory(status: string | undefined | null): boolean {
     if (!status) return false;
-    return STATUSES_SHOWING_INVENTORY_ALLOCATED.includes(status);
+    return (STATUSES_WITH_ALLOCATED_INVENTORY as readonly string[]).includes(status);
 }
 
 export function buildTransitionError(from: string, to: string): string {
@@ -245,11 +235,69 @@ export function buildTransitionError(from: string, to: string): string {
 // INVENTORY DELTA (for optimistic updates)
 // ============================================
 
+/**
+ * Calculate inventory change for a status transition.
+ * Uses the state machine's inventoryEffect as the source of truth.
+ */
 export function calculateInventoryDelta(fromStatus: string, toStatus: string, qty: number): number {
-    const hadInventory = STATUSES_SHOWING_INVENTORY_ALLOCATED.includes(fromStatus);
-    const willHaveInventory = STATUSES_SHOWING_INVENTORY_ALLOCATED.includes(toStatus);
+    if (!isValidLineStatus(fromStatus) || !isValidLineStatus(toStatus)) return 0;
 
-    if (!hadInventory && willHaveInventory) return -qty;  // Consuming
-    if (hadInventory && !willHaveInventory) return qty;   // Restoring
-    return 0;
+    const def = getTransitionDefinition(fromStatus, toStatus);
+    if (!def) return 0;  // Invalid transition = no change
+
+    if (def.inventoryEffect === 'create_outward') return -qty;  // Allocating (deduct)
+    if (def.inventoryEffect === 'delete_outward') return qty;   // Releasing (restore)
+    return 0;  // No inventory effect
+}
+
+// ============================================
+// ORDER STATUS COMPUTATION
+// ============================================
+
+export type OrderStatus =
+    | 'open'
+    | 'on_hold'
+    | 'partially_on_hold'
+    | 'delivered'
+    | 'shipped'
+    | 'partially_shipped'
+    | 'cancelled'
+    | 'archived';
+
+export const SHIPPED_OR_BEYOND = ['shipped', 'delivered', 'rto_initiated', 'rto_received'] as const;
+
+export interface OrderLineForStatus {
+    lineStatus: string;
+}
+
+export interface OrderForStatusComputation {
+    isArchived?: boolean;
+    orderLines: OrderLineForStatus[];
+}
+
+/**
+ * Compute order status from line states (pure function).
+ * Order status is derived, never set independently.
+ */
+export function computeOrderStatus(order: OrderForStatusComputation): OrderStatus {
+    if (!order?.orderLines) {
+        throw new Error('Order with orderLines is required');
+    }
+
+    if (order.isArchived) return 'archived';
+
+    const activeLines = order.orderLines.filter((l) => l.lineStatus !== 'cancelled');
+
+    if (activeLines.length === 0) return 'cancelled';
+
+    const deliveredLines = activeLines.filter((l) => l.lineStatus === 'delivered');
+    if (deliveredLines.length === activeLines.length) return 'delivered';
+
+    const shippedOrBeyond = activeLines.filter((l) =>
+        (SHIPPED_OR_BEYOND as readonly string[]).includes(l.lineStatus)
+    );
+    if (shippedOrBeyond.length === activeLines.length) return 'shipped';
+    if (shippedOrBeyond.length > 0) return 'partially_shipped';
+
+    return 'open';
 }

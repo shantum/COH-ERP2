@@ -18,7 +18,6 @@ export {
     LINE_STATUS_TRANSITIONS,
     LINE_STATUSES,
     STATUSES_WITH_ALLOCATED_INVENTORY,
-    STATUSES_SHOWING_INVENTORY_ALLOCATED,
     isValidTransition,
     getTransitionDefinition,
     getValidTargetStatuses,
@@ -27,7 +26,6 @@ export {
     releasesInventory,
     allocatesInventory,
     hasAllocatedInventory,
-    statusShowsInventoryAllocated,
     buildTransitionError,
     calculateInventoryDelta,
 } from '@coh/shared/domain';

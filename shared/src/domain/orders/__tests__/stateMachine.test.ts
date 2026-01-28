@@ -11,13 +11,11 @@ import {
     releasesInventory,
     allocatesInventory,
     hasAllocatedInventory,
-    statusShowsInventoryAllocated,
     calculateInventoryDelta,
     buildTransitionError,
     LINE_STATUS_TRANSITIONS,
     LINE_STATUSES,
     STATUSES_WITH_ALLOCATED_INVENTORY,
-    STATUSES_SHOWING_INVENTORY_ALLOCATED,
     type LineStatus,
 } from '../stateMachine.js';
 
@@ -42,27 +40,6 @@ describe('orderStateMachine', () => {
                 'picked',
                 'packed',
             ]);
-        });
-    });
-
-    describe('STATUSES_SHOWING_INVENTORY_ALLOCATED constant', () => {
-        it('contains statuses that show inventory as allocated in the UI', () => {
-            expect(STATUSES_SHOWING_INVENTORY_ALLOCATED).toEqual([
-                'allocated',
-                'picked',
-                'packed',
-                'shipped',
-            ]);
-        });
-
-        it('includes shipped (unlike STATUSES_WITH_ALLOCATED_INVENTORY)', () => {
-            expect(STATUSES_SHOWING_INVENTORY_ALLOCATED).toContain('shipped');
-            expect(STATUSES_WITH_ALLOCATED_INVENTORY).not.toContain('shipped');
-        });
-
-        it('does not include pending or cancelled', () => {
-            expect(STATUSES_SHOWING_INVENTORY_ALLOCATED).not.toContain('pending');
-            expect(STATUSES_SHOWING_INVENTORY_ALLOCATED).not.toContain('cancelled');
         });
     });
 
@@ -334,65 +311,48 @@ describe('orderStateMachine', () => {
             expect(hasAllocatedInventory('shipped')).toBe(false);
             expect(hasAllocatedInventory('cancelled')).toBe(false);
         });
-    });
 
-    describe('statusShowsInventoryAllocated', () => {
-        it('returns true for allocated/picked/packed/shipped', () => {
-            expect(statusShowsInventoryAllocated('allocated')).toBe(true);
-            expect(statusShowsInventoryAllocated('picked')).toBe(true);
-            expect(statusShowsInventoryAllocated('packed')).toBe(true);
-            expect(statusShowsInventoryAllocated('shipped')).toBe(true);
-        });
-
-        it('returns false for pending and cancelled', () => {
-            expect(statusShowsInventoryAllocated('pending')).toBe(false);
-            expect(statusShowsInventoryAllocated('cancelled')).toBe(false);
-        });
-
-        it('returns false for null and undefined', () => {
-            expect(statusShowsInventoryAllocated(null)).toBe(false);
-            expect(statusShowsInventoryAllocated(undefined)).toBe(false);
-        });
-
-        it('returns false for empty string', () => {
-            expect(statusShowsInventoryAllocated('')).toBe(false);
-        });
-
-        it('returns false for invalid status strings', () => {
-            expect(statusShowsInventoryAllocated('invalid')).toBe(false);
-            expect(statusShowsInventoryAllocated('SHIPPED')).toBe(false);
+        it('returns false for null, undefined, and empty string', () => {
+            expect(hasAllocatedInventory(null)).toBe(false);
+            expect(hasAllocatedInventory(undefined)).toBe(false);
+            expect(hasAllocatedInventory('')).toBe(false);
         });
     });
 
     describe('calculateInventoryDelta', () => {
-        it('returns negative qty when transitioning to an allocated status (consuming)', () => {
-            // pending -> allocated: inventory is being consumed
+        it('returns negative qty for allocation (create_outward)', () => {
             expect(calculateInventoryDelta('pending', 'allocated', 5)).toBe(-5);
         });
 
-        it('returns positive qty when transitioning from an allocated status to non-allocated (restoring)', () => {
-            // allocated -> pending: inventory is being restored
+        it('returns positive qty for release (delete_outward)', () => {
+            // unallocate
             expect(calculateInventoryDelta('allocated', 'pending', 3)).toBe(3);
-            // allocated -> cancelled: inventory is being restored
+            // cancel with inventory
             expect(calculateInventoryDelta('allocated', 'cancelled', 10)).toBe(10);
-            // shipped -> cancelled is not a valid transition, but delta logic is pure
-            expect(calculateInventoryDelta('shipped', 'cancelled', 7)).toBe(7);
+            expect(calculateInventoryDelta('picked', 'cancelled', 5)).toBe(5);
+            expect(calculateInventoryDelta('packed', 'cancelled', 7)).toBe(7);
         });
 
-        it('returns 0 when both statuses are allocated (no net change)', () => {
-            // allocated -> picked: both show inventory allocated
+        it('returns 0 for transitions with no inventory effect', () => {
+            // forward progression (after allocation)
             expect(calculateInventoryDelta('allocated', 'picked', 5)).toBe(0);
-            // picked -> packed
             expect(calculateInventoryDelta('picked', 'packed', 5)).toBe(0);
-            // packed -> shipped
             expect(calculateInventoryDelta('packed', 'shipped', 5)).toBe(0);
+            // backward corrections (except unallocate)
+            expect(calculateInventoryDelta('picked', 'allocated', 5)).toBe(0);
+            expect(calculateInventoryDelta('packed', 'picked', 5)).toBe(0);
+            expect(calculateInventoryDelta('shipped', 'packed', 5)).toBe(0);
+            // cancel without inventory
+            expect(calculateInventoryDelta('pending', 'cancelled', 5)).toBe(0);
+            // uncancel
+            expect(calculateInventoryDelta('cancelled', 'pending', 5)).toBe(0);
         });
 
-        it('returns 0 when neither status is allocated (no net change)', () => {
-            // pending -> cancelled: neither has allocated inventory
-            expect(calculateInventoryDelta('pending', 'cancelled', 5)).toBe(0);
-            // cancelled -> pending
-            expect(calculateInventoryDelta('cancelled', 'pending', 5)).toBe(0);
+        it('returns 0 for invalid transitions', () => {
+            // shipped -> cancelled is not allowed
+            expect(calculateInventoryDelta('shipped', 'cancelled', 7)).toBe(0);
+            // skipping steps is not allowed
+            expect(calculateInventoryDelta('pending', 'shipped', 5)).toBe(0);
         });
 
         it('scales with quantity', () => {
@@ -403,10 +363,8 @@ describe('orderStateMachine', () => {
         });
 
         it('handles zero quantity', () => {
-            // With qty=0, the result is always numerically zero (may be -0 for consuming transitions)
             expect(calculateInventoryDelta('pending', 'allocated', 0) === 0).toBe(true);
             expect(calculateInventoryDelta('allocated', 'pending', 0) === 0).toBe(true);
-            expect(calculateInventoryDelta('pending', 'cancelled', 0) === 0).toBe(true);
         });
     });
 
