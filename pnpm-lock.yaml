@@ -323,9 +323,6 @@ importers:
 
   shared:
     dependencies:
-      '@prisma/client':
-        specifier: ^6.1.0
-        version: 6.19.2(prisma@5.22.0)(typescript@5.9.3)
       '@types/pg':
         specifier: ^8.16.0
         version: 8.16.0
@@ -1290,18 +1287,6 @@ packages:
       prisma: '*'
     peerDependenciesMeta:
       prisma:
-        optional: true
-
-  '@prisma/client@6.19.2':
-    resolution: {integrity: sha512-gR2EMvfK/aTxsuooaDA32D8v+us/8AAet+C3J1cc04SW35FPdZYgLF+iN4NDLUgAaUGTKdAB0CYenu1TAgGdMg==}
-    engines: {node: '>=18.18'}
-    peerDependencies:
-      prisma: '*'
-      typescript: '>=5.1.0'
-    peerDependenciesMeta:
-      prisma:
-        optional: true
-      typescript:
         optional: true
 
   '@prisma/debug@5.22.0':
@@ -7206,11 +7191,6 @@ snapshots:
   '@prisma/client@5.22.0(prisma@5.22.0)':
     optionalDependencies:
       prisma: 5.22.0
-
-  '@prisma/client@6.19.2(prisma@5.22.0)(typescript@5.9.3)':
-    optionalDependencies:
-      prisma: 5.22.0
-      typescript: 5.9.3
 
   '@prisma/debug@5.22.0': {}
 

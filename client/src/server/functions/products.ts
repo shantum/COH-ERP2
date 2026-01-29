@@ -274,6 +274,15 @@ export const getProductsTree = createServerFn({ method: 'GET' })
                         orderBy: { colorName: 'asc' },
                         include: {
                             fabric: true,
+                            fabricColour: {
+                                include: {
+                                    fabric: {
+                                        include: {
+                                            material: true,
+                                        },
+                                    },
+                                },
+                            },
                             skus: {
                                 where: { isActive: true },
                                 orderBy: { size: 'asc' },

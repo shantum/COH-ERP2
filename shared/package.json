@@ -52,7 +52,6 @@
     "test:watch": "NODE_OPTIONS='--experimental-vm-modules' jest --watch"
   },
   "dependencies": {
-    "@prisma/client": "^5.22.0",
     "@types/pg": "^8.16.0",
     "kysely": "^0.28.10",
     "pg": "^8.17.2",
