@@ -57,7 +57,7 @@ export const ProductNameCell = memo(function ProductNameCell({ row }: ProductNam
 
             {/* Product info */}
             <div className="flex flex-col justify-center leading-tight min-w-0">
-                {/* Line 1: Product name | Size */}
+                {/* Line 1: Product name | Size | OOS indicator */}
                 <div className="flex items-center gap-1">
                     <span className="font-medium text-gray-900 truncate">
                         {productName}
@@ -67,6 +67,20 @@ export const ProductNameCell = memo(function ProductNameCell({ row }: ProductNam
                             <span className="text-gray-300">|</span>
                             <span className="text-gray-600 shrink-0">{size}</span>
                         </>
+                    )}
+                    {/* Fabric status indicator: null=no fabric, false=in stock, true=OOS */}
+                    {row.isFabricOutOfStock === true && (
+                        <span
+                            className="shrink-0 px-1 py-0.5 text-[9px] font-semibold bg-red-100 text-red-700 rounded"
+                            title="Fabric is marked as out of stock"
+                        >
+                            OOS
+                        </span>
+                    )}
+                    {row.isFabricOutOfStock === false && (
+                        <span title="Fabric linked and in stock">
+                            <Check size={10} strokeWidth={2} className="shrink-0 text-emerald-300" />
+                        </span>
                     )}
                 </div>
                 {/* Line 2: Color name + SKU */}

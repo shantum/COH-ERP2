@@ -14,3 +14,4 @@ export { WeightCell } from './WeightCell';
 export { StockCell } from './StockCell';
 export { ColoursCell } from './ColoursCell';
 export { ConnectedProductsCell } from './ConnectedProductsCell';
+export { OutOfStockCell } from './OutOfStockCell';

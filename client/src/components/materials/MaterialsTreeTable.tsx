@@ -42,6 +42,7 @@ import {
     StockCell,
     ColoursCell,
     ConnectedProductsCell,
+    OutOfStockCell,
 } from './cells';
 
 type ViewMode = 'fabric' | 'material';
@@ -169,6 +170,11 @@ export function MaterialsTreeTable({
             updateFabric.mutate({ id: node.id, data: { minOrderQty: value } });
         }
     }, [updateColour, updateFabric]);
+
+    // Handle out of stock toggle
+    const handleOutOfStockToggle = useCallback((id: string, isOutOfStock: boolean) => {
+        updateColour.mutate({ id, data: { isOutOfStock } });
+    }, [updateColour]);
 
     // Column definitions with enhanced columns
     const columns = useMemo<ColumnDef<MaterialNode>[]>(() => [
@@ -348,6 +354,18 @@ export function MaterialsTreeTable({
                 <StockCell node={row.original} />
             ),
         },
+        // Out of Stock toggle (colours only)
+        {
+            id: 'outOfStock',
+            header: 'OOS',
+            size: 70,
+            cell: ({ row }: CellContext<MaterialNode, unknown>) => (
+                <OutOfStockCell
+                    node={row.original}
+                    onToggle={handleOutOfStockToggle}
+                />
+            ),
+        },
         // Connected Products (fabrics and colours)
         {
             id: 'products',
@@ -375,7 +393,7 @@ export function MaterialsTreeTable({
                 />
             ),
         },
-    ], [loadingNodes, handleCostSave, handleLeadTimeSave, handleMinOrderSave, onEdit, onAddChild, onViewDetails, onAddInward, onDeactivate, onDelete, onLinkProducts, isFabricView]);
+    ], [loadingNodes, handleCostSave, handleLeadTimeSave, handleMinOrderSave, handleOutOfStockToggle, onEdit, onAddChild, onViewDetails, onAddInward, onDeactivate, onDelete, onLinkProducts, isFabricView]);
 
     // TanStack Table instance
     const table = useReactTable({

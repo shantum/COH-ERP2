@@ -49,11 +49,18 @@ export async function listInventorySkusKysely(
 ): Promise<InventorySkuRow[]> {
     const { includeCustomSkus = false, search } = params;
 
+    // Join to BOM system for fabric info (source of truth)
     let query = kysely
         .selectFrom('Sku')
         .innerJoin('Variation', 'Variation.id', 'Sku.variationId')
         .innerJoin('Product', 'Product.id', 'Variation.productId')
-        .leftJoin('Fabric', 'Fabric.id', 'Variation.fabricId')
+        .leftJoin('VariationBomLine', (join) =>
+            join
+                .onRef('VariationBomLine.variationId', '=', 'Variation.id')
+                .on('VariationBomLine.fabricColourId', 'is not', null)
+        )
+        .leftJoin('FabricColour', 'FabricColour.id', 'VariationBomLine.fabricColourId')
+        .leftJoin('Fabric', 'Fabric.id', 'FabricColour.fabricId')
         .leftJoin('ShopifyInventoryCache', 'ShopifyInventoryCache.skuId', 'Sku.id')
         .select([
             'Sku.id as skuId',
@@ -72,7 +79,7 @@ export async function listInventorySkusKysely(
             'Product.gender',
             'Product.category',
             'Product.imageUrl as productImageUrl',
-            'Variation.fabricId',
+            'FabricColour.fabricId',
             'Fabric.name as fabricName',
             'ShopifyInventoryCache.availableQty as shopifyAvailableQty',
         ])

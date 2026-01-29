@@ -45,6 +45,7 @@ export interface MaterialNode {
     colourName?: string;
     standardColour?: string;
     colourHex?: string;
+    isOutOfStock?: boolean; // Manual out-of-stock flag
 
     // === Cost/Lead/Min Order (Fabric/Colour - with inheritance) ===
     costPerUnit?: number | null;

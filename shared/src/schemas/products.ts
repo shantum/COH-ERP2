@@ -40,7 +40,7 @@ export const variationRowSchema = z.object({
     colorHex: z.string().nullable(),
     imageUrl: z.string().nullable(),
     isActive: z.boolean(),
-    fabricId: z.string(),
+    fabricId: z.string().nullable(), // From BOM, nullable if no fabric linked
     fabric: fabricInfoSchema.nullable(),
     skus: z.array(skuRowSchema),
 });

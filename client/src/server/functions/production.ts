@@ -255,13 +255,20 @@ export const getProductionBatches = createServerFn({ method: 'GET' })
         const db = await getKysely();
 
         // Build the base query with joins
+        // Join to BOM system for fabric info (source of truth)
         let query = db
             .selectFrom('ProductionBatch')
             .leftJoin('Tailor', 'Tailor.id', 'ProductionBatch.tailorId')
             .leftJoin('Sku', 'Sku.id', 'ProductionBatch.skuId')
             .leftJoin('Variation', 'Variation.id', 'Sku.variationId')
             .leftJoin('Product', 'Product.id', 'Variation.productId')
-            .leftJoin('Fabric', 'Fabric.id', 'Variation.fabricId')
+            .leftJoin('VariationBomLine', (join) =>
+                join
+                    .onRef('VariationBomLine.variationId', '=', 'Variation.id')
+                    .on('VariationBomLine.fabricColourId', 'is not', null)
+            )
+            .leftJoin('FabricColour', 'FabricColour.id', 'VariationBomLine.fabricColourId')
+            .leftJoin('Fabric', 'Fabric.id', 'FabricColour.fabricId')
             .select([
                 'ProductionBatch.id',
                 'ProductionBatch.batchCode',
@@ -290,7 +297,7 @@ export const getProductionBatches = createServerFn({ method: 'GET' })
                 'Product.id as productId',
                 'Product.name as productName',
                 'Product.styleCode as productStyleCode',
-                'Variation.fabricId',
+                'FabricColour.fabricId',
                 'Fabric.name as fabricName',
             ]);
 

@@ -154,6 +154,8 @@ export interface FlattenedOrderRow {
     shopifyCourier: string | null;
     shopifyTrackingUrl: string | null;
     customerTags: string[] | null;
+    /** null = no fabric colour linked, false = linked & in stock, true = linked & out of stock */
+    isFabricOutOfStock: boolean | null;
 }
 
 // ============================================
@@ -197,6 +199,11 @@ interface PrismaOrderLine {
                 name: string;
                 imageUrl: string | null;
             };
+            bomLines: Array<{
+                fabricColour: {
+                    isOutOfStock: boolean;
+                } | null;
+            }>;
         };
     };
     productionBatch: {
@@ -553,6 +560,7 @@ function flattenOrdersToRows(orders: PrismaOrder[]): FlattenedOrderRow[] {
                 shopifyCourier: order.shopifyCache?.trackingCompany ?? null,
                 shopifyTrackingUrl: order.shopifyCache?.trackingUrl ?? null,
                 customerTags,
+                isFabricOutOfStock: null, // No lines = no fabric linked
             });
             continue;
         }
@@ -646,6 +654,10 @@ function flattenOrdersToRows(orders: PrismaOrder[]): FlattenedOrderRow[] {
                 shopifyCourier: order.shopifyCache?.trackingCompany ?? null,
                 shopifyTrackingUrl: order.shopifyCache?.trackingUrl ?? null,
                 customerTags,
+                // null = no fabric linked via BOM, false = linked & in stock, true = linked & OOS
+                isFabricOutOfStock: line.sku.variation.bomLines.length > 0
+                    ? (line.sku.variation.bomLines[0].fabricColour?.isOutOfStock ?? false)
+                    : null,
             });
         }
     }
@@ -725,6 +737,15 @@ export const getOrders = createServerFn({ method: 'GET' })
                                                         name: true,
                                                         imageUrl: true,
                                                     },
+                                                },
+                                                bomLines: {
+                                                    where: { fabricColourId: { not: null } },
+                                                    select: {
+                                                        fabricColour: {
+                                                            select: { isOutOfStock: true },
+                                                        },
+                                                    },
+                                                    take: 1,
                                                 },
                                             },
                                         },
@@ -1292,6 +1313,15 @@ export const searchUnifiedOrders = createServerFn({ method: 'GET' })
                                                         imageUrl: true,
                                                     },
                                                 },
+                                                bomLines: {
+                                                    where: { fabricColourId: { not: null } },
+                                                    select: {
+                                                        fabricColour: {
+                                                            select: { isOutOfStock: true },
+                                                        },
+                                                    },
+                                                    take: 1,
+                                                },
                                             },
                                         },
                                     },
@@ -1383,6 +1413,15 @@ export const getOrderById = createServerFn({ method: 'GET' })
                                     variation: {
                                         include: {
                                             product: true,
+                                            bomLines: {
+                                                where: { fabricColourId: { not: null } },
+                                                select: {
+                                                    fabricColour: {
+                                                        select: { isOutOfStock: true },
+                                                    },
+                                                },
+                                                take: 1,
+                                            },
                                         },
                                     },
                                 },

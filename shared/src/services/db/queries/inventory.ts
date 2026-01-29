@@ -49,12 +49,19 @@ export async function listInventorySkusKysely(
     const db = await getKysely();
     const { sql } = await import('kysely');
 
+    // Join to BOM system for fabric colour (source of truth)
+    // Uses first BOM line with a fabric colour (typically "main" fabric role)
     let query = db
         .selectFrom('Sku')
         .innerJoin('Variation', 'Variation.id', 'Sku.variationId')
         .innerJoin('Product', 'Product.id', 'Variation.productId')
-        .leftJoin('Fabric', 'Fabric.id', 'Variation.fabricId')
-        .leftJoin('FabricColour', 'FabricColour.id', 'Variation.fabricColourId')
+        .leftJoin('VariationBomLine', (join) =>
+            join
+                .onRef('VariationBomLine.variationId', '=', 'Variation.id')
+                .on('VariationBomLine.fabricColourId', 'is not', null)
+        )
+        .leftJoin('FabricColour', 'FabricColour.id', 'VariationBomLine.fabricColourId')
+        .leftJoin('Fabric', 'Fabric.id', 'FabricColour.fabricId')
         .leftJoin('ShopifyInventoryCache', 'ShopifyInventoryCache.skuId', 'Sku.id')
         // Use Variation.shopifySourceProductId for status lookup (more accurate for multi-color products)
         // Falls back to Product.shopifyProductId if variation source is not set
@@ -78,10 +85,10 @@ export async function listInventorySkusKysely(
             'Product.gender',
             'Product.category',
             'Product.imageUrl as productImageUrl',
-            'Variation.fabricId',
+            'FabricColour.fabricId',
             'Fabric.name as fabricName',
             'Fabric.unit as fabricUnit',
-            'Variation.fabricColourId',
+            'FabricColour.id as fabricColourId',
             'FabricColour.colourName as fabricColourName',
             'FabricColour.colourHex as fabricColourHex',
             'ShopifyInventoryCache.availableQty as shopifyAvailableQty',

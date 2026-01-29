@@ -241,6 +241,9 @@ export interface FlattenedOrderRow {
 
     // Customer tags
     customerTags?: string[] | null;
+
+    // Fabric out of stock status: null = no fabric linked, false = linked & in stock, true = linked & OOS
+    isFabricOutOfStock?: boolean | null;
 }
 
 /**

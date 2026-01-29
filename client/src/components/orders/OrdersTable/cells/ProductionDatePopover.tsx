@@ -15,6 +15,7 @@ interface ProductionDatePopoverProps {
     onClear: () => void;
     hasExistingBatch: boolean;
     variant?: 'pending' | 'allocated';
+    isFabricOutOfStock?: boolean;
 }
 
 export const ProductionDatePopover = memo(function ProductionDatePopover({
@@ -24,6 +25,7 @@ export const ProductionDatePopover = memo(function ProductionDatePopover({
     onClear,
     hasExistingBatch,
     variant = 'pending',
+    isFabricOutOfStock = false,
 }: ProductionDatePopoverProps) {
     const [isOpen, setIsOpen] = useState(false);
     const [popoverPosition, setPopoverPosition] = useState({ top: 0, left: 0 });
@@ -118,8 +120,12 @@ export const ProductionDatePopover = memo(function ProductionDatePopover({
                                 ? 'bg-emerald-100 text-emerald-700 border border-emerald-300 hover:bg-emerald-200'
                                 : 'bg-amber-100 text-amber-700 border border-amber-300 hover:bg-amber-200'
                         : 'text-amber-600 hover:text-amber-700 hover:bg-amber-50 border border-dashed border-amber-300 hover:border-amber-400'
-                }`}
-                title={currentDate ? `Production: ${formatDisplayDate(currentDate)}` : 'Set production date'}
+                } ${isFabricOutOfStock ? 'ring-2 ring-red-300' : ''}`}
+                title={currentDate
+                    ? `Production: ${formatDisplayDate(currentDate)}${isFabricOutOfStock ? ' (Fabric OOS)' : ''}`
+                    : isFabricOutOfStock
+                        ? 'Set production date (Fabric is out of stock)'
+                        : 'Set production date'}
             >
                 {currentDate ? (
                     <span className="flex flex-col items-center leading-tight">

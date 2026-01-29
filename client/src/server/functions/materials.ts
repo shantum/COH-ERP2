@@ -734,6 +734,7 @@ export const getMaterialsTree = createServerFn({ method: 'GET' })
                         supplierId: colour.supplierId,
                         supplierName: colour.supplier?.name,
                         isActive: colour.isActive,
+                        isOutOfStock: colour.isOutOfStock,
                         // Inventory balance from FabricColourTransaction
                         currentBalance: balanceMap.get(colour.id) ?? 0,
                         // Extract unique products from variation BOM lines
@@ -918,6 +919,7 @@ export const getMaterialsTreeChildren = createServerFn({ method: 'GET' })
                         supplierId: colour.supplierId,
                         supplierName: colour.supplier?.name,
                         isActive: colour.isActive,
+                        isOutOfStock: colour.isOutOfStock,
                         // Inventory balance from FabricColourTransaction
                         currentBalance: balanceMap.get(colour.id) ?? 0,
                         connectedProducts,

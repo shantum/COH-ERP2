@@ -26,26 +26,38 @@ export const ProductionCell = memo(function ProductionCell({ row, handlersRef, i
 
     // Show for pending lines that need production (no stock, customized, or already has batch)
     if (isPending && (row.productionBatchId || !hasStock || row.isCustomized)) {
+        const handleSelectDate = (date: string) => {
+            // Show warning for out-of-stock fabric before scheduling production
+            if (row.isFabricOutOfStock === true) {
+                const confirmed = window.confirm(
+                    `Warning: The fabric for this item is marked as Out of Stock.\n\n` +
+                    `Are you sure you want to schedule production for ${date}?`
+                );
+                if (!confirmed) return;
+            }
+
+            if (row.productionBatchId) {
+                onUpdateBatch(row.productionBatchId, { batchDate: date });
+            } else {
+                onCreateBatch({
+                    skuId: row.skuId,
+                    qtyPlanned: row.qty,
+                    priority: 'order_fulfillment',
+                    sourceOrderLineId: row.lineId,
+                    batchDate: date,
+                    notes: `For ${row.orderNumber}`,
+                });
+            }
+        };
+
         return (
             <ProductionDatePopover
                 currentDate={row.productionDate}
                 isLocked={isDateLocked}
                 hasExistingBatch={!!row.productionBatchId}
                 variant="pending"
-                onSelectDate={(date) => {
-                    if (row.productionBatchId) {
-                        onUpdateBatch(row.productionBatchId, { batchDate: date });
-                    } else {
-                        onCreateBatch({
-                            skuId: row.skuId,
-                            qtyPlanned: row.qty,
-                            priority: 'order_fulfillment',
-                            sourceOrderLineId: row.lineId,
-                            batchDate: date,
-                            notes: `For ${row.orderNumber}`,
-                        });
-                    }
-                }}
+                isFabricOutOfStock={row.isFabricOutOfStock === true}
+                onSelectDate={handleSelectDate}
                 onClear={() => {
                     if (row.productionBatchId) {
                         onDeleteBatch(row.productionBatchId);

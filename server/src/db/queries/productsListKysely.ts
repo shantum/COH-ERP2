@@ -122,10 +122,16 @@ export async function listProductsKysely(
         };
     }
 
-    // Fetch variations with fabrics for these products
+    // Fetch variations with fabrics from BOM (source of truth)
     const variationsRaw = await kysely
         .selectFrom('Variation')
-        .leftJoin('Fabric', 'Fabric.id', 'Variation.fabricId')
+        .leftJoin('VariationBomLine', (join) =>
+            join
+                .onRef('VariationBomLine.variationId', '=', 'Variation.id')
+                .on('VariationBomLine.fabricColourId', 'is not', null)
+        )
+        .leftJoin('FabricColour', 'FabricColour.id', 'VariationBomLine.fabricColourId')
+        .leftJoin('Fabric', 'Fabric.id', 'FabricColour.fabricId')
         .select([
             'Variation.id',
             'Variation.productId',
@@ -134,10 +140,10 @@ export async function listProductsKysely(
             'Variation.colorHex',
             'Variation.imageUrl',
             'Variation.isActive',
-            'Variation.fabricId',
+            'FabricColour.fabricId',
             'Fabric.id as fabric_id',
             'Fabric.name as fabric_name',
-            'Fabric.colorName as fabric_colorName',
+            'FabricColour.colourName as fabric_colorName',
         ])
         .where('Variation.productId', 'in', productIds)
         .execute();

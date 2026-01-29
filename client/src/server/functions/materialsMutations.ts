@@ -203,6 +203,7 @@ const updateColourSchema = z.object({
     leadTimeDays: z.number().int().positive().optional().nullable(),
     minOrderQty: z.number().positive().optional().nullable(),
     isActive: z.boolean().optional(),
+    isOutOfStock: z.boolean().optional(),
 });
 
 const deleteColourSchema = z.object({
@@ -520,6 +521,7 @@ export const updateColour = createServerFn({ method: 'POST' })
                     ...(data.leadTimeDays !== undefined && { leadTimeDays: data.leadTimeDays }),
                     ...(data.minOrderQty !== undefined && { minOrderQty: data.minOrderQty }),
                     ...(data.isActive !== undefined && { isActive: data.isActive }),
+                    ...(data.isOutOfStock !== undefined && { isOutOfStock: data.isOutOfStock }),
                 },
                 include: {
                     fabric: {

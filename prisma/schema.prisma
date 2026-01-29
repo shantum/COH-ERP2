@@ -272,6 +272,7 @@ model FabricColour {
   minOrderQty    Float?
 
   currentBalance Float    @default(0) // Materialized balance: updated atomically by DB trigger
+  isOutOfStock   Boolean  @default(false) // Manual flag to mark fabric as out of stock
 
   isActive       Boolean  @default(true)
   createdAt      DateTime @default(now())
