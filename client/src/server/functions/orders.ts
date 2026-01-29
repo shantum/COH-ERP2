@@ -883,6 +883,7 @@ export const getOrderViewCounts = createServerFn({ method: 'GET' })
 export interface SearchResultOrder {
     id: string;
     orderNumber: string;
+    customerId: string | null;
     customerName: string | null;
     customerEmail: string | null;
     customerPhone: string | null;
@@ -1038,6 +1039,7 @@ export const searchAllOrders = createServerFn({ method: 'GET' })
                         select: {
                             id: true,
                             orderNumber: true,
+                            customerId: true,
                             customerName: true,
                             customerEmail: true,
                             customerPhone: true,
@@ -1062,6 +1064,7 @@ export const searchAllOrders = createServerFn({ method: 'GET' })
                             orders: Array<{
                                 id: string;
                                 orderNumber: string;
+                                customerId: string | null;
                                 customerName: string | null;
                                 customerEmail: string | null;
                                 customerPhone: string | null;
@@ -1078,6 +1081,7 @@ export const searchAllOrders = createServerFn({ method: 'GET' })
                             orders: orders.map((o) => ({
                                 id: o.id,
                                 orderNumber: o.orderNumber,
+                                customerId: o.customerId,
                                 customerName: o.customerName,
                                 customerEmail: o.customerEmail,
                                 customerPhone: o.customerPhone,

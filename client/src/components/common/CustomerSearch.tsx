@@ -65,7 +65,7 @@ export function CustomerSearch({
   onCancel,
   initialQuery = '',
   showTags = false,
-  placeholder = 'Search by name, email, or phone...',
+  placeholder = 'Search by name, email, phone, or order #...',
   className = '',
 }: CustomerSearchProps) {
   const [query, setQuery] = useState(initialQuery);
@@ -84,15 +84,6 @@ export function CustomerSearch({
   const searchCustomersFn = useServerFn(searchCustomers);
   const searchAllOrdersFn = useServerFn(searchAllOrders);
 
-  // Check if query looks like an order number
-  const isOrderNumberQuery = (q: string) => {
-    const trimmed = q.trim().toUpperCase();
-    return trimmed.startsWith('#') ||
-           trimmed.startsWith('COH-') ||
-           trimmed.startsWith('EXC-') ||
-           /^\d{5,}$/.test(trimmed); // 5+ digit number
-  };
-
   // Fetch customers with server-side search
   const { data: customersData, isLoading: isLoadingCustomers } = useQuery({
     queryKey: ['customers-search', debouncedQuery],
@@ -105,7 +96,7 @@ export function CustomerSearch({
     staleTime: 30 * 1000,
   });
 
-  // Fetch orders when query looks like an order number
+  // Always search orders - useful for finding customers by order number, email, or phone
   const { data: ordersData, isLoading: isLoadingOrders } = useQuery({
     queryKey: ['orders-search', debouncedQuery],
     queryFn: () => searchAllOrdersFn({
@@ -114,7 +105,7 @@ export function CustomerSearch({
         limit: 10,
       },
     }),
-    enabled: !!debouncedQuery.trim() && isOrderNumberQuery(debouncedQuery),
+    enabled: debouncedQuery.trim().length >= 3, // Search when 3+ chars
     staleTime: 30 * 1000,
   });
 
@@ -135,18 +126,20 @@ export function CustomerSearch({
   const allOrders = ordersData?.results?.flatMap((tab) => tab.orders) || [];
   const orderCustomers: (Customer & { orderNumber?: string })[] = allOrders
     .filter((order: { customerName: string | null }) => order.customerName)
-    .map((order: { id: string; orderNumber: string; customerName: string | null }) => ({
-      id: `order-${order.id}`,
+    .map((order: { id: string; customerId: string | null; orderNumber: string; customerName: string | null; customerEmail: string | null; customerPhone: string | null }) => ({
+      // Use actual customerId if available, otherwise fallback to order-based id
+      id: order.customerId || `order-${order.id}`,
       firstName: order.customerName?.split(' ')[0] || '',
       lastName: order.customerName?.split(' ').slice(1).join(' ') || '',
-      email: '',
-      phone: '',
+      email: order.customerEmail || '',
+      phone: order.customerPhone || '',
       orderNumber: order.orderNumber,
     }))
-    // Remove duplicates by name
+    // Remove duplicates by customerId (if present), then email, then name
     .filter((c, i, arr) =>
       arr.findIndex((x) =>
-        (x.firstName === c.firstName && x.lastName === c.lastName)) === i
+        !c.id.startsWith('order-') && !x.id.startsWith('order-') ? x.id === c.id :
+        c.email ? x.email === c.email : (x.firstName === c.firstName && x.lastName === c.lastName)) === i
     );
 
   // Auto-focus the input on mount
@@ -183,9 +176,9 @@ export function CustomerSearch({
           <div className="p-4 text-center">
             <User size={20} className="mx-auto mb-1 text-muted-foreground/50" />
             <p className="text-xs text-muted-foreground">
-              {query.trim() ? 'No customers found' : 'Search by name, email, phone, or order #'}
+              {query.trim() ? 'No customers found' : 'Search by name, email, phone, or order number'}
             </p>
-            <p className="text-xs mt-1 text-muted-foreground/70">Or enter details for new customer</p>
+            <p className="text-xs mt-1 text-muted-foreground/70">Enter at least 3 characters to search</p>
           </div>
         ) : (
           <div className="divide-y divide-border">
