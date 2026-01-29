@@ -289,6 +289,7 @@ export const getProductionBatches = createServerFn({ method: 'GET' })
                 'Variation.colorName',
                 'Product.id as productId',
                 'Product.name as productName',
+                'Product.styleCode as productStyleCode',
                 'Variation.fabricId',
                 'Fabric.name as fabricName',
             ]);
@@ -359,6 +360,7 @@ export const getProductionBatches = createServerFn({ method: 'GET' })
                 colorName: r.colorName,
                 productId: r.productId,
                 productName: r.productName,
+                productStyleCode: r.productStyleCode,
                 fabricId: r.fabricId,
                 fabricName: r.fabricName,
             };
@@ -417,6 +419,7 @@ export const getProductionBatches = createServerFn({ method: 'GET' })
                               product: {
                                   id: batch.productId,
                                   name: batch.productName,
+                                  styleCode: batch.productStyleCode,
                               },
                               fabric: batch.fabricId
                                   ? { id: batch.fabricId, name: batch.fabricName }
