@@ -60,6 +60,10 @@ export interface OrdersAnalyticsResponse {
         lastMonth: RevenueData;
         thisMonth: RevenueData;
     };
+    /** Days elapsed in current month (for daily average calculations) - SSR-safe */
+    daysInThisMonth: number;
+    /** Total days in last month (for daily average calculations) - SSR-safe */
+    daysInLastMonth: number;
 }
 
 // For top products dashboard card
@@ -196,6 +200,12 @@ export const getOrdersAnalytics = createServerFn({ method: 'GET' })
                 getTopProductsKysely(last30DaysStart, null, 10),
             ]);
 
+            // Calculate days for averages (server-side for SSR consistency)
+            const now = new Date();
+            const daysInThisMonth = now.getDate();
+            const lastMonthDate = new Date(now.getFullYear(), now.getMonth(), 0);
+            const daysInLastMonth = lastMonthDate.getDate();
+
             // Build response matching existing format
             const result: OrdersAnalyticsResponse = {
                 totalOrders: pipelineData.pipeline.totalOrders,
@@ -260,6 +270,8 @@ export const getOrdersAnalytics = createServerFn({ method: 'GET' })
                         customers: buildCustomerStats(revenueData.thisMonth.newCustomers, revenueData.thisMonth.returningCustomers),
                     },
                 },
+                daysInThisMonth,
+                daysInLastMonth,
             };
 
             // Cache the result

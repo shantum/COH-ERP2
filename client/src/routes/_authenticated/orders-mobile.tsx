@@ -19,12 +19,15 @@ export const Route = createFileRoute('/_authenticated/orders-mobile')({
     component: MobileOrdersPage,
 });
 
+// Mobile-optimized page size (smaller payload, faster render)
+const MOBILE_PAGE_SIZE = 50;
+
 function MobileOrdersPage() {
-    // Fetch orders
+    // Fetch orders with reduced page size for mobile performance
     const getOrdersFn = useServerFn(getOrders);
     const { data: ordersData, isLoading } = useQuery({
-        queryKey: ['orders', 'list', 'getOrders', { view: 'open' }],
-        queryFn: () => getOrdersFn({ data: { view: 'open' } }),
+        queryKey: ['orders', 'list', 'getOrders', { view: 'open', limit: MOBILE_PAGE_SIZE }],
+        queryFn: () => getOrdersFn({ data: { view: 'open', limit: MOBILE_PAGE_SIZE } }),
     });
 
     // Convert to flattened rows (server already provides this)

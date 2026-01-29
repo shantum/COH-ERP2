@@ -65,11 +65,8 @@ export function OrdersAnalyticsBar({ initialData }: OrdersAnalyticsBarProps) {
         ? Math.round((analytics.paymentSplit.cod.count / analytics.totalOrders) * 100)
         : 0;
 
-    // Calculate days for averages
-    const now = new Date();
-    const daysInThisMonth = now.getDate();
-    const lastMonthDate = new Date(now.getFullYear(), now.getMonth(), 0);
-    const daysInLastMonth = lastMonthDate.getDate();
+    // Use server-computed values for SSR consistency (avoids hydration mismatch)
+    const { daysInThisMonth, daysInLastMonth } = analytics;
 
     const ChangeIndicator = ({ change }: { change: number | null | undefined }) => {
         if (change === null || change === undefined) return null;
