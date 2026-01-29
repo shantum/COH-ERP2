@@ -108,13 +108,20 @@ export const AssignStockCell = memo(function AssignStockCell({ row, handlersRef 
                 </div>
             );
         } else {
+            // Show "Awaiting production" if production date is assigned, otherwise "No stock"
+            const hasProductionDate = !!row.productionDate;
             return (
                 <div className="flex items-center">
                     <span
-                        className="w-[82px] text-center text-[11px] text-amber-600 bg-amber-50 py-1 rounded-md"
-                        title="Insufficient stock"
+                        className={cn(
+                            'w-[82px] text-center text-[11px] py-1 rounded-md',
+                            hasProductionDate
+                                ? 'text-blue-500 bg-blue-50/50'
+                                : 'text-amber-600 bg-amber-50'
+                        )}
+                        title={hasProductionDate ? 'In production, awaiting stock' : 'Insufficient stock'}
                     >
-                        No stock
+                        {hasProductionDate ? 'In production' : 'No stock'}
                     </span>
                 </div>
             );

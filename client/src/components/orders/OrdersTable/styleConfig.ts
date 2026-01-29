@@ -74,7 +74,7 @@ export type ResolvedLineState =
 // ─── Cell background per resolved state ──────────────────────────────────────
 export const LINE_CELL_BG: Record<ResolvedLineState, string> = {
     blocked: 'bg-yellow-100',
-    inProduction: 'bg-amber-100',
+    inProduction: 'bg-yellow-50',
     customized: 'bg-orange-100',
     withStock: 'bg-green-100',
     allocated: 'bg-green-200',
@@ -194,7 +194,7 @@ export const CUSTOMIZATION_COLORS = {
 // ─── Status legend (matches waterfall highlight colors) ─────────────────────
 export const STATUS_LEGEND_ITEMS = [
     { color: 'bg-yellow-100', border: 'border-yellow-300', label: 'Pending (no stock)', desc: 'Waiting for inventory' },
-    { color: 'bg-amber-100', border: 'border-amber-300', label: 'In Production', desc: 'Has production date set' },
+    { color: 'bg-yellow-50', border: 'border-yellow-200', label: 'In Production', desc: 'Has production date set' },
     { color: 'bg-green-100', border: 'border-green-300', label: 'Ready to Allocate', desc: 'Has stock available' },
     { color: 'bg-green-200', border: 'border-green-400', label: 'Allocated', desc: 'Stock reserved' },
     { color: 'bg-green-200', border: 'border-green-400', label: 'Picked', desc: 'Ready to pack' },
