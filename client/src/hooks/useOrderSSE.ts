@@ -17,7 +17,7 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { ORDERS_PAGE_SIZE } from '../constants/queryKeys';
-import { getOrdersListQueryKey } from './orders/orderMutationUtils';
+import { getOrdersListQueryKey, invalidateAllOrderViewsStale } from './orders/orderMutationUtils';
 import type { FlattenedOrderRow } from '../server/functions/orders';
 
 // Nested order line type for cache updates
@@ -162,10 +162,12 @@ export function useOrderSSE({
                 return;
             }
 
-            // Handle buffer overflow - server lost events, need full refetch
+            // Handle buffer overflow - server lost events, need refresh
+            // IMPORTANT: Use smart invalidation to prevent 10K+ re-renders
+            // This marks all views as stale but only refetches the active view
             if (data.type === 'buffer_overflow') {
-                console.log('SSE: Buffer overflow detected, triggering full refetch');
-                queryClient.invalidateQueries({ queryKey: ['orders'] });
+                console.log('SSE: Buffer overflow detected, marking views stale (active view will refetch)');
+                invalidateAllOrderViewsStale(queryClient);
                 return;
             }
 

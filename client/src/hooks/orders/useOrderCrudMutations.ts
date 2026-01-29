@@ -6,7 +6,7 @@
 import { useMemo } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
-import { useOrderInvalidation } from './orderMutationUtils';
+import { useOrderInvalidation, invalidateAllOrderViewsStale } from './orderMutationUtils';
 import { showError } from '../../utils/toast';
 import {
     createOrder as createOrderFn,
@@ -177,7 +177,8 @@ export function useOrderCrudMutations(options: UseOrderCrudMutationsOptions = {}
             return result.data;
         },
         onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['orders'] });
+            // Use smart invalidation - marks all views stale, only active view refetches
+            invalidateAllOrderViewsStale(queryClient);
             options.onNotesSuccess?.();
         },
         onError: (err) => {
@@ -209,7 +210,8 @@ export function useOrderCrudMutations(options: UseOrderCrudMutationsOptions = {}
             return result.data;
         },
         onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['orders'] });
+            // Use smart invalidation - marks all views stale, only active view refetches
+            invalidateAllOrderViewsStale(queryClient);
         },
         onError: (err) => {
             showError('Failed to update ship by date', { description: err instanceof Error ? err.message : String(err) });

@@ -4,6 +4,7 @@ import { useServerFn } from '@tanstack/react-start';
 import { getProductsList } from '@/server/functions/products';
 import { createBatch } from '@/server/functions/productionMutations';
 import { getTodayString } from '@/components/orders/OrdersTable/utils/dateFormatters';
+import { invalidateOrderView } from '@/hooks/orders/orderMutationUtils';
 import {
     Dialog,
     DialogContent,
@@ -103,7 +104,8 @@ export function AddToPlanModal({
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['production'] });
-            queryClient.invalidateQueries({ queryKey: ['orders'] });
+            // Production batch affects open view (shows production batch info)
+            invalidateOrderView(queryClient, 'open');
             resetForm();
             onOpenChange(false);
         },

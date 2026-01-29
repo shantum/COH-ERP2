@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { ArrowDownCircle, ArrowUpCircle, Search, Calendar, Trash2, Wrench } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
+import { invalidateOrderView } from '../hooks/orders/orderMutationUtils';
 
 // Server Functions
 import { getInventoryTransactions, type InventoryTransactionItem } from '../server/functions/inventory';
@@ -156,9 +157,9 @@ export default function Ledgers() {
                 queryClient.invalidateQueries({ queryKey: ['allFabricTransactions'] });
                 queryClient.invalidateQueries({ queryKey: ['fabricStock'] });
             }
-            // If allocation was reverted, also invalidate orders
+            // If allocation was reverted, invalidate open view (where allocations are managed)
             if (data?.data?.message?.includes('allocation') || data?.data?.message?.includes('queue')) {
-                queryClient.invalidateQueries({ queryKey: ['orders'] });
+                invalidateOrderView(queryClient, 'open');
             }
         },
         onError: (err: Error) => alert(err.message || 'Failed to delete transaction')

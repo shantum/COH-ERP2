@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { getShippingRates, createShipment, cancelShipment, getShippingLabel } from '../../../server/functions/tracking';
 import { getProductMrpForShipping } from '../../../utils/orderPricing';
+import { invalidateOrderViews } from '../../../hooks/orders/orderMutationUtils';
 
 interface CourierRate {
   logistics: string;
@@ -151,7 +152,8 @@ export function BookShipmentSection({
     },
     onSuccess: () => {
       setStep('booked');
-      queryClient.invalidateQueries({ queryKey: ['orders'] });
+      // Invalidate only affected views: open (where order is) and shipped (where it may go)
+      invalidateOrderViews(queryClient, ['open', 'shipped']);
       queryClient.invalidateQueries({ queryKey: ['order', order.id] });
       onShipmentBooked?.();
     },
@@ -171,7 +173,8 @@ export function BookShipmentSection({
       return result;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['orders'] });
+      // Invalidate only affected views: open and shipped
+      invalidateOrderViews(queryClient, ['open', 'shipped']);
       queryClient.invalidateQueries({ queryKey: ['order', order.id] });
       onShipmentBooked?.();
     },

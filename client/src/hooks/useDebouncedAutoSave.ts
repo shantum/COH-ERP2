@@ -20,7 +20,8 @@
  *   buildPayload: (value) => ({ lineId: row.id, notes: value }),
  *   onSuccess: () => console.log('Saved!'),
  *   // CRITICAL: Always use onSettled to refetch data for UI/DB sync
- *   onSettled: () => queryClient.invalidateQueries({ queryKey: ['orders'] }),
+ *   // Use targeted invalidation, NOT broad ['orders'] key (causes 10K+ re-renders)
+ *   onSettled: () => invalidateAllOrderViewsStale(queryClient),
  * });
  */
 

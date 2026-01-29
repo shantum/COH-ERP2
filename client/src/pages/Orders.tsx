@@ -19,6 +19,7 @@ import { useOrderSSE } from '../hooks/useOrderSSE';
 import { useAuth } from '../hooks/useAuth';
 import { useDebounce } from '../hooks/useDebounce';
 import { useOrdersUrlModal, type OrderModalType } from '../hooks/useUrlModal';
+import { invalidateAllOrderViewsStale } from '../hooks/orders/orderMutationUtils';
 
 // Utilities
 import {
@@ -900,7 +901,8 @@ export default function Orders() {
                         onClose={closeModal}
                         onSuccess={() => {
                             closeModal();
-                            queryClient.invalidateQueries({ queryKey: ['orders'] });
+                            // Use smart invalidation - marks all views stale, only active view refetches
+                            invalidateAllOrderViewsStale(queryClient);
                         }}
                     />
                 )}

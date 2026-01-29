@@ -28,6 +28,7 @@ import {
     triggerSync,
     type SyncJobResult,
 } from '../../../server/functions/shopify';
+import { invalidateAllOrderViewsStale } from '../../../hooks/orders/orderMutationUtils';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyData = any;
@@ -164,7 +165,8 @@ export function ShopifyTab() {
         mutationFn: ({ limit, retryFailed }: { limit?: number; retryFailed?: boolean }) =>
             shopifyApi.processCache(limit, retryFailed),
         onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['orders'] });
+            // Shopify cache processing may affect multiple orders - use smart invalidation
+            invalidateAllOrderViewsStale(queryClient);
             queryClient.invalidateQueries({ queryKey: ['openOrders'] });
             queryClient.invalidateQueries({ queryKey: ['cacheStatus'] });
         },

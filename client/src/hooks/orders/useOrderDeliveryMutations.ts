@@ -21,7 +21,7 @@
 import { useQueryClient, useMutation } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { inventoryQueryKeys } from '../../constants/queryKeys';
-import { useOrderInvalidation, getOrdersListQueryKey } from './orderMutationUtils';
+import { useOrderInvalidation, getOrdersListQueryKey, cancelOrderViewQueries } from './orderMutationUtils';
 import { showError } from '../../utils/toast';
 import {
     // Line-level mutations
@@ -255,7 +255,8 @@ export function useOrderDeliveryMutations(options: UseOrderDeliveryMutationsOpti
             const shippedQueryInput = getOrdersQueryInput('shipped', page);
             const queryKey = getOrdersListQueryKey(shippedQueryInput);
 
-            await queryClient.cancelQueries({ queryKey: ['orders'] });
+            // Cancel only shipped view queries, not all order queries
+            await cancelOrderViewQueries(queryClient, 'shipped');
             const previousData = queryClient.getQueryData<OrdersListData>(queryKey);
 
             // Update the specific line in the cache
@@ -308,7 +309,8 @@ export function useOrderDeliveryMutations(options: UseOrderDeliveryMutationsOpti
             const shippedQueryInput = getOrdersQueryInput('shipped', page);
             const queryKey = getOrdersListQueryKey(shippedQueryInput);
 
-            await queryClient.cancelQueries({ queryKey: ['orders'] });
+            // Cancel only shipped view queries, not all order queries
+            await cancelOrderViewQueries(queryClient, 'shipped');
             const previousData = queryClient.getQueryData<OrdersListData>(queryKey);
 
             queryClient.setQueryData<OrdersListData>(queryKey, (old) => {
@@ -360,7 +362,8 @@ export function useOrderDeliveryMutations(options: UseOrderDeliveryMutationsOpti
             const rtoQueryInput = getOrdersQueryInput('rto', page);
             const queryKey = getOrdersListQueryKey(rtoQueryInput);
 
-            await queryClient.cancelQueries({ queryKey: ['orders'] });
+            // Cancel only RTO view queries, not all order queries
+            await cancelOrderViewQueries(queryClient, 'rto');
             const previousData = queryClient.getQueryData<OrdersListData>(queryKey);
 
             queryClient.setQueryData<OrdersListData>(queryKey, (old) => {
