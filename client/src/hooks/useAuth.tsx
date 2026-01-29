@@ -1,5 +1,19 @@
-import { createContext, useContext, useState, useEffect, useRef, type ReactNode } from 'react';
+/**
+ * Auth Hook - Single Source of Truth for Authentication
+ *
+ * Uses TanStack Query to cache auth state. Both this hook and route beforeLoad
+ * share the same query cache, preventing duplicate /api/auth/me calls.
+ *
+ * Flow:
+ * 1. beforeLoad calls ensureQueryData (populates cache if empty)
+ * 2. AuthProvider reads from same cache via useQuery
+ * 3. Subsequent navigations hit cache (staleTime: 5 min)
+ */
+
+import { createContext, useContext, useEffect, type ReactNode } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { authApi } from '../services/api';
+import { authQueryKeys } from '../constants/queryKeys';
 import type { AuthUser } from '../types';
 
 interface AuthContextType {
@@ -12,73 +26,58 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-export function AuthProvider({ children }: { children: ReactNode }) {
-    const [user, setUser] = useState<AuthUser | null>(null);
-    // SSR: Start with isLoading=false so routes render immediately
-    // Client: Start with isLoading=true, useEffect will check auth and set false
-    const [isLoading, setIsLoading] = useState(() => typeof window !== 'undefined');
-    const authCheckRef = useRef(false);
+/**
+ * Auth query options - shared between AuthProvider and route beforeLoad
+ * Exported so _authenticated.tsx can use the same query configuration
+ */
+export const authQueryOptions = {
+    queryKey: authQueryKeys.user,
+    queryFn: async (): Promise<AuthUser | null> => {
+        // Only run on client - server uses getAuthUser server function
+        if (typeof window === 'undefined') {
+            return null;
+        }
 
-    // Main auth check effect - only runs on client
-    useEffect(() => {
-        console.log('[AuthProvider] useEffect running, authCheckRef:', authCheckRef.current);
-        // Prevent double-execution in strict mode
-        if (authCheckRef.current) return;
-        authCheckRef.current = true;
-
-        const checkAuth = async () => {
-            try {
-                // Safe localStorage access (only runs in useEffect = client only)
-                const token = localStorage.getItem('token');
-                console.log('[AuthProvider] Token in localStorage:', !!token);
-
-                if (!token) {
-                    // No token - user is not logged in, but auth check is complete
-                    console.log('[AuthProvider] No token, setting isLoading=false');
-                    setIsLoading(false);
-                    return;
-                }
-
-                // Verify token with server
-                console.log('[AuthProvider] Verifying token with /api/auth/me...');
-                const res = await authApi.me();
-                console.log('[AuthProvider] Auth verified, user:', res.data?.email);
-                setUser(res.data);
-            } catch (err) {
-                // Token invalid or expired
-                console.error('[AuthProvider] Auth check failed:', err);
-                try {
-                    localStorage.removeItem('token');
-                } catch {
-                    // Ignore localStorage errors
-                }
-            } finally {
-                console.log('[AuthProvider] Setting isLoading=false');
-                setIsLoading(false);
+        try {
+            const token = localStorage.getItem('token');
+            if (!token) {
+                return null;
             }
-        };
 
-        checkAuth();
-    }, []);
+            const res = await authApi.me();
+            return res.data as AuthUser;
+        } catch {
+            // Token invalid or expired - clean up
+            try {
+                localStorage.removeItem('token');
+            } catch {
+                // Ignore localStorage errors
+            }
+            return null;
+        }
+    },
+    staleTime: 5 * 60 * 1000, // 5 minutes - don't re-fetch if fresh
+    gcTime: 10 * 60 * 1000, // Keep in cache for 10 minutes
+    retry: false, // Don't retry auth failures
+};
 
-    // Listen for unauthorized events from API interceptor
-    // This handles 401 responses without forcing a full page reload
-    useEffect(() => {
-        // Only add listener on client
-        if (typeof window === 'undefined') return;
+export function AuthProvider({ children }: { children: ReactNode }) {
+    const queryClient = useQueryClient();
 
-        const handleUnauthorized = () => {
-            setUser(null);
-        };
-        window.addEventListener('auth:unauthorized', handleUnauthorized);
-        return () => window.removeEventListener('auth:unauthorized', handleUnauthorized);
-    }, []);
+    // Use TanStack Query for auth state - shares cache with route beforeLoad
+    const { data: user, isLoading } = useQuery({
+        ...authQueryOptions,
+        // On SSR, start with loading=false to avoid hydration mismatch
+        // The route's beforeLoad will have already fetched auth via server function
+        enabled: typeof window !== 'undefined',
+    });
 
     const login = async (email: string, password: string) => {
         const res = await authApi.login(email, password);
-        // Store token in localStorage for tRPC (cookie is set by server)
+        // Store token in localStorage
         localStorage.setItem('token', res.data.token);
-        setUser(res.data.user);
+        // Update the query cache with the new user
+        queryClient.setQueryData(authQueryKeys.user, res.data.user);
     };
 
     const logout = async () => {
@@ -90,11 +89,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
         // Clear client-side token
         localStorage.removeItem('token');
-        setUser(null);
+        // Clear the query cache
+        queryClient.setQueryData(authQueryKeys.user, null);
+        // Invalidate to ensure fresh state on next login
+        queryClient.invalidateQueries({ queryKey: authQueryKeys.user });
     };
 
+    // Listen for unauthorized events from API interceptor
+    // This handles 401 responses without forcing a full page reload
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+
+        const handleUnauthorized = () => {
+            // Clear the query cache on 401
+            queryClient.setQueryData(authQueryKeys.user, null);
+        };
+
+        window.addEventListener('auth:unauthorized', handleUnauthorized);
+        return () => window.removeEventListener('auth:unauthorized', handleUnauthorized);
+    }, [queryClient]);
+
     return (
-        <AuthContext.Provider value={{ user, isAuthenticated: !!user, isLoading, login, logout }}>
+        <AuthContext.Provider
+            value={{
+                user: user ?? null,
+                isAuthenticated: !!user,
+                isLoading: typeof window === 'undefined' ? false : isLoading,
+                login,
+                logout,
+            }}
+        >
             {children}
         </AuthContext.Provider>
     );

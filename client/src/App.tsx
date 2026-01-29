@@ -30,13 +30,10 @@ const queryClient = new QueryClient({
  * Must be inside AuthProvider to access useAuth()
  */
 function InnerApp() {
-    console.log('[InnerApp] rendering');
     const auth = useAuth();
-    console.log('[InnerApp] auth state:', { isLoading: auth.isLoading, isAuthenticated: auth.isAuthenticated, user: auth.user?.email });
 
     // Show loading state while auth is being determined
     if (auth.isLoading) {
-        console.log('[InnerApp] showing loading spinner');
         return (
             <div className="min-h-screen flex items-center justify-center">
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
@@ -44,7 +41,6 @@ function InnerApp() {
         );
     }
 
-    console.log('[InnerApp] rendering RouterProvider');
     return (
         <RouterProvider
             router={router}
