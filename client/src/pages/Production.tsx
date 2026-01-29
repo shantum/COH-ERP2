@@ -434,8 +434,8 @@ function ProductionContent() {
                 const product = entry.sku?.variation?.product?.name || '';
                 const size = entry.sku?.size || '';
                 const color = entry.sku?.variation?.colorName || '';
-                const skuCode = entry.sku?.skuCode || '';
-                line = `${index + 1}. ${product} - ${size} - ${color} - ${qty}pc - ${skuCode}`;
+                const styleCode = entry.sku?.variation?.product?.styleCode || entry.sku?.skuCode || '';
+                line = `${index + 1}. ${product} - ${size} - ${color} - ${qty}pc - ${styleCode}`;
 
                 const customParts = ['[CUSTOM'];
                 if (entry.customization.type && entry.customization.value) {
@@ -460,8 +460,8 @@ function ProductionContent() {
                 const product = entry.sku?.variation?.product?.name || '';
                 const size = entry.sku?.size || '';
                 const color = entry.sku?.variation?.colorName || '';
-                const skuCode = entry.sku?.skuCode || '';
-                line = `${index + 1}. ${product} - ${size} - ${color} - ${qty}pc - ${skuCode}`;
+                const styleCode = entry.sku?.variation?.product?.styleCode || entry.sku?.skuCode || '';
+                line = `${index + 1}. ${product} - ${size} - ${color} - ${qty}pc - ${styleCode}`;
                 if (entry.notes.length > 0) {
                     line += ` (${entry.notes.join(', ')})`;
                 }
