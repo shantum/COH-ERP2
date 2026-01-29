@@ -1,14 +1,12 @@
 /**
- * Dashboard Route - / (index)
- *
- * Note: SSR data loading disabled during migration.
- * Dashboard component fetches data client-side via tRPC hooks.
+ * Index Route - / redirects to /orders
  */
-import { createFileRoute } from '@tanstack/react-router';
-import { lazy } from 'react';
+import { createFileRoute, Navigate } from '@tanstack/react-router';
 
-const Dashboard = lazy(() => import('../../pages/Dashboard'));
+function IndexRedirect() {
+    return <Navigate to="/orders" search={{ view: 'open', page: 1, limit: 250 }} />;
+}
 
 export const Route = createFileRoute('/_authenticated/')({
-    component: Dashboard,
+    component: IndexRedirect,
 });

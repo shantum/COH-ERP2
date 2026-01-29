@@ -28,8 +28,10 @@ function LoginRoute() {
     const { redirect: redirectTo } = Route.useSearch();
 
     // Callback to handle successful login - navigate to redirect target
+    // Default to /orders since that's the main landing page
     const onLoginSuccess = () => {
-        navigate({ to: redirectTo || '/' });
+        const target = redirectTo && redirectTo !== '/' ? redirectTo : '/orders';
+        navigate({ to: target });
     };
 
     return (
