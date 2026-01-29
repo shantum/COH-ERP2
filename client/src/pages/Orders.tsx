@@ -197,6 +197,7 @@ export default function Orders() {
         pagination: viewPagination,
         viewCounts,
         viewCountsLoading,
+        openViewCounts,
         inventoryBalance,
         fabricStock,
         channels,
@@ -362,57 +363,11 @@ export default function Orders() {
         return rows;
     }, [currentRows, view, allocatedFilter, productionFilter, isSearchMode]);
 
-    // Count of fully shipped orders ready for release (Open view only)
-    const releasableOrderCount = useMemo(() => {
-        if (view !== 'open' || !orders) return 0;
-        let count = 0;
-        for (const order of orders as DerivedOrder[]) {
-            // Must not already be released
-            if (order.releasedToShipped) continue;
-            const lines = (order.orderLines || []) as OrderLine[];
-            const nonCancelledLines = lines.filter((l) => l.lineStatus !== 'cancelled');
-            if (nonCancelledLines.length === 0) continue;
-            const allShipped = nonCancelledLines.every((l) => l.lineStatus === 'shipped');
-            if (allShipped) count++;
-        }
-        return count;
-    }, [view, orders]);
-
-    // Count of fully cancelled orders ready for release (Open view only)
-    const releasableCancelledCount = useMemo(() => {
-        if (view !== 'open' || !orders) return 0;
-        let count = 0;
-        for (const order of orders as DerivedOrder[]) {
-            // Must not already be released
-            if (order.releasedToCancelled) continue;
-            const lines = (order.orderLines || []) as OrderLine[];
-            if (lines.length === 0) continue;
-            const allCancelled = lines.every((l) => l.lineStatus === 'cancelled');
-            if (allCancelled) count++;
-        }
-        return count;
-    }, [view, orders]);
-
-    // Pipeline counts (Open view only)
-    const pipelineCounts = useMemo(() => {
-        if (view !== 'open' || !orders) return { pending: 0, allocated: 0, ready: 0 };
-        let pending = 0, allocated = 0, ready = 0;
-        for (const order of orders as DerivedOrder[]) {
-            const allLines = (order.orderLines || []) as OrderLine[];
-            const lines = allLines.filter((l) => l.lineStatus !== 'cancelled');
-            if (lines.length === 0) continue;
-            const allAllocatedOrBetter = lines.every((l) =>
-                ['allocated', 'picked', 'packed', 'shipped'].includes(l.lineStatus)
-            );
-            const allPackedOrBetter = lines.every((l) =>
-                ['packed', 'shipped'].includes(l.lineStatus)
-            );
-            if (allPackedOrBetter) ready++;
-            else if (allAllocatedOrBetter) allocated++;
-            else pending++;
-        }
-        return { pending, allocated, ready };
-    }, [view, orders]);
+    // Pipeline counts from server (Open view only)
+    // Server computes these efficiently via SQL COUNT queries
+    const pipelineCounts = openViewCounts ?? { pending: 0, allocated: 0, ready: 0 };
+    const releasableOrderCount = openViewCounts?.releasableShipped ?? 0;
+    const releasableCancelledCount = openViewCounts?.releasableCancelled ?? 0;
 
     // Helper to add/remove lineId from processingLines set
     const startProcessing = useCallback((lineId: string) => {

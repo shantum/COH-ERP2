@@ -26,6 +26,14 @@ import { getCustomer } from '../server/functions/customers';
 
 // Server Function types only - actual function loaded dynamically if enabled
 // This prevents @tanstack/react-start from being bundled in SPA mode
+type OpenViewCounts = {
+    pending: number;
+    allocated: number;
+    ready: number;
+    releasableShipped: number;
+    releasableCancelled: number;
+};
+
 type GetOrdersResponse = {
     rows: any[];
     view: string;
@@ -37,6 +45,7 @@ type GetOrdersResponse = {
         totalPages: number;
         hasMore: boolean;
     };
+    openViewCounts?: OpenViewCounts;
 };
 
 // Poll intervals - SSE connection determines frequency
@@ -279,6 +288,9 @@ export function useUnifiedOrdersData({
         // View counts for segmented control
         viewCounts: viewCountsQuery.data,
         viewCountsLoading: viewCountsQuery.isLoading,
+
+        // Open view pipeline counts (server-computed)
+        openViewCounts: ordersQuery.data?.openViewCounts,
 
         // Supporting data
         inventoryBalance: inventoryBalanceQuery.data,

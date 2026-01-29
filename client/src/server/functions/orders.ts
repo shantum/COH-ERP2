@@ -44,6 +44,23 @@ export type OrdersListInput = z.infer<typeof ordersListInputSchema>;
 // ============================================
 
 /**
+ * Pipeline counts for Open view
+ * Computed server-side for efficiency (SQL vs client iteration)
+ */
+export interface OpenViewCounts {
+    /** Orders in pending state (not all lines allocated+) */
+    pending: number;
+    /** Orders in allocated state (all lines allocated but not all packed) */
+    allocated: number;
+    /** Orders ready to ship (all lines packed or shipped) */
+    ready: number;
+    /** Orders fully shipped but not released */
+    releasableShipped: number;
+    /** Orders fully cancelled but not released */
+    releasableCancelled: number;
+}
+
+/**
  * Response type matching useUnifiedOrdersData expectations
  */
 export interface OrdersResponse {
@@ -57,6 +74,8 @@ export interface OrdersResponse {
         totalPages: number;
         hasMore: boolean;
     };
+    /** Pipeline counts - only present for 'open' view */
+    openViewCounts?: OpenViewCounts;
 }
 
 /**
@@ -756,6 +775,114 @@ function flattenOrdersToRows(orders: PrismaOrder[]): FlattenedOrderRow[] {
     return rows;
 }
 
+/**
+ * Compute pipeline counts for Open view
+ *
+ * Runs efficient SQL count queries to determine order distribution:
+ * - pending: has at least one pending line
+ * - allocated: no pending lines, has at least one allocated/picked line (not all packed)
+ * - ready: all non-cancelled lines are packed or shipped
+ * - releasableShipped: fully shipped but not released
+ * - releasableCancelled: fully cancelled but not released
+ */
+async function computeOpenViewCounts(
+    prisma: Awaited<ReturnType<typeof getPrisma>>
+): Promise<OpenViewCounts> {
+    // Base condition for open orders (not archived)
+    const baseCondition = { isArchived: false };
+
+    // Run all count queries in parallel for efficiency
+    const [pending, allocated, ready, releasableShipped, releasableCancelled] = await Promise.all([
+        // Pending: orders with at least one pending line (not shipped/cancelled)
+        prisma.order.count({
+            where: {
+                ...baseCondition,
+                orderLines: {
+                    some: { lineStatus: 'pending' },
+                },
+                // Must be in open view (not released)
+                releasedToShipped: false,
+                releasedToCancelled: false,
+            },
+        }),
+
+        // Allocated: no pending lines, but has allocated/picked lines (not all packed/shipped)
+        prisma.order.count({
+            where: {
+                ...baseCondition,
+                releasedToShipped: false,
+                releasedToCancelled: false,
+                // No pending lines
+                NOT: {
+                    orderLines: { some: { lineStatus: 'pending' } },
+                },
+                // Has at least one allocated or picked line
+                orderLines: {
+                    some: { lineStatus: { in: ['allocated', 'picked'] } },
+                },
+            },
+        }),
+
+        // Ready: all non-cancelled lines are packed or shipped
+        prisma.order.count({
+            where: {
+                ...baseCondition,
+                releasedToShipped: false,
+                releasedToCancelled: false,
+                // No pending, allocated, or picked lines
+                NOT: {
+                    orderLines: { some: { lineStatus: { in: ['pending', 'allocated', 'picked'] } } },
+                },
+                // Has at least one packed line (not yet shipped)
+                orderLines: {
+                    some: { lineStatus: 'packed' },
+                },
+            },
+        }),
+
+        // Releasable Shipped: fully shipped, not released
+        // All non-cancelled lines must be shipped
+        prisma.order.count({
+            where: {
+                ...baseCondition,
+                releasedToShipped: false,
+                // Has at least one shipped line
+                orderLines: { some: { lineStatus: 'shipped' } },
+                // No lines that aren't shipped or cancelled
+                NOT: {
+                    orderLines: {
+                        some: { lineStatus: { notIn: ['shipped', 'cancelled'] } },
+                    },
+                },
+            },
+        }),
+
+        // Releasable Cancelled: all lines cancelled, not released
+        prisma.order.count({
+            where: {
+                ...baseCondition,
+                releasedToCancelled: false,
+                // Has at least one line
+                orderLines: { some: {} },
+                // All lines must be cancelled (no non-cancelled lines)
+                NOT: {
+                    orderLines: {
+                        some: { lineStatus: { not: 'cancelled' } },
+                    },
+                },
+            },
+        }),
+    ]);
+
+    return {
+        pending,
+        allocated,
+        ready,
+        releasableShipped,
+        releasableCancelled,
+    };
+}
+
 // ============================================
 // SERVER FUNCTION
 // ============================================
@@ -797,8 +924,9 @@ export const getOrders = createServerFn({ method: 'GET' })
             const sortField = sortBy || 'orderDate';
             const orderBy = { [sortField]: 'desc' as const };
 
-            // Execute count and data queries in parallel
-            const [totalCount, orders] = await Promise.all([
+            // Execute count, data, and pipeline counts queries in parallel
+            // Pipeline counts only computed for 'open' view (where they're displayed)
+            const [totalCount, orders, openViewCounts] = await Promise.all([
                 prisma.order.count({ where }),
                 prisma.order.findMany({
                     where,
@@ -864,6 +992,8 @@ export const getOrders = createServerFn({ method: 'GET' })
                     skip: offset,
                     take: limit,
                 }),
+                // Only compute pipeline counts for 'open' view
+                view === 'open' ? computeOpenViewCounts(prisma) : Promise.resolve(undefined),
             ]);
 
             console.log('[Server Function] Query returned', orders.length, 'orders, total:', totalCount);
@@ -885,6 +1015,8 @@ export const getOrders = createServerFn({ method: 'GET' })
                     totalPages,
                     hasMore: data.page < totalPages,
                 },
+                // Only include for 'open' view
+                ...(openViewCounts ? { openViewCounts } : {}),
             };
         } catch (error: unknown) {
             console.error('[Server Function] Error in getOrders:', error);
