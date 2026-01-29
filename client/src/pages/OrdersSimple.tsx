@@ -90,10 +90,10 @@ export function OrdersSimplePage() {
 
     // Handler callbacks (same pattern as Orders.tsx)
     const handleAllocate = useCallback(
-        (lineId: string) => {
+        (lineId: string, orderId: string) => {
             startProcessing(lineId);
             mutations.allocate.mutate(
-                { lineIds: [lineId] },
+                { lineIds: [lineId], orderId },
                 { onSettled: () => stopProcessing(lineId) },
             );
         },
@@ -101,8 +101,9 @@ export function OrdersSimplePage() {
     );
 
     const handleUnallocate = useCallback(
-        (lineId: string) => {
+        (lineId: string, _orderId: string) => {
             startProcessing(lineId);
+            // Note: unallocate uses setLineStatus which only needs lineId
             mutations.unallocate.mutate(lineId, {
                 onSettled: () => stopProcessing(lineId),
             });

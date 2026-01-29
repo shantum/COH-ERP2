@@ -17,6 +17,7 @@ interface AssignStockCellProps {
 export const AssignStockCell = memo(function AssignStockCell({ row, handlersRef }: AssignStockCellProps) {
     const status = row.lineStatus || 'pending';
     const lineId = row.lineId;
+    const orderId = row.orderId;
     const qty = row.qty || 0;
     const stock = row.skuStock ?? 0;
     const hasStock = stock >= qty && qty > 0;
@@ -36,7 +37,7 @@ export const AssignStockCell = memo(function AssignStockCell({ row, handlersRef 
                 <button
                     onClick={(e) => {
                         e.stopPropagation();
-                        if (lineId) onUnallocate?.(lineId);
+                        if (lineId && orderId) onUnallocate?.(lineId, orderId);
                     }}
                     disabled={isLoading}
                     className={cn(
@@ -87,7 +88,7 @@ export const AssignStockCell = memo(function AssignStockCell({ row, handlersRef 
                     <button
                         onClick={(e) => {
                             e.stopPropagation();
-                            if (lineId) onAllocate?.(lineId);
+                            if (lineId && orderId) onAllocate?.(lineId, orderId);
                         }}
                         disabled={isLoading}
                         className={cn(

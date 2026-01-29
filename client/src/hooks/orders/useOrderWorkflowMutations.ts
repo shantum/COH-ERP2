@@ -73,13 +73,9 @@ export function useOrderWorkflowMutations(options: UseOrderWorkflowMutationsOpti
     // ALLOCATE
     // ============================================
     const allocate = useMutation({
-        mutationFn: async (input: { lineIds: string[] }) => {
-            // Find orderId from any cache that contains the line
-            const row = findRowInViewCache(queryClient, currentView, input.lineIds[0]);
-            if (!row?.orderId) {
-                throw new Error('Could not determine order ID for allocation');
-            }
-            const result = await allocateOrderServerFn({ data: { orderId: row.orderId, lineIds: input.lineIds } });
+        mutationFn: async (input: { lineIds: string[]; orderId: string }) => {
+            // orderId is now passed directly from the row data, eliminating cache lookup race conditions
+            const result = await allocateOrderServerFn({ data: { orderId: input.orderId, lineIds: input.lineIds } });
             if (!result.success) {
                 throw new Error(result.error?.message || 'Failed to allocate');
             }

@@ -45,6 +45,7 @@ function getStepIndex(status: string | null): number {
 export const WorkflowCell = memo(function WorkflowCell({ row, handlersRef }: WorkflowCellProps) {
     const status = row.lineStatus || 'pending';
     const lineId = row.lineId;
+    const orderId = row.orderId;
     const stock = row.skuStock ?? 0;
     const hasStock = stock > 0;
     const hasProductionDate = !!row.productionDate;
@@ -99,7 +100,7 @@ export const WorkflowCell = memo(function WorkflowCell({ row, handlersRef }: Wor
             // Reverse action
             switch (step) {
                 case 'allocate':
-                    onUnallocate?.(lineId);
+                    if (orderId) onUnallocate?.(lineId, orderId);
                     break;
                 case 'pick':
                     onUnpick?.(lineId);
@@ -115,7 +116,7 @@ export const WorkflowCell = memo(function WorkflowCell({ row, handlersRef }: Wor
             // Advance action
             switch (step) {
                 case 'allocate':
-                    if (hasStock) onAllocate?.(lineId);
+                    if (hasStock && orderId) onAllocate?.(lineId, orderId);
                     break;
                 case 'pick':
                     onPick?.(lineId);

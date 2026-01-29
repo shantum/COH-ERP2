@@ -419,10 +419,10 @@ export default function Orders() {
     );
 
     const handleAllocate = useCallback(
-        (lineId: string) => {
+        (lineId: string, orderId: string) => {
             startProcessing(lineId);
             mutations.allocate.mutate(
-                { lineIds: [lineId] },
+                { lineIds: [lineId], orderId },
                 { onSettled: () => stopProcessing(lineId) }
             );
         },
@@ -430,8 +430,9 @@ export default function Orders() {
     );
 
     const handleUnallocate = useCallback(
-        (lineId: string) => {
+        (lineId: string, _orderId: string) => {
             startProcessing(lineId);
+            // Note: unallocate uses setLineStatus which only needs lineId, not orderId
             mutations.unallocate.mutate(lineId, {
                 onSettled: () => stopProcessing(lineId)
             });

@@ -41,8 +41,8 @@ export interface DynamicColumnHandlers {
     isDeletingOrder: boolean;
 
     // Fulfillment handlers
-    onAllocate: (lineId: string) => void;
-    onUnallocate: (lineId: string) => void;
+    onAllocate: (lineId: string, orderId: string) => void;
+    onUnallocate: (lineId: string, orderId: string) => void;
     onPick: (lineId: string) => void;
     onUnpick: (lineId: string) => void;
     onPack: (lineId: string) => void;
@@ -120,8 +120,8 @@ export interface OrdersTableProps {
     rows: FlattenedOrderRow[];
     lockedDates: string[];
     currentView?: OrderViewType;
-    onAllocate: (lineId: string) => void;
-    onUnallocate: (lineId: string) => void;
+    onAllocate: (lineId: string, orderId: string) => void;
+    onUnallocate: (lineId: string, orderId: string) => void;
     onPick: (lineId: string) => void;
     onUnpick: (lineId: string) => void;
     onPack: (lineId: string) => void;
