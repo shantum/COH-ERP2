@@ -196,7 +196,6 @@ export default function Orders() {
         pagination: viewPagination,
         viewCounts,
         viewCountsLoading,
-        allSkus,
         inventoryBalance,
         fabricStock,
         channels,
@@ -902,9 +901,7 @@ export default function Orders() {
             <Suspense fallback={null}>
                 {showCreateOrder && (
                     <CreateOrderModal
-                        allSkus={allSkus || []}
                         channels={channels || []}
-                        inventoryBalance={inventoryBalance || []}
                         onCreate={(data) => mutations.createOrder.mutate(data)}
                         onClose={closeModal}
                         isCreating={mutations.createOrder.isPending}

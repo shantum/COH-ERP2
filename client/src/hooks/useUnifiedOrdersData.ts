@@ -21,7 +21,6 @@ import { getOrdersListQueryKey } from './orders/orderMutationUtils';
 import { getOrders, getOrderViewCounts } from '../server/functions/orders';
 import { getInventoryBalances } from '../server/functions/inventory';
 import { getProductionLockedDates } from '../server/functions/production';
-import { getProductsList } from '../server/functions/products';
 import { getFabricStockAnalysis } from '../server/functions/fabrics';
 import { getChannels } from '../server/functions/admin';
 import { getCustomer } from '../server/functions/customers';
@@ -206,29 +205,6 @@ export function useUnifiedOrdersData({
     // SUPPORTING DATA QUERIES
     // ==========================================
 
-    // All SKUs for CreateOrderModal product search
-    const getProductsListFn = useServerFn(getProductsList);
-    const allSkusQuery = useQuery({
-        queryKey: ['products', 'list', { limit: 1000 }],
-        queryFn: () => getProductsListFn({ data: { limit: 1000 } }),
-        staleTime: 60000,
-        refetchOnWindowFocus: false,
-        select: (data) => {
-            const skus: any[] = [];
-            data.products.forEach((product: any) => {
-                product.variations?.forEach((variation: any) => {
-                    variation.skus?.forEach((sku: any) => {
-                        skus.push({
-                            ...sku,
-                            variation: { ...variation, product },
-                        });
-                    });
-                });
-            });
-            return skus;
-        }
-    });
-
     // Check if server already included inventory in the response
     const hasInventoryFromServer = ordersQuery.data?.hasInventory ?? false;
 
@@ -342,7 +318,6 @@ export function useUnifiedOrdersData({
         viewCountsLoading: viewCountsQuery.isLoading,
 
         // Supporting data
-        allSkus: allSkusQuery.data,
         inventoryBalance: inventoryBalanceQuery.data,
         fabricStock: fabricStockQuery.data,
         channels: channelsQuery.data,

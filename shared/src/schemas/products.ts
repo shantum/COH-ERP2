@@ -87,3 +87,34 @@ export const productsListResultSchema = z.object({
 });
 
 export type ProductsListResult = z.infer<typeof productsListResultSchema>;
+
+// ============================================
+// SKU AUTOCOMPLETE SEARCH SCHEMAS
+// ============================================
+
+export const skuAutocompleteInputSchema = z.object({
+    query: z.string().max(100).default(''),
+    limit: z.number().int().min(1).max(50).default(30),
+});
+
+export type SkuAutocompleteInput = z.infer<typeof skuAutocompleteInputSchema>;
+
+export const skuAutocompleteItemSchema = z.object({
+    skuId: z.string(),
+    skuCode: z.string(),
+    size: z.string(),
+    productName: z.string(),
+    colorName: z.string(),
+    imageUrl: z.string().nullable(),
+    currentBalance: z.number(),
+    mrp: z.number(),
+});
+
+export type SkuAutocompleteItem = z.infer<typeof skuAutocompleteItemSchema>;
+
+export const skuAutocompleteResultSchema = z.object({
+    items: z.array(skuAutocompleteItemSchema),
+    hasMore: z.boolean(),
+});
+
+export type SkuAutocompleteResult = z.infer<typeof skuAutocompleteResultSchema>;

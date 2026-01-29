@@ -3,7 +3,7 @@
  * Clean, compact form for creating a new order
  */
 
-import { useState, useCallback } from 'react';
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import {
@@ -17,7 +17,6 @@ import {
 } from 'lucide-react';
 import { CustomerSearch } from '../common/CustomerSearch';
 import { ProductSearch } from '../common/ProductSearch';
-import { getInventoryBalances } from '../../server/functions/inventory';
 import { getCustomerAddresses } from '../../server/functions/customers';
 import { getOptimizedImageUrl } from '../../utils/imageOptimization';
 
@@ -66,9 +65,7 @@ interface OrderLine {
 }
 
 interface CreateOrderModalProps {
-    allSkus: any[];
     channels: any[];
-    inventoryBalance: any[];
     onCreate: (data: any) => void;
     onClose: () => void;
     isCreating: boolean;
@@ -190,9 +187,7 @@ function stringifyAddress(addr: AddressData): string {
 }
 
 export function CreateOrderModal({
-    allSkus,
     channels,
-    inventoryBalance,
     onCreate,
     onClose,
     isCreating,
@@ -220,59 +215,6 @@ export function CreateOrderModal({
     // Track original prices for exchange toggle reversion
     const [originalPrices, setOriginalPrices] = useState<Map<number, number>>(
         new Map()
-    );
-    // Track fetched balances for SKUs not in pre-fetched inventory (on-demand fetch)
-    const [fetchedBalances, setFetchedBalances] = useState<Map<string, number>>(
-        new Map()
-    );
-    // Track SKUs currently being fetched to avoid duplicate requests
-    const [fetchingSkuIds, setFetchingSkuIds] = useState<Set<string>>(new Set());
-
-    // Server function for fetching inventory balances
-    const getInventoryBalancesFn = useServerFn(getInventoryBalances);
-
-    // Handler to fetch balances for SKUs on-demand
-    const handleFetchBalances = useCallback(
-        (skuIds: string[]) => {
-            // Filter out SKUs already fetched or currently being fetched
-            const newSkuIds = skuIds.filter(
-                (id) => !fetchedBalances.has(id) && !fetchingSkuIds.has(id)
-            );
-
-            if (newSkuIds.length === 0) return;
-
-            // Mark SKUs as being fetched
-            setFetchingSkuIds((prev) => {
-                const next = new Set(prev);
-                newSkuIds.forEach((id) => next.add(id));
-                return next;
-            });
-
-            // Fetch balances using Server Function
-            getInventoryBalancesFn({ data: { skuIds: newSkuIds } })
-                .then((balances) => {
-                    setFetchedBalances((prev) => {
-                        const next = new Map(prev);
-                        balances.forEach((b: any) => {
-                            next.set(b.skuId, b.availableBalance ?? b.currentBalance ?? 0);
-                        });
-                        return next;
-                    });
-                })
-                .catch((error) => {
-                    // Silently handle errors - UI will show 0 stock
-                    console.error('Failed to fetch inventory balances:', error);
-                })
-                .finally(() => {
-                    // Remove from fetching set
-                    setFetchingSkuIds((prev) => {
-                        const next = new Set(prev);
-                        newSkuIds.forEach((id) => next.delete(id));
-                        return next;
-                    });
-                });
-        },
-        [fetchedBalances, fetchingSkuIds, getInventoryBalancesFn]
     );
 
     // Server function for fetching customer addresses
@@ -866,12 +808,8 @@ export function CreateOrderModal({
 
                                 {isAddingItem ? (
                                     <ProductSearch
-                                        allSkus={allSkus}
-                                        inventoryBalance={inventoryBalance}
                                         onSelect={handleSelectSku}
                                         onCancel={() => setIsAddingItem(false)}
-                                        fetchedBalances={fetchedBalances}
-                                        onFetchBalances={handleFetchBalances}
                                     />
                                 ) : orderLines.length === 0 ? (
                                     <button
