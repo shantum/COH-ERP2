@@ -104,6 +104,81 @@ interface UseOrderSSEOptions {
 const HEARTBEAT_CHECK_INTERVAL = 15000; // 15 seconds
 const HEARTBEAT_TIMEOUT = 45000; // 1.5x the 30s heartbeat interval
 
+// ============================================================================
+// BATCHING STATE FOR LINE UPDATES (Module-level)
+// Accumulates lineId -> changes during a single animation frame
+// ============================================================================
+let pendingLineUpdates: Map<string, Record<string, unknown>> | null = null;
+let flushScheduled = false;
+
+// ============================================================================
+// REFERENTIAL STABILITY HELPERS
+// Core invariant: If no rows actually change, return the SAME cache object reference
+// ============================================================================
+
+/**
+ * Check if update would actually change the row
+ * Compares each change value against current row value
+ *
+ * ASSUMPTION: Change values are primitives (string, number, boolean, null) or
+ * stable object references. Deep object comparison is NOT performed.
+ * SSE events from server should only contain primitives for row field updates.
+ */
+function wouldChange(row: FlattenedOrderRow, changes: Record<string, unknown>): boolean {
+    for (const [key, value] of Object.entries(changes)) {
+        if (row[key as keyof FlattenedOrderRow] !== value) return true;
+    }
+    return false;
+}
+
+/**
+ * Apply batched line updates with referential stability
+ * Returns SAME reference if no rows actually changed
+ */
+function applyLineUpdates(
+    old: OrderListCacheData,
+    updates: Map<string, Record<string, unknown>>
+): OrderListCacheData {
+    // Pre-check: do ANY target rows exist and need changes?
+    let hasChanges = false;
+    for (const [lineId, changes] of updates) {
+        const row = old.rows.find(r => r.lineId === lineId);
+        if (row && wouldChange(row, changes)) {
+            hasChanges = true;
+            break;
+        }
+    }
+
+    // NO-OP: Return same reference - this is the key optimization
+    if (!hasChanges) return old;
+
+    // Apply changes only to affected rows
+    const newRows = old.rows.map(row => {
+        if (!row.lineId) return row;
+        const changes = updates.get(row.lineId);
+        if (!changes || !wouldChange(row, changes)) return row; // Same row reference
+        return { ...row, ...changes };
+    });
+
+    // Also update legacy orders array for backwards compatibility
+    const newOrders = old.orders.map(order => {
+        const hasAffectedLine = order.orderLines?.some(
+            line => updates.has(line.id) && wouldChange(line as unknown as FlattenedOrderRow, updates.get(line.id)!)
+        );
+        if (!hasAffectedLine) return order; // Same order reference
+        return {
+            ...order,
+            orderLines: order.orderLines?.map(line => {
+                const changes = updates.get(line.id);
+                if (!changes) return line;
+                return { ...line, ...changes };
+            })
+        };
+    });
+
+    return { ...old, rows: newRows, orders: newOrders };
+}
+
 export function useOrderSSE({
     currentView,
     page = 1,
@@ -136,6 +211,31 @@ export function useOrderSSE({
         reconnectAttempts: 0,
         quality: 'unknown',
     });
+
+    // Schedule flush of pending line updates to run once per animation frame
+    const scheduleFlush = useCallback(() => {
+        if (flushScheduled) return;
+        flushScheduled = true;
+
+        requestAnimationFrame(() => {
+            flushScheduled = false;
+            if (!pendingLineUpdates || pendingLineUpdates.size === 0) return;
+
+            const updates = pendingLineUpdates;
+            pendingLineUpdates = null;
+
+            const queryKey = getOrdersListQueryKey({
+                view: currentViewRef.current,
+                page: pageRef.current,
+                limit: limitRef.current
+            });
+
+            queryClient.setQueryData<OrderListCacheData>(queryKey, (old) => {
+                if (!old) return old;
+                return applyLineUpdates(old, updates);
+            });
+        });
+    }, [queryClient]);
 
     const handleEvent = useCallback((event: MessageEvent) => {
         try {
@@ -175,33 +275,21 @@ export function useOrderSSE({
             // IMPORTANT: Must match the Server Function query key format
             const queryKey = getOrdersListQueryKey({ view: currentViewRef.current, page: pageRef.current, limit: limitRef.current });
 
-            // Handle line status changes
-            // Now supports full rowData for complete row replacement (no merge needed)
+            // ================================================================
+            // BATCHED LINE STATUS UPDATES WITH REFERENTIAL STABILITY
+            // Accumulates updates within a frame, applies once per rAF
+            // Returns same cache reference if no rows actually changed
+            // ================================================================
             if (data.type === 'line_status' && data.lineId) {
-                queryClient.setQueryData<OrderListCacheData>(queryKey, (old) => {
-                    if (!old) return old;
+                if (!pendingLineUpdates) pendingLineUpdates = new Map();
 
-                    const newRows = old.rows.map((row) =>
-                        row.lineId === data.lineId
-                            ? data.rowData
-                                ? { ...row, ...data.rowData }  // Full row from SSE
-                                : { ...row, ...data.changes }  // Partial merge (legacy)
-                            : row
-                    );
+                // Merge with any pending update for same lineId
+                const existing = pendingLineUpdates.get(data.lineId) || {};
+                const changes = data.rowData || data.changes || {};
+                pendingLineUpdates.set(data.lineId, { ...existing, ...changes });
 
-                    const newOrders = old.orders.map((order) => {
-                        const hasLine = order.orderLines?.some((line) => line.id === data.lineId);
-                        if (!hasLine) return order;
-                        return {
-                            ...order,
-                            orderLines: order.orderLines?.map((line) =>
-                                line.id === data.lineId ? { ...line, ...data.changes } : line
-                            )
-                        };
-                    });
-
-                    return { ...old, rows: newRows, orders: newOrders };
-                });
+                scheduleFlush();
+                return; // Don't fall through to other handlers
             }
 
             // Handle batch line updates
@@ -424,7 +512,7 @@ export function useOrderSSE({
             console.error('SSE: Failed to parse event', err);
         }
     // Using refs for currentView/page to avoid reconnection on navigation (Issue 3 fix)
-    }, [queryClient]);
+    }, [queryClient, scheduleFlush]);
 
     const connect = useCallback(() => {
         // Skip during SSR (no window/EventSource available)
