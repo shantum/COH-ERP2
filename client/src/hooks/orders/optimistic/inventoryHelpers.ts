@@ -24,6 +24,9 @@ export function optimisticInventoryUpdate(
         queryKey: inventoryQueryKeys.balance,
     });
 
+    let queriesUpdated = 0;
+    let totalItemsScanned = 0;
+
     // Update each matching query
     for (const [queryKey, oldData] of queries) {
         if (!oldData) continue;
@@ -31,6 +34,7 @@ export function optimisticInventoryUpdate(
         // Check if any SKUs in this cache need updating
         let hasChanges = false;
         const newData = oldData.map((item: InventoryBalanceItem) => {
+            totalItemsScanned++;
             const delta = skuDeltas.get(item.skuId);
             if (delta !== undefined && delta !== 0) {
                 hasChanges = true;
@@ -44,6 +48,7 @@ export function optimisticInventoryUpdate(
         });
 
         if (hasChanges) {
+            queriesUpdated++;
             // Save previous data for rollback (use stringified key for Map)
             const keyStr = JSON.stringify(queryKey);
             previousInventoryData.set(keyStr, oldData);
@@ -53,6 +58,7 @@ export function optimisticInventoryUpdate(
         }
     }
 
+    console.log(`[inventoryHelpers] optimisticInventoryUpdate: queries=${queries.length}, queriesUpdated=${queriesUpdated}, itemsScanned=${totalItemsScanned}, skusToUpdate=${skuDeltas.size}`);
     return previousInventoryData;
 }
 

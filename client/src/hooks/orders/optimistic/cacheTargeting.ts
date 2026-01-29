@@ -48,9 +48,12 @@ export function getViewCacheSnapshot(
     const predicate = createViewPredicate(view);
     const queries = queryClient.getQueriesData<OrdersListData>({ predicate });
     const snapshot = new Map<string, OrdersListData | undefined>();
+    let totalRows = 0;
     for (const [queryKey, data] of queries) {
         snapshot.set(JSON.stringify(queryKey), data);
+        totalRows += data?.rows?.length ?? 0;
     }
+    console.log(`[cacheTargeting] getViewCacheSnapshot: view=${view}, queries=${queries.length}, totalRows=${totalRows}`);
     return snapshot;
 }
 
@@ -75,8 +78,13 @@ export function updateViewCache(
     view: string,
     updater: (old: OrdersListData | undefined) => OrdersListData | undefined
 ): void {
+    // Count how many queries will be updated
+    const predicate = createViewPredicate(view);
+    const queries = queryClient.getQueriesData<OrdersListData>({ predicate });
+    console.log(`[cacheTargeting] updateViewCache: view=${view}, queriesAffected=${queries.length}`);
+
     queryClient.setQueriesData<OrdersListData>(
-        { predicate: createViewPredicate(view) },
+        { predicate },
         updater
     );
 }
@@ -136,14 +144,18 @@ export function findRowsInViewCache(
 ): FlattenedOrderRow[] {
     const lineIdSet = new Set(lineIds);
     const found = new Map<string, FlattenedOrderRow>();
+    let queriesScanned = 0;
+    let rowsInspected = 0;
 
     // First, try the specific view
     const viewPredicate = createViewPredicate(view);
     const viewQueries = queryClient.getQueriesData<OrdersListData>({ predicate: viewPredicate });
 
     for (const [, data] of viewQueries) {
+        queriesScanned++;
         if (!data?.rows) continue;
         for (const row of data.rows) {
+            rowsInspected++;
             if (row.lineId && lineIdSet.has(row.lineId) && !found.has(row.lineId)) {
                 found.set(row.lineId, row);
             }
@@ -160,8 +172,10 @@ export function findRowsInViewCache(
         const allQueries = queryClient.getQueriesData<OrdersListData>({ predicate: allOrdersPredicate });
 
         for (const [, data] of allQueries) {
+            queriesScanned++;
             if (!data?.rows) continue;
             for (const row of data.rows) {
+                rowsInspected++;
                 if (row.lineId && lineIdSet.has(row.lineId) && !found.has(row.lineId)) {
                     found.set(row.lineId, row);
                 }
@@ -170,6 +184,7 @@ export function findRowsInViewCache(
         }
     }
 
+    console.log(`[cacheTargeting] findRowsInViewCache: view=${view}, lookingFor=${lineIds.length}, queriesScanned=${queriesScanned}, rowsInspected=${rowsInspected}, found=${found.size}`);
     return Array.from(found.values());
 }
 

@@ -74,24 +74,38 @@ export function useOrderWorkflowMutations(options: UseOrderWorkflowMutationsOpti
     // ============================================
     const allocate = useMutation({
         mutationFn: async (input: { lineIds: string[]; orderId: string }) => {
+            const t0 = performance.now();
+            console.log('[allocate:mutationFn] START - calling server function');
             // orderId is now passed directly from the row data, eliminating cache lookup race conditions
             const result = await allocateOrderServerFn({ data: { orderId: input.orderId, lineIds: input.lineIds } });
+            const t1 = performance.now();
+            console.log(`[allocate:mutationFn] ⏱ server function call: ${(t1-t0).toFixed(0)}ms`);
             if (!result.success) {
                 throw new Error(result.error?.message || 'Failed to allocate');
             }
             return result.data;
         },
         onMutate: async ({ lineIds }) => {
+            const t0 = performance.now();
+            console.log('[allocate:onMutate] START');
+
             // Cancel any outgoing refetches for this view
             await cancelViewQueries(queryClient, currentView);
             // Also cancel inventory balance queries
             await queryClient.cancelQueries({ queryKey: inventoryQueryKeys.balance });
+            const t1 = performance.now();
+            console.log(`[allocate:onMutate] ⏱ cancelQueries: ${(t1-t0).toFixed(0)}ms`);
 
             // Snapshot ALL cached queries for this view (for proper rollback)
             const viewSnapshot = getViewCacheSnapshot(queryClient, currentView);
+            const t2 = performance.now();
+            console.log(`[allocate:onMutate] ⏱ getViewCacheSnapshot: ${(t2-t1).toFixed(0)}ms (${viewSnapshot.size} queries)`);
 
             // Find rows across ALL cached queries (handles different filter/page combinations)
             const rows = findRowsInViewCache(queryClient, currentView, lineIds);
+            const t3 = performance.now();
+            console.log(`[allocate:onMutate] ⏱ findRowsInViewCache: ${(t3-t2).toFixed(0)}ms (found ${rows.length} rows)`);
+
             const inventoryDeltas = new Map<string, number>(); // lineId -> delta
             const skuDeltas = new Map<string, number>(); // skuId -> delta (aggregated)
 
@@ -106,14 +120,23 @@ export function useOrderWorkflowMutations(options: UseOrderWorkflowMutationsOpti
                     }
                 }
             }
+            const t4 = performance.now();
+            console.log(`[allocate:onMutate] ⏱ calculateDeltas: ${(t4-t3).toFixed(0)}ms`);
 
             // Optimistically update ALL orders caches for this view
             updateViewCache(queryClient, currentView, (old) =>
                 optimisticBatchLineStatusUpdate(old, lineIds, 'allocated', inventoryDeltas)
             );
+            const t5 = performance.now();
+            console.log(`[allocate:onMutate] ⏱ updateViewCache: ${(t5-t4).toFixed(0)}ms`);
 
             // Also update the inventory balance cache
             const previousInventoryData = optimisticInventoryUpdate(queryClient, skuDeltas);
+            const t6 = performance.now();
+            console.log(`[allocate:onMutate] ⏱ optimisticInventoryUpdate: ${(t6-t5).toFixed(0)}ms`);
+
+            const tEnd = performance.now();
+            console.log(`[allocate:onMutate] ⏱ TOTAL: ${(tEnd-t0).toFixed(0)}ms`);
 
             return { viewSnapshot, view: currentView, previousInventoryData } as WorkflowOptimisticContext;
         },

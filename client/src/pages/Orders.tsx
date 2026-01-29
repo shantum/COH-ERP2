@@ -391,23 +391,18 @@ export default function Orders() {
                 console.warn('Cannot ship without AWB number and courier');
                 return;
             }
-            startProcessing(lineId);
-            mutations.markShippedLine.mutate(
-                { lineId, data: { awbNumber: data.awbNumber, courier: data.courier } },
-                { onSettled: () => stopProcessing(lineId) }
-            );
+            // No spinner - optimistic update shows "Shipped" instantly
+            mutations.markShippedLine.mutate({ lineId, data: { awbNumber: data.awbNumber, courier: data.courier } });
         },
-        [mutations.markShippedLine, startProcessing, stopProcessing]
+        [mutations.markShippedLine]
     );
 
     const handleUnmarkShippedLine = useCallback(
         (lineId: string) => {
-            startProcessing(lineId);
-            mutations.unmarkShippedLine.mutate(lineId, {
-                onSettled: () => stopProcessing(lineId)
-            });
+            // No spinner - optimistic update shows "Packed" instantly
+            mutations.unmarkShippedLine.mutate(lineId);
         },
-        [mutations.unmarkShippedLine, startProcessing, stopProcessing]
+        [mutations.unmarkShippedLine]
     );
 
     const handleUpdateLineTracking = useCallback(
@@ -421,64 +416,51 @@ export default function Orders() {
 
     const handleAllocate = useCallback(
         (lineId: string, orderId: string) => {
-            startProcessing(lineId);
-            mutations.allocate.mutate(
-                { lineIds: [lineId], orderId },
-                { onSettled: () => stopProcessing(lineId) }
-            );
+            // No spinner needed - optimistic update shows "Allocated" instantly at ~1ms
+            // Spinner was making it FEEL slow by masking the instant feedback
+            mutations.allocate.mutate({ lineIds: [lineId], orderId });
         },
-        [mutations.allocate, startProcessing, stopProcessing]
+        [mutations.allocate]
     );
 
     const handleUnallocate = useCallback(
         (lineId: string, _orderId: string) => {
-            startProcessing(lineId);
-            // Note: unallocate uses setLineStatus which only needs lineId, not orderId
-            mutations.unallocate.mutate(lineId, {
-                onSettled: () => stopProcessing(lineId)
-            });
+            // No spinner - optimistic update shows "Pending" instantly
+            mutations.unallocate.mutate(lineId);
         },
-        [mutations.unallocate, startProcessing, stopProcessing]
+        [mutations.unallocate]
     );
 
     const handlePick = useCallback(
         (lineId: string) => {
-            startProcessing(lineId);
-            mutations.pickLine.mutate(lineId, {
-                onSettled: () => stopProcessing(lineId)
-            });
+            // No spinner - optimistic update shows "Picked" instantly
+            mutations.pickLine.mutate(lineId);
         },
-        [mutations.pickLine, startProcessing, stopProcessing]
+        [mutations.pickLine]
     );
 
     const handleUnpick = useCallback(
         (lineId: string) => {
-            startProcessing(lineId);
-            mutations.unpickLine.mutate(lineId, {
-                onSettled: () => stopProcessing(lineId)
-            });
+            // No spinner - optimistic update shows "Allocated" instantly
+            mutations.unpickLine.mutate(lineId);
         },
-        [mutations.unpickLine, startProcessing, stopProcessing]
+        [mutations.unpickLine]
     );
 
     const handlePack = useCallback(
         (lineId: string) => {
-            startProcessing(lineId);
-            mutations.packLine.mutate(lineId, {
-                onSettled: () => stopProcessing(lineId)
-            });
+            // No spinner - optimistic update shows "Packed" instantly
+            mutations.packLine.mutate(lineId);
         },
-        [mutations.packLine, startProcessing, stopProcessing]
+        [mutations.packLine]
     );
 
     const handleUnpack = useCallback(
         (lineId: string) => {
-            startProcessing(lineId);
-            mutations.unpackLine.mutate(lineId, {
-                onSettled: () => stopProcessing(lineId)
-            });
+            // No spinner - optimistic update shows "Picked" instantly
+            mutations.unpackLine.mutate(lineId);
         },
-        [mutations.unpackLine, startProcessing, stopProcessing]
+        [mutations.unpackLine]
     );
 
     const handleCustomize = useCallback(

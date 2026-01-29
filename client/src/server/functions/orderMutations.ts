@@ -1756,8 +1756,12 @@ export const allocateOrder = createServerFn({ method: 'POST' })
             );
         }
 
+        const t8 = performance.now();
+        console.log(`[allocateOrder] ⏱ cache invalidate + SSE: ${(t8 - t7).toFixed(0)}ms`);
+
         const tEnd = performance.now();
         console.log(`[allocateOrder] ⏱ TOTAL: ${(tEnd - t0).toFixed(0)}ms`);
+        console.log(`[allocateOrder] ⏱ BREAKDOWN: prisma=${(t1-t0).toFixed(0)}ms, query=${(t2-t1).toFixed(0)}ms, cacheGet=${(t5-t3).toFixed(0)}ms, txn=${(t7-t6).toFixed(0)}ms, cleanup=${(t8-t7).toFixed(0)}ms`);
 
         return {
             success: true,
