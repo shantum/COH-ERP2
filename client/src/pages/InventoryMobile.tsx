@@ -3,56 +3,23 @@
  *
  * Industrial-utilitarian design for rapid stock scanning.
  * Card-based layout with size grids for instant pattern recognition.
+ *
+ * Uses server-side grouped data for optimal performance (~500 products vs ~10,000 SKUs).
  */
 
 import { useMemo, useState, useCallback, memo } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Route as InventoryMobileRoute } from '../routes/_authenticated/inventory-mobile';
-import { getInventoryAll, type InventoryAllItem } from '../server/functions/inventory';
+import {
+    getInventoryGrouped,
+    type ProductGroup,
+    type ColorGroup,
+} from '../server/functions/inventory';
 import { Search, AlertTriangle, Package, RefreshCw, ChevronDown, Zap } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { showSuccess, showError } from '../utils/toast';
 import { getOptimizedImageUrl } from '../utils/imageOptimization';
-
-// ============================================
-// TYPES
-// ============================================
-
-interface SizeStock {
-    size: string;
-    skuCode: string;
-    skuId: string;
-    stock: number;
-    shopify: number | null;
-    status: 'active' | 'archived' | 'draft' | null;
-}
-
-interface ColorGroup {
-    variationId: string;
-    colorName: string;
-    imageUrl: string | null;
-    sizes: SizeStock[];
-    totalStock: number;
-    totalShopify: number;
-    hasArchived: boolean;
-    archivedWithStock: SizeStock[];
-    // Fabric details
-    fabricName: string | null;
-    fabricUnit: string | null;
-    fabricColourName: string | null;
-    fabricColourHex: string | null;
-    fabricColourBalance: number | null;
-}
-
-interface ProductGroup {
-    productId: string;
-    productName: string;
-    imageUrl: string | null;
-    colors: ColorGroup[];
-    totalStock: number;
-    totalShopify: number;
-}
 
 // ============================================
 // SHOPIFY SYNC
@@ -88,92 +55,6 @@ function useShopifyLocation() {
         staleTime: Infinity,
         retry: 1,
     });
-}
-
-// ============================================
-// GROUPING LOGIC
-// ============================================
-
-function groupInventory(items: InventoryAllItem[]): ProductGroup[] {
-    const productMap = new Map<string, ProductGroup>();
-    const sizeOrder = ['XXS', 'XS', 'S', 'M', 'L', 'XL', 'XXL', '2XL', '3XL', '4XL', '5XL'];
-
-    for (const item of items) {
-        let product = productMap.get(item.productId);
-        if (!product) {
-            product = {
-                productId: item.productId,
-                productName: item.productName,
-                imageUrl: item.imageUrl,
-                colors: [],
-                totalStock: 0,
-                totalShopify: 0,
-            };
-            productMap.set(item.productId, product);
-        }
-
-        let color = product.colors.find(c => c.variationId === item.variationId);
-        if (!color) {
-            color = {
-                variationId: item.variationId,
-                colorName: item.colorName,
-                imageUrl: item.imageUrl,
-                sizes: [],
-                totalStock: 0,
-                totalShopify: 0,
-                hasArchived: false,
-                archivedWithStock: [],
-                fabricName: item.fabricName,
-                fabricUnit: item.fabricUnit,
-                fabricColourName: item.fabricColourName,
-                fabricColourHex: item.fabricColourHex,
-                fabricColourBalance: item.fabricColourBalance,
-            };
-            product.colors.push(color);
-        }
-
-        const sizeData: SizeStock = {
-            size: item.size,
-            skuCode: item.skuCode,
-            skuId: item.skuId,
-            stock: item.availableBalance,
-            shopify: item.shopifyQty,
-            status: item.shopifyProductStatus,
-        };
-
-        color.sizes.push(sizeData);
-        color.totalStock += item.availableBalance;
-        color.totalShopify += item.shopifyQty ?? 0;
-        product.totalStock += item.availableBalance;
-        product.totalShopify += item.shopifyQty ?? 0;
-
-        // Track archived SKUs with Shopify stock
-        if (item.shopifyProductStatus === 'archived') {
-            color.hasArchived = true;
-            if ((item.shopifyQty ?? 0) > 0) {
-                color.archivedWithStock.push(sizeData);
-            }
-        }
-
-        if (!product.imageUrl && item.imageUrl) product.imageUrl = item.imageUrl;
-        if (!color.imageUrl && item.imageUrl) color.imageUrl = item.imageUrl;
-    }
-
-    // Sort sizes
-    for (const product of productMap.values()) {
-        for (const color of product.colors) {
-            color.sizes.sort((a, b) => {
-                const aIdx = sizeOrder.indexOf(a.size);
-                const bIdx = sizeOrder.indexOf(b.size);
-                if (aIdx !== -1 && bIdx !== -1) return aIdx - bIdx;
-                if (aIdx !== -1) return -1;
-                if (bIdx !== -1) return 1;
-                return a.size.localeCompare(b.size);
-            });
-        }
-    }
-
-    return Array.from(productMap.values());
 }
 
 // ============================================
@@ -528,12 +409,12 @@ export default function InventoryMobile() {
     const { data: locationId } = useShopifyLocation();
     const [searchInput, setSearchInput] = useState(search.search || '');
 
-    // Get loader data for initial hydration
+    // Get loader data for initial hydration (now pre-grouped from server)
     const loaderData = InventoryMobileRoute.useLoaderData();
 
     const { data, isLoading, error } = useQuery({
         queryKey: [
-            'inventory-mobile-all',
+            'inventory-mobile-grouped',
             search.search,
             search.stockFilter,
             search.shopifyStatus,
@@ -543,12 +424,9 @@ export default function InventoryMobile() {
             search.sortOrder,
         ],
         queryFn: () =>
-            getInventoryAll({
+            getInventoryGrouped({
                 data: {
-                    includeCustomSkus: false,
                     search: search.search,
-                    limit: 10000, // Need all for product grouping
-                    offset: 0,
                     stockFilter: search.stockFilter,
                     shopifyStatus: search.shopifyStatus,
                     discrepancy: search.discrepancy,
@@ -557,15 +435,16 @@ export default function InventoryMobile() {
                     sortOrder: search.sortOrder,
                 },
             }),
-        // Use loader data as initial data when available and params match
+        // Use loader data as initial data when available
         initialData: loaderData?.inventory ?? undefined,
         staleTime: 60000,
     });
 
-    const items = data?.items ?? [];
-    const products = useMemo(() => groupInventory(items), [items]);
+    // Products are pre-grouped from server
+    const products = data?.products ?? [];
+    const totalSkus = data?.totalSkus ?? 0;
 
-    // Real-time filtering based on searchInput
+    // Real-time filtering based on searchInput (client-side for instant feedback)
     const filteredProducts = useMemo(() => {
         if (!searchInput) return products;
         const q = searchInput.toLowerCase();
@@ -589,7 +468,7 @@ export default function InventoryMobile() {
     );
 
     const handleRefresh = useCallback(() => {
-        queryClient.invalidateQueries({ queryKey: ['inventory-mobile-all'] });
+        queryClient.invalidateQueries({ queryKey: ['inventory-mobile-grouped'] });
     }, [queryClient]);
 
     if (error) {
@@ -623,7 +502,7 @@ export default function InventoryMobile() {
                             <h1 className="text-lg font-bold tracking-tight text-zinc-900">Stock Scanner</h1>
                             {!isLoading && (
                                 <p className="text-xs text-zinc-500">
-                                    {filteredProducts.length} products · {items.length} SKUs
+                                    {filteredProducts.length} products · {totalSkus} SKUs
                                 </p>
                             )}
                         </div>

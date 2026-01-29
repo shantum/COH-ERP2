@@ -28,7 +28,7 @@ const getInventoryAllSchema = z.object({
     includeCustomSkus: z.boolean().optional().default(false),
     belowTarget: z.boolean().optional(),
     search: z.string().optional(),
-    limit: z.number().int().positive().optional().default(10000),
+    limit: z.number().int().positive().optional().default(100),
     offset: z.number().int().nonnegative().optional().default(0),
     // Filters for mobile inventory
     stockFilter: z.enum(['all', 'in_stock', 'out_of_stock', 'low_stock']).optional().default('all'),
@@ -129,6 +129,25 @@ export interface InventoryAllItem {
     shopifyProductStatus: 'active' | 'archived' | 'draft' | null;
 }
 
+/** Top stocked product for analytics */
+export interface TopStockedProduct {
+    productId: string;
+    productName: string;
+    imageUrl: string | null;
+    totalAvailable: number;
+    colors: { colorName: string; available: number }[];
+}
+
+/** Aggregated stats computed from all matching SKUs (not just current page) */
+export interface InventoryStats {
+    totalPieces: number;
+    totalSkus: number;
+    inStockCount: number;
+    lowStockCount: number;
+    outOfStockCount: number;
+    topStockedProducts: TopStockedProduct[];
+}
+
 export interface InventoryAllResult {
     items: InventoryAllItem[];
     pagination: {
@@ -137,6 +156,8 @@ export interface InventoryAllResult {
         offset: number;
         hasMore: boolean;
     };
+    /** Aggregated stats from ALL matching SKUs (computed before pagination) */
+    stats: InventoryStats;
 }
 
 // Legacy types kept for backwards compatibility
@@ -507,6 +528,84 @@ export const getInventoryAll = createServerFn({ method: 'GET' })
             return sortOrder === 'asc' ? aVal - bVal : bVal - aVal;
         });
 
+        // ============================================
+        // COMPUTE STATS FROM ALL FILTERED DATA (before pagination)
+        // ============================================
+
+        // Stock status counts
+        let totalPieces = 0;
+        let inStockCount = 0;
+        let lowStockCount = 0;
+        let outOfStockCount = 0;
+
+        // Aggregate by product for top stocked
+        const productStockMap = new Map<string, {
+            productId: string;
+            productName: string;
+            imageUrl: string | null;
+            totalAvailable: number;
+            colorMap: Map<string, number>;
+        }>();
+
+        for (const item of filteredBalances) {
+            totalPieces += item.availableBalance;
+
+            if (item.availableBalance === 0) {
+                outOfStockCount++;
+            } else if (item.status === 'below_target') {
+                lowStockCount++;
+            } else {
+                inStockCount++;
+            }
+
+            // Aggregate for top stocked products
+            if (item.productId && item.availableBalance > 0) {
+                let product = productStockMap.get(item.productId);
+                if (!product) {
+                    product = {
+                        productId: item.productId,
+                        productName: item.productName,
+                        imageUrl: item.imageUrl,
+                        totalAvailable: 0,
+                        colorMap: new Map(),
+                    };
+                    productStockMap.set(item.productId, product);
+                }
+                product.totalAvailable += item.availableBalance;
+
+                const colorKey = item.colorName || 'Unknown';
+                product.colorMap.set(colorKey, (product.colorMap.get(colorKey) || 0) + item.availableBalance);
+
+                if (!product.imageUrl && item.imageUrl) {
+                    product.imageUrl = item.imageUrl;
+                }
+            }
+        }
+
+        // Build top 5 stocked products
+        const topStockedProducts: TopStockedProduct[] = Array.from(productStockMap.values())
+            .sort((a, b) => b.totalAvailable - a.totalAvailable)
+            .slice(0, 5)
+            .map(p => ({
+                productId: p.productId,
+                productName: p.productName,
+                imageUrl: p.imageUrl,
+                totalAvailable: p.totalAvailable,
+                colors: Array.from(p.colorMap.entries())
+                    .map(([colorName, available]) => ({ colorName, available }))
+                    .sort((a, b) => b.available - a.available)
+                    .slice(0, 3),
+            }));
+
+        const stats: InventoryStats = {
+            totalPieces,
+            totalSkus: filteredBalances.length,
+            inStockCount,
+            lowStockCount,
+            outOfStockCount,
+            topStockedProducts,
+        };
+
         // Apply pagination
         const totalCount = filteredBalances.length;
         const paginatedBalances = filteredBalances.slice(offset, offset + limit);
@@ -519,6 +618,274 @@ export const getInventoryAll = createServerFn({ method: 'GET' })
                 offset,
                 hasMore: offset + paginatedBalances.length < totalCount,
             },
+            stats,
+        };
+    });
+
+// ============================================
+// GROUPED INVENTORY FOR MOBILE
+// ============================================
+
+/** Size-level stock data for mobile inventory */
+export interface SizeStock {
+    size: string;
+    skuCode: string;
+    skuId: string;
+    stock: number;
+    shopify: number | null;
+    status: 'active' | 'archived' | 'draft' | null;
+}
+
+/** Color/variation group for mobile inventory */
+export interface ColorGroup {
+    variationId: string;
+    colorName: string;
+    imageUrl: string | null;
+    sizes: SizeStock[];
+    totalStock: number;
+    totalShopify: number;
+    hasArchived: boolean;
+    archivedWithStock: SizeStock[];
+    fabricName: string | null;
+    fabricUnit: string | null;
+    fabricColourName: string | null;
+    fabricColourHex: string | null;
+    fabricColourBalance: number | null;
+}
+
+/** Product group for mobile inventory */
+export interface ProductGroup {
+    productId: string;
+    productName: string;
+    imageUrl: string | null;
+    colors: ColorGroup[];
+    totalStock: number;
+    totalShopify: number;
+}
+
+/** Result type for grouped inventory */
+export interface InventoryGroupedResult {
+    products: ProductGroup[];
+    totalProducts: number;
+    totalSkus: number;
+}
+
+const getInventoryGroupedSchema = z.object({
+    search: z.string().optional(),
+    stockFilter: z.enum(['all', 'in_stock', 'out_of_stock', 'low_stock']).optional().default('all'),
+    shopifyStatus: z.enum(['all', 'active', 'archived', 'draft']).optional().default('all'),
+    discrepancy: z.enum(['all', 'has_discrepancy', 'no_discrepancy']).optional().default('all'),
+    fabricFilter: z.enum(['all', 'has_fabric', 'no_fabric', 'low_fabric']).optional().default('all'),
+    sortBy: z.enum(['stock', 'shopify', 'fabric']).optional().default('stock'),
+    sortOrder: z.enum(['desc', 'asc']).optional().default('desc'),
+});
+
+/**
+ * Get inventory grouped by product for mobile view
+ *
+ * Performs server-side grouping of SKUs into Product > Variation > Size hierarchy.
+ * Returns ~500 products instead of ~10,000 SKUs, significantly reducing payload size.
+ */
+export const getInventoryGrouped = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
+    .inputValidator(
+        (input: unknown): z.infer<typeof getInventoryGroupedSchema> =>
+            getInventoryGroupedSchema.parse(input)
+    )
+    .handler(async ({ data }): Promise<InventoryGroupedResult> => {
+        const { search, stockFilter, shopifyStatus, discrepancy, fabricFilter, sortBy, sortOrder } = data;
+
+        const prisma = await getPrisma();
+
+        // Fetch all inventory using existing function logic
+        const { listInventorySkusKysely } = await import('@coh/shared/services/db/queries');
+
+        const skus = await listInventorySkusKysely({
+            includeCustomSkus: false,
+            search,
+        });
+
+        // Get balances from cache
+        const { inventoryBalanceCache, fabricColourBalanceCache } = await import('@coh/shared/services/inventory');
+
+        const skuIds = skus.map((sku) => sku.skuId);
+        const balanceMap = await inventoryBalanceCache.get(prisma, skuIds);
+
+        // Get fabric colour balances
+        const fabricColourIds = [...new Set(
+            skus.map((sku) => sku.fabricColourId).filter((id): id is string => id !== null)
+        )];
+        const fcBalanceMap = await fabricColourBalanceCache.get(prisma, fabricColourIds);
+
+        const fabricColourBalanceMap = new Map<string, number>();
+        for (const [id, balance] of fcBalanceMap) {
+            fabricColourBalanceMap.set(id, balance.currentBalance);
+        }
+
+        // Size ordering for consistent display
+        const sizeOrder = ['XXS', 'XS', 'S', 'M', 'L', 'XL', 'XXL', '2XL', '3XL', '4XL', '5XL'];
+
+        // Group into Product > Variation > Size hierarchy
+        const productMap = new Map<string, ProductGroup>();
+
+        for (const sku of skus) {
+            const balance = balanceMap.get(sku.skuId) || {
+                totalInward: 0,
+                totalOutward: 0,
+                currentBalance: 0,
+                availableBalance: 0,
+            };
+
+            const availableBalance = balance.availableBalance;
+            const shopifyQty = sku.shopifyAvailableQty ?? null;
+            const shopifyProductStatus = sku.shopifyProductStatus ?? null;
+            const fabricColourBalance = sku.fabricColourId
+                ? fabricColourBalanceMap.get(sku.fabricColourId) ?? null
+                : null;
+
+            // Apply filters before grouping
+            // Stock filter
+            if (stockFilter !== 'all') {
+                if (stockFilter === 'in_stock' && availableBalance <= 0) continue;
+                if (stockFilter === 'out_of_stock' && availableBalance > 0) continue;
+                if (stockFilter === 'low_stock' && (availableBalance <= 0 || availableBalance >= (sku.targetStockQty || 10))) continue;
+            }
+
+            // Shopify status filter
+            if (shopifyStatus !== 'all' && shopifyProductStatus !== shopifyStatus) continue;
+
+            // Discrepancy filter
+            if (discrepancy !== 'all') {
+                const hasDiscrepancy = shopifyQty !== null && shopifyQty !== availableBalance;
+                if (discrepancy === 'has_discrepancy' && !hasDiscrepancy) continue;
+                if (discrepancy === 'no_discrepancy' && hasDiscrepancy) continue;
+            }
+
+            // Fabric filter
+            if (fabricFilter !== 'all') {
+                if (fabricFilter === 'has_fabric' && (fabricColourBalance === null || fabricColourBalance <= 0)) continue;
+                if (fabricFilter === 'no_fabric' && fabricColourBalance !== null && fabricColourBalance > 0) continue;
+                if (fabricFilter === 'low_fabric' && (fabricColourBalance === null || fabricColourBalance <= 0 || fabricColourBalance >= 10)) continue;
+            }
+
+            // Get or create product group
+            let product = productMap.get(sku.productId);
+            if (!product) {
+                product = {
+                    productId: sku.productId,
+                    productName: sku.productName,
+                    imageUrl: sku.productImageUrl || sku.variationImageUrl || null,
+                    colors: [],
+                    totalStock: 0,
+                    totalShopify: 0,
+                };
+                productMap.set(sku.productId, product);
+            }
+
+            // Get or create color group
+            let color = product.colors.find(c => c.variationId === sku.variationId);
+            if (!color) {
+                color = {
+                    variationId: sku.variationId,
+                    colorName: sku.colorName,
+                    imageUrl: sku.variationImageUrl || sku.productImageUrl || null,
+                    sizes: [],
+                    totalStock: 0,
+                    totalShopify: 0,
+                    hasArchived: false,
+                    archivedWithStock: [],
+                    fabricName: sku.fabricName ?? null,
+                    fabricUnit: sku.fabricUnit ?? null,
+                    fabricColourName: sku.fabricColourName ?? null,
+                    fabricColourHex: sku.fabricColourHex ?? null,
+                    fabricColourBalance,
+                };
+                product.colors.push(color);
+            }
+
+            // Add size data
+            const sizeData: SizeStock = {
+                size: sku.size,
+                skuCode: sku.skuCode,
+                skuId: sku.skuId,
+                stock: availableBalance,
+                shopify: shopifyQty,
+                status: shopifyProductStatus,
+            };
+
+            color.sizes.push(sizeData);
+            color.totalStock += availableBalance;
+            color.totalShopify += shopifyQty ?? 0;
+            product.totalStock += availableBalance;
+            product.totalShopify += shopifyQty ?? 0;
+
+            // Track archived SKUs with Shopify stock
+            if (shopifyProductStatus === 'archived') {
+                color.hasArchived = true;
+                if ((shopifyQty ?? 0) > 0) {
+                    color.archivedWithStock.push(sizeData);
+                }
+            }
+
+            // Update images if not set
+            if (!product.imageUrl && (sku.variationImageUrl || sku.productImageUrl)) {
+                product.imageUrl = sku.variationImageUrl || sku.productImageUrl || null;
+            }
+            if (!color.imageUrl && (sku.variationImageUrl || sku.productImageUrl)) {
+                color.imageUrl = sku.variationImageUrl || sku.productImageUrl || null;
+            }
+        }
+
+        // Sort sizes within each color
+        for (const product of productMap.values()) {
+            for (const color of product.colors) {
+                color.sizes.sort((a, b) => {
+                    const aIdx = sizeOrder.indexOf(a.size);
+                    const bIdx = sizeOrder.indexOf(b.size);
+                    if (aIdx !== -1 && bIdx !== -1) return aIdx - bIdx;
+                    if (aIdx !== -1) return -1;
+                    if (bIdx !== -1) return 1;
+                    return a.size.localeCompare(b.size);
+                });
+            }
+        }
+
+        // Convert to array and sort products
+        let products = Array.from(productMap.values());
+
+        // Sort by selected column and order
+        products.sort((a, b) => {
+            let aVal: number;
+            let bVal: number;
+
+            switch (sortBy) {
+                case 'shopify':
+                    aVal = a.totalShopify;
+                    bVal = b.totalShopify;
+                    break;
+                case 'fabric':
+                    // Sort by first color's fabric balance (or 0 if none)
+                    aVal = a.colors[0]?.fabricColourBalance ?? 0;
+                    bVal = b.colors[0]?.fabricColourBalance ?? 0;
+                    break;
+                case 'stock':
+                default:
+                    aVal = a.totalStock;
+                    bVal = b.totalStock;
+                    break;
+            }
+
+            return sortOrder === 'asc' ? aVal - bVal : bVal - aVal;
+        });
+
+        // Count total SKUs
+        const totalSkus = products.reduce((sum, p) =>
+            sum + p.colors.reduce((cSum, c) => cSum + c.sizes.length, 0), 0);
+
+        return {
+            products,
+            totalProducts: products.length,
+            totalSkus,
         };
     });
 

@@ -5,13 +5,15 @@
  * Simpler than Catalog page - focused on finding stock levels quickly
  *
  * FEATURES:
- * - Fast debounced search (200ms)
+ * - Server-side search with debounce (400ms)
+ * - Server-side pagination (~100 items per page)
+ * - Server-side analytics (stats computed from ALL matching SKUs)
  * - AG-Grid with compact display
  * - Stock status filters (All | In Stock | Low Stock | Out of Stock)
  * - Auto-focus search on page load
  * - Analytics: Total pieces, most stocked products, highest demand products
  *
- * DATA SOURCE: Server Function getInventoryList + /reports/top-products
+ * DATA SOURCE: Server Function getInventoryAll + /reports/top-products
  */
 
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
@@ -20,29 +22,20 @@ import { useServerFn } from '@tanstack/react-start';
 import { AgGridReact } from 'ag-grid-react';
 import type { ColDef } from 'ag-grid-community';
 import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community';
-import { Package, Search, TrendingUp, Warehouse, ChevronDown, ChevronUp, RefreshCw } from 'lucide-react';
+import { Package, Search, TrendingUp, Warehouse, ChevronDown, ChevronUp, RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useNavigate } from '@tanstack/react-router';
-import { getInventoryList } from '../server/functions/inventory';
+import { getInventoryAll } from '../server/functions/inventory';
 import { getTopProducts } from '../server/functions/reports';
 import { compactThemeSmall } from '../utils/agGridHelpers';
 import { getOptimizedImageUrl } from '../utils/imageOptimization';
 import { Route } from '../routes/_authenticated/inventory';
+import { useDebounce } from '../hooks/useDebounce';
 
 // Register AG Grid modules
 ModuleRegistry.registerModules([AllCommunityModule]);
 
 type StockFilter = 'all' | 'in_stock' | 'low_stock' | 'out_of_stock';
 type DemandPeriod = 14 | 30 | 60 | 90;
-
-// Type for aggregated product data
-interface ProductStock {
-    productId: string;
-    productName: string;
-    category: string;
-    imageUrl: string | null;
-    totalAvailable: number;
-    colors: { colorName: string; available: number }[];
-}
 
 export default function Inventory() {
     const gridRef = useRef<AgGridReact>(null);
@@ -53,19 +46,18 @@ export default function Inventory() {
     const search = Route.useSearch();
     const navigate = useNavigate();
 
+    // Pagination from URL
+    const page = search.page;
+    const limit = search.limit;
+
     // Stock filter from URL (URL-persisted for bookmarking/sharing)
     const stockFilter = (search.stockFilter || 'all') as StockFilter;
 
-    const setStockFilter = useCallback((value: StockFilter) => {
-        navigate({
-            to: '/inventory',
-            search: { ...search, stockFilter: value === 'all' ? undefined : value } as any,
-            replace: true,
-        });
-    }, [navigate, search]);
+    // Local state for search input (syncs to URL with debounce)
+    const [searchInput, setSearchInput] = useState(search.search || '');
+    const debouncedSearch = useDebounce(searchInput, 400);
 
     // Local state (not persisted to URL)
-    const [searchInput, setSearchInput] = useState('');
     const [demandDays, setDemandDays] = useState<DemandPeriod>(30);
     const [analyticsExpanded, setAnalyticsExpanded] = useState(false);
 
@@ -74,17 +66,67 @@ export default function Inventory() {
         searchInputRef.current?.focus();
     }, []);
 
+    // Sync debounced search to URL (resets to page 1)
+    useEffect(() => {
+        // Only update URL if debounced value differs from URL search param
+        const currentUrlSearch = search.search || '';
+        if (debouncedSearch !== currentUrlSearch) {
+            navigate({
+                to: '/inventory',
+                search: {
+                    ...search,
+                    search: debouncedSearch || undefined,
+                    page: 1, // Reset to page 1 on search change
+                },
+                replace: true,
+            });
+        }
+    }, [debouncedSearch, search, navigate]);
+
+    // Page navigation
+    const setPage = useCallback((newPage: number) => {
+        navigate({
+            to: '/inventory',
+            search: { ...search, page: newPage },
+            replace: true,
+        });
+    }, [navigate, search]);
+
+    const setStockFilter = useCallback((value: StockFilter) => {
+        navigate({
+            to: '/inventory',
+            search: {
+                ...search,
+                stockFilter: value === 'all' ? undefined : value,
+                page: 1, // Reset to page 1 on filter change
+            },
+            replace: true,
+        });
+    }, [navigate, search]);
+
     // Get Server Function reference
-    const getInventoryListFn = useServerFn(getInventoryList);
+    const getInventoryAllFn = useServerFn(getInventoryAll);
+
+    // Calculate offset from page
+    const offset = (page - 1) * limit;
 
     // Query for inventory data using Server Function
     // Uses loader data as initialData when available for instant hydration
     const { data: inventoryData, isLoading, refetch, isFetching } = useQuery({
-        queryKey: ['inventory', 'all', { includeCustomSkus: false, limit: 10000 }],
-        queryFn: () => getInventoryListFn({
+        queryKey: ['inventory', 'all', 'getInventoryAll', {
+            includeCustomSkus: false,
+            search: search.search,
+            stockFilter: search.stockFilter,
+            limit,
+            offset,
+        }],
+        queryFn: () => getInventoryAllFn({
             data: {
                 includeCustomSkus: false,
-                limit: 10000,
+                search: search.search || undefined,
+                stockFilter: search.stockFilter as StockFilter | undefined,
+                limit,
+                offset,
             },
         }),
         // Use loader data for instant display, query will refetch in background if stale
@@ -93,8 +135,16 @@ export default function Inventory() {
         staleTime: loaderData?.inventory ? 30000 : 0,
     });
 
-    // Use query data directly (initialData provides instant hydration)
-    const effectiveInventoryData = inventoryData;
+    // Pagination info from server
+    const pagination = inventoryData?.pagination;
+    const total = pagination?.total ?? 0;
+    const totalPages = pagination ? Math.ceil(pagination.total / limit) : 1;
+
+    // Items from server (already filtered and paginated)
+    const items = inventoryData?.items || [];
+
+    // Stats from server (computed from ALL matching SKUs, not just current page)
+    const stats = inventoryData?.stats;
 
     // Fetch demand data (top products by units sold)
     const getTopProductsFn = useServerFn(getTopProducts);
@@ -106,84 +156,6 @@ export default function Inventory() {
             }),
         staleTime: 60000,
     });
-
-    // Apply quick filter when search input changes (client-side, instant)
-    useEffect(() => {
-        const timer = setTimeout(() => {
-            gridRef.current?.api?.setGridOption('quickFilterText', searchInput);
-        }, 200);
-        return () => clearTimeout(timer);
-    }, [searchInput]);
-
-    // Filter data by stock status
-    const filteredData = useMemo(() => {
-        const items = effectiveInventoryData?.items || [];
-
-        switch (stockFilter) {
-            case 'in_stock':
-                return items.filter(item => item.availableBalance > 0);
-            case 'low_stock':
-                return items.filter(item => item.status === 'below_target' && item.availableBalance > 0);
-            case 'out_of_stock':
-                return items.filter(item => item.availableBalance === 0);
-            default:
-                return items;
-        }
-    }, [effectiveInventoryData?.items, stockFilter]);
-
-    // Stats for header cards (including total pieces)
-    const stats = useMemo(() => {
-        const items = effectiveInventoryData?.items || [];
-        const totalPieces = items.reduce((sum, i) => sum + (i.availableBalance || 0), 0);
-        return {
-            total: items.length,
-            totalPieces,
-            inStock: items.filter(i => i.availableBalance > 0).length,
-            lowStock: items.filter(i => i.status === 'below_target' && i.availableBalance > 0).length,
-            outOfStock: items.filter(i => i.availableBalance === 0).length,
-        };
-    }, [effectiveInventoryData?.items]);
-
-    // Aggregate inventory by product (for "Most Stocked Products")
-    const mostStockedProducts = useMemo(() => {
-        const items = effectiveInventoryData?.items || [];
-        const productMap = new Map<string, ProductStock>();
-
-        for (const item of items) {
-            if (!item.productId || item.availableBalance <= 0) continue;
-
-            const existing = productMap.get(item.productId);
-            if (existing) {
-                existing.totalAvailable += item.availableBalance;
-                // Update color breakdown
-                const colorEntry = existing.colors.find(c => c.colorName === item.colorName);
-                if (colorEntry) {
-                    colorEntry.available += item.availableBalance;
-                } else {
-                    existing.colors.push({ colorName: item.colorName || 'Unknown', available: item.availableBalance });
-                }
-            } else {
-                productMap.set(item.productId, {
-                    productId: item.productId,
-                    productName: item.productName || 'Unknown',
-                    category: item.category || '',
-                    imageUrl: item.imageUrl || null,
-                    totalAvailable: item.availableBalance,
-                    colors: [{ colorName: item.colorName || 'Unknown', available: item.availableBalance }],
-                });
-            }
-        }
-
-        // Sort by total available descending, take top 5
-        return Array.from(productMap.values())
-            .sort((a, b) => b.totalAvailable - a.totalAvailable)
-            .slice(0, 5)
-            .map(p => ({
-                ...p,
-                // Sort colors by available descending
-                colors: p.colors.sort((a, b) => b.available - a.available).slice(0, 3),
-            }));
-    }, [effectiveInventoryData?.items]);
 
     // Column definitions
     const columnDefs = useMemo(() => [
@@ -275,6 +247,13 @@ export default function Inventory() {
         },
     ] as ColDef[], []);
 
+    // Calculate display range for pagination
+    const displayStart = total > 0 ? offset + 1 : 0;
+    const displayEnd = Math.min(offset + items.length, total);
+
+    // Most stocked products from server stats
+    const mostStockedProducts = stats?.topStockedProducts || [];
+
     return (
         <div className="space-y-4">
             {/* Header */}
@@ -290,12 +269,12 @@ export default function Inventory() {
                     </div>
                 </div>
 
-                {/* Stats Cards */}
+                {/* Stats Cards - using server-computed stats from ALL matching SKUs */}
                 <div className="flex flex-wrap gap-3">
                     {/* Total Pieces */}
                     <div className="flex items-center gap-3 px-4 py-2.5 bg-blue-50 rounded-xl border border-blue-200 shadow-sm">
                         <div>
-                            <div className="text-2xl font-bold text-blue-700 leading-none">{stats.totalPieces.toLocaleString()}</div>
+                            <div className="text-2xl font-bold text-blue-700 leading-none">{(stats?.totalPieces ?? 0).toLocaleString()}</div>
                             <div className="text-xs text-blue-600 mt-0.5">Total Pcs</div>
                         </div>
                     </div>
@@ -303,7 +282,7 @@ export default function Inventory() {
                     {/* Total SKUs */}
                     <div className="flex items-center gap-3 px-4 py-2.5 bg-white rounded-xl border border-gray-200 shadow-sm">
                         <div>
-                            <div className="text-2xl font-bold text-gray-900 leading-none">{stats.total.toLocaleString()}</div>
+                            <div className="text-2xl font-bold text-gray-900 leading-none">{(stats?.totalSkus ?? total).toLocaleString()}</div>
                             <div className="text-xs text-gray-500 mt-0.5">SKUs</div>
                         </div>
                     </div>
@@ -311,26 +290,26 @@ export default function Inventory() {
                     {/* In Stock */}
                     <div className="flex items-center gap-3 px-4 py-2.5 bg-green-50 rounded-xl border border-green-200 shadow-sm">
                         <div>
-                            <div className="text-2xl font-bold text-green-700 leading-none">{stats.inStock.toLocaleString()}</div>
+                            <div className="text-2xl font-bold text-green-700 leading-none">{(stats?.inStockCount ?? 0).toLocaleString()}</div>
                             <div className="text-xs text-green-600 mt-0.5">In Stock</div>
                         </div>
                     </div>
 
                     {/* Low Stock */}
-                    {stats.lowStock > 0 && (
+                    {(stats?.lowStockCount ?? 0) > 0 && (
                         <div className="flex items-center gap-3 px-4 py-2.5 bg-amber-50 rounded-xl border border-amber-200 shadow-sm">
                             <div>
-                                <div className="text-2xl font-bold text-amber-700 leading-none">{stats.lowStock.toLocaleString()}</div>
+                                <div className="text-2xl font-bold text-amber-700 leading-none">{(stats?.lowStockCount ?? 0).toLocaleString()}</div>
                                 <div className="text-xs text-amber-600 mt-0.5">Low Stock</div>
                             </div>
                         </div>
                     )}
 
                     {/* Out of Stock */}
-                    {stats.outOfStock > 0 && (
+                    {(stats?.outOfStockCount ?? 0) > 0 && (
                         <div className="flex items-center gap-3 px-4 py-2.5 bg-red-50 rounded-xl border border-red-200 shadow-sm">
                             <div>
-                                <div className="text-2xl font-bold text-red-700 leading-none">{stats.outOfStock.toLocaleString()}</div>
+                                <div className="text-2xl font-bold text-red-700 leading-none">{(stats?.outOfStockCount ?? 0).toLocaleString()}</div>
                                 <div className="text-xs text-red-600 mt-0.5">Out of Stock</div>
                             </div>
                         </div>
@@ -363,7 +342,7 @@ export default function Inventory() {
                 {/* Collapsible Content */}
                 {analyticsExpanded && (
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 p-4 pt-0 border-t border-gray-100">
-                        {/* Most Stocked Products Card */}
+                        {/* Most Stocked Products Card - using server-computed data */}
                         <div className="bg-gray-50 rounded-lg p-4">
                             <div className="flex items-center gap-2 mb-3">
                                 <Warehouse size={18} className="text-blue-600" />
@@ -562,20 +541,45 @@ export default function Inventory() {
                     </div>
                 </div>
 
-                {/* Result count */}
-                <div className="mt-3 text-sm text-gray-500">
-                    Showing {filteredData.length.toLocaleString()} of {stats.total.toLocaleString()} SKUs
+                {/* Result count and Pagination */}
+                <div className="mt-3 flex items-center justify-between">
+                    <div className="text-sm text-gray-500">
+                        Showing {displayStart.toLocaleString()}–{displayEnd.toLocaleString()} of {total.toLocaleString()} SKUs
+                    </div>
+
+                    {/* Pagination Controls */}
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={() => setPage(page - 1)}
+                            disabled={page === 1 || isFetching}
+                            className="flex items-center gap-1 px-3 py-1.5 text-sm font-medium text-gray-600 bg-gray-50 border border-gray-200 rounded-lg hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                        >
+                            <ChevronLeft size={16} />
+                            Prev
+                        </button>
+                        <span className="px-3 py-1.5 text-sm font-medium text-gray-700">
+                            {page} / {totalPages}
+                        </span>
+                        <button
+                            onClick={() => setPage(page + 1)}
+                            disabled={page >= totalPages || isFetching}
+                            className="flex items-center gap-1 px-3 py-1.5 text-sm font-medium text-gray-600 bg-gray-50 border border-gray-200 rounded-lg hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                        >
+                            Next
+                            <ChevronRight size={16} />
+                        </button>
+                    </div>
                 </div>
             </div>
 
             {/* AG-Grid Container */}
             <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
                 <div className="table-scroll-container">
-                    <div style={{ minWidth: '1000px', height: analyticsExpanded ? 'calc(100vh - 580px)' : 'calc(100vh - 340px)', minHeight: '400px' }}>
+                    <div style={{ minWidth: '1000px', height: analyticsExpanded ? 'calc(100vh - 620px)' : 'calc(100vh - 380px)', minHeight: '400px' }}>
                         <AgGridReact
                             ref={gridRef}
                             theme={compactThemeSmall}
-                            rowData={filteredData}
+                            rowData={items}
                             columnDefs={columnDefs}
                             loading={isLoading}
                             defaultColDef={{
@@ -586,10 +590,7 @@ export default function Inventory() {
                             animateRows={false}
                             suppressCellFocus={false}
                             getRowId={(params) => params.data.skuId}
-                            pagination={true}
-                            paginationPageSize={100}
-                            paginationPageSizeSelector={[50, 100, 200, 500]}
-                            cacheQuickFilter={true}
+                            pagination={false}
                             enableCellTextSelection={true}
                             ensureDomOrder={true}
                         />

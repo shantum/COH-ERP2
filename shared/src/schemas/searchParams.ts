@@ -90,6 +90,10 @@ export const InventorySearchParams = z.object({
     search: z.string().optional().catch(undefined),
     /** Stock status filter */
     stockFilter: z.enum(['all', 'in_stock', 'low_stock', 'out_of_stock']).optional().catch(undefined),
+    /** Page number for pagination */
+    page: z.coerce.number().int().positive().catch(1),
+    /** Items per page (defaults to 100) */
+    limit: z.coerce.number().int().positive().max(500).optional().transform(v => v ?? 100),
 });
 export type InventorySearchParams = z.infer<typeof InventorySearchParams>;
 

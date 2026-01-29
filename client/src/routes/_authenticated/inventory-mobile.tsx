@@ -2,12 +2,14 @@
  * Inventory Mobile Route - /inventory-mobile
  *
  * Mobile-friendly inventory page using TanStack Table and shadcn/ui.
- * Shows SKU-level stock data with product info and Shopify comparison.
+ * Shows product-grouped stock data with Shopify comparison.
+ *
+ * Uses server-side grouping for optimal payload size (~500 products vs ~10,000 SKUs).
  */
 import { createFileRoute } from '@tanstack/react-router';
 import { lazy } from 'react';
 import { z } from 'zod';
-import { getInventoryAll, type InventoryAllResult } from '../../server/functions/inventory';
+import { getInventoryGrouped, type InventoryGroupedResult } from '../../server/functions/inventory';
 
 const InventoryMobile = lazy(() => import('../../pages/InventoryMobile'));
 
@@ -51,14 +53,10 @@ export const Route = createFileRoute('/_authenticated/inventory-mobile')({
     }),
     loader: async ({ deps }): Promise<InventoryMobileLoaderData> => {
         try {
-            // Fetch all items for product grouping (client groups by product)
-            // Filters are applied server-side, only the filtered subset is returned
-            const inventory = await getInventoryAll({
+            // Use server-side grouped data (much smaller payload)
+            const inventory = await getInventoryGrouped({
                 data: {
-                    includeCustomSkus: false,
                     search: deps.search,
-                    limit: 10000, // Need all for product grouping
-                    offset: 0,
                     stockFilter: deps.stockFilter,
                     shopifyStatus: deps.shopifyStatus,
                     discrepancy: deps.discrepancy,
@@ -80,6 +78,6 @@ export const Route = createFileRoute('/_authenticated/inventory-mobile')({
 });
 
 export interface InventoryMobileLoaderData {
-    inventory: InventoryAllResult | null;
+    inventory: InventoryGroupedResult | null;
     error: string | null;
 }
