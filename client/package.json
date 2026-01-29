@@ -4,8 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "preinstall": "cd ../shared && npm install",
-    "prebuild": "cd ../shared && npm install && npm run build",
+    "prebuild": "cd ../shared && npm run build",
     "dev": "vite dev",
     "dev:spa": "vite --config vite.spa.config.ts",
     "build": "vite build",
