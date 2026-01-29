@@ -884,6 +884,8 @@ export interface SearchResultOrder {
     id: string;
     orderNumber: string;
     customerName: string | null;
+    customerEmail: string | null;
+    customerPhone: string | null;
     status: string;
     paymentMethod: string | null;
     totalAmount: number | null;
@@ -1037,6 +1039,8 @@ export const searchAllOrders = createServerFn({ method: 'GET' })
                             id: true,
                             orderNumber: true,
                             customerName: true,
+                            customerEmail: true,
+                            customerPhone: true,
                             status: true,
                             paymentMethod: true,
                             totalAmount: true,
@@ -1059,6 +1063,8 @@ export const searchAllOrders = createServerFn({ method: 'GET' })
                                 id: string;
                                 orderNumber: string;
                                 customerName: string | null;
+                                customerEmail: string | null;
+                                customerPhone: string | null;
                                 status: string;
                                 paymentMethod: string | null;
                                 totalAmount: number | null;
@@ -1073,6 +1079,8 @@ export const searchAllOrders = createServerFn({ method: 'GET' })
                                 id: o.id,
                                 orderNumber: o.orderNumber,
                                 customerName: o.customerName,
+                                customerEmail: o.customerEmail,
+                                customerPhone: o.customerPhone,
                                 status: o.status,
                                 paymentMethod: o.paymentMethod,
                                 totalAmount: o.totalAmount,
