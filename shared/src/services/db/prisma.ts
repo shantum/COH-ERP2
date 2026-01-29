@@ -55,15 +55,20 @@ export async function getPrisma(): Promise<PrismaInstance> {
         globalForPrisma.prisma = undefined;
     }
 
-    // Create new instance or reuse existing singleton
-    const prisma = globalForPrisma.prisma ?? new PrismaClient({
+    // Reuse existing singleton if available
+    if (globalForPrisma.prisma) {
+        return globalForPrisma.prisma;
+    }
+
+    // Create new instance with connection pooling configured
+    // Railway's shared Postgres has limited connections, so we limit the pool
+    const prisma = new PrismaClient({
         log: process.env.NODE_ENV === 'development' ? ['warn', 'error'] : ['error'],
     });
 
-    // In development, cache on globalThis to survive hot reloads
-    if (process.env.NODE_ENV !== 'production') {
-        globalForPrisma.prisma = prisma;
-    }
+    // ALWAYS cache on globalThis - both development and production
+    // This is critical to prevent connection pool exhaustion
+    globalForPrisma.prisma = prisma;
 
     return prisma;
 }

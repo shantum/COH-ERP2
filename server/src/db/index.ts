@@ -31,6 +31,7 @@ const globalForPrisma = globalThis as unknown as {
 };
 
 // Standard PrismaClient - backward compatible
+// ALWAYS cache to prevent connection pool exhaustion
 const prismaInstance =
     globalForPrisma.prisma ??
     new PrismaClient({
@@ -49,10 +50,10 @@ const kyselyInstance =
         }),
     });
 
-if (process.env.NODE_ENV !== 'production') {
-    globalForPrisma.prisma = prismaInstance;
-    globalForPrisma.kysely = kyselyInstance;
-}
+// ALWAYS cache on globalThis - both development and production
+// This is critical to prevent connection pool exhaustion in production
+globalForPrisma.prisma = prismaInstance;
+globalForPrisma.kysely = kyselyInstance;
 
 export const prisma = prismaInstance;
 export const kysely = kyselyInstance;
