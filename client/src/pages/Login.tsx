@@ -8,8 +8,8 @@ interface LoginProps {
 }
 
 export default function Login({ onLoginSuccess }: LoginProps) {
-    const [email, setEmail] = useState('admin@coh.com');
-    const [password, setPassword] = useState('XOFiya@34');
+    const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
     const { login } = useAuth();
@@ -82,9 +82,6 @@ export default function Login({ onLoginSuccess }: LoginProps) {
                         </button>
                     </form>
 
-                    <p className="mt-6 text-center text-sm text-gray-500">
-                        Default: admin@coh.com / XOFiya@34
-                    </p>
                 </div>
             </div>
         </div>
