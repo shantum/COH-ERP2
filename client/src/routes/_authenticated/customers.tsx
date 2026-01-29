@@ -5,14 +5,15 @@
  * Auth is verified by parent _authenticated layout's beforeLoad.
  */
 import { createFileRoute } from '@tanstack/react-router';
-import { lazy } from 'react';
 import { CustomersSearchParams } from '@coh/shared';
 import {
     getCustomersList,
     type CustomersListResponse,
 } from '../../server/functions/customers';
 
-const Customers = lazy(() => import('../../pages/Customers'));
+// Direct import (no lazy loading) for SSR routes with loader data
+// React's lazy() causes hydration flicker: SSR content → Suspense fallback → content again
+import Customers from '../../pages/Customers';
 
 export const Route = createFileRoute('/_authenticated/customers')({
     validateSearch: (search) => CustomersSearchParams.parse(search),

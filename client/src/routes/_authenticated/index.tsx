@@ -5,13 +5,14 @@
  * Auth is verified by parent _authenticated layout's beforeLoad.
  */
 import { createFileRoute } from '@tanstack/react-router';
-import { lazy } from 'react';
 import {
     getOrdersAnalytics,
     type OrdersAnalyticsResponse,
 } from '../../server/functions/dashboard';
 
-const Dashboard = lazy(() => import('../../pages/Dashboard'));
+// Direct import (no lazy loading) for SSR routes with loader data
+// React's lazy() causes hydration flicker: SSR content → Suspense fallback → content again
+import Dashboard from '../../pages/Dashboard';
 
 export const Route = createFileRoute('/_authenticated/')({
     // Pre-fetch dashboard analytics on server

@@ -7,14 +7,15 @@
  * Server-side pagination: ~100 items per page for performance.
  */
 import { createFileRoute } from '@tanstack/react-router';
-import { lazy } from 'react';
 import { InventorySearchParams } from '@coh/shared';
 import {
     getInventoryAll,
     type InventoryAllResult,
 } from '../../server/functions/inventory';
 
-const Inventory = lazy(() => import('../../pages/Inventory'));
+// Direct import (no lazy loading) for SSR routes with loader data
+// React's lazy() causes hydration flicker: SSR content → Suspense fallback → content again
+import Inventory from '../../pages/Inventory';
 
 export const Route = createFileRoute('/_authenticated/inventory')({
     validateSearch: (search) => InventorySearchParams.parse(search),

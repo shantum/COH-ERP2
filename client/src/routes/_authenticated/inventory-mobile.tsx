@@ -7,11 +7,12 @@
  * Uses server-side grouping for optimal payload size (~500 products vs ~10,000 SKUs).
  */
 import { createFileRoute } from '@tanstack/react-router';
-import { lazy } from 'react';
 import { z } from 'zod';
 import { getInventoryGrouped, type InventoryGroupedResult } from '../../server/functions/inventory';
 
-const InventoryMobile = lazy(() => import('../../pages/InventoryMobile'));
+// Direct import (no lazy loading) for SSR routes with loader data
+// React's lazy() causes hydration flicker: SSR content → Suspense fallback → content again
+import InventoryMobile from '../../pages/InventoryMobile';
 
 // Filter value types
 export const stockFilterValues = ['all', 'in_stock', 'out_of_stock', 'low_stock'] as const;
