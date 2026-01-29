@@ -52,11 +52,21 @@ export function createInvalidationHelpers(ctx: InvalidationContext) {
             });
         }
 
-        // Invalidate Server Function query cache
+        // Invalidate Server Function query cache using predicate to match all pages
+        // The query key format is: ['orders', 'list', 'server-fn', { view, page, limit }]
+        // We need to match all pages for a given view
         const queryInput = viewToQueryInput[tab];
         if (queryInput) {
-            const queryKey = getOrdersListQueryKey(queryInput);
-            queryClient.invalidateQueries({ queryKey });
+            queryClient.invalidateQueries({
+                predicate: (query) => {
+                    const key = query.queryKey;
+                    if (key[0] !== 'orders' || key[1] !== 'list' || key[2] !== 'server-fn') {
+                        return false;
+                    }
+                    const params = key[3] as { view?: string } | undefined;
+                    return params?.view === queryInput.view;
+                },
+            });
         }
     };
 

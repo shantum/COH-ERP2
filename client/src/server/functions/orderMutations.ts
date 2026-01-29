@@ -12,6 +12,7 @@ import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth';
 import { getPrisma, type PrismaTransaction } from '@coh/shared/services/db';
+import type { Prisma } from '@prisma/client';
 import {
     type LineStatus,
     hasAllocatedInventory as sharedHasAllocatedInventory,
@@ -1111,27 +1112,28 @@ export const releaseToShipped = createServerFn({ method: 'POST' })
         const prisma = await getPrisma();
         const { orderIds } = data;
 
-        // Build where clause
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const whereClause: any = {
-            releasedToShipped: false,
-            // Only release orders where all non-cancelled lines are shipped
-            NOT: {
-                orderLines: {
-                    some: {
-                        lineStatus: { notIn: ['shipped', 'cancelled'] },
+        // Build where clause - must match the Open view's "fully shipped but not released" condition
+        // Uses AND to explicitly combine conditions, avoiding potential Prisma issues
+        const whereClause: Prisma.OrderWhereInput = {
+            AND: [
+                { isArchived: false },
+                { releasedToShipped: false },
+                // Must have at least one shipped line
+                { orderLines: { some: { lineStatus: 'shipped' } } },
+                // All lines must be shipped or cancelled (no pending/allocated/picked/packed)
+                {
+                    NOT: {
+                        orderLines: {
+                            some: {
+                                lineStatus: { notIn: ['shipped', 'cancelled'] },
+                            },
+                        },
                     },
                 },
-            },
-            // Must have at least one shipped line
-            orderLines: {
-                some: { lineStatus: 'shipped' },
-            },
+                // Add orderIds filter if provided
+                ...(orderIds && orderIds.length > 0 ? [{ id: { in: orderIds } }] : []),
+            ],
         };
-
-        if (orderIds && orderIds.length > 0) {
-            whereClause.id = { in: orderIds };
-        }
 
         const result = await prisma.order.updateMany({
             where: whereClause,
@@ -1167,27 +1169,28 @@ export const releaseToCancelled = createServerFn({ method: 'POST' })
         const prisma = await getPrisma();
         const { orderIds } = data;
 
-        // Build where clause
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const whereClause: any = {
-            releasedToCancelled: false,
-            // Only release orders where all lines are cancelled
-            NOT: {
-                orderLines: {
-                    some: {
-                        lineStatus: { not: 'cancelled' },
+        // Build where clause - must match the Open view's "fully cancelled but not released" condition
+        // Uses AND to explicitly combine conditions
+        const whereClause: Prisma.OrderWhereInput = {
+            AND: [
+                { isArchived: false },
+                { releasedToCancelled: false },
+                // Must have at least one cancelled line
+                { orderLines: { some: { lineStatus: 'cancelled' } } },
+                // All lines must be cancelled (no other statuses)
+                {
+                    NOT: {
+                        orderLines: {
+                            some: {
+                                lineStatus: { not: 'cancelled' },
+                            },
+                        },
                     },
                 },
-            },
-            // Must have at least one cancelled line
-            orderLines: {
-                some: { lineStatus: 'cancelled' },
-            },
+                // Add orderIds filter if provided
+                ...(orderIds && orderIds.length > 0 ? [{ id: { in: orderIds } }] : []),
+            ],
         };
-
-        if (orderIds && orderIds.length > 0) {
-            whereClause.id = { in: orderIds };
-        }
 
         const result = await prisma.order.updateMany({
             where: whereClause,

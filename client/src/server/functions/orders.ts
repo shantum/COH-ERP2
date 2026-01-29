@@ -355,10 +355,39 @@ function buildWhereClause(
     // View-specific filtering
     switch (view) {
         case 'open':
+            // Must match ORDER_VIEWS.open from orderViews.ts exactly
             where.OR = [
-                { status: 'open' },
+                // Still has lines being processed (not shipped, not cancelled)
                 {
-                    AND: [{ releasedToShipped: false }, { releasedToCancelled: false }],
+                    orderLines: {
+                        some: {
+                            lineStatus: { notIn: ['shipped', 'cancelled'] },
+                        },
+                    },
+                },
+                // Fully shipped but not released yet
+                {
+                    releasedToShipped: false,
+                    orderLines: { some: { lineStatus: 'shipped' } },
+                    NOT: {
+                        orderLines: {
+                            some: {
+                                lineStatus: { notIn: ['shipped', 'cancelled'] },
+                            },
+                        },
+                    },
+                },
+                // Fully cancelled but not released yet
+                {
+                    releasedToCancelled: false,
+                    orderLines: { some: { lineStatus: 'cancelled' } },
+                    NOT: {
+                        orderLines: {
+                            some: {
+                                lineStatus: { not: 'cancelled' },
+                            },
+                        },
+                    },
                 },
             ];
             break;

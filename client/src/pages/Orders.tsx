@@ -369,6 +369,8 @@ export default function Orders() {
         if (view !== 'open' || !orders) return 0;
         let count = 0;
         for (const order of orders as DerivedOrder[]) {
+            // Must not already be released
+            if (order.releasedToShipped) continue;
             const lines = (order.orderLines || []) as OrderLine[];
             const nonCancelledLines = lines.filter((l) => l.lineStatus !== 'cancelled');
             if (nonCancelledLines.length === 0) continue;
@@ -383,6 +385,8 @@ export default function Orders() {
         if (view !== 'open' || !orders) return 0;
         let count = 0;
         for (const order of orders as DerivedOrder[]) {
+            // Must not already be released
+            if (order.releasedToCancelled) continue;
             const lines = (order.orderLines || []) as OrderLine[];
             if (lines.length === 0) continue;
             const allCancelled = lines.every((l) => l.lineStatus === 'cancelled');

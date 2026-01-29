@@ -3,7 +3,6 @@
  * Handles releasing orders to shipped/cancelled views and migration
  */
 
-import { useMemo } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { useOrderInvalidation } from './orderMutationUtils';
@@ -33,21 +32,24 @@ export function useOrderReleaseMutations() {
             }
             return result.data;
         },
-        onSuccess: () => {
+        onSuccess: (data) => {
             invalidateOpenOrders();
             invalidateShippedOrders();
+            if (data) {
+                showSuccess(data.message);
+            }
         },
         onError: (err) => showError('Failed to release orders', { description: err instanceof Error ? err.message : String(err) })
     });
 
-    // Wrapper for backward compatibility - useMemo ensures isPending updates reactively
-    const releaseToShipped = useMemo(() => ({
+    // Direct pass-through - useMutation returns stable function references
+    const releaseToShipped = {
         mutate: (orderIds?: string[]) => releaseToShippedMutation.mutate({ orderIds }),
         mutateAsync: (orderIds?: string[]) => releaseToShippedMutation.mutateAsync({ orderIds }),
         isPending: releaseToShippedMutation.isPending,
         isError: releaseToShippedMutation.isError,
         error: releaseToShippedMutation.error,
-    }), [releaseToShippedMutation.isPending, releaseToShippedMutation.isError, releaseToShippedMutation.error]);
+    };
 
     // ============================================
     // RELEASE TO CANCELLED
@@ -60,21 +62,24 @@ export function useOrderReleaseMutations() {
             }
             return result.data;
         },
-        onSuccess: () => {
+        onSuccess: (data) => {
             invalidateOpenOrders();
             invalidateCancelledOrders();
+            if (data) {
+                showSuccess(data.message);
+            }
         },
         onError: (err) => showError('Failed to release cancelled orders', { description: err instanceof Error ? err.message : String(err) })
     });
 
-    // Wrapper for backward compatibility - useMemo ensures isPending updates reactively
-    const releaseToCancelled = useMemo(() => ({
+    // Direct pass-through - useMutation returns stable function references
+    const releaseToCancelled = {
         mutate: (orderIds?: string[]) => releaseToCancelledMutation.mutate({ orderIds }),
         mutateAsync: (orderIds?: string[]) => releaseToCancelledMutation.mutateAsync({ orderIds }),
         isPending: releaseToCancelledMutation.isPending,
         isError: releaseToCancelledMutation.isError,
         error: releaseToCancelledMutation.error,
-    }), [releaseToCancelledMutation.isPending, releaseToCancelledMutation.isError, releaseToCancelledMutation.error]);
+    };
 
     // ============================================
     // MIGRATE SHOPIFY FULFILLED
@@ -98,14 +103,14 @@ export function useOrderReleaseMutations() {
         onError: (err) => showError('Failed to migrate fulfilled orders', { description: err instanceof Error ? err.message : String(err) })
     });
 
-    // Wrapper for backward compatibility - useMemo ensures isPending updates reactively
-    const migrateShopifyFulfilled = useMemo(() => ({
+    // Direct pass-through - useMutation returns stable function references
+    const migrateShopifyFulfilled = {
         mutate: () => migrateShopifyFulfilledMutation.mutate({ limit: 50 }),
         mutateAsync: () => migrateShopifyFulfilledMutation.mutateAsync({ limit: 50 }),
         isPending: migrateShopifyFulfilledMutation.isPending,
         isError: migrateShopifyFulfilledMutation.isError,
         error: migrateShopifyFulfilledMutation.error,
-    }), [migrateShopifyFulfilledMutation.isPending, migrateShopifyFulfilledMutation.isError, migrateShopifyFulfilledMutation.error]);
+    };
 
     return {
         releaseToShipped,
