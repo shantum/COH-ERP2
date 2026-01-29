@@ -16,7 +16,7 @@ import { useMemo } from 'react';
 import { useQueryClient, useMutation } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { inventoryQueryKeys } from '../../constants/queryKeys';
-import { useOrderInvalidation, getOrdersListQueryKey } from './orderMutationUtils';
+import { useOrderInvalidation } from './orderMutationUtils';
 import { showError } from '../../utils/toast';
 import {
     cancelLine as cancelLineFn,
@@ -64,13 +64,39 @@ export function useOrderStatusMutations(options: UseOrderStatusMutationsOptions 
     const cancelOrderServerFn = useServerFn(cancelOrderFn);
     const uncancelOrderServerFn = useServerFn(uncancelOrderFn);
 
-    // Build query input for cache operations
+    // Build query input for cache operations (used for rollback context)
     const queryInput = getOrdersQueryInput(currentView, page);
-    const queryKey = getOrdersListQueryKey(queryInput);
 
-    // Helper to get current cache data
+    /**
+     * Create a predicate to match all order list queries for a specific view.
+     * This matches regardless of filters (allocatedFilter, productionFilter) or pagination.
+     * Query key format: ['orders', 'list', 'server-fn', { view, page, limit, ...filters }]
+     */
+    const createViewPredicate = (view: string) => (query: { queryKey: readonly unknown[] }) => {
+        const key = query.queryKey;
+        if (key[0] !== 'orders' || key[1] !== 'list' || key[2] !== 'server-fn') return false;
+        const params = key[3] as { view?: string } | undefined;
+        return params?.view === view;
+    };
+
+    // Predicate for current view
+    const viewQueryPredicate = createViewPredicate(currentView);
+
+    // Helper to get current cache data - finds any matching query for the view
     const getCachedData = (): OrdersListData | undefined => {
-        return queryClient.getQueryData<OrdersListData>(queryKey);
+        const queries = queryClient.getQueriesData<OrdersListData>({ predicate: viewQueryPredicate });
+        return queries[0]?.[1];
+    };
+
+    // Helper to set cache data for ALL matching queries in a view
+    const setCachedDataForView = (
+        view: string,
+        updater: (old: OrdersListData | undefined) => OrdersListData | undefined
+    ) => {
+        queryClient.setQueriesData<OrdersListData>(
+            { predicate: createViewPredicate(view) },
+            updater
+        );
     };
 
     // ============================================
@@ -85,8 +111,8 @@ export function useOrderStatusMutations(options: UseOrderStatusMutationsOptions 
             return result.data;
         },
         onMutate: async ({ orderId }) => {
-            // Cancel only the specific query for this view (per CLAUDE.md rule #41)
-            await queryClient.cancelQueries({ queryKey });
+            // Cancel queries for this view (matches any filter/page combination)
+            await queryClient.cancelQueries({ predicate: viewQueryPredicate });
             // Also cancel inventory balance queries to prevent stale data from overwriting
             await queryClient.cancelQueries({ queryKey: inventoryQueryKeys.balance });
 
@@ -106,9 +132,9 @@ export function useOrderStatusMutations(options: UseOrderStatusMutationsOptions 
                 }
             }
 
-            // Optimistically cancel all lines in the order
-            queryClient.setQueryData<OrdersListData>(
-                queryKey,
+            // Optimistically cancel all lines in the order - update ALL caches for this view
+            setCachedDataForView(
+                currentView,
                 (old) => optimisticCancelOrder(old, orderId) as OrdersListData | undefined
             );
 
@@ -121,10 +147,9 @@ export function useOrderStatusMutations(options: UseOrderStatusMutationsOptions 
             return { previousData, queryInput, previousInventoryData } as StatusOptimisticContext;
         },
         onError: (err, _vars, context) => {
-            // Rollback on error
+            // Rollback all view caches to the previous value
             if (context?.previousData) {
-                const rollbackKey = getOrdersListQueryKey(context.queryInput);
-                queryClient.setQueryData(rollbackKey, context.previousData);
+                setCachedDataForView(currentView, () => context.previousData);
             }
             // Rollback inventory cache
             if (context?.previousInventoryData) {
@@ -165,24 +190,27 @@ export function useOrderStatusMutations(options: UseOrderStatusMutationsOptions 
             return result.data;
         },
         onMutate: async ({ orderId }) => {
-            // For uncancel, we may be in cancelled view
+            // For uncancel, we target the cancelled view
+            const cancelledViewPredicate = createViewPredicate('cancelled');
             const cancelledQueryInput = getOrdersQueryInput('cancelled', page);
-            const cancelledQueryKey = getOrdersListQueryKey(cancelledQueryInput);
-            // Cancel only the specific query for this view (per CLAUDE.md rule #41)
-            await queryClient.cancelQueries({ queryKey: cancelledQueryKey });
-            const previousData = queryClient.getQueryData<OrdersListData>(cancelledQueryKey);
+            await queryClient.cancelQueries({ predicate: cancelledViewPredicate });
 
-            queryClient.setQueryData<OrdersListData>(
-                cancelledQueryKey,
+            // Get data from any matching cancelled view query
+            const queries = queryClient.getQueriesData<OrdersListData>({ predicate: cancelledViewPredicate });
+            const previousData = queries[0]?.[1];
+
+            // Update ALL cancelled view caches
+            setCachedDataForView(
+                'cancelled',
                 (old) => optimisticUncancelOrder(old, orderId) as OrdersListData | undefined
             );
 
             return { previousData, queryInput: cancelledQueryInput } as OptimisticUpdateContext;
         },
         onError: (err, _vars, context) => {
+            // Rollback all cancelled view caches
             if (context?.previousData) {
-                const rollbackKey = getOrdersListQueryKey(context.queryInput);
-                queryClient.setQueryData(rollbackKey, context.previousData);
+                setCachedDataForView('cancelled', () => context.previousData);
             }
             // Invalidate after rollback to ensure consistency
             invalidateOpenOrders();
@@ -216,8 +244,8 @@ export function useOrderStatusMutations(options: UseOrderStatusMutationsOptions 
             return result.data;
         },
         onMutate: async ({ lineId }) => {
-            // Cancel only the specific query for this view (per CLAUDE.md rule #41)
-            await queryClient.cancelQueries({ queryKey });
+            // Cancel queries for this view (matches any filter/page combination)
+            await queryClient.cancelQueries({ predicate: viewQueryPredicate });
             // Also cancel inventory balance queries to prevent stale data from overwriting
             await queryClient.cancelQueries({ queryKey: inventoryQueryKeys.balance });
 
@@ -230,9 +258,9 @@ export function useOrderStatusMutations(options: UseOrderStatusMutationsOptions 
                 ? calculateInventoryDelta(row.lineStatus || 'pending', 'cancelled', row.qty || 0)
                 : 0;
 
-            // Optimistically update orders cache
-            queryClient.setQueryData<OrdersListData>(
-                queryKey,
+            // Optimistically update ALL orders caches for this view
+            setCachedDataForView(
+                currentView,
                 (old) => optimisticCancelLine(old, lineId) as OrdersListData | undefined
             );
 
@@ -246,10 +274,9 @@ export function useOrderStatusMutations(options: UseOrderStatusMutationsOptions 
             return { previousData, queryInput, previousInventoryData } as StatusOptimisticContext;
         },
         onError: (err, _vars, context) => {
-            // Rollback on error
+            // Rollback all view caches to the previous value
             if (context?.previousData) {
-                const rollbackKey = getOrdersListQueryKey(context.queryInput);
-                queryClient.setQueryData(rollbackKey, context.previousData);
+                setCachedDataForView(currentView, () => context.previousData);
             }
             // Rollback inventory cache
             if (context?.previousInventoryData) {
@@ -288,22 +315,22 @@ export function useOrderStatusMutations(options: UseOrderStatusMutationsOptions 
             return result.data;
         },
         onMutate: async ({ lineId }) => {
-            // Cancel only the specific query for this view (per CLAUDE.md rule #41)
-            await queryClient.cancelQueries({ queryKey });
+            // Cancel queries for this view (matches any filter/page combination)
+            await queryClient.cancelQueries({ predicate: viewQueryPredicate });
             const previousData = getCachedData();
 
-            // Optimistically update
-            queryClient.setQueryData<OrdersListData>(
-                queryKey,
+            // Optimistically update ALL orders caches for this view
+            setCachedDataForView(
+                currentView,
                 (old) => optimisticUncancelLine(old, lineId) as OrdersListData | undefined
             );
 
             return { previousData, queryInput } as OptimisticUpdateContext;
         },
         onError: (err, _vars, context) => {
+            // Rollback all view caches to the previous value
             if (context?.previousData) {
-                const rollbackKey = getOrdersListQueryKey(context.queryInput);
-                queryClient.setQueryData(rollbackKey, context.previousData);
+                setCachedDataForView(currentView, () => context.previousData);
             }
             // Invalidate after rollback to ensure consistency
             invalidateOpenOrders();

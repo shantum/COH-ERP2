@@ -3,9 +3,10 @@
  * Handles allocate/unallocate/pick/pack line status transitions
  *
  * Optimistic update strategy:
- * 1. onMutate: Cancel inflight queries, save previous data, update cache optimistically
+ * 1. onMutate: Cancel inflight queries, save ALL view cache data, update cache optimistically
  *    - Updates BOTH orders cache AND inventory balance cache for consistency
- * 2. onError: Rollback to previous data + invalidate for consistency
+ *    - Saves ALL cached queries for proper rollback (handles filter/page variants)
+ * 2. onError: Rollback ALL cached queries to previous state + invalidate for consistency
  * 3. onSettled: Only invalidate non-SSE-synced data (e.g., inventory balance)
  *
  * Note: Order list invalidation removed from onSettled to prevent UI flicker.
@@ -18,7 +19,7 @@
 import { useQueryClient, useMutation } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { inventoryQueryKeys } from '../../constants/queryKeys';
-import { useOrderInvalidation, getOrdersListQueryKey } from './orderMutationUtils';
+import { useOrderInvalidation } from './orderMutationUtils';
 import { showError } from '../../utils/toast';
 import {
     allocateOrder as allocateOrderFn,
@@ -26,14 +27,17 @@ import {
 } from '../../server/functions/orderMutations';
 import type { MutationOptions } from './orderMutationUtils';
 import {
-    getOrdersQueryInput,
     optimisticLineStatusUpdate,
     optimisticBatchLineStatusUpdate,
     calculateInventoryDelta,
-    getRowByLineId,
-    getRowsByLineIds,
-    type OrdersListData,
-    type OptimisticUpdateContext,
+    // View-based cache utilities
+    getViewCacheSnapshot,
+    restoreViewCacheSnapshot,
+    updateViewCache,
+    cancelViewQueries,
+    findRowInViewCache,
+    findRowsInViewCache,
+    type ViewCacheSnapshot,
 } from './optimisticUpdateHelpers';
 import {
     optimisticInventoryUpdate,
@@ -46,13 +50,18 @@ export interface UseOrderWorkflowMutationsOptions {
     page?: number;
 }
 
-/** Extended context that includes inventory rollback data */
-interface WorkflowOptimisticContext extends OptimisticUpdateContext {
+/** Context for optimistic updates with proper multi-query rollback */
+interface WorkflowOptimisticContext {
+    /** Snapshot of ALL cached queries for the view */
+    viewSnapshot: ViewCacheSnapshot;
+    /** The view being operated on */
+    view: string;
+    /** Previous inventory data for rollback */
     previousInventoryData?: Map<string, InventoryBalanceItem[] | undefined>;
 }
 
 export function useOrderWorkflowMutations(options: UseOrderWorkflowMutationsOptions = {}) {
-    const { currentView = 'open', page = 1 } = options;
+    const { currentView = 'open' } = options;
     const queryClient = useQueryClient();
     const { invalidateOpenOrders } = useOrderInvalidation();
 
@@ -60,24 +69,13 @@ export function useOrderWorkflowMutations(options: UseOrderWorkflowMutationsOpti
     const allocateOrderServerFn = useServerFn(allocateOrderFn);
     const setLineStatusServerFn = useServerFn(setLineStatusFn);
 
-    // Build query input for cache operations
-    const queryInput = getOrdersQueryInput(currentView, page);
-    const queryKey = getOrdersListQueryKey(queryInput);
-
-    // Helper to get current cache data
-    const getCachedData = (): OrdersListData | undefined => {
-        return queryClient.getQueryData<OrdersListData>(queryKey);
-    };
-
     // ============================================
     // ALLOCATE
     // ============================================
     const allocate = useMutation({
         mutationFn: async (input: { lineIds: string[] }) => {
-            // Server Function expects orderId, but we're using lineIds
-            // We need to get orderId from the first line
-            const cachedData = getCachedData();
-            const row = getRowByLineId(cachedData, input.lineIds[0]);
+            // Find orderId from any cache that contains the line
+            const row = findRowInViewCache(queryClient, currentView, input.lineIds[0]);
             if (!row?.orderId) {
                 throw new Error('Could not determine order ID for allocation');
             }
@@ -88,17 +86,16 @@ export function useOrderWorkflowMutations(options: UseOrderWorkflowMutationsOpti
             return result.data;
         },
         onMutate: async ({ lineIds }) => {
-            // Cancel any outgoing refetches (so they don't overwrite our optimistic update)
-            await queryClient.cancelQueries({ queryKey });
-            // Also cancel inventory balance queries to prevent stale data from overwriting
+            // Cancel any outgoing refetches for this view
+            await cancelViewQueries(queryClient, currentView);
+            // Also cancel inventory balance queries
             await queryClient.cancelQueries({ queryKey: inventoryQueryKeys.balance });
 
-            // Snapshot the previous value
-            const previousData = getCachedData();
+            // Snapshot ALL cached queries for this view (for proper rollback)
+            const viewSnapshot = getViewCacheSnapshot(queryClient, currentView);
 
-            // Get rows and calculate inventory deltas in a single pass
-            // Two maps: one by lineId (for order rows), one by skuId (for inventory cache)
-            const rows = getRowsByLineIds(previousData, lineIds);
+            // Find rows across ALL cached queries (handles different filter/page combinations)
+            const rows = findRowsInViewCache(queryClient, currentView, lineIds);
             const inventoryDeltas = new Map<string, number>(); // lineId -> delta
             const skuDeltas = new Map<string, number>(); // skuId -> delta (aggregated)
 
@@ -107,7 +104,6 @@ export function useOrderWorkflowMutations(options: UseOrderWorkflowMutationsOpti
                     const delta = calculateInventoryDelta(row.lineStatus || 'pending', 'allocated', row.qty || 0);
                     inventoryDeltas.set(row.lineId, delta);
 
-                    // Aggregate deltas by SKU for inventory cache update
                     if (row.skuId && delta !== 0) {
                         const existing = skuDeltas.get(row.skuId) || 0;
                         skuDeltas.set(row.skuId, existing + delta);
@@ -115,33 +111,26 @@ export function useOrderWorkflowMutations(options: UseOrderWorkflowMutationsOpti
                 }
             }
 
-            // Optimistically update the orders cache
-            queryClient.setQueryData<OrdersListData>(
-                queryKey,
-                (old) => optimisticBatchLineStatusUpdate(old, lineIds, 'allocated', inventoryDeltas) as OrdersListData | undefined
+            // Optimistically update ALL orders caches for this view
+            updateViewCache(queryClient, currentView, (old) =>
+                optimisticBatchLineStatusUpdate(old, lineIds, 'allocated', inventoryDeltas)
             );
 
-            // Also optimistically update the inventory balance cache
-            // This prevents enrichRowsWithInventory from overwriting our optimistic skuStock
+            // Also update the inventory balance cache
             const previousInventoryData = optimisticInventoryUpdate(queryClient, skuDeltas);
 
-            // Return context with data for rollback
-            return { previousData, queryInput, previousInventoryData } as WorkflowOptimisticContext;
+            return { viewSnapshot, view: currentView, previousInventoryData } as WorkflowOptimisticContext;
         },
         onError: (err, _vars, context) => {
-            // Rollback to the previous value on error
-            if (context?.previousData) {
-                const rollbackKey = getOrdersListQueryKey(context.queryInput);
-                queryClient.setQueryData(rollbackKey, context.previousData);
+            // Rollback ALL cached queries to their previous state
+            if (context?.viewSnapshot) {
+                restoreViewCacheSnapshot(queryClient, context.viewSnapshot);
             }
-            // Rollback inventory cache
             if (context?.previousInventoryData) {
                 rollbackInventoryUpdate(queryClient, context.previousInventoryData);
             }
-            // Invalidate after rollback to ensure consistency
             invalidateOpenOrders();
 
-            // Show error toast for insufficient stock
             const errorMsg = err instanceof Error ? err.message : String(err);
             if (errorMsg.includes('Insufficient stock')) {
                 showError('Insufficient stock', { description: errorMsg });
@@ -150,10 +139,7 @@ export function useOrderWorkflowMutations(options: UseOrderWorkflowMutationsOpti
             }
         },
         onSettled: () => {
-            // Don't invalidate inventory here - the optimistic update already handles it
-            // Invalidating causes a refetch that can race with server cache and return stale data
-            // The server mutation invalidates its cache, so future queries will get fresh data
-            // SSE handles syncing for other users
+            // SSE handles syncing; don't invalidate to prevent flicker
         },
     });
 
@@ -169,43 +155,39 @@ export function useOrderWorkflowMutations(options: UseOrderWorkflowMutationsOpti
             return result.data;
         },
         onMutate: async ({ lineId, status: newStatus }) => {
-            await queryClient.cancelQueries({ queryKey });
-            // Also cancel inventory balance queries to prevent stale data from overwriting
+            await cancelViewQueries(queryClient, currentView);
             await queryClient.cancelQueries({ queryKey: inventoryQueryKeys.balance });
 
-            const previousData = getCachedData();
+            // Snapshot ALL cached queries for this view
+            const viewSnapshot = getViewCacheSnapshot(queryClient, currentView);
 
-            // Get the row to calculate inventory delta
-            const row = getRowByLineId(previousData, lineId);
+            // Find the row across ALL cached queries
+            const row = findRowInViewCache(queryClient, currentView, lineId);
             const inventoryDelta = row
                 ? calculateInventoryDelta(row.lineStatus || 'pending', newStatus, row.qty || 0)
                 : 0;
 
-            // Optimistically update orders cache
-            queryClient.setQueryData<OrdersListData>(
-                queryKey,
-                (old) => optimisticLineStatusUpdate(old, lineId, newStatus, inventoryDelta) as OrdersListData | undefined
+            // Update ALL orders caches for this view
+            updateViewCache(queryClient, currentView, (old) =>
+                optimisticLineStatusUpdate(old, lineId, newStatus, inventoryDelta)
             );
 
-            // Also optimistically update the inventory balance cache
+            // Update inventory balance cache
             let previousInventoryData: Map<string, InventoryBalanceItem[] | undefined> | undefined;
             if (row?.skuId && inventoryDelta !== 0) {
                 const skuDeltas = new Map<string, number>([[row.skuId, inventoryDelta]]);
                 previousInventoryData = optimisticInventoryUpdate(queryClient, skuDeltas);
             }
 
-            return { previousData, queryInput, previousInventoryData } as WorkflowOptimisticContext;
+            return { viewSnapshot, view: currentView, previousInventoryData } as WorkflowOptimisticContext;
         },
         onError: (err, _vars, context) => {
-            if (context?.previousData) {
-                const rollbackKey = getOrdersListQueryKey(context.queryInput);
-                queryClient.setQueryData(rollbackKey, context.previousData);
+            if (context?.viewSnapshot) {
+                restoreViewCacheSnapshot(queryClient, context.viewSnapshot);
             }
-            // Rollback inventory cache
             if (context?.previousInventoryData) {
                 rollbackInventoryUpdate(queryClient, context.previousInventoryData);
             }
-            // Invalidate after rollback to ensure consistency
             invalidateOpenOrders();
 
             const msg = err instanceof Error ? err.message : 'Failed to update line status';
@@ -214,8 +196,7 @@ export function useOrderWorkflowMutations(options: UseOrderWorkflowMutationsOpti
             }
         },
         onSettled: () => {
-            // Don't invalidate inventory here - the optimistic update already handles it
-            // Invalidating causes a refetch that can race with server cache and return stale data
+            // SSE handles syncing; don't invalidate to prevent flicker
         },
     });
 

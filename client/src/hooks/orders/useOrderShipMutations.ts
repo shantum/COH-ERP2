@@ -14,7 +14,7 @@ import { useMemo } from 'react';
 import { useQueryClient, useMutation } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { inventoryQueryKeys } from '../../constants/queryKeys';
-import { useOrderInvalidation, getOrdersListQueryKey } from './orderMutationUtils';
+import { useOrderInvalidation } from './orderMutationUtils';
 import { showError } from '../../utils/toast';
 import {
     adminShipOrder as adminShipOrderFn,
@@ -53,20 +53,39 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
     const unmarkShippedLineServerFn = useServerFn(unmarkShippedLineFn);
     const updateLineTrackingServerFn = useServerFn(updateLineTrackingFn);
 
-    // Build query input for cache operations
+    // Build query input for cache operations (used for rollback context)
     const queryInput = getOrdersQueryInput(currentView, page);
 
-    // Helper to get current cache data
-    const getCachedData = (): OrdersListData | undefined => {
-        return queryClient.getQueryData(getOrdersListQueryKey(queryInput));
+    /**
+     * Create a predicate to match all order list queries for a specific view.
+     * This matches regardless of filters (allocatedFilter, productionFilter) or pagination.
+     * Query key format: ['orders', 'list', 'server-fn', { view, page, limit, ...filters }]
+     */
+    const createViewPredicate = (view: string) => (query: { queryKey: readonly unknown[] }) => {
+        const key = query.queryKey;
+        if (key[0] !== 'orders' || key[1] !== 'list' || key[2] !== 'server-fn') return false;
+        const params = key[3] as { view?: string } | undefined;
+        return params?.view === view;
     };
 
-    // Helper to set cache data with updater function
-    const setCachedData = (
-        input: { view: string; page?: number; limit?: number },
+    // Predicate for current view
+    const viewQueryPredicate = createViewPredicate(currentView);
+
+    // Helper to get current cache data - finds any matching query for the view
+    const getCachedData = (): OrdersListData | undefined => {
+        const queries = queryClient.getQueriesData<OrdersListData>({ predicate: viewQueryPredicate });
+        return queries[0]?.[1];
+    };
+
+    // Helper to set cache data for ALL matching queries in a view
+    const setCachedDataForView = (
+        view: string,
         updater: (old: OrdersListData | undefined) => OrdersListData | undefined
     ) => {
-        queryClient.setQueryData(getOrdersListQueryKey(input), updater);
+        queryClient.setQueriesData<OrdersListData>(
+            { predicate: createViewPredicate(view) },
+            updater
+        );
     };
 
     // ============================================
@@ -81,12 +100,13 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
             return result.data;
         },
         onMutate: async ({ lineIds, awbNumber, courier }) => {
-            await queryClient.cancelQueries({ queryKey: ['orders'] });
+            // Cancel queries for the current view (matches any filter/page combination)
+            await queryClient.cancelQueries({ predicate: viewQueryPredicate });
             const previousData = getCachedData();
 
-            // Ship the specified lines
-            setCachedData(
-                queryInput,
+            // Ship the specified lines - update ALL caches for this view
+            setCachedDataForView(
+                currentView,
                 (old) => optimisticShipLines(old, lineIds, {
                     lineStatus: 'shipped',
                     awbNumber,
@@ -98,8 +118,9 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
             return { previousData, queryInput } as OptimisticUpdateContext;
         },
         onError: (err, _vars, context) => {
+            // Rollback all view caches to the previous value
             if (context?.previousData) {
-                setCachedData(context.queryInput, () => context.previousData);
+                setCachedDataForView(currentView, () => context.previousData);
             }
             // Invalidate after rollback to ensure consistency
             invalidateOpenOrders();
@@ -151,12 +172,13 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
             return result.data;
         },
         onMutate: async ({ lineIds, awbNumber, courier }) => {
-            await queryClient.cancelQueries({ queryKey: ['orders'] });
+            // Cancel queries for the current view (matches any filter/page combination)
+            await queryClient.cancelQueries({ predicate: viewQueryPredicate });
             const previousData = getCachedData();
 
-            // Ship the specified lines (provide defaults for optional fields)
-            setCachedData(
-                queryInput,
+            // Ship the specified lines - update ALL caches for this view
+            setCachedDataForView(
+                currentView,
                 (old) => optimisticShipLines(old, lineIds, {
                     lineStatus: 'shipped',
                     awbNumber: awbNumber || 'ADMIN-MANUAL',
@@ -168,8 +190,9 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
             return { previousData, queryInput } as OptimisticUpdateContext;
         },
         onError: (err, _vars, context) => {
+            // Rollback all view caches to the previous value
             if (context?.previousData) {
-                setCachedData(context.queryInput, () => context.previousData);
+                setCachedDataForView(currentView, () => context.previousData);
             }
             // Invalidate after rollback to ensure consistency
             invalidateOpenOrders();
@@ -196,26 +219,32 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
             return result.data;
         },
         onMutate: async ({ orderId }) => {
-            // For unship, we may be in shipped view
+            // For unship, we target the shipped view
+            const shippedViewPredicate = createViewPredicate('shipped');
             const shippedQueryInput = getOrdersQueryInput('shipped', page);
-            await queryClient.cancelQueries({ queryKey: ['orders'] });
-            const previousData = queryClient.getQueryData<OrdersListData>(getOrdersListQueryKey(shippedQueryInput));
+            await queryClient.cancelQueries({ predicate: shippedViewPredicate });
+
+            // Get data from any matching shipped view query
+            const queries = queryClient.getQueriesData<OrdersListData>({ predicate: shippedViewPredicate });
+            const previousData = queries[0]?.[1];
 
             // Get all shipped line IDs for this order from the cache
             const shippedLineIds = previousData?.rows
                 .filter((row: any) => row.orderId === orderId && row.lineStatus === 'shipped' && row.lineId)
                 .map((row: any) => row.lineId as string) || [];
 
-            setCachedData(
-                shippedQueryInput,
+            // Update ALL shipped view caches
+            setCachedDataForView(
+                'shipped',
                 (old) => optimisticUnshipLines(old, shippedLineIds)
             );
 
             return { previousData, queryInput: shippedQueryInput } as OptimisticUpdateContext;
         },
         onError: (err, _vars, context) => {
+            // Rollback all shipped view caches
             if (context?.previousData) {
-                setCachedData(context.queryInput, () => context.previousData);
+                setCachedDataForView('shipped', () => context.previousData);
             }
             // Invalidate after rollback to ensure consistency
             invalidateOpenOrders();
@@ -248,12 +277,13 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
             return result.data;
         },
         onMutate: async ({ lineId, awbNumber, courier }) => {
-            await queryClient.cancelQueries({ queryKey: ['orders'] });
+            // Cancel queries for the current view (matches any filter/page combination)
+            await queryClient.cancelQueries({ predicate: viewQueryPredicate });
             const previousData = getCachedData();
 
-            // Update line status to shipped
-            setCachedData(
-                queryInput,
+            // Update line status to shipped - update ALL caches for this view
+            setCachedDataForView(
+                currentView,
                 (old) => {
                     if (!old) return old;
 
@@ -290,8 +320,9 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
             return { previousData, queryInput } as OptimisticUpdateContext;
         },
         onError: (err, _vars, context) => {
+            // Rollback all view caches to the previous value
             if (context?.previousData) {
-                setCachedData(context.queryInput, () => context.previousData);
+                setCachedDataForView(currentView, () => context.previousData);
             }
             // Invalidate after rollback to ensure consistency
             invalidateOpenOrders();
@@ -328,19 +359,22 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
             return result.data;
         },
         onMutate: async ({ lineId }) => {
-            await queryClient.cancelQueries({ queryKey: ['orders'] });
+            // Cancel queries for the current view (matches any filter/page combination)
+            await queryClient.cancelQueries({ predicate: viewQueryPredicate });
             const previousData = getCachedData();
 
-            setCachedData(
-                queryInput,
+            // Update ALL caches for this view
+            setCachedDataForView(
+                currentView,
                 (old) => optimisticLineStatusUpdate(old, lineId, 'packed')
             );
 
             return { previousData, queryInput } as OptimisticUpdateContext;
         },
         onError: (err, _vars, context) => {
+            // Rollback all view caches to the previous value
             if (context?.previousData) {
-                setCachedData(context.queryInput, () => context.previousData);
+                setCachedDataForView(currentView, () => context.previousData);
             }
             // Invalidate after rollback to ensure consistency
             invalidateOpenOrders();
@@ -373,19 +407,22 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
             return result.data;
         },
         onMutate: async ({ lineId, awbNumber, courier }) => {
-            await queryClient.cancelQueries({ queryKey: ['orders'] });
+            // Cancel queries for the current view (matches any filter/page combination)
+            await queryClient.cancelQueries({ predicate: viewQueryPredicate });
             const previousData = getCachedData();
 
-            setCachedData(
-                queryInput,
+            // Update ALL caches for this view
+            setCachedDataForView(
+                currentView,
                 (old) => optimisticUpdateLineTracking(old, lineId, { awbNumber, courier })
             );
 
             return { previousData, queryInput } as OptimisticUpdateContext;
         },
         onError: (err, _vars, context) => {
+            // Rollback all view caches to the previous value
             if (context?.previousData) {
-                setCachedData(context.queryInput, () => context.previousData);
+                setCachedDataForView(currentView, () => context.previousData);
             }
             // Invalidate after rollback to ensure consistency
             invalidateOpenOrders();

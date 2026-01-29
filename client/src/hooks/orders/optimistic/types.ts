@@ -31,12 +31,28 @@ export interface OrdersListData {
 }
 
 /**
- * Helper type for optimistic update context
- * Stores data needed for rollback on error
+ * Legacy type for optimistic update context (single query rollback)
+ * @deprecated Use ViewOptimisticContext for proper multi-query rollback
  */
 export interface OptimisticUpdateContext {
     previousData: OrdersListData | undefined;
     queryInput: OrdersQueryInput;
+}
+
+/**
+ * Type for view cache snapshot (maps stringified query keys to data)
+ */
+export type ViewCacheSnapshot = Map<string, OrdersListData | undefined>;
+
+/**
+ * Optimistic update context that properly handles ALL cached queries for a view.
+ * Stores snapshots of all matching queries for correct rollback on error.
+ */
+export interface ViewOptimisticContext {
+    /** Snapshot of ALL cached queries for the view (for rollback) */
+    viewSnapshot: ViewCacheSnapshot;
+    /** The view being operated on */
+    view: string;
 }
 
 /**

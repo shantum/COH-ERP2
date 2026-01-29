@@ -13,7 +13,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { inventoryQueryKeys } from '../../constants/queryKeys';
-import { useOrderInvalidation, getOrdersListQueryKey } from './orderMutationUtils';
+import { useOrderInvalidation } from './orderMutationUtils';
 import { getTodayString } from '../../components/orders/OrdersTable/utils/dateFormatters';
 import {
     createBatch as createBatchFn,
@@ -40,20 +40,30 @@ export function useProductionBatchMutations(options: UseProductionBatchMutations
     const queryClient = useQueryClient();
     const { invalidateOpenOrders } = useOrderInvalidation();
 
-    // Build query input for cache operations
+    // Build query input for cache operations (used for rollback context)
     const queryInput = getOrdersQueryInput(currentView, page);
 
-    // Query key for TanStack Query cache operations
-    const ordersQueryKey = getOrdersListQueryKey(queryInput);
-
-    // Helper to get current cache data
-    const getCachedData = (): OrdersListData | undefined => {
-        return queryClient.getQueryData(ordersQueryKey);
+    /**
+     * Predicate to match all order list queries for the current view.
+     * This matches regardless of filters (allocatedFilter, productionFilter) or pagination.
+     * Query key format: ['orders', 'list', 'server-fn', { view, page, limit, ...filters }]
+     */
+    const viewQueryPredicate = (query: { queryKey: readonly unknown[] }) => {
+        const key = query.queryKey;
+        if (key[0] !== 'orders' || key[1] !== 'list' || key[2] !== 'server-fn') return false;
+        const params = key[3] as { view?: string } | undefined;
+        return params?.view === currentView;
     };
 
-    // Helper to set cache data
+    // Helper to get current cache data - finds any matching query for the view
+    const getCachedData = (): OrdersListData | undefined => {
+        const queries = queryClient.getQueriesData<OrdersListData>({ predicate: viewQueryPredicate });
+        return queries[0]?.[1];
+    };
+
+    // Helper to set cache data for ALL matching queries in this view
     const setCachedData = (updater: (old: OrdersListData | undefined) => OrdersListData | undefined) => {
-        queryClient.setQueryData(ordersQueryKey, updater);
+        queryClient.setQueriesData<OrdersListData>({ predicate: viewQueryPredicate }, updater);
     };
 
     // Server function wrappers
@@ -95,8 +105,8 @@ export function useProductionBatchMutations(options: UseProductionBatchMutations
             return { id: result.data!.batchId, ...result.data };
         },
         onMutate: async (data) => {
-            // Cancel any outgoing refetches
-            await queryClient.cancelQueries({ queryKey: ordersQueryKey });
+            // Cancel queries for this view (matches any filter/page combination)
+            await queryClient.cancelQueries({ predicate: viewQueryPredicate });
 
             // Snapshot previous data for rollback
             const previousData = getCachedData();
@@ -161,9 +171,12 @@ export function useProductionBatchMutations(options: UseProductionBatchMutations
             queryClient.invalidateQueries({ queryKey: ['production', 'requirements'] });
         },
         onError: (err: Error, _data, context) => {
-            // Rollback on error
+            // Rollback all view caches to the previous value
             if (context?.previousData) {
-                queryClient.setQueryData(ordersQueryKey, context.previousData);
+                queryClient.setQueriesData<OrdersListData>(
+                    { predicate: viewQueryPredicate },
+                    () => context.previousData
+                );
             }
             // Force invalidate to ensure consistency
             invalidateOpenOrders();
@@ -204,7 +217,8 @@ export function useProductionBatchMutations(options: UseProductionBatchMutations
             return result.data;
         },
         onMutate: async ({ id, data }) => {
-            await queryClient.cancelQueries({ queryKey: ordersQueryKey });
+            // Cancel queries for this view (matches any filter/page combination)
+            await queryClient.cancelQueries({ predicate: viewQueryPredicate });
             const previousData = getCachedData();
 
             // Optimistically update the batch date
@@ -222,8 +236,12 @@ export function useProductionBatchMutations(options: UseProductionBatchMutations
             queryClient.invalidateQueries({ queryKey: ['production', 'capacity'] });
         },
         onError: (err: Error, _vars, context) => {
+            // Rollback all view caches to the previous value
             if (context?.previousData) {
-                queryClient.setQueryData(ordersQueryKey, context.previousData);
+                queryClient.setQueriesData<OrdersListData>(
+                    { predicate: viewQueryPredicate },
+                    () => context.previousData
+                );
             }
             invalidateOpenOrders();
             alert(err.message || 'Failed to update batch');
@@ -247,7 +265,8 @@ export function useProductionBatchMutations(options: UseProductionBatchMutations
             return result.data;
         },
         onMutate: async (id) => {
-            await queryClient.cancelQueries({ queryKey: ordersQueryKey });
+            // Cancel queries for this view (matches any filter/page combination)
+            await queryClient.cancelQueries({ predicate: viewQueryPredicate });
             const previousData = getCachedData();
 
             // Find the line ID before deleting (for potential rollback info)
@@ -272,8 +291,12 @@ export function useProductionBatchMutations(options: UseProductionBatchMutations
             queryClient.invalidateQueries({ queryKey: ['production', 'requirements'] });
         },
         onError: (err: Error, _id, context) => {
+            // Rollback all view caches to the previous value
             if (context?.previousData) {
-                queryClient.setQueryData(ordersQueryKey, context.previousData);
+                queryClient.setQueriesData<OrdersListData>(
+                    { predicate: viewQueryPredicate },
+                    () => context.previousData
+                );
             }
             invalidateOpenOrders();
             alert(err.message || 'Failed to delete batch');

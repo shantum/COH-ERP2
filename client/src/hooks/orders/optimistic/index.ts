@@ -22,6 +22,8 @@ export {
     type OrdersQueryInput,
     type OrdersListData,
     type OptimisticUpdateContext,
+    type ViewOptimisticContext,
+    type ViewCacheSnapshot,
     type ShipData,
 } from './types';
 
@@ -31,13 +33,25 @@ export {
     hasAllocatedInventory,
 } from './inventoryHelpers';
 
-// Cache targeting
+// Cache targeting (legacy single-query helpers)
 export {
     getOrdersQueryInput,
     getRowByLineId,
     getRowsByLineIds,
     getRowsByOrderId,
     getRowByBatchId,
+} from './cacheTargeting';
+
+// View-based cache utilities (handles all filter/page variants)
+export {
+    createViewPredicate,
+    getViewCacheSnapshot,
+    restoreViewCacheSnapshot,
+    updateViewCache,
+    cancelViewQueries,
+    findRowInViewCache,
+    findRowsInViewCache,
+    findOrderRowsInViewCache,
 } from './cacheTargeting';
 
 // Status update helpers
