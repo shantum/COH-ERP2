@@ -5,7 +5,7 @@
  * Note: Archived view hidden from UI but auto-archive still runs. Search shows archived orders.
  */
 
-import { useState, useMemo, useCallback, useEffect } from 'react';
+import { useState, useMemo, useCallback, useEffect, lazy, Suspense } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { useQueryClient, useQuery } from '@tanstack/react-query';
 import { Route } from '../routes/_authenticated/orders';
@@ -32,13 +32,15 @@ import { getOrderById } from '../server/functions/orders';
 import {
     OrdersTable,
     OrdersGridSkeleton,
-    CreateOrderModal,
-    CustomizationModal,
-    UnifiedOrderModal,
     GlobalOrderSearch,
     OrderViewTabs,
 } from '../components/orders';
 import type { CustomizationType } from '../components/orders';
+
+// Lazy load modals - only loaded when user opens them
+const CreateOrderModal = lazy(() => import('../components/orders/CreateOrderModal'));
+const CustomizationModal = lazy(() => import('../components/orders/CustomizationModal'));
+const UnifiedOrderModal = lazy(() => import('../components/orders/UnifiedOrderModal'));
 import type { Order, OrderLine } from '../types';
 import type { OrdersSearchParams } from '@coh/shared';
 
@@ -902,55 +904,57 @@ export default function Orders() {
                 </div>
             </div>
 
-            {/* Modals */}
-            {showCreateOrder && (
-                <CreateOrderModal
-                    allSkus={allSkus || []}
-                    channels={channels || []}
-                    inventoryBalance={inventoryBalance || []}
-                    onCreate={(data) => mutations.createOrder.mutate(data)}
-                    onClose={closeModal}
-                    isCreating={mutations.createOrder.isPending}
-                />
-            )}
+            {/* Modals - lazy loaded */}
+            <Suspense fallback={null}>
+                {showCreateOrder && (
+                    <CreateOrderModal
+                        allSkus={allSkus || []}
+                        channels={channels || []}
+                        inventoryBalance={inventoryBalance || []}
+                        onCreate={(data) => mutations.createOrder.mutate(data)}
+                        onClose={closeModal}
+                        isCreating={mutations.createOrder.isPending}
+                    />
+                )}
 
-            {customizingLine && (
-                <CustomizationModal
-                    isOpen={true}
-                    onClose={() => {
-                        setCustomizingLine(null);
-                        setIsEditingCustomization(false);
-                        setCustomizationInitialData(null);
-                    }}
-                    onConfirm={handleConfirmCustomization}
-                    lineData={customizingLine}
-                    isSubmitting={mutations.customizeLine.isPending || mutations.removeCustomization.isPending}
-                    isEditMode={isEditingCustomization}
-                    initialData={customizationInitialData}
-                />
-            )}
+                {customizingLine && (
+                    <CustomizationModal
+                        isOpen={true}
+                        onClose={() => {
+                            setCustomizingLine(null);
+                            setIsEditingCustomization(false);
+                            setCustomizationInitialData(null);
+                        }}
+                        onConfirm={handleConfirmCustomization}
+                        lineData={customizingLine}
+                        isSubmitting={mutations.customizeLine.isPending || mutations.removeCustomization.isPending}
+                        isEditMode={isEditingCustomization}
+                        initialData={customizationInitialData}
+                    />
+                )}
 
-            {/* Loading state when fetching order from URL */}
-            {isLoadingModalOrder && modalOrderId && !unifiedModalOrder && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-                    <div className="bg-white rounded-lg p-6 flex items-center gap-3">
-                        <RefreshCw className="h-5 w-5 animate-spin text-primary-600" />
-                        <span>Loading order...</span>
+                {/* Loading state when fetching order from URL */}
+                {isLoadingModalOrder && modalOrderId && !unifiedModalOrder && (
+                    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+                        <div className="bg-white rounded-lg p-6 flex items-center gap-3">
+                            <RefreshCw className="h-5 w-5 animate-spin text-primary-600" />
+                            <span>Loading order...</span>
+                        </div>
                     </div>
-                </div>
-            )}
+                )}
 
-            {unifiedModalOrder && (
-                <UnifiedOrderModal
-                    order={unifiedModalOrder}
-                    initialMode={unifiedModalMode}
-                    onClose={closeModal}
-                    onSuccess={() => {
-                        closeModal();
-                        queryClient.invalidateQueries({ queryKey: ['orders'] });
-                    }}
-                />
-            )}
+                {unifiedModalOrder && (
+                    <UnifiedOrderModal
+                        order={unifiedModalOrder}
+                        initialMode={unifiedModalMode}
+                        onClose={closeModal}
+                        onSuccess={() => {
+                            closeModal();
+                            queryClient.invalidateQueries({ queryKey: ['orders'] });
+                        }}
+                    />
+                )}
+            </Suspense>
         </div>
     );
 }

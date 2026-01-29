@@ -9,10 +9,12 @@ import {
     getFrequentReturners,
     type TopCustomer,
 } from '../server/functions/reports';
-import { useState, useMemo, useCallback, useEffect } from 'react';
+import { useState, useMemo, useCallback, useEffect, lazy, Suspense } from 'react';
 import { Crown, Medal, AlertTriangle, TrendingDown, ShoppingBag, Clock, TrendingUp, Repeat } from 'lucide-react';
 import { useNavigate } from '@tanstack/react-router';
-import { UnifiedOrderModal } from '../components/orders';
+
+// Lazy load modal - only loaded when user opens it
+const UnifiedOrderModal = lazy(() => import('../components/orders/UnifiedOrderModal'));
 import type { Order, OrderLine } from '../types';
 import { useCustomersUrlModal } from '../hooks/useUrlModal';
 import { Route } from '../routes/_authenticated/customers';
@@ -794,14 +796,16 @@ export default function Customers() {
                 </div>
             )}
 
-            {/* Unified Order Modal - Customer Tab (URL-driven) */}
-            {modalType === 'view' && modalOrder && (
-                <UnifiedOrderModal
-                    order={modalOrder}
-                    initialMode="customer"
-                    onClose={handleCloseModal}
-                />
-            )}
+            {/* Unified Order Modal - Customer Tab (URL-driven, lazy loaded) */}
+            <Suspense fallback={null}>
+                {modalType === 'view' && modalOrder && (
+                    <UnifiedOrderModal
+                        order={modalOrder}
+                        initialMode="customer"
+                        onClose={handleCloseModal}
+                    />
+                )}
+            </Suspense>
         </div>
     );
 }

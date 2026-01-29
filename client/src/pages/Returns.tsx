@@ -42,14 +42,16 @@ import {
     toOptions,
     getLabel,
 } from '@coh/shared/domain/returns';
-import { useState } from 'react';
+import { useState, lazy, Suspense } from 'react';
 import {
     Plus, X, Search, Package, Truck, Check,
     PackageCheck, AlertCircle, CheckCircle,
     ArrowRight, DollarSign, XCircle, Settings,
     MessageSquare, Pencil, Save
 } from 'lucide-react';
-import { CustomerDetailModal } from '../components/orders/CustomerDetailModal';
+
+// Lazy load modal - only loaded when user opens it
+const CustomerDetailModal = lazy(() => import('../components/orders/CustomerDetailModal'));
 import { useIThinkTracking } from '../hooks/useIThinkTracking';
 import ithinkLogo from '../assets/ithinklogistics.png';
 import { formatLastUpdate } from '../components/orders/OrdersTable/utils/dateFormatters';
@@ -761,13 +763,15 @@ export default function Returns() {
                 />
             )}
 
-            {/* Customer Detail Modal */}
-            {selectedCustomerId && (
-                <CustomerDetailModal
-                    customerId={selectedCustomerId}
-                    onClose={() => setSelectedCustomerId(null)}
-                />
-            )}
+            {/* Customer Detail Modal (lazy loaded) */}
+            <Suspense fallback={null}>
+                {selectedCustomerId && (
+                    <CustomerDetailModal
+                        customerId={selectedCustomerId}
+                        onClose={() => setSelectedCustomerId(null)}
+                    />
+                )}
+            </Suspense>
         </div>
     );
 }

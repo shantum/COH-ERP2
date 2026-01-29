@@ -304,7 +304,7 @@ export function OrdersTable({
         count: tableRows.length,
         getScrollElement: () => parentRef.current,
         estimateSize: () => ROW_HEIGHT,
-        overscan: 20,
+        overscan: 5,
     });
 
     const virtualRows = virtualizer.getVirtualItems();
