@@ -428,25 +428,21 @@ export const getFabricColourTransactions = createServerFn({ method: 'GET' })
     .handler(async ({ data }): Promise<GetFabricColourTransactionsResponse> => {
         const prisma = await getPrisma();
 
-        try {
-            const transactions = await prisma.fabricColourTransaction.findMany({
-                where: { fabricColourId: data.fabricColourId },
-                include: {
-                    createdBy: { select: { id: true, name: true } },
-                    supplier: { select: { id: true, name: true } },
-                },
-                orderBy: { createdAt: 'desc' },
-                take: data.limit,
-                skip: data.offset,
-            });
+        const transactions = await prisma.fabricColourTransaction.findMany({
+            where: { fabricColourId: data.fabricColourId },
+            include: {
+                createdBy: { select: { id: true, name: true } },
+                supplier: { select: { id: true, name: true } },
+            },
+            orderBy: { createdAt: 'desc' },
+            take: data.limit,
+            skip: data.offset,
+        });
 
-            return {
-                success: true,
-                transactions,
-            };
-        } finally {
-            await prisma.$disconnect();
-        }
+        return {
+            success: true,
+            transactions,
+        };
     });
 
 /**
@@ -460,8 +456,7 @@ export const getAllFabricColourTransactions = createServerFn({ method: 'POST' })
     .handler(async ({ data }): Promise<GetAllFabricColourTransactionsResponse> => {
         const prisma = await getPrisma();
 
-        try {
-            const limit = data?.limit ?? 500;
+        const limit = data?.limit ?? 500;
             const offset = data?.offset ?? 0;
 
             // Build where clause
@@ -535,9 +530,6 @@ export const getAllFabricColourTransactions = createServerFn({ method: 'POST' })
                 page: Math.floor(offset / limit) + 1,
                 pageSize: limit,
             };
-        } finally {
-            await prisma.$disconnect();
-        }
     });
 
 /**
@@ -552,8 +544,7 @@ export const getRecentFabricReceipts = createServerFn({ method: 'POST' })
     .handler(async ({ data }): Promise<GetRecentFabricReceiptsResponse> => {
         const prisma = await getPrisma();
 
-        try {
-            const limit = data?.limit ?? 100;
+        const limit = data?.limit ?? 100;
             const days = data?.days ?? 7;
 
             // Calculate start date
@@ -612,9 +603,6 @@ export const getRecentFabricReceipts = createServerFn({ method: 'POST' })
                 receipts,
                 total,
             };
-        } finally {
-            await prisma.$disconnect();
-        }
     });
 
 /**
@@ -628,8 +616,7 @@ export const getFabricColourStockAnalysis = createServerFn({ method: 'GET' })
     .handler(async ({ data }): Promise<GetFabricColourStockAnalysisResponse> => {
         const prisma = await getPrisma();
 
-        try {
-            const where: Prisma.FabricColourWhereInput = { isActive: true };
+        const where: Prisma.FabricColourWhereInput = { isActive: true };
 
             if (data?.fabricColourId) {
                 where.id = data.fabricColourId;
@@ -731,9 +718,6 @@ export const getFabricColourStockAnalysis = createServerFn({ method: 'GET' })
                 success: true,
                 analysis: filteredAnalysis,
             };
-        } finally {
-            await prisma.$disconnect();
-        }
     });
 
 /**
@@ -748,8 +732,7 @@ export const getTopMaterials = createServerFn({ method: 'GET' })
     .handler(async ({ data }): Promise<GetTopMaterialsResponse> => {
         const prisma = await getPrisma();
 
-        try {
-            const days = data?.days ?? 0;
+        const days = data?.days ?? 0;
             const level = data?.level ?? 'material';
             const limit = data?.limit ?? 15;
 
@@ -1037,9 +1020,6 @@ export const getTopMaterials = createServerFn({ method: 'GET' })
                     data: result,
                 };
             }
-        } finally {
-            await prisma.$disconnect();
-        }
     });
 
 // ============================================
@@ -1055,8 +1035,7 @@ export const getFabricColourReconciliations = createServerFn({ method: 'GET' })
     .handler(async ({ data }): Promise<GetFabricColourReconciliationsResponse> => {
         const prisma = await getPrisma();
 
-        try {
-            const reconciliations = await prisma.fabricColourReconciliation.findMany({
+        const reconciliations = await prisma.fabricColourReconciliation.findMany({
                 include: {
                     items: true,
                 },
@@ -1098,9 +1077,6 @@ export const getFabricColourReconciliations = createServerFn({ method: 'GET' })
                 success: true,
                 history,
             };
-        } finally {
-            await prisma.$disconnect();
-        }
     });
 
 /**
@@ -1112,8 +1088,7 @@ export const getFabricColourReconciliation = createServerFn({ method: 'GET' })
     .handler(async ({ data }): Promise<GetFabricColourReconciliationResponse> => {
         const prisma = await getPrisma();
 
-        try {
-            const reconciliation = await prisma.fabricColourReconciliation.findUnique({
+        const reconciliation = await prisma.fabricColourReconciliation.findUnique({
                 where: { id: data.id },
                 include: {
                     items: {
@@ -1164,9 +1139,6 @@ export const getFabricColourReconciliation = createServerFn({ method: 'GET' })
                     })),
                 },
             };
-        } finally {
-            await prisma.$disconnect();
-        }
     });
 
 /**
@@ -1181,9 +1153,8 @@ export const startFabricColourReconciliation = createServerFn({ method: 'POST' }
     .handler(async ({ data, context }): Promise<StartFabricColourReconciliationResponse> => {
         const prisma = await getPrisma();
 
-        try {
-            // Get all active fabric colours
-            const fabricColours = await prisma.fabricColour.findMany({
+        // Get all active fabric colours
+        const fabricColours = await prisma.fabricColour.findMany({
                 where: { isActive: true },
                 include: {
                     fabric: {
@@ -1258,10 +1229,6 @@ export const startFabricColourReconciliation = createServerFn({ method: 'POST' }
                     })),
                 },
             };
-        } catch (error: unknown) {
-            console.error('[startFabricColourReconciliation] Error:', error);
-            throw error;
-        }
     });
 
 /**

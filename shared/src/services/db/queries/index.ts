@@ -25,3 +25,25 @@ export {
     type InventoryListParams,
     type InventoryBalanceWithSkuId,
 } from './inventory.js';
+
+// Dashboard queries
+export {
+    getPipelineAndPaymentSplit,
+    getAllRevenueMetrics,
+    getTopProductsKysely,
+    getTopVariationsKysely,
+    getTopCustomersKysely,
+    getTopMaterialsKysely,
+    getTopFabricColoursKysely,
+    getDashboardAnalytics,
+    type PipelineCounts,
+    type PaymentSplitData,
+    type RevenueMetrics,
+    type AllRevenueMetrics,
+    type TopProductData,
+    type TopVariationData,
+    type TopCustomerData,
+    type TopMaterialData,
+    type TopFabricColourData,
+    type DashboardAnalytics,
+} from './dashboard.js';

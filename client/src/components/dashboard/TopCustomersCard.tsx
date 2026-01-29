@@ -2,13 +2,14 @@
  * TopCustomersCard - Top customers by revenue with their favorite products
  * Mobile-first responsive design
  *
- * Uses TanStack Start Server Functions for data fetching.
+ * Uses optimized Kysely queries with server-side caching.
  */
 
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { getTopCustomersForDashboard } from '../../server/functions/reports';
-import { Users, Crown, Star, Award } from 'lucide-react';
+import { formatCurrency } from '@coh/shared';
+import { getTopCustomersForDashboard } from '../../server/functions/dashboard';
+import { Users, Crown, Star, Award, AlertCircle, RefreshCcw } from 'lucide-react';
 
 const TIME_PERIODS = [
     { value: 'today', label: 'Today' },
@@ -29,17 +30,12 @@ const TIER_STYLES: Record<string, { bg: string; text: string; icon: any }> = {
 export function TopCustomersCard() {
     const [period, setPeriod] = useState('today');
 
-    const { data, isLoading } = useQuery({
-        queryKey: ['topCustomers', period],
+    const { data, isLoading, error, refetch } = useQuery({
+        queryKey: ['dashboard', 'topCustomers', period],
         queryFn: () => getTopCustomersForDashboard({ data: { period, limit: 10 } }),
         staleTime: 60 * 1000,
+        retry: 2,
     });
-
-    const formatCurrency = (amount: number) => {
-        if (amount >= 100000) return `₹${(amount / 100000).toFixed(1)}L`;
-        if (amount >= 1000) return `₹${(amount / 1000).toFixed(1)}K`;
-        return `₹${amount.toFixed(0)}`;
-    };
 
     const getTierBadge = (tier?: string) => {
         if (!tier) return null;
@@ -75,10 +71,22 @@ export function TopCustomersCard() {
             </div>
 
             {/* Content */}
-            {isLoading ? (
+            {error ? (
+                <div className="py-6 text-center">
+                    <AlertCircle className="w-8 h-8 text-red-400 mx-auto mb-2" />
+                    <p className="text-gray-500 text-sm mb-2">Failed to load customers</p>
+                    <button
+                        onClick={() => refetch()}
+                        className="inline-flex items-center gap-1 text-xs text-emerald-600 hover:text-emerald-700"
+                    >
+                        <RefreshCcw className="w-3 h-3" />
+                        Try again
+                    </button>
+                </div>
+            ) : isLoading ? (
                 <div className="space-y-2">
                     {[...Array(5)].map((_, i) => (
-                        <div key={i} className="h-14 sm:h-16 bg-gray-100 rounded animate-pulse" />
+                        <div key={i} className="h-14 sm:h-16 bg-gray-100 rounded" />
                     ))}
                 </div>
             ) : !data?.data?.length ? (
@@ -109,7 +117,6 @@ export function TopCustomersCard() {
                                     {getTierBadge(customer.tier)}
                                 </div>
                                 <div className="text-[10px] sm:text-xs text-gray-500 mt-0.5">
-                                    {customer.city && <span className="text-gray-600">{customer.city} • </span>}
                                     {customer.orderCount} orders • {customer.units} units
                                 </div>
                                 {/* Top Products */}

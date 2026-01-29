@@ -2,27 +2,36 @@
  * OrdersAnalyticsBar - Clean, responsive dashboard metrics
  * Mobile-first design with collapsible sections
  *
- * Uses Server Functions for data fetching (TanStack Start migration)
+ * SSR-optimized: Accepts initialData from route loader for instant render.
+ * Uses server-side caching for efficient data fetching.
  */
 
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
-import { ChevronDown, ChevronUp, TrendingUp, TrendingDown, Minus, Users, UserPlus } from 'lucide-react';
-import { getOrdersAnalytics, type OrdersAnalyticsResponse, type CustomerStats } from '../../server/functions/orders';
+import { ChevronDown, ChevronUp, TrendingUp, TrendingDown, Minus, Users, UserPlus, AlertCircle, RefreshCcw } from 'lucide-react';
+import { formatCurrency } from '@coh/shared';
+import { getOrdersAnalytics, type OrdersAnalyticsResponse, type CustomerStats } from '../../server/functions/dashboard';
 
-export function OrdersAnalyticsBar() {
+interface OrdersAnalyticsBarProps {
+    /** SSR pre-fetched data from route loader */
+    initialData?: OrdersAnalyticsResponse | null;
+}
+
+export function OrdersAnalyticsBar({ initialData }: OrdersAnalyticsBarProps) {
     const [isExpanded, setIsExpanded] = useState(true);
-    const { data: analytics, isLoading } = useQuery<OrdersAnalyticsResponse>({
-        queryKey: ['ordersAnalytics'],
+    const { data: analytics, isLoading, error, refetch } = useQuery<OrdersAnalyticsResponse>({
+        queryKey: ['dashboard', 'ordersAnalytics'],
         queryFn: () => getOrdersAnalytics(),
+        initialData: initialData ?? undefined,
         staleTime: 30 * 1000,
         refetchInterval: 60 * 1000,
     });
 
-    if (isLoading) {
+    // Show skeleton only if no initial data and still loading
+    if (isLoading && !initialData) {
         return (
             <div className="bg-white border border-gray-200 rounded-lg p-3 sm:p-4">
-                <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 animate-pulse">
+                <div className="flex flex-col sm:flex-row gap-3 sm:gap-4">
                     <div className="h-8 sm:h-10 bg-gray-100 rounded flex-1"></div>
                     <div className="h-8 sm:h-10 bg-gray-100 rounded flex-1"></div>
                     <div className="h-8 sm:h-10 bg-gray-100 rounded flex-1"></div>
@@ -31,13 +40,26 @@ export function OrdersAnalyticsBar() {
         );
     }
 
-    if (!analytics) return null;
+    // Show error state
+    if (error && !analytics) {
+        return (
+            <div className="bg-white border border-red-200 rounded-lg p-3 sm:p-4">
+                <div className="flex items-center gap-2 text-red-600">
+                    <AlertCircle className="w-4 h-4" />
+                    <span className="text-sm">Failed to load analytics</span>
+                    <button
+                        onClick={() => refetch()}
+                        className="ml-auto inline-flex items-center gap-1 text-xs text-red-600 hover:text-red-700"
+                    >
+                        <RefreshCcw className="w-3 h-3" />
+                        Retry
+                    </button>
+                </div>
+            </div>
+        );
+    }
 
-    const formatCurrency = (amount: number) => {
-        if (amount >= 100000) return `₹${(amount / 100000).toFixed(2)}L`;
-        if (amount >= 1000) return `₹${(amount / 1000).toFixed(2)}K`;
-        return `₹${amount.toFixed(0)}`;
-    };
+    if (!analytics) return null;
 
     const codPercent = analytics.totalOrders > 0
         ? Math.round((analytics.paymentSplit.cod.count / analytics.totalOrders) * 100)

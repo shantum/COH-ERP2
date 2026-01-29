@@ -2,13 +2,14 @@
  * TopProductsCard - Configurable top products display
  * Mobile-first responsive design
  *
- * Uses TanStack Start Server Functions for data fetching.
+ * Uses optimized Kysely queries with server-side caching.
  */
 
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { getTopProductsForDashboard } from '../../server/functions/reports';
-import { TrendingUp, Package, Palette } from 'lucide-react';
+import { formatCurrency } from '@coh/shared';
+import { getTopProductsForDashboard } from '../../server/functions/dashboard';
+import { TrendingUp, Package, Palette, AlertCircle, RefreshCcw } from 'lucide-react';
 import { getOptimizedImageUrl } from '../../utils/imageOptimization';
 
 const TIME_PERIODS = [
@@ -29,17 +30,12 @@ export function TopProductsCard() {
     const [days, setDays] = useState(0);
     const [level, setLevel] = useState<'product' | 'variation'>('product');
 
-    const { data, isLoading } = useQuery({
-        queryKey: ['topProducts', days, level],
+    const { data, isLoading, error, refetch } = useQuery({
+        queryKey: ['dashboard', 'topProducts', days, level],
         queryFn: () => getTopProductsForDashboard({ data: { days, level, limit: 15 } }),
         staleTime: 60 * 1000,
+        retry: 2,
     });
-
-    const formatCurrency = (amount: number) => {
-        if (amount >= 100000) return `₹${(amount / 100000).toFixed(1)}L`;
-        if (amount >= 1000) return `₹${(amount / 1000).toFixed(1)}K`;
-        return `₹${amount.toFixed(0)}`;
-    };
 
     return (
         <div className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4 shadow-sm">
@@ -83,10 +79,22 @@ export function TopProductsCard() {
             </div>
 
             {/* Content */}
-            {isLoading ? (
+            {error ? (
+                <div className="py-6 text-center">
+                    <AlertCircle className="w-8 h-8 text-red-400 mx-auto mb-2" />
+                    <p className="text-gray-500 text-sm mb-2">Failed to load products</p>
+                    <button
+                        onClick={() => refetch()}
+                        className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700"
+                    >
+                        <RefreshCcw className="w-3 h-3" />
+                        Try again
+                    </button>
+                </div>
+            ) : isLoading ? (
                 <div className="space-y-2">
                     {[...Array(5)].map((_, i) => (
-                        <div key={i} className="h-10 sm:h-12 bg-gray-100 rounded animate-pulse" />
+                        <div key={i} className="h-10 sm:h-12 bg-gray-100 rounded" />
                     ))}
                 </div>
             ) : !data?.data?.length ? (
