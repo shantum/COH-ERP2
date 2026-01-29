@@ -22,6 +22,7 @@ import {
   Save,
 } from 'lucide-react';
 import type { Order, OrderLine } from '../../../../types';
+import { getOptimizedImageUrl } from '../../../../utils/imageOptimization';
 import type { ReturnFormState, LineReturnEligibility } from '../types';
 
 // Return conditions for receive action
@@ -232,7 +233,7 @@ function ReturnLineItem({
       {/* Product image */}
       <div className="w-14 h-14 shrink-0 bg-slate-100 rounded-lg overflow-hidden">
         {imageUrl ? (
-          <img src={imageUrl} alt={productName} className="w-full h-full object-cover" />
+          <img src={getOptimizedImageUrl(imageUrl, 'md') || imageUrl} alt={productName} className="w-full h-full object-cover" loading="lazy" />
         ) : (
           <div className="w-full h-full flex items-center justify-center text-slate-400">
             <Package size={20} />

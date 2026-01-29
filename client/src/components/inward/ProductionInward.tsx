@@ -11,6 +11,7 @@ import { quickInwardBySkuCode } from '../../server/functions/inventoryMutations'
 import { Search, Plus, X, Check, AlertTriangle, Package } from 'lucide-react';
 import RecentInwardsTable from './RecentInwardsTable';
 import PendingQueuePanel from './PendingQueuePanel';
+import { getOptimizedImageUrl } from '../../utils/imageOptimization';
 interface ProductionInwardProps {
     onSuccess?: (message: string) => void;
     onError?: (message: string) => void;
@@ -242,9 +243,10 @@ export default function ProductionInward({ onSuccess, onError }: ProductionInwar
                         <div className="w-32 h-32 bg-white rounded-lg overflow-hidden flex-shrink-0 border">
                             {scanResult.sku.imageUrl ? (
                                 <img
-                                    src={scanResult.sku.imageUrl}
+                                    src={getOptimizedImageUrl(scanResult.sku.imageUrl, 'lg') || scanResult.sku.imageUrl}
                                     alt={scanResult.sku.skuCode}
                                     className="w-full h-full object-cover"
+                                    loading="lazy"
                                 />
                             ) : (
                                 <div className="w-full h-full flex items-center justify-center text-gray-400">

@@ -16,6 +16,7 @@ import { useState, useCallback, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { Users, Search, LayoutGrid, Layers } from 'lucide-react';
+import { useDebounce } from '../../hooks/useDebounce';
 
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import type { MaterialNode, MaterialNodeType, MaterialTreeResponse } from './types';
@@ -59,6 +60,8 @@ export function MaterialsTreeView({
     onAddSupplier,
 }: MaterialsTreeViewProps) {
     const [searchQuery, setSearchQuery] = useState('');
+    // Debounce search to prevent expensive tree filtering on every keystroke
+    const debouncedSearchQuery = useDebounce(searchQuery, 300);
     const [viewMode, setViewMode] = useState<ViewMode>('fabric'); // Default to fabric view
 
     // Unified modal state
@@ -369,7 +372,7 @@ export function MaterialsTreeView({
                     onDeactivate={handleDeactivate}
                     onDelete={handleDelete}
                     onLinkProducts={handleLinkProducts}
-                    searchQuery={searchQuery}
+                    searchQuery={debouncedSearchQuery}
                     viewMode={viewMode}
                     fabricFirstData={fabricFirstData}
                     height="100%"

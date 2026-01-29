@@ -13,6 +13,7 @@ import { useState, useMemo, useEffect, Fragment } from 'react';
 import { type ColumnDef, type ExpandedState, type PaginationState, flexRender, getCoreRowModel, getExpandedRowModel, getPaginationRowModel, useReactTable } from '@tanstack/react-table';
 import { Eye, Package, Layers, Box, AlertTriangle, CheckCircle, XCircle, GitBranch, ChevronRight, ChevronDown, ChevronLeft, ImageIcon, Edit } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { getOptimizedImageUrl } from '../../utils/imageOptimization';
 
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
@@ -97,9 +98,10 @@ export function ProductsDataTable({ onViewProduct, onEditBom, onEditProduct, sea
                     <div className="w-7 h-7 rounded overflow-hidden bg-gray-100 flex items-center justify-center flex-shrink-0">
                         {row.original.imageUrl ? (
                             <img
-                                src={row.original.imageUrl}
+                                src={getOptimizedImageUrl(row.original.imageUrl, 'xs') || row.original.imageUrl}
                                 alt={row.original.name}
                                 className="w-full h-full object-cover"
+                                loading="lazy"
                             />
                         ) : (
                             <ImageIcon size={12} className="text-gray-300" />
@@ -188,9 +190,10 @@ export function ProductsDataTable({ onViewProduct, onEditBom, onEditProduct, sea
                                 >
                                     {v.imageUrl ? (
                                         <img
-                                            src={v.imageUrl}
+                                            src={getOptimizedImageUrl(v.imageUrl, 'xs') || v.imageUrl}
                                             alt={v.colorName || ''}
                                             className="w-full h-full object-cover"
+                                            loading="lazy"
                                         />
                                     ) : v.colorHex ? (
                                         <div
@@ -568,9 +571,10 @@ function VariationsTable({ variations, onViewVariation, onEditBom, onEditVariati
                                     <div className="w-6 h-6 rounded overflow-hidden bg-gray-100 flex items-center justify-center">
                                         {variation.imageUrl ? (
                                             <img
-                                                src={variation.imageUrl}
+                                                src={getOptimizedImageUrl(variation.imageUrl, 'xs') || variation.imageUrl}
                                                 alt={variation.colorName}
                                                 className="w-full h-full object-cover"
+                                                loading="lazy"
                                             />
                                         ) : variation.colorHex ? (
                                             <span

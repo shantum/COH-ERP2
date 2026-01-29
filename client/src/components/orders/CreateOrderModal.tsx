@@ -19,6 +19,7 @@ import { CustomerSearch } from '../common/CustomerSearch';
 import { ProductSearch } from '../common/ProductSearch';
 import { getInventoryBalances } from '../../server/functions/inventory';
 import { getCustomerAddresses } from '../../server/functions/customers';
+import { getOptimizedImageUrl } from '../../utils/imageOptimization';
 
 // shadcn/ui components
 import {
@@ -102,9 +103,10 @@ function ItemCard({
                 <div className="w-14 h-14 rounded-md bg-gradient-to-br from-slate-100 to-slate-200 border flex items-center justify-center shrink-0 overflow-hidden">
                     {line.imageUrl ? (
                         <img
-                            src={line.imageUrl}
+                            src={getOptimizedImageUrl(line.imageUrl, 'md') || line.imageUrl}
                             alt={line.productName || 'Product'}
                             className="w-full h-full object-cover"
+                            loading="lazy"
                             onError={(e) => {
                                 // Hide broken image and show fallback
                                 e.currentTarget.style.display = 'none';

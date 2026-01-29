@@ -13,6 +13,7 @@ import { getInventoryAll, type InventoryAllItem } from '../server/functions/inve
 import { Search, AlertTriangle, Package, RefreshCw, ChevronDown, Zap } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { showSuccess, showError } from '../utils/toast';
+import { getOptimizedImageUrl } from '../utils/imageOptimization';
 
 // ============================================
 // TYPES
@@ -254,7 +255,7 @@ const ColorCard = memo(function ColorCard({ color, locationId, onRefresh }: Colo
                     style={{ backgroundColor: color.fabricColourHex || '#f4f4f5' }}
                 >
                     {color.imageUrl && (
-                        <img src={color.imageUrl} alt="" className="w-full h-full object-cover" loading="lazy" />
+                        <img src={getOptimizedImageUrl(color.imageUrl, 'sm') || color.imageUrl} alt="" className="w-full h-full object-cover" loading="lazy" />
                     )}
                 </div>
 
@@ -447,7 +448,7 @@ const ProductSection = memo(function ProductSection({
                                 }}
                             >
                                 {color.imageUrl && (
-                                    <img src={color.imageUrl} alt="" className="w-full h-full object-cover" loading="lazy" />
+                                    <img src={getOptimizedImageUrl(color.imageUrl, 'xs') || color.imageUrl} alt="" className="w-full h-full object-cover" loading="lazy" />
                                 )}
                             </div>
                         ))}

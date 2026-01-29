@@ -8,6 +8,7 @@
 import { memo, useState, useCallback, useMemo } from 'react';
 import { Search, Filter, Check, ChevronRight, Package, Scissors, AlertTriangle } from 'lucide-react';
 import type { FlattenedOrderRow } from '../../../utils/orderHelpers';
+import { getOptimizedImageUrl } from '../../../utils/imageOptimization';
 import { MobileBottomSheet } from './MobileBottomSheet';
 
 interface MobileOrdersListProps {
@@ -210,13 +211,14 @@ const MobileOrderListItem = memo(function MobileOrderListItem({
                 </button>
             )}
 
-            {/* Product image */}
+            {/* Product image - optimized for mobile */}
             <div className="w-12 h-12 rounded-lg bg-slate-100 overflow-hidden flex-shrink-0">
                 {row.imageUrl ? (
                     <img
-                        src={row.imageUrl}
+                        src={getOptimizedImageUrl(row.imageUrl, 'sm') || row.imageUrl}
                         alt={row.productName}
                         className="w-full h-full object-cover"
+                        loading="lazy"
                     />
                 ) : (
                     <div className="w-full h-full flex items-center justify-center">

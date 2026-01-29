@@ -48,6 +48,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { restrictToHorizontalAxis } from '@dnd-kit/modifiers';
 import { ArrowUpDown, Package, Eye, GitBranch, ImageIcon, GripVertical, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Edit, RotateCcw } from 'lucide-react';
+import { getOptimizedImageUrl } from '../../utils/imageOptimization';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -338,9 +339,10 @@ export function SkuFlatView({
                 <div className="w-7 h-7 rounded bg-gray-100 overflow-hidden flex-shrink-0">
                     {row.original.imageUrl ? (
                         <img
-                            src={row.original.imageUrl}
+                            src={getOptimizedImageUrl(row.original.imageUrl, 'xs') || row.original.imageUrl}
                             alt=""
                             className="w-full h-full object-cover"
+                            loading="lazy"
                         />
                     ) : (
                         <div className="w-full h-full flex items-center justify-center">

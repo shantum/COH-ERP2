@@ -13,6 +13,7 @@
 
 import { useState, useMemo, useCallback } from 'react';
 import { LayoutGrid, Grid2x2, Filter, X, Users, Shirt, Scissors, Search, Plus } from 'lucide-react';
+import { useDebounce } from '../../hooks/useDebounce';
 
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -56,6 +57,9 @@ export function ProductsViewSwitcher({ searchQuery, onSearchChange, onViewProduc
         category: null,
     });
     const [showFilters, setShowFilters] = useState(false);
+
+    // Debounce search to prevent expensive tree filtering on every keystroke
+    const debouncedSearchQuery = useDebounce(searchQuery || '', 300);
 
     // Edit modal state
     const [editModalOpen, setEditModalOpen] = useState(false);
@@ -372,7 +376,7 @@ export function ProductsViewSwitcher({ searchQuery, onSearchChange, onViewProduc
             <div className="flex-1 min-h-0">
                 {viewMode === 'product' ? (
                     <ProductsDataTable
-                        searchQuery={searchQuery}
+                        searchQuery={debouncedSearchQuery}
                         onViewProduct={onViewProduct}
                         onEditBom={onEditBom}
                         onEditProduct={handleEditProduct}
@@ -381,7 +385,7 @@ export function ProductsViewSwitcher({ searchQuery, onSearchChange, onViewProduc
                 ) : (
                     <SkuFlatView
                         products={filteredProducts}
-                        searchQuery={searchQuery}
+                        searchQuery={debouncedSearchQuery}
                         onViewProduct={onViewProduct}
                         onEditBom={onEditBom}
                         onEditProduct={handleEditProduct}

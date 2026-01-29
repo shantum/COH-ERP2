@@ -30,6 +30,7 @@ import { Package, Search, Loader2 } from 'lucide-react';
 import { sortBySizeOrder } from '../../constants/sizes';
 import { getProductsList } from '../../server/functions/products';
 import { getInventoryBalances } from '../../server/functions/inventory';
+import { getOptimizedImageUrl } from '../../utils/imageOptimization';
 
 /** Balance info for a SKU */
 interface BalanceInfo {
@@ -334,9 +335,10 @@ export function ProductSearch({
                   <div className={`shrink-0 w-10 h-10 rounded-lg overflow-hidden bg-slate-100 ${isOutOfStock ? 'opacity-50' : ''}`}>
                     {imageUrl ? (
                       <img
-                        src={imageUrl}
+                        src={getOptimizedImageUrl(imageUrl, 'sm') || imageUrl}
                         alt={sku.variation?.product?.name || 'Product'}
                         className="w-full h-full object-cover"
+                        loading="lazy"
                       />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center">

@@ -16,6 +16,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Search, FlaskConical, Package, X, Loader2 } from 'lucide-react';
+import { getOptimizedImageUrl } from '@/utils/imageOptimization';
 
 interface AddToPlanModalProps {
     open: boolean;
@@ -209,9 +210,10 @@ export function AddToPlanModal({
                                         <div className="flex h-auto w-full items-center gap-3 rounded-md border border-input bg-muted px-3 py-2 text-sm">
                                             {getSkuImageUrl(selectedSku) ? (
                                                 <img
-                                                    src={getSkuImageUrl(selectedSku)}
+                                                    src={getOptimizedImageUrl(getSkuImageUrl(selectedSku), 'sm') || getSkuImageUrl(selectedSku)}
                                                     alt=""
                                                     className="w-10 h-10 object-cover rounded flex-shrink-0"
+                                                    loading="lazy"
                                                 />
                                             ) : (
                                                 <div className="w-10 h-10 bg-gray-200 rounded flex items-center justify-center flex-shrink-0">
@@ -284,9 +286,10 @@ export function AddToPlanModal({
                                                 >
                                                     {getSkuImageUrl(sku) ? (
                                                         <img
-                                                            src={getSkuImageUrl(sku)}
+                                                            src={getOptimizedImageUrl(getSkuImageUrl(sku), 'sm') || getSkuImageUrl(sku)}
                                                             alt=""
                                                             className="w-10 h-10 object-cover rounded flex-shrink-0"
+                                                            loading="lazy"
                                                         />
                                                     ) : (
                                                         <div className="w-10 h-10 bg-gray-100 rounded flex items-center justify-center flex-shrink-0">

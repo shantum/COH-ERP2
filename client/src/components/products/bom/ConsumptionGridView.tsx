@@ -20,6 +20,7 @@ import {
     updateConsumptionGrid,
     type ConsumptionGridResult,
 } from '../../../server/functions/bomMutations';
+import { getOptimizedImageUrl } from '../../../utils/imageOptimization';
 
 interface SizeData {
     quantity: number | null;
@@ -583,9 +584,10 @@ export function ConsumptionGridView() {
                                                                 <div className="flex items-center gap-2 pl-6">
                                                                     {row.imageUrl ? (
                                                                         <img
-                                                                            src={row.imageUrl}
+                                                                            src={getOptimizedImageUrl(row.imageUrl, 'sm') || row.imageUrl}
                                                                             alt=""
                                                                             className="w-8 h-8 rounded object-cover flex-shrink-0"
+                                                                            loading="lazy"
                                                                         />
                                                                     ) : (
                                                                         <div className="w-8 h-8 rounded bg-gray-100 flex-shrink-0" />

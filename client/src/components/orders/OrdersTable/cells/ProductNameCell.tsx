@@ -6,6 +6,7 @@ import { useState, memo } from 'react';
 import type { FlattenedOrderRow } from '../../../../utils/orderHelpers';
 import { Package, Check } from 'lucide-react';
 import { cn } from '../../../../lib/utils';
+import { getOptimizedImageUrl } from '../../../../utils/imageOptimization';
 
 interface ProductNameCellProps {
     row: FlattenedOrderRow;
@@ -39,11 +40,11 @@ export const ProductNameCell = memo(function ProductNameCell({ row }: ProductNam
             title={skuCode ? `Click to copy: ${skuCode}` : fullName}
             onClick={handleCopySku}
         >
-            {/* Thumbnail */}
+            {/* Thumbnail - optimized to 56x56 (2x for retina) instead of full-size */}
             <div className="w-7 h-7 rounded bg-gray-100 flex-shrink-0 overflow-hidden">
                 {imageUrl ? (
                     <img
-                        src={imageUrl}
+                        src={getOptimizedImageUrl(imageUrl, 'xs') || imageUrl}
                         alt={productName}
                         className="w-full h-full object-cover"
                         loading="lazy"

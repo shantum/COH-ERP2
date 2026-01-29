@@ -13,6 +13,7 @@ import { useState, useCallback, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { Search, X, Check, Package, Loader2, Link2, AlertCircle } from 'lucide-react';
+import { getOptimizedImageUrl } from '../../utils/imageOptimization';
 
 import {
     Dialog,
@@ -269,9 +270,10 @@ export function LinkProductsModal({ isOpen, onClose, colour }: LinkProductsModal
                                         <div className="w-10 h-10 rounded bg-gray-100 overflow-hidden flex-shrink-0">
                                             {variation.imageUrl ? (
                                                 <img
-                                                    src={variation.imageUrl}
+                                                    src={getOptimizedImageUrl(variation.imageUrl, 'sm') || variation.imageUrl}
                                                     alt={variation.colorName}
                                                     className="w-full h-full object-cover"
+                                                    loading="lazy"
                                                 />
                                             ) : (
                                                 <div className="w-full h-full flex items-center justify-center">

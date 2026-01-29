@@ -32,6 +32,7 @@ import {
 import RecentInwardsTable from './RecentInwardsTable';
 import PendingQueuePanel from './PendingQueuePanel';
 import type { RtoScanMatchData, RtoCondition } from '../../types';
+import { getOptimizedImageUrl } from '../../utils/imageOptimization';
 
 interface RtoInwardProps {
     onSuccess?: (message: string) => void;
@@ -237,9 +238,10 @@ function RtoInwardForm({ scanResult, rtoData, onSuccess, onCancel }: RtoInwardFo
                 <div className="flex items-center gap-3">
                     {scanResult.sku.imageUrl ? (
                         <img
-                            src={scanResult.sku.imageUrl}
+                            src={getOptimizedImageUrl(scanResult.sku.imageUrl, 'sm') || scanResult.sku.imageUrl}
                             alt={scanResult.sku.productName}
                             className="w-12 h-12 object-cover rounded"
+                            loading="lazy"
                         />
                     ) : (
                         <div className="w-12 h-12 bg-gray-100 rounded flex items-center justify-center">

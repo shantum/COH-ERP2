@@ -11,6 +11,7 @@ import { useState, useMemo, useCallback } from 'react';
 import { RefreshCw, ChevronRight, ChevronDown, Search, Loader2 } from 'lucide-react';
 import { useProductsTree, filterProductTree } from '../hooks/useProductsTree';
 import type { ProductTreeNode } from '../types';
+import { getOptimizedImageUrl } from '../../../utils/imageOptimization';
 
 interface BomProductListProps {
     onSelect: (node: ProductTreeNode | null) => void;
@@ -157,9 +158,10 @@ function ProductRow({
                 <div className="w-8 h-8 flex-shrink-0 rounded bg-gray-100 overflow-hidden">
                     {product.imageUrl ? (
                         <img
-                            src={product.imageUrl}
+                            src={getOptimizedImageUrl(product.imageUrl, 'sm') || product.imageUrl}
                             alt={product.name}
                             className="w-full h-full object-cover"
+                            loading="lazy"
                         />
                     ) : (
                         <div className="w-full h-full flex items-center justify-center text-[10px] text-gray-400">
@@ -222,9 +224,10 @@ function VariationRow({ variation, isSelected, onSelect }: VariationRowProps) {
                     />
                 ) : variation.imageUrl ? (
                     <img
-                        src={variation.imageUrl}
+                        src={getOptimizedImageUrl(variation.imageUrl, 'xs') || variation.imageUrl}
                         alt={variation.colorName || variation.name}
                         className="w-full h-full object-cover"
+                        loading="lazy"
                     />
                 ) : (
                     <div className="w-full h-full bg-gray-200" />

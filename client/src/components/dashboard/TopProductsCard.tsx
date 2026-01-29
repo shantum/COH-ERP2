@@ -9,6 +9,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getTopProductsForDashboard } from '../../server/functions/reports';
 import { TrendingUp, Package, Palette } from 'lucide-react';
+import { getOptimizedImageUrl } from '../../utils/imageOptimization';
 
 const TIME_PERIODS = [
     { value: 0, label: 'Today' },
@@ -110,9 +111,10 @@ export function TopProductsCard() {
                             {/* Image */}
                             {item.imageUrl ? (
                                 <img
-                                    src={item.imageUrl}
+                                    src={getOptimizedImageUrl(item.imageUrl, 'sm') || item.imageUrl}
                                     alt={item.name}
                                     className="w-8 h-8 sm:w-10 sm:h-10 rounded object-cover flex-shrink-0"
+                                    loading="lazy"
                                 />
                             ) : (
                                 <div className="w-8 h-8 sm:w-10 sm:h-10 rounded bg-gray-100 flex items-center justify-center flex-shrink-0">

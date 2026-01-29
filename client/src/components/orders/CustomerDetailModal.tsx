@@ -18,6 +18,7 @@ import {
 import { useQuery } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { getCustomer } from '../../server/functions/customers';
+import { getOptimizedImageUrl } from '../../utils/imageOptimization';
 import {
     TIER_CONFIG,
     calculateHealthScore,
@@ -321,9 +322,10 @@ function OrderCard({ order, isExpanded, onToggle }: { order: Order; isExpanded: 
                                     {/* Product Image Thumbnail */}
                                     {imageUrl ? (
                                         <img
-                                            src={imageUrl}
+                                            src={getOptimizedImageUrl(imageUrl, 'sm') || imageUrl}
                                             alt={line.sku?.variation?.product?.name || 'Product'}
                                             className="w-10 h-10 rounded-lg object-cover border border-slate-200 flex-shrink-0"
+                                            loading="lazy"
                                         />
                                     ) : (
                                         <div className="w-10 h-10 rounded-lg bg-slate-100 flex items-center justify-center flex-shrink-0 border border-slate-200">

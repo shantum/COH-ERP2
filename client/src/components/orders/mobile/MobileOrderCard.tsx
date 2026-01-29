@@ -12,6 +12,7 @@ import {
     Check
 } from 'lucide-react';
 import type { FlattenedOrderRow } from '../../../utils/orderHelpers';
+import { getOptimizedImageUrl } from '../../../utils/imageOptimization';
 import { MobileDateStrip } from './MobileDateStrip';
 
 interface MobileOrderCardProps {
@@ -195,13 +196,14 @@ export const MobileOrderCard = memo(function MobileOrderCard({
 
                     {/* Product Info */}
                     <div className="flex gap-3 mb-3">
-                        {/* Product Image */}
+                        {/* Product Image - optimized for mobile */}
                         <div className="w-14 h-14 rounded-lg bg-slate-100 overflow-hidden flex-shrink-0">
                             {row.imageUrl ? (
                                 <img
-                                    src={row.imageUrl}
+                                    src={getOptimizedImageUrl(row.imageUrl, 'sm') || row.imageUrl}
                                     alt={row.productName}
                                     className="w-full h-full object-cover"
+                                    loading="lazy"
                                 />
                             ) : (
                                 <div className="w-full h-full flex items-center justify-center">

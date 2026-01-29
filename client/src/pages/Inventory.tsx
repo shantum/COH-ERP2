@@ -25,6 +25,7 @@ import { useNavigate } from '@tanstack/react-router';
 import { getInventoryList } from '../server/functions/inventory';
 import { getTopProducts } from '../server/functions/reports';
 import { compactThemeSmall } from '../utils/agGridHelpers';
+import { getOptimizedImageUrl } from '../utils/imageOptimization';
 import { Route } from '../routes/_authenticated/inventory';
 
 // Register AG Grid modules
@@ -391,9 +392,9 @@ export default function Inventory() {
                                                 {index + 1}
                                             </div>
 
-                                            {/* Product Image */}
+                                            {/* Product Image - optimized for 40x40 display */}
                                             {product.imageUrl ? (
-                                                <img src={product.imageUrl} alt={product.productName} className="w-10 h-10 rounded object-cover flex-shrink-0" />
+                                                <img src={getOptimizedImageUrl(product.imageUrl, 'sm') || product.imageUrl} alt={product.productName} className="w-10 h-10 rounded object-cover flex-shrink-0" loading="lazy" />
                                             ) : (
                                                 <div className="w-10 h-10 rounded bg-gray-100 flex items-center justify-center flex-shrink-0">
                                                     <Package size={16} className="text-gray-400" />
@@ -462,9 +463,9 @@ export default function Inventory() {
                                                 {index + 1}
                                             </div>
 
-                                            {/* Product Image */}
+                                            {/* Product Image - optimized for 40x40 display */}
                                             {product.imageUrl ? (
-                                                <img src={product.imageUrl} alt={product.name} className="w-10 h-10 rounded object-cover flex-shrink-0" />
+                                                <img src={getOptimizedImageUrl(product.imageUrl, 'sm') || product.imageUrl} alt={product.name} className="w-10 h-10 rounded object-cover flex-shrink-0" loading="lazy" />
                                             ) : (
                                                 <div className="w-10 h-10 rounded bg-gray-100 flex items-center justify-center flex-shrink-0">
                                                     <Package size={16} className="text-gray-400" />

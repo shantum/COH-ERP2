@@ -28,6 +28,7 @@ import {
     resetConsumption,
     type ProductForMappingResult,
 } from '../../../server/functions/bomMutations';
+import { getOptimizedImageUrl } from '../../../utils/imageOptimization';
 
 interface CsvRow {
     id: string;
@@ -582,9 +583,10 @@ export function ConsumptionImportView() {
                                                             >
                                                                 {prod.imageUrl ? (
                                                                     <img
-                                                                        src={prod.imageUrl}
+                                                                        src={getOptimizedImageUrl(prod.imageUrl, 'xs') || prod.imageUrl}
                                                                         alt=""
                                                                         className="w-6 h-6 rounded object-cover"
+                                                                        loading="lazy"
                                                                     />
                                                                 ) : (
                                                                     <div className="w-6 h-6 rounded bg-gray-100" />

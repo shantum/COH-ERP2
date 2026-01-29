@@ -9,6 +9,7 @@ import type { Order, OrderLine } from '../../../../types';
 import type { ModalMode, CategorizedLines, ShipFormState } from '../types';
 import { LINE_STATUS_CONFIG, LINE_STATUS_BAR_COLORS } from '../types';
 import { ProductSearch } from '../../../common/ProductSearch';
+import { getOptimizedImageUrl } from '../../../../utils/imageOptimization';
 
 // Shopify line item data (from shopifyDetails)
 interface ShopifyLineItem {
@@ -158,7 +159,7 @@ function LineItem({
       {/* Product image */}
       <div className="w-14 h-14 shrink-0 bg-slate-100 rounded-lg overflow-hidden">
         {imageUrl ? (
-          <img src={imageUrl} alt={productName} className="w-full h-full object-cover" />
+          <img src={getOptimizedImageUrl(imageUrl, 'md') || imageUrl} alt={productName} className="w-full h-full object-cover" loading="lazy" />
         ) : (
           <div className="w-full h-full flex items-center justify-center text-slate-400">
             <Package size={20} />

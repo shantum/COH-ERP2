@@ -57,6 +57,7 @@ import ithinkLogo from '../assets/ithinklogistics.png';
 import { formatLastUpdate } from '../components/orders/OrdersTable/utils/dateFormatters';
 import { TRACKING_STATUS_STYLES } from '../components/orders/OrdersTable/rowStyling';
 import { cn } from '../lib/utils';
+import { getOptimizedImageUrl } from '../utils/imageOptimization';
 
 // ============================================
 // TYPES
@@ -908,9 +909,10 @@ function ActionQueueTab({
                                         <div className="w-14 h-14 bg-gray-100 rounded-lg flex-shrink-0 overflow-hidden">
                                             {item.imageUrl ? (
                                                 <img
-                                                    src={item.imageUrl}
+                                                    src={getOptimizedImageUrl(item.imageUrl, 'md') || item.imageUrl}
                                                     alt={item.productName || ''}
                                                     className="w-full h-full object-cover"
+                                                    loading="lazy"
                                                 />
                                             ) : (
                                                 <div className="w-full h-full flex items-center justify-center">
@@ -2051,7 +2053,7 @@ function ProcessRefundModal({ item, onSubmit, onClose }: ProcessRefundModalProps
                         <div className="flex items-start gap-3">
                             <div className="w-12 h-12 bg-gray-200 rounded flex items-center justify-center shrink-0">
                                 {item.imageUrl ? (
-                                    <img src={item.imageUrl} alt="" className="w-full h-full object-cover rounded" />
+                                    <img src={getOptimizedImageUrl(item.imageUrl, 'sm') || item.imageUrl} alt="" className="w-full h-full object-cover rounded" loading="lazy" />
                                 ) : (
                                     <Package size={20} className="text-gray-400" />
                                 )}

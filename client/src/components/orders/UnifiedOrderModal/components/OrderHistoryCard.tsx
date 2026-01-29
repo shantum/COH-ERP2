@@ -6,6 +6,7 @@
  */
 
 import { ChevronRight, Package } from 'lucide-react';
+import { getOptimizedImageUrl } from '../../../../utils/imageOptimization';
 
 interface OrderLine {
   id: string;
@@ -109,9 +110,10 @@ export function OrderHistoryCard({ order, isCurrent, onClick }: OrderHistoryCard
         {/* Product Image Thumbnail */}
         {firstImage ? (
           <img
-            src={firstImage}
+            src={getOptimizedImageUrl(firstImage, 'sm') || firstImage}
             alt="Product"
             className="w-10 h-10 rounded-lg object-cover border border-slate-200 flex-shrink-0"
+            loading="lazy"
           />
         ) : (
           <div className="w-10 h-10 rounded-lg bg-slate-100 flex items-center justify-center flex-shrink-0 border border-slate-200">
