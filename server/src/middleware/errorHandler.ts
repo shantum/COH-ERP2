@@ -157,8 +157,22 @@ export const errorHandler: ErrorRequestHandler = (
         return;
     }
 
-    // Handle Prisma errors
-    if (err.code && err.code.startsWith('P')) {
+    // Handle AbortError (request cancelled by client)
+    if (err.name === 'AbortError' || (err as { type?: string }).type === 'AbortError') {
+        // Don't log as error - this is expected when clients cancel requests
+        console.log('[Request Aborted]', { method: req.method, path: req.path });
+        // Client already disconnected, but send response in case connection is still open
+        if (!res.headersSent) {
+            res.status(499).json({
+                error: 'Request cancelled',
+                type: 'AbortError'
+            });
+        }
+        return;
+    }
+
+    // Handle Prisma errors (code is a string like 'P2002')
+    if (err.code && typeof err.code === 'string' && err.code.startsWith('P')) {
         console.error('[Prisma Error]', {
             code: err.code,
             meta: err.meta,

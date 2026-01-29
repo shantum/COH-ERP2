@@ -31,6 +31,63 @@ cd client && npm run dev
 
 Login: `admin@coh.com` / `XOFiya@34`
 
+## Database Migration Workflow
+
+**Golden Rule:** Migrations flow ONE direction: `local → staging → production`. Never manually migrate staging/production.
+
+### Environments
+
+| Environment | Database | How Migrations Run |
+|-------------|----------|-------------------|
+| **Local** | Postgres.app (port 5444) | Manual: `pnpm db:migrate` |
+| **Staging** | Railway (shuttle.proxy.rlwy.net) | **Auto** on `develop` push |
+| **Production** | Railway (caboose.proxy.rlwy.net) | **Auto** on `main` merge |
+
+### Step-by-Step Workflow
+
+```bash
+# 1. LOCAL: Edit schema.prisma, then create migration
+pnpm db:migrate --name add_customer_field
+
+# 2. COMMIT: Migration file goes to git
+git add prisma/migrations/ prisma/schema.prisma
+git commit -m "Add customer field"
+
+# 3. PUSH: Staging auto-migrates on deploy
+git push origin develop
+
+# 4. PRODUCTION: Merge PR, production auto-migrates
+# PR: develop → main (requires approval)
+```
+
+### Migration Commands
+
+| Command | When to Use |
+|---------|-------------|
+| `pnpm db:migrate` | Create + apply migration locally (dev only) |
+| `pnpm db:migrate:create` | Create migration without applying (inspect first) |
+| `pnpm db:migrate:status` | Check pending migrations |
+| `pnpm db:migrate:deploy` | Apply pending migrations (CI/CD only) |
+| `pnpm db:reset` | Reset local DB + reapply all migrations |
+| `pnpm db:studio` | Visual DB browser |
+
+### Critical Rules
+
+1. **NEVER run `db:migrate` against staging/production** - it uses shadow DB and can cause issues
+2. **NEVER manually switch DATABASE_URL** to run migrations against remote DBs
+3. **Always commit migration files** - they're the source of truth
+4. **Railway handles remote migrations** via `prisma migrate deploy` in start command
+
+### Troubleshooting
+
+```bash
+# Check migration status on any DB
+pnpm db:migrate:status
+
+# Schema drift? See what's different
+pnpm db:migrate:diff
+```
+
 ## Stack
 
 | Layer | Technology |
@@ -623,32 +680,59 @@ Request > production.js
            |-- /* > TanStack Start SSR
 ```
 
+### Railway Environments
+
+| Environment | Branch | URL | Auto-Deploy |
+|-------------|--------|-----|-------------|
+| **production** | `main` | `coh-erp2-production.up.railway.app` | Yes |
+| **staging** | `develop` | `coh-erp2-staging.up.railway.app` | Yes |
+
 ### Railway CLI
 ```bash
-railway login && railway link    # One-time setup
-railway up --detach              # Deploy
+# Setup
+railway login && railway link -p COH-ERP2 -e staging -s COH-ERP2
+
+# Deploy
+railway up --detach              # Deploy current directory
 railway logs                     # View logs
-railway variables --set "KEY=val"  # Set env var
+railway redeploy                 # Redeploy latest
+
+# Variables
+railway variables --json         # View all variables
+railway variable --service Postgres --json  # Postgres variables
+
+# Get public database URL (for local debugging)
+railway variable --service Postgres --json | jq -r '.DATABASE_PUBLIC_URL'
+railway variable --service Postgres -e production --json | jq -r '.DATABASE_PUBLIC_URL'
+
+# Switch environments
+railway link -p COH-ERP2 -e production -s COH-ERP2
+railway link -p COH-ERP2 -e staging -s COH-ERP2
 ```
+
+### Railway Database URLs
+
+| Environment | Public Proxy |
+|-------------|--------------|
+| Production | `caboose.proxy.rlwy.net:20615` |
+| Staging | `shuttle.proxy.rlwy.net:21568` |
+
+Full URLs in `server/.env` (commented). Use public URLs for local debugging only.
 
 **Build Order** (nixpacks.toml): root deps + Prisma > shared > server > client
 
 **Debug**: Set `NO_CACHE=1` for fresh build, then unset.
 
-### Staging (REQUIRED)
-- `develop` > Staging (auto-deploy)
-- `main` > Production (via PR)
-- Same login credentials both environments
-
-```bash
-railway link -e staging -s COH-ERP2 -p COH-ERP2
-railway up --detach
+### CI/CD Flow
+```
+develop branch → Staging (auto-deploy) → PR to main → Production (auto-deploy)
 ```
 
-### CI/CD
 - No GitHub Actions configured
-- Deployment: Railway auto-deploy from `develop` (staging) and `main` (production)
 - Pre-commit: Manual TypeScript check required (see Principle #6)
+- Same login credentials both environments
+
+> **Full Railway documentation**: See `.claude/skills/railway/SKILL.md`
 
 ## UI Components
 
@@ -666,6 +750,20 @@ railway up --detach
 | Logic verification | `logic-auditor` |
 | Documentation | `doc-optimizer`, `codebase-steward` |
 | Planning | `Plan` |
+
+## Domain Skills
+
+Skills provide deep domain knowledge. Auto-loaded when working on related tasks.
+
+| Skill | Domain |
+|-------|--------|
+| `database` | Prisma, Kysely, triggers, migrations, transactions |
+| `orders` | Order fulfillment, tracking, state machine, RTO |
+| `products` | Products, variations, SKUs, BOM system |
+| `materials` | Materials, fabrics, fabric colours hierarchy |
+| `inventory` | SKU stock, transactions, balance triggers |
+| `returns` | Customer returns, refunds, exchanges |
+| `railway` | Railway CLI, deployments, database access |
 
 ## Pages Overview
 
@@ -692,4 +790,4 @@ railway up --detach
 | `/users` | User management |
 
 ---
-**Updated:** 2026-01-27 (comprehensive audit by 7 parallel agents)
+**Updated:** 2026-01-29 (added database skill, migration workflow, Railway skill)

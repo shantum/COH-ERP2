@@ -92,6 +92,7 @@ export type FabricColour = {
     leadTimeDays: number | null;
     minOrderQty: number | null;
     currentBalance: Generated<number>;
+    isOutOfStock: Generated<boolean>;
     isActive: Generated<boolean>;
     createdAt: Generated<Timestamp>;
     updatedAt: Timestamp;

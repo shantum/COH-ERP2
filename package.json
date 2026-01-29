@@ -17,9 +17,13 @@
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate dev",
+    "db:migrate:create": "prisma migrate dev --create-only",
     "db:migrate:deploy": "prisma migrate deploy",
+    "db:migrate:status": "prisma migrate status",
+    "db:migrate:diff": "prisma migrate diff --from-schema-datasource prisma/schema.prisma --to-schema-datamodel prisma/schema.prisma",
     "db:studio": "prisma studio",
     "db:seed": "node prisma/seed.js",
+    "db:reset": "prisma migrate reset",
     "install:all": "cd server && npm install && cd ../client && npm install"
   },
   "engines": {
