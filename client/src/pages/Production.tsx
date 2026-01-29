@@ -425,8 +425,10 @@ function ProductionContent() {
                 const sampleSize = entry.sampleInfo.sampleSize || '-';
                 const sampleColour = entry.sampleInfo.sampleColour || '-';
                 line = `${index + 1}. ${entry.sampleInfo.sampleName} - ${sampleSize} - ${sampleColour} - ${qty}pc - ${entry.sampleInfo.sampleCode}`;
-                if (entry.notes.length > 0) {
-                    line += ` (${entry.notes.join(', ')})`;
+                // Filter out internal "Sheet sync:" notes from clipboard output
+                const displayNotes = entry.notes.filter(n => !n.startsWith('Sheet sync:'));
+                if (displayNotes.length > 0) {
+                    line += ` (${displayNotes.join(', ')})`;
                 }
             }
             // Handle custom SKU batches
@@ -462,8 +464,10 @@ function ProductionContent() {
                 const color = entry.sku?.variation?.colorName || '';
                 const styleCode = entry.sku?.variation?.product?.styleCode || entry.sku?.skuCode || '';
                 line = `${index + 1}. ${product} - ${size} - ${color} - ${qty}pc - ${styleCode}`;
-                if (entry.notes.length > 0) {
-                    line += ` (${entry.notes.join(', ')})`;
+                // Filter out internal "Sheet sync:" notes from clipboard output
+                const displayNotes = entry.notes.filter(n => !n.startsWith('Sheet sync:'));
+                if (displayNotes.length > 0) {
+                    line += ` (${displayNotes.join(', ')})`;
                 }
             }
             lines.push(line);
