@@ -191,6 +191,7 @@ interface PrismaOrderLine {
         customizationType: string | null;
         customizationValue: string | null;
         customizationNotes: string | null;
+        currentBalance: number;
         variation: {
             colorName: string;
             colorHex: string | null;
@@ -607,7 +608,7 @@ function flattenOrdersToRows(orders: PrismaOrder[]): FlattenedOrderRow[] {
                 lineStatus: line.lineStatus,
                 lineNotes: line.notes || '',
                 unitPrice: line.unitPrice,
-                skuStock: 0, // Filled by inventory cache later
+                skuStock: line.sku.currentBalance ?? 0,
                 fabricBalance: 0,
                 shopifyStatus,
                 productionBatch: line.productionBatch
@@ -780,7 +781,7 @@ export const getOrders = createServerFn({ method: 'GET' })
             return {
                 rows,
                 view: data.view,
-                hasInventory: false, // TODO: Add inventory enrichment
+                hasInventory: true,
                 pagination: {
                     total: totalCount,
                     page: data.page,
