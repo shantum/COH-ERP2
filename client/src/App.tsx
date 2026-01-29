@@ -14,7 +14,6 @@ import { Toaster } from 'sonner';
 import ErrorBoundary from './components/ErrorBoundary';
 import { AuthProvider, useAuth } from './hooks/useAuth';
 import { router } from './router';
-import './index.css';
 
 // QueryClient configuration
 const queryClient = new QueryClient({
