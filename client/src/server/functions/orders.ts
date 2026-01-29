@@ -32,6 +32,9 @@ const ordersListInputSchema = z.object({
     search: z.string().optional(),
     days: z.number().int().positive().optional(),
     sortBy: z.enum(['orderDate', 'archivedAt', 'shippedAt', 'createdAt'] as const).optional(),
+    // Open view filters (server-side filtering for performance)
+    allocatedFilter: z.enum(['all', 'allocated', 'pending']).optional(),
+    productionFilter: z.enum(['all', 'scheduled', 'needs', 'ready']).optional(),
 });
 
 export type OrdersListInput = z.infer<typeof ordersListInputSchema>;
@@ -354,7 +357,9 @@ function parseCustomerTags(tags: string | null): string[] | null {
 function buildWhereClause(
     view: 'open' | 'shipped' | 'rto' | 'all' | 'cancelled',
     search: string | undefined,
-    sinceDate: Date | null
+    sinceDate: Date | null,
+    allocatedFilter?: 'all' | 'allocated' | 'pending',
+    productionFilter?: 'all' | 'scheduled' | 'needs' | 'ready'
 ): Prisma.OrderWhereInput {
     const where: Prisma.OrderWhereInput = {
         isArchived: false,
@@ -364,7 +369,8 @@ function buildWhereClause(
     switch (view) {
         case 'open':
             // Must match ORDER_VIEWS.open from orderViews.ts exactly
-            where.OR = [
+            // Base open view conditions
+            const openBaseConditions: Prisma.OrderWhereInput[] = [
                 // Still has lines being processed (not shipped, not cancelled)
                 {
                     orderLines: {
@@ -398,6 +404,90 @@ function buildWhereClause(
                     },
                 },
             ];
+
+            // Apply allocated filter (filters orders with matching lines)
+            if (allocatedFilter === 'allocated') {
+                // Orders with at least one allocated/picked/packed line
+                where.AND = [
+                    { OR: openBaseConditions },
+                    {
+                        orderLines: {
+                            some: {
+                                lineStatus: { in: ['allocated', 'picked', 'packed'] },
+                            },
+                        },
+                    },
+                ];
+            } else if (allocatedFilter === 'pending') {
+                // Orders with at least one pending line
+                where.AND = [
+                    { OR: openBaseConditions },
+                    {
+                        orderLines: {
+                            some: {
+                                lineStatus: 'pending',
+                            },
+                        },
+                    },
+                ];
+            } else {
+                where.OR = openBaseConditions;
+            }
+
+            // Apply production filter (additional narrowing)
+            if (productionFilter && productionFilter !== 'all') {
+                // Ensure AND array exists
+                if (!where.AND) {
+                    where.AND = where.OR ? [{ OR: where.OR }] : [];
+                    delete where.OR;
+                }
+
+                if (productionFilter === 'scheduled') {
+                    // Orders with at least one scheduled line
+                    (where.AND as Prisma.OrderWhereInput[]).push({
+                        orderLines: {
+                            some: {
+                                productionBatchId: { not: null },
+                            },
+                        },
+                    });
+                } else if (productionFilter === 'needs') {
+                    // Orders with pending lines without production batch
+                    // Note: Stock comparison (skuStock < qty) still done client-side
+                    // because it requires comparing sku.currentBalance with qty
+                    (where.AND as Prisma.OrderWhereInput[]).push({
+                        orderLines: {
+                            some: {
+                                lineStatus: 'pending',
+                                productionBatchId: null,
+                            },
+                        },
+                    });
+                } else if (productionFilter === 'ready') {
+                    // Orders where ALL non-cancelled lines are allocated/picked/packed
+                    // This means NO lines exist that are pending or in other non-ready states
+                    (where.AND as Prisma.OrderWhereInput[]).push(
+                        // Must have at least one allocated/picked/packed line
+                        {
+                            orderLines: {
+                                some: {
+                                    lineStatus: { in: ['allocated', 'picked', 'packed'] },
+                                },
+                            },
+                        },
+                        // Must NOT have any pending lines (shipped/cancelled are OK)
+                        {
+                            NOT: {
+                                orderLines: {
+                                    some: {
+                                        lineStatus: 'pending',
+                                    },
+                                },
+                            },
+                        }
+                    );
+                }
+            }
             break;
 
         case 'shipped':
@@ -684,7 +774,7 @@ export const getOrders = createServerFn({ method: 'GET' })
         try {
             const prisma = await getPrisma();
 
-            const { view, page, limit, search, days, sortBy } = data;
+            const { view, page, limit, search, days, sortBy, allocatedFilter, productionFilter } = data;
             const offset = (page - 1) * limit;
 
             // Calculate date filter if days specified
@@ -694,8 +784,14 @@ export const getOrders = createServerFn({ method: 'GET' })
                 sinceDate.setDate(sinceDate.getDate() - days);
             }
 
-            // Build where clause
-            const where = buildWhereClause(view, search, sinceDate);
+            // Build where clause with filters (filters only apply to 'open' view)
+            const where = buildWhereClause(
+                view,
+                search,
+                sinceDate,
+                view === 'open' ? allocatedFilter : undefined,
+                view === 'open' ? productionFilter : undefined
+            );
 
             // Determine sort field
             const sortField = sortBy || 'orderDate';

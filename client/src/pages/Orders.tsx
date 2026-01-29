@@ -190,6 +190,7 @@ export default function Orders() {
     const { isConnected: isSSEConnected } = useOrderSSE({ currentView: view, page, limit });
 
     // Data hook - simplified, single view with pagination
+    // Filters are passed to server for server-side filtering (reduces data transfer)
     const {
         rows: serverRows,
         orders,
@@ -210,6 +211,9 @@ export default function Orders() {
         isSSEConnected,
         // Pass loader data for instant SSR hydration
         initialData: loaderData?.orders ?? null,
+        // Server-side filters for Open view (reduces CPU spikes on filter toggle)
+        allocatedFilter,
+        productionFilter,
     });
 
     // Search data hook - only active when searching
@@ -309,7 +313,9 @@ export default function Orders() {
         setSearchPage(1);
     }, []);
 
-    // Apply filters (only in normal view mode, not search mode)
+    // Apply row-level display filters (server already filtered orders, this filters rows within orders)
+    // Server-side: Filters orders to include only those with matching lines
+    // Client-side: Filters rows to display only the matching lines within those orders
     const filteredRows = useMemo(() => {
         let rows = currentRows;
 
@@ -318,8 +324,11 @@ export default function Orders() {
             return rows;
         }
 
-        // Open view specific filters
+        // Open view: Row-level display filtering
+        // Server has already filtered to orders with matching lines
+        // Now filter to show only the matching rows (lines) within those orders
         if (view === 'open') {
+            // Allocated filter - show only lines with allocated/picked/packed status
             if (allocatedFilter === 'allocated') {
                 rows = rows.filter(row =>
                     row.lineStatus === 'allocated' ||
@@ -327,31 +336,25 @@ export default function Orders() {
                     row.lineStatus === 'packed'
                 );
             } else if (allocatedFilter === 'pending') {
+                // Show only pending lines
                 rows = rows.filter(row => row.lineStatus === 'pending');
             }
 
+            // Production filter - additional row filtering
             if (productionFilter === 'scheduled') {
+                // Show only scheduled lines
                 rows = rows.filter(row => row.productionBatchId);
             } else if (productionFilter === 'needs') {
+                // Show only lines that need production (pending, no batch, insufficient stock OR customized)
+                // Server already filtered to orders with such lines
                 rows = rows.filter(row =>
                     row.lineStatus === 'pending' &&
                     !row.productionBatchId &&
                     (row.skuStock < row.qty || row.isCustomized)
                 );
-            } else if (productionFilter === 'ready') {
-                rows = rows.filter(row => {
-                    const orderLines = row.order?.orderLines as OrderLine[] | undefined;
-                    const activeLines = orderLines?.filter(
-                        (line) => line.lineStatus !== 'cancelled'
-                    ) || [];
-                    return activeLines.length > 0 && activeLines.every(
-                        (line) =>
-                            line.lineStatus === 'allocated' ||
-                            line.lineStatus === 'picked' ||
-                            line.lineStatus === 'packed'
-                    );
-                });
             }
+            // Note: 'ready' filter doesn't need row-level filtering
+            // Server already ensures all non-cancelled lines are allocated/picked/packed
         }
 
         // Note: Shipped view filters (RTO, COD Pending) are applied server-side

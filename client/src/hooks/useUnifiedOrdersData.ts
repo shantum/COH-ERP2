@@ -71,6 +71,10 @@ interface UseUnifiedOrdersDataOptions {
     isSSEConnected?: boolean;
     /** Initial data from route loader (SSR) */
     initialData?: GetOrdersResponse | null;
+    /** Allocation filter for Open view (server-side filtering) */
+    allocatedFilter?: 'all' | 'allocated' | 'pending';
+    /** Production filter for Open view (server-side filtering) */
+    productionFilter?: 'all' | 'scheduled' | 'needs' | 'ready';
 }
 
 export function useUnifiedOrdersData({
@@ -80,6 +84,8 @@ export function useUnifiedOrdersData({
     selectedCustomerId,
     isSSEConnected = false,
     initialData,
+    allocatedFilter,
+    productionFilter,
 }: UseUnifiedOrdersDataOptions) {
     const queryClient = useQueryClient();
 
@@ -101,12 +107,19 @@ export function useUnifiedOrdersData({
     // Uses TanStack Start Server Functions
     // ==========================================
 
-    // Build query params
+    // Build query params (include filters for Open view server-side filtering)
     const queryParams = useMemo(() => ({
         view: currentView,
         page,
         limit,
-    }), [currentView, page, limit]);
+        // Only include filters when they have meaningful values (not 'all')
+        ...(currentView === 'open' && allocatedFilter && allocatedFilter !== 'all'
+            ? { allocatedFilter }
+            : {}),
+        ...(currentView === 'open' && productionFilter && productionFilter !== 'all'
+            ? { productionFilter }
+            : {}),
+    }), [currentView, page, limit, allocatedFilter, productionFilter]);
 
     // Server Function path - uses useServerFn hook for proper client-side calls
     const getOrdersFn = useServerFn(getOrders);

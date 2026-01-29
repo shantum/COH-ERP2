@@ -12,27 +12,17 @@
  */
 
 import { createFileRoute, redirect } from '@tanstack/react-router';
-import { lazy, Suspense } from 'react';
 import { getAuthUser } from '../server/functions/auth';
 import { authQueryKeys } from '../constants/queryKeys';
 import { authQueryOptions } from '../hooks/useAuth';
 
-const Layout = lazy(() => import('../components/Layout'));
-
-function LoadingSpinner() {
-    return (
-        <div className="min-h-screen flex items-center justify-center bg-gray-50">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-        </div>
-    );
-}
+// Direct import (no lazy loading) for the main layout
+// React's lazy() causes hydration flicker: SSR content → Suspense fallback → content again
+// The Layout component is critical path and should load synchronously for smooth SSR hydration
+import Layout from '../components/Layout';
 
 function AuthenticatedLayout() {
-    return (
-        <Suspense fallback={<LoadingSpinner />}>
-            <Layout />
-        </Suspense>
-    );
+    return <Layout />;
 }
 
 export const Route = createFileRoute('/_authenticated')({
