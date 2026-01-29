@@ -2,10 +2,10 @@
  * useUnifiedOrdersData hook
  * Centralizes all data queries for the unified Orders page
  *
- * Loading strategy (hybrid):
- * 1. Current view loads immediately
- * 2. Shipped prefetches after Open completes
- * 3. Other views load on-demand when selected
+ * Loading strategy: on-demand only (no prefetching)
+ * - Current view loads immediately
+ * - Other views/pages load when navigated to
+ * - Server-side filtering reduces payload size
  *
  * Views: open, shipped, rto, all (4 views)
  * Pagination: 250 orders per page
@@ -13,11 +13,10 @@
  * Data fetching uses TanStack Start Server Functions.
  */
 
-import { useMemo, useEffect } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { inventoryQueryKeys, ORDERS_PAGE_SIZE } from '../constants/queryKeys';
-import { getOrdersListQueryKey } from './orders/orderMutationUtils';
 import { getOrders, getOrderViewCounts } from '../server/functions/orders';
 import { getInventoryBalances } from '../server/functions/inventory';
 import { getProductionLockedDates } from '../server/functions/production';
@@ -87,8 +86,6 @@ export function useUnifiedOrdersData({
     allocatedFilter,
     productionFilter,
 }: UseUnifiedOrdersDataOptions) {
-    const queryClient = useQueryClient();
-
     // Determine poll interval based on SSE connection status
     // SSE connected: disable polling entirely
     // Trust SSE for real-time updates; lastEventId replay handles reconnects
@@ -164,55 +161,8 @@ export function useUnifiedOrdersData({
         refetchOnWindowFocus: false,
     });
 
-    // ==========================================
-    // HYBRID LOADING: Prefetch adjacent pages and related views
-    // ==========================================
-
-    useEffect(() => {
-        if (currentView === 'open' && page === 1 && ordersQuery.isSuccess) {
-            // Prefetch shipped view page 1 in background
-            queryClient.prefetchQuery({
-                queryKey: getOrdersListQueryKey({ view: 'shipped', page: 1, limit }),
-                staleTime: STALE_TIME,
-            });
-        }
-        if (currentView === 'shipped' && page === 1 && ordersQuery.isSuccess) {
-            // Prefetch rto view page 1 in background
-            queryClient.prefetchQuery({
-                queryKey: getOrdersListQueryKey({ view: 'rto', page: 1, limit }),
-                staleTime: STALE_TIME,
-            });
-        }
-    }, [currentView, page, limit, ordersQuery.isSuccess, queryClient]);
-
-    // Prefetch adjacent pages for smoother pagination
-    useEffect(() => {
-        if (!ordersQuery.isSuccess || !ordersQuery.data?.pagination) return;
-
-        const { totalPages } = ordersQuery.data.pagination;
-
-        // Build base query input
-        const baseInput = {
-            view: currentView,
-            limit,
-        };
-
-        // Prefetch next page if it exists
-        if (page < totalPages) {
-            queryClient.prefetchQuery({
-                queryKey: getOrdersListQueryKey({ ...baseInput, page: page + 1 }),
-                staleTime: STALE_TIME,
-            });
-        }
-
-        // Prefetch previous page if it exists
-        if (page > 1) {
-            queryClient.prefetchQuery({
-                queryKey: getOrdersListQueryKey({ ...baseInput, page: page - 1 }),
-                staleTime: STALE_TIME,
-            });
-        }
-    }, [currentView, page, limit, ordersQuery.isSuccess, ordersQuery.data?.pagination, queryClient]);
+    // NOTE: Prefetching disabled - views/pages load on-demand
+    // Server-side filtering makes prefetch unreliable (filter params vary)
 
     // ==========================================
     // SUPPORTING DATA QUERIES
