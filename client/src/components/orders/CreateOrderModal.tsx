@@ -576,7 +576,7 @@ export function CreateOrderModal({
                                     <Label className="text-xs text-muted-foreground">Phone</Label>
                                     <Input
                                         className="h-8 text-sm"
-                                        placeholder="+91 98765 43210"
+                                        placeholder="Phone number..."
                                         value={orderForm.customerPhone}
                                         onChange={(e) => handleCustomerFieldChange('customerPhone', e.target.value)}
                                     />
