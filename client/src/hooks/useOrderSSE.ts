@@ -16,6 +16,8 @@
 
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import { ORDERS_PAGE_SIZE } from '../constants/queryKeys';
+import { getOrdersListQueryKey } from './orders/orderMutationUtils';
 
 // Event types from server (expanded)
 interface SSEEvent {
@@ -69,12 +71,12 @@ interface UseOrderSSEOptions {
     currentView: string;
     /** Current page number (to match query key) */
     page?: number;
+    /** Items per page (defaults to ORDERS_PAGE_SIZE) */
+    limit?: number;
     /** Enable/disable SSE connection */
     enabled?: boolean;
 }
 
-// Page size must match useUnifiedOrdersData.ts
-const PAGE_SIZE = 250;
 
 // Heartbeat monitoring interval
 const HEARTBEAT_CHECK_INTERVAL = 15000; // 15 seconds
@@ -83,6 +85,7 @@ const HEARTBEAT_TIMEOUT = 45000; // 1.5x the 30s heartbeat interval
 export function useOrderSSE({
     currentView,
     page = 1,
+    limit = ORDERS_PAGE_SIZE,
     enabled = true,
 }: UseOrderSSEOptions) {
     const queryClient = useQueryClient();
@@ -91,15 +94,17 @@ export function useOrderSSE({
     const reconnectAttempts = useRef(0);
     const lastEventIdRef = useRef<string | null>(null);
 
-    // Refs to avoid reconnection when view/page changes (Issue 3 fix)
+    // Refs to avoid reconnection when view/page/limit changes (Issue 3 fix)
     const currentViewRef = useRef(currentView);
     const pageRef = useRef(page);
+    const limitRef = useRef(limit);
 
     // Keep refs updated without triggering reconnection
     useEffect(() => {
         currentViewRef.current = currentView;
         pageRef.current = page;
-    }, [currentView, page]);
+        limitRef.current = limit;
+    }, [currentView, page, limit]);
 
     const [isConnected, setIsConnected] = useState(false);
     const [connectionHealth, setConnectionHealth] = useState<ConnectionHealth>({
@@ -142,8 +147,9 @@ export function useOrderSSE({
                 return;
             }
 
-            // Build query key for cache operations (using refs to avoid reconnection on view/page change)
-            const queryKey = ['orders', { view: currentViewRef.current, page: pageRef.current, limit: PAGE_SIZE }];
+            // Build query key for cache operations (using refs to avoid reconnection on view/page/limit change)
+            // IMPORTANT: Must match the Server Function query key format
+            const queryKey = getOrdersListQueryKey({ view: currentViewRef.current, page: pageRef.current, limit: limitRef.current });
 
             // Type for order list cache data
             type OrderListData = { rows: any[]; orders: any[] };

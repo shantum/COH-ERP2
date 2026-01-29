@@ -26,7 +26,7 @@ export function RouterNotFoundComponent() {
                     </Link>
                 </Button>
                 <Button variant="outline" asChild>
-                    <Link to="/orders" search={{ view: 'open', page: 1, limit: 500 }}>
+                    <Link to="/orders" search={{ view: 'open', page: 1, limit: 250 }}>
                         <ShoppingCart className="h-4 w-4 mr-2" />
                         Orders
                     </Link>

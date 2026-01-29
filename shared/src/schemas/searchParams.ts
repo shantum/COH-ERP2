@@ -30,8 +30,8 @@ export const OrdersSearchParams = z.object({
     view: z.enum(['open', 'shipped', 'rto', 'all']).catch('open'),
     /** Page number for pagination */
     page: z.coerce.number().int().positive().catch(1),
-    /** Items per page (Open: 500 default, Shipped/Cancelled: 100) */
-    limit: z.coerce.number().int().positive().max(2000).catch(500),
+    /** Items per page (defaults to 250) */
+    limit: z.coerce.number().int().positive().max(1000).optional().transform(v => v ?? 250),
     /** Search query string */
     search: z.string().optional().catch(undefined),
     /** Days filter (e.g., shipped in last N days) */

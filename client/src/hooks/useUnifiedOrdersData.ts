@@ -16,7 +16,7 @@
 import { useMemo, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
-import { inventoryQueryKeys } from '../constants/queryKeys';
+import { inventoryQueryKeys, ORDERS_PAGE_SIZE } from '../constants/queryKeys';
 import { getOrdersListQueryKey } from './orders/orderMutationUtils';
 import { getOrders, getOrderViewCounts } from '../server/functions/orders';
 import { getInventoryBalances } from '../server/functions/inventory';
@@ -42,23 +42,21 @@ type GetOrdersResponse = {
 };
 
 // Poll intervals - SSE connection determines frequency
-// When SSE connected: longer intervals (fallback only)
-// When SSE disconnected: frequent polling to stay in sync
-const POLL_INTERVAL_ACTIVE = 5000;    // 5 seconds for 'open' view (no SSE)
-const POLL_INTERVAL_PASSIVE = 30000;  // 30 seconds for other views (no SSE)
+// When SSE connected: polling disabled entirely (SSE handles updates)
+// When SSE disconnected: moderate polling to stay in sync without overwhelming low-spec devices
+const POLL_INTERVAL_ACTIVE = 15000;   // 15 seconds for 'open' view (no SSE) - was 5s, reduced for performance
+const POLL_INTERVAL_PASSIVE = 45000;  // 45 seconds for other views (no SSE) - was 30s
 // Stale time prevents double-fetches when data is still fresh
 const STALE_TIME = 120000;  // 2 minutes (SSE handles real-time updates)
 // Cache retention time (5 minutes) - keeps stale data for instant display
 const GC_TIME = 5 * 60 * 1000;
-// Orders per page
-const PAGE_SIZE = 250;
 
 // All available views (4 views: Open, Shipped, RTO, All)
 export type OrderView = 'open' | 'shipped' | 'rto' | 'all';
 
 // Helper to get page size for a view
 export const getPageSize = (_view: OrderView): number => {
-    return PAGE_SIZE;
+    return ORDERS_PAGE_SIZE;
 };
 
 // Legacy type alias for backwards compatibility
@@ -67,6 +65,8 @@ export type UnifiedOrderTab = OrderView;
 interface UseUnifiedOrdersDataOptions {
     currentView: OrderView;
     page: number;
+    /** Items per page (defaults to ORDERS_PAGE_SIZE) */
+    limit?: number;
     selectedCustomerId?: string | null;
     /** Whether SSE is connected - disables polling when true */
     isSSEConnected?: boolean;
@@ -77,6 +77,7 @@ interface UseUnifiedOrdersDataOptions {
 export function useUnifiedOrdersData({
     currentView,
     page,
+    limit = ORDERS_PAGE_SIZE,
     selectedCustomerId,
     isSSEConnected = false,
     initialData,
@@ -105,8 +106,8 @@ export function useUnifiedOrdersData({
     const queryParams = useMemo(() => ({
         view: currentView,
         page,
-        limit: getPageSize(currentView),
-    }), [currentView, page]);
+        limit,
+    }), [currentView, page, limit]);
 
     // Server Function path - uses useServerFn hook for proper client-side calls
     const getOrdersFn = useServerFn(getOrders);
@@ -159,18 +160,18 @@ export function useUnifiedOrdersData({
         if (currentView === 'open' && page === 1 && ordersQuery.isSuccess) {
             // Prefetch shipped view page 1 in background
             queryClient.prefetchQuery({
-                queryKey: getOrdersListQueryKey({ view: 'shipped', page: 1, limit: getPageSize('shipped') }),
+                queryKey: getOrdersListQueryKey({ view: 'shipped', page: 1, limit }),
                 staleTime: STALE_TIME,
             });
         }
         if (currentView === 'shipped' && page === 1 && ordersQuery.isSuccess) {
             // Prefetch rto view page 1 in background
             queryClient.prefetchQuery({
-                queryKey: getOrdersListQueryKey({ view: 'rto', page: 1, limit: getPageSize('rto') }),
+                queryKey: getOrdersListQueryKey({ view: 'rto', page: 1, limit }),
                 staleTime: STALE_TIME,
             });
         }
-    }, [currentView, page, ordersQuery.isSuccess, queryClient]);
+    }, [currentView, page, limit, ordersQuery.isSuccess, queryClient]);
 
     // Prefetch adjacent pages for smoother pagination
     useEffect(() => {
@@ -181,7 +182,7 @@ export function useUnifiedOrdersData({
         // Build base query input
         const baseInput = {
             view: currentView,
-            limit: getPageSize(currentView),
+            limit,
         };
 
         // Prefetch next page if it exists
@@ -199,7 +200,7 @@ export function useUnifiedOrdersData({
                 staleTime: STALE_TIME,
             });
         }
-    }, [currentView, page, ordersQuery.isSuccess, ordersQuery.data?.pagination, queryClient]);
+    }, [currentView, page, limit, ordersQuery.isSuccess, ordersQuery.data?.pagination, queryClient]);
 
     // ==========================================
     // SUPPORTING DATA QUERIES

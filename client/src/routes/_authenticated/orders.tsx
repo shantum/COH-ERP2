@@ -17,6 +17,7 @@ export const Route = createFileRoute('/_authenticated/orders')({
     loaderDeps: ({ search }) => ({
         view: search.view || 'open',
         page: search.page || 1,
+        limit: search.limit || 250,
     }),
     // Pre-fetch orders data on server
     loader: async ({ deps }): Promise<OrdersLoaderData> => {
@@ -25,7 +26,7 @@ export const Route = createFileRoute('/_authenticated/orders')({
                 data: {
                     view: deps.view as 'open' | 'shipped' | 'rto' | 'all',
                     page: deps.page,
-                    limit: 250,
+                    limit: deps.limit,
                 },
             });
             return { orders, error: null };
@@ -36,7 +37,7 @@ export const Route = createFileRoute('/_authenticated/orders')({
                     rows: [],
                     view: deps.view,
                     hasInventory: false,
-                    pagination: { total: 0, page: 1, limit: 250, totalPages: 0, hasMore: false },
+                    pagination: { total: 0, page: 1, limit: deps.limit, totalPages: 0, hasMore: false },
                 },
                 error: error instanceof Error ? error.message : 'Failed to load orders',
             };

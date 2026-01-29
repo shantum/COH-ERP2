@@ -7,6 +7,7 @@ import { useAuth } from '../hooks/useAuth';
 import { enrichRowsWithInventory } from '../utils/orderHelpers';
 import { formatDate } from '../utils/agGridHelpers';
 import type { DynamicColumnHandlers } from '../components/orders/OrdersTable/types';
+import { ORDERS_PAGE_SIZE } from '../constants/queryKeys';
 
 // Cell components (reused from main orders table)
 import { WorkflowCell } from '../components/orders/OrdersTable/cells/WorkflowCell';
@@ -16,7 +17,7 @@ import { CancelLineCell } from '../components/orders/OrdersTable/cells/CancelLin
 import { QtyStockCell } from '../components/orders/OrdersTable/cells/QtyStockCell';
 import { ShipByDateCell } from '../components/orders/OrdersTable/cells/ShipByDateCell';
 
-const PAGE_SIZE = 250;
+const PAGE_SIZE = ORDERS_PAGE_SIZE;
 
 const HEADERS = [
     { label: 'Date', width: 85 },

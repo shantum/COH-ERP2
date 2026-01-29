@@ -5,10 +5,10 @@
 
 import { useQueryClient, QueryClient } from '@tanstack/react-query';
 import { useMemo } from 'react';
-import { orderTabInvalidationMap } from '../../constants/queryKeys';
+import { orderTabInvalidationMap, ORDERS_PAGE_SIZE } from '../../constants/queryKeys';
 
-// Page size for orders pagination (must match useUnifiedOrdersData)
-export const PAGE_SIZE = 250;
+// Re-export for backwards compatibility
+export const PAGE_SIZE = ORDERS_PAGE_SIZE;
 
 // Map view names to query input
 export const viewToQueryInput: Record<string, { view: string; limit?: number }> = {

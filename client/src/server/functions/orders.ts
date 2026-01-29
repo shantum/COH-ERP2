@@ -28,7 +28,7 @@ export type SearchAllInput = z.infer<typeof searchAllInputSchema>;
 const ordersListInputSchema = z.object({
     view: z.enum(['open', 'shipped', 'rto', 'all', 'cancelled'] as const),
     page: z.number().int().positive().default(1),
-    limit: z.number().int().positive().max(1000).default(100),
+    limit: z.number().int().positive().max(1000).default(250),
     search: z.string().optional(),
     days: z.number().int().positive().optional(),
     sortBy: z.enum(['orderDate', 'archivedAt', 'shippedAt', 'createdAt'] as const).optional(),

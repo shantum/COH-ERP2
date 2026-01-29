@@ -32,7 +32,8 @@ export type { UseOrderLineMutationsOptions } from './useOrderLineMutations';
 export type { UseOrderShipMutationsOptions } from './useOrderShipMutations';
 export type { UseOrderWorkflowMutationsOptions } from './useOrderWorkflowMutations';
 export type { UseOrderStatusMutationsOptions } from './useOrderStatusMutations';
-export type { MutationOptions, PAGE_SIZE } from './orderMutationUtils';
+export type { MutationOptions } from './orderMutationUtils';
+export { PAGE_SIZE } from './orderMutationUtils';
 export type { LineStatusFlags } from './useLineStatus';
 
 // Re-export optimistic update helpers for direct use

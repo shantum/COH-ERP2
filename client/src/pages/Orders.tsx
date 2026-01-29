@@ -93,12 +93,13 @@ export default function Orders() {
     // Get loader data from route (SSR pre-fetched data)
     const loaderData = Route.useLoaderData();
 
-    // View and page state - persisted in URL via TanStack Router
+    // View, page, and limit state - persisted in URL via TanStack Router
     // Using Route.useSearch() for proper SSR support
     const search = Route.useSearch();
     const navigate = useNavigate();
     const view = (search.view || 'open') as OrderView;
     const page = search.page || 1;
+    const limit = search.limit || 250;
 
     const setView = useCallback((newView: OrderView) => {
         // Clear view-specific filters when changing views
@@ -186,7 +187,7 @@ export default function Orders() {
 
     // Real-time updates via SSE (for multi-user collaboration)
     // When SSE is connected, polling is reduced since SSE handles updates
-    const { isConnected: isSSEConnected } = useOrderSSE({ currentView: view, page });
+    const { isConnected: isSSEConnected } = useOrderSSE({ currentView: view, page, limit });
 
     // Data hook - simplified, single view with pagination
     const {
@@ -206,6 +207,7 @@ export default function Orders() {
     } = useUnifiedOrdersData({
         currentView: view,
         page,
+        limit,
         isSSEConnected,
         // Pass loader data for instant SSR hydration
         initialData: loaderData?.orders ?? null,

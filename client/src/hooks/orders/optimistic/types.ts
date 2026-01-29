@@ -3,9 +3,10 @@
  */
 
 import type { FlattenedOrderRow } from '../../../utils/orderHelpers';
+import { ORDERS_PAGE_SIZE } from '../../../constants/queryKeys';
 
-// Constants (must match useUnifiedOrdersData)
-export const PAGE_SIZE = 250;
+// Re-export for backwards compatibility
+export const PAGE_SIZE = ORDERS_PAGE_SIZE;
 
 // Types for tRPC query input
 export interface OrdersQueryInput {
