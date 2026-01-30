@@ -92,6 +92,13 @@ export interface VariationNode {
     colorHex?: string;
     fabricId?: string;
     fabricName?: string;
+    // New 3-tier fabric hierarchy fields
+    fabricColourId?: string;
+    fabricColourName?: string;
+    fabricColourHex?: string;
+    materialId?: string;
+    materialName?: string;
+    hasBomFabricLine: boolean;
     imageUrl?: string;
     hasLining: boolean;
     totalStock: number;
@@ -236,6 +243,21 @@ export const getProductsTree = createServerFn({ method: 'GET' })
                 balances.map((b: BalanceRow) => [b.skuId, Number(b.balance)])
             );
 
+            // Step 1b: Pre-fetch BOM fabric status (N+1 safe - single query)
+            // Find all variations that have at least one VariationBomLine with:
+            // - A ComponentRole whose ComponentType.code = 'FABRIC'
+            // - fabricColourId is not null
+            const variationsWithBomFabric = await prisma.variationBomLine.findMany({
+                where: {
+                    fabricColourId: { not: null },
+                    role: {
+                        type: { code: 'FABRIC' },
+                    },
+                },
+                select: { variationId: true },
+            });
+            const bomFabricVariationIds = new Set(variationsWithBomFabric.map(v => v.variationId));
+
             // Step 2: Build search filter
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             let searchFilter: Record<string, any> = {};
@@ -371,6 +393,13 @@ export const getProductsTree = createServerFn({ method: 'GET' })
                             colorHex: variation.colorHex ?? undefined,
                             fabricId: variation.fabricId ?? undefined,
                             fabricName: variation.fabric?.name ?? undefined,
+                            // New 3-tier fabric hierarchy fields
+                            fabricColourId: variation.fabricColourId ?? undefined,
+                            fabricColourName: variation.fabricColour?.colourName ?? undefined,
+                            fabricColourHex: variation.fabricColour?.colourHex ?? undefined,
+                            materialId: variation.fabricColour?.fabric?.material?.id ?? variation.fabric?.material?.id ?? undefined,
+                            materialName: variation.fabricColour?.fabric?.material?.name ?? variation.fabric?.material?.name ?? undefined,
+                            hasBomFabricLine: bomFabricVariationIds.has(variation.id),
                             imageUrl: variation.imageUrl ?? undefined,
                             hasLining: variation.hasLining,
                             totalStock: variationStock,

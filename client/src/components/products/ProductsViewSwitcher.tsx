@@ -22,7 +22,10 @@ import { Button } from '@/components/ui/button';
 import {
     Select,
     SelectContent,
+    SelectGroup,
     SelectItem,
+    SelectLabel,
+    SelectSeparator,
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select';
@@ -43,17 +46,63 @@ interface ProductsViewSwitcherProps {
     onAddProduct?: () => void;
 }
 
+// Discriminated union for fabric filter state
+type FabricFilterValue =
+    | { type: 'all' }
+    | { type: 'no-fabric' }      // Variations with fabricColourId = null
+    | { type: 'no-bom' }         // Variations without BOM fabric line
+    | { type: 'colour'; colourId: string };  // Specific fabric colour
+
 interface FilterState {
     gender: string | null;
-    fabricType: string | null;
+    fabricFilter: FabricFilterValue;
     category: string | null;
+}
+
+// Types for fabric filter hierarchy
+interface FabricColourOption {
+    id: string;
+    name: string;
+    hex: string | null;
+}
+
+interface FabricGroup {
+    id: string;
+    name: string;
+    colours: FabricColourOption[];
+}
+
+interface MaterialGroup {
+    id: string;
+    name: string;
+    fabrics: FabricGroup[];
+}
+
+interface FabricFilterOptions {
+    hierarchy: MaterialGroup[];
+    noFabricCount: number;
+    noBomCount: number;
+}
+
+// Helper functions for fabric filter serialization
+function serializeFabricFilter(filter: FabricFilterValue): string {
+    if (filter.type === 'colour') return `colour:${filter.colourId}`;
+    return filter.type;
+}
+
+function parseFabricFilter(value: string): FabricFilterValue {
+    if (value === 'all') return { type: 'all' };
+    if (value === 'no-fabric') return { type: 'no-fabric' };
+    if (value === 'no-bom') return { type: 'no-bom' };
+    if (value.startsWith('colour:')) return { type: 'colour', colourId: value.slice(7) };
+    return { type: 'all' };
 }
 
 export function ProductsViewSwitcher({ searchQuery, onSearchChange, onViewProduct, onEditBom, onAddProduct }: ProductsViewSwitcherProps) {
     const [viewMode, setViewMode] = useState<ViewMode>('product');
     const [filters, setFilters] = useState<FilterState>({
         gender: null,
-        fabricType: null,
+        fabricFilter: { type: 'all' },
         category: null,
     });
     const [showFilters, setShowFilters] = useState(false);
@@ -74,24 +123,128 @@ export function ProductsViewSwitcher({ searchQuery, onSearchChange, onViewProduc
 
     // Extract unique filter options from data
     const filterOptions = useMemo(() => {
-        if (!treeData) return { genders: [], fabricTypes: [], categories: [] };
+        if (!treeData) return { genders: [], categories: [] };
 
         const genders = new Set<string>();
-        const fabricTypes = new Set<string>();
         const categories = new Set<string>();
 
         treeData.forEach(product => {
             if (product.gender) genders.add(product.gender);
-            if (product.fabricTypeName) fabricTypes.add(product.fabricTypeName);
             if (product.category) categories.add(product.category);
         });
 
         return {
             genders: Array.from(genders).sort(),
-            fabricTypes: Array.from(fabricTypes).sort(),
             categories: Array.from(categories).sort(),
         };
     }, [treeData]);
+
+    // Build fabric filter options with Material > Fabric > Colour hierarchy
+    const fabricFilterOptions = useMemo((): FabricFilterOptions => {
+        if (!treeData) return { hierarchy: [], noFabricCount: 0, noBomCount: 0 };
+
+        const materialsMap = new Map<string, {
+            id: string;
+            name: string;
+            fabrics: Map<string, { id: string; name: string; colours: Map<string, FabricColourOption> }>;
+        }>();
+
+        let noFabricCount = 0;
+        let noBomCount = 0;
+        const productsWithNoFabric = new Set<string>();
+        const productsWithNoBom = new Set<string>();
+
+        treeData.forEach(product => {
+            const variations = (product.children || []) as ProductTreeNode[];
+
+            // Count products for special filters
+            if (variations.some(v => !v.fabricColourId)) {
+                productsWithNoFabric.add(product.id);
+            }
+            if (variations.some(v => !v.hasBomFabricLine)) {
+                productsWithNoBom.add(product.id);
+            }
+
+            // Build hierarchy from variations
+            variations.forEach(variation => {
+                if (!variation.fabricColourId || !variation.materialId) return;
+
+                // Get or create material
+                let material = materialsMap.get(variation.materialId);
+                if (!material) {
+                    material = {
+                        id: variation.materialId,
+                        name: variation.materialName || 'Unknown Material',
+                        fabrics: new Map(),
+                    };
+                    materialsMap.set(variation.materialId, material);
+                }
+
+                // Get or create fabric under material
+                const fabricId = variation.fabricId || '';
+                let fabric = material.fabrics.get(fabricId);
+                if (!fabric) {
+                    fabric = {
+                        id: fabricId,
+                        name: variation.fabricName || 'Unknown Fabric',
+                        colours: new Map(),
+                    };
+                    material.fabrics.set(fabricId, fabric);
+                }
+
+                // Add colour
+                fabric.colours.set(variation.fabricColourId, {
+                    id: variation.fabricColourId,
+                    name: variation.fabricColourName || 'Unknown Colour',
+                    hex: variation.fabricColourHex || null,
+                });
+            });
+        });
+
+        noFabricCount = productsWithNoFabric.size;
+        noBomCount = productsWithNoBom.size;
+
+        // Convert to sorted arrays
+        const hierarchy = Array.from(materialsMap.values())
+            .map(m => ({
+                id: m.id,
+                name: m.name,
+                fabrics: Array.from(m.fabrics.values())
+                    .map(f => ({
+                        id: f.id,
+                        name: f.name,
+                        colours: Array.from(f.colours.values()).sort((a, b) => a.name.localeCompare(b.name)),
+                    }))
+                    .sort((a, b) => a.name.localeCompare(b.name)),
+            }))
+            .sort((a, b) => a.name.localeCompare(b.name));
+
+        return { hierarchy, noFabricCount, noBomCount };
+    }, [treeData]);
+
+    // Pure filter function for fabric filter matching
+    const matchesFabricFilter = useCallback((
+        variations: ProductTreeNode[],
+        filter: FabricFilterValue
+    ): boolean => {
+        switch (filter.type) {
+            case 'all':
+                return true;
+            case 'no-fabric':
+                // Show products with ANY variation missing fabricColourId
+                return variations.some(v => !v.fabricColourId);
+            case 'no-bom':
+                // Show products with ANY variation missing BOM fabric line
+                return variations.some(v => !v.hasBomFabricLine);
+            case 'colour':
+                // Show products with ANY variation using this fabric colour
+                return variations.some(v => v.fabricColourId === filter.colourId);
+            default:
+                // Exhaustive check - TypeScript will error if we miss a case
+                filter satisfies never;
+                return true;
+        }
+    }, []);
 
     // Filter products based on selected filters
     const filteredProducts = useMemo(() => {
@@ -99,24 +252,32 @@ export function ProductsViewSwitcher({ searchQuery, onSearchChange, onViewProduc
 
         return treeData.filter(product => {
             if (filters.gender && product.gender !== filters.gender) return false;
-            if (filters.fabricType && product.fabricTypeName !== filters.fabricType) return false;
             if (filters.category && product.category !== filters.category) return false;
+
+            // Fabric filter operates on variations
+            const variations = (product.children || []) as ProductTreeNode[];
+            if (!matchesFabricFilter(variations, filters.fabricFilter)) return false;
+
             return true;
         });
-    }, [treeData, filters]);
+    }, [treeData, filters, matchesFabricFilter]);
 
     // Count active filters
     const activeFilterCount = useMemo(() => {
-        return Object.values(filters).filter(Boolean).length;
+        let count = 0;
+        if (filters.gender) count++;
+        if (filters.category) count++;
+        if (filters.fabricFilter.type !== 'all') count++;
+        return count;
     }, [filters]);
 
     // Clear all filters
     const clearFilters = useCallback(() => {
-        setFilters({ gender: null, fabricType: null, category: null });
+        setFilters({ gender: null, fabricFilter: { type: 'all' }, category: null });
     }, []);
 
-    // Update a single filter
-    const updateFilter = useCallback((key: keyof FilterState, value: string | null) => {
+    // Update a single filter (for simple string filters)
+    const updateFilter = useCallback(<K extends keyof FilterState>(key: K, value: FilterState[K]) => {
         setFilters(prev => ({ ...prev, [key]: value }));
     }, []);
 
@@ -304,25 +465,70 @@ export function ProductsViewSwitcher({ searchQuery, onSearchChange, onViewProduc
 
                     <div className="w-px h-6 bg-gray-200" />
 
-                    {/* Fabric Type Filter */}
+                    {/* Fabric Colour Filter (3-tier hierarchy) */}
                     <div className="flex items-center gap-2">
                         <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
                             <Scissors size={14} />
                             <span className="hidden sm:inline">Fabric</span>
                         </div>
                         <Select
-                            value={filters.fabricType || "all"}
-                            onValueChange={(v) => updateFilter('fabricType', v === 'all' ? null : v)}
+                            value={serializeFabricFilter(filters.fabricFilter)}
+                            onValueChange={(v) => updateFilter('fabricFilter', parseFabricFilter(v))}
                         >
-                            <SelectTrigger className="w-36 h-8">
-                                <SelectValue placeholder="All" />
+                            <SelectTrigger className="w-52 h-8">
+                                <SelectValue placeholder="All Fabrics" />
                             </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="all">All Fabric Types</SelectItem>
-                                {filterOptions.fabricTypes.map(ft => (
-                                    <SelectItem key={ft} value={ft}>
-                                        {ft}
-                                    </SelectItem>
+                            <SelectContent className="max-h-80">
+                                <SelectItem value="all">All Fabrics</SelectItem>
+                                <SelectSeparator />
+
+                                {/* Special filters with counts */}
+                                <SelectItem value="no-fabric">
+                                    <span className="flex items-center gap-2">
+                                        No Fabric Assigned
+                                        {fabricFilterOptions.noFabricCount > 0 && (
+                                            <Badge variant="secondary" className="text-xs h-5 px-1.5">
+                                                {fabricFilterOptions.noFabricCount}
+                                            </Badge>
+                                        )}
+                                    </span>
+                                </SelectItem>
+                                <SelectItem value="no-bom">
+                                    <span className="flex items-center gap-2">
+                                        No BOM Fabric Line
+                                        {fabricFilterOptions.noBomCount > 0 && (
+                                            <Badge variant="secondary" className="text-xs h-5 px-1.5">
+                                                {fabricFilterOptions.noBomCount}
+                                            </Badge>
+                                        )}
+                                    </span>
+                                </SelectItem>
+
+                                {fabricFilterOptions.hierarchy.length > 0 && <SelectSeparator />}
+
+                                {/* Grouped by Material > Fabric > Colour */}
+                                {fabricFilterOptions.hierarchy.map(material => (
+                                    <SelectGroup key={material.id}>
+                                        <SelectLabel className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                                            {material.name}
+                                        </SelectLabel>
+                                        {material.fabrics.flatMap(fabric =>
+                                            fabric.colours.map(colour => (
+                                                <SelectItem key={colour.id} value={`colour:${colour.id}`}>
+                                                    <span className="flex items-center gap-2">
+                                                        {colour.hex && (
+                                                            <span
+                                                                className="w-3 h-3 rounded-full border border-gray-200 flex-shrink-0"
+                                                                style={{ backgroundColor: colour.hex }}
+                                                            />
+                                                        )}
+                                                        <span>{colour.name}</span>
+                                                        <span className="text-muted-foreground text-xs">({fabric.name})</span>
+                                                    </span>
+                                                </SelectItem>
+                                            ))
+                                        )}
+                                    </SelectGroup>
                                 ))}
                             </SelectContent>
                         </Select>
@@ -355,11 +561,23 @@ export function ProductsViewSwitcher({ searchQuery, onSearchChange, onViewProduc
                                         </button>
                                     </Badge>
                                 )}
-                                {filters.fabricType && (
+                                {filters.fabricFilter.type !== 'all' && (
                                     <Badge variant="secondary" className="gap-1 pr-1">
-                                        {filters.fabricType}
+                                        {filters.fabricFilter.type === 'no-fabric' && 'No Fabric Assigned'}
+                                        {filters.fabricFilter.type === 'no-bom' && 'No BOM Fabric'}
+                                        {filters.fabricFilter.type === 'colour' && (() => {
+                                            // Find the colour name from hierarchy
+                                            const colourId = filters.fabricFilter.colourId;
+                                            for (const mat of fabricFilterOptions.hierarchy) {
+                                                for (const fab of mat.fabrics) {
+                                                    const colour = fab.colours.find(c => c.id === colourId);
+                                                    if (colour) return colour.name;
+                                                }
+                                            }
+                                            return 'Selected Fabric';
+                                        })()}
                                         <button
-                                            onClick={() => updateFilter('fabricType', null)}
+                                            onClick={() => updateFilter('fabricFilter', { type: 'all' })}
                                             className="ml-1 rounded-full hover:bg-gray-300 p-0.5"
                                         >
                                             <X size={12} />

@@ -44,6 +44,13 @@ export interface ProductTreeNode {
     colorHex?: string;
     fabricId?: string;
     fabricName?: string;
+    // New 3-tier fabric hierarchy fields (for variations)
+    fabricColourId?: string;
+    fabricColourName?: string;
+    fabricColourHex?: string;
+    materialId?: string;
+    materialName?: string;
+    hasBomFabricLine?: boolean;
 
     // === SKU level ===
     variationId?: string;
