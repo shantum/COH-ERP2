@@ -86,26 +86,9 @@ export type UpdateColourMinOrderInput = z.infer<typeof UpdateColourMinOrderSchem
 // ============================================
 // PRODUCT/VARIATION FABRIC MAPPING SCHEMAS
 // ============================================
-
-/**
- * Update product fabric type
- * Used by FabricEditPopover for product-level fabric type assignment
- */
-export const UpdateProductFabricTypeSchema = z.object({
-    productId: z.string().uuid('Invalid product ID'),
-    fabricTypeId: z.string().uuid('Invalid fabric type ID').nullable(),
-});
-export type UpdateProductFabricTypeInput = z.infer<typeof UpdateProductFabricTypeSchema>;
-
-/**
- * Update variation fabric
- * Used by FabricEditPopover for variation-level fabric assignment
- */
-export const UpdateVariationFabricSchema = z.object({
-    variationId: z.string().uuid('Invalid variation ID'),
-    fabricId: z.string().uuid('Invalid fabric ID'),
-});
-export type UpdateVariationFabricInput = z.infer<typeof UpdateVariationFabricSchema>;
+// NOTE: FabricType and direct fabric assignment schemas removed.
+// Fabric assignment is now managed via BOM (VariationBomLine.fabricColourId).
+// See bomMutations.ts for linkVariationsToColour.
 
 // ============================================
 // UNIFIED MATERIAL NODE UPDATE SCHEMA

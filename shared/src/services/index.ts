@@ -20,6 +20,7 @@
  * If you need to refactor, see CLAUDE.md for architecture notes.
  */
 
+export * from './bom/index.js';
 export * from './dashboard/index.js';
 export * from './db/index.js';
 export * from './inventory/index.js';

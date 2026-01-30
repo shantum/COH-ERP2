@@ -1033,14 +1033,8 @@ export const deleteTransaction = createServerFn({ method: 'POST' })
                     },
                 });
 
-                // Delete fabric outward if exists
-                await prisma.fabricTransaction.deleteMany({
-                    where: {
-                        referenceId: existing.referenceId,
-                        reason: TXN_REASON.PRODUCTION,
-                        txnType: 'outward',
-                    },
-                });
+                // NOTE: FabricTransaction table removed in fabric consolidation
+                // Fabric transactions now use FabricColourTransaction
 
                 message = 'Transaction deleted, production batch reverted';
             }

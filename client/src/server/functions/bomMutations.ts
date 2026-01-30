@@ -1146,7 +1146,7 @@ export const importConsumption = createServerFn({ method: 'POST' })
 /**
  * Link fabric colour to multiple variations
  * Creates VariationBomLine records for the main fabric role
- * Also updates variation.fabricId to maintain hierarchy consistency
+ * NOTE: BOM is now the single source of truth for fabric assignment
  */
 export const linkFabricToVariation = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
@@ -1202,13 +1202,9 @@ export const linkFabricToVariation = createServerFn({ method: 'POST' })
         try {
             // OPTIMIZED: Batch operations instead of sequential loop
             const results = await prisma.$transaction(async (tx: PrismaTransaction) => {
-                // 1. Batch update all variations' fabricId (single query)
-                await tx.variation.updateMany({
-                    where: { id: { in: variationIds } },
-                    data: { fabricId: colour.fabricId },
-                });
+                // NOTE: Removed legacy variation.fabricId sync - BOM is now source of truth
 
-                // 2. Find existing BOM lines for these variations
+                // 1. Find existing BOM lines for these variations
                 const existingBomLines = await tx.variationBomLine.findMany({
                     where: {
                         variationId: { in: variationIds },
@@ -2467,22 +2463,14 @@ export const linkVariationsToColour = createServerFn({ method: 'POST' })
                 };
             }
 
-            // Create/update BOM lines AND update variation.fabricId in a transaction
+            // Create/update BOM lines - BOM is now the single source of truth for fabric
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const results = await prisma.$transaction(async (tx: any) => {
                 const updated: string[] = [];
 
                 for (const variation of variations) {
-                    // 1. Update the variation's fabricId AND fabricColourId to keep them in sync
-                    await tx.variation.update({
-                        where: { id: variation.id },
-                        data: {
-                            fabricId: colour.fabricId,
-                            fabricColourId: colourId,  // Keep fabricColourId in sync
-                        },
-                    });
-
-                    // 2. THEN create/update the BOM line with the fabric colour
+                    // Create/update the BOM line with the fabric colour
+                    // NOTE: Removed legacy variation.fabricId/fabricColourId sync - BOM is source of truth
                     await tx.variationBomLine.upsert({
                         where: {
                             variationId_roleId: {
@@ -2579,16 +2567,11 @@ export const clearVariationsFabricMapping = createServerFn({ method: 'POST' })
                 };
             }
 
-            // Clear fabric assignments in a transaction
+            // Clear fabric assignments by deleting BOM lines
+            // NOTE: BOM is now the single source of truth - no variation fields to update
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             await prisma.$transaction(async (tx: any) => {
-                // 1. Set fabricColourId to null on variations (fabricId stays as-is since it's required)
-                await tx.variation.updateMany({
-                    where: { id: { in: variationIds } },
-                    data: { fabricColourId: null },
-                });
-
-                // 2. Delete the BOM lines for the main fabric role
+                // Delete the BOM lines for the main fabric role
                 await tx.variationBomLine.deleteMany({
                     where: {
                         variationId: { in: variationIds },

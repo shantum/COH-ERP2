@@ -41,6 +41,10 @@
     "./services/orders": {
       "types": "./dist/services/orders/index.d.ts",
       "import": "./dist/services/orders/index.js"
+    },
+    "./services/bom": {
+      "types": "./dist/services/bom/index.d.ts",
+      "import": "./dist/services/bom/index.js"
     }
   },
   "scripts": {

@@ -28,6 +28,7 @@ export interface CustomerDetailParams {
 }
 
 // Type for order with lines from Prisma query
+// NOTE: fabricColour removed from variation - fabric assignment now via BOM
 interface OrderWithLines {
     id: string;
     orderNumber: string;
@@ -46,11 +47,6 @@ interface OrderWithLines {
                 product: {
                     name: string | null;
                     imageUrl: string | null;
-                } | null;
-                fabricColour: {
-                    fabric: {
-                        name: string | null;
-                    } | null;
                 } | null;
             } | null;
         } | null;
@@ -103,6 +99,7 @@ export async function getCustomerKysely(id: string): Promise<CustomerDetailResul
     if (!customer) return null;
 
     // Get orders with full line details using Prisma for relations
+    // NOTE: fabricColour removed from variation - fabric assignment now via BOM
     const orders: OrderWithLines[] = await prisma.order.findMany({
         where: { customerId: id },
         orderBy: { orderDate: 'desc' },
@@ -129,15 +126,6 @@ export async function getCustomerKysely(id: string): Promise<CustomerDetailResul
                                         select: {
                                             name: true,
                                             imageUrl: true,
-                                        },
-                                    },
-                                    fabricColour: {
-                                        select: {
-                                            fabric: {
-                                                select: {
-                                                    name: true,
-                                                },
-                                            },
                                         },
                                     },
                                 },
@@ -176,10 +164,9 @@ export async function getCustomerKysely(id: string): Promise<CustomerDetailResul
             }
 
             // Fabric affinity
-            const fabricName = variation.fabricColour?.fabric?.name;
-            if (fabricName) {
-                fabricCounts.set(fabricName, (fabricCounts.get(fabricName) || 0) + line.qty);
-            }
+            // NOTE: fabricColour removed from variation - fabric assignment now via BOM
+            // Fabric affinity calculation currently disabled
+            // TODO: Look up fabric via VariationBomLine when needed
         }
     }
 
@@ -246,6 +233,7 @@ export async function getCustomerKysely(id: string): Promise<CustomerDetailResul
         productAffinity: productAffinity.length > 0 ? productAffinity : null,
         fabricAffinity: fabricAffinity.length > 0 ? fabricAffinity : null,
         // Orders with lines for size preferences
+        // NOTE: fabricColour removed from variation - fabric assignment now via BOM
         orders: orders.map((o) => ({
             id: o.id,
             orderNumber: o.orderNumber,
@@ -262,7 +250,7 @@ export async function getCustomerKysely(id: string): Promise<CustomerDetailResul
                         colorHex: line.sku.variation.colorHex,
                         imageUrl: line.sku.variation.imageUrl,
                         product: line.sku.variation.product,
-                        fabricColour: line.sku.variation.fabricColour,
+                        fabricColour: null,  // Removed - fabric assignment now via BOM
                     } : null,
                 } : null,
             })),

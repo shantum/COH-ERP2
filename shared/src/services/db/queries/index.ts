@@ -53,3 +53,15 @@ export {
     getFabricSalesMetricsKysely,
     type FabricSalesMetrics,
 } from './materials.js';
+
+// Products queries
+export {
+    getVariationSalesMetricsKysely,
+    getSkuSalesMetricsKysely,
+    getVariationShopifyStockKysely,
+    getSkuShopifyStockKysely,
+    getFabricColourBalancesKysely,
+    getProductShopifyStatusesKysely,
+    type VariationSalesMetrics,
+    type SkuSalesMetrics,
+} from './products.js';

@@ -16,6 +16,7 @@ import type { ColDef, ICellRendererParams, ValueFormatterParams, CellClassParams
 import type { PermissionColDef } from '../hooks/usePermissionColumns';
 import { InventoryStatusBadge } from '../components/common/grid';
 import type { ViewLevel } from '../components/catalog/FabricEditPopover';
+import { FabricDisplayCell } from '../components/catalog/FabricEditPopover';
 
 // All column IDs in display order
 export const ALL_COLUMN_IDS = [
@@ -75,15 +76,17 @@ export interface CreateColumnDefsParams {
     viewLevel: ViewLevel;
     filterOptions?: any;
     catalogData?: any;
-    uniqueFabricTypes: Array<{ id: string; name: string }>;
-    handleUpdateFabricType: (productId: string, fabricTypeId: string | null, affectedCount: number) => void;
-    handleUpdateFabric: (variationId: string, fabricId: string, affectedCount: number) => void;
+    // Legacy - no longer used since fabric editing moved to BOM
+    uniqueFabricTypes?: Array<{ id: string; name: string }>;
+    handleUpdateFabricType?: (productId: string, fabricTypeId: string | null, affectedCount: number) => void;
+    handleUpdateFabric?: (variationId: string, fabricId: string, affectedCount: number) => void;
     promptLiningChange: (row: any) => void;
     openEditModal: (row: any, level: 'sku' | 'variation' | 'product') => void;
     openBomEditor?: (row: any) => void;
     setFilter: React.Dispatch<React.SetStateAction<any>>;
     setViewLevel: (level: ViewLevel) => void;
-    FabricEditPopover: React.ComponentType<any>;
+    // Legacy - FabricEditPopover no longer used, fabric is read-only
+    FabricEditPopover?: React.ComponentType<any>;
 }
 
 /**
@@ -91,17 +94,11 @@ export interface CreateColumnDefsParams {
  */
 export function createColumnDefs({
     viewLevel,
-    filterOptions,
-    catalogData,
-    uniqueFabricTypes,
-    handleUpdateFabricType,
-    handleUpdateFabric,
     promptLiningChange,
     openEditModal,
     openBomEditor,
     setFilter,
     setViewLevel,
-    FabricEditPopover,
 }: CreateColumnDefsParams): PermissionColDef[] {
     return [
         // Image column - first for visual identification
@@ -202,11 +199,11 @@ export function createColumnDefs({
             colId: 'fabricTypeName',
             headerName: DEFAULT_HEADERS.fabricTypeName,
             width: 120,
-            // Use valueGetter for filtering - always show product's fabricTypeName for consistency
+            // Material name derived from BOM fabric colour
             valueGetter: (params: any) => {
                 const row = params.data;
                 if (!row) return '';
-                return row.fabricTypeName || '';
+                return row.fabricTypeName || row.materialName || '';
             },
             filter: 'agTextColumnFilter',
             floatingFilter: true,
@@ -214,15 +211,10 @@ export function createColumnDefs({
                 const row = params.data;
                 if (!row) return null;
                 return (
-                    <FabricEditPopover
+                    <FabricDisplayCell
                         row={row}
                         viewLevel={viewLevel}
                         columnType="fabricType"
-                        fabricTypes={uniqueFabricTypes}
-                        fabrics={filterOptions?.fabrics || []}
-                        onUpdateFabricType={handleUpdateFabricType}
-                        onUpdateFabric={handleUpdateFabric}
-                        rawItems={catalogData?.items || []}
                     />
                 );
             },
@@ -261,31 +253,23 @@ export function createColumnDefs({
             colId: 'fabricName',
             headerName: DEFAULT_HEADERS.fabricName,
             width: 140,
-            // Use valueGetter for filtering (returns displayed text)
+            // Fabric colour name derived from BOM
             valueGetter: (params: any) => {
                 const row = params.data;
                 if (!row) return '';
-                return row.fabricName || '';
+                return row.fabricName || row.fabricColourName || '';
             },
             filter: 'agTextColumnFilter',
             floatingFilter: true,
             cellRenderer: (params: ICellRendererParams) => {
                 const row = params.data;
                 if (!row) return null;
-                // Show fabric count at product level, editor for variation and SKU views
-                if (viewLevel === 'product') {
-                    return <span className="text-xs text-gray-500">{row.fabricName || '-'}</span>;
-                }
+                // Read-only display - fabric is now set via BOM Editor
                 return (
-                    <FabricEditPopover
+                    <FabricDisplayCell
                         row={row}
                         viewLevel={viewLevel}
                         columnType="fabric"
-                        fabricTypes={uniqueFabricTypes}
-                        fabrics={filterOptions?.fabrics || []}
-                        onUpdateFabricType={handleUpdateFabricType}
-                        onUpdateFabric={handleUpdateFabric}
-                        rawItems={catalogData?.items || []}
                     />
                 );
             },

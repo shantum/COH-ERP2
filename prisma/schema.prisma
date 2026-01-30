@@ -42,7 +42,7 @@ model User {
   permissionOverrides   UserPermissionOverride[]
   gridPreferences       UserGridPreference[]
   inventoryTransactions InventoryTransaction[]
-  fabricTransactions    FabricTransaction[]
+  // NOTE: fabricTransactions removed - use fabricColourTransactions
   fabricColourTransactions FabricColourTransaction[] @relation("FabricColourTxnCreator")
   returnStatusHistory   ReturnStatusHistory[]
   processedRepackItems  RepackingQueueItem[]     @relation("RepackingProcessor")
@@ -97,7 +97,7 @@ model Product {
   category                 String
   productType              String
   gender                   String      @default("unisex")
-  fabricTypeId             String?
+  // NOTE: fabricTypeId removed - fabric info comes from variation BOM lines
   baseProductionTimeMins   Int         @default(60)
   defaultFabricConsumption Float?
   imageUrl                 String?
@@ -115,11 +115,9 @@ model Product {
   packagingCost            Float?
   liningCost               Float?
   shopifyProductIds        String[]    @default([])
-  fabricType               FabricType? @relation(fields: [fabricTypeId], references: [id])
   variations               Variation[]
-  bomTemplates             ProductBomTemplate[] // NEW: BOM structure for this product
+  bomTemplates             ProductBomTemplate[] // BOM structure for this product
 
-  @@index([fabricTypeId])
   @@index([category])
   @@index([shopifyHandle])
   @@index([name])
@@ -132,8 +130,7 @@ model Variation {
   colorName              String
   standardColor          String?
   colorHex               String?
-  fabricId               String
-  fabricColourId         String?  // NEW: Link to FabricColour (replaces fabricId)
+  // NOTE: fabricId/fabricColourId removed - fabric assignment via BOM (VariationBomLine.fabricColourId)
   imageUrl               String?
   isActive               Boolean @default(true)
   hasLining              Boolean @default(false)
@@ -141,18 +138,15 @@ model Variation {
   packagingCost          Float?
   liningCost             Float?
   laborMinutes           Float?
+  bomCost                Float?   // Computed total BOM cost (sum of SKU bomCosts)
   shopifySourceProductId String?
   shopifySourceHandle    String?
   skus                   Sku[]
-  fabric                 Fabric  @relation(fields: [fabricId], references: [id])
-  fabricColour           FabricColour? @relation(fields: [fabricColourId], references: [id])
   product                Product @relation(fields: [productId], references: [id])
-  bomLines               VariationBomLine[] // NEW: BOM overrides for this variation
+  bomLines               VariationBomLine[] // BOM overrides for this variation (fabric assigned here)
 
   @@unique([productId, colorName])
   @@index([productId])
-  @@index([fabricId])
-  @@index([fabricColourId])
   @@index([shopifySourceProductId])
 }
 
@@ -183,6 +177,7 @@ model Sku {
   packagingCost          Float?
   liningCost             Float?
   laborMinutes           Float?
+  bomCost                Float?   // Computed total BOM cost (fabric + trims + services)
   feedbackProductLinks   FeedbackProductLink[]
   reconciliationItems    InventoryReconciliationItem[]
   inventoryTransactions  InventoryTransaction[]
@@ -228,22 +223,10 @@ model CostConfig {
   gstThreshold         Float    @default(2500)
 }
 
-model FabricType {
-  id                  String    @id @default(uuid())
-  name                String    @unique
-  composition         String?
-  unit                String
-  avgShrinkagePct     Float     @default(0)
-  defaultCostPerUnit  Float?
-  defaultLeadTimeDays Int?
-  defaultMinOrderQty  Float?
-  fabrics             Fabric[]
-  products            Product[]
-}
-
 // ============================================
-// MATERIAL HIERARCHY (NEW - 3-tier system)
+// MATERIAL HIERARCHY (3-tier system)
 // ============================================
+// NOTE: FabricType model removed - replaced by Material model
 
 // Level 1: Base fiber/material (replaces FabricType conceptually)
 model Material {
@@ -281,12 +264,12 @@ model FabricColour {
   fabric         Fabric   @relation("FabricColours", fields: [fabricId], references: [id])
   supplier       Supplier? @relation("FabricColourSupplier", fields: [supplierId], references: [id])
 
-  // BOM usages
+  // BOM usages (fabric assignment via these tables)
   variationBomLines VariationBomLine[]
   skuBomLines       SkuBomLine[]
 
-  // NEW: Direct variation link and transactions
-  variations               Variation[]
+  // Transactions and reconciliation
+  // NOTE: Direct variation link removed - use variationBomLines for fabric->variation
   transactions             FabricColourTransaction[]
   reconciliationItems      FabricColourReconciliationItem[]
 
@@ -298,7 +281,7 @@ model FabricColour {
 
 model Fabric {
   id                  String                     @id @default(uuid())
-  fabricTypeId        String
+  // NOTE: fabricTypeId removed - fabric now links directly to Material
   name                String
   colorName           String
   standardColor       String?
@@ -308,10 +291,9 @@ model Fabric {
   leadTimeDays        Int?
   minOrderQty         Float?
   isActive            Boolean                    @default(true)
-  // NOTE: Legacy model - use FabricColour for new inventory tracking
 
-  // NEW: Material hierarchy fields (optional for migration)
-  materialId          String?                    // Link to new Material model
+  // Material hierarchy fields
+  materialId          String?                    // Link to Material model
   constructionType    String?                    // "knit", "woven"
   pattern             String?                    // "single_jersey", "french_terry", "twill", "plain"
   weight              Float?                     // 180 (for gsm), 40 (for lea)
@@ -322,17 +304,13 @@ model Fabric {
   defaultMinOrderQty  Float?                     // Default min order for colours
   unit                String?                    // "meters", "yards"
 
-  fabricType          FabricType                 @relation(fields: [fabricTypeId], references: [id])
   supplier            Supplier?                  @relation(fields: [supplierId], references: [id])
   material            Material?                  @relation("MaterialFabrics", fields: [materialId], references: [id])
   fabricOrders        FabricOrder[]
   reconciliationItems FabricReconciliationItem[]
-  transactions        FabricTransaction[]
-  variations          Variation[]
   colours             FabricColour[]             @relation("FabricColours")
 
   @@unique([materialId, name]) // Prevent duplicate fabric names under the same material
-  @@index([fabricTypeId])
   @@index([supplierId])
   @@index([materialId])
   @@index([constructionType])
@@ -350,36 +328,13 @@ model Supplier {
   createdAt                  DateTime            @default(now())
   fabrics                    Fabric[]
   fabricOrders               FabricOrder[]
-  fabricTransactions         FabricTransaction[]
+  // NOTE: fabricTransactions removed - use FabricColourTransaction instead
   fabricColourTransactions   FabricColourTransaction[] @relation("FabricColourTxnSupplier")
   fabricColours              FabricColour[]      @relation("FabricColourSupplier")
   trimItems                  TrimItem[]          @relation("TrimSupplier")
 }
 
-model FabricTransaction {
-  id          String    @id @default(uuid())
-  fabricId    String
-  txnType     String
-  qty         Float
-  unit        String
-  reason      String
-  costPerUnit Float?
-  supplierId  String?
-  referenceId String?
-  notes       String?
-  createdById String
-  createdAt   DateTime  @default(now())
-  createdBy   User      @relation(fields: [createdById], references: [id])
-  fabric      Fabric    @relation(fields: [fabricId], references: [id])
-  supplier    Supplier? @relation(fields: [supplierId], references: [id])
-
-  @@index([fabricId])
-  @@index([txnType])
-  @@index([createdAt])
-  @@index([fabricId, createdAt])
-  @@index([supplierId])  // FK index for supplier reports
-  @@index([createdById]) // FK index for user activity tracking
-}
+// NOTE: FabricTransaction model removed - use FabricColourTransaction instead
 
 model FabricOrder {
   id           String    @id @default(uuid())

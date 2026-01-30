@@ -3,16 +3,15 @@
  */
 
 import { Controller, type UseFormReturn } from 'react-hook-form';
-import type { ProductFormData, CatalogFilters } from '../types';
+import type { ProductFormData } from '../types';
 import { PRODUCT_CATEGORIES, GENDERS } from '../../types';
 
 interface ProductInfoTabProps {
   form: UseFormReturn<ProductFormData>;
-  filters?: CatalogFilters;
   disabled?: boolean;
 }
 
-export function ProductInfoTab({ form, filters, disabled = false }: ProductInfoTabProps) {
+export function ProductInfoTab({ form, disabled = false }: ProductInfoTabProps) {
   const { control, formState: { errors } } = form;
 
   return (
@@ -106,51 +105,26 @@ export function ProductInfoTab({ form, filters, disabled = false }: ProductInfoT
         </div>
       </div>
 
-      {/* Gender & Fabric Type */}
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Gender
-          </label>
-          <Controller
-            name="gender"
-            control={control}
-            render={({ field }) => (
-              <select
-                {...field}
-                disabled={disabled}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50"
-              >
-                {GENDERS.map(g => (
-                  <option key={g} value={g}>{g}</option>
-                ))}
-              </select>
-            )}
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Fabric Type
-          </label>
-          <Controller
-            name="fabricTypeId"
-            control={control}
-            render={({ field }) => (
-              <select
-                {...field}
-                value={field.value ?? ''}
-                disabled={disabled}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50"
-              >
-                <option value="">Select fabric type...</option>
-                {filters?.fabricTypes?.map(ft => (
-                  <option key={ft.id} value={ft.id}>{ft.name}</option>
-                ))}
-              </select>
-            )}
-          />
-        </div>
+      {/* Gender */}
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">
+          Gender
+        </label>
+        <Controller
+          name="gender"
+          control={control}
+          render={({ field }) => (
+            <select
+              {...field}
+              disabled={disabled}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50"
+            >
+              {GENDERS.map(g => (
+                <option key={g} value={g}>{g}</option>
+              ))}
+            </select>
+          )}
+        />
       </div>
 
       {/* Active Status */}

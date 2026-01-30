@@ -3,9 +3,12 @@
  *
  * Modal for editing SKU, Variation, or Product data.
  * Displays appropriate fields based on edit level.
+ *
+ * NOTE: Fabric assignment is now managed via BOM Editor, not this modal.
+ * FabricType and Fabric fields have been removed as part of fabric system consolidation.
  */
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { FormModal } from '../Modal';
 
 type EditLevel = 'sku' | 'variation' | 'product';
@@ -16,8 +19,9 @@ export interface EditModalProps {
     data: any;
     onClose: () => void;
     onSubmit: (formData: any) => void;
-    fabricTypes: Array<{ id: string; name: string }>;
-    fabrics: Array<{ id: string; name: string; colorName: string; fabricTypeId: string | null; displayName: string }>;
+    // Legacy props - kept for backward compatibility but no longer used
+    fabricTypes?: Array<{ id: string; name: string }>;
+    fabrics?: Array<{ id: string; name: string; colorName: string; fabricTypeId: string | null; displayName: string }>;
     isLoading: boolean;
 }
 
@@ -27,13 +31,12 @@ export function EditModal({
     data,
     onClose,
     onSubmit,
-    fabricTypes,
-    fabrics,
     isLoading
 }: EditModalProps) {
     const [formData, setFormData] = useState<any>({});
 
     // Reset form when data changes
+    // NOTE: fabricId and fabricTypeId removed - fabric is now managed via BOM Editor
     useEffect(() => {
         if (data) {
             if (level === 'sku') {
@@ -46,7 +49,6 @@ export function EditModal({
                 setFormData({
                     colorName: data.colorName || '',
                     hasLining: data.hasLining || false,
-                    fabricId: data.fabricId || '',
                 });
             } else if (level === 'product') {
                 setFormData({
@@ -55,7 +57,6 @@ export function EditModal({
                     category: data.category || '',
                     gender: data.gender || '',
                     productType: data.productType || '',
-                    fabricTypeId: data.fabricTypeId || '',
                 });
             }
         }
@@ -81,12 +82,6 @@ export function EditModal({
         if (level === 'variation') return data?.productName;
         return data?.styleCode || '';
     };
-
-    // Filter fabrics by selected fabric type
-    const filteredFabrics = useMemo(() => {
-        if (!data?.fabricTypeId) return fabrics;
-        return fabrics.filter(f => f.fabricTypeId === data.fabricTypeId);
-    }, [fabrics, data?.fabricTypeId]);
 
     return (
         <FormModal
@@ -172,19 +167,9 @@ export function EditModal({
                                 </label>
                             </div>
                         </div>
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Fabric</label>
-                            <select
-                                value={formData.fabricId}
-                                onChange={(e) => handleChange('fabricId', e.target.value)}
-                                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100"
-                            >
-                                <option value="">Select fabric...</option>
-                                {filteredFabrics.map((f) => (
-                                    <option key={f.id} value={f.id}>{f.displayName}</option>
-                                ))}
-                            </select>
-                        </div>
+                        <p className="text-xs text-gray-500 mt-2">
+                            Fabric is assigned via BOM Editor
+                        </p>
                     </>
                 )}
 
@@ -236,33 +221,21 @@ export function EditModal({
                                 </select>
                             </div>
                         </div>
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Product Type</label>
-                                <select
-                                    value={formData.productType}
-                                    onChange={(e) => handleChange('productType', e.target.value)}
-                                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100"
-                                >
-                                    <option value="basic">Basic</option>
-                                    <option value="seasonal">Seasonal</option>
-                                    <option value="limited">Limited</option>
-                                </select>
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Fabric Type</label>
-                                <select
-                                    value={formData.fabricTypeId}
-                                    onChange={(e) => handleChange('fabricTypeId', e.target.value)}
-                                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100"
-                                >
-                                    <option value="">Not set</option>
-                                    {fabricTypes.map((ft) => (
-                                        <option key={ft.id} value={ft.id}>{ft.name}</option>
-                                    ))}
-                                </select>
-                            </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Product Type</label>
+                            <select
+                                value={formData.productType}
+                                onChange={(e) => handleChange('productType', e.target.value)}
+                                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100"
+                            >
+                                <option value="basic">Basic</option>
+                                <option value="seasonal">Seasonal</option>
+                                <option value="limited">Limited</option>
+                            </select>
                         </div>
+                        <p className="text-xs text-gray-500 mt-2">
+                            Fabric is assigned at variation level via BOM Editor
+                        </p>
                     </>
                 )}
             </div>

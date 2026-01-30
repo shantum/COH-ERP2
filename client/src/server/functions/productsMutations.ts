@@ -60,7 +60,6 @@ const createProductSchema = z.object({
     category: z.string().min(1, 'Category is required'),
     productType: z.string().min(1, 'Product type is required'),
     gender: z.string().default('unisex'),
-    fabricTypeId: z.string().uuid().optional().nullable(),
     baseProductionTimeMins: z.number().int().positive().default(60),
     defaultFabricConsumption: z.number().positive().optional().nullable(),
     imageUrl: z.string().url().optional().nullable(),
@@ -73,7 +72,6 @@ const updateProductSchema = z.object({
     category: z.string().min(1).optional(),
     productType: z.string().min(1).optional(),
     gender: z.string().optional(),
-    fabricTypeId: z.string().uuid().optional().nullable(),
     baseProductionTimeMins: z.number().int().positive().optional(),
     defaultFabricConsumption: z.number().positive().optional().nullable(),
     imageUrl: z.string().url().optional().nullable(),
@@ -87,12 +85,13 @@ const deleteProductSchema = z.object({
     id: z.string().uuid('Invalid product ID'),
 });
 
+// NOTE: fabricId has been REMOVED from Variation table.
+// Fabric assignment is now ONLY via BOM lines (VariationBomLine.fabricColourId).
 const createVariationSchema = z.object({
     productId: z.string().uuid('Invalid product ID'),
     colorName: z.string().min(1, 'Color name is required').trim(),
     standardColor: z.string().optional().nullable(),
     colorHex: z.string().regex(/^#[0-9A-Fa-f]{6}$/, 'Invalid color hex').optional().nullable(),
-    fabricId: z.string().uuid('Invalid fabric ID'),
     imageUrl: z.string().url().optional().nullable(),
     hasLining: z.boolean().default(false),
 });
@@ -102,7 +101,6 @@ const updateVariationSchema = z.object({
     colorName: z.string().min(1).trim().optional(),
     standardColor: z.string().optional().nullable(),
     colorHex: z.string().regex(/^#[0-9A-Fa-f]{6}$/, 'Invalid color hex').optional().nullable(),
-    fabricId: z.string().uuid().optional(),
     imageUrl: z.string().url().optional().nullable(),
     hasLining: z.boolean().optional(),
     isActive: z.boolean().optional(),
@@ -158,13 +156,9 @@ export const createProduct = createServerFn({ method: 'POST' })
                         category: data.category,
                         productType: data.productType,
                         gender: data.gender || 'unisex',
-                        fabricTypeId: data.fabricTypeId || null,
                         baseProductionTimeMins: data.baseProductionTimeMins || 60,
                         defaultFabricConsumption: data.defaultFabricConsumption || null,
                         imageUrl: data.imageUrl || null,
-                    },
-                    include: {
-                        fabricType: true,
                     },
                 });
 
@@ -180,7 +174,7 @@ export const createProduct = createServerFn({ method: 'POST' })
  * Update an existing product
  *
  * Updates product fields. Only provided fields are updated.
- * Note: Changing fabricTypeId does NOT auto-reset variation fabrics.
+ * NOTE: Fabric info comes from variation BOM lines, not product-level fields.
  */
 export const updateProduct = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
@@ -195,7 +189,6 @@ export const updateProduct = createServerFn({ method: 'POST' })
                 if (data.category !== undefined) updateData.category = data.category;
                 if (data.productType !== undefined) updateData.productType = data.productType;
                 if (data.gender !== undefined) updateData.gender = data.gender;
-                if (data.fabricTypeId !== undefined) updateData.fabricTypeId = data.fabricTypeId;
                 if (data.baseProductionTimeMins !== undefined) updateData.baseProductionTimeMins = data.baseProductionTimeMins;
                 if (data.defaultFabricConsumption !== undefined) updateData.defaultFabricConsumption = data.defaultFabricConsumption;
                 if (data.imageUrl !== undefined) updateData.imageUrl = data.imageUrl;
@@ -207,9 +200,6 @@ export const updateProduct = createServerFn({ method: 'POST' })
                 const product = await prisma.product.update({
                     where: { id: data.id },
                     data: updateData,
-                    include: {
-                        fabricType: true,
-                    },
                 });
 
                 return { success: true, data: product };
@@ -266,12 +256,11 @@ export const createVariation = createServerFn({ method: 'POST' })
                         colorName: data.colorName,
                         standardColor: data.standardColor || null,
                         colorHex: data.colorHex || null,
-                        fabricId: data.fabricId,
+                        // NOTE: fabricId removed - fabric is now assigned via BOM
                         imageUrl: data.imageUrl || null,
                         hasLining: data.hasLining || false,
                     },
                     include: {
-                        fabric: true,
                         product: true,
                     },
                 });
@@ -287,8 +276,7 @@ export const createVariation = createServerFn({ method: 'POST' })
 /**
  * Update an existing variation
  *
- * Updates variation fields. If fabricId changes to a non-Default fabric type,
- * the parent product's fabricTypeId is automatically synced.
+ * Updates variation fields. Fabric assignment is now managed via BOM.
  */
 export const updateVariation = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
@@ -297,11 +285,11 @@ export const updateVariation = createServerFn({ method: 'POST' })
         try {
             const prisma = await getPrisma();
                 // Build update data with only provided fields
+                // Note: fabricId/fabricColourId no longer set here - use BOM
                 const updateData: Record<string, unknown> = {};
                 if (data.colorName !== undefined) updateData.colorName = data.colorName;
                 if (data.standardColor !== undefined) updateData.standardColor = data.standardColor || null;
                 if (data.colorHex !== undefined) updateData.colorHex = data.colorHex;
-                if (data.fabricId !== undefined) updateData.fabricId = data.fabricId;
                 if (data.imageUrl !== undefined) updateData.imageUrl = data.imageUrl;
                 if (data.hasLining !== undefined) updateData.hasLining = data.hasLining;
                 if (data.isActive !== undefined) updateData.isActive = data.isActive;
@@ -314,31 +302,15 @@ export const updateVariation = createServerFn({ method: 'POST' })
                     where: { id: data.id },
                     data: updateData,
                     include: {
-                        fabric: {
-                            include: {
-                                fabricType: true,
-                            },
-                        },
+                        // NOTE: fabric removed - now via BOM
                         product: {
                             select: {
                                 id: true,
-                                fabricTypeId: true,
+                                name: true,
                             },
                         },
                     },
                 });
-
-                // Sync product's fabricType when variation's fabric changes
-                // If the new fabric has a non-Default type, update the product to match
-                if (data.fabricId && variation.fabric?.fabricTypeId) {
-                    const isDefaultType = variation.fabric.fabricType?.name === 'Default';
-                    if (!isDefaultType && variation.product.fabricTypeId !== variation.fabric.fabricTypeId) {
-                        await prisma.product.update({
-                            where: { id: variation.product.id },
-                            data: { fabricTypeId: variation.fabric.fabricTypeId },
-                        });
-                    }
-                }
 
                 return { success: true, data: variation };
         } catch (error: unknown) {
@@ -378,7 +350,7 @@ export const createSku = createServerFn({ method: 'POST' })
                         variation: {
                             include: {
                                 product: true,
-                                fabric: true,
+                                // NOTE: fabric removed - now via BOM
                             },
                         },
                     },
@@ -422,7 +394,7 @@ export const updateSku = createServerFn({ method: 'POST' })
                         variation: {
                             include: {
                                 product: true,
-                                fabric: true,
+                                // NOTE: fabric removed - now via BOM
                             },
                         },
                     },

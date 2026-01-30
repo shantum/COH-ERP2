@@ -10,6 +10,11 @@
 export type ProductNodeType = 'product' | 'variation' | 'sku';
 
 /**
+ * Shopify product/variation status
+ */
+export type ShopifyStatus = 'active' | 'archived' | 'draft' | 'not_linked' | 'not_cached' | 'unknown';
+
+/**
  * Unified node for tree table representation.
  * All three levels use the same structure with type-specific fields being optional.
  */
@@ -74,6 +79,14 @@ export interface ProductTreeNode {
     fabricCost?: number | null;
     laborCost?: number | null;
     totalCost?: number | null;
+    bomCost?: number | null;        // Pre-computed total BOM cost
+
+    // === Shopify & Sales fields ===
+    shopifyStatus?: ShopifyStatus;
+    shopifyStock?: number;         // SKU: direct from cache, Variation: sum of SKUs
+    fabricStock?: number;          // From FabricColour.currentBalance
+    sales30DayUnits?: number;      // Units sold in 30 days
+    sales30DayValue?: number;      // Revenue in 30 days
 
     // === UI State ===
     _isExpanded?: boolean;
@@ -173,4 +186,61 @@ export function sortBySizeOrder(a: string, b: string): number {
     if (indexA === -1) return 1;
     if (indexB === -1) return -1;
     return indexA - indexB;
+}
+
+/**
+ * Row type for variation view (flat table with mixed row types)
+ */
+export type VariationViewRowType = 'product-header' | 'variation';
+
+/**
+ * Row for variation view table.
+ * Product headers are visual separators; variation rows are the primary data rows.
+ */
+export interface VariationViewRow {
+    id: string;
+    rowType: VariationViewRowType;
+
+    // Product header fields (rowType === 'product-header')
+    productId?: string;
+    productName?: string;
+    productImageUrl?: string;
+    styleCode?: string;
+    category?: string;
+    gender?: string;
+    materialName?: string;
+    variationCount?: number;
+    productTotalStock?: number;
+
+    // Variation fields (rowType === 'variation')
+    variationId?: string;
+    colorName?: string;
+    colorHex?: string;
+    fabricName?: string;
+    fabricColourId?: string;
+    fabricColourName?: string;
+    imageUrl?: string;
+    hasLining?: boolean;
+    parentProductId?: string;
+    parentProductName?: string;
+    parentStyleCode?: string;
+    skuCount?: number;
+    totalStock?: number;
+    avgMrp?: number | null;
+    skus?: ProductTreeNode[];
+
+    // === Shopify & Sales fields ===
+    shopifyStatus?: ShopifyStatus;
+    shopifyStock?: number;
+    fabricStock?: number;
+    sales30DayUnits?: number;
+    sales30DayValue?: number;
+
+    // === Consumption & Cost fields ===
+    avgConsumption?: number;        // Average fabric consumption across SKUs
+    bomCost?: number | null;        // Pre-computed total BOM cost
+
+    // Original node reference for actions
+    productNode?: ProductTreeNode;
+    variationNode?: ProductTreeNode;
 }

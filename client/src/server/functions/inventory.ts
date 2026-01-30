@@ -223,7 +223,6 @@ export const getInventoryBalance = createServerFn({ method: 'GET' })
                 variation: {
                     include: {
                         product: true,
-                        fabric: true,
                     },
                 },
             },
@@ -254,12 +253,8 @@ export const getInventoryBalance = createServerFn({ method: 'GET' })
                         id: sku.variation.product.id,
                         name: sku.variation.product.name,
                     },
-                    fabric: sku.variation.fabric
-                        ? {
-                              id: sku.variation.fabric.id,
-                              name: sku.variation.fabric.name,
-                          }
-                        : null,
+                    // NOTE: fabric relation removed from Variation - now via BOM
+                    fabric: null,
                 },
             },
             ...balance,
@@ -920,9 +915,7 @@ interface SkuWithRelations {
             category: string | null;
             imageUrl: string | null;
         };
-        fabric: {
-            name: string;
-        } | null;
+        // NOTE: fabric relation removed from Variation - now via BOM
     };
     shopifyInventoryCache: {
         availableQty: number;
@@ -1009,7 +1002,6 @@ export const getInventoryList = createServerFn({ method: 'GET' })
                     variation: {
                         include: {
                             product: true,
-                            fabric: true,
                         },
                     },
                     shopifyInventoryCache: true,

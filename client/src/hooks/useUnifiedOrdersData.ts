@@ -206,12 +206,13 @@ export function useUnifiedOrdersData({
     });
 
     // Fabric stock - only needed for Open view
+    // NOTE: getFabricStockAnalysis is deprecated - fabric stock analysis now uses FabricColour
     const getFabricStockAnalysisFn = useServerFn(getFabricStockAnalysis);
     const fabricStockQuery = useQuery({
         queryKey: inventoryQueryKeys.fabric,
         queryFn: async () => {
-            const result = await getFabricStockAnalysisFn({ data: {} });
-            return result.analysis;
+            const result = await getFabricStockAnalysisFn();
+            return result.fabrics;
         },
         staleTime: 60000,
         enabled: currentView === 'open',

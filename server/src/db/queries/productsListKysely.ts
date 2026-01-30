@@ -70,9 +70,9 @@ export async function listProductsKysely(
 
     // Build main query with JSON aggregation for variations and SKUs
     // Using a subquery approach to avoid complex CTEs
-    const productsRaw = await kysely
+    // NOTE: FabricType removed from schema - fabric assignment now via BOM
+    let query = kysely
         .selectFrom('Product')
-        .leftJoin('FabricType', 'FabricType.id', 'Product.fabricTypeId')
         .select([
             'Product.id',
             'Product.name',
@@ -83,25 +83,24 @@ export async function listProductsKysely(
             'Product.imageUrl',
             'Product.isActive',
             'Product.createdAt',
-            'Product.fabricTypeId',
-            'FabricType.name as fabricTypeName',
-        ])
-        .$call((qb) => {
-            let q = qb;
-            if (category) {
-                q = q.where('Product.category', '=', category) as typeof q;
-            }
-            if (isActive !== undefined) {
-                q = q.where('Product.isActive', '=', isActive) as typeof q;
-            }
-            if (search) {
-                const searchTerm = `%${search.toLowerCase()}%`;
-                q = q.where((eb: any) =>
-                    eb.or([sql`LOWER("Product"."name") LIKE ${searchTerm}`])
-                ) as typeof q;
-            }
-            return q;
-        })
+        ]);
+
+    if (category) {
+        query = query.where('Product.category', '=', category);
+    }
+    if (isActive !== undefined) {
+        query = query.where('Product.isActive', '=', isActive);
+    }
+    if (search) {
+        const searchTerm = `%${search.toLowerCase()}%`;
+        query = query.where((eb) =>
+            eb.or([
+                eb(sql`LOWER("Product"."name")`, 'like', searchTerm),
+            ])
+        );
+    }
+
+    const productsRaw = await query
         .orderBy('Product.createdAt', 'desc')
         .limit(limit)
         .offset(offset)
@@ -210,6 +209,7 @@ export async function listProductsKysely(
     }
 
     // Assemble final products
+    // NOTE: fabricType removed from schema - fabric assignment now via BOM
     const products: ProductWithVariations[] = productsRaw.map((p) => ({
         id: p.id,
         name: p.name,
@@ -220,12 +220,7 @@ export async function listProductsKysely(
         imageUrl: p.imageUrl,
         isActive: p.isActive,
         createdAt: p.createdAt,
-        fabricType: p.fabricTypeId
-            ? {
-                  id: p.fabricTypeId,
-                  name: p.fabricTypeName ?? '',
-              }
-            : null,
+        fabricType: null,  // Removed - fabric assignment now via BOM
         variations: variationsByProduct.get(p.id) || [],
     }));
 

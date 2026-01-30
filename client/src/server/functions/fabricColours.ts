@@ -725,6 +725,9 @@ export const getFabricColourStockAnalysis = createServerFn({ method: 'GET' })
  *
  * Replaces getTopFabrics - aggregates by material/fabric/colour levels.
  * Configurable time period and aggregation level.
+ *
+ * NOTE: Now uses BOM-based fabric assignment (VariationBomLine.fabricColourId)
+ * instead of the removed Variation.fabricColourId field.
  */
 export const getTopMaterials = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
@@ -758,18 +761,13 @@ export const getTopMaterials = createServerFn({ method: 'GET' })
                 dateFilter = { gte: getISTMidnightAsUTC(-days) };
             }
 
-            // Get order lines in the date range (by order date) with fabric colour info
-            // Include all non-cancelled lines to see what was ordered
+            // Get order lines in the date range (by order date)
+            // Join through BOM to get fabric colour info
             const orderLines = await prisma.orderLine.findMany({
                 where: {
                     lineStatus: { not: 'cancelled' },
                     order: {
                         orderDate: dateFilter,
-                    },
-                    sku: {
-                        variation: {
-                            fabricColourId: { not: null },
-                        },
                     },
                 },
                 include: {
@@ -777,12 +775,26 @@ export const getTopMaterials = createServerFn({ method: 'GET' })
                         include: {
                             variation: {
                                 include: {
-                                    fabricColour: {
+                                    // Get fabric colour from BOM lines
+                                    bomLines: {
+                                        where: {
+                                            fabricColourId: { not: null },
+                                        },
                                         include: {
-                                            fabric: {
-                                                include: { material: true },
+                                            fabricColour: {
+                                                include: {
+                                                    fabric: {
+                                                        include: { material: true },
+                                                    },
+                                                },
+                                            },
+                                            role: {
+                                                include: {
+                                                    type: true,
+                                                },
                                             },
                                         },
+                                        take: 1, // Get first/main fabric line
                                     },
                                     product: true,
                                 },
@@ -791,6 +803,17 @@ export const getTopMaterials = createServerFn({ method: 'GET' })
                     },
                 },
             });
+
+            // Helper to get main fabric colour from a variation's BOM lines
+            const getMainFabricColour = (bomLines: typeof orderLines[number]['sku']['variation']['bomLines']) => {
+                // Find main fabric role first
+                const mainFabricLine = bomLines.find(line =>
+                    line.role?.type?.code === 'FABRIC' && line.role?.code === 'main'
+                );
+                if (mainFabricLine?.fabricColour) return mainFabricLine.fabricColour;
+                // Fallback to any fabric line
+                return bomLines.find(line => line.fabricColour)?.fabricColour ?? null;
+            };
 
             if (level === 'colour') {
                 // Aggregate at specific colour level
@@ -810,7 +833,7 @@ export const getTopMaterials = createServerFn({ method: 'GET' })
                 > = {};
 
                 for (const line of orderLines) {
-                    const fabricColour = line.sku.variation?.fabricColour;
+                    const fabricColour = getMainFabricColour(line.sku.variation?.bomLines ?? []);
                     if (!fabricColour) continue;
 
                     const key = fabricColour.id;
@@ -876,7 +899,7 @@ export const getTopMaterials = createServerFn({ method: 'GET' })
                 > = {};
 
                 for (const line of orderLines) {
-                    const fabricColour = line.sku.variation?.fabricColour;
+                    const fabricColour = getMainFabricColour(line.sku.variation?.bomLines ?? []);
                     if (!fabricColour) continue;
 
                     const fabric = fabricColour.fabric;
@@ -956,7 +979,7 @@ export const getTopMaterials = createServerFn({ method: 'GET' })
                 > = {};
 
                 for (const line of orderLines) {
-                    const fabricColour = line.sku.variation?.fabricColour;
+                    const fabricColour = getMainFabricColour(line.sku.variation?.bomLines ?? []);
                     if (!fabricColour?.fabric.material) continue;
 
                     const material = fabricColour.fabric.material;

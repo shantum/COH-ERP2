@@ -557,17 +557,7 @@ export const ORDER_UNIFIED_SELECT = {
                                     imageUrl: true,
                                 },
                             },
-                            fabric: {
-                                select: {
-                                    colorHex: true,
-                                    colours: {
-                                        select: {
-                                            colourName: true,
-                                            colourHex: true,
-                                        },
-                                    },
-                                },
-                            },
+                            // NOTE: fabric removed from Variation - fabric assignment now via BOM
                         },
                     },
                 },

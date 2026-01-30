@@ -1081,9 +1081,6 @@ export const searchVariations = createServerFn({ method: 'GET' })
                     product: {
                         select: { id: true, name: true, styleCode: true },
                     },
-                    fabric: {
-                        select: { id: true, name: true },
-                    },
                     bomLines: {
                         where: {
                             role: {
@@ -1117,10 +1114,8 @@ export const searchVariations = createServerFn({ method: 'GET' })
                         name: v.product.name,
                         styleCode: v.product.styleCode,
                     },
-                    currentFabric: v.fabric ? {
-                        id: v.fabric.id,
-                        name: v.fabric.name,
-                    } : null,
+                    // NOTE: fabric relation removed from Variation - now via BOM
+                    currentFabric: null,
                     currentFabricColour: mainFabricLine?.fabricColour ? {
                         id: mainFabricLine.fabricColour.id,
                         colourName: mainFabricLine.fabricColour.colourName,

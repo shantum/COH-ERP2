@@ -121,19 +121,28 @@ interface SyncAllProductsReturn {
 
 /**
  * Ensure a default fabric exists for new variations
+ * NOTE: FabricType removed - fabric now links to Material directly
+ * NOTE: fabricId removed from Variation - fabric assignment now via BOM
+ * This function still creates a default Fabric for backward compatibility with
+ * existing code that may reference it, but variations are no longer linked to fabrics directly.
  */
 export async function ensureDefaultFabric(prisma: PrismaClient): Promise<Fabric> {
-    let defaultFabric = await prisma.fabric.findFirst();
+    let defaultFabric = await prisma.fabric.findFirst({
+        where: { name: 'Default Fabric' }
+    });
     if (!defaultFabric) {
-        let fabricType = await prisma.fabricType.findFirst();
-        if (!fabricType) {
-            fabricType = await prisma.fabricType.create({
-                data: { name: 'Default', composition: 'Unknown', unit: 'meter', avgShrinkagePct: 0 }
+        // Create or find default material
+        let material = await prisma.material.findFirst({
+            where: { name: 'Default' }
+        });
+        if (!material) {
+            material = await prisma.material.create({
+                data: { name: 'Default' }
             });
         }
         defaultFabric = await prisma.fabric.create({
             data: {
-                fabricTypeId: fabricType.id,
+                materialId: material.id,
                 name: 'Default Fabric',
                 colorName: 'Default',
                 costPerUnit: 0,
@@ -367,11 +376,11 @@ export async function syncSingleProduct(
         });
 
         if (!variation) {
+            // NOTE: fabricId removed from Variation - fabric assignment now via BOM
             variation = await prisma.variation.create({
                 data: {
                     productId: product.id,
                     colorName,
-                    fabricId: defaultFabricId,
                     imageUrl: variationImageUrl,
                     shopifySourceProductId: shopifyProductId,  // Track source
                     shopifySourceHandle: shopifyProduct.handle,

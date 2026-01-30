@@ -64,14 +64,24 @@ interface ProductCsvRow {
 
 /**
  * CSV row for fabric export/import
+ * Supports both old format (fabricTypeName, colorName) and new format (materialName, colourName)
  */
 interface FabricCsvRow {
-    fabricTypeName: string;
+    // New format (3-tier: Material > Fabric > FabricColour)
+    materialName?: string;
+    fabricName?: string;
+    fabricUnit?: string;
+    colourName?: string;
+    standardColour?: string;
+    colourHex?: string;
+    // Legacy format (backward compatibility)
+    fabricTypeName?: string;
     fabricTypeComposition?: string;
     fabricTypeUnit?: string;
-    colorName: string;
+    colorName?: string;
     standardColor?: string;
     colorHex?: string;
+    // Common fields
     costPerUnit?: string;
     supplierName?: string;
     leadTimeDays?: string;
@@ -98,11 +108,11 @@ const upload = multer({
 
 router.get('/export/products', authenticateToken, async (req: Request, res: Response) => {
     try {
+        // NOTE: fabric/fabricType removed from schema - fabric assignment now via BOM
         const products = await req.prisma.product.findMany({
             include: {
                 variations: {
                     include: {
-                        fabric: { include: { fabricType: true } },
                         skus: true,
                     },
                 },
@@ -124,8 +134,8 @@ router.get('/export/products', authenticateToken, async (req: Request, res: Resp
                         colorName: variation.colorName,
                         standardColor: variation.standardColor || '',
                         colorHex: variation.colorHex || '',
-                        fabricTypeName: variation.fabric?.fabricType?.name || '',
-                        fabricColorName: variation.fabric?.colorName || '',
+                        fabricTypeName: '',  // Removed - fabric assignment now via BOM
+                        fabricColorName: '',  // Removed - fabric assignment now via BOM
                         skuCode: sku.skuCode,
                         size: sku.size,
                         mrp: sku.mrp,
@@ -213,17 +223,7 @@ router.post('/import/products', authenticateToken, upload.single('file'), async 
                     results.created.products++;
                 }
 
-                // Find fabric by type and color name
-                let fabricId: string | null = null;
-                if (row.fabricTypeName && row.fabricColorName) {
-                    const fabric = await req.prisma.fabric.findFirst({
-                        where: {
-                            colorName: row.fabricColorName,
-                            fabricType: { name: row.fabricTypeName },
-                        },
-                    });
-                    fabricId = fabric?.id ?? null;
-                }
+                // NOTE: fabric/fabricType removed from variation - fabric assignment now via BOM
 
                 // Find or create variation
                 let variation = await req.prisma.variation.findFirst({
@@ -234,25 +234,12 @@ router.post('/import/products', authenticateToken, upload.single('file'), async 
                 });
 
                 if (!variation) {
-                    // Need a fabric for variation - use first available if not specified
-                    if (!fabricId) {
-                        const anyFabric = await req.prisma.fabric.findFirst();
-                        fabricId = anyFabric?.id ?? null;
-                    }
-
-                    if (!fabricId) {
-                        results.errors.push(`Row ${rowNum}: No fabric available for variation`);
-                        results.skipped++;
-                        continue;
-                    }
-
                     variation = await req.prisma.variation.create({
                         data: {
                             productId: product.id,
                             colorName: row.colorName || 'Default',
                             standardColor: row.standardColor || null,
                             colorHex: row.colorHex || null,
-                            fabricId,
                         },
                     });
                     results.created.variations++;
@@ -314,26 +301,32 @@ router.post('/import/products', authenticateToken, upload.single('file'), async 
 
 router.get('/export/fabrics', authenticateToken, async (req: Request, res: Response) => {
     try {
-        const fabrics = await req.prisma.fabric.findMany({
+        // NOTE: FabricType removed - now using Material > Fabric > FabricColour hierarchy
+        // Export FabricColour with parent Fabric and Material info
+        const fabricColours = await req.prisma.fabricColour.findMany({
             include: {
-                fabricType: true,
+                fabric: {
+                    include: {
+                        material: true,
+                    },
+                },
                 supplier: true,
             },
-            orderBy: { name: 'asc' },
+            orderBy: { colourName: 'asc' },
         });
 
-        const rows = fabrics.map((fabric) => ({
-            fabricTypeName: fabric.fabricType?.name || '',
-            fabricTypeComposition: fabric.fabricType?.composition || '',
-            fabricTypeUnit: fabric.fabricType?.unit || 'meter',
-            colorName: fabric.colorName,
-            standardColor: fabric.standardColor || '',
-            colorHex: fabric.colorHex || '',
-            costPerUnit: fabric.costPerUnit,
-            supplierName: fabric.supplier?.name || '',
-            leadTimeDays: fabric.leadTimeDays,
-            minOrderQty: fabric.minOrderQty,
-            isActive: fabric.isActive ? 'true' : 'false',
+        const rows = fabricColours.map((fc) => ({
+            materialName: fc.fabric?.material?.name || '',
+            fabricName: fc.fabric?.name || '',
+            fabricUnit: fc.fabric?.unit || 'meters',
+            colourName: fc.colourName,
+            standardColour: fc.standardColour || '',
+            colourHex: fc.colourHex || '',
+            costPerUnit: fc.costPerUnit ?? fc.fabric?.costPerUnit ?? 0,
+            supplierName: fc.supplier?.name || '',
+            leadTimeDays: fc.leadTimeDays ?? fc.fabric?.defaultLeadTimeDays ?? 14,
+            minOrderQty: fc.minOrderQty ?? fc.fabric?.defaultMinOrderQty ?? 10,
+            isActive: fc.isActive ? 'true' : 'false',
         }));
 
         res.setHeader('Content-Type', 'text/csv');
@@ -361,9 +354,10 @@ router.post('/import/fabrics', authenticateToken, upload.single('file'), async (
             return;
         }
 
+        // NOTE: FabricType removed - now using Material > Fabric > FabricColour hierarchy
         const results: ImportResults = {
-            created: { fabricTypes: 0, fabrics: 0, suppliers: 0 },
-            updated: { fabrics: 0 },
+            created: { materials: 0, fabrics: 0, fabricColours: 0, suppliers: 0 },
+            updated: { fabricColours: 0 },
             skipped: 0,
             errors: [],
         };
@@ -383,27 +377,51 @@ router.post('/import/fabrics', authenticateToken, upload.single('file'), async (
             const rowNum = i + 2;
 
             try {
-                if (!row.fabricTypeName || !row.colorName) {
-                    results.errors.push(`Row ${rowNum}: Missing required fields (fabricTypeName, colorName)`);
+                // Support both old format (fabricTypeName) and new format (materialName)
+                const materialName = row.materialName || row.fabricTypeName;
+                const fabricName = row.fabricName || materialName;  // Default fabric name = material name
+                const colourName = row.colourName || row.colorName;
+
+                if (!materialName || !colourName) {
+                    results.errors.push(`Row ${rowNum}: Missing required fields (materialName/fabricTypeName, colourName/colorName)`);
                     results.skipped++;
                     continue;
                 }
 
-                // Find or create fabric type
-                let fabricType = await req.prisma.fabricType.findFirst({
-                    where: { name: row.fabricTypeName },
+                // Find or create material
+                let material = await req.prisma.material.findFirst({
+                    where: { name: materialName },
                 });
 
-                if (!fabricType) {
-                    fabricType = await req.prisma.fabricType.create({
+                if (!material) {
+                    material = await req.prisma.material.create({
+                        data: { name: materialName },
+                    });
+                    results.created.materials++;
+                }
+
+                // Find or create fabric
+                const fabricNameFinal = fabricName || materialName;  // Ensure non-undefined
+                let fabric = await req.prisma.fabric.findFirst({
+                    where: {
+                        materialId: material.id,
+                        name: fabricNameFinal,
+                    },
+                });
+
+                if (!fabric) {
+                    fabric = await req.prisma.fabric.create({
                         data: {
-                            name: row.fabricTypeName,
-                            composition: row.fabricTypeComposition || null,
-                            unit: row.fabricTypeUnit || 'meter',
-                            avgShrinkagePct: 0,
+                            materialId: material.id,
+                            name: fabricNameFinal,
+                            colorName: colourName,  // Required field on Fabric model
+                            unit: row.fabricUnit || row.fabricTypeUnit || 'meters',
+                            costPerUnit: parseFloat(row.costPerUnit || '0') || null,
+                            defaultLeadTimeDays: parseInt(row.leadTimeDays || '14') || 14,
+                            defaultMinOrderQty: parseFloat(row.minOrderQty || '10') || 10,
                         },
                     });
-                    results.created.fabricTypes++;
+                    results.created.fabrics++;
                 }
 
                 // Find or create supplier
@@ -422,44 +440,43 @@ router.post('/import/fabrics', authenticateToken, upload.single('file'), async (
                     supplierId = supplier.id;
                 }
 
-                // Find or create fabric
-                const fabric = await req.prisma.fabric.findFirst({
+                // Find or create fabric colour
+                const fabricColour = await req.prisma.fabricColour.findFirst({
                     where: {
-                        fabricTypeId: fabricType.id,
-                        colorName: row.colorName,
+                        fabricId: fabric.id,
+                        colourName: colourName,
                     },
                 });
 
-                if (fabric) {
-                    await req.prisma.fabric.update({
-                        where: { id: fabric.id },
+                if (fabricColour) {
+                    await req.prisma.fabricColour.update({
+                        where: { id: fabricColour.id },
                         data: {
-                            standardColor: row.standardColor || fabric.standardColor,
-                            colorHex: row.colorHex || fabric.colorHex,
-                            costPerUnit: parseFloat(row.costPerUnit || '0') || fabric.costPerUnit,
-                            supplierId: supplierId || fabric.supplierId,
-                            leadTimeDays: parseInt(row.leadTimeDays || '0') || fabric.leadTimeDays,
-                            minOrderQty: parseFloat(row.minOrderQty || '0') || fabric.minOrderQty,
+                            standardColour: row.standardColour || row.standardColor || fabricColour.standardColour,
+                            colourHex: row.colourHex || row.colorHex || fabricColour.colourHex,
+                            costPerUnit: parseFloat(row.costPerUnit || '0') || fabricColour.costPerUnit,
+                            supplierId: supplierId || fabricColour.supplierId,
+                            leadTimeDays: parseInt(row.leadTimeDays || '0') || fabricColour.leadTimeDays,
+                            minOrderQty: parseFloat(row.minOrderQty || '0') || fabricColour.minOrderQty,
                             isActive: row.isActive === 'false' ? false : true,
                         },
                     });
-                    results.updated.fabrics++;
+                    results.updated.fabricColours++;
                 } else {
-                    await req.prisma.fabric.create({
+                    await req.prisma.fabricColour.create({
                         data: {
-                            fabricTypeId: fabricType.id,
-                            name: `${row.fabricTypeName} - ${row.colorName}`,
-                            colorName: row.colorName,
-                            standardColor: row.standardColor || null,
-                            colorHex: row.colorHex || null,
-                            costPerUnit: parseFloat(row.costPerUnit || '0') || 0,
+                            fabricId: fabric.id,
+                            colourName: colourName,
+                            standardColour: row.standardColour || row.standardColor || null,
+                            colourHex: row.colourHex || row.colorHex || null,
+                            costPerUnit: parseFloat(row.costPerUnit || '0') || null,
                             supplierId,
-                            leadTimeDays: parseInt(row.leadTimeDays || '14') || 14,
-                            minOrderQty: parseFloat(row.minOrderQty || '10') || 10,
+                            leadTimeDays: parseInt(row.leadTimeDays || '14') || null,
+                            minOrderQty: parseFloat(row.minOrderQty || '10') || null,
                             isActive: row.isActive === 'false' ? false : true,
                         },
                     });
-                    results.created.fabrics++;
+                    results.created.fabricColours++;
                 }
             } catch (rowError) {
                 const errorMessage = rowError instanceof Error ? rowError.message : 'Unknown error';

@@ -51,7 +51,6 @@ import { compactThemeSmall } from '../utils/agGridHelpers';
 import { useGridState, getColumnOrderFromApi, applyColumnVisibility, applyColumnWidths, orderColumns } from '../hooks/useGridState';
 import { usePermissionColumns } from '../hooks/usePermissionColumns';
 import {
-    FabricEditPopover,
     EditModal,
     CatalogFilters,
     type ViewLevel,
@@ -177,40 +176,7 @@ export default function Catalog() {
         staleTime: 5 * 60 * 1000,
     });
 
-    // Mutations for updating fabric type and fabric
-    const updateProductMutation = useMutation({
-        mutationFn: async ({ productId, fabricTypeId }: { productId: string; fabricTypeId: string | null }) => {
-            const result = await updateProductFn({ data: { id: productId, fabricTypeId } });
-            if (!result.success) {
-                throw new Error(result.error?.message || 'Failed to update fabric type');
-            }
-            return result.data;
-        },
-        onSuccess: () => {
-            // Force refetch all catalog queries to ensure data consistency across views
-            queryClient.invalidateQueries({ queryKey: ['catalog'], refetchType: 'all' });
-        },
-        onError: (err: Error) => {
-            alert(err.message || 'Failed to update fabric type');
-        },
-    });
-
-    const updateVariationMutation = useMutation({
-        mutationFn: async ({ variationId, fabricId }: { variationId: string; fabricId: string }) => {
-            const result = await updateVariationFn({ data: { id: variationId, fabricId } });
-            if (!result.success) {
-                throw new Error(result.error?.message || 'Failed to update fabric');
-            }
-            return result.data;
-        },
-        onSuccess: () => {
-            // Force refetch all catalog queries to ensure data consistency across views
-            queryClient.invalidateQueries({ queryKey: ['catalog'], refetchType: 'all' });
-        },
-        onError: (err: Error) => {
-            alert(err.message || 'Failed to update fabric');
-        },
-    });
+    // NOTE: Fabric type and fabric mutations removed - fabric is now managed via BOM Editor
 
     const updateLiningMutation = useMutation({
         mutationFn: async ({ variationId, hasLining }: { variationId: string; hasLining: boolean }) => {
@@ -270,14 +236,6 @@ export default function Catalog() {
         currentValue: boolean;
     } | null>(null);
 
-    const handleUpdateFabricType = useCallback((productId: string, fabricTypeId: string | null) => {
-        updateProductMutation.mutate({ productId, fabricTypeId });
-    }, [updateProductMutation]);
-
-    const handleUpdateFabric = useCallback((variationId: string, fabricId: string) => {
-        updateVariationMutation.mutate({ variationId, fabricId });
-    }, [updateVariationMutation]);
-
     // Show confirmation dialog for lining change
     const promptLiningChange = useCallback((row: any) => {
         setLiningConfirm({
@@ -319,8 +277,9 @@ export default function Catalog() {
     });
 
     // Full variation update mutation (for edit modal)
+    // NOTE: fabricId removed - fabric is now managed via BOM Editor
     const updateVariationFullMutation = useMutation({
-        mutationFn: async ({ variationId, data }: { variationId: string; data: { colorName?: string; hasLining?: boolean; fabricId?: string } }) => {
+        mutationFn: async ({ variationId, data }: { variationId: string; data: { colorName?: string; hasLining?: boolean } }) => {
             const result = await updateVariationFn({ data: { id: variationId, ...data } });
             if (!result.success) {
                 throw new Error(result.error?.message || 'Failed to update variation');
@@ -337,8 +296,9 @@ export default function Catalog() {
     });
 
     // Full product update mutation (for edit modal)
+    // NOTE: fabricTypeId removed - fabric is now managed via BOM Editor
     const updateProductFullMutation = useMutation({
-        mutationFn: async ({ productId, data }: { productId: string; data: { name?: string; styleCode?: string | null; category?: string; gender?: string; productType?: string; fabricTypeId?: string | null } }) => {
+        mutationFn: async ({ productId, data }: { productId: string; data: { name?: string; styleCode?: string | null; category?: string; gender?: string; productType?: string } }) => {
             const result = await updateProductFn({ data: { id: productId, ...data } });
             if (!result.success) {
                 throw new Error(result.error?.message || 'Failed to update product');
@@ -380,6 +340,7 @@ export default function Catalog() {
     });
 
     // Handle edit modal submit
+    // NOTE: fabricId and fabricTypeId removed - fabric is now managed via BOM Editor
     const handleEditSubmit = useCallback((formData: any) => {
         if (!editModal.data) return;
 
@@ -398,7 +359,6 @@ export default function Catalog() {
                 data: {
                     colorName: formData.colorName,
                     hasLining: formData.hasLining === 'true' || formData.hasLining === true,
-                    fabricId: formData.fabricId || undefined,
                 },
             });
         } else if (editModal.level === 'product') {
@@ -410,7 +370,6 @@ export default function Catalog() {
                     category: formData.category,
                     gender: formData.gender,
                     productType: formData.productType,
-                    fabricTypeId: formData.fabricTypeId || null,
                 },
             });
         }
@@ -431,17 +390,8 @@ export default function Catalog() {
         });
     }, [filterOptions?.products, filter.gender, filter.category]);
 
-    // Deduplicate fabric types by name (database may have duplicates with same name)
-    const uniqueFabricTypes = useMemo(() => {
-        if (!filterOptions?.fabricTypes) return [];
-        const seen = new Map<string, { id: string; name: string }>();
-        for (const ft of filterOptions.fabricTypes) {
-            if (!seen.has(ft.name)) {
-                seen.set(ft.name, ft);
-            }
-        }
-        return Array.from(seen.values());
-    }, [filterOptions?.fabricTypes]);
+    // NOTE: uniqueFabricTypes removed - fabric type no longer editable from catalog
+    // Fabric is now set via BOM Editor
 
     // Aggregate data based on view level
     const displayData = useMemo(() => {
@@ -501,20 +451,15 @@ export default function Catalog() {
     }, [viewLevel]);
 
     // Column definitions with permission-aware cost columns
+    // NOTE: Fabric editing removed - now handled via BOM Editor
     const columnDefs = useMemo(() => createColumnDefs({
         viewLevel,
-        filterOptions,
-        catalogData,
-        uniqueFabricTypes,
-        handleUpdateFabricType,
-        handleUpdateFabric,
         promptLiningChange,
         openEditModal,
         openBomEditor,
         setFilter,
         setViewLevel,
-        FabricEditPopover,
-    }), [viewLevel, filterOptions, catalogData, uniqueFabricTypes, handleUpdateFabricType, handleUpdateFabric, promptLiningChange, openEditModal, openBomEditor]);
+    }), [viewLevel, promptLiningChange, openEditModal, openBomEditor]);
 
     // Mutation for updating fabric consumption by SKU IDs
     const updateConsumption = useMutation({
@@ -1004,15 +949,13 @@ export default function Catalog() {
                 isLoading={updateLiningMutation.isPending}
             />
 
-            {/* Edit Modal */}
+            {/* Edit Modal - fabric editing removed, now via BOM Editor */}
             <EditModal
                 isOpen={editModal.isOpen}
                 level={editModal.level}
                 data={editModal.data}
                 onClose={() => setEditModal({ isOpen: false, level: 'sku', data: null })}
                 onSubmit={handleEditSubmit}
-                fabricTypes={uniqueFabricTypes}
-                fabrics={filterOptions?.fabrics || []}
                 isLoading={updateSkuMutation.isPending || updateVariationFullMutation.isPending || updateProductFullMutation.isPending}
             />
 

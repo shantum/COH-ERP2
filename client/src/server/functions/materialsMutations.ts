@@ -331,19 +331,8 @@ export const createFabric = createServerFn({ method: 'POST' })
                 throw new Error('Material not found');
             }
 
-            // Get or create a FabricType matching the Material name for legacy compatibility
-            // The Fabric model requires fabricTypeId (legacy 2-tier system).
-            // We use the Material's name so the legacy system stays consistent.
-            const matchingFabricType = await prisma.fabricType.upsert({
-                where: { name: material.name },
-                update: {},
-                create: {
-                    name: material.name,
-                    unit: data.unit || 'meter',
-                },
-            });
-
             // Create fabric with proper field mapping
+            // NOTE: FabricType table removed in fabric consolidation
             const fabric = await prisma.fabric.create({
                 data: {
                     materialId: data.materialId,
@@ -358,8 +347,6 @@ export const createFabric = createServerFn({ method: 'POST' })
                     costPerUnit: data.defaultCostPerUnit || null,
                     defaultLeadTimeDays: data.defaultLeadTimeDays || null,
                     defaultMinOrderQty: data.defaultMinOrderQty || null,
-                    // Legacy field: use FabricType matching the Material name
-                    fabricTypeId: matchingFabricType.id,
                     colorName: 'N/A',
                 },
                 include: {

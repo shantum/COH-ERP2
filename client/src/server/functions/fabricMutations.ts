@@ -2,7 +2,9 @@
  * Fabric Mutations Server Functions
  *
  * TanStack Start Server Functions for fabric CRUD operations.
- * Handles fabric types, fabrics (colors), transactions, and suppliers.
+ *
+ * NOTE: Most functions in this file are DEPRECATED as of the fabric consolidation.
+ * FabricType has been removed. Fabric assignment is now done via BOM (VariationBomLine.fabricColourId).
  *
  * IMPORTANT: All database imports are dynamic to prevent Node.js code
  * (pg, Buffer) from being bundled into the client.
@@ -13,32 +15,24 @@ import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth';
 import { getPrisma } from '@coh/shared/services/db';
 import type {
-    FabricType,
     Fabric,
-    FabricTransaction,
     Supplier,
-    User,
 } from '@prisma/client';
 
 // ============================================
 // RETURN TYPES
 // ============================================
 
-type FabricTypeSuccessResult = {
-    success: true;
-    fabricType: FabricType;
-};
-
-type FabricTypeErrorResult = {
+// FabricType functions are deprecated - return deprecation error
+type DeprecatedResult = {
     success: false;
     error: {
-        code: 'NOT_FOUND' | 'FORBIDDEN';
+        code: 'DEPRECATED';
         message: string;
     };
 };
 
 type FabricWithRelations = Fabric & {
-    fabricType: FabricType;
     supplier: Supplier | null;
 };
 
@@ -50,131 +44,106 @@ type FabricSuccessResult = {
 type FabricErrorResult = {
     success: false;
     error: {
-        code: 'NOT_FOUND' | 'FORBIDDEN';
+        code: 'NOT_FOUND' | 'FORBIDDEN' | 'DEPRECATED';
         message: string;
     };
 };
 
-type DeleteFabricSuccessResult = {
-    success: true;
-    id: string;
-    hadTransactions: boolean;
-    variationsReassigned: number;
-    fabricTypeDeleted: boolean;
-};
-
-type DeleteFabricErrorResult = {
-    success: false;
-    error: {
-        code: 'NOT_FOUND' | 'FORBIDDEN' | 'INTERNAL_ERROR';
-        message: string;
-    };
-};
-
-type TransactionWithRelations = FabricTransaction & {
-    createdBy: Pick<User, 'id' | 'name'>;
-    supplier: Pick<Supplier, 'id' | 'name'> | null;
-};
-
-type TransactionSuccessResult = {
-    success: true;
-    transaction: TransactionWithRelations;
-};
-
-type DeleteTransactionSuccessResult = {
-    success: true;
-    id: string;
-};
-
-type TransactionErrorResult = {
-    success: false;
-    error: {
-        code: 'NOT_FOUND' | 'FORBIDDEN';
-        message: string;
-    };
-};
+// FabricDeleteResult and TransactionResult types removed - no longer used after fabric consolidation
 
 type SupplierSuccessResult = {
     success: true;
     supplier: Supplier;
 };
 
+type SupplierErrorResult = {
+    success: false;
+    error: {
+        code: 'NOT_FOUND' | 'CONFLICT';
+        message: string;
+    };
+};
+
 // ============================================
 // INPUT SCHEMAS
 // ============================================
 
-// Fabric Type schemas
+// Deprecated - FabricType no longer exists
 const createFabricTypeSchema = z.object({
-    name: z.string().min(1, 'Name is required').trim(),
+    name: z.string().min(1),
     composition: z.string().optional().nullable(),
-    unit: z.enum(['meter', 'kg']).default('meter'),
-    avgShrinkagePct: z.number().min(0).max(100).optional().default(0),
-    defaultCostPerUnit: z.number().positive().optional().nullable(),
-    defaultLeadTimeDays: z.number().int().positive().optional().nullable(),
-    defaultMinOrderQty: z.number().positive().optional().nullable(),
+    unit: z.string().default('meter'),
+    avgShrinkagePct: z.number().optional(),
+    defaultCostPerUnit: z.number().optional().nullable(),
+    defaultLeadTimeDays: z.number().int().optional().nullable(),
+    defaultMinOrderQty: z.number().optional().nullable(),
 });
 
 const updateFabricTypeSchema = z.object({
-    id: z.string().uuid('Invalid fabric type ID'),
-    name: z.string().min(1, 'Name is required').trim().optional(),
+    id: z.string().uuid(),
+    name: z.string().min(1).optional(),
     composition: z.string().optional().nullable(),
-    unit: z.enum(['meter', 'kg']).optional(),
-    avgShrinkagePct: z.number().min(0).max(100).optional(),
-    defaultCostPerUnit: z.number().positive().nullable().optional(),
-    defaultLeadTimeDays: z.number().int().positive().nullable().optional(),
-    defaultMinOrderQty: z.number().positive().nullable().optional(),
+    unit: z.string().optional(),
+    avgShrinkagePct: z.number().optional(),
+    defaultCostPerUnit: z.number().optional().nullable(),
+    defaultLeadTimeDays: z.number().int().optional().nullable(),
+    defaultMinOrderQty: z.number().optional().nullable(),
 });
 
-// Fabric (color) schemas
+// Fabric schemas - still used but simplified
 const createFabricSchema = z.object({
-    fabricTypeId: z.string().uuid('Invalid fabric type ID'),
-    name: z.string().min(1, 'Name is required').trim(),
-    colorName: z.string().min(1, 'Color name is required').trim(),
+    materialId: z.string().uuid(), // Now links to Material instead of FabricType
+    name: z.string().min(1),
+    colorName: z.string().min(1),
+    colorHex: z.string().optional().nullable(),
     standardColor: z.string().optional().nullable(),
-    colorHex: z.string().regex(/^#[0-9A-Fa-f]{6}$/, 'Invalid hex color').optional().default('#6B8E9F'),
-    costPerUnit: z.number().positive().optional().nullable(),
+    pattern: z.string().optional().nullable(),
+    unit: z.string().optional().nullable(),
+    costPerUnit: z.number().optional().nullable(),
+    leadTimeDays: z.number().int().optional().nullable(),
+    minOrderQty: z.number().optional().nullable(),
     supplierId: z.string().uuid().optional().nullable(),
-    leadTimeDays: z.number().int().positive().optional().nullable(),
-    minOrderQty: z.number().positive().optional().nullable(),
 });
 
 const updateFabricSchema = z.object({
-    fabricId: z.string().uuid('Invalid fabric ID'),
-    name: z.string().min(1).trim().optional(),
-    colorName: z.string().min(1).trim().optional(),
+    id: z.string().uuid(),
+    name: z.string().min(1).optional(),
+    colorName: z.string().min(1).optional(),
+    colorHex: z.string().optional().nullable(),
     standardColor: z.string().optional().nullable(),
-    colorHex: z.string().regex(/^#[0-9A-Fa-f]{6}$/, 'Invalid hex color').optional(),
-    costPerUnit: z.number().positive().nullable().optional(),
-    supplierId: z.string().uuid().nullable().optional(),
-    leadTimeDays: z.number().int().positive().nullable().optional(),
-    minOrderQty: z.number().positive().nullable().optional(),
+    pattern: z.string().optional().nullable(),
+    unit: z.string().optional().nullable(),
+    costPerUnit: z.number().optional().nullable(),
+    leadTimeDays: z.number().int().optional().nullable(),
+    minOrderQty: z.number().optional().nullable(),
+    supplierId: z.string().uuid().optional().nullable(),
     isActive: z.boolean().optional(),
 });
 
 const deleteFabricSchema = z.object({
-    fabricId: z.string().uuid('Invalid fabric ID'),
+    id: z.string().uuid(),
 });
 
-// Transaction schemas
-const createTransactionSchema = z.object({
-    fabricId: z.string().uuid('Invalid fabric ID'),
+// Deprecated - FabricTransaction no longer exists
+const createFabricTransactionSchema = z.object({
+    fabricId: z.string().uuid(),
     txnType: z.enum(['inward', 'outward']),
-    qty: z.number().positive('Quantity must be positive'),
-    unit: z.enum(['meter', 'kg']).default('meter'),
-    reason: z.string().min(1, 'Reason is required'),
+    qty: z.number().positive(),
+    unit: z.string().min(1),
+    reason: z.string().min(1),
+    costPerUnit: z.number().optional().nullable(),
+    supplierId: z.string().uuid().optional().nullable(),
     referenceId: z.string().optional().nullable(),
     notes: z.string().optional().nullable(),
-    costPerUnit: z.number().positive().optional().nullable(),
-    supplierId: z.string().uuid().optional().nullable(),
 });
 
-const deleteTransactionSchema = z.object({
-    txnId: z.string().uuid('Invalid transaction ID'),
+const deleteFabricTransactionSchema = z.object({
+    id: z.string().uuid(),
 });
 
-// Supplier schemas
+// Supplier schema
 const createSupplierSchema = z.object({
-    name: z.string().min(1, 'Name is required').trim(),
+    name: z.string().min(1),
     contactName: z.string().optional().nullable(),
     email: z.string().email().optional().nullable(),
     phone: z.string().optional().nullable(),
@@ -182,79 +151,41 @@ const createSupplierSchema = z.object({
 });
 
 // ============================================
-// FABRIC TYPE MUTATIONS
+// FABRIC TYPE MUTATIONS - DEPRECATED
 // ============================================
 
 /**
  * Create a new fabric type
+ * @deprecated FabricType table has been removed. Use Material instead.
  */
 export const createFabricType = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => createFabricTypeSchema.parse(input))
-    .handler(async ({ data }): Promise<FabricTypeSuccessResult> => {
-        const prisma = await getPrisma();
-            const fabricType = await prisma.fabricType.create({
-                data: {
-                    name: data.name,
-                    composition: data.composition || null,
-                    unit: data.unit,
-                    avgShrinkagePct: data.avgShrinkagePct || 0,
-                    defaultCostPerUnit: data.defaultCostPerUnit ?? null,
-                    defaultLeadTimeDays: data.defaultLeadTimeDays ?? null,
-                    defaultMinOrderQty: data.defaultMinOrderQty ?? null,
-                },
-            });
-
-            return {
-                success: true,
-                fabricType,
-            };
+    .handler(async (): Promise<DeprecatedResult> => {
+        return {
+            success: false,
+            error: {
+                code: 'DEPRECATED',
+                message: 'FabricType has been removed. Fabric types are now managed as Materials. Use the Materials page to create new materials.',
+            },
+        };
     });
 
 /**
  * Update a fabric type
+ * @deprecated FabricType table has been removed. Use Material instead.
  */
 export const updateFabricType = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => updateFabricTypeSchema.parse(input))
-    .handler(async ({ data }): Promise<FabricTypeSuccessResult | FabricTypeErrorResult> => {
-        const prisma = await getPrisma();
-            // Check if trying to rename Default fabric type
-            const existing = await prisma.fabricType.findUnique({
-                where: { id: data.id },
-            });
-
-            if (!existing) {
-                return {
-                    success: false,
-                    error: {
-                        code: 'NOT_FOUND' as const,
-                        message: 'Fabric type not found',
-                    },
-                };
-            }
-
-            if (existing.name === 'Default' && data.name && data.name !== 'Default') {
-                return {
-                    success: false,
-                    error: {
-                        code: 'FORBIDDEN' as const,
-                        message: 'Cannot rename the Default fabric type',
-                    },
-                };
-            }
-
-            const { id, ...updateData } = data;
-
-            const fabricType = await prisma.fabricType.update({
-                where: { id },
-                data: updateData,
-            });
-
-            return {
-                success: true,
-                fabricType,
-            };
+    .handler(async (): Promise<DeprecatedResult> => {
+        return {
+            success: false,
+            error: {
+                code: 'DEPRECATED',
+                message: 'FabricType has been removed. Fabric types are now managed as Materials.',
+            },
+        };
     });
 
 // ============================================
@@ -263,291 +194,166 @@ export const updateFabricType = createServerFn({ method: 'POST' })
 
 /**
  * Create a new fabric (color)
+ * NOTE: Fabric now links to Material instead of FabricType
  */
 export const createFabric = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => createFabricSchema.parse(input))
     .handler(async ({ data }): Promise<FabricSuccessResult | FabricErrorResult> => {
         const prisma = await getPrisma();
-            // Prevent adding colors to the Default fabric type
-            const fabricType = await prisma.fabricType.findUnique({
-                where: { id: data.fabricTypeId },
-            });
 
-            if (!fabricType) {
-                return {
-                    success: false,
-                    error: {
-                        code: 'NOT_FOUND' as const,
-                        message: 'Fabric type not found',
-                    },
-                };
-            }
+        // Verify Material exists
+        const material = await prisma.material.findUnique({
+            where: { id: data.materialId },
+        });
 
-            if (fabricType.name === 'Default') {
-                return {
-                    success: false,
-                    error: {
-                        code: 'FORBIDDEN' as const,
-                        message: 'Cannot add colors to the Default fabric type',
-                    },
-                };
-            }
-
-            const fabric = await prisma.fabric.create({
-                data: {
-                    fabricTypeId: data.fabricTypeId,
-                    name: data.name,
-                    colorName: data.colorName,
-                    standardColor: data.standardColor || null,
-                    colorHex: data.colorHex,
-                    costPerUnit: data.costPerUnit ?? null,
-                    supplierId: data.supplierId || null,
-                    leadTimeDays: data.leadTimeDays ?? null,
-                    minOrderQty: data.minOrderQty ?? null,
-                },
-                include: {
-                    fabricType: true,
-                    supplier: true,
-                },
-            });
-
+        if (!material) {
             return {
-                success: true,
-                fabric,
+                success: false,
+                error: {
+                    code: 'NOT_FOUND',
+                    message: 'Material not found',
+                },
             };
+        }
+
+        const fabric = await prisma.fabric.create({
+            data: {
+                materialId: data.materialId,
+                name: data.name,
+                colorName: data.colorName,
+                colorHex: data.colorHex ?? null,
+                standardColor: data.standardColor ?? null,
+                pattern: data.pattern ?? null,
+                unit: data.unit ?? 'meters',
+                costPerUnit: data.costPerUnit ?? null,
+                leadTimeDays: data.leadTimeDays ?? null,
+                minOrderQty: data.minOrderQty ?? null,
+                supplierId: data.supplierId ?? null,
+            },
+            include: {
+                supplier: true,
+            },
+        });
+
+        return {
+            success: true,
+            fabric,
+        };
     });
 
 /**
- * Update a fabric (color)
+ * Update a fabric
  */
 export const updateFabric = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => updateFabricSchema.parse(input))
-    .handler(async ({ data }): Promise<FabricSuccessResult> => {
+    .handler(async ({ data }): Promise<FabricSuccessResult | FabricErrorResult> => {
         const prisma = await getPrisma();
-            const { fabricId, ...updateData } = data;
 
-            // Build update object, handling null values for inheritance
-            const update: Record<string, unknown> = {};
+        const existing = await prisma.fabric.findUnique({
+            where: { id: data.id },
+        });
 
-            if (updateData.name !== undefined) update.name = updateData.name;
-            if (updateData.colorName !== undefined) update.colorName = updateData.colorName;
-            if (updateData.colorHex !== undefined) update.colorHex = updateData.colorHex;
-            if (updateData.isActive !== undefined) update.isActive = updateData.isActive;
-
-            // Handle nullable fields - allow explicit null for inheritance
-            if ('standardColor' in updateData) update.standardColor = updateData.standardColor || null;
-            if ('supplierId' in updateData) update.supplierId = updateData.supplierId || null;
-            if ('costPerUnit' in updateData) update.costPerUnit = updateData.costPerUnit;
-            if ('leadTimeDays' in updateData) update.leadTimeDays = updateData.leadTimeDays;
-            if ('minOrderQty' in updateData) update.minOrderQty = updateData.minOrderQty;
-
-            const fabric = await prisma.fabric.update({
-                where: { id: fabricId },
-                data: update,
-                include: {
-                    fabricType: true,
-                    supplier: true,
-                },
-            });
-
+        if (!existing) {
             return {
-                success: true,
-                fabric,
+                success: false,
+                error: {
+                    code: 'NOT_FOUND',
+                    message: 'Fabric not found',
+                },
             };
+        }
+
+        const { id, ...updateData } = data;
+
+        const fabric = await prisma.fabric.update({
+            where: { id },
+            data: updateData,
+            include: {
+                supplier: true,
+            },
+        });
+
+        return {
+            success: true,
+            fabric,
+        };
     });
 
 /**
- * Delete a fabric (soft delete)
- * Automatically reassigns any product variations to the default fabric
+ * Delete (deactivate) a fabric
+ * NOTE: Simplified - no longer reassigns variations since fabricId is removed from Variation
  */
 export const deleteFabric = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => deleteFabricSchema.parse(input))
-    .handler(async ({ data }): Promise<DeleteFabricSuccessResult | DeleteFabricErrorResult> => {
+    .handler(async ({ data }): Promise<{ success: true; id: string } | FabricErrorResult> => {
         const prisma = await getPrisma();
-            const fabric = await prisma.fabric.findUnique({
-                where: { id: data.fabricId },
-                include: {
-                    fabricType: true,
-                    _count: {
-                        select: {
-                            transactions: true,
-                            variations: true,
-                        },
-                    },
-                },
-            });
 
-            if (!fabric) {
-                return {
-                    success: false,
-                    error: {
-                        code: 'NOT_FOUND' as const,
-                        message: 'Fabric not found',
-                    },
-                };
-            }
+        const existing = await prisma.fabric.findUnique({
+            where: { id: data.id },
+        });
 
-            // Find the default fabric to reassign variations
-            const defaultFabric = await prisma.fabric.findFirst({
-                where: {
-                    fabricType: { name: 'Default' },
-                    isActive: true,
-                },
-            });
-
-            if (!defaultFabric) {
-                return {
-                    success: false,
-                    error: {
-                        code: 'INTERNAL_ERROR' as const,
-                        message: 'Default fabric not found. Cannot delete.',
-                    },
-                };
-            }
-
-            // Prevent deleting the default fabric itself
-            if (fabric.id === defaultFabric.id) {
-                return {
-                    success: false,
-                    error: {
-                        code: 'FORBIDDEN' as const,
-                        message: 'Cannot delete the default fabric',
-                    },
-                };
-            }
-
-            let variationsReassigned = 0;
-
-            // Reassign any variations using this fabric to the default fabric
-            if (fabric._count.variations > 0) {
-                const result = await prisma.variation.updateMany({
-                    where: { fabricId: data.fabricId },
-                    data: { fabricId: defaultFabric.id },
-                });
-                variationsReassigned = result.count;
-            }
-
-            // Soft delete - set isActive to false
-            await prisma.fabric.update({
-                where: { id: data.fabricId },
-                data: { isActive: false },
-            });
-
-            // Check if fabric type has any remaining active fabrics
-            // If not, delete the fabric type (except Default)
-            let fabricTypeDeleted = false;
-            const fabricTypeRecord = await prisma.fabricType.findUnique({
-                where: { id: fabric.fabricTypeId },
-                include: {
-                    _count: {
-                        select: {
-                            fabrics: { where: { isActive: true } },
-                        },
-                    },
-                },
-            });
-
-            if (
-                fabricTypeRecord &&
-                fabricTypeRecord.name !== 'Default' &&
-                fabricTypeRecord._count.fabrics === 0
-            ) {
-                await prisma.fabricType.delete({
-                    where: { id: fabric.fabricTypeId },
-                });
-                fabricTypeDeleted = true;
-            }
-
+        if (!existing) {
             return {
-                success: true,
-                id: data.fabricId,
-                hadTransactions: fabric._count.transactions > 0,
-                variationsReassigned,
-                fabricTypeDeleted,
+                success: false,
+                error: {
+                    code: 'NOT_FOUND',
+                    message: 'Fabric not found',
+                },
             };
+        }
+
+        // Soft delete by setting isActive = false
+        await prisma.fabric.update({
+            where: { id: data.id },
+            data: { isActive: false },
+        });
+
+        return {
+            success: true,
+            id: data.id,
+        };
     });
 
 // ============================================
-// TRANSACTION MUTATIONS
+// FABRIC TRANSACTION MUTATIONS - DEPRECATED
 // ============================================
 
 /**
- * Create a fabric transaction (inward/outward)
+ * Create a fabric transaction
+ * @deprecated FabricTransaction has been replaced by FabricColourTransaction.
+ * Use createColourTransaction from materialsMutations.ts instead.
  */
 export const createFabricTransaction = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
-    .inputValidator((input: unknown) => createTransactionSchema.parse(input))
-    .handler(async ({ data, context }): Promise<TransactionSuccessResult> => {
-        const prisma = await getPrisma();
-            const transaction = await prisma.fabricTransaction.create({
-                data: {
-                    fabricId: data.fabricId,
-                    txnType: data.txnType,
-                    qty: data.qty,
-                    unit: data.unit,
-                    reason: data.reason,
-                    referenceId: data.referenceId || null,
-                    notes: data.notes || null,
-                    costPerUnit: data.costPerUnit ?? null,
-                    supplierId: data.supplierId || null,
-                    createdById: context.user.id,
-                },
-                include: {
-                    createdBy: { select: { id: true, name: true } },
-                    supplier: { select: { id: true, name: true } },
-                },
-            });
-
-            return {
-                success: true,
-                transaction,
-            };
+    .inputValidator((input: unknown) => createFabricTransactionSchema.parse(input))
+    .handler(async (): Promise<DeprecatedResult> => {
+        return {
+            success: false,
+            error: {
+                code: 'DEPRECATED',
+                message: 'FabricTransaction has been replaced by FabricColourTransaction. Use the Materials page to record fabric colour inventory transactions.',
+            },
+        };
     });
 
 /**
- * Delete a fabric transaction (admin only)
+ * Delete a fabric transaction
+ * @deprecated FabricTransaction has been replaced by FabricColourTransaction.
  */
 export const deleteFabricTransaction = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
-    .inputValidator((input: unknown) => deleteTransactionSchema.parse(input))
-    .handler(async ({ data, context }): Promise<DeleteTransactionSuccessResult | TransactionErrorResult> => {
-        const prisma = await getPrisma();
-            // Check if user is admin
-            if (context.user.role !== 'admin') {
-                return {
-                    success: false,
-                    error: {
-                        code: 'FORBIDDEN' as const,
-                        message: 'Only admins can delete transactions',
-                    },
-                };
-            }
-
-            const transaction = await prisma.fabricTransaction.findUnique({
-                where: { id: data.txnId },
-            });
-
-            if (!transaction) {
-                return {
-                    success: false,
-                    error: {
-                        code: 'NOT_FOUND' as const,
-                        message: 'Transaction not found',
-                    },
-                };
-            }
-
-            await prisma.fabricTransaction.delete({
-                where: { id: data.txnId },
-            });
-
-            return {
-                success: true,
-                id: data.txnId,
-            };
+    .inputValidator((input: unknown) => deleteFabricTransactionSchema.parse(input))
+    .handler(async (): Promise<DeprecatedResult> => {
+        return {
+            success: false,
+            error: {
+                code: 'DEPRECATED',
+                message: 'FabricTransaction has been replaced by FabricColourTransaction. Use the Ledgers page to manage fabric colour transactions.',
+            },
+        };
     });
 
 // ============================================
@@ -560,20 +366,36 @@ export const deleteFabricTransaction = createServerFn({ method: 'POST' })
 export const createSupplier = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => createSupplierSchema.parse(input))
-    .handler(async ({ data }): Promise<SupplierSuccessResult> => {
+    .handler(async ({ data }): Promise<SupplierSuccessResult | SupplierErrorResult> => {
         const prisma = await getPrisma();
-            const supplier = await prisma.supplier.create({
-                data: {
-                    name: data.name,
-                    contactName: data.contactName || null,
-                    email: data.email || null,
-                    phone: data.phone || null,
-                    address: data.address || null,
-                },
-            });
 
+        // Check for duplicate name
+        const existing = await prisma.supplier.findFirst({
+            where: { name: data.name },
+        });
+
+        if (existing) {
             return {
-                success: true,
-                supplier,
+                success: false,
+                error: {
+                    code: 'CONFLICT',
+                    message: 'A supplier with this name already exists',
+                },
             };
+        }
+
+        const supplier = await prisma.supplier.create({
+            data: {
+                name: data.name,
+                contactName: data.contactName ?? null,
+                email: data.email ?? null,
+                phone: data.phone ?? null,
+                address: data.address ?? null,
+            },
+        });
+
+        return {
+            success: true,
+            supplier,
+        };
     });

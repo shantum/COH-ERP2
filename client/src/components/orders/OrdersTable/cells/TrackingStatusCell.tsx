@@ -16,7 +16,18 @@ interface TrackingStatusCellProps {
 
 export const TrackingStatusCell = memo(function TrackingStatusCell({ row }: TrackingStatusCellProps) {
     const status = row.lineTrackingStatus;
-    if (!status) return <span className="text-gray-300">—</span>;
+
+    // Use order-level lastScanAt (courier's scan time) or fall back to line-level lastTrackingUpdate
+    const lastTrackingTime = row.order?.lastScanAt || row.lineLastTrackingUpdate;
+
+    // Only show tracking status if there's actual tracking data from iThink
+    // The default 'in_transit' status is set when orders ship, but without real tracking data it's misleading
+    const hasRealTrackingData = !!lastTrackingTime;
+
+    // Show dash if no status OR if status is just the default 'in_transit' without real tracking data
+    if (!status || (status === 'in_transit' && !hasRealTrackingData)) {
+        return <span className="text-gray-300">—</span>;
+    }
 
     const style = TRACKING_STATUS_STYLES[status] || {
         bg: 'bg-gray-100',
@@ -24,10 +35,7 @@ export const TrackingStatusCell = memo(function TrackingStatusCell({ row }: Trac
         label: status,
     };
 
-    // Use order-level lastScanAt (courier's scan time) or fall back to line-level lastTrackingUpdate
-    const lastUpdate = formatLastUpdate(
-        row.order?.lastScanAt || row.lineLastTrackingUpdate
-    );
+    const lastUpdate = formatLastUpdate(lastTrackingTime);
 
     return (
         <div className="flex items-center gap-1.5">

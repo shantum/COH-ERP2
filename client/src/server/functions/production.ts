@@ -576,8 +576,7 @@ export const getProductionRequirements = createServerFn({ method: 'GET' })
                             include: {
                                 variation: {
                                     include: {
-                                        product: { include: { fabricType: true } },
-                                        fabric: true
+                                        product: true,
                                     }
                                 }
                             }
@@ -691,7 +690,7 @@ export const getProductionRequirements = createServerFn({ method: 'GET' })
                         productName: sku.variation.product.name,
                         colorName: sku.variation.colorName || '',
                         size: sku.size || '',
-                        fabricType: sku.variation.product.fabricType?.name || 'N/A',
+                        fabricType: 'N/A', // NOTE: FabricType removed - now derived from BOM materials
                         qty: line.qty,
                         currentInventory,
                         scheduledForLine: scheduledForThisLine,

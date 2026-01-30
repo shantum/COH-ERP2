@@ -41,11 +41,12 @@ export const topProductsQueryOptions = (days: number, level: 'product' | 'variat
 
 /**
  * Top fabrics report (Server Function)
+ * NOTE: getTopFabricsForDashboard is deprecated - returns empty array
  */
 export const topFabricsQueryOptions = (days: number, level: 'type' | 'color') =>
   queryOptions({
     queryKey: ['topFabrics', days, level],
-    queryFn: () => getTopFabricsForDashboard({ data: { days, level, limit: 12 } }),
+    queryFn: () => getTopFabricsForDashboard(),
     staleTime: 60 * 1000, // 1 minute
   });
 

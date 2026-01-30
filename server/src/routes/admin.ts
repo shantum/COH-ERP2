@@ -295,10 +295,9 @@ router.post('/clear', requireAdmin, asyncHandler(async (req: Request, res: Respo
             // Customers
             { name: 'customers', model: prisma.customer },
             // Fabric related
-            { name: 'fabricTransactions', model: prisma.fabricTransaction },
+            // NOTE: fabricTransaction and fabricType removed - using FabricColour hierarchy now
             { name: 'fabricOrders', model: prisma.fabricOrder },
             { name: 'fabrics', model: prisma.fabric },
-            { name: 'fabricTypes', model: prisma.fabricType },
             // Other
             { name: 'costConfigs', model: prisma.costConfig },
             { name: 'tailors', model: prisma.tailor },

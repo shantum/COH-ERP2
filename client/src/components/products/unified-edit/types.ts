@@ -36,7 +36,6 @@ export interface ProductFormData {
   category: string;
   productType: string;
   gender: string;
-  fabricTypeId: string | null;
   baseProductionTimeMins: number;
   defaultFabricConsumption: number | null;
   trimsCost: number | null;
@@ -48,7 +47,6 @@ export interface ProductFormData {
 export interface VariationFormData {
   colorName: string;
   colorHex: string | null;
-  fabricColourId: string | null;
   hasLining: boolean;
   trimsCost: number | null;
   liningCost: number | null;
@@ -99,8 +97,6 @@ export interface ProductDetailData {
   category: string;
   productType: string;
   gender: string;
-  fabricTypeId: string | null;
-  fabricTypeName: string | null;
   baseProductionTimeMins: number;
   defaultFabricConsumption: number | null;
   trimsCost: number | null;
@@ -116,6 +112,7 @@ export interface VariationDetailData {
   productId: string;
   colorName: string;
   colorHex: string | null;
+  // Fabric info derived from BOM (read-only display)
   fabricColourId: string | null;
   fabricColourName: string | null;
   fabricName: string | null;
@@ -148,11 +145,6 @@ export interface SkuDetailData {
 
 // === Filter/Dropdown Data ===
 
-export interface FabricType {
-  id: string;
-  name: string;
-}
-
 export interface FabricColour {
   id: string;
   name: string;
@@ -166,7 +158,6 @@ export interface FabricColour {
 }
 
 export interface CatalogFilters {
-  fabricTypes: FabricType[];
   fabricColours: FabricColour[];
   categories: string[];
   genders: string[];

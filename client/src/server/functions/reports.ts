@@ -379,6 +379,7 @@ export const getTopProductsForDashboard = createServerFn({ method: 'GET' })
 
         // Get order lines within the time period (by order date)
         // Include all non-cancelled lines to see what was ordered, not just shipped
+        // NOTE: fabricColour removed from variation - fabric assignment now via BOM
         const orderLines = await prisma.orderLine.findMany({
             where: {
                 lineStatus: { not: 'cancelled' },
@@ -392,11 +393,6 @@ export const getTopProductsForDashboard = createServerFn({ method: 'GET' })
                         variation: {
                             include: {
                                 product: true,
-                                fabricColour: {
-                                    include: {
-                                        fabric: true,
-                                    },
-                                },
                             },
                         },
                     },
@@ -429,7 +425,7 @@ export const getTopProductsForDashboard = createServerFn({ method: 'GET' })
                         id: variation.id,
                         name: variation.product.name,
                         colorName: variation.colorName,
-                        fabricName: variation.fabricColour?.colourName || null,
+                        fabricName: null,  // fabricColour removed - fabric assignment now via BOM
                         imageUrl: variation.imageUrl || variation.product.imageUrl,
                         units: 0,
                         revenue: 0,
@@ -1098,6 +1094,8 @@ export const getSalesAnalytics = createServerFn({ method: 'GET' })
                 : { not: 'cancelled' };  // 'all' - include all non-cancelled
 
         // Fetch order lines
+        // NOTE: fabricColour removed from variation - fabric assignment now via BOM
+        // Material/fabric/fabricColour dimensions will return 'no-*' for now
         const orderLines = await prisma.orderLine.findMany({
             where: {
                 order: {
@@ -1120,15 +1118,6 @@ export const getSalesAnalytics = createServerFn({ method: 'GET' })
                         variation: {
                             include: {
                                 product: true,
-                                fabricColour: {
-                                    include: {
-                                        fabric: {
-                                            include: {
-                                                material: true,
-                                            },
-                                        },
-                                    },
-                                },
                             },
                         },
                     },
@@ -1184,34 +1173,31 @@ export const getSalesAnalytics = createServerFn({ method: 'GET' })
                     break;
                 }
                 case 'standardColor': {
-                    // Get from new fabric model first, fall back to variation field for older data
-                    const fabricColour = line.sku.variation.fabricColour;
-                    key = fabricColour?.standardColour || line.sku.variation.standardColor || 'no-color';
+                    // NOTE: fabricColour removed - fabric assignment now via BOM
+                    // Fall back to variation field for older data
+                    key = line.sku.variation.standardColor || 'no-color';
                     label = key;
                     break;
                 }
                 case 'material': {
-                    // Get material from new hierarchy: FabricColour -> Fabric -> Material
-                    const fabricColour = line.sku.variation.fabricColour;
-                    key = fabricColour?.fabric?.material?.name || 'no-material';
+                    // NOTE: fabricColour removed - fabric assignment now via BOM
+                    // Material dimension will return 'no-material' until BOM lookup is implemented
+                    key = 'no-material';
                     label = key;
                     break;
                 }
                 case 'fabric': {
-                    // Get fabric (construction type) from new hierarchy
-                    const fabricColour = line.sku.variation.fabricColour;
-                    const fabric = fabricColour?.fabric;
-                    key = fabric?.name || 'no-fabric';
-                    label = fabric ? `${fabric.material?.name || ''} - ${fabric.name}` : 'no-fabric';
+                    // NOTE: fabricColour removed - fabric assignment now via BOM
+                    // Fabric dimension will return 'no-fabric' until BOM lookup is implemented
+                    key = 'no-fabric';
+                    label = 'no-fabric';
                     break;
                 }
                 case 'fabricColour': {
-                    // Get fabric colour (the actual color variant)
-                    const fabricColour = line.sku.variation.fabricColour;
-                    key = fabricColour?.id || 'no-fabric-colour';
-                    label = fabricColour
-                        ? `${fabricColour.fabric?.name || ''} - ${fabricColour.colourName}`
-                        : 'no-fabric-colour';
+                    // NOTE: fabricColour removed - fabric assignment now via BOM
+                    // FabricColour dimension will return 'no-fabric-colour' until BOM lookup is implemented
+                    key = 'no-fabric-colour';
+                    label = 'no-fabric-colour';
                     break;
                 }
                 case 'channel': {

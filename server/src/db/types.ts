@@ -60,7 +60,6 @@ export type Customer = {
 };
 export type Fabric = {
     id: Generated<string>;
-    fabricTypeId: string;
     name: string;
     colorName: string;
     standardColor: string | null;
@@ -165,30 +164,6 @@ export type FabricReconciliationItem = {
     adjustmentReason: string | null;
     notes: string | null;
     txnId: string | null;
-};
-export type FabricTransaction = {
-    id: Generated<string>;
-    fabricId: string;
-    txnType: string;
-    qty: number;
-    unit: string;
-    reason: string;
-    costPerUnit: number | null;
-    supplierId: string | null;
-    referenceId: string | null;
-    notes: string | null;
-    createdById: string;
-    createdAt: Generated<Timestamp>;
-};
-export type FabricType = {
-    id: Generated<string>;
-    name: string;
-    composition: string | null;
-    unit: string;
-    avgShrinkagePct: Generated<number>;
-    defaultCostPerUnit: number | null;
-    defaultLeadTimeDays: number | null;
-    defaultMinOrderQty: number | null;
 };
 export type FailedSyncItem = {
     id: Generated<string>;
@@ -429,7 +404,6 @@ export type Product = {
     category: string;
     productType: string;
     gender: Generated<string>;
-    fabricTypeId: string | null;
     baseProductionTimeMins: Generated<number>;
     defaultFabricConsumption: number | null;
     imageUrl: string | null;
@@ -736,6 +710,7 @@ export type Sku = {
     packagingCost: number | null;
     liningCost: number | null;
     laborMinutes: number | null;
+    bomCost: number | null;
 };
 export type SkuBomLine = {
     id: Generated<string>;
@@ -868,8 +843,6 @@ export type Variation = {
     colorName: string;
     standardColor: string | null;
     colorHex: string | null;
-    fabricId: string;
-    fabricColourId: string | null;
     imageUrl: string | null;
     isActive: Generated<boolean>;
     hasLining: Generated<boolean>;
@@ -877,6 +850,7 @@ export type Variation = {
     packagingCost: number | null;
     liningCost: number | null;
     laborMinutes: number | null;
+    bomCost: number | null;
     shopifySourceProductId: string | null;
     shopifySourceHandle: string | null;
 };
@@ -943,8 +917,6 @@ export type DB = {
     FabricOrder: FabricOrder;
     FabricReconciliation: FabricReconciliation;
     FabricReconciliationItem: FabricReconciliationItem;
-    FabricTransaction: FabricTransaction;
-    FabricType: FabricType;
     FailedSyncItem: FailedSyncItem;
     Feedback: Feedback;
     FeedbackContent: FeedbackContent;

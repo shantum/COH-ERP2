@@ -228,42 +228,9 @@ async function saveLockedDates(prisma: PrismaClientInstance, dates: string[]): P
     });
 }
 
-/**
- * Get effective fabric consumption for a SKU
- */
-function getEffectiveFabricConsumption(sku: {
-    fabricConsumption?: number | null;
-    variation?: { product?: { defaultFabricConsumption?: number | null } | null } | null;
-}): number {
-    return sku.fabricConsumption ?? sku.variation?.product?.defaultFabricConsumption ?? 1.5;
-}
-
-/**
- * Calculate fabric balance
- */
-async function calculateFabricBalance(
-    prisma: PrismaClientInstance,
-    fabricId: string
-): Promise<{ currentBalance: number }> {
-    const aggregations = await prisma.fabricTransaction.groupBy({
-        by: ['txnType'],
-        where: { fabricId },
-        _sum: { qty: true },
-    });
-
-    let totalInward = 0;
-    let totalOutward = 0;
-
-    for (const agg of aggregations) {
-        if (agg.txnType === 'inward') {
-            totalInward = agg._sum.qty || 0;
-        } else if (agg.txnType === 'outward') {
-            totalOutward = agg._sum.qty || 0;
-        }
-    }
-
-    return { currentBalance: totalInward - totalOutward };
-}
+// NOTE: getEffectiveFabricConsumption removed - no longer used after fabric consolidation
+// NOTE: calculateFabricBalance removed - FabricTransaction table no longer exists
+// Fabric balance is now tracked via FabricColourTransaction
 
 // ============================================
 // CACHE INVALIDATION HELPER
@@ -586,20 +553,8 @@ export const deleteBatch = createServerFn({ method: 'POST' })
             };
         }
 
-        // Also check for fabric transactions
-        const fabricTxnCount = await prisma.fabricTransaction.count({
-            where: { referenceId: batchId, reason: 'production' },
-        });
-
-        if (fabricTxnCount > 0) {
-            return {
-                success: false,
-                error: {
-                    code: 'BAD_REQUEST',
-                    message: 'Cannot delete batch with fabric transactions. Use uncomplete first.',
-                },
-            };
-        }
+        // NOTE: FabricTransaction check removed - table no longer exists
+        // Fabric balance is now tracked via FabricColourTransaction
 
         // Unlink from order line if connected
         const linkedLineId = batch.sourceOrderLineId;
@@ -683,24 +638,8 @@ export const completeBatch = createServerFn({ method: 'POST' })
         const isSampleBatch = !batch.skuId && batch.sampleCode;
         const isCustomSkuBatch = !isSampleBatch && batch.sku?.isCustomSku && batch.sourceOrderLineId;
 
-        // Pre-calculate fabric consumption
-        const consumptionPerUnit = isSampleBatch ? 0 : getEffectiveFabricConsumption(batch.sku!);
-        const totalFabricConsumption = consumptionPerUnit * qtyCompleted;
-        const fabricId = isSampleBatch ? null : batch.sku?.variation?.fabricId;
-
-        // Check fabric balance if needed
-        if (fabricId) {
-            const fabricBalance = await calculateFabricBalance(prisma, fabricId);
-            if (fabricBalance.currentBalance < totalFabricConsumption) {
-                return {
-                    success: false,
-                    error: {
-                        code: 'BAD_REQUEST',
-                        message: `Insufficient fabric balance. Required: ${totalFabricConsumption}, Available: ${fabricBalance.currentBalance}`,
-                    },
-                };
-            }
-        }
+        // NOTE: Fabric balance checking removed - FabricTransaction table no longer exists
+        // Fabric consumption is now tracked via FabricColourTransaction in BOM system
 
         let autoAllocated = false;
 
@@ -733,20 +672,8 @@ export const completeBatch = createServerFn({ method: 'POST' })
                     },
                 });
 
-                // Create fabric outward transaction
-                if (fabricId) {
-                    await tx.fabricTransaction.create({
-                        data: {
-                            fabricId,
-                            txnType: 'outward',
-                            qty: totalFabricConsumption,
-                            unit: 'meter',
-                            reason: 'production',
-                            referenceId: batchId,
-                            createdById: context.user.id,
-                        },
-                    });
-                }
+                // NOTE: Fabric outward transaction removed - FabricTransaction table no longer exists
+                // Fabric consumption is now tracked via FabricColourTransaction in BOM system
             }
 
             // Custom SKU auto-allocation
@@ -852,10 +779,7 @@ export const uncompleteBatch = createServerFn({ method: 'POST' })
                 },
             });
 
-            // Delete fabric outward transaction
-            await tx.fabricTransaction.deleteMany({
-                where: { referenceId: batchId, reason: TXN_REASON.PRODUCTION, txnType: 'outward' },
-            });
+            // NOTE: Fabric outward deletion removed - FabricTransaction table no longer exists
 
             // Custom SKU: Reverse auto-allocation
             if (isCustomSkuBatch && batch.sourceOrderLineId) {

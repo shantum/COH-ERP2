@@ -1,22 +1,20 @@
 /**
- * ProductsViewSwitcher - Dual-view for Products
+ * ProductsViewSwitcher - By Variation view for Products
  *
- * Two viewing modes:
- * 1. By Product - Product → Variation → SKU hierarchy (default)
- * 2. By SKU - Flat table of all SKUs with sorting/filtering
+ * Single view showing variations grouped by product with expandable SKUs.
  *
  * Features:
- * - Smooth view transitions
+ * - Product headers as visual separators
+ * - Variation rows with expandable SKU sub-tables
  * - Filter persistence (gender, category, fabric type)
  * - World-class UI with shadcn components
  */
 
 import { useState, useMemo, useCallback } from 'react';
-import { LayoutGrid, Grid2x2, Filter, X, Users, Shirt, Scissors, Search, Plus } from 'lucide-react';
+import { Filter, X, Users, Shirt, Scissors, Search, Plus } from 'lucide-react';
 import { useDebounce } from '../../hooks/useDebounce';
 
 import { Input } from '@/components/ui/input';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -29,14 +27,11 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select';
-import { ProductsDataTable } from './ProductsDataTable';
-import { SkuFlatView } from './SkuFlatView';
+import { VariationsDataTable } from './VariationsDataTable';
 import { useProductsTree } from './hooks/useProductsTree';
 import { UnifiedProductEditModal } from './unified-edit';
 import type { ProductTreeNode } from './types';
 import type { EditLevel } from './unified-edit/types';
-
-type ViewMode = 'product' | 'sku';
 
 interface ProductsViewSwitcherProps {
     searchQuery?: string;
@@ -101,7 +96,6 @@ function parseFabricFilter(value: string): FabricFilterValue {
 }
 
 export function ProductsViewSwitcher({ searchQuery, onSearchChange, onViewProduct, onEditBom, onAddProduct, initialData }: ProductsViewSwitcherProps) {
-    const [viewMode, setViewMode] = useState<ViewMode>('product');
     const [filters, setFilters] = useState<FilterState>({
         gender: null,
         fabricFilter: { type: 'all' },
@@ -327,23 +321,9 @@ export function ProductsViewSwitcher({ searchQuery, onSearchChange, onViewProduc
 
     return (
         <div className="flex flex-col h-full">
-            {/* View Switcher Header */}
+            {/* Header */}
             <div className="flex items-center justify-between gap-4 pb-4 border-b mb-4 flex-shrink-0">
-                {/* Left: View Mode Tabs */}
-                <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as ViewMode)}>
-                    <TabsList className="bg-gray-100/80">
-                        <TabsTrigger value="product" className="gap-2 data-[state=active]:bg-white">
-                            <LayoutGrid size={16} />
-                            <span className="hidden sm:inline">By Product</span>
-                        </TabsTrigger>
-                        <TabsTrigger value="sku" className="gap-2 data-[state=active]:bg-white">
-                            <Grid2x2 size={16} />
-                            <span className="hidden sm:inline">By SKU</span>
-                        </TabsTrigger>
-                    </TabsList>
-                </Tabs>
-
-                {/* Center: Search */}
+                {/* Left: Search */}
                 <div className="flex-1 max-w-md">
                     <div className="relative">
                         <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -597,23 +577,13 @@ export function ProductsViewSwitcher({ searchQuery, onSearchChange, onViewProduc
 
             {/* View Content */}
             <div className="flex-1 min-h-0">
-                {viewMode === 'product' ? (
-                    <ProductsDataTable
-                        searchQuery={debouncedSearchQuery}
-                        onViewProduct={onViewProduct}
-                        onEditBom={onEditBom}
-                        onEditProduct={handleEditProduct}
-                        filteredData={filteredProducts}
-                    />
-                ) : (
-                    <SkuFlatView
-                        products={filteredProducts}
-                        searchQuery={debouncedSearchQuery}
-                        onViewProduct={onViewProduct}
-                        onEditBom={onEditBom}
-                        onEditProduct={handleEditProduct}
-                    />
-                )}
+                <VariationsDataTable
+                    filteredData={filteredProducts}
+                    searchQuery={debouncedSearchQuery}
+                    onViewProduct={onViewProduct}
+                    onEditBom={onEditBom}
+                    onEditProduct={handleEditProduct}
+                />
             </div>
 
             {/* Unified Edit Modal */}

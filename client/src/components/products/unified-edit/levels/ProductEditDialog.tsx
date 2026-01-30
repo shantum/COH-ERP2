@@ -40,7 +40,6 @@ export function ProductEditDialog({
   const {
     form,
     product,
-    filters,
     isLoading,
     isSaving,
     isDirty,
@@ -142,7 +141,7 @@ export function ProductEditDialog({
       {/* Tab Content */}
       <div className="flex-1 overflow-y-auto py-4">
         {activeTab === 'info' && (
-          <ProductInfoTab form={form} filters={filters} disabled={isSaving} />
+          <ProductInfoTab form={form} disabled={isSaving} />
         )}
         {activeTab === 'variations' && (
           <ProductVariationsTab

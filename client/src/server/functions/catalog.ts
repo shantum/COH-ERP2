@@ -207,20 +207,13 @@ interface BalanceRow {
 }
 
 // Type for SKU query with nested includes
+// NOTE: fabricType, fabric removed from Variation as part of fabric consolidation
+// Fabric info is now derived from VariationBomLine.fabricColourId
 type SkuWithRelations = Prisma.SkuGetPayload<{
     include: {
         variation: {
             include: {
-                product: {
-                    include: {
-                        fabricType: true;
-                    };
-                };
-                fabric: {
-                    include: {
-                        fabricType: true;
-                    };
-                };
+                product: true;
             };
         };
         shopifyInventoryCache: true;
@@ -239,20 +232,6 @@ type ProductQueryResult = {
     name: string;
     gender: string | null;
     category: string | null;
-};
-
-// Type for FabricType query result
-type FabricTypeQueryResult = {
-    id: string;
-    name: string;
-};
-
-// Type for Fabric query result
-type FabricQueryResult = {
-    id: string;
-    name: string;
-    colorName: string;
-    fabricTypeId: string | null;
 };
 
 // Size sort order for proper sorting (XS -> S -> M -> L -> XL -> 2XL -> etc)
@@ -366,21 +345,13 @@ export const getCatalogProducts = createServerFn({ method: 'GET' })
                 }
 
                 // Fetch all SKUs with full product hierarchy
+                // NOTE: fabric/fabricType removed - fabric info now comes from BOM
                 const skus = await prisma.sku.findMany({
                     where: skuWhere,
                     include: {
                         variation: {
                             include: {
-                                product: {
-                                    include: {
-                                        fabricType: true,
-                                    },
-                                },
-                                fabric: {
-                                    include: {
-                                        fabricType: true,
-                                    },
-                                },
+                                product: true,
                             },
                         },
                         shopifyInventoryCache: true,
@@ -474,8 +445,9 @@ export const getCatalogProducts = createServerFn({ method: 'GET' })
                         sku.laborMinutes ?? variation.laborMinutes ?? product.baseProductionTimeMins ?? 60;
 
                     // Calculate fabric cost
-                    const fabricCostPerUnit =
-                        Number(variation.fabric?.costPerUnit ?? variation.fabric?.fabricType?.defaultCostPerUnit) || 0;
+                    // NOTE: Fabric cost now comes from BOM, not from variation.fabric
+                    // This will need to be fetched from BOM for accurate costing
+                    const fabricCostPerUnit = 0; // TODO: Get from VariationBomLine
                     const fabricCost = (Number(sku.fabricConsumption) || 0) * fabricCostPerUnit;
                     const laborCost = (Number(effectiveLaborMinutes) || 0) * laborRatePerMin;
                     const totalCost =
@@ -514,9 +486,8 @@ export const getCatalogProducts = createServerFn({ method: 'GET' })
                         variationId: variation.id,
                         colorName: variation.colorName,
                         hasLining: variation.hasLining || false,
-                        fabricName: variation.fabric
-                            ? `${variation.fabric.fabricType?.name || 'Unknown'} - ${variation.fabric.colorName}`
-                            : null,
+                        // NOTE: fabricName now derived from BOM, not variation.fabric
+                        fabricName: null, // TODO: Get from VariationBomLine
                         imageUrl: variation.imageUrl || product.imageUrl || null,
                         productId: product.id,
                         productName: product.name,
@@ -524,9 +495,10 @@ export const getCatalogProducts = createServerFn({ method: 'GET' })
                         category: product.category ?? null,
                         gender: product.gender ?? null,
                         productType: product.productType ?? null,
-                        fabricTypeId: product.fabricTypeId || null,
-                        fabricTypeName: product.fabricType?.name || null,
-                        fabricId: variation.fabricId || null,
+                        // NOTE: fabricTypeId removed - fabric info now from BOM
+                        fabricTypeId: null,
+                        fabricTypeName: null,
+                        fabricId: null,
                         shopifyProductId: product.shopifyProductId || null,
                         shopifyStatus: product.shopifyProductId
                             ? (shopifyStatusMap.get(product.shopifyProductId) || 'not_cached')
@@ -587,35 +559,17 @@ export const getCatalogCategories = createServerFn({ method: 'GET' })
     .handler(async (): Promise<CatalogFiltersResponse> => {
         try {
             const prisma = await getPrisma();
-                const [products, fabricTypes, fabrics] = await Promise.all([
-                    prisma.product.findMany({
-                        where: { isActive: true },
-                        select: {
-                            id: true,
-                            name: true,
-                            gender: true,
-                            category: true,
-                        },
-                        orderBy: { name: 'asc' },
-                    }),
-                    prisma.fabricType.findMany({
-                        select: {
-                            id: true,
-                            name: true,
-                        },
-                        orderBy: { name: 'asc' },
-                    }),
-                    prisma.fabric.findMany({
-                        where: { isActive: true },
-                        select: {
-                            id: true,
-                            name: true,
-                            colorName: true,
-                            fabricTypeId: true,
-                        },
-                        orderBy: [{ name: 'asc' }, { colorName: 'asc' }],
-                    }),
-                ]);
+                // NOTE: fabricTypes and fabrics removed - fabric is now via BOM
+                const products = await prisma.product.findMany({
+                    where: { isActive: true },
+                    select: {
+                        id: true,
+                        name: true,
+                        gender: true,
+                        category: true,
+                    },
+                    orderBy: { name: 'asc' },
+                });
 
                 // Extract unique genders and categories
                 const genders: string[] = [
@@ -634,17 +588,9 @@ export const getCatalogCategories = createServerFn({ method: 'GET' })
                         gender: p.gender,
                         category: p.category,
                     })),
-                    fabricTypes: fabricTypes.map((ft: FabricTypeQueryResult) => ({
-                        id: ft.id,
-                        name: ft.name,
-                    })),
-                    fabrics: fabrics.map((f: FabricQueryResult) => ({
-                        id: f.id,
-                        name: f.name,
-                        colorName: f.colorName,
-                        fabricTypeId: f.fabricTypeId,
-                        displayName: f.name,
-                    })),
+                    // NOTE: fabricTypes and fabrics removed - fabric is now via BOM
+                    fabricTypes: [],
+                    fabrics: [],
                 };
         } catch (error: unknown) {
             console.error('getCatalogCategories error:', error);
@@ -677,7 +623,6 @@ export const updateCatalogProduct = createServerFn({ method: 'POST' })
                         variation: {
                             include: {
                                 product: true,
-                                fabric: true,
                             },
                         },
                     },

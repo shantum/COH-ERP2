@@ -180,8 +180,8 @@ interface VariationData {
     productId: string;
     colorName: string;
     colorHex: string | null;
-    fabricId: string;
-    fabricColourId: string | null;
+    // NOTE: fabricId, fabricColourId, fabric, and fabricColour relations removed from Variation
+    // Fabric assignment is now via BOM (VariationBomLine.fabricColourId)
     imageUrl: string | null;
     isActive: boolean;
     hasLining: boolean;
@@ -190,27 +190,6 @@ interface VariationData {
     liningCost: number | null;
     packagingCost: number | null;
     laborMinutes: number | null;
-    fabric: {
-        id: string;
-        name: string;
-        material?: {
-            id: string;
-            name: string;
-        } | null;
-    } | null;
-    fabricColour: {
-        id: string;
-        colourName: string;
-        colourHex: string | null;
-        fabric: {
-            id: string;
-            name: string;
-            material?: {
-                id: string;
-                name: string;
-            } | null;
-        };
-    } | null;
     skus: SkuData[];
 }
 
@@ -221,7 +200,7 @@ interface ProductData {
     category: string;
     gender: string;
     productType: string;
-    fabricTypeId: string | null;
+    // NOTE: fabricTypeId removed from schema - fabric type now derived from BOM materials
     shopifyProductId: string | null;
     imageUrl: string | null;
     isActive: boolean;
@@ -229,10 +208,7 @@ interface ProductData {
     liningCost: number | null;
     packagingCost: number | null;
     baseProductionTimeMins: number;
-    fabricType: {
-        id: string;
-        name: string;
-    } | null;
+    // NOTE: fabricType relation removed - now derived from BOM materials
     variations: VariationData[];
 }
 
@@ -256,12 +232,12 @@ export const getProductsTree = createServerFn({ method: 'GET' })
             // (maintained by DB trigger). No need to aggregate from InventoryTransaction.
 
             // Step 1: Pre-fetch all metrics data in parallel (N+1 safe)
+            // NOTE: getFabricColourBalancesKysely removed - fabric assignment now via BOM
             const {
                 getVariationSalesMetricsKysely,
                 getSkuSalesMetricsKysely,
                 getVariationShopifyStockKysely,
                 getSkuShopifyStockKysely,
-                getFabricColourBalancesKysely,
                 getProductShopifyStatusesKysely,
             } = await import('@coh/shared/services/db/queries');
 
@@ -270,14 +246,14 @@ export const getProductsTree = createServerFn({ method: 'GET' })
                 skuSalesMap,
                 variationShopifyStockMap,
                 skuShopifyStockMap,
-                fabricColourBalanceMap,
+                // fabricColourBalanceMap removed - fabric assignment now via BOM
                 productShopifyStatusMap,
             ] = await Promise.all([
                 getVariationSalesMetricsKysely(),
                 getSkuSalesMetricsKysely(),
                 getVariationShopifyStockKysely(),
                 getSkuShopifyStockKysely(),
-                getFabricColourBalancesKysely(),
+                // getFabricColourBalancesKysely() removed - fabric assignment now via BOM
                 getProductShopifyStatusesKysely(),
             ]);
 
@@ -326,31 +302,19 @@ export const getProductsTree = createServerFn({ method: 'GET' })
             }
 
             // Step 3: Fetch products with nested variations and SKUs
-            const products: ProductData[] = await prisma.product.findMany({
+            const productsRaw = await prisma.product.findMany({
                 where: {
                     isActive: true,
                     ...searchFilter,
                 },
                 include: {
-                    fabricType: true,
+                    // NOTE: fabricType removed from schema
                     variations: {
                         where: { isActive: true },
                         orderBy: { colorName: 'asc' },
                         include: {
-                            fabric: {
-                                include: {
-                                    material: true,
-                                },
-                            },
-                            fabricColour: {
-                                include: {
-                                    fabric: {
-                                        include: {
-                                            material: true,
-                                        },
-                                    },
-                                },
-                            },
+                            // NOTE: fabric and fabricColour relations removed from Variation
+                            // Fabric assignment now via BOM (VariationBomLine.fabricColourId)
                             skus: {
                                 where: { isActive: true },
                                 orderBy: { size: 'asc' },
@@ -360,6 +324,9 @@ export const getProductsTree = createServerFn({ method: 'GET' })
                 },
                 orderBy: { name: 'asc' },
             });
+
+            // Cast to ProductData with variations included
+            const products: ProductData[] = productsRaw as unknown as ProductData[];
 
             // Step 4: Transform to tree structure with computed fields
             let totalProducts = 0;
@@ -436,8 +403,8 @@ export const getProductsTree = createServerFn({ method: 'GET' })
                         // Get variation-level metrics
                         const variationSales = variationSalesMap.get(variation.id);
                         const variationShopifyStock = variationShopifyStockMap.get(variation.id);
-                        const fabricColourId = variation.fabricColourId;
-                        const fabricStock = fabricColourId ? fabricColourBalanceMap.get(fabricColourId) : undefined;
+                        // NOTE: fabricColourId removed from Variation - now via BOM
+                        const fabricStock = undefined;
 
                         // Get Shopify status from product level
                         const shopifyStatus = productShopifyStatusMap.get(product.id) as ShopifyStatus | undefined;
@@ -451,14 +418,14 @@ export const getProductsTree = createServerFn({ method: 'GET' })
                             productName: product.name,
                             colorName: variation.colorName,
                             colorHex: variation.colorHex ?? undefined,
-                            fabricId: variation.fabricId ?? undefined,
-                            fabricName: variation.fabric?.name ?? undefined,
-                            // New 3-tier fabric hierarchy fields
-                            fabricColourId: variation.fabricColourId ?? undefined,
-                            fabricColourName: variation.fabricColour?.colourName ?? undefined,
-                            fabricColourHex: variation.fabricColour?.colourHex ?? undefined,
-                            materialId: variation.fabricColour?.fabric?.material?.id ?? variation.fabric?.material?.id ?? undefined,
-                            materialName: variation.fabricColour?.fabric?.material?.name ?? variation.fabric?.material?.name ?? undefined,
+                            // NOTE: fabricId/fabricName/fabricColourId removed - now via BOM (VariationBomLine.fabricColourId)
+                            fabricId: undefined,
+                            fabricName: undefined,
+                            fabricColourId: undefined,
+                            fabricColourName: undefined,
+                            fabricColourHex: undefined,
+                            materialId: undefined,
+                            materialName: undefined,
                             hasBomFabricLine: bomFabricVariationIds.has(variation.id),
                             imageUrl: variation.imageUrl ?? undefined,
                             hasLining: variation.hasLining,
@@ -521,8 +488,9 @@ export const getProductsTree = createServerFn({ method: 'GET' })
                     category: product.category || '',
                     gender: product.gender ?? undefined,
                     productType: product.productType ?? undefined,
-                    fabricTypeId: product.fabricTypeId ?? undefined,
-                    fabricTypeName: product.fabricType?.name ?? undefined,
+                    // NOTE: fabricTypeId/fabricTypeName removed - now derived from BOM materials
+                    fabricTypeId: undefined,
+                    fabricTypeName: undefined,
                     materialName: productMaterialName,
                     imageUrl: product.imageUrl ?? undefined,
                     hasLining,
@@ -615,9 +583,9 @@ export const getProductsList = createServerFn({ method: 'GET' })
         const total = countResult?.count ?? 0;
 
         // Build main query for products
+        // NOTE: FabricType table removed - fabric type now derived from BOM materials
         const productsRaw = await db
             .selectFrom('Product')
-            .leftJoin('FabricType', 'FabricType.id', 'Product.fabricTypeId')
             .select([
                 'Product.id',
                 'Product.name',
@@ -628,8 +596,6 @@ export const getProductsList = createServerFn({ method: 'GET' })
                 'Product.imageUrl',
                 'Product.isActive',
                 'Product.createdAt',
-                'Product.fabricTypeId',
-                'FabricType.name as fabricTypeName',
             ])
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             .$call((qb: any) => {
@@ -670,10 +636,10 @@ export const getProductsList = createServerFn({ method: 'GET' })
             };
         }
 
-        // Fetch variations with fabrics for these products
+        // Fetch variations for these products
+        // NOTE: Variation.fabricId removed - fabric now via BOM (VariationBomLine.fabricColourId)
         const variationsRaw = await db
             .selectFrom('Variation')
-            .leftJoin('Fabric', 'Fabric.id', 'Variation.fabricId')
             .select([
                 'Variation.id',
                 'Variation.productId',
@@ -682,10 +648,6 @@ export const getProductsList = createServerFn({ method: 'GET' })
                 'Variation.colorHex',
                 'Variation.imageUrl',
                 'Variation.isActive',
-                'Variation.fabricId',
-                'Fabric.id as fabric_id',
-                'Fabric.name as fabric_name',
-                'Fabric.colorName as fabric_colorName',
             ])
             .where('Variation.productId', 'in', productIds)
             .execute();
@@ -739,14 +701,9 @@ export const getProductsList = createServerFn({ method: 'GET' })
                 colorHex: v.colorHex,
                 imageUrl: v.imageUrl,
                 isActive: v.isActive,
-                fabricId: v.fabricId ?? '',
-                fabric: v.fabric_id
-                    ? {
-                          id: v.fabric_id,
-                          name: v.fabric_name ?? '',
-                          colorName: v.fabric_colorName ?? '',
-                      }
-                    : null,
+                // NOTE: fabricId removed - now via BOM
+                fabricId: '',
+                fabric: null, // TODO: Get from BOM via VariationBomLine if needed
                 skus: skusByVariation.get(v.id) || [],
             });
             variationsByProduct.set(v.productId, list);
@@ -885,27 +842,13 @@ export const getProductById = createServerFn({ method: 'GET' })
             );
 
             // Fetch product with full hierarchy
+            // NOTE: fabricType, fabric, and fabricColour removed - fabric assignment now via BOM
             const product = await prisma.product.findUnique({
                 where: { id: data.id },
                 include: {
-                    fabricType: true,
                     variations: {
                         orderBy: { colorName: 'asc' },
                         include: {
-                            fabric: {
-                                include: {
-                                    material: true,
-                                },
-                            },
-                            fabricColour: {
-                                include: {
-                                    fabric: {
-                                        include: {
-                                            material: true,
-                                        },
-                                    },
-                                },
-                            },
                             skus: {
                                 orderBy: { size: 'asc' },
                             },
@@ -919,6 +862,8 @@ export const getProductById = createServerFn({ method: 'GET' })
             }
 
             // Transform to response type
+            // NOTE: fabricTypeId, fabricTypeName, fabricId, fabricName, fabricColourId,
+            // fabricColourName, materialName removed - fabric assignment now via BOM
             return {
                 id: product.id,
                 name: product.name,
@@ -926,8 +871,8 @@ export const getProductById = createServerFn({ method: 'GET' })
                 category: product.category,
                 productType: product.productType,
                 gender: product.gender,
-                fabricTypeId: product.fabricTypeId,
-                fabricTypeName: product.fabricType?.name ?? null,
+                fabricTypeId: null,
+                fabricTypeName: null,
                 baseProductionTimeMins: product.baseProductionTimeMins,
                 defaultFabricConsumption: product.defaultFabricConsumption,
                 trimsCost: product.trimsCost,
@@ -940,11 +885,11 @@ export const getProductById = createServerFn({ method: 'GET' })
                     productId: v.productId,
                     colorName: v.colorName,
                     colorHex: v.colorHex,
-                    fabricId: v.fabricId,
-                    fabricName: v.fabric?.name ?? null,
-                    fabricColourId: v.fabricColourId ?? null,
-                    fabricColourName: v.fabricColour?.colourName ?? null,
-                    materialName: v.fabricColour?.fabric?.material?.name ?? v.fabric?.material?.name ?? null,
+                    fabricId: null,
+                    fabricName: null,
+                    fabricColourId: null,
+                    fabricColourName: null,
+                    materialName: null,
                     hasLining: v.hasLining,
                     trimsCost: v.trimsCost,
                     liningCost: v.liningCost,
@@ -981,13 +926,14 @@ export const getProductById = createServerFn({ method: 'GET' })
 
 /**
  * Catalog filters response for dropdowns
+ * NOTE: fabricTypes removed, fabrics simplified - fabric assignment now via BOM
  */
 export interface CatalogFiltersResponse {
-    fabricTypes: { id: string; name: string }[];
+    fabricTypes: { id: string; name: string }[];  // Empty array for backward compatibility
     fabrics: {
         id: string;
         name: string;
-        fabricTypeId: string;
+        fabricTypeId: string;  // materialId for backward compatibility
         colorName: string | null;
         colorHex: string | null;
         costPerUnit: number | null;
@@ -1018,49 +964,17 @@ export const getCatalogFilters = createServerFn({ method: 'GET' })
         try {
             const prisma = await getPrisma();
 
-            // Fetch fabric types (FabricType doesn't have isActive field)
-            const fabricTypes = await prisma.fabricType.findMany({
-                select: { id: true, name: true },
-                orderBy: { name: 'asc' },
-            });
+            // FabricType removed - return empty array for backward compatibility
+            const fabricTypes: { id: string; name: string }[] = [];
 
-            // Fetch fabrics (legacy - for backward compatibility)
-            const fabrics = await prisma.fabric.findMany({
-                where: { isActive: true },
-                select: {
-                    id: true,
-                    name: true,
-                    fabricTypeId: true,
-                    colorName: true,
-                    colorHex: true,
-                    costPerUnit: true,
-                },
-                orderBy: { name: 'asc' },
-            });
-
-            // Fetch fabric colours (NEW - 3-tier hierarchy)
+            // Fetch fabric colours (3-tier hierarchy: Material > Fabric > FabricColour)
+            // NOTE: "fabrics" now comes from FabricColour for backward compatibility
             const fabricColoursRaw = await prisma.fabricColour.findMany({
                 where: { isActive: true },
                 include: {
                     fabric: {
                         include: {
                             material: true,
-                        },
-                    },
-                    // Include linked variations to get product images
-                    variations: {
-                        where: { isActive: true },
-                        take: 4, // Limit to 4 product images
-                        select: {
-                            id: true,
-                            imageUrl: true,
-                            product: {
-                                select: {
-                                    id: true,
-                                    name: true,
-                                    imageUrl: true,
-                                },
-                            },
                         },
                     },
                 },
@@ -1071,35 +985,30 @@ export const getCatalogFilters = createServerFn({ method: 'GET' })
                 ],
             });
 
+            // Transform fabricColours for the "fabrics" response (backward compatibility)
+            // Uses materialId as fabricTypeId for older code
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const fabrics = fabricColoursRaw.map((fc: any) => ({
+                id: fc.id,
+                name: `${fc.fabric?.name ?? ''} - ${fc.colourName}`,
+                fabricTypeId: fc.fabric?.materialId ?? '',  // materialId for backward compat
+                colorName: fc.colourName,
+                colorHex: fc.colourHex,
+                costPerUnit: fc.costPerUnit ?? fc.fabric?.costPerUnit ?? null,
+            }));
+
             // Transform fabricColours to expected format
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const fabricColours = fabricColoursRaw.map((fc: any) => {
-                // Get unique product images (prefer variation image, fallback to product image)
-                const productImages: string[] = [];
-                const seenProductIds = new Set<string>();
-                for (const variation of fc.variations || []) {
-                    const productId = variation.product?.id;
-                    if (productId && !seenProductIds.has(productId)) {
-                        seenProductIds.add(productId);
-                        const imageUrl = variation.imageUrl || variation.product?.imageUrl;
-                        if (imageUrl) {
-                            productImages.push(imageUrl);
-                        }
-                    }
-                }
-
-                return {
-                    id: fc.id,
-                    name: fc.colourName,
-                    hex: fc.colourHex,
-                    fabricId: fc.fabricId,
-                    fabricName: fc.fabric?.name ?? '',
-                    materialId: fc.fabric?.materialId ?? '',
-                    materialName: fc.fabric?.material?.name ?? '',
-                    costPerUnit: fc.costPerUnit ?? fc.fabric?.costPerUnit ?? null,
-                    productImages: productImages.slice(0, 3), // Max 3 images
-                };
-            });
+            const fabricColours = fabricColoursRaw.map((fc: any) => ({
+                id: fc.id,
+                name: fc.colourName,
+                hex: fc.colourHex,
+                fabricId: fc.fabricId,
+                fabricName: fc.fabric?.name ?? '',
+                materialId: fc.fabric?.materialId ?? '',
+                materialName: fc.fabric?.material?.name ?? '',
+                costPerUnit: fc.costPerUnit ?? fc.fabric?.costPerUnit ?? null,
+            }));
 
             // Get distinct categories from products
             const categoriesResult = await prisma.product.findMany({

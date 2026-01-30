@@ -139,10 +139,10 @@ export function VariationEditDialog({
         )}
         {activeTab === 'fabric' && (
           <VariationFabricTab
-            form={form}
             fabricColours={fabricColours}
-            materialId={product.fabricTypeId}
-            disabled={isSaving}
+            currentFabricColourId={variation.fabricColourId}
+            currentFabricColourName={variation.fabricColourName}
+            currentMaterialName={variation.materialName}
           />
         )}
         {activeTab === 'costs' && (

@@ -8,10 +8,10 @@ import { useEffect, useMemo } from 'react';
 import { useForm } from 'react-hook-form';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
-import { getProductById, getCatalogFilters } from '@/server/functions/products';
+import { getProductById } from '@/server/functions/products';
 import { updateProduct } from '@/server/functions/productsMutations';
 import { productsTreeKeys } from '../../hooks/useProductsTree';
-import type { ProductFormData, ProductDetailData, CatalogFilters, CostCascade } from '../types';
+import type { ProductFormData, ProductDetailData, CostCascade } from '../types';
 
 interface UseProductEditFormOptions {
   productId: string;
@@ -24,7 +24,6 @@ export function useProductEditForm({ productId, onSuccess, onError }: UseProduct
 
   // Server Functions
   const getProductByIdFn = useServerFn(getProductById);
-  const getCatalogFiltersFn = useServerFn(getCatalogFilters);
   const updateProductFn = useServerFn(updateProduct);
 
   // Fetch product data using Server Function
@@ -39,18 +38,6 @@ export function useProductEditForm({ productId, onSuccess, onError }: UseProduct
       return result as ProductDetailData;
     },
     enabled: !!productId,
-  });
-
-  // Fetch catalog filters using Server Function
-  const {
-    data: filters,
-    isLoading: isLoadingFilters,
-  } = useQuery<CatalogFilters>({
-    queryKey: ['catalogFilters'],
-    queryFn: async () => {
-      const result = await getCatalogFiltersFn({ data: undefined });
-      return result as CatalogFilters;
-    },
   });
 
   // Form setup
@@ -68,6 +55,7 @@ export function useProductEditForm({ productId, onSuccess, onError }: UseProduct
   }, [product, reset]);
 
   // Update mutation using Server Function
+  // Note: fabricTypeId removed - fabric is now managed via BOM
   const updateMutation = useMutation({
     mutationFn: async (data: ProductFormData) => {
       const result = await updateProductFn({
@@ -78,7 +66,6 @@ export function useProductEditForm({ productId, onSuccess, onError }: UseProduct
           category: data.category,
           productType: data.productType,
           gender: data.gender,
-          fabricTypeId: data.fabricTypeId,
           baseProductionTimeMins: data.baseProductionTimeMins,
           defaultFabricConsumption: data.defaultFabricConsumption,
           trimsCost: data.trimsCost,
@@ -155,9 +142,8 @@ export function useProductEditForm({ productId, onSuccess, onError }: UseProduct
   return {
     form,
     product,
-    filters,
     costCascade,
-    isLoading: isLoadingProduct || isLoadingFilters,
+    isLoading: isLoadingProduct,
     isSaving: updateMutation.isPending,
     isDirty,
     isValid,
@@ -175,7 +161,6 @@ function getDefaultValues(product?: ProductDetailData | null): ProductFormData {
     category: product?.category ?? '',
     productType: product?.productType ?? '',
     gender: product?.gender ?? 'Women',
-    fabricTypeId: product?.fabricTypeId ?? null,
     baseProductionTimeMins: product?.baseProductionTimeMins ?? 60,
     defaultFabricConsumption: product?.defaultFabricConsumption ?? null,
     trimsCost: product?.trimsCost ?? null,

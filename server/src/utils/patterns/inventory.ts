@@ -250,65 +250,28 @@ export async function calculateInventoryBalancesWithLock(
 // FABRIC BALANCE
 // ============================================
 
+// NOTE: FabricTransaction table removed - fabric balance now tracked via FabricColourTransaction
+// These functions have been deprecated. Use FabricColour.currentBalance (materialized) instead.
+
 /**
- * Calculate fabric balance for a fabric
- * Fetches transaction data from database and uses shared pure function for calculation.
+ * @deprecated FabricTransaction removed - use FabricColour.currentBalance instead
  */
 export async function calculateFabricBalance(
-    prisma: PrismaOrTransaction,
-    fabricId: string
+    _prisma: PrismaOrTransaction,
+    _fabricId: string
 ): Promise<FabricBalance> {
-    const result = await prisma.fabricTransaction.groupBy({
-        by: ['txnType'],
-        where: { fabricId },
-        _sum: { qty: true },
-    });
-
-    let totalInward = 0;
-    let totalOutward = 0;
-
-    result.forEach((r) => {
-        if (r.txnType === 'inward') totalInward = r._sum.qty || 0;
-        else if (r.txnType === 'outward') totalOutward = r._sum.qty || 0;
-    });
-
-    // Use shared pure function for balance calculation
-    return calculateFabricBalancePure({ totalInward, totalOutward });
+    // Return zero balance - FabricTransaction no longer exists
+    return calculateFabricBalancePure({ totalInward: 0, totalOutward: 0 });
 }
 
 /**
- * Calculate fabric balances for all fabrics efficiently
+ * @deprecated FabricTransaction removed - use FabricColour.currentBalance instead
  */
 export async function calculateAllFabricBalances(
-    prisma: PrismaOrTransaction
+    _prisma: PrismaOrTransaction
 ): Promise<Map<string, FabricBalanceWithId>> {
-    const result = await prisma.fabricTransaction.groupBy({
-        by: ['fabricId', 'txnType'],
-        _sum: { qty: true },
-    });
-
-    // Aggregate transaction totals by fabric
-    const summaryMap = new Map<string, { totalInward: number; totalOutward: number }>();
-
-    result.forEach((r) => {
-        if (!summaryMap.has(r.fabricId)) {
-            summaryMap.set(r.fabricId, { totalInward: 0, totalOutward: 0 });
-        }
-
-        const summary = summaryMap.get(r.fabricId)!;
-        if (r.txnType === 'inward') summary.totalInward = r._sum.qty || 0;
-        else if (r.txnType === 'outward') summary.totalOutward = r._sum.qty || 0;
-    });
-
-    // Calculate balances using shared pure function
-    const balanceMap = new Map<string, FabricBalanceWithId>();
-
-    for (const [fabricId, summary] of summaryMap) {
-        const balance = calculateFabricBalancePure(summary);
-        balanceMap.set(fabricId, { fabricId, ...balance });
-    }
-
-    return balanceMap;
+    // Return empty map - FabricTransaction no longer exists
+    return new Map();
 }
 
 // ============================================

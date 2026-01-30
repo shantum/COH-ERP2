@@ -45,6 +45,7 @@ export function useVariationEditForm({
   }, [variation, reset]);
 
   // Update mutation using Server Function
+  // Note: fabricColourId is now managed via BOM, not direct variation fields
   const updateMutation = useMutation({
     mutationFn: async (data: VariationFormData) => {
       const result = await updateVariationFn({
@@ -52,7 +53,6 @@ export function useVariationEditForm({
           id: variation.id,
           colorName: data.colorName,
           colorHex: data.colorHex ?? undefined,
-          fabricColourId: data.fabricColourId ?? undefined,
           hasLining: data.hasLining,
           trimsCost: data.trimsCost ?? undefined,
           packagingCost: data.packagingCost ?? undefined,
@@ -154,7 +154,6 @@ function getDefaultValues(variation: VariationDetailData): VariationFormData {
   return {
     colorName: variation.colorName ?? '',
     colorHex: variation.colorHex ?? null,
-    fabricColourId: variation.fabricColourId ?? null,
     hasLining: variation.hasLining ?? false,
     trimsCost: variation.trimsCost ?? null,
     liningCost: variation.liningCost ?? null,

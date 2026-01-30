@@ -68,6 +68,14 @@ const stateConfig: Record<FulfillmentState, { label: string; labelClass: string 
 export const ShopifyTrackingCell = memo(function ShopifyTrackingCell({ row }: ShopifyTrackingCellProps) {
     if (!row.isFirstLine) return null;
 
+    // Only show Shopify fulfillment status for Shopify orders
+    const channel = (row.channel || '').toLowerCase();
+    const isShopifyOrder = channel === 'shopify' || channel.startsWith('shopify_') || channel.startsWith('shopify-');
+
+    if (!isShopifyOrder) {
+        return <span className="text-[11px] text-slate-300">—</span>;
+    }
+
     const awb = row.shopifyAwb;
     const courier = row.shopifyCourier;
     const status = row.shopifyStatus;
