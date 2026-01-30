@@ -467,12 +467,18 @@ export async function getTopMaterialsKysely(
     const db = await getKysely();
     const { sql } = await import('kysely');
 
+    // Join through VariationBomLine to get fabric (Variation.fabricColourId was removed)
     let query = db
         .selectFrom('OrderLine')
         .innerJoin('Order', 'Order.id', 'OrderLine.orderId')
         .innerJoin('Sku', 'Sku.id', 'OrderLine.skuId')
         .innerJoin('Variation', 'Variation.id', 'Sku.variationId')
-        .innerJoin('FabricColour', 'FabricColour.id', 'Variation.fabricColourId')
+        .innerJoin('VariationBomLine', (join) =>
+            join
+                .onRef('VariationBomLine.variationId', '=', 'Variation.id')
+                .on('VariationBomLine.fabricColourId', 'is not', null)
+        )
+        .innerJoin('FabricColour', 'FabricColour.id', 'VariationBomLine.fabricColourId')
         .innerJoin('Fabric', 'Fabric.id', 'FabricColour.fabricId')
         .innerJoin('Material', 'Material.id', 'Fabric.materialId')
         .select([
@@ -517,12 +523,18 @@ export async function getTopFabricColoursKysely(
     const db = await getKysely();
     const { sql } = await import('kysely');
 
+    // Join through VariationBomLine to get fabric (Variation.fabricColourId was removed)
     let query = db
         .selectFrom('OrderLine')
         .innerJoin('Order', 'Order.id', 'OrderLine.orderId')
         .innerJoin('Sku', 'Sku.id', 'OrderLine.skuId')
         .innerJoin('Variation', 'Variation.id', 'Sku.variationId')
-        .innerJoin('FabricColour', 'FabricColour.id', 'Variation.fabricColourId')
+        .innerJoin('VariationBomLine', (join) =>
+            join
+                .onRef('VariationBomLine.variationId', '=', 'Variation.id')
+                .on('VariationBomLine.fabricColourId', 'is not', null)
+        )
+        .innerJoin('FabricColour', 'FabricColour.id', 'VariationBomLine.fabricColourId')
         .innerJoin('Fabric', 'Fabric.id', 'FabricColour.fabricId')
         .innerJoin('Material', 'Material.id', 'Fabric.materialId')
         .select([

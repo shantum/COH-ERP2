@@ -49,12 +49,18 @@ export async function getFabricSalesMetricsKysely(): Promise<Map<string, FabricS
     // 30 days ago in IST
     const thirtyDaysAgo = getISTMidnightAsUTC(-30);
 
+    // Join through VariationBomLine to get fabric (Variation.fabricColourId was removed)
     const rows = await db
         .selectFrom('OrderLine')
         .innerJoin('Order', 'Order.id', 'OrderLine.orderId')
         .innerJoin('Sku', 'Sku.id', 'OrderLine.skuId')
         .innerJoin('Variation', 'Variation.id', 'Sku.variationId')
-        .innerJoin('FabricColour', 'FabricColour.id', 'Variation.fabricColourId')
+        .innerJoin('VariationBomLine', (join) =>
+            join
+                .onRef('VariationBomLine.variationId', '=', 'Variation.id')
+                .on('VariationBomLine.fabricColourId', 'is not', null)
+        )
+        .innerJoin('FabricColour', 'FabricColour.id', 'VariationBomLine.fabricColourId')
         .select([
             'FabricColour.id as fabricColourId',
             sql<number>`SUM("OrderLine"."qty" * "OrderLine"."unitPrice")::numeric`.as('sales30DayValue'),
