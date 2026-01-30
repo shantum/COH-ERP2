@@ -75,8 +75,15 @@ export interface ProductNode {
     liningCost: number | null;
     packagingCost: number | null;
     laborMinutes: number | null;
+    // Shopify status (inherited by variations)
+    shopifyStatus?: ShopifyStatus;
     children: VariationNode[];
 }
+
+/**
+ * Shopify product/variation status
+ */
+export type ShopifyStatus = 'active' | 'archived' | 'draft' | 'not_linked' | 'not_cached' | 'unknown';
 
 /**
  * Variation node in the tree
@@ -107,6 +114,13 @@ export interface VariationNode {
     liningCost: number | null;
     packagingCost: number | null;
     laborMinutes: number | null;
+    // Shopify & Sales fields
+    shopifyStatus?: ShopifyStatus;
+    shopifyStock?: number;
+    fabricStock?: number;
+    sales30DayUnits?: number;
+    sales30DayValue?: number;
+    bomCost?: number;              // Pre-computed average BOM cost
     children: SkuNode[];
 }
 
@@ -131,6 +145,11 @@ export interface SkuNode {
     liningCost: number | null;
     packagingCost: number | null;
     laborMinutes: number | null;
+    // Shopify & Sales fields
+    shopifyStock?: number;
+    sales30DayUnits?: number;
+    sales30DayValue?: number;
+    bomCost?: number;              // Pre-computed total BOM cost
 }
 
 // Internal types for Prisma query results
@@ -149,6 +168,7 @@ interface SkuData {
     targetStockQty: number | null;
     currentBalance: number;
     isActive: boolean;
+    bomCost: number | null;
     trimsCost: number | null;
     liningCost: number | null;
     packagingCost: number | null;
@@ -165,6 +185,7 @@ interface VariationData {
     imageUrl: string | null;
     isActive: boolean;
     hasLining: boolean;
+    bomCost: number | null;
     trimsCost: number | null;
     liningCost: number | null;
     packagingCost: number | null;
@@ -201,6 +222,7 @@ interface ProductData {
     gender: string;
     productType: string;
     fabricTypeId: string | null;
+    shopifyProductId: string | null;
     imageUrl: string | null;
     isActive: boolean;
     trimsCost: number | null;
@@ -232,6 +254,32 @@ export const getProductsTree = createServerFn({ method: 'GET' })
 
             // NOTE: SKU balances are now read directly from Sku.currentBalance
             // (maintained by DB trigger). No need to aggregate from InventoryTransaction.
+
+            // Step 1: Pre-fetch all metrics data in parallel (N+1 safe)
+            const {
+                getVariationSalesMetricsKysely,
+                getSkuSalesMetricsKysely,
+                getVariationShopifyStockKysely,
+                getSkuShopifyStockKysely,
+                getFabricColourBalancesKysely,
+                getProductShopifyStatusesKysely,
+            } = await import('@coh/shared/services/db/queries');
+
+            const [
+                variationSalesMap,
+                skuSalesMap,
+                variationShopifyStockMap,
+                skuShopifyStockMap,
+                fabricColourBalanceMap,
+                productShopifyStatusMap,
+            ] = await Promise.all([
+                getVariationSalesMetricsKysely(),
+                getSkuSalesMetricsKysely(),
+                getVariationShopifyStockKysely(),
+                getSkuShopifyStockKysely(),
+                getFabricColourBalancesKysely(),
+                getProductShopifyStatusesKysely(),
+            ]);
 
             // Step 1b: Pre-fetch BOM fabric status (N+1 safe - single query)
             // Find all variations that have at least one VariationBomLine with:
@@ -346,6 +394,10 @@ export const getProductsTree = createServerFn({ method: 'GET' })
                                 allMrps.push(sku.mrp);
                             }
 
+                            // Get SKU-level metrics
+                            const skuSales = skuSalesMap.get(sku.id);
+                            const skuShopifyStock = skuShopifyStockMap.get(sku.id);
+
                             return {
                                 id: sku.id,
                                 type: 'sku' as const,
@@ -364,6 +416,11 @@ export const getProductsTree = createServerFn({ method: 'GET' })
                                 liningCost: sku.liningCost,
                                 packagingCost: sku.packagingCost,
                                 laborMinutes: sku.laborMinutes,
+                                // Shopify & Sales fields
+                                shopifyStock: skuShopifyStock,
+                                sales30DayUnits: skuSales?.sales30DayUnits,
+                                sales30DayValue: skuSales?.sales30DayValue,
+                                bomCost: sku.bomCost ?? undefined,
                             };
                         });
 
@@ -375,6 +432,15 @@ export const getProductsTree = createServerFn({ method: 'GET' })
                             variationMrps.length > 0
                                 ? variationMrps.reduce((a, b) => a + b, 0) / variationMrps.length
                                 : null;
+
+                        // Get variation-level metrics
+                        const variationSales = variationSalesMap.get(variation.id);
+                        const variationShopifyStock = variationShopifyStockMap.get(variation.id);
+                        const fabricColourId = variation.fabricColourId;
+                        const fabricStock = fabricColourId ? fabricColourBalanceMap.get(fabricColourId) : undefined;
+
+                        // Get Shopify status from product level
+                        const shopifyStatus = productShopifyStatusMap.get(product.id) as ShopifyStatus | undefined;
 
                         return {
                             id: variation.id,
@@ -402,6 +468,13 @@ export const getProductsTree = createServerFn({ method: 'GET' })
                             liningCost: variation.liningCost,
                             packagingCost: variation.packagingCost,
                             laborMinutes: variation.laborMinutes,
+                            // Shopify & Sales fields
+                            shopifyStatus: shopifyStatus ?? (product.shopifyProductId ? 'not_cached' : 'not_linked'),
+                            shopifyStock: variationShopifyStock,
+                            fabricStock,
+                            sales30DayUnits: variationSales?.sales30DayUnits,
+                            sales30DayValue: variationSales?.sales30DayValue,
+                            bomCost: variation.bomCost ?? undefined,
                             children,
                         };
                     }
@@ -436,6 +509,9 @@ export const getProductsTree = createServerFn({ method: 'GET' })
                     productMaterialName = maxMaterial;
                 }
 
+                // Get product-level Shopify status
+                const productShopifyStatus = productShopifyStatusMap.get(product.id) as ShopifyStatus | undefined;
+
                 return {
                     id: product.id,
                     type: 'product' as const,
@@ -458,6 +534,7 @@ export const getProductsTree = createServerFn({ method: 'GET' })
                     liningCost: product.liningCost,
                     packagingCost: product.packagingCost,
                     laborMinutes: product.baseProductionTimeMins,
+                    shopifyStatus: productShopifyStatus ?? (product.shopifyProductId ? 'not_cached' : 'not_linked'),
                     children: processedVariations,
                 };
             });
@@ -798,7 +875,7 @@ export const getProductById = createServerFn({ method: 'GET' })
                 WHERE "skuId" IN (
                     SELECT s.id FROM "Sku" s
                     JOIN "Variation" v ON s."variationId" = v.id
-                    WHERE v."productId" = ${data.id}::uuid
+                    WHERE v."productId"::text = ${data.id}
                 )
                 GROUP BY "skuId"
             `;
