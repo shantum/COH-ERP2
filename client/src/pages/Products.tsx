@@ -223,6 +223,7 @@ export default function Products() {
                             onSearchChange={setSearchQuery}
                             onViewProduct={handleViewProduct}
                             onEditBom={handleEditBom}
+                            initialData={loaderData?.productsTree}
                         />
                     </div>
                 )}
@@ -268,6 +269,7 @@ export default function Products() {
                             <BomProductList
                                 onSelect={handleBomSelect}
                                 selectedId={selectedNode?.id}
+                                initialData={loaderData?.productsTree}
                             />
                         </div>
 

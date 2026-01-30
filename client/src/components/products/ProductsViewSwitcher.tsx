@@ -44,6 +44,8 @@ interface ProductsViewSwitcherProps {
     onViewProduct?: (product: ProductTreeNode) => void;
     onEditBom?: (product: ProductTreeNode) => void;
     onAddProduct?: () => void;
+    /** Initial data from route loader for instant hydration (prevents refetch) */
+    initialData?: { items: ProductTreeNode[]; summary: { products: number; variations: number; skus: number; totalStock: number } } | null;
 }
 
 // Discriminated union for fabric filter state
@@ -98,7 +100,7 @@ function parseFabricFilter(value: string): FabricFilterValue {
     return { type: 'all' };
 }
 
-export function ProductsViewSwitcher({ searchQuery, onSearchChange, onViewProduct, onEditBom, onAddProduct }: ProductsViewSwitcherProps) {
+export function ProductsViewSwitcher({ searchQuery, onSearchChange, onViewProduct, onEditBom, onAddProduct, initialData }: ProductsViewSwitcherProps) {
     const [viewMode, setViewMode] = useState<ViewMode>('product');
     const [filters, setFilters] = useState<FilterState>({
         gender: null,
@@ -119,7 +121,10 @@ export function ProductsViewSwitcher({ searchQuery, onSearchChange, onViewProduc
         skuId?: string;
     } | null>(null);
 
-    const { data: treeData, summary, refetch } = useProductsTree();
+    // Use initialData from route loader to prevent refetch after SSR hydration
+    const { data: treeData, summary, refetch } = useProductsTree({
+        initialData: initialData ? { items: initialData.items, summary: initialData.summary } : undefined,
+    });
 
     // Extract unique filter options from data
     const filterOptions = useMemo(() => {

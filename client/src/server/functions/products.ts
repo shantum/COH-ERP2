@@ -147,6 +147,7 @@ interface SkuData {
     mrp: number;
     fabricConsumption: number | null;
     targetStockQty: number | null;
+    currentBalance: number;
     isActive: boolean;
     trimsCost: number | null;
     liningCost: number | null;
@@ -229,19 +230,8 @@ export const getProductsTree = createServerFn({ method: 'GET' })
 
             const { search } = data;
 
-            // Step 1: Get inventory balances by SKU
-            const balances: BalanceRow[] = await prisma.$queryRaw`
-                SELECT
-                    "skuId",
-                    SUM(qty)::bigint AS "balance"
-                FROM "InventoryTransaction"
-                GROUP BY "skuId"
-            `;
-
-            // Create balance lookup map for O(1) access
-            const balanceMap = new Map<string, number>(
-                balances.map((b: BalanceRow) => [b.skuId, Number(b.balance)])
-            );
+            // NOTE: SKU balances are now read directly from Sku.currentBalance
+            // (maintained by DB trigger). No need to aggregate from InventoryTransaction.
 
             // Step 1b: Pre-fetch BOM fabric status (N+1 safe - single query)
             // Find all variations that have at least one VariationBomLine with:
@@ -340,11 +330,11 @@ export const getProductsTree = createServerFn({ method: 'GET' })
                         let variationStock = 0;
                         const variationMrps: number[] = [];
 
-                        // Process SKUs
+                        // Process SKUs - use materialized currentBalance (O(1) from trigger)
                         const children: SkuNode[] = variation.skus.map((sku: SkuData) => {
                             totalSkus++;
                             productSkuCount++;
-                            const balance = balanceMap.get(sku.id) || 0;
+                            const balance = sku.currentBalance ?? 0;
                             variationStock += balance;
                             totalStock += balance;
                             if (sku.mrp > 0) {

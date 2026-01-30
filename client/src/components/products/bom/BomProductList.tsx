@@ -16,13 +16,18 @@ import { getOptimizedImageUrl } from '../../../utils/imageOptimization';
 interface BomProductListProps {
     onSelect: (node: ProductTreeNode | null) => void;
     selectedId?: string | null;
+    /** Initial data from route loader for instant hydration (prevents refetch) */
+    initialData?: { items: ProductTreeNode[]; summary: { products: number; variations: number; skus: number; totalStock: number } } | null;
 }
 
-export function BomProductList({ onSelect, selectedId }: BomProductListProps) {
+export function BomProductList({ onSelect, selectedId, initialData }: BomProductListProps) {
     const [searchQuery, setSearchQuery] = useState('');
     const [expandedProducts, setExpandedProducts] = useState<Set<string>>(new Set());
 
-    const { data: treeData, summary, isLoading, isFetching, refetch } = useProductsTree();
+    // Use initialData from route loader to prevent refetch after SSR hydration
+    const { data: treeData, summary, isLoading, isFetching, refetch } = useProductsTree({
+        initialData: initialData ? { items: initialData.items, summary: initialData.summary } : undefined,
+    });
 
     // Filter and flatten to products only (with variations as children)
     const products = useMemo(() => {
