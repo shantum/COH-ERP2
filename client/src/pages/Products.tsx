@@ -10,8 +10,8 @@
  */
 
 import { useState, useCallback, useEffect } from 'react';
-import { useNavigate } from '@tanstack/react-router';
-import { Package, Layers, Scissors, Wrench, GitBranch, Grid3X3, FileUp, Link2, Hash } from 'lucide-react';
+import { useNavigate, ClientOnly } from '@tanstack/react-router';
+import { Package, Layers, Scissors, Wrench, GitBranch, Grid3X3, FileUp, Link2, Hash, Loader2 } from 'lucide-react';
 
 import { ProductsViewSwitcher } from '../components/products/ProductsViewSwitcher';
 import { DetailPanel } from '../components/products/DetailPanel';
@@ -228,36 +228,46 @@ export default function Products() {
                     </div>
                 )}
 
-                {/* Materials Tab */}
+                {/* Materials Tab - wrapped in ClientOnly to prevent hydration mismatch */}
                 {activeTab === 'materials' && (
                     <div className="flex-1 overflow-hidden">
-                        <MaterialsTreeView
-                            onViewDetails={() => {}}
-                            onAddInward={() => {}}
-                            onAddSupplier={() => {}}
-                        />
+                        <ClientOnly fallback={
+                            <div className="flex items-center justify-center h-full">
+                                <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+                            </div>
+                        }>
+                            <MaterialsTreeView
+                                onViewDetails={() => {}}
+                                onAddInward={() => {}}
+                                onAddSupplier={() => {}}
+                            />
+                        </ClientOnly>
                     </div>
                 )}
 
                 {/* Trims Tab */}
                 {activeTab === 'trims' && (
                     <div className="flex-1 p-4 overflow-auto">
-                        <TrimsTable
-                            onEdit={() => {}}
-                            onViewDetails={() => {}}
-                            onAdd={() => {}}
-                        />
+                        <ClientOnly fallback={<div className="flex items-center justify-center h-32"><Loader2 className="h-6 w-6 animate-spin text-gray-400" /></div>}>
+                            <TrimsTable
+                                onEdit={() => {}}
+                                onViewDetails={() => {}}
+                                onAdd={() => {}}
+                            />
+                        </ClientOnly>
                     </div>
                 )}
 
                 {/* Services Tab */}
                 {activeTab === 'services' && (
                     <div className="flex-1 p-4 overflow-auto">
-                        <ServicesTable
-                            onEdit={() => {}}
-                            onViewDetails={() => {}}
-                            onAdd={() => {}}
-                        />
+                        <ClientOnly fallback={<div className="flex items-center justify-center h-32"><Loader2 className="h-6 w-6 animate-spin text-gray-400" /></div>}>
+                            <ServicesTable
+                                onEdit={() => {}}
+                                onViewDetails={() => {}}
+                                onAdd={() => {}}
+                            />
+                        </ClientOnly>
                     </div>
                 )}
 
