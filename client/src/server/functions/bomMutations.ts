@@ -17,6 +17,13 @@ import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth';
 import { getPrisma, type PrismaTransaction } from '@coh/shared/services/db';
+import {
+    recalculateSkuBomCost,
+    recalculateVariationBomCost,
+    recalculateVariationAndSkuBomCosts,
+    getVariationIdForSku,
+    getVariationIdsForProduct,
+} from '@coh/shared/services/bom';
 
 // ============================================
 // INPUT SCHEMAS
@@ -732,6 +739,31 @@ export const createBomLine = createServerFn({ method: 'POST' })
                 };
             }
 
+            // Trigger BOM cost recalculation (fire and forget)
+            (async () => {
+                try {
+                    if (level === 'sku' && skuId) {
+                        // SKU-level change: recalculate this SKU and its variation
+                        const varId = await getVariationIdForSku(prisma, skuId);
+                        await recalculateSkuBomCost(prisma, skuId);
+                        if (varId) {
+                            await recalculateVariationBomCost(prisma, varId);
+                        }
+                    } else if (level === 'variation' && variationId) {
+                        // Variation-level change: affects all SKUs in this variation
+                        await recalculateVariationAndSkuBomCosts(prisma, variationId);
+                    } else if (level === 'product' && productId) {
+                        // Product-level change: affects all variations and SKUs
+                        const varIds = await getVariationIdsForProduct(prisma, productId);
+                        for (const varId of varIds) {
+                            await recalculateVariationAndSkuBomCosts(prisma, varId);
+                        }
+                    }
+                } catch (err) {
+                    console.error('[createBomLine] BOM cost recalculation failed:', err);
+                }
+            })();
+
             return {
                 success: true,
                 data: { id: result.id, level, roleId },
@@ -767,7 +799,18 @@ export const updateBomLine = createServerFn({ method: 'POST' })
         } = data;
 
         try {
+            // Get parent IDs before update for cost recalculation
+            let productId: string | undefined;
+            let variationId: string | undefined;
+            let skuId: string | undefined;
+
             if (level === 'product') {
+                const template = await prisma.productBomTemplate.findUnique({
+                    where: { id: lineId },
+                    select: { productId: true },
+                });
+                productId = template?.productId;
+
                 await prisma.productBomTemplate.update({
                     where: { id: lineId },
                     data: {
@@ -780,6 +823,12 @@ export const updateBomLine = createServerFn({ method: 'POST' })
                     },
                 });
             } else if (level === 'variation') {
+                const line = await prisma.variationBomLine.findUnique({
+                    where: { id: lineId },
+                    select: { variationId: true },
+                });
+                variationId = line?.variationId;
+
                 await prisma.variationBomLine.update({
                     where: { id: lineId },
                     data: {
@@ -792,6 +841,12 @@ export const updateBomLine = createServerFn({ method: 'POST' })
                     },
                 });
             } else if (level === 'sku') {
+                const line = await prisma.skuBomLine.findUnique({
+                    where: { id: lineId },
+                    select: { skuId: true },
+                });
+                skuId = line?.skuId;
+
                 await prisma.skuBomLine.update({
                     where: { id: lineId },
                     data: {
@@ -810,6 +865,28 @@ export const updateBomLine = createServerFn({ method: 'POST' })
                     error: { code: 'BAD_REQUEST', message: 'Invalid level' },
                 };
             }
+
+            // Trigger BOM cost recalculation (fire and forget)
+            (async () => {
+                try {
+                    if (level === 'sku' && skuId) {
+                        const varId = await getVariationIdForSku(prisma, skuId);
+                        await recalculateSkuBomCost(prisma, skuId);
+                        if (varId) {
+                            await recalculateVariationBomCost(prisma, varId);
+                        }
+                    } else if (level === 'variation' && variationId) {
+                        await recalculateVariationAndSkuBomCosts(prisma, variationId);
+                    } else if (level === 'product' && productId) {
+                        const varIds = await getVariationIdsForProduct(prisma, productId);
+                        for (const varId of varIds) {
+                            await recalculateVariationAndSkuBomCosts(prisma, varId);
+                        }
+                    }
+                } catch (err) {
+                    console.error('[updateBomLine] BOM cost recalculation failed:', err);
+                }
+            })();
 
             return {
                 success: true,
@@ -841,15 +918,38 @@ export const deleteBomLine = createServerFn({ method: 'POST' })
         const { lineId, level } = data;
 
         try {
+            // Get parent IDs before delete for cost recalculation
+            let productId: string | undefined;
+            let variationId: string | undefined;
+            let skuId: string | undefined;
+
             if (level === 'product') {
+                const template = await prisma.productBomTemplate.findUnique({
+                    where: { id: lineId },
+                    select: { productId: true },
+                });
+                productId = template?.productId;
+
                 await prisma.productBomTemplate.delete({
                     where: { id: lineId },
                 });
             } else if (level === 'variation') {
+                const line = await prisma.variationBomLine.findUnique({
+                    where: { id: lineId },
+                    select: { variationId: true },
+                });
+                variationId = line?.variationId;
+
                 await prisma.variationBomLine.delete({
                     where: { id: lineId },
                 });
             } else if (level === 'sku') {
+                const line = await prisma.skuBomLine.findUnique({
+                    where: { id: lineId },
+                    select: { skuId: true },
+                });
+                skuId = line?.skuId;
+
                 await prisma.skuBomLine.delete({
                     where: { id: lineId },
                 });
@@ -859,6 +959,28 @@ export const deleteBomLine = createServerFn({ method: 'POST' })
                     error: { code: 'BAD_REQUEST', message: 'Invalid level' },
                 };
             }
+
+            // Trigger BOM cost recalculation (fire and forget)
+            (async () => {
+                try {
+                    if (level === 'sku' && skuId) {
+                        const varId = await getVariationIdForSku(prisma, skuId);
+                        await recalculateSkuBomCost(prisma, skuId);
+                        if (varId) {
+                            await recalculateVariationBomCost(prisma, varId);
+                        }
+                    } else if (level === 'variation' && variationId) {
+                        await recalculateVariationAndSkuBomCosts(prisma, variationId);
+                    } else if (level === 'product' && productId) {
+                        const varIds = await getVariationIdsForProduct(prisma, productId);
+                        for (const varId of varIds) {
+                            await recalculateVariationAndSkuBomCosts(prisma, varId);
+                        }
+                    }
+                } catch (err) {
+                    console.error('[deleteBomLine] BOM cost recalculation failed:', err);
+                }
+            })();
 
             return {
                 success: true,
@@ -985,6 +1107,26 @@ export const importConsumption = createServerFn({ method: 'POST' })
 
             const uniqueProducts = new Set(imports.map((i) => i.productId)).size;
 
+            // Trigger BOM cost recalculation for all affected variations (fire and forget)
+            (async () => {
+                try {
+                    // Get unique variation IDs from the updates
+                    const skuIds = skuUpdates.map((u) => u.skuId);
+                    const skusWithVariations = await prisma.sku.findMany({
+                        where: { id: { in: skuIds } },
+                        select: { id: true, variationId: true },
+                    });
+
+                    // Group by variation and recalculate
+                    const variationIds = [...new Set(skusWithVariations.map((s) => s.variationId))];
+                    for (const variationId of variationIds) {
+                        await recalculateVariationAndSkuBomCosts(prisma, variationId);
+                    }
+                } catch (err) {
+                    console.error('[importConsumption] BOM cost recalculation failed:', err);
+                }
+            })();
+
             return {
                 success: true,
                 data: {
@@ -1103,6 +1245,17 @@ export const linkFabricToVariation = createServerFn({ method: 'POST' })
                 return { updated: variationIds };
             }, { timeout: 30000 });
 
+            // Trigger BOM cost recalculation for all linked variations (fire and forget)
+            (async () => {
+                try {
+                    for (const variationId of variationIds) {
+                        await recalculateVariationAndSkuBomCosts(prisma, variationId);
+                    }
+                } catch (err) {
+                    console.error('[linkFabricToVariation] BOM cost recalculation failed:', err);
+                }
+            })();
+
             return {
                 success: true,
                 data: {
@@ -1210,6 +1363,18 @@ export const updateSizeConsumptions = createServerFn({ method: 'POST' })
                     updatedCount++;
                 }
             }, { timeout: 30000 });
+
+            // Trigger BOM cost recalculation for all variations (fire and forget)
+            (async () => {
+                try {
+                    const variationIds = product.variations.map((v: DbRecord) => v.id);
+                    for (const variationId of variationIds) {
+                        await recalculateVariationAndSkuBomCosts(prisma, variationId);
+                    }
+                } catch (err) {
+                    console.error('[updateSizeConsumptions] BOM cost recalculation failed:', err);
+                }
+            })();
 
             return {
                 success: true,
@@ -2354,6 +2519,92 @@ export const linkVariationsToColour = createServerFn({ method: 'POST' })
             };
         } catch (error: unknown) {
             const message = error instanceof Error ? error.message : 'Failed to link variations';
+            return {
+                success: false,
+                error: { code: 'BAD_REQUEST', message },
+            };
+        }
+    });
+
+/**
+ * Clear Fabric Mapping for Variations
+ * Removes the fabric colour assignment from variations and deletes BOM lines
+ */
+const clearVariationsFabricMappingSchema = z.object({
+    variationIds: z.array(z.string()).min(1, 'At least one variation ID is required'),
+    roleId: z.string().optional(),
+});
+
+export const clearVariationsFabricMapping = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => clearVariationsFabricMappingSchema.parse(input))
+    .handler(async ({ data }: { data: z.infer<typeof clearVariationsFabricMappingSchema> }): Promise<{
+        success: boolean;
+        cleared?: { total: number };
+        error?: { code: string; message: string };
+    }> => {
+        const prisma = await getPrisma();
+
+        try {
+            const { variationIds, roleId } = data;
+
+            // Get the main fabric role if not specified
+            let targetRoleId = roleId;
+            if (!targetRoleId) {
+                const mainFabricRole = await prisma.componentRole.findFirst({
+                    where: {
+                        code: 'main',
+                        type: { code: 'FABRIC' },
+                    },
+                });
+                if (!mainFabricRole) {
+                    return {
+                        success: false,
+                        error: { code: 'SERVER_ERROR', message: 'Main fabric role not configured' },
+                    };
+                }
+                targetRoleId = mainFabricRole.id;
+            }
+
+            // Verify variations exist
+            const variations = await prisma.variation.findMany({
+                where: { id: { in: variationIds } },
+                select: { id: true },
+            });
+
+            if (variations.length === 0) {
+                return {
+                    success: false,
+                    error: { code: 'BAD_REQUEST', message: 'No valid variations found' },
+                };
+            }
+
+            // Clear fabric assignments in a transaction
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            await prisma.$transaction(async (tx: any) => {
+                // 1. Set fabricColourId to null on variations (fabricId stays as-is since it's required)
+                await tx.variation.updateMany({
+                    where: { id: { in: variationIds } },
+                    data: { fabricColourId: null },
+                });
+
+                // 2. Delete the BOM lines for the main fabric role
+                await tx.variationBomLine.deleteMany({
+                    where: {
+                        variationId: { in: variationIds },
+                        roleId: targetRoleId!,
+                    },
+                });
+            }, {
+                timeout: 30000,
+            });
+
+            return {
+                success: true,
+                cleared: { total: variations.length },
+            };
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : 'Failed to clear fabric mapping';
             return {
                 success: false,
                 error: { code: 'BAD_REQUEST', message },

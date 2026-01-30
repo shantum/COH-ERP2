@@ -63,12 +63,18 @@ export interface FabricMappingRow {
 }
 
 /**
+ * Special value indicating a clear/reset operation
+ */
+export const CLEAR_FABRIC_VALUE = '__clear__';
+
+/**
  * Pending change for a variation's fabric assignment.
  * Stored in a Map keyed by variationId.
+ * When colourId is CLEAR_FABRIC_VALUE, it represents a clear operation.
  */
 export interface PendingFabricChange {
     variationId: string;
-    /** The fabric colour being assigned */
+    /** The fabric colour being assigned, or CLEAR_FABRIC_VALUE for clear */
     colourId: string;
     /** The fabric (parent of colour) - derived from selection */
     fabricId: string;
@@ -79,6 +85,8 @@ export interface PendingFabricChange {
     fabricName: string;
     colourName: string;
     colourHex?: string;
+    /** Whether this is a clear operation */
+    isClear?: boolean;
 }
 
 /**

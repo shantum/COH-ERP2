@@ -27,6 +27,7 @@ import type {
     PendingFabricChange,
     CascadingSelection,
 } from './types';
+import { CLEAR_FABRIC_VALUE } from './types';
 
 interface FabricMappingTableProps {
     rows: FabricMappingRow[];
@@ -300,6 +301,36 @@ export function FabricMappingTable({
         [getSelection, materialsLookup, onPendingChange]
     );
 
+    // Handle clear fabric assignment - creates a pending clear change
+    const handleClearFabric = useCallback(
+        (variationId: string, row: FabricMappingRow) => {
+            const selection = getSelection(variationId, row);
+
+            // Update selection state to show cleared
+            setSelectionState((prev) => {
+                const next = new Map(prev);
+                next.set(variationId, {
+                    ...selection,
+                    colourId: null,
+                });
+                return next;
+            });
+
+            // Create a pending change with isClear flag
+            onPendingChange(variationId, {
+                variationId,
+                colourId: CLEAR_FABRIC_VALUE,
+                fabricId: '',
+                materialId: '',
+                materialName: '',
+                fabricName: '',
+                colourName: 'Clear',
+                isClear: true,
+            });
+        },
+        [getSelection, onPendingChange]
+    );
+
     // Filter visible rows based on expanded state (collapsed by default)
     const visibleRows = useMemo(() => {
         const result: FabricMappingRow[] = [];
@@ -506,6 +537,7 @@ export function FabricMappingTable({
                                                 ? () => onAddColour?.(selection.fabricId!)
                                                 : undefined
                                         }
+                                        onClear={() => handleClearFabric(row.variationId || '', row)}
                                     />
                                 </td>
                                 <td className="px-3 py-1.5 border-b border-gray-100 text-center">
