@@ -289,7 +289,11 @@ export const getProductsTree = createServerFn({ method: 'GET' })
                         where: { isActive: true },
                         orderBy: { colorName: 'asc' },
                         include: {
-                            fabric: true,
+                            fabric: {
+                                include: {
+                                    material: true,
+                                },
+                            },
                             fabricColour: {
                                 include: {
                                     fabric: {
@@ -409,6 +413,29 @@ export const getProductsTree = createServerFn({ method: 'GET' })
                         ? allMrps.reduce((a, b) => a + b, 0) / allMrps.length
                         : null;
 
+                // Compute most common material name from variations
+                const materialCounts = new Map<string, number>();
+                for (const v of processedVariations) {
+                    if (v.materialName) {
+                        materialCounts.set(v.materialName, (materialCounts.get(v.materialName) || 0) + 1);
+                    }
+                }
+                let productMaterialName: string | undefined;
+                if (materialCounts.size === 1) {
+                    productMaterialName = materialCounts.keys().next().value;
+                } else if (materialCounts.size > 1) {
+                    // Find most common, or "Mixed" if tie
+                    let maxCount = 0;
+                    let maxMaterial: string | undefined;
+                    for (const [material, count] of materialCounts) {
+                        if (count > maxCount) {
+                            maxCount = count;
+                            maxMaterial = material;
+                        }
+                    }
+                    productMaterialName = maxMaterial;
+                }
+
                 return {
                     id: product.id,
                     type: 'product' as const,
@@ -420,6 +447,7 @@ export const getProductsTree = createServerFn({ method: 'GET' })
                     productType: product.productType ?? undefined,
                     fabricTypeId: product.fabricTypeId ?? undefined,
                     fabricTypeName: product.fabricType?.name ?? undefined,
+                    materialName: productMaterialName,
                     imageUrl: product.imageUrl ?? undefined,
                     hasLining,
                     variationCount: processedVariations.length,

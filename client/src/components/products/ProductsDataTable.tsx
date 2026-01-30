@@ -51,10 +51,11 @@ export function ProductsDataTable({ onViewProduct, onEditBom, onEditProduct, sea
                 p.name.toLowerCase().includes(query) ||
                 p.styleCode?.toLowerCase().includes(query) ||
                 p.category?.toLowerCase().includes(query) ||
-                p.fabricTypeName?.toLowerCase().includes(query) ||
+                p.materialName?.toLowerCase().includes(query) ||
                 p.children?.some(v =>
                     v.colorName?.toLowerCase().includes(query) ||
-                    v.fabricName?.toLowerCase().includes(query)
+                    v.fabricName?.toLowerCase().includes(query) ||
+                    v.materialName?.toLowerCase().includes(query)
                 )
         );
     }, [treeData, filteredData, searchQuery]);
@@ -157,18 +158,6 @@ export function ProductsDataTable({ onViewProduct, onEditBom, onEditProduct, sea
                 ),
             },
             {
-                accessorKey: 'fabricTypeName',
-                header: 'Fabric Type',
-                size: 80,
-                cell: ({ row }) => (
-                    <span className="text-[11px] truncate block">
-                        {row.original.fabricTypeName || (
-                            <span className="text-red-500 text-[10px]">Not set</span>
-                        )}
-                    </span>
-                ),
-            },
-            {
                 id: 'colorSwatches',
                 header: 'Colors',
                 size: 100,
@@ -215,6 +204,20 @@ export function ProductsDataTable({ onViewProduct, onEditBom, onEditProduct, sea
                 },
             },
             {
+                accessorKey: 'materialName',
+                header: 'Material',
+                size: 70,
+                cell: ({ row }) => (
+                    <span className="text-[11px] truncate block">
+                        {row.original.materialName || (
+                            <span className="bg-amber-50 text-amber-600 text-[10px] px-1.5 py-0.5 rounded">
+                                Not set
+                            </span>
+                        )}
+                    </span>
+                ),
+            },
+            {
                 id: 'fabrics',
                 header: 'Fabrics',
                 size: 100,
@@ -224,7 +227,7 @@ export function ProductsDataTable({ onViewProduct, onEditBom, onEditProduct, sea
 
                     // Get unique fabric names
                     const fabrics = [...new Set(variations.map(v => v.fabricName).filter(Boolean))];
-                    if (fabrics.length === 0) return <span className="text-red-500 text-[10px]">Not set</span>;
+                    if (fabrics.length === 0) return <span className="text-amber-50 text-amber-600 text-[10px] px-1.5 py-0.5 rounded">Not set</span>;
 
                     return (
                         <div className="flex items-center gap-0.5 overflow-hidden">

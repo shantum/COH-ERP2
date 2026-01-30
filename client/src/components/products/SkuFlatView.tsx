@@ -78,7 +78,7 @@ interface FlatSku {
     fabricName?: string;
     gender?: string;
     category?: string;
-    fabricTypeName?: string;
+    materialName?: string;
     imageUrl?: string;
     mrp?: number;
     currentBalance?: number;
@@ -188,7 +188,7 @@ export function SkuFlatView({
         'variationName',
         'gender',
         'category',
-        'fabricTypeName',
+        'materialName',
         'mrp',
         'currentBalance',
         'actions',
@@ -202,7 +202,7 @@ export function SkuFlatView({
         variationName: 120,
         gender: 60,
         category: 80,
-        fabricTypeName: 70,
+        materialName: 70,
         mrp: 70,
         currentBalance: 55,
         actions: 80,
@@ -295,7 +295,7 @@ export function SkuFlatView({
                         fabricName: variation.fabricName,
                         gender: product.gender,
                         category: product.category,
-                        fabricTypeName: product.fabricTypeName,
+                        materialName: variation.materialName || product.materialName,
                         imageUrl: variation.imageUrl || product.imageUrl,
                         mrp: sku.mrp,
                         currentBalance: sku.currentBalance,
@@ -468,16 +468,22 @@ export function SkuFlatView({
             ),
         },
         {
-            id: 'fabricTypeName',
-            accessorKey: 'fabricTypeName',
-            header: 'Fabric',
+            id: 'materialName',
+            accessorKey: 'materialName',
+            header: 'Material',
             size: 70,
             minSize: 50,
             maxSize: 150,
             cell: ({ row }) => (
-                <span className="text-xs text-muted-foreground truncate block">
-                    {row.original.fabricTypeName || '-'}
-                </span>
+                row.original.materialName ? (
+                    <span className="text-xs text-muted-foreground truncate block">
+                        {row.original.materialName}
+                    </span>
+                ) : (
+                    <span className="bg-amber-50 text-amber-600 text-[10px] px-1.5 py-0.5 rounded">
+                        Not set
+                    </span>
+                )
             ),
         },
         {
