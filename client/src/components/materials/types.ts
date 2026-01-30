@@ -82,6 +82,14 @@ export interface MaterialNode {
     // === Aggregated Stock (Material/Fabric levels) ===
     totalStock?: number;
 
+    // === 30-Day Sales & Consumption (Colour level, aggregated to Fabric) ===
+    /** Revenue in last 30 days (SUM of qty × unitPrice) */
+    sales30DayValue?: number;
+    /** Units sold in last 30 days */
+    sales30DayUnits?: number;
+    /** Fabric consumed in last 30 days (meters/kg) */
+    consumption30Day?: number;
+
     // === Connected Products (Fabric/Colour levels) ===
     productCount?: number;
     connectedProducts?: Array<{

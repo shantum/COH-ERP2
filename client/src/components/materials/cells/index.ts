@@ -15,3 +15,5 @@ export { StockCell } from './StockCell';
 export { ColoursCell } from './ColoursCell';
 export { ConnectedProductsCell } from './ConnectedProductsCell';
 export { OutOfStockCell } from './OutOfStockCell';
+export { Sales30DayCell } from './Sales30DayCell';
+export { Consumption30DayCell } from './Consumption30DayCell';

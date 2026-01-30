@@ -43,6 +43,8 @@ import {
     ColoursCell,
     ConnectedProductsCell,
     OutOfStockCell,
+    Sales30DayCell,
+    Consumption30DayCell,
 } from './cells';
 
 type ViewMode = 'fabric' | 'material';
@@ -352,6 +354,24 @@ export function MaterialsTreeTable({
             size: 80,
             cell: ({ row }: CellContext<MaterialNode, unknown>) => (
                 <StockCell node={row.original} />
+            ),
+        },
+        // 30-Day Sales Value
+        {
+            id: 'sales30Day',
+            header: '30D Sales',
+            size: 90,
+            cell: ({ row }: CellContext<MaterialNode, unknown>) => (
+                <Sales30DayCell node={row.original} />
+            ),
+        },
+        // 30-Day Consumption
+        {
+            id: 'consumption30Day',
+            header: '30D Usage',
+            size: 90,
+            cell: ({ row }: CellContext<MaterialNode, unknown>) => (
+                <Consumption30DayCell node={row.original} />
             ),
         },
         // Out of Stock toggle (colours only)

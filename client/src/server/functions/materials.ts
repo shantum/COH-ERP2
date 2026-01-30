@@ -12,6 +12,36 @@ import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth';
 import { getPrisma } from '@coh/shared/services/db';
+import { getFabricSalesMetricsKysely, type FabricSalesMetrics } from '@coh/shared/services/db/queries';
+
+// ============================================
+// CACHES
+// ============================================
+
+/**
+ * Cache for 30-day fabric sales metrics (shared across all users)
+ * TTL: 5 minutes - 30-day window is naturally stable, slight staleness is acceptable
+ */
+let fabricMetricsCache: {
+    data: Map<string, FabricSalesMetrics> | null;
+    timestamp: number;
+} = { data: null, timestamp: 0 };
+
+const FABRIC_METRICS_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+/**
+ * Get cached fabric metrics or fetch fresh data
+ */
+async function getFabricMetricsCached(): Promise<Map<string, FabricSalesMetrics>> {
+    const now = Date.now();
+    if (fabricMetricsCache.data && (now - fabricMetricsCache.timestamp) < FABRIC_METRICS_CACHE_TTL) {
+        return fabricMetricsCache.data;
+    }
+
+    const data = await getFabricSalesMetricsKysely();
+    fabricMetricsCache = { data, timestamp: now };
+    return data;
+}
 
 // ============================================
 // INPUT SCHEMAS
@@ -132,6 +162,8 @@ export const getMaterialsHierarchy = createServerFn({ method: 'GET' })
                         colourName: colour.colourName,
                         standardColour: colour.standardColour,
                         colourHex: colour.colourHex,
+                        // Inherit unit from parent fabric
+                        unit: fabric.unit,
                         // Effective values with inheritance
                         costPerUnit: colour.costPerUnit,
                         effectiveCostPerUnit: colour.costPerUnit ?? fabric.costPerUnit,
@@ -650,34 +682,42 @@ export const getMaterialsTree = createServerFn({ method: 'GET' })
                 }
             }
 
-            // Batch calculate balances from FabricColourTransaction
-            const balanceMap = new Map<string, number>();
-            if (allColourIds.length > 0) {
-                const aggregations = await prisma.fabricColourTransaction.groupBy({
-                    by: ['fabricColourId', 'txnType'],
-                    where: { fabricColourId: { in: allColourIds } },
-                    _sum: { qty: true },
-                });
+            // Batch fetch balances and 30-day metrics in parallel
+            const [balanceMap, salesMetricsMap] = await Promise.all([
+                // Balance calculation
+                (async () => {
+                    const map = new Map<string, number>();
+                    if (allColourIds.length > 0) {
+                        const aggregations = await prisma.fabricColourTransaction.groupBy({
+                            by: ['fabricColourId', 'txnType'],
+                            where: { fabricColourId: { in: allColourIds } },
+                            _sum: { qty: true },
+                        });
 
-                // Build totals per colour
-                const colourTotals = new Map<string, { inward: number; outward: number }>();
-                for (const agg of aggregations) {
-                    if (!colourTotals.has(agg.fabricColourId)) {
-                        colourTotals.set(agg.fabricColourId, { inward: 0, outward: 0 });
-                    }
-                    const totals = colourTotals.get(agg.fabricColourId)!;
-                    if (agg.txnType === 'inward') {
-                        totals.inward = Number(agg._sum.qty) || 0;
-                    } else if (agg.txnType === 'outward') {
-                        totals.outward = Number(agg._sum.qty) || 0;
-                    }
-                }
+                        // Build totals per colour
+                        const colourTotals = new Map<string, { inward: number; outward: number }>();
+                        for (const agg of aggregations) {
+                            if (!colourTotals.has(agg.fabricColourId)) {
+                                colourTotals.set(agg.fabricColourId, { inward: 0, outward: 0 });
+                            }
+                            const totals = colourTotals.get(agg.fabricColourId)!;
+                            if (agg.txnType === 'inward') {
+                                totals.inward = Number(agg._sum.qty) || 0;
+                            } else if (agg.txnType === 'outward') {
+                                totals.outward = Number(agg._sum.qty) || 0;
+                            }
+                        }
 
-                // Calculate balance: inward - outward
-                for (const [colourId, totals] of colourTotals) {
-                    balanceMap.set(colourId, totals.inward - totals.outward);
-                }
-            }
+                        // Calculate balance: inward - outward
+                        for (const [colourId, totals] of colourTotals) {
+                            map.set(colourId, totals.inward - totals.outward);
+                        }
+                    }
+                    return map;
+                })(),
+                // 30-day sales metrics (cached)
+                getFabricMetricsCached(),
+            ]);
 
             // Build tree - using inline type assertions for the response
             const items = materials.map((material: typeof materials[number]) => ({
@@ -690,7 +730,24 @@ export const getMaterialsTree = createServerFn({ method: 'GET' })
                 colourCount: material.fabrics.reduce((sum: number, f: typeof material.fabrics[number]) => sum + f.colours.length, 0),
                 totalStock: 0, // Could calculate from inventory if needed
                 hasChildren: material.fabrics.length > 0,
-                children: material.fabrics.map((fabric: typeof material.fabrics[number]) => ({
+                children: material.fabrics.map((fabric: typeof material.fabrics[number]) => {
+                    // Calculate totals for this fabric by summing all colour values
+                    let fabricTotalStock = 0;
+                    let fabricSales30DayValue = 0;
+                    let fabricSales30DayUnits = 0;
+                    let fabricConsumption30Day = 0;
+
+                    for (const colour of fabric.colours) {
+                        fabricTotalStock += balanceMap.get(colour.id) ?? 0;
+                        const metrics = salesMetricsMap.get(colour.id);
+                        if (metrics) {
+                            fabricSales30DayValue += metrics.sales30DayValue;
+                            fabricSales30DayUnits += metrics.sales30DayUnits;
+                            fabricConsumption30Day += metrics.consumption30Day;
+                        }
+                    }
+
+                    return {
                     id: fabric.id,
                     type: 'fabric' as const,
                     name: fabric.name,
@@ -710,8 +767,15 @@ export const getMaterialsTree = createServerFn({ method: 'GET' })
                     supplierName: fabric.supplier?.name,
                     isActive: fabric.isActive,
                     colourCount: fabric.colours.length,
+                    totalStock: fabricTotalStock,
+                    // 30-day metrics aggregated from all colours
+                    sales30DayValue: fabricSales30DayValue,
+                    sales30DayUnits: fabricSales30DayUnits,
+                    consumption30Day: fabricConsumption30Day,
                     hasChildren: fabric.colours.length > 0,
-                    children: fabric.colours.map((colour: typeof fabric.colours[number]) => ({
+                    children: fabric.colours.map((colour: typeof fabric.colours[number]) => {
+                        const colourMetrics = salesMetricsMap.get(colour.id);
+                        return {
                         id: colour.id,
                         type: 'colour' as const,
                         name: colour.colourName,
@@ -722,6 +786,8 @@ export const getMaterialsTree = createServerFn({ method: 'GET' })
                         materialName: material.name,
                         standardColour: colour.standardColour,
                         colourHex: colour.colourHex,
+                        // Inherit unit from parent fabric
+                        unit: fabric.unit,
                         costPerUnit: colour.costPerUnit,
                         effectiveCostPerUnit: colour.costPerUnit ?? fabric.costPerUnit,
                         costInherited: colour.costPerUnit === null,
@@ -737,6 +803,10 @@ export const getMaterialsTree = createServerFn({ method: 'GET' })
                         isOutOfStock: colour.isOutOfStock,
                         // Inventory balance from FabricColourTransaction
                         currentBalance: balanceMap.get(colour.id) ?? 0,
+                        // 30-day sales metrics
+                        sales30DayValue: colourMetrics?.sales30DayValue ?? 0,
+                        sales30DayUnits: colourMetrics?.sales30DayUnits ?? 0,
+                        consumption30Day: colourMetrics?.consumption30Day ?? 0,
                         // Extract unique products from variation BOM lines
                         connectedProducts: (() => {
                             const productMap = new Map<string, { id: string; name: string; styleCode?: string }>();
@@ -760,8 +830,10 @@ export const getMaterialsTree = createServerFn({ method: 'GET' })
                             });
                             return productIds.size;
                         })(),
-                    })),
-                })),
+                    };
+                    }),
+                };
+                }),
             }));
 
             return {
@@ -907,6 +979,8 @@ export const getMaterialsTreeChildren = createServerFn({ method: 'GET' })
                         materialName: colour.fabric.material?.name,
                         standardColour: colour.standardColour,
                         colourHex: colour.colourHex,
+                        // Inherit unit from parent fabric
+                        unit: colour.fabric.unit,
                         costPerUnit: colour.costPerUnit,
                         effectiveCostPerUnit: colour.costPerUnit ?? colour.fabric.costPerUnit,
                         costInherited: colour.costPerUnit === null,

@@ -47,3 +47,9 @@ export {
     type TopFabricColourData,
     type DashboardAnalytics,
 } from './dashboard.js';
+
+// Materials queries
+export {
+    getFabricSalesMetricsKysely,
+    type FabricSalesMetrics,
+} from './materials.js';
