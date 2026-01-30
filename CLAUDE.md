@@ -4,7 +4,7 @@
 
 > **BEFORE starting any task, you MUST:**
 > 1. **Load relevant domain skills** using `/skill-name` (e.g., `/orders`, `/inventory`, `/products`)
-> 2. **Search QMD** using `mcp__qmd__search` or `mcp__qmd__vsearch` for documentation and code patterns
+> 2. **Use Grep** for specific function/variable lookups, **QMD vsearch** for conceptual queries
 > 3. **Check skill files** in `.claude/skills/` for deep domain knowledge
 
 ### Available Domain Skills
@@ -21,23 +21,23 @@
 | `/database` | Prisma, Kysely, triggers, migrations, transactions |
 | `/railway` | Railway CLI, deployments, database access |
 
-### QMD Search (56 docs: skills, schemas, server-fns)
+### Search Tools: Grep vs QMD vsearch
 
-```typescript
-// Search returns snippets with line numbers - use these!
-mcp__qmd__search({ query: "inventory allocation" })  // Fast keyword
-mcp__qmd__vsearch({ query: "how are orders fulfilled" })  // Semantic
-```
+**Use Grep for:** specific lookups (functions, variables, schemas, where something is used)
+**Use QMD vsearch for:** conceptual questions, cross-domain understanding, workflow explanations
 
-**IMPORTANT: Avoid `mcp__qmd__get` for code files.** Server functions are 1000-3500 lines each. Use search to find the right lines, then `Read` tool with offset/limit:
+| Use Case | Tool | Example |
+|----------|------|---------|
+| Function lookup | Grep | `Grep({ pattern: "releaseToShipped" })` |
+| Schema discovery | Grep | `Grep({ pattern: "lineStatusSchema" })` |
+| Where is X used | Grep | `Grep({ pattern: "TXN_TYPE" })` |
+| "How does X work?" | vsearch | `mcp__qmd__vsearch({ query: "how does RTO workflow work" })` |
+| Cross-domain logic | vsearch | `mcp__qmd__vsearch({ query: "how production batches affect inventory" })` |
+| Business rules | vsearch | `mcp__qmd__vsearch({ query: "order fulfillment stages" })` |
 
-```typescript
-// GOOD: Search finds line 317, read just that section
-Read({ file_path: "client/src/server/functions/orders.ts", offset: 310, limit: 50 })
+**Why vsearch works for concepts:** It searches 12 skill docs that explain *why* things work, not just *where* they are. Grep can't find "how does RTO work" - it needs exact keywords.
 
-// BAD: Dumps 2000+ lines into context
-mcp__qmd__get({ file: "coh-server-fns/orders.ts" })
-```
+**Avoid:** `mcp__qmd__search` (keyword) - Grep is always better. `mcp__qmd__get` - files are 1000-3500 lines.
 
 ---
 

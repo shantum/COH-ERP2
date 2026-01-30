@@ -74,32 +74,44 @@ export function MaterialsTreeView({
     const getTreeFn = useServerFn(getMaterialsTree);
 
     // Fetch tree data for quick add buttons using Server Function
-    const { data: treeData } = useQuery({
+    const { data: treeData, error: queryError } = useQuery({
         queryKey: materialsTreeKeys.tree(),
         queryFn: async (): Promise<MaterialTreeResponse> => {
-            const response = await getTreeFn({ data: { lazyLoad: false } });
-            // Transform Server Function response to expected MaterialTreeResponse format
-            if ('success' in response && response.success && 'items' in response) {
-                const summary = 'summary' in response ? response.summary : null;
+            try {
+                const response = await getTreeFn({ data: { lazyLoad: false } });
+                console.log('[MaterialsTreeView] Server response:', JSON.stringify(response).slice(0, 500));
+                // Transform Server Function response to expected MaterialTreeResponse format
+                if ('success' in response && response.success && 'items' in response) {
+                    const summary = 'summary' in response ? response.summary : null;
+                    return {
+                        items: response.items as MaterialNode[],
+                        summary: {
+                            total: (summary?.totalMaterials ?? 0) + (summary?.totalFabrics ?? 0) + (summary?.totalColours ?? 0),
+                            materials: summary?.totalMaterials ?? 0,
+                            fabrics: summary?.totalFabrics ?? 0,
+                            colours: summary?.totalColours ?? 0,
+                            orderNow: 0,
+                            orderSoon: 0,
+                            ok: 0,
+                        },
+                    };
+                }
+                console.error('[MaterialsTreeView] Invalid response format:', response);
                 return {
-                    items: response.items as MaterialNode[],
-                    summary: {
-                        total: (summary?.totalMaterials ?? 0) + (summary?.totalFabrics ?? 0) + (summary?.totalColours ?? 0),
-                        materials: summary?.totalMaterials ?? 0,
-                        fabrics: summary?.totalFabrics ?? 0,
-                        colours: summary?.totalColours ?? 0,
-                        orderNow: 0,
-                        orderSoon: 0,
-                        ok: 0,
-                    },
+                    items: [],
+                    summary: { total: 0, materials: 0, fabrics: 0, colours: 0, orderNow: 0, orderSoon: 0, ok: 0 },
                 };
+            } catch (error) {
+                console.error('[MaterialsTreeView] Query error:', error);
+                throw error;
             }
-            return {
-                items: [],
-                summary: { total: 0, materials: 0, fabrics: 0, colours: 0, orderNow: 0, orderSoon: 0, ok: 0 },
-            };
         },
     });
+
+    // Log any query errors
+    if (queryError) {
+        console.error('[MaterialsTreeView] TanStack Query error:', queryError);
+    }
 
     // Extract materials and fabrics lists for quick add buttons
     const { materials, fabrics } = useMemo(() => {
