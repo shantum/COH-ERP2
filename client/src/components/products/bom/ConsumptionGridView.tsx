@@ -12,7 +12,7 @@
 
 import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Loader2, Save, Search, X, Copy, ClipboardPaste, ChevronDown, ChevronRight } from 'lucide-react';
+import { Loader2, Save, Search, X, Copy, ClipboardPaste, ChevronDown, ChevronRight, Filter } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useServerFn } from '@tanstack/react-start';
 import {
@@ -68,9 +68,13 @@ interface CopiedRowData {
     sizes: Record<string, number | null>;
 }
 
+// Consumption filter type
+type ConsumptionFilter = 'all' | 'same' | 'missing';
+
 export function ConsumptionGridView() {
     const queryClient = useQueryClient();
     const [searchQuery, setSearchQuery] = useState('');
+    const [consumptionFilter, setConsumptionFilter] = useState<ConsumptionFilter>('all');
     const [pendingChanges, setPendingChanges] = useState<Map<string, PendingChange>>(new Map());
     const [editingCell, setEditingCell] = useState<{ productId: string; size: string } | null>(null);
     const [copiedRow, setCopiedRow] = useState<CopiedRowData | null>(null);
@@ -115,20 +119,54 @@ export function ConsumptionGridView() {
         },
     });
 
-    // Filter rows by search
+    // Helper to determine consumption status of a row
+    const getConsumptionStatus = useCallback((row: GridRow): 'missing' | 'same' | 'normal' => {
+        const consumptionValues = Object.values(row.sizes)
+            .filter((s): s is { quantity: number; skuCount: number } =>
+                s !== null && s !== undefined && s.quantity !== null && s.skuCount > 0
+            )
+            .map(s => s.quantity);
+
+        // Check if all zeros (or no data) - missing
+        const isAllZero = consumptionValues.length === 0 ||
+            consumptionValues.every(v => v === 0 || v === null);
+
+        if (isAllZero) return 'missing';
+
+        // Check if all values are the same (and not zero)
+        const isAllSame = consumptionValues.length > 1 &&
+            consumptionValues.every(v => v === consumptionValues[0]);
+
+        if (isAllSame) return 'same';
+
+        return 'normal';
+    }, []);
+
+    // Filter rows by search and consumption filter
     const filteredRows = useMemo(() => {
         if (!gridData?.rows) return [];
-        if (!searchQuery.trim()) return gridData.rows;
 
-        const query = searchQuery.toLowerCase();
-        return gridData.rows.filter(
-            (row) =>
-                row.productName.toLowerCase().includes(query) ||
-                row.styleCode?.toLowerCase().includes(query) ||
-                row.category?.toLowerCase().includes(query) ||
-                row.gender?.toLowerCase().includes(query)
-        );
-    }, [gridData?.rows, searchQuery]);
+        let rows = gridData.rows;
+
+        // Apply search filter
+        if (searchQuery.trim()) {
+            const query = searchQuery.toLowerCase();
+            rows = rows.filter(
+                (row) =>
+                    row.productName.toLowerCase().includes(query) ||
+                    row.styleCode?.toLowerCase().includes(query) ||
+                    row.category?.toLowerCase().includes(query) ||
+                    row.gender?.toLowerCase().includes(query)
+            );
+        }
+
+        // Apply consumption filter
+        if (consumptionFilter !== 'all') {
+            rows = rows.filter((row) => getConsumptionStatus(row) === consumptionFilter);
+        }
+
+        return rows;
+    }, [gridData?.rows, searchQuery, consumptionFilter, getConsumptionStatus]);
 
     // Group rows by gender → category
     const groupedData = useMemo((): GenderGroup[] => {
@@ -411,6 +449,20 @@ export function ConsumptionGridView() {
                         )}
                     </div>
 
+                    {/* Consumption Filter */}
+                    <div className="relative">
+                        <Filter size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                        <select
+                            value={consumptionFilter}
+                            onChange={(e) => setConsumptionFilter(e.target.value as ConsumptionFilter)}
+                            className="pl-8 pr-8 py-1.5 text-sm border rounded-md appearance-none focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white cursor-pointer"
+                        >
+                            <option value="all">All Variations</option>
+                            <option value="same">Same Consumption</option>
+                            <option value="missing">Missing Data</option>
+                        </select>
+                    </div>
+
                     {/* Save Button */}
                     <Button
                         size="sm"
@@ -544,21 +596,8 @@ export function ConsumptionGridView() {
                                                     const isCopiedRow = copiedRow?.productId === row.productId;
                                                     const canPaste = copiedRow && !isCopiedRow;
 
-                                                    // Get all non-null consumption values for this row
-                                                    const consumptionValues = Object.values(row.sizes)
-                                                        .filter((s): s is { quantity: number; skuCount: number } =>
-                                                            s !== null && s !== undefined && s.quantity !== null && s.skuCount > 0
-                                                        )
-                                                        .map(s => s.quantity);
-
-                                                    // Check if all zeros (or no data)
-                                                    const isAllZero = consumptionValues.length === 0 ||
-                                                        consumptionValues.every(v => v === 0 || v === null);
-
-                                                    // Check if all values are the same (and not zero)
-                                                    const isAllSame = !isAllZero &&
-                                                        consumptionValues.length > 1 &&
-                                                        consumptionValues.every(v => v === consumptionValues[0]);
+                                                    // Get consumption status using helper
+                                                    const consumptionStatus = getConsumptionStatus(row);
 
                                                     // Determine row background
                                                     let rowBg = '';
@@ -566,10 +605,10 @@ export function ConsumptionGridView() {
                                                     if (isCopiedRow) {
                                                         rowBg = 'bg-blue-50';
                                                         stickyBg = 'bg-blue-50';
-                                                    } else if (isAllZero) {
+                                                    } else if (consumptionStatus === 'missing') {
                                                         rowBg = 'bg-red-50';
                                                         stickyBg = 'bg-red-50';
-                                                    } else if (isAllSame) {
+                                                    } else if (consumptionStatus === 'same') {
                                                         rowBg = 'bg-yellow-50';
                                                         stickyBg = 'bg-yellow-50';
                                                     }
