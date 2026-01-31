@@ -137,7 +137,8 @@ const VariationRow = memo(function VariationRow({ variation, locationId, onRefre
 
                 {/* Info - flexible on mobile, fixed on desktop */}
                 <div className="min-w-0 flex-1 sm:flex-none sm:w-56 md:w-72">
-                    <h3 className="font-medium text-zinc-900 truncate text-[12px] sm:text-[13px] leading-tight">
+                    {/* Product name - allow 2 lines on mobile, truncate on desktop */}
+                    <h3 className="font-medium text-zinc-900 text-[12px] sm:text-[13px] leading-snug line-clamp-2 sm:line-clamp-none sm:truncate">
                         {variation.productName}
                     </h3>
                     <p className="text-[10px] sm:text-[11px] text-zinc-400 truncate">
