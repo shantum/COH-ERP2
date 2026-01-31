@@ -46,3 +46,22 @@ export const costingQueryKeys = {
   products: (period: string, channel: string) => ['costing', 'products', period, channel] as const,
   config: ['costing', 'config'] as const,
 } as const;
+
+// Channel analytics query keys
+export const channelQueryKeys = {
+  summary: (channel: string, startDate?: string, endDate?: string) =>
+    ['channels', 'summary', channel, startDate, endDate] as const,
+  timeSeries: (channel: string, groupBy: string, startDate?: string, endDate?: string) =>
+    ['channels', 'timeSeries', channel, groupBy, startDate, endDate] as const,
+  breakdown: (channel: string, groupBy: string, startDate?: string, endDate?: string) =>
+    ['channels', 'breakdown', channel, groupBy, startDate, endDate] as const,
+  rtoAnalytics: (channel: string, startDate?: string, endDate?: string) =>
+    ['channels', 'rto', channel, startDate, endDate] as const,
+  orders: (params: Record<string, unknown>) => ['channels', 'orders', params] as const,
+  filterOptions: ['channels', 'filterOptions'] as const,
+  importHistory: ['channels', 'importHistory'] as const,
+  topProducts: (channel: string, startDate?: string, endDate?: string) =>
+    ['channels', 'topProducts', channel, startDate, endDate] as const,
+  topStates: (channel: string, startDate?: string, endDate?: string) =>
+    ['channels', 'topStates', channel, startDate, endDate] as const,
+} as const;

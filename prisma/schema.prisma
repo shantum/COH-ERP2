@@ -1498,3 +1498,101 @@ model FabricColourReconciliationItem {
   @@index([reconciliationId])
   @@index([fabricColourId])
 }
+
+// ============================================
+// CHANNEL ORDER ANALYTICS (Marketplace Data)
+// ============================================
+
+/// Line-level data from BT reports for marketplace channels (Myntra, Ajio, Nykaa)
+model ChannelOrderLine {
+  id                  String    @id @default(uuid())
+
+  // Channel & Order Identity
+  channel             String                    // "myntra", "ajio", "nykaa"
+  channelOrderId      String                    // BT Order Id (e.g., "16557031058666")
+  channelRef          String?                   // Channel Ref UUID
+  channelItemId       String                    // Item ID from BT
+
+  // Order Info
+  orderDate           DateTime
+  orderType           String                    // "COD" or "Prepaid"
+  financialStatus     String?                   // "Paid", "Cod"
+  fulfillmentStatus   String?                   // "processing", "shipped", "delivered", "rto return pending", etc.
+
+  // SKU Info
+  skuCode             String                    // Maps to our SKU
+  channelSkuCode      String?                   // Channel's SKU code
+  skuTitle            String?
+  quantity            Int                       @default(1)
+
+  // Pricing (stored in paise for precision)
+  mrp                 Int?                      // MRP in paise
+  sellerPrice         Int?                      // Seller's Price
+  buyerPrice          Int?                      // Buyer's Price (after discount)
+  itemTotal           Int?                      // Item Total
+  itemDiscount        Int?                      // Item Total Discount Value
+  orderTotal          Int?                      // Order Total Amount
+
+  // Tax
+  taxPercent          Float?
+  taxType             String?                   // "SGST/CGST" or "IGST"
+  taxAmount           Int?                      // in paise
+
+  // Shipping
+  courierName         String?
+  trackingNumber      String?
+
+  // Dates
+  dispatchByDate      DateTime?
+  dispatchDate        DateTime?
+  manifestedDate      DateTime?
+  deliveryDate        DateTime?                 // Channel Delivery Date
+  returnDate          DateTime?                 // BT Return Date
+  channelReturnDate   DateTime?
+
+  // Customer (denormalized for analytics)
+  customerName        String?
+  customerCity        String?
+  customerState       String?
+  customerZip         String?
+
+  // Metadata
+  invoiceNumber       String?
+  batchNo             String?
+  hsnCode             String?
+
+  // Import tracking
+  importedAt          DateTime  @default(now())
+  importBatchId       String?                   // Track which upload batch
+
+  // Unique constraint: one line per channel + order + item
+  @@unique([channel, channelOrderId, channelItemId])
+
+  // Indexes for analytics queries
+  @@index([channel])
+  @@index([orderDate])
+  @@index([channel, orderDate])
+  @@index([fulfillmentStatus])
+  @@index([skuCode])
+  @@index([customerState])
+  @@index([importBatchId])
+}
+
+/// Track import history for BT report uploads
+model ChannelImportBatch {
+  id            String    @id @default(uuid())
+  channel       String                       // "myntra", "ajio", "nykaa", or "all"
+  filename      String
+  rowsTotal     Int
+  rowsImported  Int
+  rowsSkipped   Int
+  rowsUpdated   Int
+  errors        String?                       // JSON array of errors
+  dateRangeStart DateTime?
+  dateRangeEnd   DateTime?
+  importedAt    DateTime  @default(now())
+  importedBy    String?                       // User ID
+
+  @@index([channel])
+  @@index([importedAt])
+}

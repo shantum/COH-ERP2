@@ -42,6 +42,7 @@ import pulseRoutes from './routes/pulse.js';
 import internalRoutes from './routes/internal.js';
 import returnsRoutes from './routes/returns.js';
 import sheetSyncRoutes from './routes/sheetSync.js';
+import channelsRoutes from './routes/channels.js';
 import { pulseBroadcaster } from './services/pulseBroadcaster.js';
 import scheduledSync from './services/scheduledSync.js';
 import trackingSync from './services/trackingSync.js';
@@ -138,6 +139,7 @@ app.use('/api/internal', internalRoutes);
 app.use('/api/returns', returnsRoutes);
 app.use('/api/tracking', trackingRoutes);
 app.use('/api/admin/sheet-sync', sheetSyncRoutes);
+app.use('/api/channels', channelsRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -352,3 +354,4 @@ process.on('SIGINT', async () => {
   logger.info('Server shut down complete');
   process.exit(0);
 });
+

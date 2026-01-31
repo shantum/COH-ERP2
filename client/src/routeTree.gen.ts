@@ -38,6 +38,7 @@ import { Route as AuthenticatedFabricReconciliationRouteImport } from './routes/
 import { Route as AuthenticatedFabricReceiptRouteImport } from './routes/_authenticated/fabric-receipt'
 import { Route as AuthenticatedCustomersRouteImport } from './routes/_authenticated/customers'
 import { Route as AuthenticatedCostingRouteImport } from './routes/_authenticated/costing'
+import { Route as AuthenticatedChannelsRouteImport } from './routes/_authenticated/channels'
 import { Route as AuthenticatedAnalyticsRouteImport } from './routes/_authenticated/analytics'
 
 const ShipmentsRoute = ShipmentsRouteImport.update({
@@ -192,6 +193,11 @@ const AuthenticatedCostingRoute = AuthenticatedCostingRouteImport.update({
   path: '/costing',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
+const AuthenticatedChannelsRoute = AuthenticatedChannelsRouteImport.update({
+  id: '/channels',
+  path: '/channels',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
 const AuthenticatedAnalyticsRoute = AuthenticatedAnalyticsRouteImport.update({
   id: '/analytics',
   path: '/analytics',
@@ -208,6 +214,7 @@ export interface FileRoutesByFullPath {
   '/return-inward': typeof ReturnInwardRoute
   '/shipments': typeof ShipmentsRoute
   '/analytics': typeof AuthenticatedAnalyticsRoute
+  '/channels': typeof AuthenticatedChannelsRoute
   '/costing': typeof AuthenticatedCostingRoute
   '/customers': typeof AuthenticatedCustomersRoute
   '/fabric-receipt': typeof AuthenticatedFabricReceiptRoute
@@ -238,6 +245,7 @@ export interface FileRoutesByTo {
   '/return-inward': typeof ReturnInwardRoute
   '/shipments': typeof ShipmentsRoute
   '/analytics': typeof AuthenticatedAnalyticsRoute
+  '/channels': typeof AuthenticatedChannelsRoute
   '/costing': typeof AuthenticatedCostingRoute
   '/customers': typeof AuthenticatedCustomersRoute
   '/fabric-receipt': typeof AuthenticatedFabricReceiptRoute
@@ -271,6 +279,7 @@ export interface FileRoutesById {
   '/return-inward': typeof ReturnInwardRoute
   '/shipments': typeof ShipmentsRoute
   '/_authenticated/analytics': typeof AuthenticatedAnalyticsRoute
+  '/_authenticated/channels': typeof AuthenticatedChannelsRoute
   '/_authenticated/costing': typeof AuthenticatedCostingRoute
   '/_authenticated/customers': typeof AuthenticatedCustomersRoute
   '/_authenticated/fabric-receipt': typeof AuthenticatedFabricReceiptRoute
@@ -305,6 +314,7 @@ export interface FileRouteTypes {
     | '/return-inward'
     | '/shipments'
     | '/analytics'
+    | '/channels'
     | '/costing'
     | '/customers'
     | '/fabric-receipt'
@@ -335,6 +345,7 @@ export interface FileRouteTypes {
     | '/return-inward'
     | '/shipments'
     | '/analytics'
+    | '/channels'
     | '/costing'
     | '/customers'
     | '/fabric-receipt'
@@ -367,6 +378,7 @@ export interface FileRouteTypes {
     | '/return-inward'
     | '/shipments'
     | '/_authenticated/analytics'
+    | '/_authenticated/channels'
     | '/_authenticated/costing'
     | '/_authenticated/customers'
     | '/_authenticated/fabric-receipt'
@@ -606,6 +618,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedCostingRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/channels': {
+      id: '/_authenticated/channels'
+      path: '/channels'
+      fullPath: '/channels'
+      preLoaderRoute: typeof AuthenticatedChannelsRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/analytics': {
       id: '/_authenticated/analytics'
       path: '/analytics'
@@ -618,6 +637,7 @@ declare module '@tanstack/react-router' {
 
 interface AuthenticatedRouteChildren {
   AuthenticatedAnalyticsRoute: typeof AuthenticatedAnalyticsRoute
+  AuthenticatedChannelsRoute: typeof AuthenticatedChannelsRoute
   AuthenticatedCostingRoute: typeof AuthenticatedCostingRoute
   AuthenticatedCustomersRoute: typeof AuthenticatedCustomersRoute
   AuthenticatedFabricReceiptRoute: typeof AuthenticatedFabricReceiptRoute
@@ -643,6 +663,7 @@ interface AuthenticatedRouteChildren {
 
 const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedAnalyticsRoute: AuthenticatedAnalyticsRoute,
+  AuthenticatedChannelsRoute: AuthenticatedChannelsRoute,
   AuthenticatedCostingRoute: AuthenticatedCostingRoute,
   AuthenticatedCustomersRoute: AuthenticatedCustomersRoute,
   AuthenticatedFabricReceiptRoute: AuthenticatedFabricReceiptRoute,

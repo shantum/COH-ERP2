@@ -228,6 +228,47 @@ export const CostingSearchParams = z.object({
 export type CostingSearchParams = z.infer<typeof CostingSearchParams>;
 
 // ============================================
+// CHANNELS PAGE SEARCH PARAMS
+// ============================================
+
+/**
+ * Channels (Marketplace Analytics) page search params
+ * Supports date range filtering, channel selection, and pagination
+ *
+ * @example
+ * /channels?channel=myntra&range=30d&tab=overview
+ */
+export const ChannelsSearchParams = z.object({
+    /** Active tab */
+    tab: z.enum(['overview', 'orders', 'rto', 'import']).catch('overview'),
+    /** Channel filter */
+    channel: z.enum(['all', 'myntra', 'ajio', 'nykaa']).catch('all'),
+    /** Time range preset */
+    range: z.enum(['7d', '30d', '90d', 'mtd', 'custom']).catch('30d'),
+    /** Start date for custom range (YYYY-MM-DD) */
+    startDate: z.string().optional().catch(undefined),
+    /** End date for custom range (YYYY-MM-DD) */
+    endDate: z.string().optional().catch(undefined),
+    /** Page number for orders table */
+    page: z.coerce.number().int().positive().catch(1),
+    /** Items per page */
+    pageSize: z.coerce.number().int().positive().max(500).catch(50),
+    /** Sort field for orders table */
+    sortBy: z.string().optional().catch(undefined),
+    /** Sort direction */
+    sortDir: z.enum(['asc', 'desc']).catch('desc'),
+    /** Fulfillment status filter */
+    fulfillmentStatus: z.string().optional().catch(undefined),
+    /** Order type filter (COD/Prepaid) */
+    orderType: z.string().optional().catch(undefined),
+    /** SKU code search */
+    skuCode: z.string().optional().catch(undefined),
+    /** State filter */
+    state: z.string().optional().catch(undefined),
+});
+export type ChannelsSearchParams = z.infer<typeof ChannelsSearchParams>;
+
+// ============================================
 // EMPTY SEARCH PARAMS (for pages without params)
 // ============================================
 

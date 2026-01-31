@@ -2,7 +2,7 @@ import { Outlet, Link, useNavigate, useRouterState } from '@tanstack/react-route
 import { useAuth } from '../hooks/useAuth';
 import {
     LayoutDashboard, ShoppingCart,
-    Users, RotateCcw, Factory, LogOut, Menu, X, BookOpen, Settings, ClipboardCheck, PackagePlus, Clipboard, BarChart3, UserCog, ChevronLeft, ChevronRight, Search, Package, PackageX, ChevronDown, Minimize2, Maximize2, Calculator, Truck
+    Users, RotateCcw, Factory, LogOut, Menu, X, BookOpen, Settings, ClipboardCheck, PackagePlus, Clipboard, BarChart3, UserCog, ChevronLeft, ChevronRight, Search, Package, PackageX, ChevronDown, Minimize2, Maximize2, Calculator, Truck, Store
 } from 'lucide-react';
 import { usePermissions } from '../hooks/usePermissions';
 import { useAccess, type AccessFeature } from '../hooks/useAccess';
@@ -84,6 +84,7 @@ const navGroups: NavGroup[] = [
         items: [
             { to: '/customers', icon: Users, label: 'Customers' },
             { to: '/ledgers', icon: BookOpen, label: 'Ledgers' },
+            { to: '/channels', icon: Store, label: 'Marketplaces' },
             { to: '/analytics', icon: BarChart3, label: 'Analytics', access: 'view-analytics' },
             { to: '/costing', icon: Calculator, label: 'Costing', access: 'costing-dashboard' },
         ],
