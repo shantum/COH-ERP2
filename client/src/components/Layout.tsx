@@ -2,7 +2,7 @@ import { Outlet, Link, useNavigate, useRouterState } from '@tanstack/react-route
 import { useAuth } from '../hooks/useAuth';
 import {
     LayoutDashboard, ShoppingCart,
-    Users, RotateCcw, Factory, LogOut, Menu, X, BookOpen, Settings, ClipboardCheck, PackagePlus, Clipboard, BarChart3, UserCog, ChevronLeft, ChevronRight, Search, Package, PackageX, ChevronDown, Minimize2, Maximize2
+    Users, RotateCcw, Factory, LogOut, Menu, X, BookOpen, Settings, ClipboardCheck, PackagePlus, Clipboard, BarChart3, UserCog, ChevronLeft, ChevronRight, Search, Package, PackageX, ChevronDown, Minimize2, Maximize2, Calculator
 } from 'lucide-react';
 import { usePermissions } from '../hooks/usePermissions';
 import { useState, useEffect, useMemo } from 'react';
@@ -82,6 +82,7 @@ const navGroups: NavGroup[] = [
             { to: '/customers', icon: Users, label: 'Customers' },
             { to: '/ledgers', icon: BookOpen, label: 'Ledgers' },
             { to: '/analytics', icon: BarChart3, label: 'Analytics' },
+            { to: '/costing', icon: Calculator, label: 'Costing', permission: 'admin' },
         ],
     },
     {
@@ -96,7 +97,7 @@ const navGroups: NavGroup[] = [
 
 export default function Layout() {
     const { user, logout } = useAuth();
-    const { hasPermission } = usePermissions();
+    const { hasPermission, isOwner } = usePermissions();
     const navigate = useNavigate();
     const routerState = useRouterState();
     const location = routerState.location;
@@ -189,6 +190,8 @@ export default function Layout() {
     const filterItems = (items: NavItem[]) => {
         return items.filter(item => {
             if (!item.permission) return true;
+            // Special case: 'admin' means owner/admin only
+            if (item.permission === 'admin') return isOwner;
             return hasPermission(item.permission);
         });
     };

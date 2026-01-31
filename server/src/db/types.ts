@@ -34,6 +34,8 @@ export type CostConfig = {
     gstRateAbove: Generated<number>;
     gstRateBelow: Generated<number>;
     gstThreshold: Generated<number>;
+    monthlyLaborOverhead: number | null;
+    monthlyMarketingBudget: number | null;
 };
 export type Customer = {
     id: Generated<string>;

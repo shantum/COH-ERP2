@@ -36,6 +36,7 @@ import { Route as AuthenticatedInventoryRouteImport } from './routes/_authentica
 import { Route as AuthenticatedFabricReconciliationRouteImport } from './routes/_authenticated/fabric-reconciliation'
 import { Route as AuthenticatedFabricReceiptRouteImport } from './routes/_authenticated/fabric-receipt'
 import { Route as AuthenticatedCustomersRouteImport } from './routes/_authenticated/customers'
+import { Route as AuthenticatedCostingRouteImport } from './routes/_authenticated/costing'
 import { Route as AuthenticatedAnalyticsRouteImport } from './routes/_authenticated/analytics'
 
 const ShipmentsRoute = ShipmentsRouteImport.update({
@@ -180,6 +181,11 @@ const AuthenticatedCustomersRoute = AuthenticatedCustomersRouteImport.update({
   path: '/customers',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
+const AuthenticatedCostingRoute = AuthenticatedCostingRouteImport.update({
+  id: '/costing',
+  path: '/costing',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
 const AuthenticatedAnalyticsRoute = AuthenticatedAnalyticsRouteImport.update({
   id: '/analytics',
   path: '/analytics',
@@ -196,6 +202,7 @@ export interface FileRoutesByFullPath {
   '/return-inward': typeof ReturnInwardRoute
   '/shipments': typeof ShipmentsRoute
   '/analytics': typeof AuthenticatedAnalyticsRoute
+  '/costing': typeof AuthenticatedCostingRoute
   '/customers': typeof AuthenticatedCustomersRoute
   '/fabric-receipt': typeof AuthenticatedFabricReceiptRoute
   '/fabric-reconciliation': typeof AuthenticatedFabricReconciliationRoute
@@ -224,6 +231,7 @@ export interface FileRoutesByTo {
   '/return-inward': typeof ReturnInwardRoute
   '/shipments': typeof ShipmentsRoute
   '/analytics': typeof AuthenticatedAnalyticsRoute
+  '/costing': typeof AuthenticatedCostingRoute
   '/customers': typeof AuthenticatedCustomersRoute
   '/fabric-receipt': typeof AuthenticatedFabricReceiptRoute
   '/fabric-reconciliation': typeof AuthenticatedFabricReconciliationRoute
@@ -255,6 +263,7 @@ export interface FileRoutesById {
   '/return-inward': typeof ReturnInwardRoute
   '/shipments': typeof ShipmentsRoute
   '/_authenticated/analytics': typeof AuthenticatedAnalyticsRoute
+  '/_authenticated/costing': typeof AuthenticatedCostingRoute
   '/_authenticated/customers': typeof AuthenticatedCustomersRoute
   '/_authenticated/fabric-receipt': typeof AuthenticatedFabricReceiptRoute
   '/_authenticated/fabric-reconciliation': typeof AuthenticatedFabricReconciliationRoute
@@ -287,6 +296,7 @@ export interface FileRouteTypes {
     | '/return-inward'
     | '/shipments'
     | '/analytics'
+    | '/costing'
     | '/customers'
     | '/fabric-receipt'
     | '/fabric-reconciliation'
@@ -315,6 +325,7 @@ export interface FileRouteTypes {
     | '/return-inward'
     | '/shipments'
     | '/analytics'
+    | '/costing'
     | '/customers'
     | '/fabric-receipt'
     | '/fabric-reconciliation'
@@ -345,6 +356,7 @@ export interface FileRouteTypes {
     | '/return-inward'
     | '/shipments'
     | '/_authenticated/analytics'
+    | '/_authenticated/costing'
     | '/_authenticated/customers'
     | '/_authenticated/fabric-receipt'
     | '/_authenticated/fabric-reconciliation'
@@ -568,6 +580,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedCustomersRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/costing': {
+      id: '/_authenticated/costing'
+      path: '/costing'
+      fullPath: '/costing'
+      preLoaderRoute: typeof AuthenticatedCostingRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/analytics': {
       id: '/_authenticated/analytics'
       path: '/analytics'
@@ -580,6 +599,7 @@ declare module '@tanstack/react-router' {
 
 interface AuthenticatedRouteChildren {
   AuthenticatedAnalyticsRoute: typeof AuthenticatedAnalyticsRoute
+  AuthenticatedCostingRoute: typeof AuthenticatedCostingRoute
   AuthenticatedCustomersRoute: typeof AuthenticatedCustomersRoute
   AuthenticatedFabricReceiptRoute: typeof AuthenticatedFabricReceiptRoute
   AuthenticatedFabricReconciliationRoute: typeof AuthenticatedFabricReconciliationRoute
@@ -603,6 +623,7 @@ interface AuthenticatedRouteChildren {
 
 const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedAnalyticsRoute: AuthenticatedAnalyticsRoute,
+  AuthenticatedCostingRoute: AuthenticatedCostingRoute,
   AuthenticatedCustomersRoute: AuthenticatedCustomersRoute,
   AuthenticatedFabricReceiptRoute: AuthenticatedFabricReceiptRoute,
   AuthenticatedFabricReconciliationRoute:

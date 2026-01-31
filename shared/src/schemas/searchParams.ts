@@ -213,6 +213,21 @@ export const OrderSearchSearchParams = z.object({
 export type OrderSearchSearchParams = z.infer<typeof OrderSearchSearchParams>;
 
 // ============================================
+// COSTING PAGE SEARCH PARAMS
+// ============================================
+
+/**
+ * Costing page search params
+ */
+export const CostingSearchParams = z.object({
+    /** Time period for analysis */
+    period: z.enum(['7d', '30d', 'mtd']).catch('30d'),
+    /** Sales channel filter */
+    channel: z.enum(['all', 'shopify_online', 'marketplace']).catch('all'),
+});
+export type CostingSearchParams = z.infer<typeof CostingSearchParams>;
+
+// ============================================
 // EMPTY SEARCH PARAMS (for pages without params)
 // ============================================
 

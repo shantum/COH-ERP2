@@ -214,13 +214,16 @@ model SkuCosting {
 }
 
 model CostConfig {
-  id                   String   @id @default(uuid())
-  laborRatePerMin      Float    @default(2.50)
-  defaultPackagingCost Float    @default(50)
-  lastUpdated          DateTime @default(now())
-  gstRateAbove         Float    @default(18)
-  gstRateBelow         Float    @default(5)
-  gstThreshold         Float    @default(2500)
+  id                     String   @id @default(uuid())
+  laborRatePerMin        Float    @default(2.50)
+  defaultPackagingCost   Float    @default(50)
+  lastUpdated            DateTime @default(now())
+  gstRateAbove           Float    @default(18)
+  gstRateBelow           Float    @default(5)
+  gstThreshold           Float    @default(2500)
+  // Monthly overhead costs for P&L analysis
+  monthlyLaborOverhead   Float?   // Default: Rs 15,00,000
+  monthlyMarketingBudget Float?   // Default: Rs 15,00,000
 }
 
 // ============================================
@@ -302,7 +305,7 @@ model Fabric {
   avgShrinkagePct     Float?                     // Shrinkage percentage
   defaultLeadTimeDays Int?                       // Default lead time for colours
   defaultMinOrderQty  Float?                     // Default min order for colours
-  unit                String?                    // "meters", "yards"
+  unit                String?                    // "m", "kg"
 
   supplier            Supplier?                  @relation(fields: [supplierId], references: [id])
   material            Material?                  @relation("MaterialFabrics", fields: [materialId], references: [id])

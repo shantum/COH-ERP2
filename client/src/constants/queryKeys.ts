@@ -39,3 +39,10 @@ export const orderTabInvalidationMap: Record<string, string[]> = {
   all: ['allOrders'],
   cancelled: ['cancelledOrders'],
 };
+
+// Costing dashboard query keys
+export const costingQueryKeys = {
+  dashboard: (period: string, channel: string) => ['costing', 'dashboard', period, channel] as const,
+  products: (period: string, channel: string) => ['costing', 'products', period, channel] as const,
+  config: ['costing', 'config'] as const,
+} as const;
