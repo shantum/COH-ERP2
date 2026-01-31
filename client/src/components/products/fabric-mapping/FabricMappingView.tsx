@@ -22,6 +22,7 @@ export function FabricMappingView() {
     // State - separate input value from deferred search query
     const [searchInput, setSearchInput] = useState('');
     const [filter, setFilter] = useState<FabricMappingFilter>('all');
+    const [shopifyStatusFilter, setShopifyStatusFilter] = useState<'all' | 'active' | 'archived'>('all');
     const [pendingChanges, setPendingChanges] = useState<Map<string, PendingFabricChange>>(
         new Map()
     );
@@ -47,6 +48,7 @@ export function FabricMappingView() {
     } = useFabricMappingData({
         filter,
         searchQuery: deferredSearchQuery,
+        shopifyStatusFilter,
     });
 
     // Show loading indicator when search is pending
@@ -136,6 +138,13 @@ export function FabricMappingView() {
         { value: 'mapped', label: 'Mapped' },
     ];
 
+    // Shopify status filter options
+    const shopifyStatusOptions: { value: 'all' | 'active' | 'archived'; label: string }[] = [
+        { value: 'all', label: 'All Statuses' },
+        { value: 'active', label: 'Active on Shopify' },
+        { value: 'archived', label: 'Archived on Shopify' },
+    ];
+
     if (isLoading) {
         return (
             <div className="flex items-center justify-center h-64">
@@ -185,7 +194,7 @@ export function FabricMappingView() {
                         )}
                     </div>
 
-                    {/* Filter */}
+                    {/* Mapping Filter */}
                     <div className="relative">
                         <Filter
                             size={14}
@@ -203,6 +212,19 @@ export function FabricMappingView() {
                             ))}
                         </select>
                     </div>
+
+                    {/* Shopify Status Filter */}
+                    <select
+                        value={shopifyStatusFilter}
+                        onChange={(e) => setShopifyStatusFilter(e.target.value as 'all' | 'active' | 'archived')}
+                        className="px-3 py-1.5 text-sm border border-gray-200 rounded-lg appearance-none focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 bg-white transition-all cursor-pointer"
+                    >
+                        {shopifyStatusOptions.map((opt) => (
+                            <option key={opt.value} value={opt.value}>
+                                {opt.label}
+                            </option>
+                        ))}
+                    </select>
                 </div>
 
                 <div className="flex items-center gap-3">

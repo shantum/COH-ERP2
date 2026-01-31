@@ -54,6 +54,7 @@ interface FilterState {
     gender: string | null;
     fabricFilter: FabricFilterValue;
     category: string | null;
+    shopifyStatus: 'all' | 'active' | 'archived';
 }
 
 // Types for fabric filter hierarchy
@@ -100,6 +101,7 @@ export function ProductsViewSwitcher({ searchQuery, onSearchChange, onViewProduc
         gender: null,
         fabricFilter: { type: 'all' },
         category: null,
+        shopifyStatus: 'all',
     });
     const [showFilters, setShowFilters] = useState(false);
 
@@ -257,6 +259,14 @@ export function ProductsViewSwitcher({ searchQuery, onSearchChange, onViewProduc
             const variations = (product.children || []) as ProductTreeNode[];
             if (!matchesFabricFilter(variations, filters.fabricFilter)) return false;
 
+            // Shopify status filter - check if any variation matches
+            if (filters.shopifyStatus !== 'all') {
+                const hasMatchingVariation = variations.some(v =>
+                    v.shopifyStatus === filters.shopifyStatus
+                );
+                if (!hasMatchingVariation) return false;
+            }
+
             return true;
         });
     }, [treeData, filters, matchesFabricFilter]);
@@ -267,12 +277,13 @@ export function ProductsViewSwitcher({ searchQuery, onSearchChange, onViewProduc
         if (filters.gender) count++;
         if (filters.category) count++;
         if (filters.fabricFilter.type !== 'all') count++;
+        if (filters.shopifyStatus !== 'all') count++;
         return count;
     }, [filters]);
 
     // Clear all filters
     const clearFilters = useCallback(() => {
-        setFilters({ gender: null, fabricFilter: { type: 'all' }, category: null });
+        setFilters({ gender: null, fabricFilter: { type: 'all' }, category: null, shopifyStatus: 'all' });
     }, []);
 
     // Update a single filter (for simple string filters)
@@ -519,6 +530,26 @@ export function ProductsViewSwitcher({ searchQuery, onSearchChange, onViewProduc
                         </Select>
                     </div>
 
+                    <div className="w-px h-6 bg-gray-200" />
+
+                    {/* Shopify Status Filter */}
+                    <div className="flex items-center gap-2">
+                        <span className="text-sm text-muted-foreground hidden sm:inline">Shopify</span>
+                        <Select
+                            value={filters.shopifyStatus}
+                            onValueChange={(v) => updateFilter('shopifyStatus', v as 'all' | 'active' | 'archived')}
+                        >
+                            <SelectTrigger className="w-40 h-8">
+                                <SelectValue placeholder="All Statuses" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">All Statuses</SelectItem>
+                                <SelectItem value="active">Active on Shopify</SelectItem>
+                                <SelectItem value="archived">Archived on Shopify</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    </div>
+
                     {/* Active Filter Pills */}
                     {activeFilterCount > 0 && (
                         <>
@@ -563,6 +594,17 @@ export function ProductsViewSwitcher({ searchQuery, onSearchChange, onViewProduc
                                         })()}
                                         <button
                                             onClick={() => updateFilter('fabricFilter', { type: 'all' })}
+                                            className="ml-1 rounded-full hover:bg-gray-300 p-0.5"
+                                        >
+                                            <X size={12} />
+                                        </button>
+                                    </Badge>
+                                )}
+                                {filters.shopifyStatus !== 'all' && (
+                                    <Badge variant="secondary" className="gap-1 pr-1">
+                                        {filters.shopifyStatus === 'active' ? 'Active on Shopify' : 'Archived on Shopify'}
+                                        <button
+                                            onClick={() => updateFilter('shopifyStatus', 'all')}
                                             className="ml-1 rounded-full hover:bg-gray-300 p-0.5"
                                         >
                                             <X size={12} />

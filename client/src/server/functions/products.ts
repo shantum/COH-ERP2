@@ -190,6 +190,7 @@ interface VariationData {
     liningCost: number | null;
     packagingCost: number | null;
     laborMinutes: number | null;
+    shopifySourceProductId: string | null;
     skus: SkuData[];
 }
 
@@ -238,7 +239,7 @@ export const getProductsTree = createServerFn({ method: 'GET' })
                 getSkuSalesMetricsKysely,
                 getVariationShopifyStockKysely,
                 getSkuShopifyStockKysely,
-                getProductShopifyStatusesKysely,
+                getVariationShopifyStatusesKysely,
             } = await import('@coh/shared/services/db/queries');
 
             const [
@@ -247,20 +248,21 @@ export const getProductsTree = createServerFn({ method: 'GET' })
                 variationShopifyStockMap,
                 skuShopifyStockMap,
                 // fabricColourBalanceMap removed - fabric assignment now via BOM
-                productShopifyStatusMap,
+                variationShopifyStatusMap,
             ] = await Promise.all([
                 getVariationSalesMetricsKysely(),
                 getSkuSalesMetricsKysely(),
                 getVariationShopifyStockKysely(),
                 getSkuShopifyStockKysely(),
-                // getFabricColourBalancesKysely() removed - fabric assignment now via BOM
-                getProductShopifyStatusesKysely(),
+                // Uses variation-level shopifySourceProductId for accurate status
+                getVariationShopifyStatusesKysely(),
             ]);
 
-            // Step 1b: Pre-fetch BOM fabric status (N+1 safe - single query)
+            // Step 1b: Pre-fetch BOM fabric details (N+1 safe - single query)
             // Find all variations that have at least one VariationBomLine with:
             // - A ComponentRole whose ComponentType.code = 'FABRIC'
             // - fabricColourId is not null
+            // Include full fabric hierarchy for display
             const variationsWithBomFabric = await prisma.variationBomLine.findMany({
                 where: {
                     fabricColourId: { not: null },
@@ -268,8 +270,53 @@ export const getProductsTree = createServerFn({ method: 'GET' })
                         type: { code: 'FABRIC' },
                     },
                 },
-                select: { variationId: true },
+                select: {
+                    variationId: true,
+                    fabricColourId: true,
+                    fabricColour: {
+                        select: {
+                            id: true,
+                            colourName: true,
+                            colourHex: true,
+                            fabric: {
+                                select: {
+                                    id: true,
+                                    name: true,
+                                    material: {
+                                        select: {
+                                            id: true,
+                                            name: true,
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
             });
+            // Build map of variationId -> fabric details
+            const bomFabricMap = new Map<string, {
+                fabricColourId: string;
+                fabricColourName: string;
+                fabricColourHex: string | null;
+                fabricId: string;
+                fabricName: string;
+                materialId: string;
+                materialName: string;
+            }>();
+            for (const v of variationsWithBomFabric) {
+                if (v.fabricColour) {
+                    bomFabricMap.set(v.variationId, {
+                        fabricColourId: v.fabricColour.id,
+                        fabricColourName: v.fabricColour.colourName,
+                        fabricColourHex: v.fabricColour.colourHex,
+                        fabricId: v.fabricColour.fabric?.id ?? '',
+                        fabricName: v.fabricColour.fabric?.name ?? '',
+                        materialId: v.fabricColour.fabric?.material?.id ?? '',
+                        materialName: v.fabricColour.fabric?.material?.name ?? '',
+                    });
+                }
+            }
             const bomFabricVariationIds = new Set(variationsWithBomFabric.map(v => v.variationId));
 
             // Step 2: Build search filter
@@ -406,8 +453,11 @@ export const getProductsTree = createServerFn({ method: 'GET' })
                         // NOTE: fabricColourId removed from Variation - now via BOM
                         const fabricStock = undefined;
 
-                        // Get Shopify status from product level
-                        const shopifyStatus = productShopifyStatusMap.get(product.id) as ShopifyStatus | undefined;
+                        // Get Shopify status from variation level (via Variation.shopifySourceProductId)
+                        const shopifyStatus = variationShopifyStatusMap.get(variation.id) as ShopifyStatus | undefined;
+
+                        // Get fabric details from BOM
+                        const bomFabric = bomFabricMap.get(variation.id);
 
                         return {
                             id: variation.id,
@@ -418,14 +468,14 @@ export const getProductsTree = createServerFn({ method: 'GET' })
                             productName: product.name,
                             colorName: variation.colorName,
                             colorHex: variation.colorHex ?? undefined,
-                            // NOTE: fabricId/fabricName/fabricColourId removed - now via BOM (VariationBomLine.fabricColourId)
-                            fabricId: undefined,
-                            fabricName: undefined,
-                            fabricColourId: undefined,
-                            fabricColourName: undefined,
-                            fabricColourHex: undefined,
-                            materialId: undefined,
-                            materialName: undefined,
+                            // Fabric details from BOM (VariationBomLine.fabricColourId)
+                            fabricId: bomFabric?.fabricId,
+                            fabricName: bomFabric?.fabricName,
+                            fabricColourId: bomFabric?.fabricColourId,
+                            fabricColourName: bomFabric?.fabricColourName,
+                            fabricColourHex: bomFabric?.fabricColourHex ?? undefined,
+                            materialId: bomFabric?.materialId,
+                            materialName: bomFabric?.materialName,
                             hasBomFabricLine: bomFabricVariationIds.has(variation.id),
                             imageUrl: variation.imageUrl ?? undefined,
                             hasLining: variation.hasLining,
@@ -436,7 +486,7 @@ export const getProductsTree = createServerFn({ method: 'GET' })
                             packagingCost: variation.packagingCost,
                             laborMinutes: variation.laborMinutes,
                             // Shopify & Sales fields
-                            shopifyStatus: shopifyStatus ?? (product.shopifyProductId ? 'not_cached' : 'not_linked'),
+                            shopifyStatus: shopifyStatus ?? (variation.shopifySourceProductId ? 'not_cached' : 'not_linked'),
                             shopifyStock: variationShopifyStock,
                             fabricStock,
                             sales30DayUnits: variationSales?.sales30DayUnits,
@@ -476,8 +526,22 @@ export const getProductsTree = createServerFn({ method: 'GET' })
                     productMaterialName = maxMaterial;
                 }
 
-                // Get product-level Shopify status
-                const productShopifyStatus = productShopifyStatusMap.get(product.id) as ShopifyStatus | undefined;
+                // Derive product-level Shopify status from variations
+                // Priority: archived > draft > active > not_cached > not_linked
+                const statusPriority: Record<string, number> = {
+                    'archived': 5,
+                    'draft': 4,
+                    'active': 3,
+                    'not_cached': 2,
+                    'not_linked': 1,
+                    'unknown': 0,
+                };
+                let productShopifyStatus: ShopifyStatus = 'not_linked';
+                for (const v of processedVariations) {
+                    if (v.shopifyStatus && (statusPriority[v.shopifyStatus] ?? 0) > (statusPriority[productShopifyStatus] ?? 0)) {
+                        productShopifyStatus = v.shopifyStatus;
+                    }
+                }
 
                 return {
                     id: product.id,
@@ -502,7 +566,7 @@ export const getProductsTree = createServerFn({ method: 'GET' })
                     liningCost: product.liningCost,
                     packagingCost: product.packagingCost,
                     laborMinutes: product.baseProductionTimeMins,
-                    shopifyStatus: productShopifyStatus ?? (product.shopifyProductId ? 'not_cached' : 'not_linked'),
+                    shopifyStatus: productShopifyStatus,
                     children: processedVariations,
                 };
             });

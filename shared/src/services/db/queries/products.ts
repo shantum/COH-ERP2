@@ -265,3 +265,42 @@ export async function getProductShopifyStatusesKysely(): Promise<Map<string, str
 
     return statusMap;
 }
+
+// ============================================
+// VARIATION SHOPIFY STATUS QUERY
+// ============================================
+
+/**
+ * Get Shopify status for all variations
+ *
+ * Fetches status from ShopifyProductCache.rawData via Variation.shopifySourceProductId.
+ * This gives the correct status for variations that came from different Shopify products
+ * than the main product (e.g., merged products).
+ *
+ * @returns Map keyed by variationId for O(1) lookup
+ */
+export async function getVariationShopifyStatusesKysely(): Promise<Map<string, string>> {
+    const db = await getKysely();
+    const { sql } = await import('kysely');
+
+    const rows = await db
+        .selectFrom('Variation')
+        .innerJoin('ShopifyProductCache', 'ShopifyProductCache.id', 'Variation.shopifySourceProductId')
+        .select([
+            'Variation.id',
+            sql<string>`("ShopifyProductCache"."rawData"::json->>'status')`.as('status'),
+        ])
+        .where('Variation.shopifySourceProductId', 'is not', null)
+        .execute();
+
+    // Build Map for O(1) lookup
+    const statusMap = new Map<string, string>();
+
+    for (const row of rows) {
+        if (row.status) {
+            statusMap.set(row.id, row.status);
+        }
+    }
+
+    return statusMap;
+}

@@ -610,9 +610,10 @@ export const getMaterialsTree = createServerFn({ method: 'GET' })
             // For lazy loading, only fetch top-level materials
             if (data.lazyLoad) {
                 const materials = await prisma.material.findMany({
+                    where: { isActive: true },
                     include: {
                         _count: {
-                            select: { fabrics: true },
+                            select: { fabrics: { where: { isActive: true } } },
                         },
                     },
                     orderBy: { name: 'asc' },
@@ -644,10 +645,13 @@ export const getMaterialsTree = createServerFn({ method: 'GET' })
 
             // Full tree load (non-lazy)
             const materials = await prisma.material.findMany({
+                where: { isActive: true },
                 include: {
                     fabrics: {
+                        where: { isActive: true },
                         include: {
                             colours: {
+                                where: { isActive: true },
                                 include: {
                                     supplier: { select: { id: true, name: true } },
                                     variationBomLines: {
@@ -866,11 +870,11 @@ export const getMaterialsTreeChildren = createServerFn({ method: 'GET' })
             if (data.parentType === 'material') {
                 // Get fabrics under this material
                 const fabrics = await prisma.fabric.findMany({
-                    where: { materialId: data.parentId },
+                    where: { materialId: data.parentId, isActive: true },
                     include: {
                         material: { select: { name: true } },
                         supplier: { select: { id: true, name: true } },
-                        _count: { select: { colours: true } },
+                        _count: { select: { colours: { where: { isActive: true } } } },
                     },
                     orderBy: { name: 'asc' },
                 });
@@ -902,7 +906,7 @@ export const getMaterialsTreeChildren = createServerFn({ method: 'GET' })
             } else {
                 // Get colours under this fabric
                 const colours = await prisma.fabricColour.findMany({
-                    where: { fabricId: data.parentId },
+                    where: { fabricId: data.parentId, isActive: true },
                     include: {
                         fabric: {
                             include: {

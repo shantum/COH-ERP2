@@ -12,7 +12,8 @@ import { useQuery } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { getProductsTree } from '../../../../server/functions/products';
 import { getComponentRoles, getFabricAssignments } from '../../../../server/functions/bomMutations';
-import { getProductShopifyStatuses } from '../../../../server/functions/shopify';
+// NOTE: Shopify status now comes from getProductsTree on each variation node
+// (uses Variation.shopifySourceProductId for accurate variation-level status)
 import { useMaterialsTree } from '../../../materials/hooks/useMaterialsTree';
 import type { ProductTreeResponse, ProductTreeNode } from '../../types';
 import type { MaterialNode } from '../../../materials/types';
@@ -30,6 +31,7 @@ import type {
 interface UseFabricMappingDataOptions {
     filter?: FabricMappingFilter;
     searchQuery?: string;
+    shopifyStatusFilter?: 'all' | 'active' | 'archived';
 }
 
 interface UseFabricMappingDataReturn {
@@ -112,9 +114,9 @@ function buildMaterialsLookup(materialsData: MaterialNode[]): MaterialsLookup {
 function buildFabricMappingRows(
     productsData: ProductTreeNode[],
     variationAssignments: Map<string, { colourId: string; fabricId: string; materialId: string; colourName: string; fabricName: string; materialName: string; colourHex?: string }>,
-    shopifyStatusMap: Map<string, ShopifyStatus>,
     filter: FabricMappingFilter,
-    searchQuery: string
+    searchQuery: string,
+    shopifyStatusFilter: 'all' | 'active' | 'archived' = 'all'
 ): { rows: FabricMappingRow[]; summary: FabricMappingSummary } {
     const rows: FabricMappingRow[] = [];
     let totalVariations = 0;
@@ -145,9 +147,15 @@ function buildFabricMappingRows(
             const assignment = variationAssignments.get(variation.id);
             const isMapped = !!assignment;
 
-            // Apply filter
+            // Apply mapping filter
             if (filter === 'mapped' && !isMapped) continue;
             if (filter === 'unmapped' && isMapped) continue;
+
+            // Apply Shopify status filter
+            // Use variation-level status from tree data (via Variation.shopifySourceProductId)
+            const variationShopifyStatus = (variation.shopifyStatus || 'not_linked') as ShopifyStatus;
+            if (shopifyStatusFilter === 'active' && variationShopifyStatus !== 'active') continue;
+            if (shopifyStatusFilter === 'archived' && variationShopifyStatus !== 'archived') continue;
 
             // Check if variation matches search
             const variationMatches = !query ||
@@ -175,7 +183,7 @@ function buildFabricMappingRows(
                 parentProductId: product.id,
                 parentProductName: product.name,
                 isActive: variation.isActive,
-                shopifyStatus: shopifyStatusMap.get(product.id) || 'not_linked',
+                shopifyStatus: variationShopifyStatus,
                 currentMaterialId: assignment?.materialId || null,
                 currentMaterialName: assignment?.materialName || null,
                 currentFabricId: assignment?.fabricId || null,
@@ -216,6 +224,7 @@ function buildFabricMappingRows(
             }
 
             // Add product header row with aggregated data
+            // Product shopifyStatus is derived from variations in getProductsTree
             rows.push({
                 id: `product-${product.id}`,
                 rowType: 'product',
@@ -227,7 +236,7 @@ function buildFabricMappingRows(
                 gender: product.gender,
                 variationCount: productVariationRows.length,
                 mappedCount: productMappedCount,
-                shopifyStatus: shopifyStatusMap.get(product.id) || 'not_linked',
+                shopifyStatus: (product.shopifyStatus || 'not_linked') as ShopifyStatus,
                 currentMaterialId: aggregatedMaterialId,
                 currentMaterialName: aggregatedMaterialName,
                 currentFabricId: aggregatedFabricId,
@@ -251,13 +260,12 @@ function buildFabricMappingRows(
 }
 
 export function useFabricMappingData(options: UseFabricMappingDataOptions = {}): UseFabricMappingDataReturn {
-    const { filter = 'all', searchQuery = '' } = options;
+    const { filter = 'all', searchQuery = '', shopifyStatusFilter = 'all' } = options;
 
     // Server function hooks
     const getProductsTreeFn = useServerFn(getProductsTree);
     const getComponentRolesFn = useServerFn(getComponentRoles);
     const getFabricAssignmentsFn = useServerFn(getFabricAssignments);
-    const getProductShopifyStatusesFn = useServerFn(getProductShopifyStatuses);
 
     // Fetch products tree
     const {
@@ -319,38 +327,8 @@ export function useFabricMappingData(options: UseFabricMappingDataOptions = {}):
         staleTime: 30 * 1000,
     });
 
-    // Get all product IDs for Shopify status lookup
-    const productIds = useMemo(() => {
-        return (productsResponse?.items || [])
-            .filter(item => item.type === 'product')
-            .map(item => item.id);
-    }, [productsResponse?.items]);
-
-    // Fetch Shopify product statuses
-    const {
-        data: shopifyStatusesData,
-        isLoading: statusesLoading,
-        refetch: refetchStatuses,
-    } = useQuery({
-        queryKey: ['shopifyProductStatuses', productIds, 'server-fn'],
-        queryFn: async () => {
-            const result = await getProductShopifyStatusesFn({ data: { productIds } });
-            return result;
-        },
-        enabled: productIds.length > 0,
-        staleTime: 5 * 60 * 1000, // 5 minutes - status doesn't change often
-    });
-
-    // Build Shopify status map
-    const shopifyStatusMap = useMemo(() => {
-        const map = new Map<string, ShopifyStatus>();
-        if (shopifyStatusesData?.success && shopifyStatusesData.data) {
-            for (const status of shopifyStatusesData.data) {
-                map.set(status.productId, status.status);
-            }
-        }
-        return map;
-    }, [shopifyStatusesData]);
+    // NOTE: Shopify status now comes from getProductsTree on each variation/product node
+    // (uses Variation.shopifySourceProductId for accurate variation-level status)
 
     // Build materials lookup
     const materialsLookup = useMemo(
@@ -394,25 +372,24 @@ export function useFabricMappingData(options: UseFabricMappingDataOptions = {}):
         () => buildFabricMappingRows(
             productsResponse?.items || [],
             variationAssignments,
-            shopifyStatusMap,
             filter,
-            searchQuery
+            searchQuery,
+            shopifyStatusFilter
         ),
-        [productsResponse?.items, variationAssignments, shopifyStatusMap, filter, searchQuery]
+        [productsResponse?.items, variationAssignments, filter, searchQuery, shopifyStatusFilter]
     );
 
     const refetch = () => {
         refetchProducts();
         refetchMaterials();
         refetchAssignments();
-        refetchStatuses();
     };
 
     return {
         rows,
         materialsLookup,
         summary,
-        isLoading: productsLoading || materialsLoading || rolesLoading || assignmentsLoading || statusesLoading,
+        isLoading: productsLoading || materialsLoading || rolesLoading || assignmentsLoading,
         error: (productsError || materialsError) as Error | null,
         refetch,
         mainFabricRoleId,
