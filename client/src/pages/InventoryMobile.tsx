@@ -4,7 +4,7 @@
  * Industrial-utilitarian design for rapid stock scanning.
  * Card-based layout with size grids for instant pattern recognition.
  *
- * Uses server-side grouped data for optimal performance (~500 products vs ~10,000 SKUs).
+ * Variation-based flat list for immediate data visibility.
  */
 
 import { useMemo, useState, useCallback, memo } from 'react';
@@ -13,10 +13,9 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Route as InventoryMobileRoute } from '../routes/_authenticated/inventory-mobile';
 import {
     getInventoryGrouped,
-    type ProductGroup,
     type ColorGroup,
 } from '../server/functions/inventory';
-import { Search, AlertTriangle, Package, RefreshCw, ChevronDown, Zap } from 'lucide-react';
+import { Search, AlertTriangle, Package, RefreshCw, Zap, ChevronLeft, ChevronRight } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { showSuccess, showError } from '../utils/toast';
 import { getOptimizedImageUrl } from '../utils/imageOptimization';
@@ -58,55 +57,51 @@ function useShopifyLocation() {
 }
 
 // ============================================
-// LOGOS
+// VARIATION ROW COMPONENT (flat list item)
 // ============================================
 
-const CohLogo = memo(function CohLogo() {
-    return (
-        <img
-            src="/COH-Square-Monkey-Logo.png"
-            alt="COH"
-            className="w-5 h-5 rounded object-contain"
-        />
-    );
-});
+// Canonical size order for aligned columns
+const ALL_SIZES = ['XXS', 'XS', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL', '5XL'] as const;
 
-const ShopifyLogo = memo(function ShopifyLogo() {
-    return (
-        <img
-            src="/shopify_glyph.svg"
-            alt="Shopify"
-            className="w-5 h-5 object-contain"
-        />
-    );
-});
-
-// ============================================
-// COLOR CARD COMPONENT
-// ============================================
-
-interface ColorCardProps {
-    color: ColorGroup;
-    locationId: string | null | undefined;
-    onRefresh: () => void;
+/** Extended color group with product info for flat list */
+interface VariationWithProduct extends ColorGroup {
+    productName: string;
+    productId: string;
 }
 
-const ColorCard = memo(function ColorCard({ color, locationId, onRefresh }: ColorCardProps) {
-    const [syncing, setSyncing] = useState<string | null>(null);
-    const isOutOfStock = color.totalStock <= 0;
-    const hasActionable = color.archivedWithStock.length > 0;
+interface VariationRowProps {
+    variation: VariationWithProduct;
+    locationId: string | null | undefined;
+    onRefresh: () => void;
+    activeSizes: string[]; // Which size columns to show
+}
 
-    // Get Shopify status from first size (all sizes of a variation share the same status)
-    const shopifyStatus = color.sizes[0]?.status ?? null;
+const VariationRow = memo(function VariationRow({ variation, locationId, onRefresh, activeSizes }: VariationRowProps) {
+    const [syncing, setSyncing] = useState<string | null>(null);
+    const isOutOfStock = variation.totalStock <= 0;
+    const hasActionable = variation.archivedWithStock.length > 0;
+    const hasMismatch = variation.sizes.some(s => s.shopify !== null && s.stock !== s.shopify);
+
+    // Get Shopify status from first size
+    const shopifyStatus = variation.sizes[0]?.status ?? null;
+
+    // Create size lookup map
+    const sizeMap = useMemo(() => {
+        const map = new Map<string, { stock: number; skuId: string }>();
+        for (const s of variation.sizes) {
+            map.set(s.size, { stock: s.stock, skuId: s.skuId });
+        }
+        return map;
+    }, [variation.sizes]);
 
     const handleZeroAll = async () => {
-        if (!locationId || syncing || color.archivedWithStock.length === 0) return;
+        if (!locationId || syncing || variation.archivedWithStock.length === 0) return;
         setSyncing('all');
         try {
-            for (const sku of color.archivedWithStock) {
+            for (const sku of variation.archivedWithStock) {
                 await zeroOutShopifyStock(sku.skuCode, locationId);
             }
-            showSuccess(`Zeroed ${color.archivedWithStock.length} SKUs`);
+            showSuccess(`Zeroed ${variation.archivedWithStock.length} SKUs`);
             setTimeout(onRefresh, 500);
         } catch (e) {
             showError(e instanceof Error ? e.message : 'Sync failed');
@@ -115,251 +110,94 @@ const ColorCard = memo(function ColorCard({ color, locationId, onRefresh }: Colo
         }
     };
 
-    // Use fabric hex for border if available
-    const borderColor = color.fabricColourHex || (
-        isOutOfStock ? '#fecaca' :
-        shopifyStatus === 'archived' ? '#d4d4d8' :
-        shopifyStatus === 'draft' ? '#fde68a' :
-        '#e4e4e7'
-    );
+    // Left accent color for alerts
+    const accentColor = isOutOfStock ? 'border-l-red-400' :
+        hasMismatch ? 'border-l-amber-400' :
+        shopifyStatus === 'archived' ? 'border-l-zinc-300' :
+        'border-l-transparent';
 
     return (
-        <div
-            className="bg-white rounded-xl overflow-hidden"
-            style={{ boxShadow: `inset 0 0 0 2px ${borderColor}` }}
-        >
-            {/* Header */}
-            <div className="flex items-center gap-3 p-3 pb-2">
-                {/* Color swatch - use fabric hex if available */}
+        <div className={cn(
+            'border-b border-zinc-100 bg-white',
+            'border-l-2',
+            accentColor,
+            'hover:bg-zinc-50 transition-colors'
+        )}>
+            {/* Single compact row */}
+            <div className="flex items-center gap-2 sm:gap-4 px-3 py-2">
+                {/* Thumbnail */}
                 <div
-                    className="w-10 h-10 rounded-lg overflow-hidden flex-shrink-0"
-                    style={{ backgroundColor: color.fabricColourHex || '#f4f4f5' }}
+                    className="w-9 h-11 sm:w-10 sm:h-12 rounded overflow-hidden flex-shrink-0"
+                    style={{ backgroundColor: variation.fabricColourHex || '#f4f4f5' }}
                 >
-                    {color.imageUrl && (
-                        <img src={getOptimizedImageUrl(color.imageUrl, 'sm') || color.imageUrl} alt="" className="w-full h-full object-cover" loading="lazy" />
+                    {variation.imageUrl && (
+                        <img src={getOptimizedImageUrl(variation.imageUrl, 'xs') || variation.imageUrl} alt="" className="w-full h-full object-cover" loading="lazy" />
                     )}
                 </div>
 
-                {/* Info */}
-                <div className="flex-1 min-w-0">
-                    <h3 className="font-medium text-zinc-900 truncate text-sm">
-                        {color.colorName}
+                {/* Info - flexible on mobile, fixed on desktop */}
+                <div className="min-w-0 flex-1 sm:flex-none sm:w-56 md:w-72">
+                    <h3 className="font-medium text-zinc-900 truncate text-[12px] sm:text-[13px] leading-tight">
+                        {variation.productName}
                     </h3>
-                    {/* Fabric info */}
-                    {(color.fabricName || color.fabricColourName) && (
-                        <p className="text-[10px] text-zinc-500 truncate">
-                            {color.fabricName && color.fabricColourName
-                                ? `${color.fabricName} - ${color.fabricColourName}`
-                                : color.fabricName || color.fabricColourName}
+                    <p className="text-[10px] sm:text-[11px] text-zinc-400 truncate">
+                        {variation.colorName}
+                        {variation.fabricColourBalance !== null && (
                             <span className={cn(
-                                'ml-1 font-medium',
-                                (color.fabricColourBalance ?? 0) <= 0 ? 'text-red-500' :
-                                (color.fabricColourBalance ?? 0) < 10 ? 'text-amber-500' :
+                                'ml-1',
+                                (variation.fabricColourBalance ?? 0) <= 0 ? 'text-red-500' :
+                                (variation.fabricColourBalance ?? 0) < 10 ? 'text-amber-500' :
                                 'text-emerald-600'
                             )}>
-                                | {color.fabricColourBalance ?? 0}{color.fabricUnit === 'kg' ? 'kg' : 'm'}
+                                · {variation.fabricColourBalance}{variation.fabricUnit === 'kg' ? 'kg' : 'm'}
                             </span>
-                        </p>
-                    )}
-                </div>
-
-                {/* Stock total + status */}
-                <div className="flex items-center gap-2 flex-shrink-0">
-                    <div className={cn(
-                        'text-lg font-bold tabular-nums',
-                        isOutOfStock ? 'text-red-500' : 'text-zinc-800'
-                    )}>
-                        {color.totalStock}
-                    </div>
-                    {shopifyStatus && (
-                        <span className={cn(
-                            'px-1.5 py-0.5 rounded text-[9px] font-medium uppercase tracking-wide',
-                            shopifyStatus === 'active' ? 'bg-emerald-100 text-emerald-700' :
-                            shopifyStatus === 'archived' ? 'bg-zinc-200 text-zinc-500' :
-                            shopifyStatus === 'draft' ? 'bg-amber-100 text-amber-700' :
-                            'bg-zinc-100 text-zinc-400'
-                        )}>
-                            {shopifyStatus}
-                        </span>
-                    )}
-                </div>
-            </div>
-
-            {/* Stock grid */}
-            <div className="px-3 pb-3">
-                {/* Size headers */}
-                <div className="flex items-center mb-1">
-                    <div className="w-8 flex-shrink-0" /> {/* Logo spacer */}
-                    <div className="flex-1 grid" style={{ gridTemplateColumns: `repeat(${color.sizes.length}, 1fr)` }}>
-                        {color.sizes.map((size) => (
-                            <div key={size.skuId} className="text-center">
-                                <span className="text-[10px] font-medium text-zinc-400 uppercase">
-                                    {size.size}
-                                </span>
-                            </div>
-                        ))}
-                    </div>
-                </div>
-
-                {/* COH Row */}
-                <div className="flex items-center py-1">
-                    <div className="w-8 flex-shrink-0">
-                        <CohLogo />
-                    </div>
-                    <div className="flex-1 grid" style={{ gridTemplateColumns: `repeat(${color.sizes.length}, 1fr)` }}>
-                        {color.sizes.map((size) => {
-                            const isOut = size.stock <= 0;
-                            return (
-                                <div key={size.skuId} className="text-center">
-                                    <span className={cn(
-                                        'text-sm font-semibold tabular-nums',
-                                        isOut ? 'text-red-500' : 'text-zinc-800'
-                                    )}>
-                                        {size.stock}
-                                    </span>
-                                </div>
-                            );
-                        })}
-                    </div>
-                </div>
-
-                {/* Shopify Row */}
-                <div className="flex items-center py-1">
-                    <div className="w-8 flex-shrink-0">
-                        <ShopifyLogo />
-                    </div>
-                    <div className="flex-1 grid" style={{ gridTemplateColumns: `repeat(${color.sizes.length}, 1fr)` }}>
-                        {color.sizes.map((size) => {
-                            const shopifyVal = size.shopify ?? 0;
-                            const sizeMismatch = size.shopify !== null && size.stock !== size.shopify;
-                            return (
-                                <div key={size.skuId} className="text-center">
-                                    <span className={cn(
-                                        'text-sm tabular-nums',
-                                        sizeMismatch ? 'text-amber-500 font-semibold' : 'text-zinc-400'
-                                    )}>
-                                        {shopifyVal}
-                                    </span>
-                                </div>
-                            );
-                        })}
-                    </div>
-                </div>
-            </div>
-
-            {/* Zero action - only show if there are archived SKUs with Shopify stock */}
-            {hasActionable && (
-                <div className="px-3 pb-3 pt-1 border-t border-zinc-100">
-                    <button
-                        onClick={handleZeroAll}
-                        disabled={syncing !== null}
-                        className={cn(
-                            'w-full py-2 rounded-lg text-xs font-medium transition-all flex items-center justify-center gap-2',
-                            'bg-amber-500 text-white hover:bg-amber-600',
-                            syncing === 'all' && 'opacity-50'
                         )}
-                    >
-                        <Zap className="w-3 h-3" />
-                        {syncing === 'all' ? 'Syncing...' : `Zero ${color.archivedWithStock.length} archived on Shopify`}
-                    </button>
-                </div>
-            )}
-        </div>
-    );
-});
-
-// ============================================
-// PRODUCT SECTION
-// ============================================
-
-interface ProductSectionProps {
-    product: ProductGroup;
-    locationId: string | null | undefined;
-    onRefresh: () => void;
-    defaultExpanded?: boolean;
-}
-
-const ProductSection = memo(function ProductSection({
-    product,
-    locationId,
-    onRefresh,
-    defaultExpanded = false
-}: ProductSectionProps) {
-    const [isExpanded, setIsExpanded] = useState(defaultExpanded);
-
-    // Get up to 4 color thumbnails for the stack preview
-    const previewColors = product.colors.slice(0, 4);
-    const remainingCount = product.colors.length - previewColors.length;
-
-    // Count active colors on Shopify
-    const activeCount = product.colors.filter(c => c.sizes[0]?.status === 'active').length;
-
-    return (
-        <div className="mb-3">
-            {/* Product header - white theme with thumbnails on second line */}
-            <button
-                onClick={() => setIsExpanded(!isExpanded)}
-                className={cn(
-                    'w-full px-4 py-3 rounded-xl transition-all',
-                    'bg-white border border-zinc-200',
-                    isExpanded && 'rounded-b-none border-b-0'
-                )}
-            >
-                {/* First row: Title + Chevron */}
-                <div className="flex items-center gap-2">
-                    <h2 className="flex-1 font-semibold text-sm text-zinc-900 text-left">
-                        {product.productName}
-                    </h2>
-                    <ChevronDown className={cn(
-                        'w-5 h-5 text-zinc-400 transition-transform flex-shrink-0',
-                        isExpanded && 'rotate-180'
-                    )} />
-                </div>
-
-                {/* Second row: Color thumbnails + count */}
-                <div className="flex items-center gap-2 mt-2">
-                    <div className="flex -space-x-1.5">
-                        {previewColors.map((color, idx) => (
-                            <div
-                                key={color.variationId}
-                                className="w-7 h-9 rounded-md border-2 border-white overflow-hidden bg-zinc-100 shadow-sm"
-                                style={{
-                                    zIndex: previewColors.length - idx,
-                                    backgroundColor: color.fabricColourHex || '#f4f4f5'
-                                }}
-                            >
-                                {color.imageUrl && (
-                                    <img src={getOptimizedImageUrl(color.imageUrl, 'xs') || color.imageUrl} alt="" className="w-full h-full object-cover" loading="lazy" />
-                                )}
-                            </div>
-                        ))}
-                        {remainingCount > 0 && (
-                            <div
-                                className="w-7 h-9 rounded-md border-2 border-white bg-zinc-200 flex items-center justify-center shadow-sm"
-                                style={{ zIndex: 0 }}
-                            >
-                                <span className="text-[9px] font-medium text-zinc-600">+{remainingCount}</span>
-                            </div>
-                        )}
-                    </div>
-                    <p className="text-xs text-zinc-400">
-                        {product.colors.length} colour{product.colors.length !== 1 ? 's' : ''} | <span className="text-emerald-600">{activeCount} active</span>
                     </p>
                 </div>
-            </button>
 
-            {/* Color cards */}
-            {isExpanded && (
-                <div className="bg-zinc-100 rounded-b-xl p-3 space-y-3 border border-t-0 border-zinc-200">
-                    {product.colors.map((color) => (
-                        <ColorCard
-                            key={color.variationId}
-                            color={color}
-                            locationId={locationId}
-                            onRefresh={onRefresh}
-                        />
-                    ))}
+                {/* Size grid - aligned columns */}
+                <div className="flex justify-end gap-0 flex-shrink-0">
+                    {activeSizes.map((size) => {
+                        const sizeData = sizeMap.get(size);
+                        const hasSize = sizeData !== undefined;
+                        const isOut = hasSize && sizeData.stock <= 0;
+                        return (
+                            <div key={size} className="text-center w-7 sm:w-9">
+                                <div className="text-[8px] sm:text-[9px] text-zinc-400 uppercase leading-none">{size}</div>
+                                <div className={cn(
+                                    'text-xs sm:text-sm font-medium tabular-nums leading-tight',
+                                    !hasSize ? 'text-zinc-200' :
+                                    isOut ? 'text-red-500' : 'text-zinc-700'
+                                )}>
+                                    {hasSize ? sizeData.stock : '-'}
+                                </div>
+                            </div>
+                        );
+                    })}
                 </div>
+
+                {/* Stock total */}
+                <div className={cn(
+                    'text-base sm:text-lg font-semibold tabular-nums flex-shrink-0 w-10 sm:w-14 text-right',
+                    isOutOfStock ? 'text-red-500' : 'text-zinc-800'
+                )}>
+                    {variation.totalStock}
+                </div>
+            </div>
+
+            {/* Zero action - inline compact */}
+            {hasActionable && (
+                <button
+                    onClick={handleZeroAll}
+                    disabled={syncing !== null}
+                    className={cn(
+                        'w-full py-1.5 text-[10px] font-medium bg-amber-50 text-amber-700 hover:bg-amber-100 transition-colors flex items-center justify-center gap-1',
+                        syncing === 'all' && 'opacity-50'
+                    )}
+                >
+                    <Zap className="w-3 h-3" />
+                    {syncing === 'all' ? 'Syncing...' : `Zero ${variation.archivedWithStock.length} on Shopify`}
+                </button>
             )}
         </div>
     );
@@ -381,14 +219,13 @@ const FilterPill = memo(function FilterPill({ label, isActive, onClick, variant 
         <button
             onClick={onClick}
             className={cn(
-                'px-3 py-1.5 rounded-full text-xs font-medium transition-all whitespace-nowrap',
-                'border-2',
+                'px-2 sm:px-3 py-1 sm:py-1.5 rounded text-[10px] sm:text-xs font-medium transition-all whitespace-nowrap',
                 isActive ? (
-                    variant === 'danger' ? 'bg-red-500 border-red-500 text-white' :
-                    variant === 'warning' ? 'bg-amber-500 border-amber-500 text-zinc-900' :
-                    'bg-zinc-900 border-zinc-900 text-white'
+                    variant === 'danger' ? 'bg-red-500 text-white' :
+                    variant === 'warning' ? 'bg-amber-500 text-white' :
+                    'bg-zinc-800 text-white'
                 ) : (
-                    'bg-white border-zinc-300 text-zinc-600 hover:border-zinc-400'
+                    'bg-zinc-100 text-zinc-500 hover:bg-zinc-200'
                 )
             )}
         >
@@ -407,7 +244,16 @@ export default function InventoryMobile() {
     const search = InventoryMobileRoute.useSearch();
 
     const { data: locationId } = useShopifyLocation();
-    const [searchInput, setSearchInput] = useState(search.search || '');
+    const [searchInput, setSearchInputRaw] = useState(search.search || '');
+
+    // Reset to page 1 when search input changes
+    const setSearchInput = useCallback((value: string) => {
+        setSearchInputRaw(value);
+        // Only navigate if we're not already on page 1
+        if (search.page !== 1) {
+            navigate({ to: '/inventory-mobile', search: { ...search, page: 1 } });
+        }
+    }, [navigate, search]);
 
     // Get loader data for initial hydration (now pre-grouped from server)
     const loaderData = InventoryMobileRoute.useLoaderData();
@@ -440,31 +286,70 @@ export default function InventoryMobile() {
         staleTime: 60000,
     });
 
-    // Products are pre-grouped from server
-    const products = data?.products ?? [];
-    const totalSkus = data?.totalSkus ?? 0;
+    // Flatten products into variations for flat list display
+    const variations: VariationWithProduct[] = useMemo(() => {
+        const products = data?.products ?? [];
+        return products.flatMap(product =>
+            product.colors.map(color => ({
+                ...color,
+                productName: product.productName,
+                productId: product.productId,
+            }))
+        );
+    }, [data?.products]);
 
     // Real-time filtering based on searchInput (client-side for instant feedback)
-    const filteredProducts = useMemo(() => {
-        if (!searchInput) return products;
+    const filteredVariations = useMemo(() => {
+        if (!searchInput) return variations;
         const q = searchInput.toLowerCase();
-        return products.filter(p =>
-            p.productName.toLowerCase().includes(q) ||
-            p.colors.some(c =>
-                c.colorName.toLowerCase().includes(q) ||
-                c.fabricColourName?.toLowerCase().includes(q) ||
-                c.sizes.some(s => s.skuCode.toLowerCase().includes(q))
-            )
+        return variations.filter(v =>
+            v.productName.toLowerCase().includes(q) ||
+            v.colorName.toLowerCase().includes(q) ||
+            v.fabricColourName?.toLowerCase().includes(q) ||
+            v.sizes.some(s => s.skuCode.toLowerCase().includes(q))
         );
-    }, [products, searchInput]);
+    }, [variations, searchInput]);
 
+    // Pagination
+    const page = search.page ?? 1;
+    const pageSize = search.pageSize ?? 50;
+    const totalPages = Math.ceil(filteredVariations.length / pageSize);
+    const startIndex = (page - 1) * pageSize;
+    const paginatedVariations = useMemo(() => {
+        return filteredVariations.slice(startIndex, startIndex + pageSize);
+    }, [filteredVariations, startIndex, pageSize]);
+
+    // Calculate active sizes (union of all sizes in current page) - sorted by canonical order
+    const activeSizes = useMemo(() => {
+        const sizeSet = new Set<string>();
+        for (const v of paginatedVariations) {
+            for (const s of v.sizes) {
+                sizeSet.add(s.size);
+            }
+        }
+        // Sort by canonical order
+        return ALL_SIZES.filter(size => sizeSet.has(size));
+    }, [paginatedVariations]);
+
+    // Reset to page 1 when filters/search change
     const handleFilterChange = useCallback(
         (filterKey: 'stockFilter' | 'shopifyStatus' | 'discrepancy' | 'fabricFilter', value: string) => {
             const currentValue = search[filterKey];
             const newValue = currentValue === value ? 'all' : value;
-            navigate({ to: '/inventory-mobile', search: { ...search, [filterKey]: newValue } });
+            navigate({ to: '/inventory-mobile', search: { ...search, [filterKey]: newValue, page: 1 } });
         },
         [navigate, search]
+    );
+
+    const handlePageChange = useCallback(
+        (newPage: number) => {
+            if (newPage >= 1 && newPage <= totalPages) {
+                navigate({ to: '/inventory-mobile', search: { ...search, page: newPage } });
+                // Scroll to top
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            }
+        },
+        [navigate, search, totalPages]
     );
 
     const handleRefresh = useCallback(() => {
@@ -492,50 +377,43 @@ export default function InventoryMobile() {
     }
 
     return (
-        <div className="min-h-screen bg-zinc-100">
-            {/* Sticky header - white theme */}
-            <div className="sticky top-0 z-20 bg-white border-b border-zinc-200">
-                {/* Title bar */}
-                <div className="px-4 py-3">
-                    <div className="flex items-center justify-between">
-                        <div>
-                            <h1 className="text-lg font-bold tracking-tight text-zinc-900">Stock Scanner</h1>
+        <div className="min-h-screen bg-zinc-50">
+            {/* Centered container for desktop */}
+            <div className="max-w-4xl mx-auto">
+                {/* Sticky header - compact */}
+                <div className="sticky top-0 z-20 bg-white border-b border-zinc-200">
+                    {/* Title + Search row */}
+                    <div className="flex items-center gap-3 sm:gap-4 px-3 sm:px-4 py-2 sm:py-3">
+                        <div className="flex-shrink-0">
+                            <h1 className="text-sm sm:text-base font-semibold text-zinc-900">Stock</h1>
                             {!isLoading && (
-                                <p className="text-xs text-zinc-500">
-                                    {filteredProducts.length} products · {totalSkus} SKUs
+                                <p className="text-[10px] sm:text-xs text-zinc-400">
+                                    {startIndex + 1}-{Math.min(startIndex + pageSize, filteredVariations.length)} / {filteredVariations.length}
                                 </p>
                             )}
+                        </div>
+                        <div className="flex-1 relative max-w-md">
+                            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 sm:w-4 sm:h-4 text-zinc-400" />
+                            <input
+                                type="text"
+                                value={searchInput}
+                                onChange={(e) => setSearchInput(e.target.value)}
+                                placeholder="Search..."
+                                className="w-full pl-8 sm:pl-9 pr-3 py-1.5 sm:py-2 bg-zinc-100 border-0 rounded text-xs sm:text-sm placeholder:text-zinc-400 focus:outline-none focus:ring-1 focus:ring-zinc-300"
+                            />
                         </div>
                         <button
                             onClick={handleRefresh}
                             disabled={isLoading}
-                            className={cn(
-                                'p-2 rounded-lg bg-zinc-100 hover:bg-zinc-200 transition-colors',
-                                isLoading && 'animate-pulse'
-                            )}
+                            className="p-1.5 sm:p-2 rounded hover:bg-zinc-100 transition-colors"
                         >
-                            <RefreshCw className={cn('w-5 h-5 text-zinc-600', isLoading && 'animate-spin')} />
-                        </button>
-                    </div>
+                        <RefreshCw className={cn('w-4 h-4 sm:w-5 sm:h-5 text-zinc-500', isLoading && 'animate-spin')} />
+                    </button>
                 </div>
 
-                {/* Search - real-time */}
-                <div className="px-4 pb-3">
-                    <div className="relative">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
-                        <input
-                            type="text"
-                            value={searchInput}
-                            onChange={(e) => setSearchInput(e.target.value)}
-                            placeholder="Search products, colors, SKUs..."
-                            className="w-full pl-10 pr-4 py-2.5 bg-zinc-100 border-0 rounded-lg text-sm placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-300"
-                        />
-                    </div>
-                </div>
-
-                {/* Filters */}
-                <div className="px-4 pb-3 overflow-x-auto scrollbar-hide">
-                    <div className="flex gap-2">
+                {/* Filters - compact pills */}
+                <div className="px-3 sm:px-4 pb-2 sm:pb-3 overflow-x-auto scrollbar-hide">
+                    <div className="flex gap-1.5 sm:gap-2">
                         <FilterPill
                             label="Out of Stock"
                             isActive={search.stockFilter === 'out_of_stock'}
@@ -579,29 +457,70 @@ export default function InventoryMobile() {
                 </div>
             </div>
 
-            {/* Content */}
-            <div className="px-4 py-4">
+            {/* Content - flat list */}
+            <div className="bg-white">
                 {isLoading ? (
                     <div className="flex flex-col items-center justify-center py-20">
-                        <div className="w-12 h-12 rounded-full border-4 border-zinc-300 border-t-zinc-900 animate-spin" />
-                        <p className="mt-4 text-sm text-zinc-500">Loading inventory...</p>
+                        <div className="w-10 h-10 rounded-full border-3 border-zinc-200 border-t-zinc-600 animate-spin" />
+                        <p className="mt-3 text-xs text-zinc-400">Loading...</p>
                     </div>
-                ) : filteredProducts.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center py-20">
-                        <Package className="w-16 h-16 text-zinc-300 mb-4" />
-                        <h2 className="font-semibold text-zinc-900 mb-1">No products found</h2>
-                        <p className="text-sm text-zinc-500">Try adjusting your search or filters</p>
+                ) : filteredVariations.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-16">
+                        <Package className="w-12 h-12 text-zinc-200 mb-3" />
+                        <h2 className="font-medium text-zinc-600 text-sm mb-1">No variations found</h2>
+                        <p className="text-xs text-zinc-400">Try adjusting your search or filters</p>
                     </div>
                 ) : (
-                    filteredProducts.map((product) => (
-                        <ProductSection
-                            key={product.productId}
-                            product={product}
-                            locationId={locationId}
-                            onRefresh={handleRefresh}
-                        />
-                    ))
+                    <>
+                        {paginatedVariations.map((variation) => (
+                            <VariationRow
+                                key={variation.variationId}
+                                variation={variation}
+                                locationId={locationId}
+                                onRefresh={handleRefresh}
+                                activeSizes={activeSizes}
+                            />
+                        ))}
+
+                        {/* Pagination controls */}
+                        {totalPages > 1 && (
+                            <div className="flex items-center justify-between py-3 px-3 border-t border-zinc-100 bg-zinc-50">
+                                <button
+                                    onClick={() => handlePageChange(page - 1)}
+                                    disabled={page <= 1}
+                                    className={cn(
+                                        'flex items-center gap-1 px-2.5 py-1.5 rounded text-xs font-medium transition-colors',
+                                        page <= 1
+                                            ? 'text-zinc-300 cursor-not-allowed'
+                                            : 'text-zinc-600 hover:bg-zinc-100'
+                                    )}
+                                >
+                                    <ChevronLeft className="w-3.5 h-3.5" />
+                                    Prev
+                                </button>
+
+                                <span className="text-xs text-zinc-500">
+                                    {page} / {totalPages}
+                                </span>
+
+                                <button
+                                    onClick={() => handlePageChange(page + 1)}
+                                    disabled={page >= totalPages}
+                                    className={cn(
+                                        'flex items-center gap-1 px-2.5 py-1.5 rounded text-xs font-medium transition-colors',
+                                        page >= totalPages
+                                            ? 'text-zinc-300 cursor-not-allowed'
+                                            : 'text-zinc-600 hover:bg-zinc-100'
+                                    )}
+                                >
+                                    Next
+                                    <ChevronRight className="w-3.5 h-3.5" />
+                                </button>
+                            </div>
+                        )}
+                    </>
                 )}
+            </div>
             </div>
         </div>
     );
