@@ -1,32 +1,43 @@
 /**
  * PermissionGate Component
- * 
- * Conditionally renders children based on user permissions.
- * Supports single permission, any of multiple permissions, or all permissions required.
- * 
- * Usage:
+ *
+ * Conditionally renders children based on user permissions or access features.
+ *
+ * Supports:
+ * - New simplified access system (access prop)
+ * - Legacy permissions (permission, anyOf, allOf props)
+ *
+ * Usage (new - preferred):
+ *   <PermissionGate access="view-costs">
+ *     <CostColumn />
+ *   </PermissionGate>
+ *
+ *   <PermissionGate access="costing-dashboard">
+ *     <CostingLink />
+ *   </PermissionGate>
+ *
+ * Usage (legacy - still supported):
  *   <PermissionGate permission="products:view:cost">
  *     <CostColumn />
  *   </PermissionGate>
- * 
+ *
  *   <PermissionGate anyOf={['orders:ship', 'orders:allocate']}>
  *     <FulfillmentActions />
- *   </PermissionGate>
- * 
- *   <PermissionGate allOf={['inventory:inward', 'inventory:outward']} fallback={<AccessDenied />}>
- *     <InventoryManager />
  *   </PermissionGate>
  */
 
 import { type ReactNode, type ReactElement } from 'react';
 import { usePermissions } from '../hooks/usePermissions';
+import { useAccess, type AccessFeature } from '../hooks/useAccess';
 
 interface PermissionGateProps {
-    /** Single permission required */
+    /** New simplified access feature check */
+    access?: AccessFeature;
+    /** Single permission required (legacy) */
     permission?: string;
-    /** Any of these permissions required (OR logic) */
+    /** Any of these permissions required (OR logic, legacy) */
     anyOf?: string[];
-    /** All of these permissions required (AND logic) */
+    /** All of these permissions required (AND logic, legacy) */
     allOf?: string[];
     /** Show this when permission denied (optional) */
     fallback?: ReactNode;
@@ -35,9 +46,10 @@ interface PermissionGateProps {
 }
 
 /**
- * Permission gate for conditional rendering based on user permissions
+ * Permission gate for conditional rendering based on user permissions or access
  */
 export function PermissionGate({
+    access,
     permission,
     anyOf,
     allOf,
@@ -45,25 +57,31 @@ export function PermissionGate({
     children,
 }: PermissionGateProps): ReactElement | null {
     const { hasPermission, hasAnyPermission, hasAllPermissions } = usePermissions();
+    const { hasAccess: checkAccess } = useAccess();
 
-    let hasAccess = true;
+    let allowed = true;
 
-    // Check single permission
+    // New access system (takes priority)
+    if (access) {
+        allowed = checkAccess(access);
+    }
+
+    // Legacy: Check single permission
     if (permission) {
-        hasAccess = hasPermission(permission);
+        allowed = allowed && hasPermission(permission);
     }
 
-    // Check any of permissions (OR logic)
+    // Legacy: Check any of permissions (OR logic)
     if (anyOf && anyOf.length > 0) {
-        hasAccess = hasAccess && hasAnyPermission(...anyOf);
+        allowed = allowed && hasAnyPermission(...anyOf);
     }
 
-    // Check all of permissions (AND logic)
+    // Legacy: Check all of permissions (AND logic)
     if (allOf && allOf.length > 0) {
-        hasAccess = hasAccess && hasAllPermissions(...allOf);
+        allowed = allowed && hasAllPermissions(...allOf);
     }
 
-    if (!hasAccess) {
+    if (!allowed) {
         return fallback as ReactElement | null;
     }
 

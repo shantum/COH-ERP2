@@ -38,6 +38,7 @@ model User {
   mustChangePassword    Boolean                  @default(false)
   roleId                String?
   tokenVersion          Int                      @default(0)
+  extraAccess           Json                     @default("[]") // Array of AccessFeature strings for exceptions beyond role
   userRole              Role?                    @relation(fields: [roleId], references: [id])
   permissionOverrides   UserPermissionOverride[]
   gridPreferences       UserGridPreference[]

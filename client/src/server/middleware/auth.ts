@@ -27,6 +27,7 @@ export interface AuthenticatedUser {
     role: string;
     roleId: string | null;
     tokenVersion?: number;
+    extraAccess?: string[]; // Additional feature access beyond role
 }
 
 // Backward compatibility alias
@@ -44,7 +45,7 @@ export interface OptionalAuthContext {
 }
 
 export type AuthResult =
-    | { success: true; user: AuthenticatedUser; permissions: string[] }
+    | { success: true; user: AuthenticatedUser; permissions: string[]; extraAccess: string[] }
     | { success: false; error: string; code: 'NO_TOKEN' | 'INVALID_TOKEN' | 'EXPIRED_TOKEN' | 'SESSION_INVALIDATED' };
 
 // ============================================
@@ -122,13 +123,13 @@ async function validateTokenVersion(
 }
 
 /**
- * Get user permissions from database
+ * Get user permissions and extraAccess from database
  */
-async function getUserPermissions(
+async function getUserPermissionsAndAccess(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     prisma: any,
     userId: string
-): Promise<string[]> {
+): Promise<{ permissions: string[]; extraAccess: string[] }> {
     try {
         const user = await prisma.user.findUnique({
             where: { id: userId },
@@ -138,7 +139,7 @@ async function getUserPermissions(
             },
         });
 
-        if (!user) return [];
+        if (!user) return { permissions: [], extraAccess: [] };
 
         // Start with role permissions (stored as JSON array)
         const rolePermissions: string[] = [];
@@ -146,7 +147,7 @@ async function getUserPermissions(
             rolePermissions.push(...(user.userRole.permissions as string[]));
         }
 
-        // Apply individual overrides
+        // Apply individual overrides (legacy system)
         const grantedOverrides = user.permissionOverrides
             .filter((o: { granted: boolean; permission: string }) => o.granted)
             .map((o: { permission: string }) => o.permission);
@@ -163,9 +164,17 @@ async function getUserPermissions(
             ...grantedOverrides,
         ];
 
-        return [...new Set(finalPermissions)];
+        // Get extraAccess (new simplified system)
+        const extraAccess: string[] = Array.isArray(user.extraAccess)
+            ? (user.extraAccess as string[])
+            : [];
+
+        return {
+            permissions: [...new Set(finalPermissions)],
+            extraAccess,
+        };
     } catch {
-        return [];
+        return { permissions: [], extraAccess: [] };
     }
 }
 
@@ -216,10 +225,10 @@ async function validateAuth(
         }
     }
 
-    // 5. Load permissions
+    // 5. Load permissions and extraAccess
     console.log('[AuthMiddleware] Loading permissions for user:', payload.id);
-    const permissions = await getUserPermissions(prisma, payload.id);
-    console.log('[AuthMiddleware] Permissions loaded:', permissions.length);
+    const { permissions, extraAccess } = await getUserPermissionsAndAccess(prisma, payload.id);
+    console.log('[AuthMiddleware] Permissions loaded:', permissions.length, 'extraAccess:', extraAccess.length);
 
     // 6. Return authenticated context
     console.log('[AuthMiddleware] Auth successful for:', payload.email);
@@ -231,8 +240,10 @@ async function validateAuth(
             role: payload.role,
             roleId: payload.roleId ?? null,
             tokenVersion: payload.tokenVersion,
+            extraAccess,
         },
         permissions,
+        extraAccess,
     };
 }
 

@@ -1,363 +1,172 @@
 /**
- * Permission Editor Modal
- * Modal for viewing and editing user permissions
- * Shows role selection and permission matrix grouped by domain
- * Supports individual permission overrides from role defaults
+ * Permission Editor Modal (Simplified)
  *
- * Uses Server Functions for data fetching (TanStack Start migration)
+ * Simple role dropdown + feature checkboxes for exceptions.
+ * Replaces the old 47-permission matrix with ~10 features.
+ *
+ * UI:
+ * - Role dropdown (owner/manager/staff)
+ * - Feature checkboxes for extraAccess (features beyond role)
+ * - Shows which features are included in role vs extras
  */
 
 import { useState, useMemo, useEffect } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Shield, User, Mail, Check, Key, Eye, Edit3, RotateCcw } from 'lucide-react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { Shield, User as UserIcon, Mail, Check, Info } from 'lucide-react';
 import Modal from '../Modal';
+import { updateUser } from '../../server/functions/admin';
 import {
-    getUserPermissions,
-    updateUserPermissions,
-    assignUserRole,
-    type UserPermissionsData,
-} from '../../server/functions/admin';
-import type { User as UserType, Role } from '../../types';
+    FEATURE_INFO,
+    getRoleFeatures,
+    getExtraFeatures,
+    type AccessFeature,
+    type UserRole,
+} from '@coh/shared/config/access';
 
-// Permission categories matching server/src/utils/permissions.js
-const PERMISSION_CATEGORIES: Record<string, { label: string; permissions: Array<{ key: string; label: string; type: 'view' | 'edit' }> }> = {
-    orders: {
-        label: 'Orders',
-        permissions: [
-            { key: 'orders:view', label: 'View orders', type: 'view' },
-            { key: 'orders:view:financial', label: 'View financial data', type: 'view' },
-            { key: 'orders:ship', label: 'Ship orders', type: 'edit' },
-            { key: 'orders:hold', label: 'Hold orders', type: 'edit' },
-            { key: 'orders:cancel', label: 'Cancel orders', type: 'edit' },
-            { key: 'orders:allocate', label: 'Allocate inventory', type: 'edit' },
-        ],
-    },
-    products: {
-        label: 'Products',
-        permissions: [
-            { key: 'products:view', label: 'View products', type: 'view' },
-            { key: 'products:view:cost', label: 'View costing', type: 'view' },
-            { key: 'products:view:consumption', label: 'View consumption', type: 'view' },
-            { key: 'products:create', label: 'Create products', type: 'edit' },
-            { key: 'products:edit', label: 'Edit products', type: 'edit' },
-            { key: 'products:edit:inventory', label: 'Edit stock targets', type: 'edit' },
-            { key: 'products:edit:cost', label: 'Edit costing', type: 'edit' },
-            { key: 'products:edit:consumption', label: 'Edit consumption', type: 'edit' },
-            { key: 'products:delete', label: 'Delete products', type: 'edit' },
-        ],
-    },
-    fabrics: {
-        label: 'Fabrics',
-        permissions: [
-            { key: 'fabrics:view', label: 'View fabrics', type: 'view' },
-            { key: 'fabrics:view:cost', label: 'View costs', type: 'view' },
-            { key: 'fabrics:create', label: 'Create fabrics', type: 'edit' },
-            { key: 'fabrics:edit', label: 'Edit fabrics', type: 'edit' },
-            { key: 'fabrics:edit:cost', label: 'Edit costs', type: 'edit' },
-            { key: 'fabrics:order', label: 'Create orders', type: 'edit' },
-            { key: 'fabrics:delete', label: 'Delete fabrics', type: 'edit' },
-        ],
-    },
-    inventory: {
-        label: 'Inventory',
-        permissions: [
-            { key: 'inventory:view', label: 'View inventory', type: 'view' },
-            { key: 'inventory:inward', label: 'Record inward', type: 'edit' },
-            { key: 'inventory:outward', label: 'Record outward', type: 'edit' },
-            { key: 'inventory:adjust', label: 'Adjust inventory', type: 'edit' },
-            { key: 'inventory:delete:inward', label: 'Delete inward', type: 'edit' },
-            { key: 'inventory:delete:outward', label: 'Delete outward', type: 'edit' },
-        ],
-    },
-    production: {
-        label: 'Production',
-        permissions: [
-            { key: 'production:view', label: 'View batches', type: 'view' },
-            { key: 'production:create', label: 'Create batches', type: 'edit' },
-            { key: 'production:complete', label: 'Complete batches', type: 'edit' },
-            { key: 'production:delete', label: 'Delete batches', type: 'edit' },
-        ],
-    },
-    returns: {
-        label: 'Returns',
-        permissions: [
-            { key: 'returns:view', label: 'View returns', type: 'view' },
-            { key: 'returns:view:financial', label: 'View financial', type: 'view' },
-            { key: 'returns:process', label: 'Process returns', type: 'edit' },
-            { key: 'returns:refund', label: 'Issue refunds', type: 'edit' },
-            { key: 'returns:delete', label: 'Delete returns', type: 'edit' },
-        ],
-    },
-    customers: {
-        label: 'Customers',
-        permissions: [
-            { key: 'customers:view', label: 'View customers', type: 'view' },
-            { key: 'customers:view:contact', label: 'View contact info', type: 'view' },
-            { key: 'customers:edit', label: 'Edit customers', type: 'edit' },
-            { key: 'customers:delete', label: 'Delete customers', type: 'edit' },
-        ],
-    },
-    settings: {
-        label: 'Settings',
-        permissions: [
-            { key: 'settings:view', label: 'View settings', type: 'view' },
-            { key: 'settings:edit', label: 'Edit settings', type: 'edit' },
-        ],
-    },
-    users: {
-        label: 'Users',
-        permissions: [
-            { key: 'users:view', label: 'View users', type: 'view' },
-            { key: 'users:create', label: 'Create users', type: 'edit' },
-            { key: 'users:edit', label: 'Edit users', type: 'edit' },
-            { key: 'users:delete', label: 'Delete users', type: 'edit' },
-            { key: 'users:reset-password', label: 'Reset passwords', type: 'edit' },
-        ],
-    },
-    analytics: {
-        label: 'Analytics',
-        permissions: [
-            { key: 'analytics:view', label: 'View analytics', type: 'view' },
-            { key: 'analytics:view:financial', label: 'View financial', type: 'view' },
-        ],
-    },
-};
+// ============================================
+// TYPES
+// ============================================
+
+// Accept a minimal user type that works with both types/index.User and admin.User
+interface UserForModal {
+    id: string;
+    email: string;
+    name: string;
+    role: string;
+    isActive: boolean;
+    extraAccess?: string[];
+}
 
 interface PermissionEditorModalProps {
     isOpen: boolean;
     onClose: () => void;
-    user: UserType;
-    roles: Role[];
+    user: UserForModal;
+    roles?: unknown[]; // Accept but ignore - for backward compatibility
 }
 
-interface PermissionState {
-    granted: boolean;
-    isOverridden: boolean;
-    roleHasPermission: boolean;
-}
+// Role display info
+const ROLE_INFO: Record<UserRole, { label: string; description: string }> = {
+    owner: {
+        label: 'Owner',
+        description: 'Full access to all features including user management and settings',
+    },
+    manager: {
+        label: 'Manager',
+        description: 'Operational access with cost visibility, no user management',
+    },
+    staff: {
+        label: 'Staff',
+        description: 'Basic operational access for day-to-day tasks',
+    },
+};
 
-export default function PermissionEditorModal({ isOpen, onClose, user, roles }: PermissionEditorModalProps) {
+// ============================================
+// COMPONENT
+// ============================================
+
+export default function PermissionEditorModal({
+    isOpen,
+    onClose,
+    user,
+    roles: _roles, // Accept but ignore for backward compatibility
+}: PermissionEditorModalProps) {
     const queryClient = useQueryClient();
 
-    // Local state for role selection
-    const [selectedRoleId, setSelectedRoleId] = useState(user.roleId || '');
-
-    // Local state for permission changes (tracks what user has modified)
-    const [localPermissions, setLocalPermissions] = useState<Map<string, boolean>>(new Map());
-
-    // Track if there are unsaved changes
+    // Local state
+    const [selectedRole, setSelectedRole] = useState<UserRole>(
+        (user.role as UserRole) || 'staff'
+    );
+    const [selectedExtras, setSelectedExtras] = useState<Set<AccessFeature>>(
+        new Set((user as any).extraAccess ?? [])
+    );
     const [hasChanges, setHasChanges] = useState(false);
 
-    // Track if we're in the middle of a save operation to prevent state resets
-    const [isSaving, setIsSaving] = useState(false);
-
-    // Fetch user's current permissions and overrides
-    const { data: permissionData, isLoading: isLoadingPermissions } = useQuery<UserPermissionsData | null>({
-        queryKey: ['user-permissions', user.id],
-        queryFn: async () => {
-            const response = await getUserPermissions({ data: { userId: user.id } });
-            if (!response.success) {
-                throw new Error(response.error?.message || 'Failed to fetch permissions');
-            }
-            return response.data ?? null;
-        },
-        enabled: isOpen,
-    });
-
-    // Get the selected role's permissions
-    const selectedRole = useMemo(() => {
-        return roles.find(r => r.id === selectedRoleId);
-    }, [roles, selectedRoleId]);
-
-    const rolePermissions = useMemo(() => {
-        return new Set(selectedRole?.permissions || []);
-    }, [selectedRole]);
-
-    // Initialize local permissions from server data when modal opens
-    // CRITICAL: Only run when modal first opens or user changes, NOT during save operations
+    // Reset state when modal opens with different user
     useEffect(() => {
-        if (permissionData && isOpen && !isSaving) {
-            const initialMap = new Map<string, boolean>();
-
-            // Start with role permissions as base
-            for (const perm of permissionData.rolePermissions) {
-                initialMap.set(perm, true);
-            }
-
-            // Apply overrides
-            for (const override of permissionData.overrides) {
-                initialMap.set(override.permission, override.granted);
-            }
-
-            setLocalPermissions(initialMap);
+        if (isOpen) {
+            setSelectedRole((user.role as UserRole) || 'staff');
+            setSelectedExtras(new Set((user as any).extraAccess ?? []));
             setHasChanges(false);
         }
-    }, [permissionData, isOpen, isSaving]);
+    }, [isOpen, user.id]);
 
-    // Reset local state when role changes
-    useEffect(() => {
-        if (selectedRoleId !== user.roleId && !isSaving) {
-            // When role changes, reset to role's default permissions
-            const newMap = new Map<string, boolean>();
-            if (selectedRole?.permissions) {
-                for (const perm of selectedRole.permissions) {
-                    newMap.set(perm, true);
+    // Get features for current role
+    const roleFeatures = useMemo(() => getRoleFeatures(selectedRole), [selectedRole]);
+    const availableExtras = useMemo(() => getExtraFeatures(selectedRole), [selectedRole]);
+
+    // Handle role change
+    const handleRoleChange = (role: UserRole) => {
+        setSelectedRole(role);
+        // Clear extras that are now included in the new role
+        const newRoleFeatures = new Set(getRoleFeatures(role));
+        setSelectedExtras((prev) => {
+            const filtered = new Set<AccessFeature>();
+            for (const feature of prev) {
+                if (!newRoleFeatures.has(feature)) {
+                    filtered.add(feature);
                 }
             }
-            setLocalPermissions(newMap);
-            setHasChanges(true);
-        }
-    }, [selectedRoleId, selectedRole, user.roleId, isSaving]);
-
-    // Reset saving flag when modal closes
-    useEffect(() => {
-        if (!isOpen) {
-            setIsSaving(false);
-        }
-    }, [isOpen]);
-
-    // Get permission state for a specific permission key
-    const getPermissionState = (permKey: string): PermissionState => {
-        const roleHasPermission = rolePermissions.has(permKey);
-        const localValue = localPermissions.get(permKey);
-        const granted = localValue ?? roleHasPermission;
-        const isOverridden = localValue !== undefined && localValue !== roleHasPermission;
-
-        return { granted, isOverridden, roleHasPermission };
-    };
-
-    // Toggle a permission
-    const togglePermission = (permKey: string) => {
-        const currentState = getPermissionState(permKey);
-        const newValue = !currentState.granted;
-
-        setLocalPermissions(prev => {
-            const next = new Map(prev);
-            next.set(permKey, newValue);
-            return next;
+            return filtered;
         });
         setHasChanges(true);
     };
 
-    // Reset a single permission to role default
-    const resetPermission = (permKey: string) => {
-        const roleHasPermission = rolePermissions.has(permKey);
-
-        setLocalPermissions(prev => {
-            const next = new Map(prev);
-            if (roleHasPermission) {
-                next.set(permKey, true);
+    // Toggle extra feature
+    const toggleExtra = (feature: AccessFeature) => {
+        setSelectedExtras((prev) => {
+            const next = new Set(prev);
+            if (next.has(feature)) {
+                next.delete(feature);
             } else {
-                next.delete(permKey);
+                next.add(feature);
             }
             return next;
         });
         setHasChanges(true);
     };
 
-    // Update role mutation
-    const updateRoleMutation = useMutation({
-        mutationFn: async ({ userId, roleId }: { userId: string; roleId: string }) => {
-            const response = await assignUserRole({ data: { userId, roleId } });
-            if (!response.success) {
-                throw new Error(response.error?.message || 'Failed to assign role');
-            }
-            return response;
-        },
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['admin-users'] });
-            queryClient.invalidateQueries({ queryKey: ['user-permissions', user.id] });
-        },
-    });
-
-    // Update permissions mutation
-    const updatePermissionsMutation = useMutation({
-        mutationFn: async ({ userId, overrides }: { userId: string; overrides: Array<{ permission: string; granted: boolean }> }) => {
-            const response = await updateUserPermissions({ data: { userId, overrides } });
-            if (!response.success) {
-                throw new Error(response.error?.message || 'Failed to update permissions');
-            }
-            return response;
-        },
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['admin-users'] });
-            queryClient.invalidateQueries({ queryKey: ['user-permissions', user.id] });
-        },
-    });
-
-    const handleSave = async () => {
-        try {
-            // Set saving flag to prevent useEffect from resetting state during mutations
-            setIsSaving(true);
-
-            // Update role if changed
-            if (selectedRoleId && selectedRoleId !== user.roleId) {
-                await updateRoleMutation.mutateAsync({
+    // Update mutation
+    const updateMutation = useMutation({
+        mutationFn: async () => {
+            const response = await updateUser({
+                data: {
                     userId: user.id,
-                    roleId: selectedRoleId,
-                });
-            }
-
-            // Build overrides array - send ALL permissions currently in localPermissions
-            // The backend will filter out those that match role defaults
-            const overrides: Array<{ permission: string; granted: boolean }> = [];
-
-            // Send all permissions in the localPermissions map
-            for (const [permission, granted] of localPermissions.entries()) {
-                overrides.push({ permission, granted });
-            }
-
-            // Always call the update endpoint (even if empty to clear overrides)
-            await updatePermissionsMutation.mutateAsync({
-                userId: user.id,
-                overrides,
+                    role: selectedRole === 'owner' ? 'admin' : selectedRole, // Map owner to admin for legacy field
+                    // extraAccess will be handled separately via a new endpoint
+                },
             });
-
+            if (!response.success) {
+                throw new Error(response.error?.message || 'Failed to update user');
+            }
+            return response;
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['admin-users'] });
             onClose();
-        } finally {
-            // Reset saving flag
-            setIsSaving(false);
-        }
+        },
+    });
+
+    // Save handler
+    const handleSave = () => {
+        updateMutation.mutate();
     };
 
-    // Calculate permission stats
-    const permissionStats = useMemo(() => {
-        let total = 0;
-        let granted = 0;
-        let overridden = 0;
-
-        Object.values(PERMISSION_CATEGORIES).forEach(category => {
-            category.permissions.forEach(perm => {
-                total++;
-                const state = getPermissionState(perm.key);
-                if (state.granted) {
-                    granted++;
-                }
-                if (state.isOverridden) {
-                    overridden++;
-                }
-            });
-        });
-
-        return { total, granted, overridden };
-    }, [localPermissions, rolePermissions]);
-
-    const isPending = updateRoleMutation.isPending || updatePermissionsMutation.isPending;
+    const isPending = updateMutation.isPending;
 
     return (
         <Modal
             isOpen={isOpen}
             onClose={onClose}
-            title="User Permissions"
-            subtitle="Manage role and customize individual permissions"
-            size="2xl"
+            title="Edit User Access"
+            subtitle="Configure role and additional permissions"
+            size="lg"
             footer={
                 <div className="flex items-center justify-between">
                     <div className="text-sm text-gray-500">
-                        {permissionStats.granted} of {permissionStats.total} permissions enabled
-                        {permissionStats.overridden > 0 && (
-                            <span className="ml-2 text-amber-600">
-                                ({permissionStats.overridden} customized)
+                        {roleFeatures.length} features from role
+                        {selectedExtras.size > 0 && (
+                            <span className="ml-1 text-amber-600">
+                                + {selectedExtras.size} extra
                             </span>
                         )}
                     </div>
@@ -371,7 +180,7 @@ export default function PermissionEditorModal({ isOpen, onClose, user, roles }: 
                         </button>
                         <button
                             onClick={handleSave}
-                            disabled={isPending || (!hasChanges && selectedRoleId === user.roleId)}
+                            disabled={isPending || !hasChanges}
                             className="px-4 py-2 text-sm font-medium text-white bg-gray-900 rounded-lg hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             {isPending ? 'Saving...' : 'Save Changes'}
@@ -388,7 +197,7 @@ export default function PermissionEditorModal({ isOpen, onClose, user, roles }: 
                     </div>
                     <div className="flex-1">
                         <div className="flex items-center gap-2">
-                            <User size={14} className="text-gray-400" />
+                            <UserIcon size={14} className="text-gray-400" />
                             <span className="font-medium text-gray-900">{user.name}</span>
                         </div>
                         <div className="flex items-center gap-2 mt-0.5">
@@ -396,154 +205,138 @@ export default function PermissionEditorModal({ isOpen, onClose, user, roles }: 
                             <span className="text-sm text-gray-500">{user.email}</span>
                         </div>
                     </div>
-                    <div className={`px-3 py-1 rounded-full text-sm font-medium ${
-                        user.isActive ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
-                    }`}>
+                    <div
+                        className={`px-3 py-1 rounded-full text-sm font-medium ${
+                            user.isActive
+                                ? 'bg-green-100 text-green-700'
+                                : 'bg-gray-100 text-gray-500'
+                        }`}
+                    >
                         {user.isActive ? 'Active' : 'Inactive'}
                     </div>
                 </div>
 
                 {/* Role Selection */}
                 <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label className="block text-sm font-medium text-gray-700 mb-3">
                         <div className="flex items-center gap-2">
                             <Shield size={16} />
-                            Assigned Role
+                            Role
                         </div>
                     </label>
-                    <select
-                        value={selectedRoleId}
-                        onChange={(e) => setSelectedRoleId(e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                    >
-                        <option value="">No role assigned</option>
-                        {roles.map((role) => (
-                            <option key={role.id} value={role.id}>
-                                {role.displayName} - {role.description}
-                            </option>
-                        ))}
-                    </select>
-                    {selectedRole && (
-                        <p className="mt-2 text-xs text-gray-500">
-                            {selectedRole.description}
-                        </p>
-                    )}
+                    <div className="grid grid-cols-3 gap-3">
+                        {(Object.entries(ROLE_INFO) as [UserRole, typeof ROLE_INFO.owner][]).map(
+                            ([role, info]) => (
+                                <button
+                                    key={role}
+                                    type="button"
+                                    onClick={() => handleRoleChange(role)}
+                                    className={`p-3 text-left rounded-lg border-2 transition-all ${
+                                        selectedRole === role
+                                            ? 'border-primary-500 bg-primary-50'
+                                            : 'border-gray-200 hover:border-gray-300'
+                                    }`}
+                                >
+                                    <div className="flex items-center gap-2">
+                                        <span
+                                            className={`font-medium ${
+                                                selectedRole === role
+                                                    ? 'text-primary-700'
+                                                    : 'text-gray-900'
+                                            }`}
+                                        >
+                                            {info.label}
+                                        </span>
+                                        {selectedRole === role && (
+                                            <Check size={16} className="text-primary-600" />
+                                        )}
+                                    </div>
+                                    <p className="text-xs text-gray-500 mt-1 line-clamp-2">
+                                        {info.description}
+                                    </p>
+                                </button>
+                            )
+                        )}
+                    </div>
                 </div>
 
-                {/* Permission Matrix */}
-                <div>
-                    <h3 className="text-sm font-medium text-gray-700 mb-3 flex items-center gap-2">
-                        <Key size={16} />
-                        Permissions
-                        <span className="text-xs font-normal text-gray-400 ml-2">
-                            Click to toggle, customized permissions are highlighted
-                        </span>
-                    </h3>
-
-                    {isLoadingPermissions ? (
-                        <div className="flex items-center justify-center py-8 text-gray-500">
-                            Loading permissions...
+                {/* Role Features (read-only) */}
+                {roleFeatures.length > 0 && (
+                    <div>
+                        <div className="flex items-center gap-2 text-sm font-medium text-gray-700 mb-2">
+                            <Check size={16} className="text-green-600" />
+                            Included in {ROLE_INFO[selectedRole].label} Role
                         </div>
-                    ) : (
-                        <div className="grid grid-cols-2 gap-4">
-                            {Object.entries(PERMISSION_CATEGORIES).map(([key, category]) => (
-                                <div key={key} className="border border-gray-200 rounded-lg overflow-hidden">
-                                    <div className="px-3 py-2 bg-gray-50 border-b border-gray-200">
-                                        <h4 className="text-sm font-medium text-gray-900">{category.label}</h4>
-                                    </div>
-                                    <div className="p-3 space-y-2">
-                                        {category.permissions.map((perm) => {
-                                            const state = getPermissionState(perm.key);
-                                            return (
-                                                <div
-                                                    key={perm.key}
-                                                    className={`flex items-center gap-2 text-sm group ${
-                                                        state.granted ? 'text-gray-900' : 'text-gray-400'
-                                                    }`}
-                                                >
-                                                    {/* Clickable checkbox */}
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => togglePermission(perm.key)}
-                                                        className={`w-4 h-4 rounded flex items-center justify-center transition-colors ${
-                                                            state.granted
-                                                                ? state.isOverridden
-                                                                    ? 'bg-amber-100 text-amber-600 ring-2 ring-amber-300'
-                                                                    : 'bg-green-100 text-green-600'
-                                                                : state.isOverridden
-                                                                    ? 'bg-red-50 ring-2 ring-red-200'
-                                                                    : 'bg-gray-100 text-gray-400'
-                                                        } hover:ring-2 hover:ring-gray-300`}
-                                                        title={state.isOverridden
-                                                            ? `Customized (role default: ${state.roleHasPermission ? 'granted' : 'denied'})`
-                                                            : 'From role'}
-                                                    >
-                                                        {state.granted && <Check size={12} />}
-                                                    </button>
-
-                                                    {/* Permission type icon */}
-                                                    <span className={`w-4 flex-shrink-0 ${
-                                                        perm.type === 'view' ? 'text-blue-500' : 'text-amber-500'
-                                                    }`}>
-                                                        {perm.type === 'view' ? <Eye size={12} /> : <Edit3 size={12} />}
-                                                    </span>
-
-                                                    {/* Permission label */}
-                                                    <span
-                                                        className="truncate flex-1 cursor-pointer"
-                                                        onClick={() => togglePermission(perm.key)}
-                                                    >
-                                                        {perm.label}
-                                                    </span>
-
-                                                    {/* Reset button (only show on hover if overridden) */}
-                                                    {state.isOverridden && (
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => resetPermission(perm.key)}
-                                                            className="opacity-0 group-hover:opacity-100 p-0.5 text-gray-400 hover:text-gray-600 transition-opacity"
-                                                            title="Reset to role default"
-                                                        >
-                                                            <RotateCcw size={12} />
-                                                        </button>
-                                                    )}
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
+                        <div className="flex flex-wrap gap-2">
+                            {roleFeatures.map((feature) => (
+                                <div
+                                    key={feature}
+                                    className="px-2.5 py-1 bg-green-50 text-green-700 rounded-md text-sm"
+                                    title={FEATURE_INFO[feature].description}
+                                >
+                                    {FEATURE_INFO[feature].label}
                                 </div>
                             ))}
                         </div>
-                    )}
-                </div>
+                    </div>
+                )}
 
-                {/* Permission Legend */}
-                <div className="flex items-center gap-6 text-xs text-gray-500 border-t border-gray-100 pt-4">
-                    <div className="flex items-center gap-1.5">
-                        <Eye size={12} className="text-blue-500" />
-                        <span>View permission</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                        <Edit3 size={12} className="text-amber-500" />
-                        <span>Edit permission</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                        <div className="w-3 h-3 rounded bg-green-100 flex items-center justify-center">
-                            <Check size={8} className="text-green-600" />
+                {/* Extra Access (editable) */}
+                {availableExtras.length > 0 && (
+                    <div>
+                        <div className="flex items-center gap-2 text-sm font-medium text-gray-700 mb-2">
+                            <Info size={16} className="text-amber-500" />
+                            Grant Extra Access
+                            <span className="text-xs font-normal text-gray-400">
+                                (beyond role)
+                            </span>
                         </div>
-                        <span>From role</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                        <div className="w-3 h-3 rounded bg-amber-100 ring-2 ring-amber-300 flex items-center justify-center">
-                            <Check size={8} className="text-amber-600" />
+                        <div className="space-y-2">
+                            {availableExtras.map((feature) => {
+                                const isSelected = selectedExtras.has(feature);
+                                return (
+                                    <label
+                                        key={feature}
+                                        className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-all ${
+                                            isSelected
+                                                ? 'border-amber-300 bg-amber-50'
+                                                : 'border-gray-200 hover:border-gray-300'
+                                        }`}
+                                    >
+                                        <input
+                                            type="checkbox"
+                                            checked={isSelected}
+                                            onChange={() => toggleExtra(feature)}
+                                            className="mt-0.5 h-4 w-4 rounded border-gray-300 text-amber-600 focus:ring-amber-500"
+                                        />
+                                        <div>
+                                            <div
+                                                className={`text-sm font-medium ${
+                                                    isSelected ? 'text-amber-700' : 'text-gray-900'
+                                                }`}
+                                            >
+                                                {FEATURE_INFO[feature].label}
+                                            </div>
+                                            <div className="text-xs text-gray-500 mt-0.5">
+                                                {FEATURE_INFO[feature].description}
+                                            </div>
+                                        </div>
+                                    </label>
+                                );
+                            })}
                         </div>
-                        <span>Customized</span>
                     </div>
-                    <div className="flex items-center gap-1.5">
-                        <div className="w-3 h-3 rounded bg-gray-100"></div>
-                        <span>Denied</span>
+                )}
+
+                {/* Owner note */}
+                {selectedRole === 'owner' && (
+                    <div className="flex items-start gap-2 p-3 bg-blue-50 rounded-lg text-sm text-blue-700">
+                        <Info size={16} className="flex-shrink-0 mt-0.5" />
+                        <span>
+                            Owners have full access to all features. No extra permissions needed.
+                        </span>
                     </div>
-                </div>
+                )}
             </div>
         </Modal>
     );

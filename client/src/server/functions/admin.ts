@@ -50,6 +50,8 @@ const updateUserSchema = z.object({
     isActive: z.boolean().optional(),
     password: z.string().min(8).optional(),
     roleId: z.string().uuid().optional().nullable(),
+    role: z.enum(['admin', 'staff', 'manager', 'owner']).optional(), // Controls access level
+    extraAccess: z.array(z.string()).optional(), // Additional feature access beyond role
 });
 
 const deleteUserSchema = z.object({
@@ -128,6 +130,7 @@ export interface User {
     roleName: string | null;
     isActive: boolean;
     createdAt: string;
+    extraAccess?: string[]; // Additional feature access beyond role
 }
 
 export interface Channel {
@@ -183,14 +186,37 @@ export interface BackgroundJob {
 }
 
 // ============================================
-// ADMIN CHECK HELPER
+// ACCESS CHECK HELPERS
 // ============================================
 
+import { hasAccess as checkFeatureAccess, type AccessFeature } from '@coh/shared/config/access';
+
+/**
+ * Legacy admin check - use for backward compatibility
+ * Checks if user has admin/owner role
+ */
 function requireAdminRole(userRole: string): void {
-    if (userRole !== 'admin') {
+    if (userRole !== 'admin' && userRole !== 'owner') {
         throw new Error('Admin access required');
     }
 }
+
+/**
+ * Check if user has access to a feature
+ * Uses new simplified access system
+ * @internal For future use when migrating from requireAdminRole
+ */
+function _requireAccess(
+    userRole: string,
+    extraAccess: string[] | undefined,
+    feature: AccessFeature
+): void {
+    if (!checkFeatureAccess(userRole, extraAccess ?? [], feature)) {
+        throw new Error(`Access denied: ${feature} permission required`);
+    }
+}
+// Export for use in other modules
+export { _requireAccess as requireAccess };
 
 // ============================================
 // JSON VALUE HELPERS
@@ -237,6 +263,7 @@ export const getUsers = createServerFn({ method: 'GET' })
                 roleId: true,
                 isActive: true,
                 createdAt: true,
+                extraAccess: true,
                 userRole: {
                     select: {
                         id: true,
@@ -256,6 +283,7 @@ export const getUsers = createServerFn({ method: 'GET' })
             roleId: string | null;
             isActive: boolean;
             createdAt: Date;
+            extraAccess: unknown;
             userRole: { id: string; name: string; displayName: string } | null;
         }) => ({
             id: u.id,
@@ -266,6 +294,7 @@ export const getUsers = createServerFn({ method: 'GET' })
             roleName: u.userRole?.displayName || u.role,
             isActive: u.isActive,
             createdAt: u.createdAt.toISOString(),
+            extraAccess: Array.isArray(u.extraAccess) ? u.extraAccess as string[] : [],
         }));
 
         return { success: true, data: usersWithRoleName };
@@ -364,7 +393,7 @@ export const updateUser = createServerFn({ method: 'POST' })
             };
         }
 
-        const { userId, email, name, isActive, password, roleId } = data;
+        const { userId, email, name, isActive, password, roleId, role, extraAccess } = data;
 
         // If password is being updated, delegate to Express endpoint
         // which has bcryptjs working correctly
@@ -486,8 +515,28 @@ export const updateUser = createServerFn({ method: 'POST' })
         if (email !== undefined) updateData.email = email;
         if (name !== undefined) updateData.name = name;
         if (isActive !== undefined) updateData.isActive = isActive;
+        if (role !== undefined) {
+            // Prevent removing the last admin
+            if (existing.role === 'admin' && role === 'staff') {
+                const adminCount = await prisma.user.count({
+                    where: { role: 'admin', isActive: true },
+                });
+                if (adminCount <= 1) {
+                    return {
+                        success: false,
+                        error: { code: 'BAD_REQUEST', message: 'Cannot demote the last admin user' },
+                    };
+                }
+            }
+            updateData.role = role;
+            updateData.tokenVersion = { increment: 1 }; // Force re-login
+        }
         if (roleId !== undefined) {
             updateData.roleId = roleId;
+            updateData.tokenVersion = { increment: 1 }; // Force re-login
+        }
+        if (extraAccess !== undefined) {
+            updateData.extraAccess = extraAccess;
             updateData.tokenVersion = { increment: 1 }; // Force re-login
         }
 
@@ -502,6 +551,7 @@ export const updateUser = createServerFn({ method: 'POST' })
                 roleId: true,
                 isActive: true,
                 createdAt: true,
+                extraAccess: true,
                 userRole: {
                     select: {
                         id: true,
@@ -523,6 +573,7 @@ export const updateUser = createServerFn({ method: 'POST' })
                 roleName: user.userRole?.displayName || user.role,
                 isActive: user.isActive,
                 createdAt: user.createdAt.toISOString(),
+                extraAccess: Array.isArray(user.extraAccess) ? user.extraAccess as string[] : [],
             },
         };
     });

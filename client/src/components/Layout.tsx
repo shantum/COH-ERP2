@@ -5,6 +5,7 @@ import {
     Users, RotateCcw, Factory, LogOut, Menu, X, BookOpen, Settings, ClipboardCheck, PackagePlus, Clipboard, BarChart3, UserCog, ChevronLeft, ChevronRight, Search, Package, PackageX, ChevronDown, Minimize2, Maximize2, Calculator
 } from 'lucide-react';
 import { usePermissions } from '../hooks/usePermissions';
+import { useAccess, type AccessFeature } from '../hooks/useAccess';
 import { useState, useEffect, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
@@ -20,7 +21,8 @@ interface NavItem {
     to: string;
     icon: LucideIcon;
     label: string;
-    permission?: string;
+    permission?: string;  // Legacy permission key
+    access?: AccessFeature;  // New simplified access feature
 }
 
 interface NavGroup {
@@ -81,8 +83,8 @@ const navGroups: NavGroup[] = [
         items: [
             { to: '/customers', icon: Users, label: 'Customers' },
             { to: '/ledgers', icon: BookOpen, label: 'Ledgers' },
-            { to: '/analytics', icon: BarChart3, label: 'Analytics' },
-            { to: '/costing', icon: Calculator, label: 'Costing', permission: 'admin' },
+            { to: '/analytics', icon: BarChart3, label: 'Analytics', access: 'view-analytics' },
+            { to: '/costing', icon: Calculator, label: 'Costing', access: 'costing-dashboard' },
         ],
     },
     {
@@ -90,7 +92,7 @@ const navGroups: NavGroup[] = [
         collapsible: true,
         items: [
             { to: '/settings', icon: Settings, label: 'Settings' },
-            { to: '/users', icon: UserCog, label: 'Users', permission: 'users:view' },
+            { to: '/users', icon: UserCog, label: 'Users', access: 'manage-users' },
         ],
     },
 ];
@@ -98,6 +100,7 @@ const navGroups: NavGroup[] = [
 export default function Layout() {
     const { user, logout } = useAuth();
     const { hasPermission, isOwner } = usePermissions();
+    const { hasAccess } = useAccess();
     const navigate = useNavigate();
     const routerState = useRouterState();
     const location = routerState.location;
@@ -186,9 +189,14 @@ export default function Layout() {
         return items.some(item => location.pathname === item.to);
     };
 
-    // Filter items based on permissions
+    // Filter items based on access and permissions
     const filterItems = (items: NavItem[]) => {
         return items.filter(item => {
+            // Check new access system first
+            if (item.access) {
+                return hasAccess(item.access);
+            }
+            // Legacy permission check
             if (!item.permission) return true;
             // Special case: 'admin' means owner/admin only
             if (item.permission === 'admin') return isOwner;

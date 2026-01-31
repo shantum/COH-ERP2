@@ -182,6 +182,7 @@ router.post(
                 role: user.role,
                 roleId: user.roleId,
                 roleName: user.userRole?.displayName || null,
+                extraAccess: Array.isArray(user.extraAccess) ? user.extraAccess : [],
                 mustChangePassword: user.mustChangePassword,
             },
             // Include effective permissions (role + overrides) for frontend authorization
@@ -276,6 +277,7 @@ router.get(
             roleId: user.roleId,
             roleName: user.userRole?.displayName || null,
             permissions: Array.from(rolePermissions),
+            extraAccess: Array.isArray(user.extraAccess) ? user.extraAccess : [],
             mustChangePassword: user.mustChangePassword,
         });
     })

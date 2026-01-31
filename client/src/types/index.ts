@@ -133,6 +133,7 @@ export interface AuthUser {
   roleId?: string;
   roleName?: string;
   permissions?: string[];
+  extraAccess?: string[];  // Feature access beyond role
   mustChangePassword?: boolean;
 }
 

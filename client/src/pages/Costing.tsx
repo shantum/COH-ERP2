@@ -26,7 +26,7 @@ import {
 } from '../server/functions/costing';
 import { costingQueryKeys } from '../constants/queryKeys';
 import { compactThemeSmall } from '../utils/agGridHelpers';
-import { usePermissions } from '../hooks/usePermissions';
+import { useAccess } from '../hooks/useAccess';
 import type { ProductContribution } from '../server/functions/costing';
 
 ModuleRegistry.registerModules([AllCommunityModule]);
@@ -44,14 +44,14 @@ export default function Costing() {
     const navigate = useNavigate();
     const { period, channel } = Route.useSearch();
     const queryClient = useQueryClient();
-    const { isOwner } = usePermissions();
+    const { hasAccess } = useAccess();
 
-    // Admin-only access
-    if (!isOwner) {
+    // Costing dashboard access check
+    if (!hasAccess('costing-dashboard')) {
         return (
             <div className="flex items-center justify-center h-64">
                 <div className="text-center">
-                    <p className="text-gray-500">Access restricted to administrators only.</p>
+                    <p className="text-gray-500">Access restricted. You need costing dashboard permission.</p>
                 </div>
             </div>
         );
