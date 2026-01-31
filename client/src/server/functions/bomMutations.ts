@@ -1186,10 +1186,10 @@ export const linkFabricToVariation = createServerFn({ method: 'POST' })
             targetRoleId = mainFabricRole.id;
         }
 
-        // Verify variations exist
+        // Verify variations exist and get their productIds
         const variations = await prisma.variation.findMany({
             where: { id: { in: variationIds } },
-            select: { id: true, colorName: true, product: { select: { name: true } } },
+            select: { id: true, colorName: true, productId: true, product: { select: { name: true } } },
         });
 
         if (variations.length !== variationIds.length) {
@@ -1199,10 +1199,29 @@ export const linkFabricToVariation = createServerFn({ method: 'POST' })
             };
         }
 
+        // Get unique productIds to ensure ProductBomTemplates exist
+        const productIds = [...new Set(variations.map(v => v.productId))];
+
         try {
             // OPTIMIZED: Batch operations instead of sequential loop
             const results = await prisma.$transaction(async (tx: PrismaTransaction) => {
-                // NOTE: Removed legacy variation.fabricId sync - BOM is now source of truth
+                // Ensure ProductBomTemplate exists for each product+role
+                // This is required for BOM cost calculation to work
+                for (const productId of productIds) {
+                    await tx.productBomTemplate.upsert({
+                        where: {
+                            productId_roleId: { productId, roleId: targetRoleId! },
+                        },
+                        update: {}, // Don't change existing template
+                        create: {
+                            productId,
+                            roleId: targetRoleId!,
+                            defaultQuantity: 1.5, // Default fabric consumption
+                            quantityUnit: 'meter',
+                            wastagePercent: 5, // 5% wastage default
+                        },
+                    });
+                }
 
                 // 1. Find existing BOM lines for these variations
                 const existingBomLines = await tx.variationBomLine.findMany({
@@ -1215,7 +1234,7 @@ export const linkFabricToVariation = createServerFn({ method: 'POST' })
 
                 const existingVariationIds = new Set(existingBomLines.map((b: { variationId: string }) => b.variationId));
 
-                // 3. Batch update existing BOM lines (single query)
+                // 2. Batch update existing BOM lines (single query)
                 if (existingVariationIds.size > 0) {
                     await tx.variationBomLine.updateMany({
                         where: {
@@ -1226,7 +1245,7 @@ export const linkFabricToVariation = createServerFn({ method: 'POST' })
                     });
                 }
 
-                // 4. Batch create new BOM lines (single query)
+                // 3. Batch create new BOM lines (single query)
                 const newVariationIds = variationIds.filter((id) => !existingVariationIds.has(id));
                 if (newVariationIds.length > 0) {
                     await tx.variationBomLine.createMany({
@@ -1238,19 +1257,13 @@ export const linkFabricToVariation = createServerFn({ method: 'POST' })
                     });
                 }
 
-                return { updated: variationIds };
-            }, { timeout: 30000 });
-
-            // Trigger BOM cost recalculation for all linked variations (fire and forget)
-            (async () => {
-                try {
-                    for (const variationId of variationIds) {
-                        await recalculateVariationAndSkuBomCosts(prisma, variationId);
-                    }
-                } catch (err) {
-                    console.error('[linkFabricToVariation] BOM cost recalculation failed:', err);
+                // Recalculate BOM costs for all affected variations
+                for (const variationId of variationIds) {
+                    await recalculateVariationAndSkuBomCosts(tx, variationId);
                 }
-            })();
+
+                return { updated: variationIds };
+            }, { timeout: 60000 }); // 60 second timeout for bulk operations with cost recalculation
 
             return {
                 success: true,
@@ -2450,10 +2463,10 @@ export const linkVariationsToColour = createServerFn({ method: 'POST' })
                 targetRoleId = mainFabricRole.id;
             }
 
-            // Verify variations exist
+            // Verify variations exist and get their productIds
             const variations = await prisma.variation.findMany({
                 where: { id: { in: variationIds } },
-                select: { id: true, colorName: true, product: { select: { name: true } } },
+                select: { id: true, colorName: true, productId: true, product: { select: { name: true } } },
             });
 
             if (variations.length !== variationIds.length) {
@@ -2463,14 +2476,34 @@ export const linkVariationsToColour = createServerFn({ method: 'POST' })
                 };
             }
 
+            // Get unique productIds to ensure ProductBomTemplates exist
+            const productIds = [...new Set(variations.map(v => v.productId))];
+
             // Create/update BOM lines - BOM is now the single source of truth for fabric
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const results = await prisma.$transaction(async (tx: any) => {
+                // Ensure ProductBomTemplate exists for each product+role
+                // This is required for BOM cost calculation to work
+                for (const productId of productIds) {
+                    await tx.productBomTemplate.upsert({
+                        where: {
+                            productId_roleId: { productId, roleId: targetRoleId! },
+                        },
+                        update: {}, // Don't change existing template
+                        create: {
+                            productId,
+                            roleId: targetRoleId!,
+                            defaultQuantity: 1.5, // Default fabric consumption
+                            quantityUnit: 'meter',
+                            wastagePercent: 5, // 5% wastage default
+                        },
+                    });
+                }
+
                 const updated: string[] = [];
 
                 for (const variation of variations) {
                     // Create/update the BOM line with the fabric colour
-                    // NOTE: Removed legacy variation.fabricId/fabricColourId sync - BOM is source of truth
                     await tx.variationBomLine.upsert({
                         where: {
                             variationId_roleId: {
@@ -2489,9 +2522,14 @@ export const linkVariationsToColour = createServerFn({ method: 'POST' })
                     updated.push(variation.id);
                 }
 
+                // Recalculate BOM costs for all affected variations
+                for (const variationId of updated) {
+                    await recalculateVariationAndSkuBomCosts(tx, variationId);
+                }
+
                 return { updated };
             }, {
-                timeout: 30000, // 30 second timeout for bulk operations
+                timeout: 60000, // 60 second timeout for bulk operations with cost recalculation
             });
 
             return {

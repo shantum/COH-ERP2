@@ -566,7 +566,7 @@ const VariationRow = memo(function VariationRow({
                                 : 'text-gray-600'
                         }`}
                     >
-                        {row.fabricStock.toLocaleString()}
+                        {row.fabricStock.toLocaleString()}m
                     </span>
                 ) : (
                     <span className="text-xs text-gray-300">-</span>

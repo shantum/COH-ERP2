@@ -278,6 +278,7 @@ export const getProductsTree = createServerFn({ method: 'GET' })
                             id: true,
                             colourName: true,
                             colourHex: true,
+                            currentBalance: true,
                             fabric: {
                                 select: {
                                     id: true,
@@ -303,6 +304,7 @@ export const getProductsTree = createServerFn({ method: 'GET' })
                 fabricName: string;
                 materialId: string;
                 materialName: string;
+                fabricStock: number;
             }>();
             for (const v of variationsWithBomFabric) {
                 if (v.fabricColour) {
@@ -314,6 +316,7 @@ export const getProductsTree = createServerFn({ method: 'GET' })
                         fabricName: v.fabricColour.fabric?.name ?? '',
                         materialId: v.fabricColour.fabric?.material?.id ?? '',
                         materialName: v.fabricColour.fabric?.material?.name ?? '',
+                        fabricStock: v.fabricColour.currentBalance ?? 0,
                     });
                 }
             }
@@ -450,14 +453,13 @@ export const getProductsTree = createServerFn({ method: 'GET' })
                         // Get variation-level metrics
                         const variationSales = variationSalesMap.get(variation.id);
                         const variationShopifyStock = variationShopifyStockMap.get(variation.id);
-                        // NOTE: fabricColourId removed from Variation - now via BOM
-                        const fabricStock = undefined;
 
                         // Get Shopify status from variation level (via Variation.shopifySourceProductId)
                         const shopifyStatus = variationShopifyStatusMap.get(variation.id) as ShopifyStatus | undefined;
 
                         // Get fabric details from BOM
                         const bomFabric = bomFabricMap.get(variation.id);
+                        const fabricStock = bomFabric?.fabricStock;
 
                         return {
                             id: variation.id,
