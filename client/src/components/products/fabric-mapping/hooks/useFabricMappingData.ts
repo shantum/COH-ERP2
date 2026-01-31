@@ -109,7 +109,8 @@ function buildMaterialsLookup(materialsData: MaterialNode[]): MaterialsLookup {
 }
 
 /**
- * Transform products tree to flat rows with current fabric assignments
+ * Transform products tree to flat variation rows with current fabric assignments
+ * (No product grouping - each variation is a standalone row)
  */
 function buildFabricMappingRows(
     productsData: ProductTreeNode[],
@@ -122,7 +123,7 @@ function buildFabricMappingRows(
     let totalVariations = 0;
     let mappedVariations = 0;
     let unmappedVariations = 0;
-    let totalProducts = 0;
+    const productIds = new Set<string>();
 
     const query = searchQuery.toLowerCase().trim();
 
@@ -139,10 +140,6 @@ function buildFabricMappingRows(
             product.styleCode?.toLowerCase().includes(query) ||
             product.category?.toLowerCase().includes(query);
 
-        // Count mapped variations for this product
-        let productMappedCount = 0;
-        const productVariationRows: FabricMappingRow[] = [];
-
         for (const variation of variations) {
             const assignment = variationAssignments.get(variation.id);
             const isMapped = !!assignment;
@@ -152,7 +149,6 @@ function buildFabricMappingRows(
             if (filter === 'unmapped' && isMapped) continue;
 
             // Apply Shopify status filter
-            // Use variation-level status from tree data (via Variation.shopifySourceProductId)
             const variationShopifyStatus = (variation.shopifyStatus || 'not_linked') as ShopifyStatus;
             if (shopifyStatusFilter === 'active' && variationShopifyStatus !== 'active') continue;
             if (shopifyStatusFilter === 'archived' && variationShopifyStatus !== 'archived') continue;
@@ -167,14 +163,15 @@ function buildFabricMappingRows(
             if (!variationMatches) continue;
 
             totalVariations++;
+            productIds.add(product.id);
             if (isMapped) {
                 mappedVariations++;
-                productMappedCount++;
             } else {
                 unmappedVariations++;
             }
 
-            productVariationRows.push({
+            // Add variation row directly (no product grouping)
+            rows.push({
                 id: variation.id,
                 rowType: 'variation',
                 variationId: variation.id,
@@ -182,6 +179,8 @@ function buildFabricMappingRows(
                 colorHex: variation.colorHex,
                 parentProductId: product.id,
                 parentProductName: product.name,
+                // Use variation image if available, fall back to product image
+                imageUrl: variation.imageUrl || product.imageUrl,
                 isActive: variation.isActive,
                 shopifyStatus: variationShopifyStatus,
                 currentMaterialId: assignment?.materialId || null,
@@ -193,59 +192,6 @@ function buildFabricMappingRows(
                 currentColourHex: assignment?.colourHex || null,
             });
         }
-
-        // Only add product header if it has visible variations
-        if (productVariationRows.length > 0) {
-            totalProducts++;
-
-            // Calculate aggregated material/fabric from mapped variations
-            const mappedRows = productVariationRows.filter(v => v.currentMaterialId);
-            let aggregatedMaterialId: string | null = null;
-            let aggregatedMaterialName: string | null = null;
-            let aggregatedFabricId: string | null = null;
-            let aggregatedFabricName: string | null = null;
-
-            if (mappedRows.length > 0) {
-                // Check if all mapped variations have the same material
-                const firstMaterialId = mappedRows[0].currentMaterialId;
-                const allSameMaterial = mappedRows.every(v => v.currentMaterialId === firstMaterialId);
-                if (allSameMaterial && firstMaterialId) {
-                    aggregatedMaterialId = firstMaterialId;
-                    aggregatedMaterialName = mappedRows[0].currentMaterialName || null;
-                }
-
-                // Check if all mapped variations have the same fabric
-                const firstFabricId = mappedRows[0].currentFabricId;
-                const allSameFabric = mappedRows.every(v => v.currentFabricId === firstFabricId);
-                if (allSameFabric && firstFabricId) {
-                    aggregatedFabricId = firstFabricId;
-                    aggregatedFabricName = mappedRows[0].currentFabricName || null;
-                }
-            }
-
-            // Add product header row with aggregated data
-            // Product shopifyStatus is derived from variations in getProductsTree
-            rows.push({
-                id: `product-${product.id}`,
-                rowType: 'product',
-                productId: product.id,
-                productName: product.name,
-                productImageUrl: product.imageUrl,
-                styleCode: product.styleCode,
-                category: product.category,
-                gender: product.gender,
-                variationCount: productVariationRows.length,
-                mappedCount: productMappedCount,
-                shopifyStatus: (product.shopifyStatus || 'not_linked') as ShopifyStatus,
-                currentMaterialId: aggregatedMaterialId,
-                currentMaterialName: aggregatedMaterialName,
-                currentFabricId: aggregatedFabricId,
-                currentFabricName: aggregatedFabricName,
-            });
-
-            // Add variation rows
-            rows.push(...productVariationRows);
-        }
     }
 
     return {
@@ -254,7 +200,7 @@ function buildFabricMappingRows(
             totalVariations,
             mappedVariations,
             unmappedVariations,
-            totalProducts,
+            totalProducts: productIds.size,
         },
     };
 }

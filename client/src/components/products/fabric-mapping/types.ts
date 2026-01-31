@@ -27,10 +27,11 @@ export interface FabricMappingRow {
     /** Discriminator for row type */
     rowType: FabricMappingRowType;
 
-    // === Product Header Fields (rowType === 'product') ===
+    // === Product Fields (rowType === 'product') ===
     productId?: string;
     productName?: string;
-    productImageUrl?: string;
+    /** Image URL (variation image for variation rows, product image for product rows) */
+    imageUrl?: string;
     styleCode?: string;
     category?: string;
     gender?: string;

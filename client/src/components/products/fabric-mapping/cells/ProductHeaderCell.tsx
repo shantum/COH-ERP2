@@ -7,6 +7,7 @@
 
 import { memo } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
+import { getOptimizedImageUrl } from '../../../../utils/imageOptimization';
 import type { FabricMappingRow } from '../types';
 
 interface ProductHeaderCellProps {
@@ -32,9 +33,9 @@ export const ProductHeaderCell = memo(function ProductHeaderCell({ row, isExpand
                 )}
             </button>
 
-            {row.productImageUrl ? (
+            {row.imageUrl ? (
                 <img
-                    src={row.productImageUrl}
+                    src={getOptimizedImageUrl(row.imageUrl, 'xs') || row.imageUrl}
                     alt=""
                     className="w-8 h-8 rounded object-cover flex-shrink-0 border border-gray-100"
                 />

@@ -290,10 +290,10 @@ export function FabricMappingView() {
             {!hasChanges && (
                 <div className="px-4 py-1.5 border-t border-gray-100 bg-gray-50/50 text-[11px] text-gray-400 flex items-center justify-between flex-shrink-0">
                     <span>
-                        Set Material/Fabric at product level · Select Colour per variation · Save to apply
+                        Select Material → Fabric → Colour · Save to apply
                     </span>
                     <span>
-                        {summary.totalProducts} products
+                        {summary.totalVariations} variations
                     </span>
                 </div>
             )}

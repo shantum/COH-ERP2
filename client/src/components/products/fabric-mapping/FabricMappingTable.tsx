@@ -1,19 +1,12 @@
 /**
- * FabricMappingTable - Flat table with visual product grouping
+ * FabricMappingTable - Flat variation table with cascading dropdowns
  *
- * Renders product header rows (grey, collapsible) and variation rows (white, with dropdowns).
- * Handles cascading dropdown state and pending changes tracking.
- *
- * Features:
- * - Product-level Material/Fabric selection that cascades to all variations
- * - Variation-level Colour selection (creates pending changes)
- * - Products start collapsed for performance
+ * Renders a flat list of variations with Material → Fabric → Colour cascading dropdowns.
+ * Each variation row shows the product name and variation color for context.
  */
 
-import { useState, useCallback, useMemo, useEffect } from 'react';
-import { ChevronsDownUp, ChevronsUpDown } from 'lucide-react';
+import { useState, useCallback, useMemo } from 'react';
 import {
-    ProductHeaderCell,
     VariationCell,
     MaterialSelectCell,
     FabricSelectCell,
@@ -48,109 +41,16 @@ export function FabricMappingTable({
     onAddFabric,
     onAddColour,
 }: FabricMappingTableProps) {
-    // Track expanded products (start collapsed for performance)
-    const [expandedProducts, setExpandedProducts] = useState<Set<string>>(new Set());
-
-    // Get all product IDs for expand/collapse all
-    const allProductIds = useMemo(
-        () => rows.filter((r) => r.rowType === 'product').map((r) => r.productId!),
-        [rows]
-    );
-
-    const allExpanded = allProductIds.length > 0 && allProductIds.every((id) => expandedProducts.has(id));
-
-    // Expand/collapse all products
-    const handleExpandAll = useCallback(() => {
-        setExpandedProducts(new Set(allProductIds));
-    }, [allProductIds]);
-
-    const handleCollapseAll = useCallback(() => {
-        setExpandedProducts(new Set());
-    }, []);
-
-    // Track cascading selection state per variation (separate from pending changes)
+    // Track cascading selection state per variation
     const [selectionState, setSelectionState] = useState<Map<string, CascadingSelection>>(
         new Map()
     );
 
-    // Track product-level selection state (for cascading to variations)
-    // Persisted to localStorage so users can come back later to finish
-    const [productSelectionState, setProductSelectionState] = useState<
-        Map<string, { materialId: string | null; fabricId: string | null }>
-    >(() => {
-        // Load from localStorage on mount
-        try {
-            const saved = localStorage.getItem('fabricMapping:productSelections');
-            if (saved) {
-                const parsed = JSON.parse(saved);
-                return new Map(Object.entries(parsed));
-            }
-        } catch (e) {
-            console.warn('Failed to load fabric mapping draft:', e);
-        }
-        return new Map();
-    });
-
-    // Persist product selections to localStorage
-    useEffect(() => {
-        try {
-            const obj = Object.fromEntries(productSelectionState);
-            localStorage.setItem('fabricMapping:productSelections', JSON.stringify(obj));
-        } catch (e) {
-            console.warn('Failed to save fabric mapping draft:', e);
-        }
-    }, [productSelectionState]);
-
-    // Get variation IDs for a product
-    const getVariationIdsForProduct = useCallback(
-        (productId: string): string[] => {
-            return rows
-                .filter((r) => r.rowType === 'variation' && r.parentProductId === productId)
-                .map((r) => r.variationId!)
-                .filter(Boolean);
-        },
-        [rows]
-    );
-
-    // Toggle product expansion
-    const toggleProduct = useCallback((productId: string) => {
-        setExpandedProducts((prev) => {
-            const next = new Set(prev);
-            if (next.has(productId)) {
-                next.delete(productId);
-            } else {
-                next.add(productId);
-            }
-            return next;
-        });
-    }, []);
-
-    // Get product-level selection state
-    const getProductSelection = useCallback(
-        (productId: string): { materialId: string | null; fabricId: string | null } => {
-            return productSelectionState.get(productId) || { materialId: null, fabricId: null };
-        },
-        [productSelectionState]
-    );
-
-    // Get selection state for a variation (check product-level first, then variation-level)
+    // Get selection state for a variation
     const getSelection = useCallback(
         (variationId: string, row: FabricMappingRow): CascadingSelection => {
             const existing = selectionState.get(variationId);
             if (existing) return existing;
-
-            // Check if there's a product-level selection
-            const productSelection = row.parentProductId
-                ? productSelectionState.get(row.parentProductId)
-                : null;
-
-            if (productSelection?.materialId || productSelection?.fabricId) {
-                return {
-                    materialId: productSelection.materialId || row.currentMaterialId || null,
-                    fabricId: productSelection.fabricId || row.currentFabricId || null,
-                    colourId: row.currentColourId || null,
-                };
-            }
 
             // Default from current assignment
             return {
@@ -159,63 +59,10 @@ export function FabricMappingTable({
                 colourId: row.currentColourId || null,
             };
         },
-        [selectionState, productSelectionState]
+        [selectionState]
     );
 
-    // Handle product-level material change (cascades to all variations)
-    const handleProductMaterialChange = useCallback(
-        (productId: string, materialId: string | null) => {
-            // Update product selection state
-            setProductSelectionState((prev) => {
-                const next = new Map(prev);
-                next.set(productId, { materialId, fabricId: null }); // Reset fabric when material changes
-                return next;
-            });
-
-            // Clear variation-level selections and pending changes for this product
-            const variationIds = getVariationIdsForProduct(productId);
-            setSelectionState((prev) => {
-                const next = new Map(prev);
-                for (const varId of variationIds) {
-                    next.delete(varId);
-                }
-                return next;
-            });
-            for (const varId of variationIds) {
-                onPendingChange(varId, null);
-            }
-        },
-        [getVariationIdsForProduct, onPendingChange]
-    );
-
-    // Handle product-level fabric change (cascades to all variations)
-    const handleProductFabricChange = useCallback(
-        (productId: string, fabricId: string | null) => {
-            // Update product selection state
-            setProductSelectionState((prev) => {
-                const next = new Map(prev);
-                const current = next.get(productId) || { materialId: null, fabricId: null };
-                next.set(productId, { ...current, fabricId });
-                return next;
-            });
-
-            // Clear variation-level selections and pending changes for this product
-            const variationIds = getVariationIdsForProduct(productId);
-            setSelectionState((prev) => {
-                const next = new Map(prev);
-                for (const varId of variationIds) {
-                    next.delete(varId);
-                }
-                return next;
-            });
-            for (const varId of variationIds) {
-                onPendingChange(varId, null);
-            }
-        },
-        [getVariationIdsForProduct, onPendingChange]
-    );
-
-    // Handle variation-level material selection change
+    // Handle material selection change
     const handleMaterialChange = useCallback(
         (variationId: string, materialId: string | null) => {
             setSelectionState((prev) => {
@@ -233,7 +80,7 @@ export function FabricMappingTable({
         [onPendingChange]
     );
 
-    // Handle variation-level fabric selection change
+    // Handle fabric selection change
     const handleFabricChange = useCallback(
         (variationId: string, fabricId: string | null, currentMaterialId: string | null) => {
             setSelectionState((prev) => {
@@ -331,31 +178,16 @@ export function FabricMappingTable({
         [getSelection, onPendingChange]
     );
 
-    // Filter visible rows based on expanded state (collapsed by default)
-    const visibleRows = useMemo(() => {
-        const result: FabricMappingRow[] = [];
-        let currentProductId: string | null = null;
-        let isProductExpanded = false;
+    // Filter to only variation rows (data hook should only return variations now, but be safe)
+    const variationRows = useMemo(
+        () => rows.filter((row) => row.rowType === 'variation'),
+        [rows]
+    );
 
-        for (const row of rows) {
-            if (row.rowType === 'product') {
-                currentProductId = row.productId || null;
-                isProductExpanded = expandedProducts.has(currentProductId || '');
-                result.push(row);
-            } else if (row.rowType === 'variation') {
-                if (isProductExpanded) {
-                    result.push(row);
-                }
-            }
-        }
-
-        return result;
-    }, [rows, expandedProducts]);
-
-    if (rows.length === 0) {
+    if (variationRows.length === 0) {
         return (
             <div className="flex items-center justify-center h-32 text-gray-500 text-sm">
-                No products found
+                No variations found
             </div>
         );
     }
@@ -366,20 +198,7 @@ export function FabricMappingTable({
                 <thead className="sticky top-0 bg-white z-10 shadow-sm">
                     <tr className="border-b border-gray-200">
                         <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style={{ width: '280px' }}>
-                            <div className="flex items-center gap-2">
-                                <button
-                                    onClick={allExpanded ? handleCollapseAll : handleExpandAll}
-                                    className="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
-                                    title={allExpanded ? 'Collapse all' : 'Expand all'}
-                                >
-                                    {allExpanded ? (
-                                        <ChevronsDownUp size={14} />
-                                    ) : (
-                                        <ChevronsUpDown size={14} />
-                                    )}
-                                </button>
-                                <span>Product / Variation</span>
-                            </div>
+                            Variation
                         </th>
                         <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style={{ width: '160px' }}>
                             Material
@@ -399,83 +218,8 @@ export function FabricMappingTable({
                     </tr>
                 </thead>
                 <tbody>
-                    {visibleRows.map((row) => {
-                        const isProductRow = row.rowType === 'product';
-                        const isPending = !isProductRow && pendingChanges.has(row.variationId || '');
-
-                        if (isProductRow) {
-                            const productId = row.productId || '';
-                            const productSelection = getProductSelection(productId);
-                            const isExpanded = expandedProducts.has(productId);
-
-                            // Create a pseudo-selection for product-level dropdowns
-                            // Use manual selection if set, otherwise fall back to aggregated data from variations
-                            const productCascadeSelection: CascadingSelection = {
-                                materialId: productSelection.materialId || row.currentMaterialId || null,
-                                fabricId: productSelection.fabricId || row.currentFabricId || null,
-                                colourId: null,
-                            };
-
-                            return (
-                                <tr key={row.id} className="bg-gray-50/80 hover:bg-gray-100/80 transition-colors">
-                                    <td
-                                        className="px-3 py-2 border-b border-gray-100 cursor-pointer"
-                                        onClick={() => toggleProduct(productId)}
-                                    >
-                                        <ProductHeaderCell
-                                            row={row}
-                                            isExpanded={isExpanded}
-                                            onToggle={() => toggleProduct(productId)}
-                                        />
-                                    </td>
-                                    <td
-                                        className="px-3 py-2 border-b border-gray-100"
-                                        onClick={(e) => e.stopPropagation()}
-                                    >
-                                        <MaterialSelectCell
-                                            selection={productCascadeSelection}
-                                            materials={materialsLookup.materials}
-                                            currentMaterialId={row.currentMaterialId || null}
-                                            currentMaterialName={row.currentMaterialName || null}
-                                            onChange={(materialId) =>
-                                                handleProductMaterialChange(productId, materialId)
-                                            }
-                                            onAddNew={onAddMaterial}
-                                        />
-                                    </td>
-                                    <td
-                                        className="px-3 py-2 border-b border-gray-100"
-                                        onClick={(e) => e.stopPropagation()}
-                                    >
-                                        <FabricSelectCell
-                                            selection={productCascadeSelection}
-                                            fabrics={materialsLookup.fabrics}
-                                            currentFabricId={row.currentFabricId || null}
-                                            currentFabricName={row.currentFabricName || null}
-                                            onChange={(fabricId) =>
-                                                handleProductFabricChange(productId, fabricId)
-                                            }
-                                            onAddNew={
-                                                productCascadeSelection.materialId
-                                                    ? () => onAddFabric?.(productCascadeSelection.materialId!)
-                                                    : undefined
-                                            }
-                                        />
-                                    </td>
-                                    <td className="px-3 py-2 border-b border-gray-100 text-center text-gray-400 text-xs">
-                                        -
-                                    </td>
-                                    <td className="px-3 py-2 border-b border-gray-100 text-center">
-                                        <ShopifyStatusCell status={row.shopifyStatus} />
-                                    </td>
-                                    <td className="px-3 py-2 border-b border-gray-100 text-center">
-                                        <StatusCell row={row} />
-                                    </td>
-                                </tr>
-                            );
-                        }
-
-                        // Variation row
+                    {variationRows.map((row) => {
+                        const isPending = pendingChanges.has(row.variationId || '');
                         const selection = getSelection(row.variationId || '', row);
 
                         return (
