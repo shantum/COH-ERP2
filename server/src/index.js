@@ -34,7 +34,7 @@ import shopifyRoutes from './routes/shopify/index.js';
 import adminRoutes from './routes/admin.js';
 import webhookRoutes from './routes/webhooks.js';
 // Repacking routes migrated to TanStack Start Server Functions
-// Tracking routes migrated to TanStack Start Server Functions
+import trackingRoutes from './routes/tracking.js';
 import remittanceRoutes from './routes/remittance.js';
 import pincodeRoutes from './routes/pincodes.js';
 import sseRoutes from './routes/sse.js';
@@ -136,6 +136,7 @@ app.use('/api/events', sseRoutes);
 app.use('/api/pulse', pulseRoutes);
 app.use('/api/internal', internalRoutes);
 app.use('/api/returns', returnsRoutes);
+app.use('/api/tracking', trackingRoutes);
 app.use('/api/admin/sheet-sync', sheetSyncRoutes);
 
 // Health check

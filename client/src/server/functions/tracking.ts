@@ -351,3 +351,125 @@ export const getAwbTracking = createServerFn({ method: 'GET' })
             throw error;
         }
     });
+
+// ============================================
+// TRACK SHIPMENT LOOKUP - For Tracking Page
+// ============================================
+
+const trackShipmentInputSchema = z.object({
+    query: z.string().min(1, 'Search query is required'),
+    type: z.enum(['awb', 'order']).default('awb'),
+});
+
+export type TrackShipmentInput = z.infer<typeof trackShipmentInputSchema>;
+
+/** Raw API response type - needs explicit typing for TanStack Server Functions */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type RawApiResponse = Record<string, any> | null;
+
+/** Full tracking response with raw data for debugging */
+export interface TrackShipmentResponse {
+    success: boolean;
+    awbNumber: string;
+    orderNumber?: string;
+    courier?: string;
+    trackingData: AwbTrackingResponse | null;
+    rawApiResponse: RawApiResponse;
+    error?: string;
+}
+
+/**
+ * Track shipment by AWB or Order Number
+ *
+ * Returns both formatted tracking data and raw API response.
+ * Used by the tracking lookup page.
+ */
+export const trackShipment = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => trackShipmentInputSchema.parse(input))
+    .handler(async ({ data }): Promise<TrackShipmentResponse> => {
+        try {
+            const baseUrl = getApiBaseUrl();
+            const authToken = getCookie('auth_token');
+            const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+            if (authToken) {
+                headers['Authorization'] = `Bearer ${authToken}`;
+            }
+
+            let awbNumber = data.query.trim();
+            let orderNumber: string | undefined;
+
+            // If searching by order, first look up the AWB
+            if (data.type === 'order') {
+                orderNumber = awbNumber;
+                const orderLookupResponse = await fetch(`${baseUrl}/tracking/order-awb/${encodeURIComponent(orderNumber)}`, {
+                    method: 'GET',
+                    headers,
+                });
+
+                if (!orderLookupResponse.ok) {
+                    const error = await orderLookupResponse.json().catch(() => ({ error: 'Order not found' }));
+                    return {
+                        success: false,
+                        awbNumber: '',
+                        orderNumber,
+                        trackingData: null,
+                        rawApiResponse: null,
+                        error: error.error || 'Order not found or has no AWB',
+                    };
+                }
+
+                const orderData = await orderLookupResponse.json();
+                if (!orderData.awbNumber) {
+                    return {
+                        success: false,
+                        awbNumber: '',
+                        orderNumber,
+                        trackingData: null,
+                        rawApiResponse: null,
+                        error: 'Order has not been shipped yet (no AWB)',
+                    };
+                }
+                awbNumber = orderData.awbNumber;
+            }
+
+            // Fetch tracking with raw data
+            const response = await fetch(`${baseUrl}/tracking/lookup/${encodeURIComponent(awbNumber)}`, {
+                method: 'GET',
+                headers,
+            });
+
+            if (!response.ok) {
+                const error = await response.json().catch(() => ({ error: 'Tracking not found' }));
+                return {
+                    success: false,
+                    awbNumber,
+                    orderNumber,
+                    trackingData: null,
+                    rawApiResponse: null,
+                    error: error.error || 'Failed to fetch tracking',
+                };
+            }
+
+            const result = await response.json();
+
+            return {
+                success: true,
+                awbNumber,
+                orderNumber,
+                courier: result.trackingData?.courier,
+                trackingData: result.trackingData,
+                rawApiResponse: result.rawApiResponse,
+            };
+        } catch (error: unknown) {
+            console.error('[Server Function] Error in trackShipment:', error);
+            const message = error instanceof Error ? error.message : 'Unknown error';
+            return {
+                success: false,
+                awbNumber: data.query,
+                trackingData: null,
+                rawApiResponse: null,
+                error: message,
+            };
+        }
+    });
