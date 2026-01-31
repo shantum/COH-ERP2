@@ -17,6 +17,7 @@ import type { PermissionColDef } from '../hooks/usePermissionColumns';
 import { InventoryStatusBadge } from '../components/common/grid';
 import type { ViewLevel } from '../components/catalog/FabricEditPopover';
 import { FabricDisplayCell } from '../components/catalog/FabricEditPopover';
+import { getOptimizedImageUrl } from './imageOptimization';
 
 // All column IDs in display order
 export const ALL_COLUMN_IDS = [
@@ -112,9 +113,10 @@ export function createColumnDefs({
                 if (!params.value) return <div className="w-8 h-8 bg-gray-100 rounded flex items-center justify-center text-gray-300 text-xs">-</div>;
                 return (
                     <img
-                        src={params.value}
+                        src={getOptimizedImageUrl(params.value, 'xs') || params.value}
                         alt=""
                         className="w-8 h-8 object-cover rounded"
+                        loading="lazy"
                     />
                 );
             },

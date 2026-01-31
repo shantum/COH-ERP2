@@ -38,6 +38,7 @@ import { createSupplier } from '../server/functions/fabricMutations';
 import type { FabricColour } from '../components/products/unified-edit/types';
 import { ColorSwatch } from '../components/products/unified-edit/shared/FabricSelector';
 import { useAuth } from '../hooks/useAuth';
+import { getOptimizedImageUrl } from '../utils/imageOptimization';
 
 // ============================================
 // TYPES
@@ -634,9 +635,10 @@ function FabricColourField({ control, fabricColours, error }: FabricColourFieldP
                                                                         {fc.productImages.map((img, idx) => (
                                                                             <img
                                                                                 key={idx}
-                                                                                src={img}
+                                                                                src={getOptimizedImageUrl(img, 'xs') || img}
                                                                                 alt=""
                                                                                 className="w-6 h-6 rounded border border-white object-cover"
+                                                                                loading="lazy"
                                                                             />
                                                                         ))}
                                                                     </div>
