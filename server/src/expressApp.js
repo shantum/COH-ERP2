@@ -38,6 +38,8 @@ import internalRoutes from './routes/internal.js';
 import returnsRoutes from './routes/returns.js';
 import trackingRoutes from './routes/tracking.js';
 import sheetSyncRoutes from './routes/sheetSync.js';
+import returnPrimeWebhooks from './routes/returnPrimeWebhooks.js';
+import returnPrimeSync from './routes/returnPrimeSync.js';
 import { pulseBroadcaster } from './services/pulseBroadcaster.js';
 import scheduledSync from './services/scheduledSync.js';
 import trackingSync from './services/trackingSync.js';
@@ -116,6 +118,13 @@ export async function createExpressApp() {
     }
   }));
 
+  // Capture raw body for Return Prime webhook signature verification
+  app.use('/api/webhooks/returnprime', express.json({
+    verify: (req, res, buf) => {
+      req.rawBody = buf.toString();
+    }
+  }));
+
   // Standard JSON parsing for other routes
   app.use(express.json({ limit: '10mb' }));
 
@@ -140,6 +149,10 @@ export async function createExpressApp() {
   app.use('/api/returns', returnsRoutes);
   app.use('/api/tracking', trackingRoutes);
   app.use('/api/admin/sheet-sync', sheetSyncRoutes);
+
+  // Return Prime integration
+  app.use('/api/webhooks/returnprime', returnPrimeWebhooks);
+  app.use('/api/returnprime', returnPrimeSync);
 
   // Health check
   app.get('/api/health', (req, res) => {

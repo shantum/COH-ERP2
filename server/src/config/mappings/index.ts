@@ -35,3 +35,9 @@ export {
     type GarmentTypeRule,
     type ShopifyProductInput,
 } from './productCategory.js';
+
+// Return Prime Reason → COH-ERP ReturnReasonCategory
+export {
+    RETURNPRIME_REASON_MAP,
+    mapReturnPrimeReason,
+} from './returnPrimeReasons.js';

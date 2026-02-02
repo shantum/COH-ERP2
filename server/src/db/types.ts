@@ -4,6 +4,61 @@ export type Generated<T> = T extends ColumnType<infer S, infer I, infer U>
   : ColumnType<T, T | undefined, T>;
 export type Timestamp = ColumnType<Date, Date | string, Date | string>;
 
+export type ChannelImportBatch = {
+    id: Generated<string>;
+    channel: string;
+    filename: string;
+    rowsTotal: number;
+    rowsImported: number;
+    rowsSkipped: number;
+    rowsUpdated: number;
+    errors: string | null;
+    dateRangeStart: Timestamp | null;
+    dateRangeEnd: Timestamp | null;
+    importedAt: Generated<Timestamp>;
+    importedBy: string | null;
+};
+export type ChannelOrderLine = {
+    id: Generated<string>;
+    channel: string;
+    channelOrderId: string;
+    channelRef: string | null;
+    channelItemId: string;
+    orderDate: Timestamp;
+    orderType: string;
+    financialStatus: string | null;
+    fulfillmentStatus: string | null;
+    skuCode: string;
+    channelSkuCode: string | null;
+    skuTitle: string | null;
+    quantity: Generated<number>;
+    mrp: number | null;
+    sellerPrice: number | null;
+    buyerPrice: number | null;
+    itemTotal: number | null;
+    itemDiscount: number | null;
+    orderTotal: number | null;
+    taxPercent: number | null;
+    taxType: string | null;
+    taxAmount: number | null;
+    courierName: string | null;
+    trackingNumber: string | null;
+    dispatchByDate: Timestamp | null;
+    dispatchDate: Timestamp | null;
+    manifestedDate: Timestamp | null;
+    deliveryDate: Timestamp | null;
+    returnDate: Timestamp | null;
+    channelReturnDate: Timestamp | null;
+    customerName: string | null;
+    customerCity: string | null;
+    customerState: string | null;
+    customerZip: string | null;
+    invoiceNumber: string | null;
+    batchNo: string | null;
+    hsnCode: string | null;
+    importedAt: Generated<Timestamp>;
+    importBatchId: string | null;
+};
 export type ComponentRole = {
     id: Generated<string>;
     typeId: string;
@@ -378,6 +433,13 @@ export type OrderLine = {
     returnClosedManuallyById: string | null;
     returnClosedReason: string | null;
     returnNotes: string | null;
+    returnPrimeRequestId: string | null;
+    returnPrimeRequestNumber: string | null;
+    returnPrimeStatus: string | null;
+    returnPrimeCreatedAt: Timestamp | null;
+    returnPrimeUpdatedAt: Timestamp | null;
+    returnPrimeSyncedAt: Timestamp | null;
+    returnPrimeSyncError: string | null;
 };
 export type OrderPayment = {
     id: Generated<string>;
@@ -820,6 +882,7 @@ export type User = {
     mustChangePassword: Generated<boolean>;
     roleId: string | null;
     tokenVersion: Generated<number>;
+    extraAccess: Generated<unknown>;
 };
 export type UserGridPreference = {
     id: Generated<string>;
@@ -885,6 +948,7 @@ export type WebhookLog = {
     webhookId: string;
     topic: string;
     resourceId: string | null;
+    source: Generated<string>;
     status: Generated<string>;
     responseCode: number | null;
     processingTime: number | null;
@@ -907,6 +971,8 @@ export type WriteOffLog = {
     createdAt: Generated<Timestamp>;
 };
 export type DB = {
+    ChannelImportBatch: ChannelImportBatch;
+    ChannelOrderLine: ChannelOrderLine;
     ComponentRole: ComponentRole;
     ComponentType: ComponentType;
     CostConfig: CostConfig;

@@ -604,6 +604,15 @@ model OrderLine {
   // === INTERNAL ===
   returnNotes               String?
 
+  // === RETURN PRIME INTEGRATION ===
+  returnPrimeRequestId        String?    // RP request ID
+  returnPrimeRequestNumber    String?    // Human-readable (e.g., "RET625")
+  returnPrimeStatus           String?    // approved, received, inspected, refunded, rejected, archived
+  returnPrimeCreatedAt        DateTime?
+  returnPrimeUpdatedAt        DateTime?
+  returnPrimeSyncedAt         DateTime?  // Last sync TO Return Prime
+  returnPrimeSyncError        String?    // For retry logic
+
   // Relations
   customizedBy         User?               @relation("CustomizedBy", fields: [customizedById], references: [id])
   order                Order               @relation(fields: [orderId], references: [id])
@@ -644,6 +653,8 @@ model OrderLine {
   @@index([returnReceivedById])
   @@index([returnClosedManuallyById])
   @@index([returnExchangeOrderId])
+  @@index([returnPrimeRequestId])
+  @@index([returnPrimeStatus, returnPrimeUpdatedAt])  // Composite for status queries
 }
 
 model ReturnRequest {
@@ -1095,6 +1106,7 @@ model WebhookLog {
   webhookId      String    @unique
   topic          String
   resourceId     String?
+  source         String    @default("shopify")  // 'shopify' | 'returnprime'
   status         String    @default("received")
   responseCode   Int?
   processingTime Int?
@@ -1108,6 +1120,7 @@ model WebhookLog {
   @@index([topic])
   @@index([resourceId])
   @@index([receivedAt])
+  @@index([source, topic])
 }
 
 // Stores raw iThink API responses for debugging (max 5 per AWB, rotated)

@@ -96,6 +96,19 @@ const envSchema = z.object({
     ITHINK_DEFAULT_LOGISTICS: z.string().default('delhivery'),
 
     // ----------------------------------------
+    // RETURN PRIME INTEGRATION
+    // ----------------------------------------
+
+    /** Return Prime API token for authentication */
+    RETURNPRIME_API_TOKEN: z.string().optional(),
+
+    /** Return Prime store ID */
+    RETURNPRIME_STORE_ID: z.string().optional(),
+
+    /** Return Prime webhook secret for HMAC verification */
+    RETURNPRIME_WEBHOOK_SECRET: z.string().optional(),
+
+    // ----------------------------------------
     // VITE (passed through to client build)
     // ----------------------------------------
 
