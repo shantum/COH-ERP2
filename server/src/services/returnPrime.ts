@@ -15,7 +15,7 @@ import prisma from '../lib/prisma.js';
 // CONSTANTS
 // ============================================
 
-const API_BASE_URL = 'https://api.returnprime.co';
+const API_BASE_URL = 'https://admin.returnprime.com';
 const API_TIMEOUT_MS = 30000;
 const MAX_RETRIES = 2;
 const INITIAL_RETRY_DELAY_MS = 1000;
