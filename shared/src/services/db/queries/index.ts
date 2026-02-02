@@ -36,6 +36,12 @@ export {
     getTopMaterialsKysely,
     getTopFabricColoursKysely,
     getDashboardAnalytics,
+    // Sales analytics breakdown queries
+    getSalesBreakdownByMaterial,
+    getSalesBreakdownByFabric,
+    getSalesBreakdownByFabricColour,
+    getSalesBreakdownByChannel,
+    getSalesBreakdownByStandardColor,
     type PipelineCounts,
     type PaymentSplitData,
     type RevenueMetrics,
@@ -46,6 +52,7 @@ export {
     type TopMaterialData,
     type TopFabricColourData,
     type DashboardAnalytics,
+    type SalesBreakdownRow,
 } from './dashboard.js';
 
 // Materials queries

@@ -12,7 +12,19 @@ import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth';
 import { getPrisma } from '@coh/shared/services/db';
-import { getISTMidnightAsUTC, getISTMonthStartAsUTC } from '@coh/shared';
+import { getISTMidnightAsUTC, getISTMonthStartAsUTC, parseISTDateAsUTC, parseISTDateEndAsUTC } from '@coh/shared';
+
+// Dynamic import helper for Kysely queries (prevents bundling Node.js code into client)
+async function getKyselyQueries() {
+    const module = await import('@coh/shared/services/db/queries/dashboard');
+    return {
+        getSalesBreakdownByMaterial: module.getSalesBreakdownByMaterial,
+        getSalesBreakdownByFabric: module.getSalesBreakdownByFabric,
+        getSalesBreakdownByFabricColour: module.getSalesBreakdownByFabricColour,
+        getSalesBreakdownByChannel: module.getSalesBreakdownByChannel,
+        getSalesBreakdownByStandardColor: module.getSalesBreakdownByStandardColor,
+    };
+}
 
 // ============================================
 // INPUT SCHEMAS
@@ -1080,10 +1092,82 @@ export const getSalesAnalytics = createServerFn({ method: 'GET' })
 
         const { dimension, startDate, endDate, orderStatus } = data;
 
-        // Parse dates (default to last 30 days in IST)
-        // User-provided dates are YYYY-MM-DD strings which parse as UTC midnight
-        const end = endDate ? new Date(endDate + 'T23:59:59.999Z') : new Date();
-        const start = startDate ? new Date(startDate) : getISTMidnightAsUTC(-30);
+        // Parse dates as IST (default to last 30 days)
+        // User-provided dates (YYYY-MM-DD) are interpreted as IST, not UTC
+        const end = endDate ? parseISTDateEndAsUTC(endDate) : new Date();
+        const start = startDate ? parseISTDateAsUTC(startDate) : getISTMidnightAsUTC(-30);
+
+        // For BOM-based dimensions (material, fabric, fabricColour, standardColor) and channel,
+        // use optimized Kysely queries that do aggregation at DB level
+        const kyselyDimensions = ['material', 'fabric', 'fabricColour', 'standardColor', 'channel'] as const;
+        type KyselyDimension = typeof kyselyDimensions[number];
+
+        if (kyselyDimensions.includes(dimension as KyselyDimension)) {
+            const kyselyQueries = await getKyselyQueries();
+            const lineStatusFilter = orderStatus ?? 'all';
+
+            let rows: Awaited<ReturnType<typeof kyselyQueries.getSalesBreakdownByMaterial>>;
+
+            switch (dimension as KyselyDimension) {
+                case 'material':
+                    rows = await kyselyQueries.getSalesBreakdownByMaterial(start, end, lineStatusFilter);
+                    break;
+                case 'fabric':
+                    rows = await kyselyQueries.getSalesBreakdownByFabric(start, end, lineStatusFilter);
+                    break;
+                case 'fabricColour':
+                    rows = await kyselyQueries.getSalesBreakdownByFabricColour(start, end, lineStatusFilter);
+                    break;
+                case 'standardColor':
+                    rows = await kyselyQueries.getSalesBreakdownByStandardColor(start, end, lineStatusFilter);
+                    break;
+                case 'channel':
+                    rows = await kyselyQueries.getSalesBreakdownByChannel(start, end, lineStatusFilter);
+                    break;
+                default:
+                    rows = [];
+            }
+
+            // Convert Kysely results to SalesDataPoint format
+            const totalUnits = rows.reduce((sum, r) => sum + r.units, 0);
+            const totalRevenue = rows.reduce((sum, r) => sum + r.revenue, 0);
+            const totalOrders = rows.reduce((sum, r) => sum + r.orderCount, 0);
+            const avgOrderValue = totalOrders > 0 ? Math.round((totalRevenue / totalOrders) * 100) / 100 : 0;
+
+            const dataPoints: SalesDataPoint[] = rows.map(r => ({
+                key: r.key,
+                label: r.label,
+                units: r.units,
+                revenue: Math.round(r.revenue * 100) / 100,
+                orders: r.orderCount,
+                avgOrderValue: r.orderCount > 0 ? Math.round((r.revenue / r.orderCount) * 100) / 100 : 0,
+            }));
+
+            const breakdown: BreakdownItem[] = dataPoints.map(d => ({
+                key: d.key,
+                label: d.label,
+                revenue: d.revenue,
+                units: d.units,
+                orders: d.orders,
+                avgOrderValue: d.avgOrderValue,
+                percentOfTotal: totalRevenue > 0 ? Math.round((d.revenue / totalRevenue) * 10000) / 100 : 0,
+            }));
+
+            return {
+                dimension,
+                startDate: start.toISOString(),
+                endDate: end.toISOString(),
+                data: dataPoints,
+                timeSeries: undefined,
+                breakdown,
+                summary: {
+                    totalUnits,
+                    totalRevenue: Math.round(totalRevenue * 100) / 100,
+                    totalOrders,
+                    avgOrderValue,
+                },
+            };
+        }
 
         // Build line status filter based on orderStatus
         // 'all' = all non-cancelled, 'shipped' = shipped + delivered, 'delivered' = delivered only
@@ -1093,9 +1177,7 @@ export const getSalesAnalytics = createServerFn({ method: 'GET' })
                 ? { in: ['shipped', 'delivered'] }
                 : { not: 'cancelled' };  // 'all' - include all non-cancelled
 
-        // Fetch order lines
-        // NOTE: fabricColour removed from variation - fabric assignment now via BOM
-        // Material/fabric/fabricColour dimensions will return 'no-*' for now
+        // Fetch order lines for non-BOM dimensions
         const orderLines = await prisma.orderLine.findMany({
             where: {
                 order: {
@@ -1170,40 +1252,6 @@ export const getSalesAnalytics = createServerFn({ method: 'GET' })
                 case 'color': {
                     key = line.sku.variation.colorName || 'no-color';
                     label = key;
-                    break;
-                }
-                case 'standardColor': {
-                    // NOTE: fabricColour removed - fabric assignment now via BOM
-                    // Fall back to variation field for older data
-                    key = line.sku.variation.standardColor || 'no-color';
-                    label = key;
-                    break;
-                }
-                case 'material': {
-                    // NOTE: fabricColour removed - fabric assignment now via BOM
-                    // Material dimension will return 'no-material' until BOM lookup is implemented
-                    key = 'no-material';
-                    label = key;
-                    break;
-                }
-                case 'fabric': {
-                    // NOTE: fabricColour removed - fabric assignment now via BOM
-                    // Fabric dimension will return 'no-fabric' until BOM lookup is implemented
-                    key = 'no-fabric';
-                    label = 'no-fabric';
-                    break;
-                }
-                case 'fabricColour': {
-                    // NOTE: fabricColour removed - fabric assignment now via BOM
-                    // FabricColour dimension will return 'no-fabric-colour' until BOM lookup is implemented
-                    key = 'no-fabric-colour';
-                    label = 'no-fabric-colour';
-                    break;
-                }
-                case 'channel': {
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                    key = (line.order as any).source || 'direct';
-                    label = key.charAt(0).toUpperCase() + key.slice(1);
                     break;
                 }
                 default:

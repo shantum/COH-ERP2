@@ -614,3 +614,292 @@ export async function getDashboardAnalytics(): Promise<DashboardAnalytics> {
         topProducts,
     };
 }
+
+// ============================================
+// SALES ANALYTICS BREAKDOWN QUERIES
+// ============================================
+
+export interface SalesBreakdownRow {
+    key: string;
+    label: string;
+    units: number;
+    revenue: number;
+    orderCount: number;
+}
+
+/**
+ * Get sales breakdown by material
+ * Joins through VariationBomLine to get material from BOM
+ */
+export async function getSalesBreakdownByMaterial(
+    startDate: Date,
+    endDate: Date,
+    lineStatusFilter: 'all' | 'shipped' | 'delivered' = 'all'
+): Promise<SalesBreakdownRow[]> {
+    const db = await getKysely();
+    const { sql } = await import('kysely');
+
+    let query = db
+        .selectFrom('OrderLine')
+        .innerJoin('Order', 'Order.id', 'OrderLine.orderId')
+        .innerJoin('Sku', 'Sku.id', 'OrderLine.skuId')
+        .innerJoin('Variation', 'Variation.id', 'Sku.variationId')
+        .innerJoin('VariationBomLine', (join) =>
+            join
+                .onRef('VariationBomLine.variationId', '=', 'Variation.id')
+                .on('VariationBomLine.fabricColourId', 'is not', null)
+        )
+        .innerJoin('FabricColour', 'FabricColour.id', 'VariationBomLine.fabricColourId')
+        .innerJoin('Fabric', 'Fabric.id', 'FabricColour.fabricId')
+        .innerJoin('Material', 'Material.id', 'Fabric.materialId')
+        .select([
+            'Material.id as key',
+            'Material.name as label',
+            sql<number>`SUM("OrderLine"."qty")::int`.as('units'),
+            sql<number>`SUM("OrderLine"."qty" * "OrderLine"."unitPrice")::numeric`.as('revenue'),
+            sql<number>`COUNT(DISTINCT "OrderLine"."orderId")::int`.as('orderCount'),
+        ])
+        .where('Order.orderDate', '>=', startDate)
+        .where('Order.orderDate', '<=', endDate)
+        .where('Order.status', '!=', 'cancelled')
+        .where('OrderLine.lineStatus', '!=', 'cancelled');
+
+    // Apply line status filter
+    if (lineStatusFilter === 'delivered') {
+        query = query.where('OrderLine.lineStatus', '=', 'delivered');
+    } else if (lineStatusFilter === 'shipped') {
+        query = query.where('OrderLine.lineStatus', 'in', ['shipped', 'delivered']);
+    }
+
+    const rows = await query
+        .groupBy(['Material.id', 'Material.name'])
+        .orderBy(sql`SUM("OrderLine"."qty" * "OrderLine"."unitPrice")`, 'desc')
+        .execute();
+
+    return rows.map((r) => ({
+        key: r.key,
+        label: r.label,
+        units: r.units ?? 0,
+        revenue: Number(r.revenue ?? 0),
+        orderCount: r.orderCount ?? 0,
+    }));
+}
+
+/**
+ * Get sales breakdown by fabric
+ * Joins through VariationBomLine to get fabric from BOM
+ */
+export async function getSalesBreakdownByFabric(
+    startDate: Date,
+    endDate: Date,
+    lineStatusFilter: 'all' | 'shipped' | 'delivered' = 'all'
+): Promise<SalesBreakdownRow[]> {
+    const db = await getKysely();
+    const { sql } = await import('kysely');
+
+    let query = db
+        .selectFrom('OrderLine')
+        .innerJoin('Order', 'Order.id', 'OrderLine.orderId')
+        .innerJoin('Sku', 'Sku.id', 'OrderLine.skuId')
+        .innerJoin('Variation', 'Variation.id', 'Sku.variationId')
+        .innerJoin('VariationBomLine', (join) =>
+            join
+                .onRef('VariationBomLine.variationId', '=', 'Variation.id')
+                .on('VariationBomLine.fabricColourId', 'is not', null)
+        )
+        .innerJoin('FabricColour', 'FabricColour.id', 'VariationBomLine.fabricColourId')
+        .innerJoin('Fabric', 'Fabric.id', 'FabricColour.fabricId')
+        .innerJoin('Material', 'Material.id', 'Fabric.materialId')
+        .select([
+            'Fabric.id as key',
+            sql<string>`"Fabric"."name" || ' (' || "Material"."name" || ')'`.as('label'),
+            sql<number>`SUM("OrderLine"."qty")::int`.as('units'),
+            sql<number>`SUM("OrderLine"."qty" * "OrderLine"."unitPrice")::numeric`.as('revenue'),
+            sql<number>`COUNT(DISTINCT "OrderLine"."orderId")::int`.as('orderCount'),
+        ])
+        .where('Order.orderDate', '>=', startDate)
+        .where('Order.orderDate', '<=', endDate)
+        .where('Order.status', '!=', 'cancelled')
+        .where('OrderLine.lineStatus', '!=', 'cancelled');
+
+    // Apply line status filter
+    if (lineStatusFilter === 'delivered') {
+        query = query.where('OrderLine.lineStatus', '=', 'delivered');
+    } else if (lineStatusFilter === 'shipped') {
+        query = query.where('OrderLine.lineStatus', 'in', ['shipped', 'delivered']);
+    }
+
+    const rows = await query
+        .groupBy(['Fabric.id', 'Fabric.name', 'Material.name'])
+        .orderBy(sql`SUM("OrderLine"."qty" * "OrderLine"."unitPrice")`, 'desc')
+        .execute();
+
+    return rows.map((r) => ({
+        key: r.key,
+        label: r.label,
+        units: r.units ?? 0,
+        revenue: Number(r.revenue ?? 0),
+        orderCount: r.orderCount ?? 0,
+    }));
+}
+
+/**
+ * Get sales breakdown by fabric colour
+ * Joins through VariationBomLine to get fabric colour from BOM
+ */
+export async function getSalesBreakdownByFabricColour(
+    startDate: Date,
+    endDate: Date,
+    lineStatusFilter: 'all' | 'shipped' | 'delivered' = 'all'
+): Promise<SalesBreakdownRow[]> {
+    const db = await getKysely();
+    const { sql } = await import('kysely');
+
+    let query = db
+        .selectFrom('OrderLine')
+        .innerJoin('Order', 'Order.id', 'OrderLine.orderId')
+        .innerJoin('Sku', 'Sku.id', 'OrderLine.skuId')
+        .innerJoin('Variation', 'Variation.id', 'Sku.variationId')
+        .innerJoin('VariationBomLine', (join) =>
+            join
+                .onRef('VariationBomLine.variationId', '=', 'Variation.id')
+                .on('VariationBomLine.fabricColourId', 'is not', null)
+        )
+        .innerJoin('FabricColour', 'FabricColour.id', 'VariationBomLine.fabricColourId')
+        .innerJoin('Fabric', 'Fabric.id', 'FabricColour.fabricId')
+        .innerJoin('Material', 'Material.id', 'Fabric.materialId')
+        .select([
+            'FabricColour.id as key',
+            sql<string>`"FabricColour"."colourName" || ' - ' || "Fabric"."name" || ' (' || "Material"."name" || ')'`.as('label'),
+            sql<number>`SUM("OrderLine"."qty")::int`.as('units'),
+            sql<number>`SUM("OrderLine"."qty" * "OrderLine"."unitPrice")::numeric`.as('revenue'),
+            sql<number>`COUNT(DISTINCT "OrderLine"."orderId")::int`.as('orderCount'),
+        ])
+        .where('Order.orderDate', '>=', startDate)
+        .where('Order.orderDate', '<=', endDate)
+        .where('Order.status', '!=', 'cancelled')
+        .where('OrderLine.lineStatus', '!=', 'cancelled');
+
+    // Apply line status filter
+    if (lineStatusFilter === 'delivered') {
+        query = query.where('OrderLine.lineStatus', '=', 'delivered');
+    } else if (lineStatusFilter === 'shipped') {
+        query = query.where('OrderLine.lineStatus', 'in', ['shipped', 'delivered']);
+    }
+
+    const rows = await query
+        .groupBy(['FabricColour.id', 'FabricColour.colourName', 'Fabric.name', 'Material.name'])
+        .orderBy(sql`SUM("OrderLine"."qty" * "OrderLine"."unitPrice")`, 'desc')
+        .execute();
+
+    return rows.map((r) => ({
+        key: r.key,
+        label: r.label,
+        units: r.units ?? 0,
+        revenue: Number(r.revenue ?? 0),
+        orderCount: r.orderCount ?? 0,
+    }));
+}
+
+/**
+ * Get sales breakdown by channel (order source)
+ */
+export async function getSalesBreakdownByChannel(
+    startDate: Date,
+    endDate: Date,
+    lineStatusFilter: 'all' | 'shipped' | 'delivered' = 'all'
+): Promise<SalesBreakdownRow[]> {
+    const db = await getKysely();
+    const { sql } = await import('kysely');
+
+    let query = db
+        .selectFrom('OrderLine')
+        .innerJoin('Order', 'Order.id', 'OrderLine.orderId')
+        .select([
+            sql<string>`COALESCE("Order"."channel", 'direct')`.as('key'),
+            sql<string>`INITCAP(COALESCE("Order"."channel", 'direct'))`.as('label'),
+            sql<number>`SUM("OrderLine"."qty")::int`.as('units'),
+            sql<number>`SUM("OrderLine"."qty" * "OrderLine"."unitPrice")::numeric`.as('revenue'),
+            sql<number>`COUNT(DISTINCT "OrderLine"."orderId")::int`.as('orderCount'),
+        ])
+        .where('Order.orderDate', '>=', startDate)
+        .where('Order.orderDate', '<=', endDate)
+        .where('Order.status', '!=', 'cancelled')
+        .where('OrderLine.lineStatus', '!=', 'cancelled');
+
+    // Apply line status filter
+    if (lineStatusFilter === 'delivered') {
+        query = query.where('OrderLine.lineStatus', '=', 'delivered');
+    } else if (lineStatusFilter === 'shipped') {
+        query = query.where('OrderLine.lineStatus', 'in', ['shipped', 'delivered']);
+    }
+
+    const rows = await query
+        .groupBy(sql`COALESCE("Order"."channel", 'direct')`)
+        .orderBy(sql`SUM("OrderLine"."qty" * "OrderLine"."unitPrice")`, 'desc')
+        .execute();
+
+    return rows.map((r) => ({
+        key: r.key,
+        label: r.label,
+        units: r.units ?? 0,
+        revenue: Number(r.revenue ?? 0),
+        orderCount: r.orderCount ?? 0,
+    }));
+}
+
+/**
+ * Get sales breakdown by standard color
+ * Joins through VariationBomLine to get standardColor from FabricColour
+ */
+export async function getSalesBreakdownByStandardColor(
+    startDate: Date,
+    endDate: Date,
+    lineStatusFilter: 'all' | 'shipped' | 'delivered' = 'all'
+): Promise<SalesBreakdownRow[]> {
+    const db = await getKysely();
+    const { sql } = await import('kysely');
+
+    let query = db
+        .selectFrom('OrderLine')
+        .innerJoin('Order', 'Order.id', 'OrderLine.orderId')
+        .innerJoin('Sku', 'Sku.id', 'OrderLine.skuId')
+        .innerJoin('Variation', 'Variation.id', 'Sku.variationId')
+        .innerJoin('VariationBomLine', (join) =>
+            join
+                .onRef('VariationBomLine.variationId', '=', 'Variation.id')
+                .on('VariationBomLine.fabricColourId', 'is not', null)
+        )
+        .innerJoin('FabricColour', 'FabricColour.id', 'VariationBomLine.fabricColourId')
+        .select([
+            sql<string>`COALESCE("FabricColour"."standardColour", 'unspecified')`.as('key'),
+            sql<string>`INITCAP(COALESCE("FabricColour"."standardColour", 'unspecified'))`.as('label'),
+            sql<number>`SUM("OrderLine"."qty")::int`.as('units'),
+            sql<number>`SUM("OrderLine"."qty" * "OrderLine"."unitPrice")::numeric`.as('revenue'),
+            sql<number>`COUNT(DISTINCT "OrderLine"."orderId")::int`.as('orderCount'),
+        ])
+        .where('Order.orderDate', '>=', startDate)
+        .where('Order.orderDate', '<=', endDate)
+        .where('Order.status', '!=', 'cancelled')
+        .where('OrderLine.lineStatus', '!=', 'cancelled');
+
+    // Apply line status filter
+    if (lineStatusFilter === 'delivered') {
+        query = query.where('OrderLine.lineStatus', '=', 'delivered');
+    } else if (lineStatusFilter === 'shipped') {
+        query = query.where('OrderLine.lineStatus', 'in', ['shipped', 'delivered']);
+    }
+
+    const rows = await query
+        .groupBy(sql`COALESCE("FabricColour"."standardColour", 'unspecified')`)
+        .orderBy(sql`SUM("OrderLine"."qty" * "OrderLine"."unitPrice")`, 'desc')
+        .execute();
+
+    return rows.map((r) => ({
+        key: r.key,
+        label: r.label,
+        units: r.units ?? 0,
+        revenue: Number(r.revenue ?? 0),
+        orderCount: r.orderCount ?? 0,
+    }));
+}
