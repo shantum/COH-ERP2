@@ -56,27 +56,36 @@ export function toBatchDateCode(date: Date | string | null | undefined): string 
  * IST Timezone Utilities
  * India Standard Time is UTC+5:30
  * All functions return UTC Date objects representing IST boundaries
+ *
+ * IMPORTANT: All functions are server-timezone agnostic. They use UTC methods
+ * to ensure correct behavior regardless of server locale (Railway runs UTC).
  */
-const IST_OFFSET_MINUTES = 5 * 60 + 30; // 5 hours 30 minutes
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000; // 5 hours 30 minutes in milliseconds
 
 /**
- * Get current time in IST (as a Date object)
+ * Get current time shifted to IST (as a Date object)
+ * Note: The returned Date has an internal UTC timestamp shifted by IST offset.
+ * Use getUTC* methods to extract IST date/time components.
  */
 export function nowIST(): Date {
     const utc = new Date();
-    return new Date(utc.getTime() + IST_OFFSET_MINUTES * 60 * 1000);
+    return new Date(utc.getTime() + IST_OFFSET_MS);
 }
 
 /**
  * Get start of today in IST (returned as UTC Date for database queries)
+ * Server-timezone agnostic: uses UTC methods throughout.
  * Example: If IST is 2026-01-20 5:30 PM, returns 2026-01-19 18:30:00 UTC (midnight IST Jan 20)
  */
 export function todayStartIST(): Date {
     const ist = nowIST();
-    // Get midnight in IST
-    const midnightIST = new Date(ist.getFullYear(), ist.getMonth(), ist.getDate());
-    // Convert back to UTC for database comparison
-    return new Date(midnightIST.getTime() - IST_OFFSET_MINUTES * 60 * 1000);
+    // Use UTC methods to get IST date components
+    const istYear = ist.getUTCFullYear();
+    const istMonth = ist.getUTCMonth();
+    const istDay = ist.getUTCDate();
+    // Create UTC timestamp for IST midnight, then subtract offset
+    const istMidnightUTC = Date.UTC(istYear, istMonth, istDay) - IST_OFFSET_MS;
+    return new Date(istMidnightUTC);
 }
 
 /**
@@ -97,20 +106,26 @@ export function daysAgoStartIST(days: number): Date {
 
 /**
  * Get start of this month in IST (returned as UTC Date for database queries)
+ * Server-timezone agnostic: uses UTC methods throughout.
  */
 export function thisMonthStartIST(): Date {
     const ist = nowIST();
-    const firstOfMonthIST = new Date(ist.getFullYear(), ist.getMonth(), 1);
-    return new Date(firstOfMonthIST.getTime() - IST_OFFSET_MINUTES * 60 * 1000);
+    const istYear = ist.getUTCFullYear();
+    const istMonth = ist.getUTCMonth();
+    const istMonthStartUTC = Date.UTC(istYear, istMonth, 1) - IST_OFFSET_MS;
+    return new Date(istMonthStartUTC);
 }
 
 /**
  * Get start of last month in IST (returned as UTC Date for database queries)
+ * Server-timezone agnostic: uses UTC methods throughout.
  */
 export function lastMonthStartIST(): Date {
     const ist = nowIST();
-    const firstOfLastMonthIST = new Date(ist.getFullYear(), ist.getMonth() - 1, 1);
-    return new Date(firstOfLastMonthIST.getTime() - IST_OFFSET_MINUTES * 60 * 1000);
+    const istYear = ist.getUTCFullYear();
+    const istMonth = ist.getUTCMonth();
+    const lastMonthStartUTC = Date.UTC(istYear, istMonth - 1, 1) - IST_OFFSET_MS;
+    return new Date(lastMonthStartUTC);
 }
 
 /**
@@ -121,7 +136,8 @@ export function lastMonthEndIST(): Date {
 }
 
 /**
- * Get same time yesterday in IST (for same-time comparisons)
+ * Get same time yesterday (for same-time comparisons)
+ * This is timezone-agnostic as it's just 24 hours ago.
  */
 export function sameTimeYesterdayIST(): Date {
     return new Date(Date.now() - 24 * 60 * 60 * 1000);
@@ -129,8 +145,18 @@ export function sameTimeYesterdayIST(): Date {
 
 /**
  * Get same time last month (for same-time comparisons)
+ * Note: Uses UTC methods for consistency.
  */
 export function sameTimeLastMonthIST(): Date {
     const now = new Date();
-    return new Date(now.setMonth(now.getMonth() - 1));
+    const lastMonth = new Date(Date.UTC(
+        now.getUTCFullYear(),
+        now.getUTCMonth() - 1,
+        now.getUTCDate(),
+        now.getUTCHours(),
+        now.getUTCMinutes(),
+        now.getUTCSeconds(),
+        now.getUTCMilliseconds()
+    ));
+    return lastMonth;
 }

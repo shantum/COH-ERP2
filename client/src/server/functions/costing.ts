@@ -12,7 +12,7 @@ import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth';
 import { getPrisma } from '@coh/shared/services/db';
-import { getISTMidnightAsUTC, getISTMonthStartAsUTC } from '@coh/shared';
+import { getISTMidnightAsUTC, getISTMonthStartAsUTC, getISTDayOfMonth } from '@coh/shared';
 
 // ============================================
 // INPUT SCHEMAS
@@ -132,7 +132,7 @@ function getDateRangeForPeriod(period: '7d' | '30d' | 'mtd'): { start: Date; end
             return {
                 start: getISTMonthStartAsUTC(0),
                 end: now,
-                daysInPeriod: now.getDate(), // Days elapsed in current month
+                daysInPeriod: getISTDayOfMonth(), // Days elapsed in current month (IST)
             };
         case '30d':
         default:

@@ -11,7 +11,7 @@
 
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
-import { getISTMidnightAsUTC, getISTMonthStartAsUTC } from '@coh/shared';
+import { getISTMidnightAsUTC, getISTMonthStartAsUTC, getISTDayOfMonth, getISTDaysInMonth } from '@coh/shared';
 
 // ============================================
 // RESPONSE TYPES
@@ -200,11 +200,9 @@ export const getOrdersAnalytics = createServerFn({ method: 'GET' })
                 getTopProductsKysely(last30DaysStart, null, 10),
             ]);
 
-            // Calculate days for averages (server-side for SSR consistency)
-            const now = new Date();
-            const daysInThisMonth = now.getDate();
-            const lastMonthDate = new Date(now.getFullYear(), now.getMonth(), 0);
-            const daysInLastMonth = lastMonthDate.getDate();
+            // Calculate days for averages in IST (server runs in UTC, but we need IST days)
+            const daysInThisMonth = getISTDayOfMonth();
+            const daysInLastMonth = getISTDaysInMonth(-1);
 
             // Build response matching existing format
             const result: OrdersAnalyticsResponse = {
