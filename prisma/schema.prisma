@@ -456,6 +456,7 @@ model Order {
   originalOrder        Order?             @relation("ExchangeOriginalOrder", fields: [originalOrderId], references: [id])
   exchangeOrders       Order[]            @relation("ExchangeOriginalOrder")
   exchangeSourceLines  OrderLine[]        @relation("ExchangeOrderLine") // Lines that created this exchange order
+  returnPrimeRequests  ReturnPrimeRequest[] // Return Prime requests linked to this order
 
   @@index([customerId])
   @@index([status])
@@ -1608,4 +1609,85 @@ model ChannelImportBatch {
 
   @@index([channel])
   @@index([importedAt])
+}
+
+// ============================================
+// RETURN PRIME LOCAL CACHE
+// ============================================
+
+/// Stores Return Prime requests locally for faster dashboard loading and historical analytics
+model ReturnPrimeRequest {
+  id                    String    @id @default(uuid())
+
+  // Return Prime identifiers
+  rpRequestId           String    @unique  // Return Prime's request ID
+  rpRequestNumber       String               // e.g., "RET9183" or "EXC9184"
+  requestType           String               // "return" or "exchange"
+
+  // Order reference
+  shopifyOrderId        String?
+  shopifyOrderName      String?              // e.g., "64377"
+  orderId               String?              // COH-ERP Order ID if linked
+
+  // Customer info
+  customerName          String?
+  customerEmail         String?
+  customerPhone         String?
+  customerAddress       Json?                // Full address object
+  customerBank          Json?                // Bank details for refunds
+
+  // Status flags with timestamps
+  isApproved            Boolean   @default(false)
+  approvedAt            DateTime?
+  approvedComment       String?
+
+  isReceived            Boolean   @default(false)
+  receivedAt            DateTime?
+  receivedComment       String?
+
+  isInspected           Boolean   @default(false)
+  inspectedAt           DateTime?
+  inspectedComment      String?
+
+  isRefunded            Boolean   @default(false)
+  refundedAt            DateTime?
+
+  isRejected            Boolean   @default(false)
+  rejectedAt            DateTime?
+  rejectedComment       String?
+
+  isArchived            Boolean   @default(false)
+  archivedAt            DateTime?
+
+  // Line items stored as JSON array
+  lineItems             Json      @default("[]")
+  lineItemCount         Int       @default(0)
+
+  // Computed values for fast queries
+  totalValue            Decimal   @default(0) @db.Decimal(10, 2)
+  primaryReason         String?              // First line item's reason
+
+  // Return Prime timestamps
+  rpCreatedAt           DateTime             // When created in Return Prime
+  rpUpdatedAt           DateTime?            // Last update in Return Prime
+
+  // Sync tracking
+  syncedAt              DateTime  @default(now())
+  rawData               Json?                // Full API response for reference
+
+  // Timestamps
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  // Relations
+  order                 Order?    @relation(fields: [orderId], references: [id])
+
+  @@index([rpRequestNumber])
+  @@index([shopifyOrderId])
+  @@index([shopifyOrderName])
+  @@index([requestType])
+  @@index([rpCreatedAt])
+  @@index([isApproved, isReceived, isRefunded])
+  @@index([customerEmail])
+  @@index([syncedAt])
 }

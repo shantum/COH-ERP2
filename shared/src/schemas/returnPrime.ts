@@ -138,3 +138,321 @@ export const ReturnPrimeWebhookTopicSchema = z.enum([
 ]);
 
 export type ReturnPrimeWebhookTopic = z.infer<typeof ReturnPrimeWebhookTopicSchema>;
+
+// ============================================
+// API RESPONSE SCHEMAS (for Dashboard)
+// ============================================
+
+/**
+ * Money type used throughout Return Prime API responses
+ */
+export const MoneySchema = z.object({
+    amount: z.number().optional(),
+    currency_code: z.string(),
+});
+
+export type Money = z.infer<typeof MoneySchema>;
+
+/**
+ * Status flag (approved, received, inspected, etc.)
+ */
+export const StatusFlagSchema = z.object({
+    status: z.boolean(),
+    comment: z.string().nullable(),
+    created_at: z.string().nullable(),
+});
+
+export type StatusFlag = z.infer<typeof StatusFlagSchema>;
+
+/**
+ * Customer address from API response
+ */
+export const CustomerAddressSchema = z.object({
+    first_name: z.string().optional(),
+    last_name: z.string().nullable().optional(),
+    postal_code: z.string().optional(),
+    city: z.string().optional(),
+    province: z.string().optional(),
+    country_code: z.string().optional(),
+    province_code: z.string().optional(),
+    address_line_1: z.string().optional(),
+    address_line_2: z.string().optional(),
+    country: z.string().optional(),
+});
+
+export type CustomerAddress = z.infer<typeof CustomerAddressSchema>;
+
+/**
+ * Customer bank details
+ */
+export const CustomerBankSchema = z.object({
+    account_holder_name: z.string().optional(),
+    account_number: z.string().optional(),
+    ifsc_code: z.string().optional(),
+});
+
+export type CustomerBank = z.infer<typeof CustomerBankSchema>;
+
+/**
+ * Customer from API response (full details)
+ */
+export const ReturnPrimeApiCustomerSchema = z.object({
+    id: z.number().optional(),
+    name: z.string().optional(),
+    email: z.string().optional(),
+    phone: z.string().optional(),
+    address: CustomerAddressSchema.optional(),
+    bank: CustomerBankSchema.optional(),
+});
+
+export type ReturnPrimeApiCustomer = z.infer<typeof ReturnPrimeApiCustomerSchema>;
+
+/**
+ * Order fulfillment details
+ */
+export const OrderFulfillmentSchema = z.object({
+    id: z.number(),
+    line_items: z.array(z.number()),
+    delivery_status: z.string().nullable(),
+    delivery_date: z.string().nullable(),
+});
+
+export type OrderFulfillment = z.infer<typeof OrderFulfillmentSchema>;
+
+/**
+ * Payment gateway info
+ */
+export const PaymentGatewaySchema = z.object({
+    name: z.string(),
+    id: z.string(),
+});
+
+export type PaymentGateway = z.infer<typeof PaymentGatewaySchema>;
+
+/**
+ * Order from API response (full details)
+ */
+export const ReturnPrimeApiOrderSchema = z.object({
+    id: z.number(),
+    name: z.string(),
+    order_manual_payment: z.boolean().optional(),
+    payment_gateways: z.array(PaymentGatewaySchema).optional(),
+    fulfillments: z.array(OrderFulfillmentSchema).optional(),
+    created_at: z.string().optional(),
+});
+
+export type ReturnPrimeApiOrder = z.infer<typeof ReturnPrimeApiOrderSchema>;
+
+/**
+ * Product info for line items
+ */
+export const ProductInfoSchema = z.object({
+    title: z.string().optional(),
+    variant_title: z.string().optional(),
+    product_id: z.number().optional(),
+    variant_id: z.number().optional(),
+    image: z.object({ src: z.string() }).optional(),
+    price: z.number().optional(),
+    sku: z.string().optional(),
+    variant_deleted: z.boolean().optional(),
+    product_deleted: z.boolean().optional(),
+});
+
+export type ProductInfo = z.infer<typeof ProductInfoSchema>;
+
+/**
+ * Shop price breakdown
+ */
+export const ShopPriceSchema = z.object({
+    actual_amount: z.number().optional(),
+    total_tax: z.number().optional(),
+    return_quantity: z.number().optional(),
+    total_discount: z.number().optional(),
+    shipping_amount: z.number().optional(),
+    currency: z.string().optional(),
+});
+
+export type ShopPrice = z.infer<typeof ShopPriceSchema>;
+
+/**
+ * Line item refund details
+ */
+export const LineItemRefundSchema = z.object({
+    requested_mode: z.string().nullable().optional(),
+    actual_mode: z.string().nullable().optional(),
+    status: z.string().optional(),
+    refunded_amount: z
+        .object({
+            shop_money: MoneySchema.optional(),
+            presentment_money: MoneySchema.optional(),
+        })
+        .optional(),
+    refunded_at: z.string().nullable().optional(),
+    comment: z.string().nullable().optional(),
+});
+
+export type LineItemRefund = z.infer<typeof LineItemRefundSchema>;
+
+/**
+ * Fee schema (return fee, exchange fee)
+ */
+export const FeeSchema = z.object({
+    price_set: z
+        .object({
+            shop_money: MoneySchema.optional(),
+            presentment_money: MoneySchema.optional(),
+        })
+        .optional(),
+});
+
+export type Fee = z.infer<typeof FeeSchema>;
+
+/**
+ * Shipping info for line items
+ */
+export const ShippingInfoSchema = z.object({
+    awb: z.string().optional(),
+    shipping_company: z.string().optional(),
+    tracking_url: z.string().optional(),
+    tracking_available: z.boolean().optional(),
+    labels: z.array(z.string()).optional(),
+});
+
+export type ShippingInfo = z.infer<typeof ShippingInfoSchema>;
+
+/**
+ * Line item from API response (full details)
+ */
+export const ReturnPrimeApiLineItemSchema = z.object({
+    id: z.number(),
+    quantity: z.number(),
+    reason: z.string().optional(),
+    refund: LineItemRefundSchema.optional(),
+    return_fee: FeeSchema.optional(),
+    exchange_fee: FeeSchema.optional(),
+    original_product: ProductInfoSchema.optional(),
+    exchange_product: ProductInfoSchema.optional(),
+    shipping: z.array(ShippingInfoSchema).optional(),
+    shop_price: ShopPriceSchema.optional(),
+});
+
+export type ReturnPrimeApiLineItem = z.infer<typeof ReturnPrimeApiLineItemSchema>;
+
+/**
+ * Incentive offered for exchange
+ */
+export const IncentiveSchema = z.object({
+    type: z.enum(['fixed', 'percentage']),
+    value: z.number(),
+    amount: z
+        .object({
+            shop_money: MoneySchema.optional(),
+            presentment_money: MoneySchema.optional(),
+        })
+        .optional(),
+});
+
+export type Incentive = z.infer<typeof IncentiveSchema>;
+
+/**
+ * Main request schema from API response
+ */
+export const ReturnPrimeRequestSchema = z.object({
+    id: z.string(),
+    request_number: z.string(),
+    request_type: z.enum(['return', 'exchange']),
+    status: z.string().optional(),
+    manual_request: z.boolean().optional(),
+    channel: z.number().optional(),
+    smart_exchange: z.boolean().optional(),
+    created_at: z.string(),
+
+    order: ReturnPrimeApiOrderSchema.optional(),
+    customer: ReturnPrimeApiCustomerSchema.optional(),
+
+    // Status flags
+    approved: StatusFlagSchema.optional(),
+    received: StatusFlagSchema.optional(),
+    inspected: StatusFlagSchema.optional(),
+    rejected: StatusFlagSchema.optional(),
+    archived: StatusFlagSchema.optional(),
+    unarchived: StatusFlagSchema.optional(),
+
+    incentive: IncentiveSchema.nullable().optional(),
+    line_items: z.array(ReturnPrimeApiLineItemSchema).optional(),
+});
+
+export type ReturnPrimeRequest = z.infer<typeof ReturnPrimeRequestSchema>;
+
+/**
+ * API list response schema
+ */
+export const ReturnPrimeListResponseSchema = z.object({
+    status: z.boolean(),
+    message: z.string().optional(),
+    data: z.object({
+        list: z.array(ReturnPrimeRequestSchema),
+        hasNextPage: z.boolean(),
+        hasPreviousPage: z.boolean(),
+    }),
+});
+
+export type ReturnPrimeListResponse = z.infer<typeof ReturnPrimeListResponseSchema>;
+
+/**
+ * API detail response schema
+ */
+export const ReturnPrimeDetailResponseSchema = z.object({
+    status: z.boolean(),
+    message: z.string().optional(),
+    data: z.object({
+        request: ReturnPrimeRequestSchema,
+    }),
+});
+
+export type ReturnPrimeDetailResponse = z.infer<typeof ReturnPrimeDetailResponseSchema>;
+
+// ============================================
+// DASHBOARD-SPECIFIC TYPES
+// ============================================
+
+/**
+ * Aggregated stats for the Return Prime dashboard
+ */
+export interface ReturnPrimeStats {
+    total: number;
+    returns: number;
+    exchanges: number;
+    pending: number;
+    approved: number;
+    received: number;
+    refunded: number;
+    totalValue: number;
+}
+
+/**
+ * Combined dashboard data structure
+ */
+export interface ReturnPrimeDashboardData {
+    requests: ReturnPrimeRequest[];
+    stats: ReturnPrimeStats;
+    hasNextPage: boolean;
+    hasPreviousPage: boolean;
+}
+
+// ============================================
+// SEARCH PARAMS SCHEMA (for Route)
+// ============================================
+
+/**
+ * Search params for the Return Prime dashboard route
+ */
+export const ReturnPrimeSearchParamsSchema = z.object({
+    tab: z.enum(['requests', 'analytics']).catch('requests'),
+    requestType: z.enum(['all', 'return', 'exchange']).catch('all'),
+    dateFrom: z.string().optional().catch(undefined),
+    dateTo: z.string().optional().catch(undefined),
+    search: z.string().optional().catch(undefined),
+});
+
+export type ReturnPrimeSearchParams = z.infer<typeof ReturnPrimeSearchParamsSchema>;

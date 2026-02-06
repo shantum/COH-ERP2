@@ -40,6 +40,7 @@ import trackingRoutes from './routes/tracking.js';
 import sheetSyncRoutes from './routes/sheetSync.js';
 import returnPrimeWebhooks from './routes/returnPrimeWebhooks.js';
 import returnPrimeSync from './routes/returnPrimeSync.js';
+import returnPrimeAdminRoutes from './routes/returnPrimeAdminRoutes.js';
 import { pulseBroadcaster } from './services/pulseBroadcaster.js';
 import scheduledSync from './services/scheduledSync.js';
 import trackingSync from './services/trackingSync.js';
@@ -152,6 +153,7 @@ export async function createExpressApp() {
 
   // Return Prime integration
   app.use('/api/webhooks/returnprime', returnPrimeWebhooks);
+  app.use('/api/returnprime/admin', returnPrimeAdminRoutes);  // Must be before /api/returnprime
   app.use('/api/returnprime', returnPrimeSync);
 
   // Health check

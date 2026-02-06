@@ -23,6 +23,7 @@ import { Route as AuthenticatedTrackingRouteImport } from './routes/_authenticat
 import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings'
 import { Route as AuthenticatedReturnsRtoRouteImport } from './routes/_authenticated/returns-rto'
 import { Route as AuthenticatedReturnsRouteImport } from './routes/_authenticated/returns'
+import { Route as AuthenticatedReturnPrimeRouteImport } from './routes/_authenticated/return-prime'
 import { Route as AuthenticatedProductsRouteImport } from './routes/_authenticated/products'
 import { Route as AuthenticatedProductionRouteImport } from './routes/_authenticated/production'
 import { Route as AuthenticatedOrdersSimpleRouteImport } from './routes/_authenticated/orders-simple'
@@ -110,6 +111,12 @@ const AuthenticatedReturnsRoute = AuthenticatedReturnsRouteImport.update({
   path: '/returns',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
+const AuthenticatedReturnPrimeRoute =
+  AuthenticatedReturnPrimeRouteImport.update({
+    id: '/return-prime',
+    path: '/return-prime',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
 const AuthenticatedProductsRoute = AuthenticatedProductsRouteImport.update({
   id: '/products',
   path: '/products',
@@ -230,6 +237,7 @@ export interface FileRoutesByFullPath {
   '/orders-simple': typeof AuthenticatedOrdersSimpleRoute
   '/production': typeof AuthenticatedProductionRoute
   '/products': typeof AuthenticatedProductsRoute
+  '/return-prime': typeof AuthenticatedReturnPrimeRoute
   '/returns': typeof AuthenticatedReturnsRoute
   '/returns-rto': typeof AuthenticatedReturnsRtoRoute
   '/settings': typeof AuthenticatedSettingsRoute
@@ -261,6 +269,7 @@ export interface FileRoutesByTo {
   '/orders-simple': typeof AuthenticatedOrdersSimpleRoute
   '/production': typeof AuthenticatedProductionRoute
   '/products': typeof AuthenticatedProductsRoute
+  '/return-prime': typeof AuthenticatedReturnPrimeRoute
   '/returns': typeof AuthenticatedReturnsRoute
   '/returns-rto': typeof AuthenticatedReturnsRtoRoute
   '/settings': typeof AuthenticatedSettingsRoute
@@ -295,6 +304,7 @@ export interface FileRoutesById {
   '/_authenticated/orders-simple': typeof AuthenticatedOrdersSimpleRoute
   '/_authenticated/production': typeof AuthenticatedProductionRoute
   '/_authenticated/products': typeof AuthenticatedProductsRoute
+  '/_authenticated/return-prime': typeof AuthenticatedReturnPrimeRoute
   '/_authenticated/returns': typeof AuthenticatedReturnsRoute
   '/_authenticated/returns-rto': typeof AuthenticatedReturnsRtoRoute
   '/_authenticated/settings': typeof AuthenticatedSettingsRoute
@@ -330,6 +340,7 @@ export interface FileRouteTypes {
     | '/orders-simple'
     | '/production'
     | '/products'
+    | '/return-prime'
     | '/returns'
     | '/returns-rto'
     | '/settings'
@@ -361,6 +372,7 @@ export interface FileRouteTypes {
     | '/orders-simple'
     | '/production'
     | '/products'
+    | '/return-prime'
     | '/returns'
     | '/returns-rto'
     | '/settings'
@@ -394,6 +406,7 @@ export interface FileRouteTypes {
     | '/_authenticated/orders-simple'
     | '/_authenticated/production'
     | '/_authenticated/products'
+    | '/_authenticated/return-prime'
     | '/_authenticated/returns'
     | '/_authenticated/returns-rto'
     | '/_authenticated/settings'
@@ -511,6 +524,13 @@ declare module '@tanstack/react-router' {
       path: '/returns'
       fullPath: '/returns'
       preLoaderRoute: typeof AuthenticatedReturnsRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/return-prime': {
+      id: '/_authenticated/return-prime'
+      path: '/return-prime'
+      fullPath: '/return-prime'
+      preLoaderRoute: typeof AuthenticatedReturnPrimeRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
     '/_authenticated/products': {
@@ -653,6 +673,7 @@ interface AuthenticatedRouteChildren {
   AuthenticatedOrdersSimpleRoute: typeof AuthenticatedOrdersSimpleRoute
   AuthenticatedProductionRoute: typeof AuthenticatedProductionRoute
   AuthenticatedProductsRoute: typeof AuthenticatedProductsRoute
+  AuthenticatedReturnPrimeRoute: typeof AuthenticatedReturnPrimeRoute
   AuthenticatedReturnsRoute: typeof AuthenticatedReturnsRoute
   AuthenticatedReturnsRtoRoute: typeof AuthenticatedReturnsRtoRoute
   AuthenticatedSettingsRoute: typeof AuthenticatedSettingsRoute
@@ -680,6 +701,7 @@ const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedOrdersSimpleRoute: AuthenticatedOrdersSimpleRoute,
   AuthenticatedProductionRoute: AuthenticatedProductionRoute,
   AuthenticatedProductsRoute: AuthenticatedProductsRoute,
+  AuthenticatedReturnPrimeRoute: AuthenticatedReturnPrimeRoute,
   AuthenticatedReturnsRoute: AuthenticatedReturnsRoute,
   AuthenticatedReturnsRtoRoute: AuthenticatedReturnsRtoRoute,
   AuthenticatedSettingsRoute: AuthenticatedSettingsRoute,

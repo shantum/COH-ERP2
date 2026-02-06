@@ -50,7 +50,10 @@ export async function getPrisma(): Promise<PrismaInstance> {
 
     // Check if cached client has required models, if not, invalidate cache
     // This handles cases where schema was updated but dev server wasn't restarted
-    if (globalForPrisma.prisma && !('fabricColourTransaction' in globalForPrisma.prisma)) {
+    const hasAllModels = globalForPrisma.prisma &&
+        'returnPrimeRequest' in globalForPrisma.prisma;
+
+    if (globalForPrisma.prisma && !hasAllModels) {
         console.log('[getPrisma] Cached client missing new models, creating fresh instance');
         globalForPrisma.prisma = undefined;
     }

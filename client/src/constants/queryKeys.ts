@@ -65,3 +65,14 @@ export const channelQueryKeys = {
   topStates: (channel: string, startDate?: string, endDate?: string) =>
     ['channels', 'topStates', channel, startDate, endDate] as const,
 } as const;
+
+// Return Prime query keys
+export const returnPrimeQueryKeys = {
+  dashboard: (filters: Record<string, unknown>) =>
+    ['returnPrime', 'dashboard', filters] as const,
+  analytics: (filters: Record<string, unknown>) =>
+    ['returnPrime', 'analytics', filters] as const,
+  request: (requestId: string) =>
+    ['returnPrime', 'request', requestId] as const,
+  all: ['returnPrime'] as const,
+} as const;
