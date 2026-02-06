@@ -1459,12 +1459,28 @@ export const createOrder = createServerFn({ method: 'POST' })
             }
         }
 
-        // Generate order number with EXC- prefix for exchanges
-        const orderNumber =
-            providedOrderNumber ||
-            (isExchange
-                ? `EXC-${Date.now().toString().slice(-8)}`
-                : `COH-${Date.now().toString().slice(-8)}`);
+        // Generate order number
+        let orderNumber = providedOrderNumber;
+        if (!orderNumber) {
+            if (isExchange && originalOrderId) {
+                // Exchange order: derive from source order EXC-{sourceNumeric}-{n}
+                const sourceOrder = await prisma.order.findUnique({
+                    where: { id: originalOrderId },
+                    select: { orderNumber: true },
+                });
+                const exchangeCount = await prisma.order.count({
+                    where: { originalOrderId },
+                });
+                // Extract numeric portion from source order number (last 6 digits)
+                const sourceNumeric = sourceOrder?.orderNumber?.replace(/\D/g, '').slice(-6) || 'X';
+                orderNumber = `EXC-${sourceNumeric}-${exchangeCount + 1}`;
+            } else if (isExchange) {
+                // Exchange without source order - fallback to timestamp
+                orderNumber = `EXC-${Date.now().toString().slice(-8)}`;
+            } else {
+                orderNumber = `COH-${Date.now().toString().slice(-8)}`;
+            }
+        }
 
         // Use provided customerId if given, otherwise find or create
         let customerId = providedCustomerId || null;

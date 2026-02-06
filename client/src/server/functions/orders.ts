@@ -2079,3 +2079,137 @@ export const getOrdersAnalytics = createServerFn({ method: 'GET' })
             throw error;
         }
     });
+
+// ============================================
+// GET ORDER FOR EXCHANGE - Source order lookup
+// ============================================
+
+const getOrderForExchangeSchema = z.object({
+    orderNumber: z.string().min(1, 'Order number is required'),
+});
+
+export type GetOrderForExchangeInput = z.infer<typeof getOrderForExchangeSchema>;
+
+/**
+ * Order data returned for exchange creation
+ */
+export interface OrderForExchange {
+    id: string;
+    orderNumber: string;
+    customerId: string | null;
+    customerName: string;
+    customerEmail: string | null;
+    customerPhone: string | null;
+    shippingAddress: string | null;
+    totalAmount: number;
+    orderDate: string;
+    orderLines: Array<{
+        id: string;
+        skuId: string;
+        qty: number;
+        unitPrice: number;
+        lineStatus: string | null;
+        sku: {
+            id: string;
+            skuCode: string;
+            size: string;
+            variation: {
+                colorName: string;
+                imageUrl: string | null;
+                product: {
+                    name: string;
+                    imageUrl: string | null;
+                };
+            };
+        };
+    }>;
+}
+
+export interface GetOrderForExchangeResult {
+    success: boolean;
+    data?: OrderForExchange;
+    error?: string;
+}
+
+/**
+ * Server Function: Get order for exchange
+ *
+ * Simple order lookup by order number for exchange creation.
+ * Returns order with customer info and order lines for reference.
+ */
+export const getOrderForExchange = createServerFn({ method: 'GET' })
+    .inputValidator((input: unknown) => getOrderForExchangeSchema.parse(input))
+    .handler(async ({ data }): Promise<GetOrderForExchangeResult> => {
+        try {
+            const prisma = await getPrisma();
+
+            const order = await prisma.order.findFirst({
+                where: {
+                    orderNumber: { contains: data.orderNumber, mode: 'insensitive' },
+                },
+                include: {
+                    orderLines: {
+                        include: {
+                            sku: {
+                                include: {
+                                    variation: {
+                                        include: {
+                                            product: {
+                                                select: { name: true, imageUrl: true },
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                        orderBy: { id: 'asc' },
+                    },
+                },
+            });
+
+            if (!order) {
+                return { success: false, error: 'Order not found' };
+            }
+
+            return {
+                success: true,
+                data: {
+                    id: order.id,
+                    orderNumber: order.orderNumber,
+                    customerId: order.customerId,
+                    customerName: order.customerName,
+                    customerEmail: order.customerEmail,
+                    customerPhone: order.customerPhone,
+                    shippingAddress: order.shippingAddress,
+                    totalAmount: order.totalAmount,
+                    orderDate: order.orderDate.toISOString(),
+                    orderLines: order.orderLines.map((line) => ({
+                        id: line.id,
+                        skuId: line.skuId,
+                        qty: line.qty,
+                        unitPrice: line.unitPrice,
+                        lineStatus: line.lineStatus,
+                        sku: {
+                            id: line.sku.id,
+                            skuCode: line.sku.skuCode,
+                            size: line.sku.size,
+                            variation: {
+                                colorName: line.sku.variation.colorName,
+                                imageUrl: line.sku.variation.imageUrl,
+                                product: {
+                                    name: line.sku.variation.product.name,
+                                    imageUrl: line.sku.variation.product.imageUrl,
+                                },
+                            },
+                        },
+                    })),
+                },
+            };
+        } catch (error: unknown) {
+            console.error('[Server Function] Error in getOrderForExchange:', error);
+            return {
+                success: false,
+                error: error instanceof Error ? error.message : 'Unknown error',
+            };
+        }
+    });

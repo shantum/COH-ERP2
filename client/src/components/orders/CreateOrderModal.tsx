@@ -18,6 +18,7 @@ import {
 import { CustomerSearch } from '../common/CustomerSearch';
 import { ProductSearch } from '../common/ProductSearch';
 import { getCustomerAddresses } from '../../server/functions/customers';
+import { getOrderForExchange, type OrderForExchange } from '../../server/functions/orders';
 import { getOptimizedImageUrl } from '../../utils/imageOptimization';
 
 // shadcn/ui components
@@ -217,8 +218,15 @@ export function CreateOrderModal({
         new Map()
     );
 
+    // Exchange order state - source order lookup
+    const [sourceOrder, setSourceOrder] = useState<OrderForExchange | null>(null);
+    const [orderNumberSearch, setOrderNumberSearch] = useState('');
+    const [isSearchingOrder, setIsSearchingOrder] = useState(false);
+    const [orderSearchError, setOrderSearchError] = useState('');
+
     // Server function for fetching customer addresses
     const getCustomerAddressesFn = useServerFn(getCustomerAddresses);
+    const getOrderForExchangeFn = useServerFn(getOrderForExchange);
 
     // Fetch past addresses when address section is expanded and customer exists
     const { data: pastAddressesData, isLoading: isLoadingAddresses } = useQuery({
@@ -267,6 +275,63 @@ export function CreateOrderModal({
             // Clear customerId if user manually edits - they're entering a new customer
             customerId: null,
         }));
+    };
+
+    // Handle source order lookup for exchange
+    const handleOrderLookup = async () => {
+        if (!orderNumberSearch.trim()) return;
+
+        setIsSearchingOrder(true);
+        setOrderSearchError('');
+
+        try {
+            const result = await getOrderForExchangeFn({ data: { orderNumber: orderNumberSearch.trim() } });
+
+            if (result.success && result.data) {
+                const order = result.data;
+                setSourceOrder(order);
+
+                // Auto-fill customer info from source order
+                setOrderForm(f => ({
+                    ...f,
+                    customerId: order.customerId,
+                    customerName: order.customerName,
+                    customerEmail: order.customerEmail || '',
+                    customerPhone: order.customerPhone || '',
+                }));
+
+                // Auto-fill address if available
+                if (order.shippingAddress) {
+                    try {
+                        setAddressForm(JSON.parse(order.shippingAddress));
+                    } catch {
+                        // Ignore parse errors
+                    }
+                }
+            } else {
+                setOrderSearchError(result.error || 'Order not found');
+            }
+        } catch (error: unknown) {
+            setOrderSearchError('Failed to look up order');
+        } finally {
+            setIsSearchingOrder(false);
+        }
+    };
+
+    // Clear source order selection
+    const handleClearSourceOrder = () => {
+        setSourceOrder(null);
+        setOrderNumberSearch('');
+        setOrderSearchError('');
+        // Clear customer info when source order is cleared
+        setOrderForm(f => ({
+            ...f,
+            customerId: null,
+            customerName: '',
+            customerEmail: '',
+            customerPhone: '',
+        }));
+        setAddressForm({});
     };
 
     const handleSelectSku = (sku: any, stock: number) => {
@@ -355,13 +420,17 @@ export function CreateOrderModal({
                 })
             );
         } else {
-            // Restore original prices
+            // Restore original prices and clear source order state
             setOrderLines((lines) =>
                 lines.map((line, idx) => ({
                     ...line,
                     unitPrice: originalPrices.get(idx) || line.unitPrice,
                 }))
             );
+            // Clear source order when switching off exchange mode
+            setSourceOrder(null);
+            setOrderNumberSearch('');
+            setOrderSearchError('');
         }
     };
 
@@ -387,15 +456,17 @@ export function CreateOrderModal({
             (sum, l) => sum + l.qty * l.unitPrice,
             0
         );
-        const prefix = orderForm.isExchange ? 'EXC' : 'COH';
         onCreate({
             ...orderForm,
             // Send undefined instead of empty strings for optional fields
             customerEmail: orderForm.customerEmail?.trim() || undefined,
             customerPhone: orderForm.customerPhone?.trim() || undefined,
-            orderNumber: `${prefix}-${Date.now().toString().slice(-6)}`,
+            // Let server generate the order number (uses EXC-{sourceNum}-{n} format for exchanges)
+            orderNumber: undefined,
             totalAmount,
             shippingAddress: stringifyAddress(addressForm),
+            // Link to source order for exchanges
+            originalOrderId: sourceOrder?.id || null,
             // Convert shipByDate to ISO string if provided
             shipByDate: orderForm.shipByDate
                 ? new Date(orderForm.shipByDate).toISOString()
@@ -531,36 +602,115 @@ export function CreateOrderModal({
                             'space-y-3 transition-opacity',
                             !isChannelSelected && 'opacity-40 pointer-events-none'
                         )}>
-                            {/* Customer */}
-                            <div>
-                                <Label className="text-xs text-muted-foreground">Customer *</Label>
-                                <div className="relative">
-                                    <Input
-                                        className="h-8 text-sm pr-8"
-                                        placeholder="Name..."
-                                        value={orderForm.customerName}
-                                        onChange={(e) => handleCustomerFieldChange('customerName', e.target.value)}
-                                        required
-                                    />
-                                    <button
-                                        type="button"
-                                        onClick={() => setIsSearchingCustomer(!isSearchingCustomer)}
-                                        className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                                    >
-                                        <Search className="h-3.5 w-3.5" />
-                                    </button>
-                                    {isSearchingCustomer && (
-                                        <CustomerSearch
-                                            onSelect={handleSelectCustomer}
-                                            onCancel={() => setIsSearchingCustomer(false)}
-                                            initialQuery={orderForm.customerName}
-                                            showTags
-                                        />
+                            {/* Source Order Lookup - Exchange mode only */}
+                            {orderForm.isExchange && (
+                                <div className="space-y-2">
+                                    <Label className="text-xs text-muted-foreground">Source Order</Label>
+
+                                    {!sourceOrder ? (
+                                        <div className="space-y-2">
+                                            <div className="flex gap-2">
+                                                <Input
+                                                    className="h-8 text-sm flex-1"
+                                                    placeholder="Enter order number..."
+                                                    value={orderNumberSearch}
+                                                    onChange={(e) => setOrderNumberSearch(e.target.value)}
+                                                    onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleOrderLookup())}
+                                                />
+                                                <Button
+                                                    type="button"
+                                                    variant="outline"
+                                                    size="sm"
+                                                    onClick={handleOrderLookup}
+                                                    disabled={isSearchingOrder || !orderNumberSearch.trim()}
+                                                    className="h-8 px-3"
+                                                >
+                                                    {isSearchingOrder ? (
+                                                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                                    ) : (
+                                                        <Search className="h-3.5 w-3.5" />
+                                                    )}
+                                                </Button>
+                                            </div>
+                                            {orderSearchError && (
+                                                <p className="text-xs text-destructive">{orderSearchError}</p>
+                                            )}
+                                            <p className="text-xs text-muted-foreground">
+                                                Look up existing order to auto-fill customer info
+                                            </p>
+                                        </div>
+                                    ) : (
+                                        <div className="p-3 border rounded-md bg-amber-50/50 border-amber-200/50 space-y-2">
+                                            <div className="flex items-center justify-between">
+                                                <div className="flex items-center gap-2">
+                                                    <RefreshCw className="h-3.5 w-3.5 text-amber-600" />
+                                                    <span className="font-medium text-sm">{sourceOrder.orderNumber}</span>
+                                                </div>
+                                                <Button
+                                                    type="button"
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    onClick={handleClearSourceOrder}
+                                                    className="h-6 px-2 text-xs text-muted-foreground hover:text-foreground"
+                                                >
+                                                    Change
+                                                </Button>
+                                            </div>
+                                            <p className="text-xs text-muted-foreground">
+                                                {sourceOrder.customerName} · {sourceOrder.orderLines.length} items · ₹{sourceOrder.totalAmount.toLocaleString('en-IN')}
+                                            </p>
+                                        </div>
                                     )}
                                 </div>
-                            </div>
+                            )}
 
-                            {/* Email & Phone */}
+                            {/* Customer - Show simplified version when source order is selected */}
+                            {orderForm.isExchange && sourceOrder ? (
+                                <div className="p-3 border rounded-md bg-muted/30 space-y-2">
+                                    <div className="flex items-center justify-between">
+                                        <Label className="text-xs text-muted-foreground">Customer (from source order)</Label>
+                                    </div>
+                                    <div className="space-y-1">
+                                        <p className="text-sm font-medium">{orderForm.customerName}</p>
+                                        <p className="text-xs text-muted-foreground">
+                                            {[orderForm.customerEmail, orderForm.customerPhone].filter(Boolean).join(' · ') || 'No contact info'}
+                                        </p>
+                                    </div>
+                                </div>
+                            ) : (
+                                /* Customer - Normal mode */
+                                <div>
+                                    <Label className="text-xs text-muted-foreground">Customer *</Label>
+                                    <div className="relative">
+                                        <Input
+                                            className="h-8 text-sm pr-8"
+                                            placeholder="Name..."
+                                            value={orderForm.customerName}
+                                            onChange={(e) => handleCustomerFieldChange('customerName', e.target.value)}
+                                            required
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={() => setIsSearchingCustomer(!isSearchingCustomer)}
+                                            className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                                        >
+                                            <Search className="h-3.5 w-3.5" />
+                                        </button>
+                                        {isSearchingCustomer && (
+                                            <CustomerSearch
+                                                onSelect={handleSelectCustomer}
+                                                onCancel={() => setIsSearchingCustomer(false)}
+                                                initialQuery={orderForm.customerName}
+                                                showTags
+                                            />
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Email & Phone - Hide when source order is selected (info is from source) */}
+                            {!(orderForm.isExchange && sourceOrder) && (
+                            /* Email & Phone */
                             <div className="grid grid-cols-2 gap-2">
                                 <div>
                                     <Label className="text-xs text-muted-foreground">Email</Label>
@@ -582,6 +732,7 @@ export function CreateOrderModal({
                                     />
                                 </div>
                             </div>
+                            )}
 
                             {/* Address Section */}
                             <div className="space-y-2">
