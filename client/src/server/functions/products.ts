@@ -283,6 +283,7 @@ export const getProductsTree = createServerFn({ method: 'GET' })
                                 select: {
                                     id: true,
                                     name: true,
+                                    unit: true,
                                     material: {
                                         select: {
                                             id: true,
@@ -302,6 +303,7 @@ export const getProductsTree = createServerFn({ method: 'GET' })
                 fabricColourHex: string | null;
                 fabricId: string;
                 fabricName: string;
+                fabricUnit: string | null;
                 materialId: string;
                 materialName: string;
                 fabricStock: number;
@@ -314,6 +316,7 @@ export const getProductsTree = createServerFn({ method: 'GET' })
                         fabricColourHex: v.fabricColour.colourHex,
                         fabricId: v.fabricColour.fabric?.id ?? '',
                         fabricName: v.fabricColour.fabric?.name ?? '',
+                        fabricUnit: v.fabricColour.fabric?.unit ?? null,
                         materialId: v.fabricColour.fabric?.material?.id ?? '',
                         materialName: v.fabricColour.fabric?.material?.name ?? '',
                         fabricStock: v.fabricColour.currentBalance ?? 0,
@@ -491,6 +494,7 @@ export const getProductsTree = createServerFn({ method: 'GET' })
                             shopifyStatus: shopifyStatus ?? (variation.shopifySourceProductId ? 'not_cached' : 'not_linked'),
                             shopifyStock: variationShopifyStock,
                             fabricStock,
+                            fabricUnit: bomFabric?.fabricUnit ?? undefined,
                             sales30DayUnits: variationSales?.sales30DayUnits,
                             sales30DayValue: variationSales?.sales30DayValue,
                             bomCost: variation.bomCost ?? undefined,

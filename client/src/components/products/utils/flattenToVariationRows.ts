@@ -58,6 +58,7 @@ export function flattenToVariationRows(products: ProductTreeNode[]): VariationVi
                 shopifyStatus: variation.shopifyStatus,
                 shopifyStock: variation.shopifyStock,
                 fabricStock: variation.fabricStock,
+                fabricUnit: variation.fabricUnit,
                 sales30DayUnits: variation.sales30DayUnits,
                 sales30DayValue: variation.sales30DayValue,
                 // Consumption & Cost fields

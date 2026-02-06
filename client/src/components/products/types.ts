@@ -85,6 +85,7 @@ export interface ProductTreeNode {
     shopifyStatus?: ShopifyStatus;
     shopifyStock?: number;         // SKU: direct from cache, Variation: sum of SKUs
     fabricStock?: number;          // From FabricColour.currentBalance
+    fabricUnit?: string;           // From Fabric.unit (e.g., "m", "kg")
     sales30DayUnits?: number;      // Units sold in 30 days
     sales30DayValue?: number;      // Revenue in 30 days
 
@@ -233,6 +234,7 @@ export interface VariationViewRow {
     shopifyStatus?: ShopifyStatus;
     shopifyStock?: number;
     fabricStock?: number;
+    fabricUnit?: string;            // From Fabric.unit (e.g., "m", "kg")
     sales30DayUnits?: number;
     sales30DayValue?: number;
 

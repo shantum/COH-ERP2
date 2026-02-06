@@ -1704,6 +1704,20 @@ export const updateConsumptionGrid = createServerFn({ method: 'POST' })
                 }
             }, { timeout: 60000 });
 
+            // Trigger BOM cost recalculation for all affected variations (fire and forget)
+            (async () => {
+                try {
+                    const variationIds = products.flatMap((p: DbRecord) =>
+                        (p.variations as DbRecord[]).map((v: DbRecord) => v.id)
+                    );
+                    for (const variationId of variationIds) {
+                        await recalculateVariationAndSkuBomCosts(prisma, variationId);
+                    }
+                } catch (err) {
+                    console.error('[updateConsumptionGrid] BOM cost recalculation failed:', err);
+                }
+            })();
+
             return {
                 success: true,
                 data: { updated: updatedCount },

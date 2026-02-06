@@ -267,6 +267,7 @@ export function VariationsDataTable({
                             <col style={{ width: columnWidths.avgMrp }} />
                             <col style={{ width: columnWidths.consumption }} />
                             <col style={{ width: columnWidths.bomCost }} />
+                            <col style={{ width: columnWidths.bomMultiple }} />
                             <col style={{ width: columnWidths.stock }} />
                             <col style={{ width: columnWidths.shopifyStatus }} />
                             <col style={{ width: columnWidths.shopifyStock }} />
@@ -308,6 +309,9 @@ export function VariationsDataTable({
                                     BOM
                                 </th>
                                 <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
+                                    BOM×
+                                </th>
+                                <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
                                     Stock
                                 </th>
                                 <th className="text-center px-2 py-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
@@ -331,7 +335,7 @@ export function VariationsDataTable({
                         <tbody>
                             {paginatedRows.length === 0 ? (
                                 <tr>
-                                    <td colSpan={15} className="h-24 text-center text-muted-foreground">
+                                    <td colSpan={16} className="h-24 text-center text-muted-foreground">
                                         No variations found.
                                     </td>
                                 </tr>
@@ -355,9 +359,9 @@ export function VariationsDataTable({
                                             />
                                             {isExpanded && row.skus && row.skus.length > 0 && (
                                                 <tr>
-                                                    <td colSpan={15} className="p-0 bg-blue-50/30">
+                                                    <td colSpan={16} className="p-0 bg-blue-50/30">
                                                         <div className="py-1.5 px-3 ml-8">
-                                                            <SkusTable skus={row.skus} />
+                                                            <SkusTable skus={row.skus} fabricUnit={row.fabricUnit} />
                                                         </div>
                                                     </td>
                                                 </tr>
@@ -519,12 +523,25 @@ const VariationRow = memo(function VariationRow({
 
             {/* Consumption (avg) */}
             <td className="px-2 py-1 text-right tabular-nums text-xs text-gray-600">
-                {row.avgConsumption != null ? `${row.avgConsumption.toFixed(2)}m` : '-'}
+                {row.avgConsumption != null ? `${row.avgConsumption.toFixed(2)}${row.fabricUnit || 'm'}` : '-'}
             </td>
 
             {/* BOM Cost */}
             <td className="px-2 py-1 text-right tabular-nums text-xs text-gray-600">
                 {row.bomCost != null ? `₹${Math.round(row.bomCost).toLocaleString()}` : '-'}
+            </td>
+
+            {/* BOM Multiple (MRP/BOM) */}
+            <td className="px-2 py-1 text-right tabular-nums text-xs">
+                {row.avgMrp != null && row.bomCost != null && row.bomCost > 0 ? (
+                    <span className={`font-medium ${
+                        row.avgMrp / row.bomCost >= 3 ? 'text-green-600' :
+                        row.avgMrp / row.bomCost >= 2 ? 'text-gray-600' :
+                        'text-red-500'
+                    }`}>
+                        {(row.avgMrp / row.bomCost).toFixed(1)}×
+                    </span>
+                ) : '-'}
             </td>
 
             {/* Stock */}
@@ -566,7 +583,7 @@ const VariationRow = memo(function VariationRow({
                                 : 'text-gray-600'
                         }`}
                     >
-                        {row.fabricStock.toLocaleString()}m
+                        {row.fabricStock.toLocaleString()}{row.fabricUnit || 'm'}
                     </span>
                 ) : (
                     <span className="text-xs text-gray-300">-</span>
@@ -639,9 +656,10 @@ const VariationRow = memo(function VariationRow({
  */
 interface SkusTableProps {
     skus: ProductTreeNode[];
+    fabricUnit?: string;
 }
 
-const SkusTable = memo(function SkusTable({ skus }: SkusTableProps) {
+const SkusTable = memo(function SkusTable({ skus, fabricUnit }: SkusTableProps) {
     // Sort SKUs by size order
     const sortedSkus = useMemo(() => {
         return [...skus].sort((a, b) => sortBySizeOrder(a.size || '', b.size || ''));
@@ -692,7 +710,7 @@ const SkusTable = memo(function SkusTable({ skus }: SkusTableProps) {
                                 {sku.mrp ? `₹${sku.mrp.toLocaleString()}` : '-'}
                             </td>
                             <td className="px-2 py-0.5 text-right tabular-nums text-gray-600">
-                                {sku.fabricConsumption != null ? `${sku.fabricConsumption.toFixed(2)}m` : '-'}
+                                {sku.fabricConsumption != null ? `${sku.fabricConsumption.toFixed(2)}${fabricUnit || 'm'}` : '-'}
                             </td>
                             <td className="px-2 py-0.5 text-right tabular-nums text-gray-600">
                                 {sku.bomCost != null ? `₹${Math.round(sku.bomCost).toLocaleString()}` : '-'}

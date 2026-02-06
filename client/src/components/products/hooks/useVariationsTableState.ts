@@ -26,6 +26,7 @@ const DEFAULT_COLUMN_WIDTHS: Record<string, number> = {
     avgMrp: 65,
     consumption: 55,
     bomCost: 60,
+    bomMultiple: 45,
     stock: 55,
     shopifyStatus: 60,
     shopifyStock: 60,

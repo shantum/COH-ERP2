@@ -21,6 +21,7 @@ import {
     type ConsumptionGridResult,
 } from '../../../server/functions/bomMutations';
 import { getOptimizedImageUrl } from '../../../utils/imageOptimization';
+import { productsTreeKeys } from '../hooks/useProductsTree';
 
 interface SizeData {
     quantity: number | null;
@@ -115,6 +116,8 @@ export function ConsumptionGridView() {
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['consumptionGrid'] });
+            // Also invalidate products tree to refresh bomCost display
+            queryClient.invalidateQueries({ queryKey: productsTreeKeys.tree() });
             setPendingChanges(new Map());
         },
     });
