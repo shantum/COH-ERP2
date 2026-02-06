@@ -16,6 +16,9 @@ import { useServerFn } from '@tanstack/react-start';
 import {
     getMaterialsTree,
     getMaterialsTreeChildren,
+    getFabricColoursFlat,
+    type FabricColourFlatRow,
+    type LinkedProduct,
 } from '../../../server/functions/materials';
 import {
     updateMaterial as updateMaterialFn,
@@ -33,6 +36,8 @@ export const materialsTreeKeys = {
     tree: () => [...materialsTreeKeys.all, 'tree'] as const,
     children: (parentId: string, parentType: MaterialNodeType) =>
         [...materialsTreeKeys.all, 'children', parentId, parentType] as const,
+    flat: (params?: { search?: string; materialId?: string }) =>
+        [...materialsTreeKeys.all, 'flat', params] as const,
 };
 
 interface UseMaterialsTreeOptions {
@@ -459,3 +464,70 @@ export function useMaterialsTreeMutations() {
         deleteColour,
     };
 }
+
+// ============================================
+// FLAT FABRIC COLOURS HOOK
+// ============================================
+
+interface UseFabricColoursFlatOptions {
+    search?: string;
+    materialId?: string;
+    activeOnly?: boolean;
+    enabled?: boolean;
+}
+
+interface UseFabricColoursFlatReturn {
+    data: FabricColourFlatRow[];
+    isLoading: boolean;
+    isFetching: boolean;
+    error: Error | null;
+    refetch: () => void;
+    total: number;
+}
+
+/**
+ * Hook for fetching flat fabric colours list
+ *
+ * Returns a flat array of all fabric colours with embedded fabric and material info.
+ * Designed for table display without hierarchy.
+ */
+export function useFabricColoursFlat(options: UseFabricColoursFlatOptions = {}): UseFabricColoursFlatReturn {
+    const { search, materialId, activeOnly = true, enabled = true } = options;
+
+    // Server Function
+    const getFlatFn = useServerFn(getFabricColoursFlat);
+
+    const {
+        data: response,
+        isLoading,
+        isFetching,
+        error,
+        refetch,
+    } = useQuery({
+        queryKey: materialsTreeKeys.flat({ search, materialId }),
+        queryFn: async () => {
+            const result = await getFlatFn({
+                data: {
+                    ...(search ? { search } : {}),
+                    ...(materialId ? { materialId } : {}),
+                    activeOnly,
+                },
+            });
+            return result;
+        },
+        enabled,
+        staleTime: 2 * 60 * 1000, // 2 minutes
+    });
+
+    return {
+        data: response?.items ?? [],
+        isLoading,
+        isFetching,
+        error: error as Error | null,
+        refetch,
+        total: response?.total ?? 0,
+    };
+}
+
+// Re-export the types for convenience
+export type { FabricColourFlatRow, LinkedProduct };

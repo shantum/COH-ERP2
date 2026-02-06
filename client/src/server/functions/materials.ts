@@ -1061,6 +1061,245 @@ const searchVariationsSchema = z.object({
     limit: z.number().int().positive().optional().default(50),
 });
 
+// ============================================
+// FLAT FABRIC COLOURS (for consolidated view)
+// ============================================
+
+const getFabricColoursFlatSchema = z.object({
+    search: z.string().optional(),
+    materialId: z.string().uuid().optional(),
+    activeOnly: z.boolean().optional().default(true),
+});
+
+/** Linked product info with thumbnail */
+export interface LinkedProduct {
+    id: string;
+    name: string;
+    styleCode: string | null;
+    imageUrl: string | null;
+}
+
+/** Row shape returned by getFabricColoursFlat */
+export interface FabricColourFlatRow {
+    // Colour fields
+    id: string;
+    colourName: string;
+    standardColour: string | null;
+    colourHex: string | null;
+    isOutOfStock: boolean;
+    isActive: boolean;
+    // Fabric fields
+    fabricId: string;
+    fabricName: string;
+    pattern: string | null;
+    composition: string | null;
+    weight: number | null;
+    weightUnit: string | null;
+    constructionType: 'knit' | 'woven' | null;
+    unit: 'kg' | 'm' | string | null;
+    // Material fields
+    materialId: string;
+    materialName: string;
+    // Cost/Lead/Min with inheritance
+    costPerUnit: number | null;
+    effectiveCostPerUnit: number | null;
+    costInherited: boolean;
+    leadTimeDays: number | null;
+    effectiveLeadTimeDays: number | null;
+    leadTimeInherited: boolean;
+    minOrderQty: number | null;
+    effectiveMinOrderQty: number | null;
+    minOrderInherited: boolean;
+    // Supplier
+    supplierId: string | null;
+    supplierName: string | null;
+    // Stock
+    currentBalance: number;
+    // 30-day metrics
+    sales30DayValue: number;
+    sales30DayUnits: number;
+    consumption30Day: number;
+    // Connected products count and details
+    productCount: number;
+    linkedProducts: LinkedProduct[];
+}
+
+/**
+ * Get flat list of all fabric colours
+ *
+ * Returns a flat array of colour rows with fabric and material info embedded.
+ * Designed for a simple table view without hierarchy.
+ */
+export const getFabricColoursFlat = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => getFabricColoursFlatSchema.parse(input ?? {}))
+    .handler(async ({ data }): Promise<{ success: true; items: FabricColourFlatRow[]; total: number }> => {
+        const prisma = await getPrisma();
+
+        // Build where clause
+        const where: Record<string, unknown> = {};
+        if (data.activeOnly) {
+            where.isActive = true;
+        }
+        if (data.materialId) {
+            where.fabric = { materialId: data.materialId };
+        }
+        if (data.search) {
+            where.OR = [
+                { colourName: { contains: data.search, mode: 'insensitive' } },
+                { fabric: { name: { contains: data.search, mode: 'insensitive' } } },
+                { fabric: { material: { name: { contains: data.search, mode: 'insensitive' } } } },
+            ];
+        }
+
+        // Fetch all colours with fabric and material
+        const colours = await prisma.fabricColour.findMany({
+            where,
+            include: {
+                fabric: {
+                    include: {
+                        material: { select: { id: true, name: true } },
+                    },
+                },
+                supplier: { select: { id: true, name: true } },
+                variationBomLines: {
+                    select: {
+                        variation: {
+                            select: {
+                                productId: true,
+                                imageUrl: true,
+                                product: {
+                                    select: {
+                                        id: true,
+                                        name: true,
+                                        styleCode: true,
+                                        imageUrl: true,
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+            orderBy: [
+                { fabric: { material: { name: 'asc' } } },
+                { fabric: { name: 'asc' } },
+                { colourName: 'asc' },
+            ],
+        });
+
+        // Collect colour IDs for batch balance fetch
+        const colourIds = colours.map((c) => c.id);
+
+        // Batch fetch balances and 30-day metrics in parallel
+        const [balanceMap, salesMetricsMap] = await Promise.all([
+            // Balance calculation
+            (async () => {
+                const map = new Map<string, number>();
+                if (colourIds.length > 0) {
+                    const aggregations = await prisma.fabricColourTransaction.groupBy({
+                        by: ['fabricColourId', 'txnType'],
+                        where: { fabricColourId: { in: colourIds } },
+                        _sum: { qty: true },
+                    });
+
+                    const colourTotals = new Map<string, { inward: number; outward: number }>();
+                    for (const agg of aggregations) {
+                        if (!colourTotals.has(agg.fabricColourId)) {
+                            colourTotals.set(agg.fabricColourId, { inward: 0, outward: 0 });
+                        }
+                        const totals = colourTotals.get(agg.fabricColourId)!;
+                        if (agg.txnType === 'inward') {
+                            totals.inward = Number(agg._sum.qty) || 0;
+                        } else if (agg.txnType === 'outward') {
+                            totals.outward = Number(agg._sum.qty) || 0;
+                        }
+                    }
+
+                    for (const [colourId, totals] of colourTotals) {
+                        map.set(colourId, totals.inward - totals.outward);
+                    }
+                }
+                return map;
+            })(),
+            // 30-day sales metrics (cached)
+            getFabricMetricsCached(),
+        ]);
+
+        // Transform to flat rows
+        const items: FabricColourFlatRow[] = colours.map((colour) => {
+            const fabric = colour.fabric;
+            const material = fabric.material;
+            const metrics = salesMetricsMap.get(colour.id);
+
+            // Collect unique products with their thumbnails
+            const productMap = new Map<string, LinkedProduct>();
+            colour.variationBomLines.forEach((bomLine) => {
+                const variation = bomLine.variation;
+                if (variation?.product && !productMap.has(variation.product.id)) {
+                    productMap.set(variation.product.id, {
+                        id: variation.product.id,
+                        name: variation.product.name,
+                        styleCode: variation.product.styleCode,
+                        // Prefer variation image, fall back to product image
+                        imageUrl: variation.imageUrl || variation.product.imageUrl,
+                    });
+                }
+            });
+            const linkedProducts = Array.from(productMap.values());
+
+            return {
+                // Colour
+                id: colour.id,
+                colourName: colour.colourName,
+                standardColour: colour.standardColour,
+                colourHex: colour.colourHex,
+                isOutOfStock: colour.isOutOfStock,
+                isActive: colour.isActive,
+                // Fabric
+                fabricId: fabric.id,
+                fabricName: fabric.name,
+                pattern: fabric.pattern,
+                composition: fabric.composition,
+                weight: fabric.weight ? Number(fabric.weight) : null,
+                weightUnit: fabric.weightUnit,
+                constructionType: fabric.constructionType as 'knit' | 'woven' | null,
+                unit: fabric.unit,
+                // Material
+                materialId: material?.id ?? '',
+                materialName: material?.name ?? '',
+                // Cost/Lead/Min with inheritance
+                costPerUnit: colour.costPerUnit ? Number(colour.costPerUnit) : null,
+                effectiveCostPerUnit: colour.costPerUnit ? Number(colour.costPerUnit) : (fabric.costPerUnit ? Number(fabric.costPerUnit) : null),
+                costInherited: colour.costPerUnit === null,
+                leadTimeDays: colour.leadTimeDays,
+                effectiveLeadTimeDays: colour.leadTimeDays ?? fabric.defaultLeadTimeDays,
+                leadTimeInherited: colour.leadTimeDays === null,
+                minOrderQty: colour.minOrderQty ? Number(colour.minOrderQty) : null,
+                effectiveMinOrderQty: colour.minOrderQty ? Number(colour.minOrderQty) : (fabric.defaultMinOrderQty ? Number(fabric.defaultMinOrderQty) : null),
+                minOrderInherited: colour.minOrderQty === null,
+                // Supplier
+                supplierId: colour.supplierId,
+                supplierName: colour.supplier?.name ?? null,
+                // Stock
+                currentBalance: balanceMap.get(colour.id) ?? 0,
+                // 30-day metrics
+                sales30DayValue: metrics?.sales30DayValue ?? 0,
+                sales30DayUnits: metrics?.sales30DayUnits ?? 0,
+                consumption30Day: metrics?.consumption30Day ?? 0,
+                // Products
+                productCount: linkedProducts.length,
+                linkedProducts,
+            };
+        });
+
+        return {
+            success: true,
+            items,
+            total: items.length,
+        };
+    });
+
 /**
  * Search product variations for fabric linking
  */
