@@ -11,7 +11,7 @@ import { useServerFn } from '@tanstack/react-start';
 import { AgGridReact } from 'ag-grid-react';
 import type { ColDef, ICellRendererParams } from 'ag-grid-community';
 import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community';
-import { Search, UserPlus, Shield, Users, Check, X as XIcon } from 'lucide-react';
+import { Search, UserPlus, Shield, Users, Check, X as XIcon, Crown } from 'lucide-react';
 import { compactTheme, formatDateWithYear, formatRelativeTime } from '../utils/agGridHelpers';
 import { usePermissions } from '../hooks/usePermissions';
 import { PermissionGate, AccessDenied } from '../components/PermissionGate';
@@ -60,6 +60,17 @@ function RoleBadge({ roleName }: { roleName: string | null }) {
         <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${colorClass}`}>
             <Shield size={12} />
             {roleName || 'No Role'}
+        </span>
+    );
+}
+
+// Admin badge component
+function AdminBadge({ isAdmin }: { isAdmin: boolean }) {
+    if (!isAdmin) return null;
+    return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">
+            <Crown size={12} />
+            Admin
         </span>
     );
 }
@@ -128,7 +139,7 @@ export default function UserManagement() {
 
     // Update user status mutation using Server Function
     const updateUserMutation = useMutation({
-        mutationFn: async ({ id, data }: { id: string; data: { isActive?: boolean } }) => {
+        mutationFn: async ({ id, data }: { id: string; data: { isActive?: boolean; role?: 'admin' | 'staff' } }) => {
             const result = await updateUserServerFn({ data: { userId: id, ...data } });
             if (!result.success) {
                 throw new Error(result.error?.message || 'Failed to update user');
@@ -222,6 +233,15 @@ export default function UserManagement() {
             },
         },
         {
+            field: 'role',
+            headerName: 'Admin',
+            width: 90,
+            cellRenderer: (params: ICellRendererParams<User>) => {
+                if (!params.data) return null;
+                return <AdminBadge isAdmin={params.data.role === 'admin'} />;
+            },
+        },
+        {
             field: 'createdAt',
             headerName: 'Created',
             width: 130,
@@ -236,12 +256,13 @@ export default function UserManagement() {
         {
             colId: 'actions',
             headerName: '',
-            width: 80,
+            width: 110,
             sortable: false,
             pinned: 'right' as const,
             cellRenderer: (params: ICellRendererParams<User>) => {
                 if (!params.data) return null;
                 const user = params.data;
+                const isAdmin = user.role === 'admin';
 
                 return (
                     <div className="flex items-center gap-1">
@@ -255,6 +276,24 @@ export default function UserManagement() {
                                 title="Edit permissions"
                             >
                                 <Shield size={16} />
+                            </button>
+                        </PermissionGate>
+                        <PermissionGate permission="users:edit">
+                            <button
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    updateUserMutation.mutate({
+                                        id: user.id,
+                                        data: { role: isAdmin ? 'staff' : 'admin' },
+                                    });
+                                }}
+                                className={`p-1.5 rounded ${isAdmin
+                                        ? 'text-amber-500 hover:text-amber-700 hover:bg-amber-50'
+                                        : 'text-gray-400 hover:text-amber-600 hover:bg-amber-50'
+                                    }`}
+                                title={isAdmin ? 'Remove admin access' : 'Grant admin access'}
+                            >
+                                <Crown size={16} />
                             </button>
                         </PermissionGate>
                         <PermissionGate permission="users:edit">

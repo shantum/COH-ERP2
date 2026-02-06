@@ -155,12 +155,13 @@ export function GeneralTab() {
     });
 
     const updateUserMutation = useMutation({
-        mutationFn: async ({ id, data }: { id: string; data: { name?: string; email?: string; role?: string; isActive?: boolean; password?: string } }) => {
+        mutationFn: async ({ id, data }: { id: string; data: { name?: string; email?: string; role?: 'admin' | 'staff'; isActive?: boolean; password?: string } }) => {
             const result = await updateUserFn({
                 data: {
                     userId: id,
                     name: data.name,
                     email: data.email,
+                    role: data.role,
                     isActive: data.isActive,
                     password: data.password,
                 },
@@ -535,10 +536,10 @@ export function GeneralTab() {
                                     </button>
                                     <button
                                         onClick={() => {
-                                            const updateData: { name?: string; email?: string; role?: string; isActive?: boolean; password?: string } = {
+                                            const updateData: { name?: string; email?: string; role?: 'admin' | 'staff'; isActive?: boolean; password?: string } = {
                                                 name: editingUser.name,
                                                 email: editingUser.email,
-                                                role: editingUser.role,
+                                                role: editingUser.role as 'admin' | 'staff',
                                                 isActive: editingUser.isActive,
                                             };
                                             if (editingUser.newPassword) {
