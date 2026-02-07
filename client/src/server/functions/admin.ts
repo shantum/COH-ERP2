@@ -96,11 +96,11 @@ const getServerLogsSchema = z.object({
 
 // Background Jobs
 const startBackgroundJobSchema = z.object({
-    jobId: z.enum(['shopify_sync', 'tracking_sync', 'cache_cleanup']),
+    jobId: z.enum(['shopify_sync', 'tracking_sync', 'cache_cleanup', 'sheet_offload']),
 });
 
 const cancelBackgroundJobSchema = z.object({
-    jobId: z.enum(['shopify_sync', 'tracking_sync', 'cache_cleanup']),
+    jobId: z.enum(['shopify_sync', 'tracking_sync', 'cache_cleanup', 'sheet_offload']),
 });
 
 const updateBackgroundJobSchema = z.object({

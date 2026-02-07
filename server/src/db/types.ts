@@ -310,6 +310,11 @@ export type InventoryTransaction = {
     referenceId: string | null;
     notes: string | null;
     warehouseLocation: string | null;
+    source: string | null;
+    destination: string | null;
+    tailorNumber: string | null;
+    performedBy: string | null;
+    orderNumber: string | null;
     createdById: string;
     createdAt: Generated<Timestamp>;
 };

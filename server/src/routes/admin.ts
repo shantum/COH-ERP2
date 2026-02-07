@@ -36,6 +36,8 @@ import { runAllCleanup, getCacheStats } from '../utils/cacheCleanup.js';
 import { invalidateUserTokens } from '../middleware/permissions.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { ValidationError, NotFoundError, ConflictError, BusinessLogicError } from '../utils/errors.js';
+import sheetOffloadWorker from '../services/sheetOffloadWorker.js';
+import { ENABLE_SHEET_DELETION, OFFLOAD_AGE_DAYS } from '../config/sync/sheets.js';
 
 const router: Router = Router();
 
@@ -184,7 +186,7 @@ interface PermissionsUpdateBody {
 }
 
 /** Background job trigger params */
-type JobId = 'shopify_sync' | 'tracking_sync' | 'cache_cleanup';
+type JobId = 'shopify_sync' | 'tracking_sync' | 'cache_cleanup' | 'sheet_offload';
 
 /** Background job update body */
 interface JobUpdateBody {
@@ -1265,6 +1267,7 @@ router.get('/background-jobs', authenticateToken, asyncHandler(async (req: Reque
     // Get sync service statuses
     const shopifyStatus = scheduledSync.getStatus();
     const trackingStatus = trackingSync.getStatus();
+    const offloadStatus = sheetOffloadWorker.getStatus();
 
     // Get cache stats for cleanup job context
     const cacheStats = await getCacheStats();
@@ -1317,6 +1320,23 @@ router.get('/background-jobs', authenticateToken, asyncHandler(async (req: Reque
             schedule: 'On server startup',
             lastRunAt: savedSettings.lastAutoArchiveAt as string | null || null,
             note: 'Runs automatically when server starts',
+        },
+        {
+            id: 'sheet_offload',
+            name: 'Sheet Offload',
+            description: 'Ingests old inward/outward data from Google Sheets into ERP, updates past balances, and optionally cleans up sheet rows.',
+            enabled: offloadStatus.schedulerActive,
+            intervalMinutes: offloadStatus.intervalMs / 60000,
+            isRunning: offloadStatus.isRunning,
+            lastRunAt: offloadStatus.lastRunAt,
+            lastResult: offloadStatus.lastResult,
+            config: {
+                deletionEnabled: ENABLE_SHEET_DELETION,
+                offloadAgeDays: OFFLOAD_AGE_DAYS,
+            },
+            stats: {
+                recentRuns: offloadStatus.recentRuns,
+            },
         }
     ];
 
@@ -1371,6 +1391,11 @@ router.post('/background-jobs/:jobId/trigger', requireAdmin, asyncHandler(async 
                 message: 'Cache cleanup completed',
                 result,
             });
+            break;
+        }
+        case 'sheet_offload': {
+            const result = await sheetOffloadWorker.triggerSync();
+            res.json({ message: 'Sheet offload triggered', result });
             break;
         }
         default:

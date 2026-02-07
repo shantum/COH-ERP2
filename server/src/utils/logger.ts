@@ -121,6 +121,7 @@ export const productionLogger: Logger = logger.child({ module: 'production' });
 export const fabricLogger: Logger = logger.child({ module: 'fabrics' });
 export const customerLogger: Logger = logger.child({ module: 'customers' });
 export const remittanceLogger: Logger = logger.child({ module: 'remittance' });
+export const sheetsLogger: Logger = logger.child({ module: 'sheets' });
 
 // Export the base logger as default
 export default logger;

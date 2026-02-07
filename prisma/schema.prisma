@@ -371,6 +371,11 @@ model InventoryTransaction {
   referenceId       String?
   notes             String?
   warehouseLocation String?
+  source            String?
+  destination       String?
+  tailorNumber      String?
+  performedBy       String?
+  orderNumber       String?
   createdById       String
   createdAt         DateTime @default(now())
   createdBy         User     @relation(fields: [createdById], references: [id])
@@ -382,6 +387,7 @@ model InventoryTransaction {
   @@index([skuId, reason, createdAt])
   @@index([skuId, txnType])
   @@index([referenceId])
+  @@index([orderNumber])
 }
 
 model Customer {

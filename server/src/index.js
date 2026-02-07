@@ -51,6 +51,7 @@ import scheduledSync from './services/scheduledSync.js';
 import trackingSync from './services/trackingSync.js';
 import cacheProcessor from './services/cacheProcessor.js';
 import cacheDumpWorker from './services/cacheDumpWorker.js';
+import sheetOffloadWorker from './services/sheetOffloadWorker.js';
 import { runAllCleanup } from './utils/cacheCleanup.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import shutdownCoordinator from './utils/shutdownCoordinator.js';
@@ -256,6 +257,9 @@ app.listen(PORT, '0.0.0.0', async () => {
     // Start cache dump worker (auto-resumes incomplete Shopify full dumps)
     cacheDumpWorker.start();
 
+    // Start sheet offload worker (feature-flagged — only runs if ENABLE_SHEET_OFFLOAD=true)
+    sheetOffloadWorker.start();
+
     // Register shutdown handlers for graceful shutdown
     shutdownCoordinator.register('scheduledSync', () => {
       scheduledSync.stop();
@@ -271,6 +275,10 @@ app.listen(PORT, '0.0.0.0', async () => {
 
     shutdownCoordinator.register('cacheDumpWorker', () => {
       cacheDumpWorker.stop();
+    }, 5000);
+
+    shutdownCoordinator.register('sheetOffloadWorker', () => {
+      sheetOffloadWorker.stop();
     }, 5000);
   }
 

@@ -37,6 +37,9 @@ npm-debug.log*
 *.swp
 *.swo
 
+# Google Cloud credentials
+server/config/google-service-account.json
+
 # OS
 .DS_Store
 Thumbs.db
