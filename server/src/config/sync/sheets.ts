@@ -107,6 +107,34 @@ export const BARCODE_TABS = {
 } as const;
 
 // ============================================
+// COLUMN MAPPINGS — Orders from COH (Mastersheet)
+// ============================================
+
+/**
+ * Orders from COH tab — open orders with allocation.
+ * Col X = "Shipped" (TRUE/FALSE), Col AD = "Outward Done" (1 = already moved).
+ * When Shipped=TRUE and Outward Done≠1, the row should be moved to Outward (Live).
+ *
+ * Relevant columns for the move:
+ * B: Order Number, G: SKU, I: Qty, K: Order Note, L: COH Note,
+ * R: Sampling Date, X: Shipped, Z: Courier, AA: AWB, AC: AWB Scan, AD: Outward Done
+ */
+export const ORDERS_FROM_COH_COLS = {
+    ORDER_DATE: 0,      // A — "Order" (date the order was placed)
+    ORDER_NO: 1,        // B
+    SKU: 6,             // G
+    QTY: 8,             // I
+    ORDER_NOTE: 10,     // K
+    COH_NOTE: 11,       // L
+    SAMPLING_DATE: 17,  // R
+    SHIPPED: 23,        // X
+    COURIER: 25,        // Z
+    AWB: 26,            // AA
+    AWB_SCAN: 28,       // AC
+    OUTWARD_DONE: 29,   // AD
+} as const;
+
+// ============================================
 // COLUMN MAPPINGS — Inventory tab (Mastersheet)
 // ============================================
 
@@ -176,7 +204,7 @@ export const INWARD_LIVE_COLS = {
  * Outward (Live) — buffer tab in COH Orders Mastersheet.
  * A: SKU, B: Qty, C: Product Details, D: Outward Date, E: Destination,
  * F: Order Number, G: Sampling Date, H: Order Note, I: COH Note,
- * J: Courier, K: AWB, L: AWB Scan, M: Notes
+ * J: Courier, K: AWB, L: AWB Scan, M: Notes, N: Order Date
  */
 export const OUTWARD_LIVE_COLS = {
     SKU: 0,         // A
@@ -192,6 +220,7 @@ export const OUTWARD_LIVE_COLS = {
     AWB: 10,        // K
     AWB_SCAN: 11,   // L
     NOTES: 12,      // M
+    ORDER_DATE: 13, // N — original order date (from Orders from COH col A)
 } as const;
 
 // ============================================

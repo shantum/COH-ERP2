@@ -186,7 +186,7 @@ interface PermissionsUpdateBody {
 }
 
 /** Background job trigger params */
-type JobId = 'shopify_sync' | 'tracking_sync' | 'cache_cleanup' | 'sheet_offload';
+type JobId = 'shopify_sync' | 'tracking_sync' | 'cache_cleanup' | 'sheet_offload' | 'shipped_to_outward';
 
 /** Background job update body */
 interface JobUpdateBody {
@@ -1336,6 +1336,13 @@ router.get('/background-jobs', authenticateToken, asyncHandler(async (req: Reque
             stats: {
                 recentRuns: offloadStatus.recentRuns,
             },
+        },
+        {
+            id: 'shipped_to_outward',
+            name: 'Move Shipped → Outward',
+            description: 'Moves shipped orders from "Orders from COH" to "Outward (Live)". Finds rows where Shipped=TRUE and Outward Done≠1, writes to Outward (Live), then deletes source rows.',
+            enabled: true,
+            note: 'Manual trigger only — no scheduled interval',
         }
     ];
 
@@ -1395,6 +1402,11 @@ router.post('/background-jobs/:jobId/trigger', requireAdmin, asyncHandler(async 
         case 'sheet_offload': {
             const result = await sheetOffloadWorker.triggerSync();
             res.json({ message: 'Sheet offload triggered', result });
+            break;
+        }
+        case 'shipped_to_outward': {
+            const result = await sheetOffloadWorker.moveShippedToOutward();
+            res.json({ message: 'Shipped → Outward move completed', result });
             break;
         }
         default:

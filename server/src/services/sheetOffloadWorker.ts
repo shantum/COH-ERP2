@@ -29,6 +29,7 @@ import { broadcastOrderUpdate } from '../routes/sse.js';
 import {
     readRange,
     writeRange,
+    appendRows,
     deleteRowsBatch,
     getSheetId,
 } from './googleSheetsClient.js';
@@ -38,10 +39,12 @@ import {
     OFFICE_LEDGER_ID,
     ORDERS_MASTERSHEET_ID,
     LIVE_TABS,
+    MASTERSHEET_TABS,
     LEDGER_TABS,
     INVENTORY_TAB,
     INWARD_LIVE_COLS,
     OUTWARD_LIVE_COLS,
+    ORDERS_FROM_COH_COLS,
     INWARD_SOURCE_MAP,
     DEFAULT_INWARD_REASON,
     OUTWARD_DESTINATION_MAP,
@@ -749,6 +752,166 @@ async function runOffloadSync(): Promise<OffloadResult | null> {
 }
 
 // ============================================
+// MOVE SHIPPED ORDERS → OUTWARD (LIVE)
+// ============================================
+
+interface MoveShippedResult {
+    shippedRowsFound: number;
+    rowsWrittenToOutward: number;
+    rowsDeletedFromOrders: number;
+    errors: string[];
+    durationMs: number;
+}
+
+/**
+ * Move shipped orders from "Orders from COH" to "Outward (Live)".
+ *
+ * 1. Read "Orders from COH" tab
+ * 2. Find rows where col X (Shipped) = TRUE and col AD (Outward Done) ≠ 1
+ * 3. Map fields to Outward (Live) format
+ * 4. Append to Outward (Live) — writes cols A-B and D-M (skips C, protected formula)
+ * 5. Mark col AD = 1 on source rows (Outward Done flag)
+ * 6. Delete source rows from "Orders from COH"
+ *
+ * Safety: writes to Outward first, only deletes from Orders after confirmed write.
+ */
+async function moveShippedToOutward(): Promise<MoveShippedResult> {
+    const startTime = Date.now();
+    const result: MoveShippedResult = {
+        shippedRowsFound: 0,
+        rowsWrittenToOutward: 0,
+        rowsDeletedFromOrders: 0,
+        errors: [],
+        durationMs: 0,
+    };
+
+    try {
+        const tab = MASTERSHEET_TABS.ORDERS_FROM_COH;
+        sheetsLogger.info({ tab }, 'Reading Orders from COH for shipped rows');
+
+        // Read all data — cols A through AE (index 0-30)
+        const rows = await readRange(ORDERS_MASTERSHEET_ID, `'${tab}'!A:AE`);
+        if (rows.length <= 1) {
+            sheetsLogger.info({ tab }, 'No data rows');
+            result.durationMs = Date.now() - startTime;
+            return result;
+        }
+
+        // Find shipped rows where Outward Done ≠ 1
+        const shippedRows: Array<{ rowIndex: number; row: string[] }> = [];
+        for (let i = 1; i < rows.length; i++) {
+            const row = rows[i];
+            const shipped = String(row[ORDERS_FROM_COH_COLS.SHIPPED] ?? '').trim().toUpperCase();
+            const outwardDone = String(row[ORDERS_FROM_COH_COLS.OUTWARD_DONE] ?? '').trim();
+            const sku = String(row[ORDERS_FROM_COH_COLS.SKU] ?? '').trim();
+
+            if (shipped === 'TRUE' && outwardDone !== '1' && sku) {
+                shippedRows.push({ rowIndex: i, row });
+            }
+        }
+
+        result.shippedRowsFound = shippedRows.length;
+
+        if (shippedRows.length === 0) {
+            sheetsLogger.info({ tab }, 'No shipped rows to move');
+            result.durationMs = Date.now() - startTime;
+            return result;
+        }
+
+        sheetsLogger.info({ tab, shipped: shippedRows.length }, 'Found shipped rows to move');
+
+        // Map Orders from COH → Outward (Live) format
+        // Outward (Live) cols: A=SKU, B=Qty, C=Product(skip), D=Date, E=Destination,
+        //   F=Order#, G=SamplingDate, H=OrderNote, I=COHNote, J=Courier, K=AWB, L=AWBScan, M=Notes
+        const today = new Date().toLocaleDateString('en-GB'); // DD/MM/YYYY
+        const outwardRows: (string | number)[][] = [];
+
+        for (const { row } of shippedRows) {
+            const sku = String(row[ORDERS_FROM_COH_COLS.SKU] ?? '').trim();
+            const qty = String(row[ORDERS_FROM_COH_COLS.QTY] ?? '').trim();
+            const orderNo = String(row[ORDERS_FROM_COH_COLS.ORDER_NO] ?? '').trim();
+            const orderDate = String(row[ORDERS_FROM_COH_COLS.ORDER_DATE] ?? '').trim();
+            const samplingDate = String(row[ORDERS_FROM_COH_COLS.SAMPLING_DATE] ?? '').trim();
+            const orderNote = String(row[ORDERS_FROM_COH_COLS.ORDER_NOTE] ?? '').trim();
+            const cohNote = String(row[ORDERS_FROM_COH_COLS.COH_NOTE] ?? '').trim();
+            const courier = String(row[ORDERS_FROM_COH_COLS.COURIER] ?? '').trim();
+            const awb = String(row[ORDERS_FROM_COH_COLS.AWB] ?? '').trim();
+            const awbScan = String(row[ORDERS_FROM_COH_COLS.AWB_SCAN] ?? '').trim();
+
+            // Outward (Live) row: A=SKU, B=Qty, C=(skip, formula), D=OutwardDate, E=Destination,
+            //   F=Order#, G=SamplingDate, H=OrderNote, I=COHNote, J=Courier, K=AWB,
+            //   L=AWBScan, M=(Notes, empty), N=OrderDate
+            outwardRows.push([
+                sku,            // A
+                qty,            // B
+                '',             // C — skip (protected product details formula)
+                today,          // D — outward date
+                'Customer',     // E — destination
+                orderNo,        // F — order number
+                samplingDate,   // G — sampling date
+                orderNote,      // H — order note
+                cohNote,        // I — COH note
+                courier,        // J — courier
+                awb,            // K — AWB
+                awbScan,        // L — AWB scan
+                '',             // M — notes (empty)
+                orderDate,      // N — order date (from Orders from COH col A)
+            ]);
+        }
+
+        // Step 1: Write to Outward (Live) — safety first
+        const outwardTab = LIVE_TABS.OUTWARD;
+        await appendRows(
+            ORDERS_MASTERSHEET_ID,
+            `'${outwardTab}'!A:N`,
+            outwardRows
+        );
+        result.rowsWrittenToOutward = outwardRows.length;
+        sheetsLogger.info({ tab: outwardTab, written: outwardRows.length }, 'Written shipped rows to Outward (Live)');
+
+        // Step 2: Mark Outward Done = 1 on source rows (col AD) — batched to avoid quota issues
+        const adUpdates = shippedRows
+            .map(r => ({ row: r.rowIndex + 1, value: 1 })) // 1-indexed for A1 notation
+            .sort((a, b) => a.row - b.row);
+        const adRanges = groupIntoRanges(adUpdates);
+        for (const range of adRanges) {
+            const rangeStr = `'${tab}'!AD${range.startRow}:AD${range.startRow + range.values.length - 1}`;
+            await writeRange(ORDERS_MASTERSHEET_ID, rangeStr, range.values);
+        }
+        sheetsLogger.info({ marked: shippedRows.length, apiCalls: adRanges.length }, 'Marked Outward Done on source rows');
+
+        // Step 3: Delete source rows from Orders from COH
+        try {
+            const sheetId = await getSheetId(ORDERS_MASTERSHEET_ID, tab);
+            const rowIndices = shippedRows.map(r => r.rowIndex);
+            await deleteRowsBatch(ORDERS_MASTERSHEET_ID, sheetId, rowIndices);
+            result.rowsDeletedFromOrders = rowIndices.length;
+            sheetsLogger.info({ tab, deleted: rowIndices.length }, 'Deleted shipped rows from Orders from COH');
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : 'Unknown error';
+            result.errors.push(`Delete from Orders failed: ${message}`);
+            sheetsLogger.error({ tab, error: message }, 'Failed to delete shipped rows from Orders from COH');
+        }
+
+    } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        result.errors.push(message);
+        sheetsLogger.error({ error: message }, 'moveShippedToOutward failed');
+    }
+
+    result.durationMs = Date.now() - startTime;
+    sheetsLogger.info({
+        shippedRowsFound: result.shippedRowsFound,
+        rowsWrittenToOutward: result.rowsWrittenToOutward,
+        rowsDeletedFromOrders: result.rowsDeletedFromOrders,
+        errors: result.errors.length,
+        durationMs: result.durationMs,
+    }, 'moveShippedToOutward completed');
+
+    return result;
+}
+
+// ============================================
 // BUFFER ROW COUNTS (for admin UI)
 // ============================================
 
@@ -848,6 +1011,7 @@ export default {
     getStatus,
     triggerSync,
     getBufferCounts,
+    moveShippedToOutward,
 };
 
-export type { OffloadResult, OffloadStatus, RunSummary };
+export type { OffloadResult, OffloadStatus, RunSummary, MoveShippedResult };
