@@ -49,7 +49,7 @@
 4. **Document as you go.** Comment undocumented code when you encounter it.
 5. **Use agents liberally.** Spawn sub-agents for parallel/complex work.
 6. **Commit early, commit often.** Small, frequent commits. **Run `cd client && npx tsc -p tsconfig.app.json --noEmit && cd ../server && npx tsc --noEmit` before committing.**
-7. **STRICT: Branch discipline.** Always work on and push to `develop`. NEVER push to `main` unless the user explicitly confirms.
+7. **STRICT: Branch discipline.** Work on `main` branch. All deployments use the production database.
 8. **Separate config from code.** Magic numbers, thresholds, mappings > `/config/`.
 9. **Clean architecture.** Dependencies point inward. Business logic independent of frameworks/UI/DB.
 10. **Build for the long term.** Maintainability over cleverness.
@@ -182,13 +182,12 @@ function buildWhereClause(view: string): Prisma.OrderWhereInput { ... }
 
 > **Full details:** Load `/database` skill or search QMD
 
-**Golden Rule:** Migrations flow ONE direction: `local → staging → production`. Never manually migrate staging/production.
+**Golden Rule:** All environments (local, production) share the same production database. Migrations apply immediately.
 
 | Environment | Database | How Migrations Run |
 |-------------|----------|-------------------|
-| **Local** | Postgres.app (port 5444) | Manual: `pnpm db:migrate` |
-| **Staging** | Railway (shuttle.proxy.rlwy.net) | **Auto** on `develop` push |
-| **Production** | Railway (caboose.proxy.rlwy.net) | **Auto** on `main` merge |
+| **Local** | Railway (caboose.proxy.rlwy.net) | Shared production DB |
+| **Production** | Railway (caboose.proxy.rlwy.net) | **Auto** on `main` push |
 
 ```bash
 # LOCAL: Edit schema.prisma, then create migration
@@ -198,11 +197,11 @@ pnpm db:migrate --name add_customer_field
 git add prisma/migrations/ prisma/schema.prisma
 git commit -m "Add customer field"
 
-# PUSH: Staging auto-migrates on deploy
-git push origin develop
+# PUSH: Production auto-migrates on deploy
+git push origin main
 ```
 
-**Critical:** NEVER run `db:migrate` against staging/production. Railway handles remote migrations via `prisma migrate deploy`.
+**Critical:** NEVER run `db:migrate` against production. Railway handles migrations via `prisma migrate deploy`.
 
 ---
 
