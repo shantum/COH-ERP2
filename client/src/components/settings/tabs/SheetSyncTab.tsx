@@ -179,6 +179,21 @@ interface RecentRun {
     error: string | null;
 }
 
+interface BufferCounts {
+    inward: number;
+    outward: number;
+}
+
+interface OffloadStatusResponse {
+    isRunning: boolean;
+    schedulerActive: boolean;
+    intervalMs: number;
+    lastRunAt: string | null;
+    lastResult: OffloadLastResult | null;
+    recentRuns: RecentRun[];
+    bufferCounts: BufferCounts;
+}
+
 const OffloadMonitor = React.memo(function OffloadMonitor() {
     const queryClient = useQueryClient();
     const [showRecent, setShowRecent] = useState(false);
@@ -197,6 +212,23 @@ const OffloadMonitor = React.memo(function OffloadMonitor() {
         refetchInterval: 15000,
     });
 
+    // Dedicated status endpoint with buffer counts
+    const { data: offloadStatus } = useQuery({
+        queryKey: ['sheetOffloadDetailedStatus'],
+        queryFn: async (): Promise<OffloadStatusResponse | null> => {
+            try {
+                const response = await fetch('/api/admin/sheet-offload/status', {
+                    credentials: 'include',
+                });
+                if (!response.ok) return null;
+                return await response.json() as OffloadStatusResponse;
+            } catch {
+                return null;
+            }
+        },
+        refetchInterval: 30000,
+    });
+
     const triggerMutation = useMutation({
         mutationFn: async () => {
             const result = await triggerFn({
@@ -207,6 +239,7 @@ const OffloadMonitor = React.memo(function OffloadMonitor() {
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['sheetOffloadStatus'] });
+            queryClient.invalidateQueries({ queryKey: ['sheetOffloadDetailedStatus'] });
         },
     });
 
@@ -272,7 +305,7 @@ const OffloadMonitor = React.memo(function OffloadMonitor() {
                             )}
                         </div>
                         <p className="text-xs text-gray-500 mt-0.5">
-                            Ingests old inward/outward data from Google Sheets into ERP
+                            Ingests entries from Inward/Outward (Live) buffer tabs into ERP
                         </p>
                     </div>
                 </div>
@@ -295,8 +328,8 @@ const OffloadMonitor = React.memo(function OffloadMonitor() {
                 </div>
             </div>
 
-            {/* Config + Last Run */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+            {/* Config + Last Run + Buffer Counts */}
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-xs">
                 <div className="bg-gray-50 rounded-lg p-2.5">
                     <p className="text-gray-500">Interval</p>
                     <p className="font-medium text-gray-900">
@@ -313,10 +346,20 @@ const OffloadMonitor = React.memo(function OffloadMonitor() {
                         {config?.deletionEnabled ? 'Enabled' : 'Disabled'}
                     </p>
                 </div>
-                <div className="bg-gray-50 rounded-lg p-2.5">
-                    <p className="text-gray-500">Age Threshold</p>
-                    <p className="font-medium text-gray-900">
-                        {config?.offloadAgeDays ? `${config.offloadAgeDays} days` : 'N/A'}
+                <div className="bg-emerald-50 rounded-lg p-2.5">
+                    <p className="text-gray-500">Inward Pending</p>
+                    <p className="font-medium text-emerald-700">
+                        {offloadStatus?.bufferCounts?.inward != null && offloadStatus.bufferCounts.inward >= 0
+                            ? `${offloadStatus.bufferCounts.inward} rows`
+                            : '—'}
+                    </p>
+                </div>
+                <div className="bg-blue-50 rounded-lg p-2.5">
+                    <p className="text-gray-500">Outward Pending</p>
+                    <p className="font-medium text-blue-700">
+                        {offloadStatus?.bufferCounts?.outward != null && offloadStatus.bufferCounts.outward >= 0
+                            ? `${offloadStatus.bufferCounts.outward} rows`
+                            : '—'}
                     </p>
                 </div>
             </div>

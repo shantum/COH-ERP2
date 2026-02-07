@@ -46,6 +46,30 @@ export const ORDERS_MASTERSHEET_ID = '1OlEDXXQpKmjicTHn35EMJ2qj3f0BVNAUK3M8kyeer
  */
 export const OFFICE_LEDGER_ID = '1ZZgzu4xPXhP9ba3-liXHxj5tY0HihoEnVC9-wLijD5E';
 
+/**
+ * Barcode Mastersheet
+ * Contains: SKU master data (barcode, style code, fabric code), Fabric Balances tab
+ */
+export const BARCODE_MASTERSHEET_ID = '1xlK4gO2Gxu8-8-WS4jFnR0uxYO35fEBPZiSbJobGVy8';
+
+// ============================================
+// FEATURE FLAGS (FABRIC LEDGER)
+// ============================================
+
+/**
+ * Enable fabric ledger push — when true, ERP pushes fabric balances to Barcode Mastersheet.
+ */
+export const ENABLE_FABRIC_LEDGER_PUSH = process.env.ENABLE_FABRIC_LEDGER_PUSH === 'true';
+
+/**
+ * Fabric ledger push interval (ms) — how often to push fabric balances.
+ * Default: 15 minutes.
+ */
+export const FABRIC_LEDGER_PUSH_INTERVAL_MS = parseInt(
+    process.env.FABRIC_LEDGER_PUSH_INTERVAL_MS || String(15 * 60 * 1000),
+    10
+);
+
 // ============================================
 // TAB NAMES
 // ============================================
@@ -57,6 +81,16 @@ export const LEDGER_TABS = {
     ORDERS_OUTWARD: 'Orders Outward',
     ORDERS_OUTWARD_OLD: 'Orders Outward 12728-41874',
     BALANCE_FINAL: 'Balance (Final)',
+    RETURN_EXCHANGE_PENDING: 'Return & Exchange Pending Pieces',
+} as const;
+
+/**
+ * Live buffer tabs in the COH Orders Mastersheet (not Office Ledger).
+ * Ops team enters new inward/outward here. Worker ingests + deletes rows.
+ */
+export const LIVE_TABS = {
+    INWARD: 'Inward (Live)',
+    OUTWARD: 'Outward (Live)',
 } as const;
 
 export const MASTERSHEET_TABS = {
@@ -64,6 +98,32 @@ export const MASTERSHEET_TABS = {
     INVENTORY: 'Inventory',
     OFFICE_INVENTORY: 'Office Inventory',
     OUTWARD: 'Outward',
+} as const;
+
+export const BARCODE_TABS = {
+    MAIN: 'Sheet1',
+    FABRIC_BALANCES: 'Fabric Balances',  // New tab — ERP pushes fabric data here
+    PRODUCT_WEIGHTS: 'Product Weights',
+} as const;
+
+// ============================================
+// COLUMN MAPPINGS — Inventory tab (Mastersheet)
+// ============================================
+
+/**
+ * Inventory tab in COH Orders Mastersheet.
+ * Col R = ERP currentBalance (written by worker).
+ * Col C = R + SUMIF(Inward Live) - SUMIF(Outward Live) (formula).
+ * Col D = allocated from Orders from COH.
+ * Col E = C - D (net balance).
+ * Data starts at row 4 (rows 1-3 are headers/sums).
+ */
+export const INVENTORY_TAB = {
+    NAME: 'Inventory',
+    DATA_START_ROW: 4,
+    ERP_BALANCE_COL: 'R',     // col R = ERP currentBalance
+    BALANCE_COL: 'C',         // col C = total balance (formula)
+    SKU_COL: 'A',             // col A = SKU/barcode
 } as const;
 
 // ============================================
@@ -84,6 +144,54 @@ export const INWARD_COLS = {
     DONE_BY: 5,     // F
     BARCODE: 6,     // G — unique barcode (may differ from col A)
     TAILOR: 7,      // H
+} as const;
+
+// ============================================
+// COLUMN MAPPINGS — Inward (Live) (Mastersheet)
+// ============================================
+
+/**
+ * Inward (Live) — buffer tab in COH Orders Mastersheet.
+ * Same structure as Inward (Final) + Notes column.
+ * A: SKU, B: Qty, C: Product Details, D: Inward Date,
+ * E: Source, F: Done By, G: Unique Barcode, H: Tailor Number, I: Notes
+ */
+export const INWARD_LIVE_COLS = {
+    SKU: 0,         // A
+    QTY: 1,         // B
+    PRODUCT: 2,     // C
+    DATE: 3,        // D
+    SOURCE: 4,      // E
+    DONE_BY: 5,     // F
+    BARCODE: 6,     // G
+    TAILOR: 7,      // H
+    NOTES: 8,       // I
+} as const;
+
+// ============================================
+// COLUMN MAPPINGS — Outward (Live) (Mastersheet)
+// ============================================
+
+/**
+ * Outward (Live) — buffer tab in COH Orders Mastersheet.
+ * A: SKU, B: Qty, C: Product Details, D: Outward Date, E: Destination,
+ * F: Order Number, G: Sampling Date, H: Order Note, I: COH Note,
+ * J: Courier, K: AWB, L: AWB Scan, M: Notes
+ */
+export const OUTWARD_LIVE_COLS = {
+    SKU: 0,         // A
+    QTY: 1,         // B
+    PRODUCT: 2,     // C
+    DATE: 3,        // D
+    DESTINATION: 4, // E
+    ORDER_NO: 5,    // F
+    SAMPLING_DATE: 6, // G
+    ORDER_NOTE: 7,  // H
+    COH_NOTE: 8,    // I
+    COURIER: 9,     // J
+    AWB: 10,        // K
+    AWB_SCAN: 11,   // L
+    NOTES: 12,      // M
 } as const;
 
 // ============================================
@@ -155,6 +263,126 @@ export const MASTERSHEET_OUTWARD_COLS = {
 } as const;
 
 // ============================================
+// COLUMN MAPPINGS — Barcode Mastersheet (Sheet1)
+// ============================================
+
+/**
+ * Barcode Mastersheet main tab — SKU master data.
+ * A: Barcode, B: Product Title, C: Color, D: Size, E: name,
+ * F: Style Code, G: Fabric Code, H: Product Status, ...
+ */
+export const BARCODE_MAIN_COLS = {
+    BARCODE: 0,         // A — SKU/barcode identifier
+    PRODUCT_TITLE: 1,   // B
+    COLOR: 2,           // C
+    SIZE: 3,            // D
+    NAME: 4,            // E — Full SKU name
+    STYLE_CODE: 5,      // F
+    FABRIC_CODE: 6,     // G
+    STATUS: 7,          // H — "Inactive" or empty
+    SKU_COUNT: 8,       // I
+    DATE_ADDED: 9,      // J
+    GENDER: 10,         // K
+    WEBSITE_COLOUR: 11, // L
+    MRP: 12,            // M
+} as const;
+
+// ============================================
+// COLUMN MAPPINGS — Fabric Balances (new tab in Barcode Mastersheet)
+// ============================================
+
+/**
+ * Fabric Balances tab — ERP pushes fabric data here.
+ * Other sheets can VLOOKUP/IMPORTRANGE from this tab.
+ */
+export const FABRIC_BALANCES_COLS = {
+    FABRIC_CODE: 0,         // A — unique fabric code (e.g., Pima-SJ-Black)
+    FABRIC_NAME: 1,         // B — full name
+    MATERIAL: 2,            // C
+    CURRENT_BALANCE: 3,     // D
+    UNIT: 4,                // E — meters or kg
+    COST_PER_UNIT: 5,       // F
+    SUPPLIER: 6,            // G
+    LEAD_TIME_DAYS: 7,      // H
+    PENDING_ORDERS_QTY: 8,  // I — fabric allocated to unfulfilled orders
+    AVAILABLE_BALANCE: 9,   // J — formula: =D-I
+    CONSUMPTION_30D: 10,    // K — 30-day usage
+    REORDER_POINT: 11,      // L — formula: =K*H/30
+    LAST_UPDATED: 12,       // M — ISO timestamp
+} as const;
+
+/**
+ * Header row for Fabric Balances tab
+ */
+export const FABRIC_BALANCES_HEADERS = [
+    'Fabric Code',
+    'Fabric Name',
+    'Material',
+    'Current Balance',
+    'Unit',
+    'Cost per Unit',
+    'Supplier',
+    'Lead Time (days)',
+    'Pending Orders Qty',
+    'Available Balance',
+    '30-Day Consumption',
+    'Reorder Point',
+    'Last Updated',
+] as const;
+
+// ============================================
+// COLUMN MAPPINGS — Return & Exchange Pending Pieces (Office Ledger)
+// ============================================
+
+/**
+ * Return & Exchange Pending Pieces tab — piece-level tracking.
+ * A: uniqueBarcode, B: Product Barcode (SKU), C: productName,
+ * D: Qty, E: Source, F: Order ID, G: Return ID, H: Customer Name,
+ * I: Date Received, J: (empty), K: Note, L: Inward Count, M: timestamp
+ */
+export const RETURN_EXCHANGE_COLS = {
+    UNIQUE_BARCODE: 0,   // A — unique ID per physical piece
+    SKU: 1,              // B — Product Barcode (SKU)
+    PRODUCT_NAME: 2,     // C — (often #REF!)
+    QTY: 3,              // D — always 1
+    SOURCE: 4,           // E — Return, Exchange, RTO, etc.
+    ORDER_ID: 5,         // F — Shopify order number
+    RETURN_ID: 6,        // G — Return Prime / marketplace ID
+    CUSTOMER_NAME: 7,    // H
+    DATE_RECEIVED: 8,    // I
+    NOTE: 10,            // K
+    INWARD_COUNT: 11,    // L — 0=pending, 1=inwarded
+    TIMESTAMP: 12,       // M
+} as const;
+
+/**
+ * Maps Return & Exchange Source values to normalized enum.
+ */
+export const RETURN_SOURCE_MAP: Record<string, 'RETURN' | 'EXCHANGE' | 'RTO' | 'REPACKING' | 'OTHER'> = {
+    return: 'RETURN',
+    'return ': 'RETURN',
+    retrun: 'RETURN',
+    retunr: 'RETURN',
+    returm: 'RETURN',
+    exchange: 'EXCHANGE',
+    'exchange ': 'EXCHANGE',
+    exchnage: 'EXCHANGE',
+    excahnge: 'EXCHANGE',
+    exchagne: 'EXCHANGE',
+    exchnge: 'EXCHANGE',
+    exchangeq: 'EXCHANGE',
+    rto: 'RTO',
+    'rto - used': 'RTO',
+    repacking: 'REPACKING',
+    other: 'OTHER',
+    refund: 'OTHER',
+    nykaa: 'OTHER',
+    pima: 'OTHER',
+};
+
+export const DEFAULT_RETURN_SOURCE = 'OTHER' as const;
+
+// ============================================
 // COLUMN MAPPINGS — Balance (Final)
 // ============================================
 
@@ -224,14 +452,9 @@ export const DEFAULT_OUTWARD_REASON: TxnReason = 'sale';
 // ============================================
 
 /**
- * Interval between offload cycles (ms) — hourly, not time-critical
+ * Interval between offload cycles (ms) — every 30 minutes for live buffer tabs
  */
-export const OFFLOAD_INTERVAL_MS = 60 * 60 * 1000;
-
-/**
- * Only ingest rows older than this many days
- */
-export const OFFLOAD_AGE_DAYS = 30;
+export const OFFLOAD_INTERVAL_MS = 30 * 60 * 1000;
 
 /**
  * Delay before first offload after server start (ms) — let server settle
@@ -282,6 +505,8 @@ export const REF_PREFIX = {
     ORDERS_OUTWARD: 'sheet:orders-outward',
     ORDERS_OUTWARD_OLD: 'sheet:orders-outward-old',
     MASTERSHEET_OUTWARD: 'sheet:ms-outward',
+    INWARD_LIVE: 'sheet:inward-live',
+    OUTWARD_LIVE: 'sheet:outward-live',
 } as const;
 
 /**
@@ -307,7 +532,18 @@ export const OFFLOAD_NOTES_PREFIX = '[sheet-offload]';
 export const ORIGINAL_BALANCE_FORMULA = `=SUMIF('Inward (Final)'!$A:$A,$A3,'Inward (Final)'!$B:$B)+SUMIF('Inward (Archive)'!$A:$A,$A3,'Inward (Archive)'!$B:$B)-SUMIF(Outward!$A:$A,$A3,Outward!$B:$B)-SUMIF('Orders Outward'!$A:$A,$A3,'Orders Outward'!$B:$B)-SUMIF('Orders Outward 12728-41874'!$N:$N,$A3,'Orders Outward 12728-41874'!$O:$O)`;
 
 /**
- * New Balance formula after offload — uses ERP Past Balance + recent data only.
- * Removes Archive and old outward SUMIFs (those live in ERP now).
+ * Phase 2 formula — used ERP Past Balance + remaining active sheet tabs.
+ * Kept for reference / rollback to Phase 2 state.
  */
-export const NEW_BALANCE_FORMULA = `=F3+SUMIF('Inward (Final)'!$A:$A,$A3,'Inward (Final)'!$B:$B)-SUMIF(Outward!$A:$A,$A3,Outward!$B:$B)-SUMIF('Orders Outward'!$A:$A,$A3,'Orders Outward'!$B:$B)`;
+export const PHASE2_BALANCE_FORMULA = `=F3+SUMIF('Inward (Final)'!$A:$A,$A3,'Inward (Final)'!$B:$B)-SUMIF(Outward!$A:$A,$A3,Outward!$B:$B)-SUMIF('Orders Outward'!$A:$A,$A3,'Orders Outward'!$B:$B)`;
+
+/**
+ * Phase 3 formula — ERP currentBalance (col F) + pending buffer entries.
+ * Col F is written by the worker after each ingestion cycle.
+ * Live tabs are in COH Orders Mastersheet (IMPORTRANGE or same-sheet reference).
+ *
+ * NOTE: Live tabs are in the COH Orders Mastersheet, so Balance (Final) in Office Ledger
+ * needs IMPORTRANGE. The formula uses the Mastersheet ID for cross-sheet references.
+ */
+export const LIVE_BALANCE_FORMULA_TEMPLATE = (row: number) =>
+    `=F${row}+IFERROR(SUMIF(IMPORTRANGE("${ORDERS_MASTERSHEET_ID}","'Inward (Live)'!$A:$A"),$A${row},IMPORTRANGE("${ORDERS_MASTERSHEET_ID}","'Inward (Live)'!$B:$B")),0)-IFERROR(SUMIF(IMPORTRANGE("${ORDERS_MASTERSHEET_ID}","'Outward (Live)'!$A:$A"),$A${row},IMPORTRANGE("${ORDERS_MASTERSHEET_ID}","'Outward (Live)'!$B:$B")),0)`;

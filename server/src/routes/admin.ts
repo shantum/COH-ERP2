@@ -37,7 +37,7 @@ import { invalidateUserTokens } from '../middleware/permissions.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { ValidationError, NotFoundError, ConflictError, BusinessLogicError } from '../utils/errors.js';
 import sheetOffloadWorker from '../services/sheetOffloadWorker.js';
-import { ENABLE_SHEET_DELETION, OFFLOAD_AGE_DAYS } from '../config/sync/sheets.js';
+import { ENABLE_SHEET_DELETION } from '../config/sync/sheets.js';
 
 const router: Router = Router();
 
@@ -1324,7 +1324,7 @@ router.get('/background-jobs', authenticateToken, asyncHandler(async (req: Reque
         {
             id: 'sheet_offload',
             name: 'Sheet Offload',
-            description: 'Ingests old inward/outward data from Google Sheets into ERP, updates past balances, and optionally cleans up sheet rows.',
+            description: 'Ingests entries from Inward (Live) and Outward (Live) buffer tabs, creates ERP transactions, deletes rows, and updates Balance (Final) col F.',
             enabled: offloadStatus.schedulerActive,
             intervalMinutes: offloadStatus.intervalMs / 60000,
             isRunning: offloadStatus.isRunning,
@@ -1332,7 +1332,6 @@ router.get('/background-jobs', authenticateToken, asyncHandler(async (req: Reque
             lastResult: offloadStatus.lastResult,
             config: {
                 deletionEnabled: ENABLE_SHEET_DELETION,
-                offloadAgeDays: OFFLOAD_AGE_DAYS,
             },
             stats: {
                 recentRuns: offloadStatus.recentRuns,
@@ -1608,6 +1607,39 @@ router.delete('/grid-preferences/:gridId/user', authenticateToken, asyncHandler(
         message: 'User preferences deleted, will use admin defaults',
         gridId,
     });
+}));
+
+// ============================================
+// SHEET OFFLOAD — STATUS & BUFFER COUNTS
+// ============================================
+
+/**
+ * Get sheet offload worker status including pending buffer counts
+ * @route GET /api/admin/sheet-offload/status
+ */
+router.get('/sheet-offload/status', requireAdmin, asyncHandler(async (_req: Request, res: Response) => {
+    const status = sheetOffloadWorker.getStatus();
+    const bufferCounts = await sheetOffloadWorker.getBufferCounts();
+
+    res.json({
+        ...status,
+        bufferCounts,
+    });
+}));
+
+/**
+ * Manually trigger sheet offload sync
+ * @route POST /api/admin/sheet-offload/trigger
+ */
+router.post('/sheet-offload/trigger', requireAdmin, asyncHandler(async (_req: Request, res: Response) => {
+    const result = await sheetOffloadWorker.triggerSync();
+
+    if (!result) {
+        res.status(409).json({ error: 'Sync already in progress' });
+        return;
+    }
+
+    res.json({ message: 'Sheet offload sync completed', result });
 }));
 
 export default router;

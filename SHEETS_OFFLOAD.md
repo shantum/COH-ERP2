@@ -5,25 +5,28 @@
 Google Sheets remains the team's daily working surface for **order management** — it's fast, familiar, and flexible. The ERP handles the **heavy lifting**: inventory engine, historical data, analytics, and Shopify integration. The two systems stay in sync through targeted data flows.
 
 ```
-┌─────────────────────────────────────────┐     ┌─────────────────────────────┐
-│           Google Sheets (Ops UI)         │     │        ERP (Engine)          │
-│                                         │     │                             │
-│  Orders from COH  ← GCF webhooks ←───────── Shopify                       │
-│    (open orders, fulfillment,           │     │                             │
-│     packing, dispatch)                  │     │  All orders (archive)       │
-│                                         │     │  All inventory transactions │
-│  Inventory tab                          │     │  SKU/product catalog        │
-│    Col C: Balance  ◄── ERP writes ──────────  Computed balance per SKU     │
-│    Col D: Allocated (SUMIFS on orders)  │     │                             │
-│    Col E: Available = C - D             │     │                             │
-│                                         │     │                             │
-│  Inward/Outward tabs                    │     │                             │
-│    Recent entries  ──── ERP ingests ────────→ InventoryTransactions        │
-│    Old entries     ──── offloaded ──────────→ InventoryTransactions        │
-│                                         │     │                             │
-│  Balance (Final)                        │     │                             │
-│    =F (ERP past bal) + recent SUMIFs    │     │                             │
-└─────────────────────────────────────────┘     └─────────────────────────────┘
+┌─────────────────────────────────────────────┐     ┌─────────────────────────────┐
+│     COH Orders Mastersheet (Ops UI)          │     │        ERP (Engine)          │
+│                                              │     │                             │
+│  Orders from COH  ← GCF webhooks ←────────────── Shopify                       │
+│    (open orders, fulfillment, dispatch)      │     │                             │
+│                                              │     │  All orders (archive)       │
+│  Inventory tab                               │     │  All inventory transactions │
+│    Col R: ERP Balance  ◄── worker writes ────────  currentBalance per SKU      │
+│    Col C: = R + Inward(Live) - Outward(Live) │     │                             │
+│    Col D: Allocated (SUMIFS on orders)       │     │                             │
+│    Col E: Available = C - D                  │     │                             │
+│                                              │     │                             │
+│  Inward (Live) ──── worker ingests ──────────────→ InventoryTransactions        │
+│  Outward (Live) ──── worker ingests ─────────────→ InventoryTransactions        │
+│    (buffer tabs: team enters, worker clears) │     │                             │
+│                                              │     │                             │
+├──────────────────────────────────────────────┤     │                             │
+│     Office Ledger (backward compat)          │     │                             │
+│  Balance (Final)                             │     │                             │
+│    Col F: ERP Balance  ◄── worker writes ────────  currentBalance per SKU      │
+│    Col E: = F + IMPORTRANGE(Live tabs)       │     │                             │
+└──────────────────────────────────────────────┘     └─────────────────────────────┘
 ```
 
 ### Who Owns What
@@ -31,11 +34,11 @@ Google Sheets remains the team's daily working surface for **order management** 
 | Domain | Owner | Other system's role |
 |--------|-------|-------------------|
 | **Open orders / fulfillment** | Sheets | ERP stores archive, provides analytics |
-| **Inventory balance** | ERP (computes) | Sheets displays via pushed value |
+| **Inventory balance** | **ERP (source of truth)** | Sheets displays via col R/F (worker pushes `currentBalance`) |
 | **Allocation** | Sheets (formulas) | ERP doesn't track allocation |
-| **Inward (production received)** | Transitioning → ERP | Currently Sheets, migrating to ERP UI |
-| **Outward (dispatch)** | Transitioning → ERP | Currently Sheets (manual copy), migrating |
-| **Historical data** | ERP | Sheets keeps only recent/active data |
+| **Inward (production received)** | **Sheets → ERP** | Team enters in "Inward (Live)" buffer tab, worker ingests to ERP |
+| **Outward (dispatch)** | **Sheets → ERP** | Team enters in "Outward (Live)" buffer tab, worker ingests to ERP |
+| **Historical data** | ERP | Sheets keeps only recent/active data + buffer tabs |
 | **Shopify orders** | ERP (via webhooks) | GCF writes line items to Sheets for ops |
 
 ---
@@ -49,9 +52,11 @@ Google Sheets remains the team's daily working surface for **order management** 
 | Tab | Rows | Purpose |
 |-----|------|---------|
 | **Orders from COH** | ~219 | Active open orders. Line-level: order#, customer, SKU, qty, status, assigned, picked, packed, shipped. GCF webhook writes new orders here. |
-| **Inventory** | 6,510 | Per-SKU balance + allocation. Pulls from Office Inventory, subtracts assigned orders. |
-| **Office Inventory** | 6,510 | Mirror of Balance (Final) from ledger. Cols: Barcode, Name, Inward, Outward, Balance. |
-| **Outward** | 39,424 | Dispatched order lines (copied from Orders from COH after packing). |
+| **Inventory** | 6,510 | Per-SKU balance + allocation. Col R = ERP balance (worker writes), Col C = R + Live SUMIFs, Col D = allocated, Col E = available. |
+| **Inward (Live)** | buffer | Team enters inward here. Worker ingests rows → ERP → deletes. Cols: SKU, Qty, Product, Date, Source, Done By, Barcode, Tailor#, Notes. |
+| **Outward (Live)** | buffer | Team enters outward here. Worker ingests rows → ERP → deletes. Cols: SKU, Qty, Product, Date, Destination, Order#, etc. |
+| **Office Inventory** | 6,510 | Mirror of Balance (Final) from ledger (legacy — Inventory tab no longer depends on this). |
+| **Outward** | 39,424 | Dispatched order lines (frozen — all future outward goes to "Outward (Live)"). |
 | **ShopifyAllOrderData** | 40,670 | Order-level data from GCF webhook #2. |
 | Dashboard, Sampling Plan, Fabric Status, etc. | Various | Other operational tabs. |
 
@@ -68,7 +73,33 @@ Google Sheets remains the team's daily working surface for **order management** 
 
 > **CRITICAL DISCOVERY:** Office Ledger "Orders Outward" is an **IMPORTRANGE aggregate** from Mastersheet's "Outward Summary" tab — it contains only SKU + Qty totals, NOT individual dispatch rows. The actual per-order dispatch data lives in **Mastersheet "Outward"** (39K rows with order numbers, dates, SKUs).
 
-### Key Formulas (current)
+### Key Formulas
+
+#### Current (Phase 3 — ERP-based)
+
+**Balance (Final) Col E** — ERP base + IMPORTRANGE to live buffer tabs:
+```
+=F{row}+SUMIF(IMPORTRANGE("mastersheet-id",'Inward (Live)'!$A:$A),$A{row},IMPORTRANGE("mastersheet-id",'Inward (Live)'!$B:$B))-SUMIF(IMPORTRANGE("mastersheet-id",'Outward (Live)'!$A:$A),$A{row},IMPORTRANGE("mastersheet-id",'Outward (Live)'!$B:$B))
+```
+Where F = ERP `currentBalance` (written by worker after each ingestion cycle).
+
+**Inventory Tab Col C** (Balance) — ERP base + same-sheet SUMIF on live tabs:
+```
+=R{row}+SUMIF('Inward (Live)'!$A:$A,$A{row},'Inward (Live)'!$B:$B)-SUMIF('Outward (Live)'!$A:$A,$A{row},'Outward (Live)'!$B:$B)
+```
+Where R = ERP `currentBalance` (written by worker). No IMPORTRANGE needed — live tabs are in the same spreadsheet.
+
+**Inventory Tab Col D** (Allocated) — counts assigned order qty (unchanged):
+```
+=SUMIFS('Orders from COH'!I:I, 'Orders from COH'!G:G, A4, 'Orders from COH'!N:N, TRUE)
+```
+
+**Inventory Tab Col E** (Available, unchanged):
+```
+=C4-D4
+```
+
+#### Original (pre-Phase 3, for reference/rollback)
 
 **Balance (Final) Col E** — 5 SUMIFs scanning ~135K rows:
 ```
@@ -79,20 +110,9 @@ Google Sheets remains the team's daily working surface for **order management** 
 -SUMIF('Orders Outward 12728-41874'!$N:$N,$A3,'Orders Outward 12728-41874'!$O:$O)
 ```
 
-**Inventory Tab Col C** (Balance) — looks up Office Inventory:
+**Inventory Tab Col C** — looked up Office Inventory (Office Ledger dependency):
 ```
 =SUMIF('Office Inventory'!A:E, A4, 'Office Inventory'!E:E)
-```
-
-**Inventory Tab Col D** (Allocated) — counts assigned order qty:
-```
-=SUMIFS('Orders from COH'!I:I, 'Orders from COH'!G:G, A4, 'Orders from COH'!N:N, TRUE)
-```
-Where col I = Qty, col G = SKU, col N = Assigned flag (TRUE/FALSE).
-
-**Inventory Tab Col E** (Available):
-```
-=C4-D4
 ```
 
 **Orders from COH Col M** (Qty Balance) — VLOOKUP to Inventory tab showing available stock per SKU.
@@ -767,17 +787,517 @@ The ERP already receives Shopify webhooks and stores orders. Optionally, the ERP
 
 ---
 
+## Phase 4: Barcode Mastersheet & Fabric Ledger (PLANNED)
+
+The **Barcode Mastersheet** (`1xlK4gO2Gxu8-8-WS4jFnR0uxYO35fEBPZiSbJobGVy8`) is the master reference for all SKU/product data across the Google Sheets ecosystem. Making the ERP the source of truth for this data prevents operations/warehouse teams from accidentally corrupting critical product metadata.
+
+### Current State (Explored 2026-02-07)
+
+**Barcode Mastersheet Structure:**
+
+| Tab | Rows | Purpose |
+|-----|------|---------|
+| **Sheet1** (main) | 6,508 | SKU master data: Barcode, Product, Color, Size, Style Code, Fabric Code, etc. |
+| New Barcodes | 0 | Placeholder for new SKUs (empty) |
+| Copy of Sheet1 / Copy of Sheet1 1 | ~4,500 each | Historical backups |
+| Shopify Product Export | 3,420 | Raw Shopify export data |
+| Product Weights | 848 | SKU shipping dimensions (Weight, Length, Breadth, Height, HSN Code) |
+| Fabric Report | broken | Has #REF! errors — attempted fabric balance formulas |
+| Sheet17 | 654 | Analytics: Sampling, Sales, Inventory, Fabric Stock |
+
+**Main Tab (Sheet1) Column Analysis:**
+
+| Column | Header | Coverage | Unique Values | Notes |
+|--------|--------|----------|---------------|-------|
+| A | Barcode | 93.7% | 5,540 | SKU/barcode identifier |
+| B | Product Title | 74.1% | 180 | Product name (e.g., "Modal Crew") |
+| C | Color | 74.1% | 105 | Color name |
+| D | Size | 74.0% | 9 | S, M, L, XL, XS, 2XL, 3XL, 4XL, Regular |
+| E | name | 74.0% | 4,798 | Full SKU name (e.g., "Women's Modal Crew - S - White") |
+| **F** | **Style Code** | 68.8% | **127** | Product variation grouping (e.g., WTS003, COHW030TP) |
+| **G** | **Fabric Code** | 62.5% | **97** | Links to fabric (e.g., Modal-IL-White, Pima-SJ-Black) |
+| H | Product Status | 0.5% | 1 | Only "Inactive" marked |
+| K | Gender | 74.0% | 3 | Women's, Men's, Accessories |
+| M | MRP | 40.5% | 28 | Prices (₹1,799, etc.) |
+| N-P | Fabric Cost, UOM, Consumption | 0% | - | Empty columns |
+| T | Fabric Type | 0% | - | Empty column |
+
+> **Key columns for ERP integration:** Barcode (A), Style Code (F), Fabric Code (G)
+
+### Fabric Code Pattern Analysis
+
+97 unique fabric codes following pattern: `{Material}-{FabricType/ID}-{Colour}`
+
+| Prefix | Count | Pattern | Examples |
+|--------|-------|---------|----------|
+| COT | 19 | `COT-{construction}-{colour}` | COT-SEERSUCKER-BLUE, COT-SHRT-FNESTR-DRKGREY |
+| Linen | 15 | `Linen-01-{colour}` | Linen-01-White, Linen-01-Indigo |
+| Pima | 11 | `Pima-{SJ\|FT}-{colour}` | Pima-SJ-Black, Pima-FT-MilGreen |
+| BrushedTerry | 5 | `BrushedTerry-01-{colour}` | BrushedTerry-01-Black |
+| Satin | 5 | `Satin-{variant}-{colour}` | Satin-01-Blue, Satin-FloralPrint-AW23 |
+| CMRib/CMRIb | 8 | `CMRib-01-{colour}` | CMRib-01-Green, CMRIb-01-Black |
+| Modal | 3 | `Modal-IL-{colour}` | Modal-IL-White, Modal-IL-Grey |
+| Tencel | 4 | `Tencel-01-{colour}` | Tencel-01-Black |
+| Vintage | 5 | `Vintage-IL-{colour}` | Vintage-IL-White |
+
+**Abbreviation Key:**
+- `SJ` = Single Jersey
+- `FT` = French Terry
+- `IL` = Interlock (assumed)
+- `SHRT` = Shirting
+- `FNESTR` = Fine Stripe
+
+### ERP FabricColour Mapping
+
+The ERP has 103 FabricColours but **no `code` field**. Current identification is via `(fabricId, colourName)` composite unique key.
+
+**Mapping Strategy:**
+
+1. **Add `code` field to FabricColour** (nullable String, unique)
+2. **Map existing 97 sheet codes** to corresponding FabricColours
+3. **Flag unmapped codes** for manual review (don't auto-create)
+4. **ERP generates codes** for new FabricColours using consistent pattern
+
+**Sample Mappings:**
+
+| Sheet Code | ERP FabricColour |
+|------------|------------------|
+| `Pima-SJ-Black` | Pima Cotton → Supima Single Jersey \| Carbon Black |
+| `Pima-FT-MilGreen` | Pima Cotton → Supima French Terry \| Military Green |
+| `Linen-01-White` | Linen → Linen 60 Lea \| White |
+| `CMRib-01-Black` | Cotton → Rib \| Carbon Black |
+| `Seersucker-Blue` | Cotton → Seersucker \| Blue |
+| `Modal-IL-White` | **NOT IN ERP** — needs creation |
+| `Tencel-01-Black` | **NOT IN ERP** — needs creation |
+
+### Fabric Ledger Tab
+
+New tab in Barcode Mastersheet that ERP updates with fabric balance data. Other sheets (Orders Mastersheet, etc.) can VLOOKUP/IMPORTRANGE from this tab.
+
+**Tab Name:** `Fabric Balances` (or `ERP Fabric Ledger`)
+
+**Columns:**
+
+| Column | Header | Source | Description |
+|--------|--------|--------|-------------|
+| A | Fabric Code | ERP | Unique fabric code (e.g., Pima-SJ-Black) |
+| B | Fabric Name | ERP | Full name (e.g., "Pima Cotton - Supima Single Jersey - Carbon Black") |
+| C | Material | ERP | Material name (e.g., "Pima Cotton") |
+| D | Current Balance | ERP | `FabricColour.currentBalance` |
+| E | Unit | ERP | meters or kg |
+| F | Cost per Unit | ERP | ₹ per unit |
+| G | Supplier | ERP | Primary supplier name |
+| H | Lead Time (days) | ERP | Default lead time |
+| I | Pending Orders Qty | ERP | Fabric allocated to unfulfilled orders (computed from BOM × open orders) |
+| J | Available Balance | Formula | `=D-I` (balance minus pending) |
+| K | 30-Day Consumption | ERP | Average usage over last 30 days |
+| L | Reorder Point | Formula | `=K*H/30` (consumption × lead time) |
+| M | Last Updated | ERP | Timestamp of last push |
+
+**Usage in Orders Mastersheet:**
+
+```
+=VLOOKUP(G2, IMPORTRANGE("barcode-sheet-id", "Fabric Balances!A:J"), 10, FALSE)
+```
+
+This gives the **Available Balance** for the fabric code in column G of any order line.
+
+### Schema Changes
+
+**Add `code` field to FabricColour:**
+
+```prisma
+model FabricColour {
+  // ... existing fields ...
+
+  code            String?   @unique  // Fabric code for sheet sync (e.g., "Pima-SJ-Black")
+}
+```
+
+**Migration:**
+```sql
+ALTER TABLE "FabricColour" ADD COLUMN "code" TEXT;
+CREATE UNIQUE INDEX "FabricColour_code_key" ON "FabricColour"("code");
+```
+
+### Fabric Ledger Push Worker
+
+New worker that pushes fabric balance data from ERP to the Fabric Balances tab.
+
+**Architecture:**
+
+```typescript
+// server/src/services/fabricLedgerPushWorker.ts
+
+interface FabricLedgerRow {
+  code: string;
+  name: string;
+  material: string;
+  currentBalance: number;
+  unit: string;
+  costPerUnit: number | null;
+  supplierName: string | null;
+  leadTimeDays: number | null;
+  pendingOrdersQty: number;  // Computed from BOM
+  consumption30d: number;    // From FabricColourTransaction history
+  lastUpdated: string;       // ISO timestamp
+}
+
+// Phases:
+// 1. Query all FabricColours with code field populated
+// 2. Compute pending orders qty (join OrderLine → SkuBomLine → FabricColour)
+// 3. Compute 30-day consumption (aggregate FabricColourTransaction)
+// 4. Write to Fabric Balances tab in Barcode Mastersheet
+```
+
+**Push Frequency:** Every 15 minutes (configurable via `FABRIC_LEDGER_PUSH_INTERVAL_MS`)
+
+**Feature Flag:** `ENABLE_FABRIC_LEDGER_PUSH` (default: false)
+
+### Fabric Code Mapping Script
+
+Script to populate the `code` field on existing FabricColours:
+
+```bash
+npx tsx server/scripts/map-fabric-codes.ts --dry-run   # Preview mappings
+npx tsx server/scripts/map-fabric-codes.ts --apply     # Apply mappings
+npx tsx server/scripts/map-fabric-codes.ts --report    # Show unmapped codes
+```
+
+**Mapping Logic:**
+
+1. Read all 97 fabric codes from Barcode Mastersheet
+2. For each code, parse pattern: `{Material}-{FabricType}-{Colour}`
+3. Look up FabricColour by matching Material name + Fabric name + Colour name
+4. If found: set `FabricColour.code = sheetCode`
+5. If not found: log for manual review
+
+### Barcode → SKU Sync (Future)
+
+Currently, new SKUs are sometimes added to the Barcode Mastersheet before they exist in the ERP. A future enhancement could:
+
+1. **Detect new barcodes** in sheet that don't exist in ERP
+2. **Flag for review** or auto-import as new SKUs
+3. **Validate fabric code** exists before creating SKU
+
+This enables the team to continue their current workflow of adding SKUs to the sheet while ensuring ERP stays in sync.
+
+### Remaining Work (Phase 4)
+
+| # | Task | Status | Notes |
+|---|------|--------|-------|
+| P4-1 | **Prisma migration: add `code` to FabricColour** | Not started | Nullable unique String field |
+| P4-2 | **Build fabric code mapping script** | Not started | `map-fabric-codes.ts` with --dry-run/--apply/--report |
+| P4-3 | **Populate `code` field** | Not started | Run mapping script, manually review unmapped |
+| P4-4 | **Create Fabric Balances tab** | Not started | Add new tab to Barcode Mastersheet with header row |
+| P4-5 | **Build fabric ledger push worker** | Not started | Query ERP, compute pending/consumption, write to sheet |
+| P4-6 | **Add pending orders calculation** | Not started | Join OrderLine → SkuBomLine to sum fabric requirements |
+| P4-7 | **Add 30-day consumption calculation** | Not started | Aggregate FabricColourTransaction for last 30 days |
+| P4-8 | **Test VLOOKUP from Orders Mastersheet** | Not started | Verify other sheets can read Fabric Balances |
+| P4-9 | **Add to monitoring page** | Not started | Show fabric push status, last run, any errors |
+| P4-10 | **Create missing FabricColours** | Not started | Modal, Tencel, Vintage fabrics from manual review |
+
+### Design Decisions (Phase 4)
+
+14. **`code` field on FabricColour** — human-readable unique identifier for sheet sync. Follows existing sheet pattern `{Material}-{Type}-{Colour}`.
+15. **Fabric Ledger as reference tab** — ERP pushes to a single tab in Barcode Mastersheet. Other sheets VLOOKUP/IMPORTRANGE from it. Centralized, cacheable.
+16. **Pending orders = fabric demand** — computed from open orders × BOM fabric requirements. Shows fabric committed to orders not yet dispatched.
+17. **Flag, don't auto-create** — unmapped fabric codes are logged for manual review rather than auto-creating potentially duplicate FabricColours.
+18. **Available Balance = Current - Pending** — simple formula in sheet. ERP provides the inputs, sheet does the math.
+
+---
+
+## Phase 5: Piece-Level Tracking & Returns Integration (PLANNED)
+
+The **Return & Exchange Pending Pieces** tab in Office Ledger tracks individual physical pieces with unique barcodes. This enables piece-level tracking through the return → QC → inward workflow. The ERP should adopt this capability.
+
+### Current Sheet System (Explored 2026-02-07)
+
+**Tab: "Return & Exchange Pending Pieces"** — 14,241 pieces tracked
+
+| Column | Header | Coverage | Purpose |
+|--------|--------|----------|---------|
+| A | uniqueBarcode | 99.9% | **Unique ID per physical piece** |
+| B | Product Barcode | 99.8% | SKU (links to product) |
+| C | productName | 0% | Broken (#REF!) |
+| D | Qty | 100% | Always 1 (piece-level) |
+| E | Source | 98.7% | Return (43.8%), Exchange (30.8%), RTO (23.6%) |
+| F | Order ID | 93.8% | Shopify order number |
+| G | Return ID | 5.4% | Return Prime / marketplace ID |
+| H | Customer Name | 96.6% | Customer name |
+| I | Date Received | 99.8% | When piece arrived |
+| K | Note | 49.4% | Additional notes |
+| L | Inward Count | 99.9% | 0=pending, 1=inwarded (formula has issues) |
+| M | timestamp | 52.5% | Entry timestamp |
+
+**Source Distribution:**
+- Return: 6,241 (43.8%)
+- Exchange: 4,392 (30.8%)
+- RTO: 3,370 (23.6%)
+- Other: 236 (1.6%)
+
+**Order Channel (from Order ID patterns):**
+- Shopify (5-digit): 78.7%
+- Shopify (6-digit): 3.4%
+- Amazon: 0.2%
+- Other/Empty: 17.8%
+
+### Unique Barcode Format
+
+**Pattern:** `DDMMYY` (print date) + `NNNN` (sequence within batch)
+
+| Example | Breakdown | Meaning |
+|---------|-----------|---------|
+| `2801250510` | `280125` + `0510` | Jan 28, 2025 batch, sequence 510 |
+| `1207241000` | `120724` + `1000` | Jul 12, 2024 batch, sequence 1000 |
+| `1112202616` | `111220` + `2616` | Dec 11, 2020 batch, sequence 2616 |
+
+**How it works:**
+1. Pre-print batch of 500-1000 barcode labels with sequential numbers
+2. Date in barcode = when batch was **printed** (not when piece arrives)
+3. Physical label attached to each piece when it arrives at warehouse
+4. Barcode scanned to log piece in "Return & Exchange Pending Pieces" tab
+
+**Note:** Old batches may still be in use — a 2020 barcode can be applied to a 2026 return.
+
+### Linkage: Returns → Inward (Final)
+
+When a piece is QC'd and added to inventory:
+1. Entry created in **Inward (Final)** with source = "repacking"
+2. Unique barcode placed in **column G** ("Unique Barcode")
+3. Links the inward transaction back to the original return record
+
+**Current linkage stats:**
+- 3,172 Inward (Final) rows have a unique barcode in col G
+- 3,150 of those match a barcode from Returns tab (99.3%)
+- Almost all are source = "repacking"
+
+### ERP Returns System (Current)
+
+The ERP has a rich returns system but **no piece-level tracking**:
+
+| Feature | ERP Support | Sheet Support |
+|---------|-------------|---------------|
+| Return status workflow | ✅ (requested→pickup→received→complete) | ❌ (just 0/1) |
+| Batch grouping | ✅ (returnBatchNumber) | ❌ |
+| QC condition | ✅ (5 conditions) | ❌ |
+| Refund calculation | ✅ (gross, clawback, deductions, net) | ❌ |
+| Return Prime integration | ✅ | ✅ (Return ID field) |
+| **Piece-level barcode** | ❌ | ✅ |
+| **Individual piece tracking** | ❌ | ✅ |
+
+**Key gap:** ERP tracks at SKU + batch level, not individual piece level.
+
+### Proposed Schema: ReturnedPiece Model
+
+Add piece-level tracking to the ERP:
+
+```prisma
+model ReturnedPiece {
+  id              String   @id @default(uuid())
+
+  // Unique barcode (the physical label)
+  pieceBarcode    String   @unique  // e.g., "2801250510"
+
+  // Link to SKU
+  skuId           String
+  sku             Sku      @relation(fields: [skuId], references: [id])
+
+  // Source tracking
+  source          ReturnSource  // RETURN, EXCHANGE, RTO, REPACKING, OTHER
+
+  // Order linkage
+  orderId         String?       // Shopify order ID
+  orderLineId     String?       // ERP OrderLine if matched
+  orderLine       OrderLine?    @relation(fields: [orderLineId], references: [id])
+
+  // Return Prime linkage
+  returnPrimeId   String?       // Return Prime request ID
+
+  // Customer (for analytics, not critical)
+  customerName    String?
+
+  // Lifecycle
+  receivedAt      DateTime      // When piece arrived at warehouse
+  receivedById    String?       // Who logged it
+  receivedBy      User?         @relation("PieceReceivedBy", fields: [receivedById], references: [id])
+
+  // QC / Inward status
+  status          PieceStatus   @default(PENDING)  // PENDING, APPROVED, REJECTED, WRITTEN_OFF
+
+  inwardedAt      DateTime?     // When added to inventory
+  inwardedById    String?       // Who approved it
+  inwardedBy      User?         @relation("PieceInwardedBy", fields: [inwardedById], references: [id])
+
+  // QC details
+  condition       String?       // good, damaged, defective, wrong_item, used
+  conditionNotes  String?
+
+  // Link to inventory transaction (when approved)
+  inventoryTransactionId  String?  @unique
+  inventoryTransaction    InventoryTransaction? @relation(fields: [inventoryTransactionId], references: [id])
+
+  // Metadata
+  notes           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([skuId])
+  @@index([orderId])
+  @@index([status])
+  @@index([receivedAt])
+}
+
+enum ReturnSource {
+  RETURN
+  EXCHANGE
+  RTO
+  REPACKING
+  OTHER
+}
+
+enum PieceStatus {
+  PENDING      // Received, awaiting QC
+  APPROVED     // QC passed, added to inventory
+  REJECTED     // QC failed, not added to inventory
+  WRITTEN_OFF  // Written off (damaged, etc.)
+}
+```
+
+### Barcode Generation
+
+ERP can generate barcodes in same format for continuity:
+
+```typescript
+// server/src/utils/pieceBarcode.ts
+
+/**
+ * Generate a batch of piece barcodes.
+ * Format: DDMMYY + NNNN (4-digit sequence)
+ *
+ * @param count - Number of barcodes to generate (max 9999)
+ * @param startSequence - Starting sequence number (default: find next available)
+ */
+export async function generatePieceBarcodes(
+  count: number,
+  startSequence?: number
+): Promise<string[]> {
+  const today = new Date();
+  const dd = today.getDate().toString().padStart(2, '0');
+  const mm = (today.getMonth() + 1).toString().padStart(2, '0');
+  const yy = today.getFullYear().toString().slice(2);
+  const prefix = `${dd}${mm}${yy}`;  // e.g., "070226" for Feb 7, 2026
+
+  // Find highest existing sequence for today's prefix
+  const existing = await prisma.returnedPiece.findMany({
+    where: { pieceBarcode: { startsWith: prefix } },
+    select: { pieceBarcode: true },
+    orderBy: { pieceBarcode: 'desc' },
+    take: 1,
+  });
+
+  const lastSeq = existing[0]
+    ? parseInt(existing[0].pieceBarcode.slice(6), 10)
+    : 0;
+  const start = startSequence ?? (lastSeq + 1);
+
+  const barcodes: string[] = [];
+  for (let i = 0; i < count; i++) {
+    const seq = (start + i).toString().padStart(4, '0');
+    barcodes.push(`${prefix}${seq}`);
+  }
+
+  return barcodes;
+}
+```
+
+### Workflow: Piece Receiving
+
+**Current Sheet workflow:**
+1. Piece arrives at warehouse
+2. Team attaches pre-printed barcode label
+3. Scans barcode → logs in "Return & Exchange Pending Pieces"
+4. Later: QC passes → logs in "Inward (Final)" with barcode in col G
+
+**Proposed ERP workflow:**
+1. Piece arrives at warehouse
+2. Team scans/enters barcode → creates `ReturnedPiece` record
+3. Links to OrderLine if order number provided
+4. QC inspector reviews → sets `status` and `condition`
+5. If approved: creates `InventoryTransaction`, links to piece, updates SKU balance
+6. If rejected: sets `status=REJECTED` or `WRITTEN_OFF`
+
+### Data Migration
+
+Import existing 14,241 pieces from sheet into ERP:
+
+```bash
+npx tsx server/scripts/import-returned-pieces.ts --dry-run   # Preview
+npx tsx server/scripts/import-returned-pieces.ts --apply     # Import
+```
+
+**Field mapping:**
+
+| Sheet Column | ERP Field |
+|--------------|-----------|
+| A (uniqueBarcode) | pieceBarcode |
+| B (Product Barcode) | skuId (lookup by SKU code) |
+| E (Source) | source (normalize: return→RETURN, exchange→EXCHANGE, rto→RTO) |
+| F (Order ID) | orderId |
+| G (Return ID) | returnPrimeId |
+| H (Customer Name) | customerName |
+| I (Date Received) | receivedAt |
+| K (Note) | notes |
+| L (Inward Count) | status (0→PENDING, 1→APPROVED) |
+
+### Integration with Existing Returns
+
+Link `ReturnedPiece` to existing ERP returns:
+
+1. **Match by Order ID:** If orderId matches an ERP Order, link pieces to corresponding OrderLines
+2. **Match by Return Prime ID:** If returnPrimeId matches ReturnPrimeRequest, link pieces
+3. **Populate QC fields:** When piece is approved, copy condition to OrderLine.returnCondition
+
+### Remaining Work (Phase 5)
+
+| # | Task | Status | Notes |
+|---|------|--------|-------|
+| P5-1 | **Prisma migration: ReturnedPiece model** | Not started | New model with enums |
+| P5-2 | **Add pieceBarcode generation utility** | Not started | Same format as sheet (DDMMYY + seq) |
+| P5-3 | **Build import script for existing pieces** | Not started | `import-returned-pieces.ts` |
+| P5-4 | **Add piece receiving UI** | Not started | Scan barcode → create ReturnedPiece |
+| P5-5 | **Integrate with repacking queue** | Not started | Link ReturnedPiece to RepackingQueueItem |
+| P5-6 | **Add inventory transaction linkage** | Not started | Create txn on approval, link to piece |
+| P5-7 | **Add to monitoring page** | Not started | Show piece stats, pending count |
+| P5-8 | **Verify linkage accuracy** | Not started | Compare sheet Inward Count with ERP status |
+
+### Design Decisions (Phase 5)
+
+19. **Piece-level tracking** — each physical unit gets a unique barcode. Enables tracking through return → QC → inventory lifecycle.
+20. **Same barcode format** — ERP generates DDMMYY + sequence to maintain continuity with existing printed labels.
+21. **Link to OrderLine** — pieces connect to orders for analytics. Can track "which piece from which order went where."
+22. **Status enum vs Inward Count** — richer status (PENDING/APPROVED/REJECTED/WRITTEN_OFF) instead of just 0/1.
+23. **Preserve source** — store original source (RETURN/EXCHANGE/RTO) on piece, don't lose it when added to inventory.
+24. **Inventory transaction linkage** — when piece is approved, create InventoryTransaction and link back to piece for audit trail.
+
+---
+
 ## Spreadsheet IDs
 
-| Sheet | ID |
-|-------|-----|
-| Orders Mastersheet | `1OlEDXXQpKmjicTHn35EMJ2qj3f0BVNAUK3M8kyeergo` |
-| Office Ledger | `1ZZgzu4xPXhP9ba3-liXHxj5tY0HihoEnVC9-wLijD5E` |
+| Sheet | ID | Purpose |
+|-------|-----|---------|
+| Orders Mastersheet | `1OlEDXXQpKmjicTHn35EMJ2qj3f0BVNAUK3M8kyeergo` | Active orders, fulfillment, inventory allocation |
+| Office Ledger | `1ZZgzu4xPXhP9ba3-liXHxj5tY0HihoEnVC9-wLijD5E` | Inward/Outward transactions, Balance (Final) |
+| **Barcode Mastersheet** | `1xlK4gO2Gxu8-8-WS4jFnR0uxYO35fEBPZiSbJobGVy8` | SKU master data, Style/Fabric codes, Fabric Balances tab |
 
 ## Scripts Reference
 
 | Script | Purpose |
 |--------|---------|
+| `create-live-tabs.ts` | **Phase 3**: Create "Inward (Live)" and "Outward (Live)" tabs in COH Orders Mastersheet |
+| `switch-balance-formula.ts` | **Phase 3**: Write ERP balance to Balance (Final) col F, switch col E formula to IMPORTRANGE-based |
+| `switch-inventory-formula.ts` | **Phase 3**: Add col R to Inventory tab, write ERP balance, switch col C formula. `--dry-run` supported |
+| `check-inventory-formulas.ts` | Diagnostic: read current Inventory + Office Inventory formulas |
 | `setup-balance-formula.ts` | Update/restore col E formulas. `--dry-run` / `--apply` / `--restore` |
 | `test-past-balance.ts` | Compute & preview col F values from sheet data. `--write` to apply |
 | `check-sheet-totals.ts` | Diagnostic: row counts and qty totals per tab |
@@ -788,6 +1308,14 @@ The ERP already receives Shopify webhooks and stores orders. Optionally, the ERP
 | `verify-outward-totals.ts` | Diagnostic: verify Mastersheet Outward totals match OL Orders Outward aggregate |
 | `backup-sheets.ts` | Full snapshot of all sheet tabs to timestamped JSON. Run before any modifications |
 | `restore-sheets.ts` | Restore sheet tabs from backup. `--backup <timestamp>` `--tab <name>` or `--all` `--dry-run` |
+| `explore-barcode-sheet.ts` | Diagnostic: explore Barcode Mastersheet structure, tabs, columns, sample data |
+| `analyze-fabric-codes.ts` | Diagnostic: analyze fabric code patterns from Barcode Mastersheet col G |
+| `list-erp-fabrics.ts` | Diagnostic: list all FabricColours in ERP with Material → Fabric → Colour hierarchy |
+| `map-fabric-codes.ts` | Map sheet fabric codes to ERP FabricColours. `--dry-run` / `--apply` / `--report` |
+| `explore-returns-tab.ts` | Diagnostic: explore Return & Exchange Pending Pieces structure |
+| `analyze-returns-workflow.ts` | Diagnostic: analyze source distribution, inward status, linkages |
+| `analyze-unique-barcodes.ts` | Diagnostic: analyze piece barcode format (DDMMYY + sequence) |
+| `import-returned-pieces.ts` | Import existing pieces from sheet to ERP. `--dry-run` / `--apply` |
 
 ## Key Design Decisions
 
@@ -809,48 +1337,34 @@ The ERP already receives Shopify webhooks and stores orders. Optionally, the ERP
 
 ## Remaining Work (as of 2026-02-07)
 
-### Before Go-Live (Phase 0)
-
-**Build:**
+### Phase 3, Step 12: Deploy & Monitor
 
 | # | Task | Status | Notes |
 |---|------|--------|-------|
-| 1 | **Prisma migration: 5 new fields** | Not started | `source`, `destination`, `tailorNumber`, `performedBy`, `orderNumber` on InventoryTransaction |
-| 2 | **Revise offload worker: outward source** | Not started | Switch Phase B from OL "Orders Outward" (aggregate) → Mastersheet "Outward" (individual order lines) |
-| 3 | **Revise offload worker: capture new fields** | Not started | Populate `source`, `destination`, `tailorNumber`, `performedBy`, `orderNumber` during ingestion |
-| 4 | **Expand source mapping** | Not started | Add missing sources: warehouse→transfer, op stock→transfer, alteration→production, rto→rto_received, reject→damage |
-| 5 | **Extend worker status** | Not started | Add `sheetRowCounts`, `ingestedCounts`, `recentRuns`, `durationMs` to `getStatus()` |
-| 6 | **Build backup & restore scripts** | Not started | `backup-sheets.ts` (full snapshot to JSON) + `restore-sheets.ts` (write back from backup) |
-| 7 | **Add side-by-side formula verification** | Not started | Extend `setup-balance-formula.ts` with `--test` flag that writes to col G for comparison |
-| 8 | **Build monitoring page** | Not started | `/settings/sheets` — server function + frontend (see Monitoring Page section) |
-| 9 | **Run verify-outward-totals.ts** | Not started | Confirm Mastersheet Outward totals match OL Orders Outward aggregate |
+| 1 | **Enable on staging** | Not started | `ENABLE_SHEET_OFFLOAD=true`, `ENABLE_SHEET_DELETION=true` |
+| 2 | **Test with sample data** | Not started | Add test rows to Inward (Live) and Outward (Live), verify ingestion |
+| 3 | **Enable on production** | Not started | Same env vars, monitor first few cycles |
+| 4 | **Redirect team** | Not started | Tell ops team to use "Inward (Live)" and "Outward (Live)" tabs |
+| 5 | **Archive old tabs** | Not started | Rename old inward/outward tabs with "(Archive)" suffix or hide |
 
-**Go-live (safety-first sequence):**
+### Completed Phases
 
-| # | Task | Status | Notes |
-|---|------|--------|-------|
-| 10 | **Take full backup** | Not started | `backup-sheets.ts` → verify manifest |
-| 11 | **Write col F values** | Not started | `test-past-balance.ts --write` → verify col E unchanged |
-| 12 | **Side-by-side formula test** | Not started | Write new formula to col G, compare E vs G for all 6,510 SKUs |
-| 13 | **Switch col E formula** | Not started | `setup-balance-formula.ts --apply` → verify values unchanged → delete col G |
-| 14 | **Enable worker (ingest only)** | Not started | `ENABLE_SHEET_OFFLOAD=true`, `ENABLE_SHEET_DELETION=false` — watch via monitoring page |
-| 15 | **Verify for 1-2 weeks** | Not started | Monitor balance crosscheck, spot-check SKUs, run reconciliation |
+| Phase | Status | Summary |
+|-------|--------|---------|
+| Phase 1: Build | DONE | Worker, config, backup/restore, monitoring, admin UI |
+| Phase 2: Historical Ingestion | DONE | 134K+ txns ingested, 4,257 SKUs verified, 73 missing SKUs imported |
+| Phase 3, Steps 8-11 | DONE | Live tabs created, formulas switched (both Inventory + Balance Final), worker rewritten for dual-target, admin endpoints |
 
-### Phase 1 (Balance Push)
+### Future Phases
 
 | # | Task | Status |
 |---|------|--------|
-| 11 | Build balance push worker (ERP → col F) | Not started |
-| 12 | Decide push frequency (periodic vs on-change) | Not decided |
-
-### Phase 2 (Migration)
-
-| # | Task | Status |
-|---|------|--------|
-| 13 | Add order reconciliation to monitoring page | Not started |
-| 14 | Improve ERP inward UI for team adoption | Not started |
-| 15 | ERP outward on order dispatch | Not started |
-| 16 | ERP clean-up: deprecate redundant features | Not started |
+| P4 | **Barcode Mastersheet & Fabric Ledger** | Not started (see Phase 4 section) |
+| P5 | **Piece-Level Tracking & Returns** | Not started (see Phase 5 section) |
+| — | Add order reconciliation to monitoring page | Not started |
+| — | Improve ERP inward UI for team adoption | Not started |
+| — | ERP outward on order dispatch | Not started |
+| — | ERP clean-up: deprecate redundant features | Not started |
 
 ---
 
@@ -991,22 +1505,46 @@ const ENABLE_FULFILLMENT_UI = process.env.ENABLE_FULFILLMENT_UI !== 'false'; // 
 
 ## Implementation Progress
 
-### Phase 1: Build — COMPLETED (2026-02-07)
+### Phase 1: Historical Offload Build — COMPLETED (2026-02-07)
 
 | Component | Status | Files |
 |-----------|--------|-------|
 | Prisma migration (5 fields) | Done | `prisma/schema.prisma`, `prisma/migrations/20260207_add_sheet_metadata_fields/` |
 | Config: Mastersheet Outward + mappings | Done | `server/src/config/sync/sheets.ts`, `server/src/config/sync/index.ts` |
-| Worker: Phase A metadata | Done | `server/src/services/sheetOffloadWorker.ts` (ParsedInwardRow + txnData) |
-| Worker: Phase B Mastersheet Outward | Done | `server/src/services/sheetOffloadWorker.ts` (new Mastersheet block) |
-| Worker: dynamic outward reason | Done | `server/src/services/sheetOffloadWorker.ts` (mapDestinationToReason) |
-| Worker: status extension | Done | `server/src/services/sheetOffloadWorker.ts` (recentRuns, sheetRowCounts, ingestedCounts) |
-| Backup script | Done | `server/scripts/backup-sheets.ts` |
-| Restore script | Done | `server/scripts/restore-sheets.ts` |
+| Worker: Phase A metadata | Done | `server/src/services/sheetOffloadWorker.ts` |
+| Worker: Phase B Mastersheet Outward | Done | `server/src/services/sheetOffloadWorker.ts` |
+| Backup/Restore scripts | Done | `server/scripts/backup-sheets.ts`, `server/scripts/restore-sheets.ts` |
 | Formula verification script | Done | `server/scripts/setup-balance-formula.ts` |
 | Monitoring (OffloadMonitor) | Done | `client/src/components/settings/tabs/SheetSyncTab.tsx` |
-| Admin trigger enum | Done | `client/src/server/functions/admin.ts` |
 | Admin stats (recentRuns) | Done | `server/src/routes/admin.ts` |
+
+### Phase 2: Historical Ingestion — COMPLETED (2026-02-07)
+
+- **134K+ transactions** ingested (83K inward + 51K outward + 484 adjustments)
+- **4,257 SKUs** verified: 0 mismatches against Balance (Final)
+- **73 missing SKUs** imported from Barcode Mastersheet
+- Backup at `backups/sheets-2026-02-07-133013/`
+
+### Phase 3: ERP-Based Balance System — COMPLETED (2026-02-07, Steps 8-11)
+
+| Component | Status | Files |
+|-----------|--------|-------|
+| Create live tabs (Inward/Outward) | Done | `server/scripts/create-live-tabs.ts` — tabs in COH Orders Mastersheet |
+| Write ERP balance to Balance (Final) col F | Done | `server/scripts/switch-balance-formula.ts` — 6,098 match, 0 mismatch |
+| Switch Balance (Final) col E formula | Done | IMPORTRANGE-based formula referencing live tabs |
+| Add Inventory col R (ERP balance) | Done | `server/scripts/switch-inventory-formula.ts` — grid expanded 17→18 cols |
+| Switch Inventory col C formula | Done | `=R+SUMIF(Inward Live)-SUMIF(Outward Live)` — 6,098 match, 0 mismatch |
+| Rewrite sheetOffloadWorker | Done | `server/src/services/sheetOffloadWorker.ts` — 2 buffer tabs, dual-target writes |
+| Config: LIVE_TABS, INVENTORY_TAB, live cols | Done | `server/src/config/sync/sheets.ts`, `server/src/config/sync/index.ts` |
+| Admin status + trigger endpoints | Done | `server/src/routes/admin.ts` — GET status, POST trigger |
+| SheetSyncTab: buffer counts UI | Done | `client/src/components/settings/tabs/SheetSyncTab.tsx` |
 | TypeScript check | Pass | Both client and server |
 
-**Next**: Phase 2 — Go-Live (run migration, take backup, test offload worker)
+**Key architecture changes:**
+- Live tabs in **COH Orders Mastersheet** (not Office Ledger) — same sheet as Inventory for fast SUMIF
+- Worker writes to **both** Inventory col R (Mastersheet) AND Balance (Final) col F (Office Ledger)
+- Inventory tab no longer depends on Office Inventory / Office Ledger
+- Worker interval changed from 60 min to 30 min
+- Removed `OFFLOAD_AGE_DAYS` — buffer tabs are always fresh
+
+**Next**: Step 12 — Deploy & Monitor (enable `ENABLE_SHEET_OFFLOAD=true` on staging, test with sample data)
