@@ -79,11 +79,8 @@ const TOTAL_COLS = 30;
  * Adds a bottom border after the last line item of the order.
  */
 export async function pushNewOrderToSheet(
-    shopifyOrder: ShopifyOrder,
-    webhookTopic: string
+    shopifyOrder: ShopifyOrder
 ): Promise<void> {
-    // Guard: only push on order creation
-    if (webhookTopic !== 'orders/create') return;
 
     const lineItems = shopifyOrder.line_items;
     if (!lineItems || lineItems.length === 0) {
