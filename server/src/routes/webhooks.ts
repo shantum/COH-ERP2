@@ -37,6 +37,8 @@ const updateWebhookLog = _updateWebhookLog as (
 ) => Promise<void>;
 import { upsertCustomerFromWebhook } from '../utils/customerUtils.js';
 import { webhookLogger as log } from '../utils/logger.js';
+import { deferredExecutor } from '../services/deferredExecutor.js';
+import { pushNewOrderToSheet } from '../services/sheetOrderPush.js';
 
 // ============================================
 // TYPE DEFINITIONS
@@ -232,6 +234,13 @@ router.post('/shopify/orders', verifyWebhook, async (req: WebhookRequest, res: R
         await logWebhookReceived(req.prisma, webhookId, webhookTopic, String(shopifyOrder.id), dedupeResult.isRetry, shopifyOrder);
 
         const result = await processShopifyOrderWebhook(req.prisma, shopifyOrder, webhookTopic);
+
+        // Push new orders to "Orders from COH" sheet (fire-and-forget)
+        if (webhookTopic === 'orders/create' && result.action === 'created') {
+            deferredExecutor.enqueue(async () => {
+                await pushNewOrderToSheet(shopifyOrder as unknown as Parameters<typeof pushNewOrderToSheet>[0], webhookTopic);
+            }, { orderId: result.orderId, action: 'push_order_to_sheet' });
+        }
 
         // Log success with result data
         await updateWebhookLog(req.prisma, webhookId, 'processed', null, Date.now() - startTime, result);
