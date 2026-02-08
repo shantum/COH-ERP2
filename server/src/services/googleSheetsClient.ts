@@ -179,15 +179,16 @@ export async function writeRange(
 
 /**
  * Append rows to the end of a range.
+ * Returns the 0-based start row index where data was appended.
  */
 export async function appendRows(
     spreadsheetId: string,
     range: string,
     values: (string | number)[][]
-): Promise<void> {
+): Promise<number> {
     const client = getClient();
 
-    await withRetry(
+    const response = await withRetry(
         () => client.spreadsheets.values.append({
             spreadsheetId,
             range,
@@ -195,6 +196,51 @@ export async function appendRows(
             requestBody: { values },
         }),
         `appendRows(${range})`
+    );
+
+    // Extract start row from updatedRange (e.g. "'Orders from COH'!A125:AD136" → 124)
+    const updatedRange = response.data.updates?.updatedRange ?? '';
+    const match = updatedRange.match(/!.*?(\d+):/);
+    return match ? parseInt(match[1], 10) - 1 : -1; // Convert 1-based to 0-based
+}
+
+/**
+ * Apply a bottom border to specific rows.
+ * @param spreadsheetId - Spreadsheet ID
+ * @param sheetId - Numeric sheet ID (from getSheetId)
+ * @param rowIndices - 0-based row indices to add a bottom border to
+ * @param endCol - Last column index (exclusive, default 30 for A-AD)
+ */
+export async function addBottomBorders(
+    spreadsheetId: string,
+    sheetId: number,
+    rowIndices: number[],
+    endCol = 30
+): Promise<void> {
+    if (rowIndices.length === 0) return;
+
+    const client = getClient();
+    const border = { style: 'SOLID' as const, width: 1, color: { red: 0, green: 0, blue: 0 } };
+
+    const requests = rowIndices.map(rowIdx => ({
+        updateBorders: {
+            range: {
+                sheetId,
+                startRowIndex: rowIdx,
+                endRowIndex: rowIdx + 1,
+                startColumnIndex: 0,
+                endColumnIndex: endCol,
+            },
+            bottom: border,
+        },
+    }));
+
+    await withRetry(
+        () => client.spreadsheets.batchUpdate({
+            spreadsheetId,
+            requestBody: { requests },
+        }),
+        `addBottomBorders(${rowIndices.length} rows)`
     );
 }
 

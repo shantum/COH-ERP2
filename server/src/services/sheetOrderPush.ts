@@ -10,7 +10,7 @@
  */
 
 import { sheetsLogger } from '../utils/logger.js';
-import { appendRows } from './googleSheetsClient.js';
+import { appendRows, addBottomBorders, getSheetId } from './googleSheetsClient.js';
 import {
     ORDERS_MASTERSHEET_ID,
     MASTERSHEET_TABS,
@@ -41,6 +41,7 @@ interface ShopifyOrder {
     name?: string | null;
     note?: string | null;
     source_name?: string | null;
+    payment_gateway_names?: string[] | null;
     shipping_address?: ShopifyAddress | null;
     line_items?: ShopifyLineItem[] | null;
 }
@@ -75,6 +76,7 @@ const TOTAL_COLS = 30;
 /**
  * Push a new Shopify order to the "Orders from COH" sheet tab.
  * Creates one row per line item. Skips silently if not an orders/create webhook.
+ * Adds a bottom border after the last line item of the order.
  */
 export async function pushNewOrderToSheet(
     shopifyOrder: ShopifyOrder,
@@ -96,29 +98,38 @@ export async function pushNewOrderToSheet(
     const customerName = [addr?.first_name, addr?.last_name].filter(Boolean).join(' ');
     const city = addr?.city ?? '';
     const phone = addr?.phone ?? '';
-    const channel = shopifyOrder.source_name ?? '';
+    const channel = shopifyOrder.payment_gateway_names?.[0] ?? shopifyOrder.source_name ?? '';
     const orderNote = shopifyOrder.note ?? '';
 
     // Build one row per line item
+    // Col H (Product Name) left empty — populated by VLOOKUP formula on the sheet
     const rows: (string | number)[][] = lineItems.map(item => {
         const row: (string | number)[] = new Array(TOTAL_COLS).fill('');
-        row[0] = orderDate;                                              // A: Order Date
-        row[1] = orderNumber;                                            // B: Order#
-        row[2] = customerName;                                           // C: Name
-        row[3] = city;                                                   // D: City
-        row[4] = phone;                                                  // E: Mobile
-        row[5] = channel;                                                // F: Channel
-        row[6] = item.sku ?? '';                                         // G: SKU
-        row[7] = [item.title, item.variant_title].filter(Boolean).join(' - '); // H: Product Name
-        row[8] = item.quantity ?? 0;                                     // I: Qty
-        row[10] = orderNote;                                             // K: Order Note
+        row[0] = orderDate;           // A: Order Date
+        row[1] = orderNumber;         // B: Order#
+        row[2] = customerName;        // C: Name
+        row[3] = city;                // D: City
+        row[4] = phone;               // E: Mobile
+        row[5] = channel;             // F: Channel
+        row[6] = item.sku ?? '';      // G: SKU
+        // row[7] left empty          // H: Product Name (VLOOKUP)
+        row[8] = item.quantity ?? 0;  // I: Qty
+        row[10] = orderNote;          // K: Order Note
         return row;
     });
 
     const range = `'${MASTERSHEET_TABS.ORDERS_FROM_COH}'!A:AD`;
 
     try {
-        await appendRows(ORDERS_MASTERSHEET_ID, range, rows);
+        const startRow = await appendRows(ORDERS_MASTERSHEET_ID, range, rows);
+
+        // Add bottom border on the last row of this order
+        if (startRow >= 0) {
+            const lastRowIdx = startRow + rows.length - 1;
+            const sheetId = await getSheetId(ORDERS_MASTERSHEET_ID, MASTERSHEET_TABS.ORDERS_FROM_COH);
+            await addBottomBorders(ORDERS_MASTERSHEET_ID, sheetId, [lastRowIdx]);
+        }
+
         log.info(
             { orderName: orderNumber, lineCount: rows.length },
             'Pushed order to Orders from COH sheet'
