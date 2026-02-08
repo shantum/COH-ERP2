@@ -112,12 +112,15 @@ export const BARCODE_TABS = {
 
 /**
  * Orders from COH tab — open orders with allocation.
- * Col X = "Shipped" (TRUE/FALSE), Col AD = "Outward Done" (1 = already moved).
- * When Shipped=TRUE and Outward Done≠1, the row should be moved to Outward (Live).
+ * Col O = "Picked", Col U = "Packed", Col X = "Shipped" (TRUE/FALSE),
+ * Col AD = "Outward Done" (1 = already moved), Col AE = "Unique ID" (formula: =B&G&I).
+ * A row is eligible for move to Outward (Live) when Picked+Packed+Shipped all TRUE,
+ * Outward Done≠1, and AWB/Courier/AWB Scan are present.
  *
  * Relevant columns for the move:
  * B: Order Number, G: SKU, I: Qty, K: Order Note, L: COH Note,
- * R: Sampling Date, X: Shipped, Z: Courier, AA: AWB, AC: AWB Scan, AD: Outward Done
+ * O: Picked, R: Sampling Date, U: Packed, X: Shipped,
+ * Z: Courier, AA: AWB, AC: AWB Scan, AD: Outward Done, AE: Unique ID
  */
 export const ORDERS_FROM_COH_COLS = {
     ORDER_DATE: 0,      // A — "Order" (date the order was placed)
@@ -126,12 +129,15 @@ export const ORDERS_FROM_COH_COLS = {
     QTY: 8,             // I
     ORDER_NOTE: 10,     // K
     COH_NOTE: 11,       // L
+    PICKED: 14,         // O
     SAMPLING_DATE: 17,  // R
+    PACKED: 20,         // U
     SHIPPED: 23,        // X
     COURIER: 25,        // Z
     AWB: 26,            // AA
     AWB_SCAN: 28,       // AC
     OUTWARD_DONE: 29,   // AD
+    UNIQUE_ID: 30,      // AE — formula: =B&G&I (order#+sku+qty)
 } as const;
 
 // ============================================
@@ -202,7 +208,7 @@ export const INWARD_LIVE_COLS = {
 
 /**
  * Outward (Live) — buffer tab in COH Orders Mastersheet.
- * Layout matches "Orders from COH" (cols A-AD) + Outward Date at AE.
+ * Layout matches "Orders from COH" (cols A-AD) + Outward Date at AE + Unique ID at AF.
  * This allows simple copy-paste from Orders from COH for emergency outward.
  *
  * A: Order Date, B: Order#, C: Name, D: City, E: Mob, F: Channel,
@@ -210,7 +216,7 @@ export const INWARD_LIVE_COLS = {
  * M-P: (Qty Balance, Assigned, Picked, Order Age), Q: source_, R: samplingDate,
  * S: Fabric Stock, T: (empty), U: Packed, V-W: (empty), X: Shipped,
  * Y: Shopify Status, Z: Courier, AA: AWB, AB: Ready To Ship,
- * AC: AWB Scan, AD: Outward Done, AE: Outward Date
+ * AC: AWB Scan, AD: Outward Done, AE: Outward Date, AF: Unique ID
  */
 export const OUTWARD_LIVE_COLS = {
     ORDER_DATE: 0,      // A — order placement date
@@ -232,6 +238,7 @@ export const OUTWARD_LIVE_COLS = {
     AWB_SCAN: 28,       // AC
     OUTWARD_DONE: 29,   // AD
     OUTWARD_DATE: 30,   // AE — outward/dispatch date
+    UNIQUE_ID: 31,      // AF — generated: order#+sku+qty (for move verification)
 } as const;
 
 // ============================================
@@ -466,6 +473,12 @@ export const INWARD_SOURCE_MAP: Record<string, TxnReason> = {
  * Default reason when source is empty or unknown
  */
 export const DEFAULT_INWARD_REASON: TxnReason = 'production';
+
+/**
+ * Valid sources for Inward (Live) entries.
+ * Rows with sources not in this list are rejected during ingestion.
+ */
+export const VALID_INWARD_LIVE_SOURCES = ['sampling', 'repacking', 'adjustment'] as const;
 
 // ============================================
 // OUTWARD DESTINATION MAPPING

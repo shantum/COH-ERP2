@@ -1,7 +1,7 @@
 # COH-ERP Database Schema Analysis
 
-**Generated**: 2026-01-21
-**Schema**: 56 Tables (Atlas ERD)
+**Generated**: 2026-01-21 | **Updated**: 2026-02-08
+**Schema**: 62 Models (was 56 at generation)
 
 ---
 
@@ -24,16 +24,19 @@ The schema is well-designed for the business domain (fashion/apparel D2C with ma
 |--------|--------|---------|
 | Orders | Order, OrderLine, OrderPayment | Order fulfillment pipeline |
 | Products | Product, Variation, Sku, SkuCosting, SkuBomLine | Product catalog hierarchy |
-| Materials | Material, Fabric, FabricColour, FabricType, FabricTransaction, FabricOrder | Fabric inventory |
-| Inventory | InventoryTransaction, InventoryReconciliation, InventoryReconciliationItem | SKU inventory |
-| Returns | ReturnRequest, ReturnRequestLine, ReturnShipping, ReturnStatusHistory, RepackingQueueItem | Returns/exchanges |
-| Customers | Customer, Feedback (+ FeedbackContent, FeedbackMedia, FeedbackRating, FeedbackTag) | Customer data |
+| Materials | Material, Fabric, FabricColour, FabricOrder, FabricColourTransaction, FabricReconciliation, FabricReconciliationItem, FabricColourReconciliation, FabricColourReconciliationItem | Fabric inventory & reconciliation |
+| Inventory | InventoryTransaction, InventoryReconciliation, InventoryReconciliationItem, WriteOffLog | SKU inventory |
+| Returns | ReturnRequest, ReturnRequestLine, ReplacementItem, ReturnShipping, ReturnStatusHistory, RepackingQueueItem, ReturnSettings, ReturnPrimeRequest | Returns/exchanges |
+| Customers | Customer, Feedback (+ FeedbackContent, FeedbackMedia, FeedbackRating, FeedbackProductLink, FeedbackTag) | Customer data |
 | BOM | ComponentType, ComponentRole, ProductBomTemplate, VariationBomLine, SkuBomLine | Bill of materials |
 | Catalog | TrimItem, ServiceItem, Supplier, Vendor | Supporting items |
 | Production | ProductionBatch, Tailor | Manufacturing |
+| Channels | ChannelOrderLine, ChannelImportBatch | Multi-channel order import |
 | Users | User, Role, UserPermissionOverride, UserGridPreference | Auth & preferences |
 | Shopify | ShopifyOrderCache, ShopifyProductCache, ShopifyInventoryCache | Integration cache |
-| System | SyncJob, SystemSetting, WebhookLog, FailedSyncItem, CostConfig, Pincode | Infrastructure |
+| System | SyncJob, SystemSetting, WebhookLog, FailedSyncItem, TrackingApiResponse, CostConfig, Pincode | Infrastructure |
+
+> **Note (2026-02-08):** `FabricType` and `FabricTransaction` from the original 56-table analysis no longer exist. `FabricColourTransaction` replaced `FabricTransaction`. 6 new models added since original analysis: ReplacementItem, WriteOffLog, ReturnSettings, ReturnPrimeRequest, ChannelOrderLine, ChannelImportBatch, FeedbackProductLink, TrackingApiResponse, FabricColourReconciliation, FabricColourReconciliationItem.
 
 ### Key Hierarchies
 

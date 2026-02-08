@@ -1,18 +1,16 @@
 /**
- * Google Sheets Offload Worker — Phase 3
+ * Google Sheets Offload Worker — 3 Independent Jobs
  *
- * Ingests entries from two live buffer tabs in the COH Orders Mastersheet:
- *   - "Inward (Live)"  → creates INWARD InventoryTransactions
- *   - "Outward (Live)" → creates OUTWARD InventoryTransactions
+ * Three independently triggerable background jobs:
+ *   1. Ingest Inward  — reads Inward (Live), creates INWARD InventoryTransactions
+ *   2. Move Shipped    — copies shipped rows from "Orders from COH" to "Outward (Live)"
+ *   3. Ingest Outward — reads Outward (Live), creates OUTWARD InventoryTransactions + links to OrderLines
  *
- * After ingestion:
- *   - Deletes ingested rows from the buffer tabs (when ENABLE_SHEET_DELETION=true)
- *   - Writes updated ERP currentBalance to col F in Balance (Final)
+ * After each ingest job (1 & 3):
+ *   - Writes updated ERP currentBalance to col R (Inventory) and col F (Balance Final)
  *   - Invalidates caches and broadcasts SSE
  *
- * The Balance (Final) formula is:
- *   =F{row} + SUMIF(Inward Live) - SUMIF(Outward Live)
- * Where col F = ERP currentBalance, updated after each ingestion cycle.
+ * Move Shipped (2) does NOT trigger balance updates — no ERP transactions are created.
  *
  * Follows trackingSync.ts pattern: module-level state, concurrency guard,
  * start/stop/getStatus/triggerSync exports.
@@ -46,6 +44,7 @@ import {
     OUTWARD_LIVE_COLS,
     ORDERS_FROM_COH_COLS,
     INWARD_SOURCE_MAP,
+    VALID_INWARD_LIVE_SOURCES,
     DEFAULT_INWARD_REASON,
     OUTWARD_DESTINATION_MAP,
     DEFAULT_OUTWARD_REASON,
@@ -60,38 +59,62 @@ import {
 // TYPES
 // ============================================
 
-interface OffloadResult {
+interface IngestInwardResult {
     startedAt: string;
     inwardIngested: number;
-    outwardIngested: number;
-    ordersLinked: number;
+    skipped: number;
     rowsDeleted: number;
     skusUpdated: number;
-    skipped: number;
     errors: number;
     durationMs: number;
     error: string | null;
-    /** Row counts read from each tab */
-    sheetRowCounts: Record<string, number>;
-    /** Row counts actually ingested per tab */
-    ingestedCounts: Record<string, number>;
+    inwardValidationErrors: Record<string, number>;
+}
+
+interface IngestOutwardResult {
+    startedAt: string;
+    outwardIngested: number;
+    ordersLinked: number;
+    skipped: number;
+    rowsDeleted: number;
+    skusUpdated: number;
+    errors: number;
+    durationMs: number;
+    error: string | null;
+    outwardSkipReasons?: Record<string, number>;
+}
+
+interface MoveShippedResult {
+    shippedRowsFound: number;
+    skippedRows: number;
+    skipReasons: Record<string, number>;
+    rowsWrittenToOutward: number;
+    rowsVerified: number;
+    rowsDeletedFromOrders: number;
+    errors: string[];
+    durationMs: number;
 }
 
 interface RunSummary {
     startedAt: string;
     durationMs: number;
-    inwardIngested: number;
-    outwardIngested: number;
+    count: number;        // inwardIngested or outwardIngested or rowsWrittenToOutward
     error: string | null;
 }
 
-interface OffloadStatus {
+interface JobState<T> {
     isRunning: boolean;
+    lastRunAt: Date | null;
+    lastResult: T | null;
+    recentRuns: RunSummary[];
+}
+
+interface OffloadStatus {
+    ingestInward: JobState<IngestInwardResult>;
+    ingestOutward: JobState<IngestOutwardResult>;
+    moveShipped: JobState<MoveShippedResult>;
     schedulerActive: boolean;
     intervalMs: number;
-    lastRunAt: Date | null;
-    lastResult: OffloadResult | null;
-    recentRuns: RunSummary[];
 }
 
 interface ParsedRow {
@@ -118,6 +141,12 @@ interface LinkableOutward {
     awb: string;
 }
 
+/** Internal accumulator for deleteIngestedRows — shared across job types. */
+interface DeleteTracker {
+    rowsDeleted: number;
+    errors: number;
+}
+
 // ============================================
 // STATE
 // ============================================
@@ -125,11 +154,30 @@ interface LinkableOutward {
 let syncInterval: ReturnType<typeof setInterval> | null = null;
 let startupTimeout: ReturnType<typeof setTimeout> | null = null;
 let schedulerActive = false;
-let isRunning = false;
-let lastRunAt: Date | null = null;
-let lastResult: OffloadResult | null = null;
-const recentRuns: RunSummary[] = [];
+
 const MAX_RECENT_RUNS = 10;
+
+// Per-job state
+const ingestInwardState: JobState<IngestInwardResult> = {
+    isRunning: false,
+    lastRunAt: null,
+    lastResult: null,
+    recentRuns: [],
+};
+
+const ingestOutwardState: JobState<IngestOutwardResult> = {
+    isRunning: false,
+    lastRunAt: null,
+    lastResult: null,
+    recentRuns: [],
+};
+
+const moveShippedState: JobState<MoveShippedResult> = {
+    isRunning: false,
+    lastRunAt: null,
+    lastResult: null,
+    recentRuns: [],
+};
 
 // ============================================
 // HELPERS
@@ -239,6 +287,83 @@ async function bulkLookupSkus(skuCodes: string[]): Promise<Map<string, string>> 
     return new Map(skus.map(s => [s.skuCode, s.id]));
 }
 
+interface OutwardValidationResult {
+    validRows: ParsedRow[];
+    skipReasons: Record<string, number>;
+    orderMap: Map<string, { id: string; orderLines: Array<{ id: string; skuId: string }> }>;
+}
+
+/**
+ * Pre-ingestion validation for outward rows.
+ */
+async function validateOutwardRows(
+    rows: ParsedRow[],
+    skuMap: Map<string, string>
+): Promise<OutwardValidationResult> {
+    const skipReasons: Record<string, number> = {};
+    const addSkip = (reason: string) => {
+        skipReasons[reason] = (skipReasons[reason] ?? 0) + 1;
+    };
+
+    // Pass 1: basic field validation
+    const afterBasic: ParsedRow[] = [];
+    for (const row of rows) {
+        if (!row.skuCode) { addSkip('empty_sku'); continue; }
+        if (row.qty <= 0) { addSkip('zero_qty'); continue; }
+        if (!skuMap.has(row.skuCode)) { addSkip('unknown_sku'); continue; }
+        if (!row.date) { addSkip('invalid_date'); continue; }
+        afterBasic.push(row);
+    }
+
+    // Pass 2: order/order-line validation for rows with an orderNumber
+    const orderNumbers = [...new Set(
+        afterBasic
+            .map(r => r.extra)
+            .filter(Boolean)
+    )];
+
+    const orderMap = new Map<string, { id: string; orderLines: Array<{ id: string; skuId: string }> }>();
+    if (orderNumbers.length > 0) {
+        const orders = await prisma.order.findMany({
+            where: { orderNumber: { in: orderNumbers } },
+            select: {
+                id: true,
+                orderNumber: true,
+                orderLines: { select: { id: true, skuId: true } },
+            },
+        });
+        for (const o of orders) {
+            orderMap.set(o.orderNumber, { id: o.id, orderLines: o.orderLines });
+        }
+    }
+
+    const validRows: ParsedRow[] = [];
+    for (const row of afterBasic) {
+        const orderNumber = row.extra;
+        if (!orderNumber) {
+            validRows.push(row);
+            continue;
+        }
+
+        const order = orderMap.get(orderNumber);
+        if (!order) {
+            addSkip('order_not_found');
+            continue;
+        }
+
+        const skuId = skuMap.get(row.skuCode)!;
+        const hasMatchingLine = order.orderLines.some(l => l.skuId === skuId);
+        if (!hasMatchingLine) {
+            addSkip('order_line_not_found');
+            continue;
+        }
+
+        validRows.push(row);
+    }
+
+    return { validRows, skipReasons, orderMap };
+}
+
 const DEDUP_CHUNK_SIZE = 2000;
 
 async function findExistingReferenceIds(referenceIds: string[]): Promise<Set<string>> {
@@ -259,36 +384,80 @@ async function findExistingReferenceIds(referenceIds: string[]): Promise<Set<str
 }
 
 // ============================================
+// INWARD VALIDATION
+// ============================================
+
+function validateInwardRow(
+    parsed: ParsedRow,
+    rawRow: unknown[],
+    skuMap: Map<string, string>,
+): string[] {
+    const reasons: string[] = [];
+
+    const rawQty = String(rawRow[INWARD_LIVE_COLS.QTY] ?? '').trim();
+    const product = String(rawRow[INWARD_LIVE_COLS.PRODUCT] ?? '').trim();
+    const dateStr = String(rawRow[INWARD_LIVE_COLS.DATE] ?? '').trim();
+    const barcode = String(rawRow[INWARD_LIVE_COLS.BARCODE] ?? '').trim();
+    const notes = String(rawRow[INWARD_LIVE_COLS.NOTES] ?? '').trim();
+
+    const source = parsed.source.toLowerCase();
+
+    if (!parsed.skuCode)    reasons.push('missing SKU (A)');
+    if (!rawQty)            reasons.push('missing Qty (B)');
+    if (!product)           reasons.push('missing Product (C)');
+    if (!dateStr)           reasons.push('missing Date (D)');
+    if (!parsed.source)     reasons.push('missing Source (E)');
+    if (!parsed.extra)      reasons.push('missing Done By (F)');
+    if (rawQty && parsed.qty <= 0) reasons.push('Qty must be > 0');
+    if (parsed.source && !VALID_INWARD_LIVE_SOURCES.some(s => s === source)) {
+        reasons.push(`invalid Source "${parsed.source}"`);
+    }
+    if (source === 'repacking' && !barcode) {
+        reasons.push('missing Barcode (G) for repacking');
+    }
+    if (source === 'sampling' && !parsed.tailor) {
+        reasons.push('missing Tailor Number (H) for sampling');
+    }
+    if (source === 'adjustment' && !notes) {
+        reasons.push('missing Notes (I) for adjustment');
+    }
+    if (parsed.skuCode && !skuMap.has(parsed.skuCode)) {
+        reasons.push(`unknown SKU "${parsed.skuCode}"`);
+    }
+
+    return reasons;
+}
+
+// ============================================
 // PHASE A: INGEST INWARD (LIVE)
 // ============================================
 
-async function ingestInwardLive(result: OffloadResult): Promise<Set<string>> {
+async function ingestInwardLive(result: IngestInwardResult): Promise<Set<string>> {
     const tab = LIVE_TABS.INWARD;
     const affectedSkuIds = new Set<string>();
 
     sheetsLogger.info({ tab }, 'Reading inward live tab');
 
     const rows = await readRange(ORDERS_MASTERSHEET_ID, `'${tab}'!A:I`);
-    result.sheetRowCounts[tab] = rows.length > 1 ? rows.length - 1 : 0;
     if (rows.length <= 1) {
         sheetsLogger.info({ tab }, 'No data rows');
         return affectedSkuIds;
     }
 
-    // Parse rows (skip header row 0)
+    // --- Step 1: Parse rows (skip rows with no SKU) ---
     const parsed: ParsedRow[] = [];
     const seenRefs = new Set<string>();
 
     for (let i = 1; i < rows.length; i++) {
         const row = rows[i];
         const skuCode = String(row[INWARD_LIVE_COLS.SKU] ?? '').trim();
+        if (!skuCode) continue;
+
         const qty = parseQty(String(row[INWARD_LIVE_COLS.QTY] ?? ''));
         const dateStr = String(row[INWARD_LIVE_COLS.DATE] ?? '');
         const source = String(row[INWARD_LIVE_COLS.SOURCE] ?? '').trim();
         const doneBy = String(row[INWARD_LIVE_COLS.DONE_BY] ?? '').trim();
         const tailor = String(row[INWARD_LIVE_COLS.TAILOR] ?? '').trim();
-
-        if (!skuCode || qty === 0) continue;
 
         let refId = buildReferenceId(REF_PREFIX.INWARD_LIVE, skuCode, qty, dateStr, source);
         if (seenRefs.has(refId)) {
@@ -314,24 +483,65 @@ async function ingestInwardLive(result: OffloadResult): Promise<Set<string>> {
     }
 
     if (parsed.length === 0) {
-        sheetsLogger.info({ tab }, 'No valid rows to ingest');
+        sheetsLogger.info({ tab }, 'No data rows to process');
         return affectedSkuIds;
     }
 
-    // Dedup against existing transactions
-    const existingRefs = await findExistingReferenceIds(parsed.map(r => r.referenceId));
-    const newRows = parsed.filter(r => !existingRefs.has(r.referenceId));
+    // --- Step 2: Bulk lookup SKUs for validation ---
+    const skuMap = await bulkLookupSkus(parsed.map(r => r.skuCode));
+
+    // --- Step 3: Validate each row ---
+    const validRows: ParsedRow[] = [];
+    const validationErrors: Record<string, number> = {};
+    let invalidCount = 0;
+
+    for (const p of parsed) {
+        const reasons = validateInwardRow(p, rows[p.rowIndex], skuMap);
+        if (reasons.length === 0) {
+            validRows.push(p);
+        } else {
+            invalidCount++;
+            for (const reason of reasons) {
+                validationErrors[reason] = (validationErrors[reason] ?? 0) + 1;
+            }
+            sheetsLogger.debug({
+                row: p.rowIndex + 1,
+                skuCode: p.skuCode,
+                reasons,
+            }, 'Inward row failed validation');
+        }
+    }
+
+    result.inwardValidationErrors = validationErrors;
+    result.skipped += invalidCount;
+
+    if (invalidCount > 0) {
+        sheetsLogger.warn({
+            tab,
+            invalid: invalidCount,
+            valid: validRows.length,
+            validationErrors,
+        }, 'Inward rows failed validation — will remain on sheet');
+    }
+
+    if (validRows.length === 0) {
+        sheetsLogger.info({ tab, total: parsed.length, invalid: invalidCount }, 'No valid rows after validation');
+        return affectedSkuIds;
+    }
+
+    // --- Step 4: Dedup valid rows against existing transactions ---
+    const existingRefs = await findExistingReferenceIds(validRows.map(r => r.referenceId));
+    const newRows = validRows.filter(r => !existingRefs.has(r.referenceId));
 
     if (newRows.length === 0) {
-        sheetsLogger.info({ tab, total: parsed.length }, 'All rows already ingested');
-        // Still delete if enabled (rows were previously ingested but not deleted)
+        sheetsLogger.info({ tab, total: validRows.length }, 'All valid rows already ingested');
         if (ENABLE_SHEET_DELETION) {
-            await deleteIngestedRows(ORDERS_MASTERSHEET_ID, tab, parsed.map(r => r.rowIndex), result);
+            await deleteIngestedRows(ORDERS_MASTERSHEET_ID, tab, validRows.map(r => r.rowIndex), result);
         }
         return affectedSkuIds;
     }
 
-    const skuMap = await bulkLookupSkus(newRows.map(r => r.skuCode));
+    // --- Step 5: Create transactions ---
     const adminUserId = await getAdminUserId();
     const ingestedRowIndices: number[] = [];
 
@@ -352,12 +562,7 @@ async function ingestInwardLive(result: OffloadResult): Promise<Set<string>> {
         }> = [];
 
         for (const row of chunk) {
-            const skuId = skuMap.get(row.skuCode);
-            if (!skuId) {
-                sheetsLogger.warn({ skuCode: row.skuCode, tab }, 'Unknown SKU — skipping');
-                result.skipped++;
-                continue;
-            }
+            const skuId = skuMap.get(row.skuCode)!;
 
             txnData.push({
                 skuId,
@@ -383,12 +588,15 @@ async function ingestInwardLive(result: OffloadResult): Promise<Set<string>> {
         }
     }
 
-    result.ingestedCounts[tab] = ingestedRowIndices.length;
-    sheetsLogger.info({ tab, ingested: ingestedRowIndices.length }, 'Inward ingestion complete');
+    sheetsLogger.info({
+        tab,
+        ingested: ingestedRowIndices.length,
+        skippedInvalid: invalidCount,
+    }, 'Inward ingestion complete');
 
-    // Delete ALL parsed rows (including already-ingested duplicates)
+    // Delete only valid rows — invalid rows remain on sheet for ops team to fix
     if (ENABLE_SHEET_DELETION) {
-        await deleteIngestedRows(ORDERS_MASTERSHEET_ID, tab, parsed.map(r => r.rowIndex), result);
+        await deleteIngestedRows(ORDERS_MASTERSHEET_ID, tab, validRows.map(r => r.rowIndex), result);
     }
 
     return affectedSkuIds;
@@ -399,7 +607,7 @@ async function ingestInwardLive(result: OffloadResult): Promise<Set<string>> {
 // ============================================
 
 async function ingestOutwardLive(
-    result: OffloadResult
+    result: IngestOutwardResult
 ): Promise<{ affectedSkuIds: Set<string>; linkableItems: LinkableOutward[] }> {
     const tab = LIVE_TABS.OUTWARD;
     const affectedSkuIds = new Set<string>();
@@ -407,9 +615,7 @@ async function ingestOutwardLive(
 
     sheetsLogger.info({ tab }, 'Reading outward live tab');
 
-    // Read A:AE (cols 0-30) to capture all columns including Outward Date
     const rows = await readRange(ORDERS_MASTERSHEET_ID, `'${tab}'!A:AE`);
-    result.sheetRowCounts[tab] = rows.length > 1 ? rows.length - 1 : 0;
     if (rows.length <= 1) {
         sheetsLogger.info({ tab }, 'No data rows');
         return { affectedSkuIds, linkableItems };
@@ -426,12 +632,10 @@ async function ingestOutwardLive(
         const courier = String(row[OUTWARD_LIVE_COLS.COURIER] ?? '').trim();
         const awb = String(row[OUTWARD_LIVE_COLS.AWB] ?? '').trim();
 
-        // Date priority: Outward Date (AE) > Order Date (A) > today
         const outwardDateStr = String(row[OUTWARD_LIVE_COLS.OUTWARD_DATE] ?? '');
         const orderDateStr = String(row[OUTWARD_LIVE_COLS.ORDER_DATE] ?? '');
         const dateStr = outwardDateStr.trim() || orderDateStr;
 
-        // Destination: "Customer" for order-linked rows, empty otherwise
         const dest = orderNo ? 'Customer' : '';
 
         if (!skuCode || qty === 0) continue;
@@ -476,11 +680,20 @@ async function ingestOutwardLive(
     }
 
     const skuMap = await bulkLookupSkus(newRows.map(r => r.skuCode));
+
+    const { validRows, skipReasons } = await validateOutwardRows(newRows, skuMap);
+    const skippedCount = newRows.length - validRows.length;
+    result.skipped += skippedCount;
+    if (Object.keys(skipReasons).length > 0) {
+        result.outwardSkipReasons = skipReasons;
+        sheetsLogger.info({ tab, skipped: skippedCount, skipReasons }, 'Outward validation complete');
+    }
+
     const adminUserId = await getAdminUserId();
     const ingestedRowIndices: number[] = [];
 
-    for (let batch = 0; batch < newRows.length; batch += BATCH_SIZE) {
-        const chunk = newRows.slice(batch, batch + BATCH_SIZE);
+    for (let batch = 0; batch < validRows.length; batch += BATCH_SIZE) {
+        const chunk = validRows.slice(batch, batch + BATCH_SIZE);
         const txnData: Array<{
             skuId: string;
             txnType: string;
@@ -495,15 +708,8 @@ async function ingestOutwardLive(
         }> = [];
 
         for (const row of chunk) {
-            const skuId = skuMap.get(row.skuCode);
-            if (!skuId) {
-                sheetsLogger.warn({ skuCode: row.skuCode, tab }, 'Unknown SKU — skipping');
-                result.skipped++;
-                continue;
-            }
+            const skuId = skuMap.get(row.skuCode)!;
 
-            // If an order number is present, it's an order-linked outward → reason=sale.
-            // Otherwise, use the destination mapping (e.g., Warehouse→adjustment, Customer→order_allocation).
             txnData.push({
                 skuId,
                 txnType: TXN_TYPE.OUTWARD,
@@ -514,7 +720,7 @@ async function ingestOutwardLive(
                 referenceId: row.referenceId,
                 notes: row.notes,
                 createdById: adminUserId,
-                createdAt: row.date ?? new Date(),
+                createdAt: row.date!,
                 destination: row.source || null,
                 orderNumber: row.extra || null,
             });
@@ -522,7 +728,6 @@ async function ingestOutwardLive(
             affectedSkuIds.add(skuId);
             ingestedRowIndices.push(row.rowIndex);
 
-            // Collect linkable items for order-line matching
             if (row.extra) {
                 linkableItems.push({
                     orderNumber: row.extra,
@@ -541,7 +746,6 @@ async function ingestOutwardLive(
         }
     }
 
-    result.ingestedCounts[tab] = ingestedRowIndices.length;
     sheetsLogger.info({ tab, ingested: ingestedRowIndices.length }, 'Outward ingestion complete');
 
     if (ENABLE_SHEET_DELETION) {
@@ -555,27 +759,14 @@ async function ingestOutwardLive(
 // PHASE B2: LINK OUTWARD TO ORDER LINES
 // ============================================
 
-/** Statuses that should be updated to 'shipped' when outward evidence is found. */
 const LINKABLE_STATUSES = ['pending', 'allocated', 'picked', 'packed'];
 
-/**
- * Link newly ingested outward transactions to their OrderLines.
- *
- * For each outward item with an orderNumber:
- * 1. Look up the Order by orderNumber
- * 2. Find the matching OrderLine by skuId
- * 3. Update lineStatus to 'shipped', set shippedAt, awbNumber, courier
- *
- * Non-destructive: only updates lines in pre-ship statuses.
- * Failures are logged but don't abort the sync.
- */
 async function linkOutwardToOrders(
     items: LinkableOutward[],
-    result: OffloadResult
+    result: IngestOutwardResult
 ): Promise<void> {
     if (items.length === 0) return;
 
-    // Group by orderNumber for batch lookup
     const byOrder = new Map<string, LinkableOutward[]>();
     for (const item of items) {
         const existing = byOrder.get(item.orderNumber);
@@ -589,7 +780,6 @@ async function linkOutwardToOrders(
     const orderNumbers = [...byOrder.keys()];
     sheetsLogger.info({ uniqueOrders: orderNumbers.length, totalItems: items.length }, 'Linking outward to orders');
 
-    // Batch-query orders by orderNumber
     const orders = await prisma.order.findMany({
         where: { orderNumber: { in: orderNumbers } },
         select: {
@@ -613,7 +803,6 @@ async function linkOutwardToOrders(
     let skippedNoOrder = 0;
     let skippedNoLine = 0;
 
-    // Collect all updates, then batch-apply
     const updates: Array<{ lineId: string; data: Record<string, unknown> }> = [];
 
     for (const [orderNumber, outwardItems] of byOrder) {
@@ -623,7 +812,6 @@ async function linkOutwardToOrders(
             continue;
         }
 
-        // Build SKU → OrderLine[] lookup (supports multiple lines with same SKU)
         const linesBySkuId = new Map<string, Array<typeof order.orderLines[0]>>();
         for (const line of order.orderLines) {
             const existing = linesBySkuId.get(line.skuId);
@@ -641,7 +829,6 @@ async function linkOutwardToOrders(
                 continue;
             }
 
-            // Pick the first line in a linkable status
             const line = lines.find(l => LINKABLE_STATUSES.includes(l.lineStatus));
             if (!line) {
                 skippedAlreadyShipped++;
@@ -656,14 +843,10 @@ async function linkOutwardToOrders(
             if (item.awb) updateData.awbNumber = item.awb;
 
             updates.push({ lineId: line.id, data: updateData });
-
-            // Mark this line as consumed so the next outward item for the same SKU
-            // picks a different line (mutate status in memory to exclude from future finds)
             line.lineStatus = 'shipped';
         }
     }
 
-    // Batch-apply all updates in a transaction
     if (updates.length > 0) {
         try {
             await prisma.$transaction(
@@ -695,7 +878,7 @@ async function deleteIngestedRows(
     spreadsheetId: string,
     tab: string,
     rowIndices: number[],
-    result: OffloadResult
+    result: DeleteTracker
 ): Promise<void> {
     if (rowIndices.length === 0) return;
 
@@ -715,9 +898,6 @@ async function deleteIngestedRows(
 // PHASE C: UPDATE ERP BALANCE ON SHEETS
 // ============================================
 
-/**
- * Group contiguous (row, value) pairs into ranges for efficient batch writing.
- */
 function groupIntoRanges(
     updates: Array<{ row: number; value: number }>
 ): Array<{ startRow: number; values: number[][] }> {
@@ -736,14 +916,9 @@ function groupIntoRanges(
     return ranges;
 }
 
-/**
- * Write ERP currentBalance to:
- *   1. Inventory tab col R (Mastersheet) — feeds col C formula in real-time
- *   2. Balance (Final) col F (Office Ledger) — backward compat
- */
 async function updateSheetBalances(
     affectedSkuIds: Set<string>,
-    result: OffloadResult
+    errorTracker: { errors: number; skusUpdated: number }
 ): Promise<void> {
     if (affectedSkuIds.size === 0) {
         sheetsLogger.info('No affected SKUs — skipping balance update');
@@ -752,7 +927,6 @@ async function updateSheetBalances(
 
     sheetsLogger.info({ affectedSkus: affectedSkuIds.size }, 'Updating sheet balances');
 
-    // Get currentBalance for affected SKUs
     const skus = await prisma.sku.findMany({
         where: { id: { in: [...affectedSkuIds] } },
         select: { id: true, skuCode: true, currentBalance: true },
@@ -772,7 +946,7 @@ async function updateSheetBalances(
             `'${INVENTORY_TAB.NAME}'!${INVENTORY_TAB.SKU_COL}:${INVENTORY_TAB.SKU_COL}`
         );
 
-        const dataStart = INVENTORY_TAB.DATA_START_ROW - 1; // 0-indexed
+        const dataStart = INVENTORY_TAB.DATA_START_ROW - 1;
         const updates: Array<{ row: number; value: number }> = [];
 
         for (let i = dataStart; i < inventoryRows.length; i++) {
@@ -794,7 +968,7 @@ async function updateSheetBalances(
     } catch (err: unknown) {
         const message = err instanceof Error ? err.message : 'Unknown error';
         sheetsLogger.error({ error: message }, 'Failed to update Inventory col R');
-        result.errors++;
+        errorTracker.errors++;
     }
 
     // --- Target 2: Balance (Final) col F (Office Ledger) ---
@@ -825,10 +999,10 @@ async function updateSheetBalances(
     } catch (err: unknown) {
         const message = err instanceof Error ? err.message : 'Unknown error';
         sheetsLogger.error({ error: message }, 'Failed to update Balance (Final) col F');
-        result.errors++;
+        errorTracker.errors++;
     }
 
-    result.skusUpdated = totalUpdated;
+    errorTracker.skusUpdated = totalUpdated;
 }
 
 // ============================================
@@ -842,214 +1016,360 @@ function invalidateCaches(): void {
 }
 
 // ============================================
-// MAIN SYNC FUNCTION
+// RECENT RUN TRACKING
 // ============================================
 
-function pushRecentRun(result: OffloadResult): void {
-    recentRuns.unshift({
-        startedAt: result.startedAt,
-        durationMs: result.durationMs,
-        inwardIngested: result.inwardIngested,
-        outwardIngested: result.outwardIngested,
-        error: result.error,
-    });
-    if (recentRuns.length > MAX_RECENT_RUNS) {
-        recentRuns.length = MAX_RECENT_RUNS;
+function pushRecentRun(state: JobState<unknown>, summary: RunSummary): void {
+    state.recentRuns.unshift(summary);
+    if (state.recentRuns.length > MAX_RECENT_RUNS) {
+        state.recentRuns.length = MAX_RECENT_RUNS;
     }
 }
 
-async function runOffloadSync(): Promise<OffloadResult | null> {
-    if (isRunning) {
-        sheetsLogger.debug('Offload sync already in progress, skipping');
+// ============================================
+// JOB 1: TRIGGER INGEST INWARD
+// ============================================
+
+async function triggerIngestInward(): Promise<IngestInwardResult | null> {
+    if (ingestInwardState.isRunning) {
+        sheetsLogger.debug('Ingest inward already in progress, skipping');
         return null;
     }
 
-    isRunning = true;
+    ingestInwardState.isRunning = true;
     const startTime = Date.now();
 
-    const result: OffloadResult = {
+    const result: IngestInwardResult = {
         startedAt: new Date().toISOString(),
         inwardIngested: 0,
-        outwardIngested: 0,
-        ordersLinked: 0,
+        skipped: 0,
         rowsDeleted: 0,
         skusUpdated: 0,
-        skipped: 0,
         errors: 0,
         durationMs: 0,
         error: null,
-        sheetRowCounts: {},
-        ingestedCounts: {},
+        inwardValidationErrors: {},
     };
 
     try {
-        sheetsLogger.info({ deletionEnabled: ENABLE_SHEET_DELETION }, 'Starting sheet offload sync');
+        sheetsLogger.info({ deletionEnabled: ENABLE_SHEET_DELETION }, 'Starting ingest inward');
 
-        // Phase A: Ingest Inward (Live)
-        const inwardSkuIds = await ingestInwardLive(result);
+        const affectedSkuIds = await ingestInwardLive(result);
 
-        // Phase B: Ingest Outward (Live) + collect linkable items
-        const { affectedSkuIds: outwardSkuIds, linkableItems } = await ingestOutwardLive(result);
-
-        // Phase B2: Link outward to OrderLines (mark as shipped)
-        if (linkableItems.length > 0) {
-            await linkOutwardToOrders(linkableItems, result);
+        // Balance update + cache invalidation if anything was ingested
+        if (affectedSkuIds.size > 0) {
+            await updateSheetBalances(affectedSkuIds, result);
         }
-
-        // Phase C: Update sheet balances (Inventory col R + Balance (Final) col F)
-        const allAffectedSkuIds = new Set([...inwardSkuIds, ...outwardSkuIds]);
-        await updateSheetBalances(allAffectedSkuIds, result);
-
-        // Phase D: Invalidate caches (only if something changed)
-        if (result.inwardIngested > 0 || result.outwardIngested > 0) {
+        if (result.inwardIngested > 0) {
             invalidateCaches();
         }
 
         result.durationMs = Date.now() - startTime;
-        lastRunAt = new Date();
-        lastResult = result;
-        pushRecentRun(result);
+        ingestInwardState.lastRunAt = new Date();
+        ingestInwardState.lastResult = result;
+        pushRecentRun(ingestInwardState, {
+            startedAt: result.startedAt,
+            durationMs: result.durationMs,
+            count: result.inwardIngested,
+            error: result.error,
+        });
 
         sheetsLogger.info({
             durationMs: result.durationMs,
             inwardIngested: result.inwardIngested,
-            outwardIngested: result.outwardIngested,
-            ordersLinked: result.ordersLinked,
-            rowsDeleted: result.rowsDeleted,
-            skusUpdated: result.skusUpdated,
             skipped: result.skipped,
-            errors: result.errors,
-        }, 'Sheet offload sync completed');
+            skusUpdated: result.skusUpdated,
+        }, 'Ingest inward completed');
 
         return result;
     } catch (error: unknown) {
         const err = error instanceof Error ? error : new Error(String(error));
-        sheetsLogger.error({ error: err.message, stack: err.stack }, 'Sheet offload sync failed');
+        sheetsLogger.error({ error: err.message, stack: err.stack }, 'Ingest inward failed');
         result.error = err.message;
         result.durationMs = Date.now() - startTime;
-        lastResult = result;
-        pushRecentRun(result);
+        ingestInwardState.lastResult = result;
+        pushRecentRun(ingestInwardState, {
+            startedAt: result.startedAt,
+            durationMs: result.durationMs,
+            count: result.inwardIngested,
+            error: result.error,
+        });
         return result;
     } finally {
-        isRunning = false;
+        ingestInwardState.isRunning = false;
     }
 }
 
 // ============================================
-// MOVE SHIPPED ORDERS → OUTWARD (LIVE)
+// JOB 2: TRIGGER INGEST OUTWARD
 // ============================================
 
-interface MoveShippedResult {
-    shippedRowsFound: number;
-    rowsWrittenToOutward: number;
-    rowsDeletedFromOrders: number;
-    errors: string[];
-    durationMs: number;
+async function triggerIngestOutward(): Promise<IngestOutwardResult | null> {
+    if (ingestOutwardState.isRunning) {
+        sheetsLogger.debug('Ingest outward already in progress, skipping');
+        return null;
+    }
+
+    ingestOutwardState.isRunning = true;
+    const startTime = Date.now();
+
+    const result: IngestOutwardResult = {
+        startedAt: new Date().toISOString(),
+        outwardIngested: 0,
+        ordersLinked: 0,
+        skipped: 0,
+        rowsDeleted: 0,
+        skusUpdated: 0,
+        errors: 0,
+        durationMs: 0,
+        error: null,
+    };
+
+    try {
+        sheetsLogger.info({ deletionEnabled: ENABLE_SHEET_DELETION }, 'Starting ingest outward');
+
+        const { affectedSkuIds, linkableItems } = await ingestOutwardLive(result);
+
+        // Link outward to order lines
+        if (linkableItems.length > 0) {
+            await linkOutwardToOrders(linkableItems, result);
+        }
+
+        // Balance update + cache invalidation if anything was ingested
+        if (affectedSkuIds.size > 0) {
+            await updateSheetBalances(affectedSkuIds, result);
+        }
+        if (result.outwardIngested > 0) {
+            invalidateCaches();
+        }
+
+        result.durationMs = Date.now() - startTime;
+        ingestOutwardState.lastRunAt = new Date();
+        ingestOutwardState.lastResult = result;
+        pushRecentRun(ingestOutwardState, {
+            startedAt: result.startedAt,
+            durationMs: result.durationMs,
+            count: result.outwardIngested,
+            error: result.error,
+        });
+
+        sheetsLogger.info({
+            durationMs: result.durationMs,
+            outwardIngested: result.outwardIngested,
+            ordersLinked: result.ordersLinked,
+            skipped: result.skipped,
+            skusUpdated: result.skusUpdated,
+        }, 'Ingest outward completed');
+
+        return result;
+    } catch (error: unknown) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        sheetsLogger.error({ error: err.message, stack: err.stack }, 'Ingest outward failed');
+        result.error = err.message;
+        result.durationMs = Date.now() - startTime;
+        ingestOutwardState.lastResult = result;
+        pushRecentRun(ingestOutwardState, {
+            startedAt: result.startedAt,
+            durationMs: result.durationMs,
+            count: result.outwardIngested,
+            error: result.error,
+        });
+        return result;
+    } finally {
+        ingestOutwardState.isRunning = false;
+    }
 }
 
-/**
- * Move shipped orders from "Orders from COH" to "Outward (Live)".
- *
- * Since Outward (Live) now mirrors the Orders from COH column layout (A-AD),
- * this is a simple 1:1 copy + append Outward Date in col AE.
- *
- * 1. Read "Orders from COH" tab (A:AE)
- * 2. Find rows where col X (Shipped) = TRUE and col AD (Outward Done) ≠ 1
- * 3. Copy entire row (A-AD) as-is, append today's date at AE (Outward Date)
- * 4. Append to Outward (Live)
- * 5. Mark col AD = 1 on source rows (Outward Done flag)
- * 6. Delete source rows from "Orders from COH"
- *
- * Safety: writes to Outward first, only deletes from Orders after confirmed write.
- */
-async function moveShippedToOutward(): Promise<MoveShippedResult> {
+// ============================================
+// JOB 3: MOVE SHIPPED → OUTWARD (LIVE)
+// ============================================
+
+async function triggerMoveShipped(): Promise<MoveShippedResult | null> {
+    if (moveShippedState.isRunning) {
+        sheetsLogger.debug('Move shipped already in progress, skipping');
+        return null;
+    }
+
+    moveShippedState.isRunning = true;
     const startTime = Date.now();
     const result: MoveShippedResult = {
         shippedRowsFound: 0,
+        skippedRows: 0,
+        skipReasons: {},
         rowsWrittenToOutward: 0,
+        rowsVerified: 0,
         rowsDeletedFromOrders: 0,
         errors: [],
         durationMs: 0,
+    };
+
+    const addSkipReason = (reason: string) => {
+        result.skipReasons[reason] = (result.skipReasons[reason] ?? 0) + 1;
+        result.skippedRows++;
     };
 
     try {
         const tab = MASTERSHEET_TABS.ORDERS_FROM_COH;
         sheetsLogger.info({ tab }, 'Reading Orders from COH for shipped rows');
 
-        // Read all data — cols A through AD (index 0-29)
-        const rows = await readRange(ORDERS_MASTERSHEET_ID, `'${tab}'!A:AD`);
+        const rows = await readRange(ORDERS_MASTERSHEET_ID, `'${tab}'!A:AE`);
         if (rows.length <= 1) {
             sheetsLogger.info({ tab }, 'No data rows');
             result.durationMs = Date.now() - startTime;
+            moveShippedState.lastRunAt = new Date();
+            moveShippedState.lastResult = result;
+            pushRecentRun(moveShippedState, {
+                startedAt: new Date().toISOString(),
+                durationMs: result.durationMs,
+                count: 0,
+                error: null,
+            });
             return result;
         }
 
-        // Find shipped rows where Outward Done ≠ 1
-        const shippedRows: Array<{ rowIndex: number; row: string[] }> = [];
+        const validRows: Array<{ rowIndex: number; row: string[]; uniqueId: string }> = [];
         for (let i = 1; i < rows.length; i++) {
             const row = rows[i];
             const shipped = String(row[ORDERS_FROM_COH_COLS.SHIPPED] ?? '').trim().toUpperCase();
             const outwardDone = String(row[ORDERS_FROM_COH_COLS.OUTWARD_DONE] ?? '').trim();
-            const sku = String(row[ORDERS_FROM_COH_COLS.SKU] ?? '').trim();
 
-            if (shipped === 'TRUE' && outwardDone !== '1' && sku) {
-                shippedRows.push({ rowIndex: i, row });
-            }
+            if (shipped !== 'TRUE' || outwardDone === '1') continue;
+            result.shippedRowsFound++;
+
+            const sku = String(row[ORDERS_FROM_COH_COLS.SKU] ?? '').trim();
+            const picked = String(row[ORDERS_FROM_COH_COLS.PICKED] ?? '').trim().toUpperCase();
+            const packed = String(row[ORDERS_FROM_COH_COLS.PACKED] ?? '').trim().toUpperCase();
+            const courier = String(row[ORDERS_FROM_COH_COLS.COURIER] ?? '').trim();
+            const awb = String(row[ORDERS_FROM_COH_COLS.AWB] ?? '').trim();
+            const awbScan = String(row[ORDERS_FROM_COH_COLS.AWB_SCAN] ?? '').trim();
+            const orderNo = String(row[ORDERS_FROM_COH_COLS.ORDER_NO] ?? '').trim();
+
+            if (!sku)                     { addSkipReason('missing SKU'); continue; }
+            if (picked !== 'TRUE')        { addSkipReason('not Picked'); continue; }
+            if (packed !== 'TRUE')        { addSkipReason('not Packed'); continue; }
+            if (!courier)                 { addSkipReason('missing Courier'); continue; }
+            if (!awb)                     { addSkipReason('missing AWB'); continue; }
+            if (!awbScan)                 { addSkipReason('missing AWB Scan'); continue; }
+
+            const qty = String(row[ORDERS_FROM_COH_COLS.QTY] ?? '').trim();
+            const uniqueId = `${orderNo}${sku}${qty}`;
+            validRows.push({ rowIndex: i, row, uniqueId });
         }
 
-        result.shippedRowsFound = shippedRows.length;
-
-        if (shippedRows.length === 0) {
-            sheetsLogger.info({ tab }, 'No shipped rows to move');
+        if (validRows.length === 0) {
+            sheetsLogger.info({
+                tab,
+                shippedRowsFound: result.shippedRowsFound,
+                skippedRows: result.skippedRows,
+                skipReasons: result.skipReasons,
+            }, 'No valid rows to move after validation');
             result.durationMs = Date.now() - startTime;
+            moveShippedState.lastRunAt = new Date();
+            moveShippedState.lastResult = result;
+            pushRecentRun(moveShippedState, {
+                startedAt: new Date().toISOString(),
+                durationMs: result.durationMs,
+                count: 0,
+                error: null,
+            });
             return result;
         }
 
-        sheetsLogger.info({ tab, shipped: shippedRows.length }, 'Found shipped rows to move');
+        sheetsLogger.info({
+            tab,
+            shippedRowsFound: result.shippedRowsFound,
+            validRows: validRows.length,
+            skippedRows: result.skippedRows,
+            skipReasons: result.skipReasons,
+        }, 'Validated shipped rows for move');
 
-        // 1:1 copy — same column layout, just append Outward Date at col AE
-        const today = new Date().toLocaleDateString('en-GB'); // DD/MM/YYYY
+        // Build Outward rows: copy A-AD (30 cols) + AE=Outward Date + AF=Unique ID
+        const today = new Date().toLocaleDateString('en-GB');
         const outwardRows: (string | number)[][] = [];
 
-        for (const { row } of shippedRows) {
-            // Copy all 30 columns (A-AD, indices 0-29) as-is, pad if row is shorter
+        for (const { row, uniqueId } of validRows) {
             const copiedRow: (string | number)[] = [];
             for (let c = 0; c < 30; c++) {
                 copiedRow.push(row[c] ?? '');
             }
-            // Append today's date as Outward Date (col AE, index 30)
             copiedRow.push(today);
+            copiedRow.push(uniqueId);
             outwardRows.push(copiedRow);
         }
 
-        // Step 1: Write to Outward (Live) — safety first
+        // Step 1: Write to Outward (Live)
         const outwardTab = LIVE_TABS.OUTWARD;
         await appendRows(
             ORDERS_MASTERSHEET_ID,
-            `'${outwardTab}'!A:AE`,
+            `'${outwardTab}'!A:AF`,
             outwardRows
         );
         result.rowsWrittenToOutward = outwardRows.length;
         sheetsLogger.info({ tab: outwardTab, written: outwardRows.length }, 'Written shipped rows to Outward (Live)');
 
-        // Step 2: Mark Outward Done = 1 on source rows (col AD) — batched to avoid quota issues
-        const adUpdates = shippedRows
-            .map(r => ({ row: r.rowIndex + 1, value: 1 })) // 1-indexed for A1 notation
+        // Step 2: Verify
+        const outwardUidRows = await readRange(
+            ORDERS_MASTERSHEET_ID,
+            `'${outwardTab}'!AF:AF`
+        );
+        const outwardUids = new Set<string>();
+        for (const uidRow of outwardUidRows) {
+            const uid = String(uidRow[0] ?? '').trim();
+            if (uid) outwardUids.add(uid);
+        }
+
+        const verifiedRows: typeof validRows = [];
+        const unverifiedRows: typeof validRows = [];
+        for (const vr of validRows) {
+            if (outwardUids.has(vr.uniqueId)) {
+                verifiedRows.push(vr);
+            } else {
+                unverifiedRows.push(vr);
+            }
+        }
+        result.rowsVerified = verifiedRows.length;
+
+        if (unverifiedRows.length > 0) {
+            const sampleUids = unverifiedRows.slice(0, 5).map(r => r.uniqueId);
+            const errMsg = `${unverifiedRows.length} rows written but NOT verified in Outward (Live) — will NOT delete. Sample UIDs: ${sampleUids.join(', ')}`;
+            result.errors.push(errMsg);
+            sheetsLogger.error({ unverified: unverifiedRows.length, sampleUids }, errMsg);
+        }
+
+        if (verifiedRows.length === 0) {
+            sheetsLogger.warn('No rows verified — skipping delete and Outward Done marking');
+            result.durationMs = Date.now() - startTime;
+            moveShippedState.lastRunAt = new Date();
+            moveShippedState.lastResult = result;
+            pushRecentRun(moveShippedState, {
+                startedAt: new Date().toISOString(),
+                durationMs: result.durationMs,
+                count: result.rowsWrittenToOutward,
+                error: result.errors.length > 0 ? result.errors[0] : null,
+            });
+            return result;
+        }
+
+        sheetsLogger.info({ verified: verifiedRows.length, unverified: unverifiedRows.length }, 'Verification complete');
+
+        // Step 3: Mark Outward Done = 1
+        const adUpdates = verifiedRows
+            .map(r => ({ row: r.rowIndex + 1, value: 1 }))
             .sort((a, b) => a.row - b.row);
         const adRanges = groupIntoRanges(adUpdates);
         for (const range of adRanges) {
             const rangeStr = `'${tab}'!AD${range.startRow}:AD${range.startRow + range.values.length - 1}`;
             await writeRange(ORDERS_MASTERSHEET_ID, rangeStr, range.values);
         }
-        sheetsLogger.info({ marked: shippedRows.length, apiCalls: adRanges.length }, 'Marked Outward Done on source rows');
+        sheetsLogger.info({ marked: verifiedRows.length, apiCalls: adRanges.length }, 'Marked Outward Done on verified source rows');
 
-        // Step 3: Delete source rows from Orders from COH
+        // Step 4: Delete verified source rows
         try {
             const sheetId = await getSheetId(ORDERS_MASTERSHEET_ID, tab);
-            const rowIndices = shippedRows.map(r => r.rowIndex);
+            const rowIndices = verifiedRows.map(r => r.rowIndex);
             await deleteRowsBatch(ORDERS_MASTERSHEET_ID, sheetId, rowIndices);
             result.rowsDeletedFromOrders = rowIndices.length;
-            sheetsLogger.info({ tab, deleted: rowIndices.length }, 'Deleted shipped rows from Orders from COH');
+            sheetsLogger.info({ tab, deleted: rowIndices.length }, 'Deleted verified rows from Orders from COH');
         } catch (err: unknown) {
             const message = err instanceof Error ? err.message : 'Unknown error';
             result.errors.push(`Delete from Orders failed: ${message}`);
@@ -1059,17 +1379,28 @@ async function moveShippedToOutward(): Promise<MoveShippedResult> {
     } catch (error: unknown) {
         const message = error instanceof Error ? error.message : 'Unknown error';
         result.errors.push(message);
-        sheetsLogger.error({ error: message }, 'moveShippedToOutward failed');
+        sheetsLogger.error({ error: message }, 'triggerMoveShipped failed');
     }
 
     result.durationMs = Date.now() - startTime;
+    moveShippedState.lastRunAt = new Date();
+    moveShippedState.lastResult = result;
+    pushRecentRun(moveShippedState, {
+        startedAt: new Date().toISOString(),
+        durationMs: result.durationMs,
+        count: result.rowsWrittenToOutward,
+        error: result.errors.length > 0 ? result.errors[0] : null,
+    });
+
     sheetsLogger.info({
         shippedRowsFound: result.shippedRowsFound,
+        skippedRows: result.skippedRows,
         rowsWrittenToOutward: result.rowsWrittenToOutward,
+        rowsVerified: result.rowsVerified,
         rowsDeletedFromOrders: result.rowsDeletedFromOrders,
         errors: result.errors.length,
         durationMs: result.durationMs,
-    }, 'moveShippedToOutward completed');
+    }, 'triggerMoveShipped completed');
 
     return result;
 }
@@ -1078,10 +1409,6 @@ async function moveShippedToOutward(): Promise<MoveShippedResult> {
 // BUFFER ROW COUNTS (for admin UI)
 // ============================================
 
-/**
- * Get the number of pending rows in each live buffer tab.
- * Lightweight — just reads row counts, no data processing.
- */
 async function getBufferCounts(): Promise<{ inward: number; outward: number }> {
     try {
         const [inwardRows, outwardRows] = await Promise.all([
@@ -1089,7 +1416,6 @@ async function getBufferCounts(): Promise<{ inward: number; outward: number }> {
             readRange(ORDERS_MASTERSHEET_ID, `'${LIVE_TABS.OUTWARD}'!A:A`),
         ]);
 
-        // Count non-empty rows after header (guard against empty array)
         const countNonEmpty = (rows: string[][]) =>
             rows.length <= 1 ? 0 : rows.slice(1).filter(r => r[0]?.trim()).length;
 
@@ -1102,6 +1428,19 @@ async function getBufferCounts(): Promise<{ inward: number; outward: number }> {
         sheetsLogger.error({ error: message }, 'Failed to get buffer counts');
         return { inward: -1, outward: -1 };
     }
+}
+
+// ============================================
+// SCHEDULED RUNNER
+// ============================================
+
+/**
+ * Scheduled cycle: runs inward then outward sequentially
+ * to avoid Google API rate limit conflicts.
+ */
+async function runScheduledCycle(): Promise<void> {
+    await triggerIngestInward();
+    await triggerIngestOutward();
 }
 
 // ============================================
@@ -1129,9 +1468,9 @@ function start(): void {
 
     // Run after startup delay, then start repeating interval
     startupTimeout = setTimeout(async () => {
-        await runOffloadSync();
+        await runScheduledCycle();
         if (schedulerActive && !syncInterval) {
-            syncInterval = setInterval(runOffloadSync, OFFLOAD_INTERVAL_MS);
+            syncInterval = setInterval(runScheduledCycle, OFFLOAD_INTERVAL_MS);
         }
     }, STARTUP_DELAY_MS);
 }
@@ -1151,17 +1490,27 @@ function stop(): void {
 
 function getStatus(): OffloadStatus {
     return {
-        isRunning,
+        ingestInward: {
+            isRunning: ingestInwardState.isRunning,
+            lastRunAt: ingestInwardState.lastRunAt,
+            lastResult: ingestInwardState.lastResult,
+            recentRuns: [...ingestInwardState.recentRuns],
+        },
+        ingestOutward: {
+            isRunning: ingestOutwardState.isRunning,
+            lastRunAt: ingestOutwardState.lastRunAt,
+            lastResult: ingestOutwardState.lastResult,
+            recentRuns: [...ingestOutwardState.recentRuns],
+        },
+        moveShipped: {
+            isRunning: moveShippedState.isRunning,
+            lastRunAt: moveShippedState.lastRunAt,
+            lastResult: moveShippedState.lastResult,
+            recentRuns: [...moveShippedState.recentRuns],
+        },
         schedulerActive,
         intervalMs: OFFLOAD_INTERVAL_MS,
-        lastRunAt,
-        lastResult,
-        recentRuns: [...recentRuns],
     };
-}
-
-async function triggerSync(): Promise<OffloadResult | null> {
-    return runOffloadSync();
 }
 
 // ============================================
@@ -1172,9 +1521,10 @@ export default {
     start,
     stop,
     getStatus,
-    triggerSync,
+    triggerIngestInward,
+    triggerIngestOutward,
+    triggerMoveShipped,
     getBufferCounts,
-    moveShippedToOutward,
 };
 
-export type { OffloadResult, OffloadStatus, RunSummary, MoveShippedResult };
+export type { IngestInwardResult, IngestOutwardResult, MoveShippedResult, OffloadStatus, RunSummary };

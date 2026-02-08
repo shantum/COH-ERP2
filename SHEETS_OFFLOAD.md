@@ -330,7 +330,7 @@ After:   Balance = F (ERP past bal) + SUMIF(recent inward) - SUMIF(recent outwar
 |-----------|------|--------|
 | Config (IDs, tabs, cols, timing, formulas) | `server/src/config/sync/sheets.ts` | ✅ Done |
 | Google Sheets API client (auth, rate limit, retry) | `server/src/services/googleSheetsClient.ts` | ✅ Done |
-| Offload worker (4 phases) | `server/src/services/sheetOffloadWorker.ts` | ✅ Done (updated for new Outward Live layout matching Orders from COH) |
+| Offload worker (3 independent jobs) | `server/src/services/sheetOffloadWorker.ts` | ✅ Done (split into `ingest_inward`, `ingest_outward`, `move_shipped_to_outward`) |
 | Logger (`sheetsLogger`) | `server/src/utils/logger.ts` | ✅ Done |
 | Config re-exports | `server/src/config/sync/index.ts` | ✅ Done |
 | Server integration (start/stop/shutdown) | `server/src/index.js` | ✅ Done |
@@ -339,15 +339,23 @@ After:   Balance = F (ERP past bal) + SUMIF(recent inward) - SUMIF(recent outwar
 | Past balance preview/write | `server/scripts/test-past-balance.ts` | ✅ Done |
 | Diagnostic scripts | `server/scripts/check-*.ts` | ✅ Done |
 
-### Worker Phases
+### Worker Architecture (3 Independent Jobs)
 
-1. **Phase A — Ingest Inward:** Read Inward (Live) buffer tab, create InventoryTransactions, delete ingested rows
-2. **Phase B — Ingest Outward:** Read Outward (Live) buffer tab, create InventoryTransactions, extract linkable items (with order numbers), delete ingested rows
-3. **Phase B2 — Link Outward to Orders (Evidence-Based Fulfillment):** Match outward InventoryTransactions to OrderLines by orderNumber + skuId, mark as shipped
-4. **Phase C — Update Sheet Balances:** Write ERP `currentBalance` to Inventory col R (Mastersheet) + Balance (Final) col F (Office Ledger)
-5. **Phase D — Invalidate Caches:** Clear inventory balance cache, broadcast SSE update
+The monolithic `runOffloadSync()` (Phases A-D) has been replaced by 3 independently triggerable jobs, each with its own `JobState<T>` (concurrency guard, state, result history). The scheduler runs `ingest_inward` then `ingest_outward` sequentially on a 30-min interval. `move_shipped_to_outward` is manual-trigger only.
 
-> **Phase B2 is the core of evidence-based fulfillment.** Outward entries from sheets ARE the shipping evidence. When an outward entry has an order number, the corresponding OrderLine is automatically set to `shipped`. Only lines in LINKABLE_STATUSES (`pending`, `allocated`, `picked`, `packed`) are updated. Already-shipped or cancelled lines are skipped.
+**Exports:** `{ start, stop, getStatus, triggerIngestInward, triggerIngestOutward, triggerMoveShipped, getBufferCounts }`
+
+| Job ID | Function | Schedule | Balance Updates? |
+|--------|----------|----------|-----------------|
+| `ingest_inward` | `triggerIngestInward()` | 30 min interval | Yes |
+| `move_shipped_to_outward` | `triggerMoveShipped()` | Manual only | No |
+| `ingest_outward` | `triggerIngestOutward()` | 30 min interval | Yes |
+
+1. **Ingest Inward (`ingest_inward`):** Read Inward (Live) buffer tab, **validate rows** (`validateInwardRow()` -- 7 rules: required columns A-F, barcode for repacking, tailor# for sampling, notes for adjustment, source in `VALID_INWARD_LIVE_SOURCES`, SKU exists in ERP, qty > 0), create InventoryTransactions from valid rows, report failures in `inwardValidationErrors`, **invalid rows remain on sheet** for ops team to fix, delete only valid rows. Then: update sheet balances + invalidate caches.
+2. **Move Shipped (`move_shipped_to_outward`):** Copy shipped rows from "Orders from COH" to "Outward (Live)". No ERP transactions created. No balance updates.
+3. **Ingest Outward (`ingest_outward`):** Read Outward (Live) buffer tab, **validate rows** (`validateOutwardRows()` -- rejects empty SKUs, zero qty, unknown SKUs, invalid dates, missing orders/order-lines), create InventoryTransactions from valid rows, extract linkable items (with order numbers), report skip reasons in `outwardSkipReasons`, delete ingested rows. Then: link outward to OrderLines (evidence-based fulfillment), update sheet balances + invalidate caches.
+
+> **Evidence-based fulfillment** is part of `ingest_outward`. Outward entries from sheets ARE the shipping evidence. When an outward entry has an order number, the corresponding OrderLine is automatically set to `shipped`. Only lines in LINKABLE_STATUSES (`pending`, `allocated`, `picked`, `packed`) are updated. Already-shipped or cancelled lines are skipped.
 
 ### Deduplication
 - Content-based `referenceId`: `sheet:{tab}:{sku}:{qty}:{date}:{source}` — stable across row deletions
@@ -721,7 +729,7 @@ At any point, to verify both systems agree:
 
 ```bash
 # 1. Run the offload worker (ingests sheet → ERP)
-# Admin dashboard → Background Jobs → Sheet Offload → Trigger
+# Admin dashboard → Background Jobs → Ingest Inward / Ingest Outward → Trigger
 
 # 2. Compare ERP balance vs sheet balance
 # (diagnostic script can be built to diff per-SKU)
@@ -1501,7 +1509,7 @@ The only analytics that depend on fulfillment status are **pipeline counts** (pe
 | **Scheduled Sync** (hourly) | Catch missed webhooks | **KEEP** | No change |
 | **Cache Processor** (30s) | Drain ShopifyOrderCache backlog | **KEEP** | No change |
 | **Tracking Sync** (4h) | Fetch iThink tracking updates | **KEEP** | No change — tracking data stays in ERP |
-| **Sheet Offload Worker** | Ingest sheet data to ERP | **KEEP** | This IS the hybrid bridge |
+| **Sheet Offload Worker** (3 jobs) | Ingest sheet data to ERP | **KEEP** | This IS the hybrid bridge (`ingest_inward`, `ingest_outward`, `move_shipped_to_outward`) |
 | **Return Prime Sync** | Retry failed RP syncs | **KEEP** | No change |
 | **Shopify Inventory Webhook** | Cache Shopify inventory levels | **REVIEW** | May become redundant if ERP balance is source of truth |
 

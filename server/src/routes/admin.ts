@@ -186,7 +186,7 @@ interface PermissionsUpdateBody {
 }
 
 /** Background job trigger params */
-type JobId = 'shopify_sync' | 'tracking_sync' | 'cache_cleanup' | 'sheet_offload' | 'shipped_to_outward';
+type JobId = 'shopify_sync' | 'tracking_sync' | 'cache_cleanup' | 'ingest_inward' | 'ingest_outward' | 'move_shipped_to_outward';
 
 /** Background job update body */
 interface JobUpdateBody {
@@ -1322,27 +1322,49 @@ router.get('/background-jobs', authenticateToken, asyncHandler(async (req: Reque
             note: 'Runs automatically when server starts',
         },
         {
-            id: 'sheet_offload',
-            name: 'Sheet Offload',
-            description: 'Ingests entries from Inward (Live) and Outward (Live) buffer tabs, creates ERP transactions, deletes rows, and updates Balance (Final) col F.',
+            id: 'ingest_inward',
+            name: 'Ingest Inward',
+            description: 'Reads Inward (Live) buffer tab and creates INWARD inventory transactions in ERP. Updates sheet balances after ingestion.',
             enabled: offloadStatus.schedulerActive,
             intervalMinutes: offloadStatus.intervalMs / 60000,
-            isRunning: offloadStatus.isRunning,
-            lastRunAt: offloadStatus.lastRunAt,
-            lastResult: offloadStatus.lastResult,
+            isRunning: offloadStatus.ingestInward.isRunning,
+            lastRunAt: offloadStatus.ingestInward.lastRunAt,
+            lastResult: offloadStatus.ingestInward.lastResult,
             config: {
                 deletionEnabled: ENABLE_SHEET_DELETION,
             },
             stats: {
-                recentRuns: offloadStatus.recentRuns,
+                recentRuns: offloadStatus.ingestInward.recentRuns,
             },
         },
         {
-            id: 'shipped_to_outward',
+            id: 'move_shipped_to_outward',
             name: 'Move Shipped → Outward',
             description: 'Moves shipped orders from "Orders from COH" to "Outward (Live)". Finds rows where Shipped=TRUE and Outward Done≠1, writes to Outward (Live), then deletes source rows.',
             enabled: true,
+            isRunning: offloadStatus.moveShipped.isRunning,
+            lastRunAt: offloadStatus.moveShipped.lastRunAt,
+            lastResult: offloadStatus.moveShipped.lastResult,
             note: 'Manual trigger only — no scheduled interval',
+            stats: {
+                recentRuns: offloadStatus.moveShipped.recentRuns,
+            },
+        },
+        {
+            id: 'ingest_outward',
+            name: 'Ingest Outward',
+            description: 'Reads Outward (Live) buffer tab, creates OUTWARD inventory transactions, and links shipped entries to OrderLines. Updates sheet balances after ingestion.',
+            enabled: offloadStatus.schedulerActive,
+            intervalMinutes: offloadStatus.intervalMs / 60000,
+            isRunning: offloadStatus.ingestOutward.isRunning,
+            lastRunAt: offloadStatus.ingestOutward.lastRunAt,
+            lastResult: offloadStatus.ingestOutward.lastResult,
+            config: {
+                deletionEnabled: ENABLE_SHEET_DELETION,
+            },
+            stats: {
+                recentRuns: offloadStatus.ingestOutward.recentRuns,
+            },
         }
     ];
 
@@ -1399,14 +1421,19 @@ router.post('/background-jobs/:jobId/trigger', requireAdmin, asyncHandler(async 
             });
             break;
         }
-        case 'sheet_offload': {
-            const result = await sheetOffloadWorker.triggerSync();
-            res.json({ message: 'Sheet offload triggered', result });
+        case 'ingest_inward': {
+            const result = await sheetOffloadWorker.triggerIngestInward();
+            res.json({ message: 'Ingest inward triggered', result });
             break;
         }
-        case 'shipped_to_outward': {
-            const result = await sheetOffloadWorker.moveShippedToOutward();
-            res.json({ message: 'Shipped → Outward move completed', result });
+        case 'ingest_outward': {
+            const result = await sheetOffloadWorker.triggerIngestOutward();
+            res.json({ message: 'Ingest outward triggered', result });
+            break;
+        }
+        case 'move_shipped_to_outward': {
+            const result = await sheetOffloadWorker.triggerMoveShipped();
+            res.json({ message: 'Move shipped → outward completed', result });
             break;
         }
         default:
@@ -1634,24 +1661,29 @@ router.get('/sheet-offload/status', requireAdmin, asyncHandler(async (_req: Requ
     const bufferCounts = await sheetOffloadWorker.getBufferCounts();
 
     res.json({
-        ...status,
+        ingestInward: status.ingestInward,
+        ingestOutward: status.ingestOutward,
+        moveShipped: status.moveShipped,
+        schedulerActive: status.schedulerActive,
+        intervalMs: status.intervalMs,
         bufferCounts,
     });
 }));
 
 /**
- * Manually trigger sheet offload sync
+ * Manually trigger ingest inward
  * @route POST /api/admin/sheet-offload/trigger
+ * @deprecated Use /api/admin/background-jobs/ingest_inward/trigger instead
  */
 router.post('/sheet-offload/trigger', requireAdmin, asyncHandler(async (_req: Request, res: Response) => {
-    const result = await sheetOffloadWorker.triggerSync();
+    const inwardResult = await sheetOffloadWorker.triggerIngestInward();
+    const outwardResult = await sheetOffloadWorker.triggerIngestOutward();
 
-    if (!result) {
-        res.status(409).json({ error: 'Sync already in progress' });
-        return;
-    }
-
-    res.json({ message: 'Sheet offload sync completed', result });
+    res.json({
+        message: 'Sheet offload sync completed',
+        inwardResult,
+        outwardResult,
+    });
 }));
 
 // ============================================

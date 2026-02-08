@@ -10,7 +10,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import {
     RefreshCw, Play, Clock, CheckCircle, XCircle, Info,
-    Store, Truck, Trash2, Archive, AlertTriangle, Database
+    Store, Truck, Trash2, Archive, AlertTriangle, Database,
+    ArrowDownToLine, ArrowUpFromLine, ArrowRightLeft,
 } from 'lucide-react';
 
 // Server Functions
@@ -50,7 +51,7 @@ export function BackgroundJobsTab() {
         mutationFn: async (jobId: string) => {
             // Cast jobId to the expected enum type
             const result = await startBackgroundJobFn({
-                data: { jobId: jobId as 'shopify_sync' | 'tracking_sync' | 'cache_cleanup' | 'sheet_offload' | 'shipped_to_outward' },
+                data: { jobId: jobId as 'shopify_sync' | 'tracking_sync' | 'cache_cleanup' | 'ingest_inward' | 'ingest_outward' | 'move_shipped_to_outward' },
             });
             if (!result.success) throw new Error(result.error?.message);
             return result.data;
@@ -84,6 +85,12 @@ export function BackgroundJobsTab() {
                 return <Trash2 size={20} className="text-orange-600" />;
             case 'auto_archive':
                 return <Archive size={20} className="text-purple-600" />;
+            case 'ingest_inward':
+                return <ArrowDownToLine size={20} className="text-emerald-600" />;
+            case 'ingest_outward':
+                return <ArrowUpFromLine size={20} className="text-blue-600" />;
+            case 'move_shipped_to_outward':
+                return <ArrowRightLeft size={20} className="text-amber-600" />;
             default:
                 return <RefreshCw size={20} className="text-gray-600" />;
         }
@@ -191,6 +198,117 @@ export function BackgroundJobsTab() {
                             <p className="text-gray-600">
                                 Deleted: {result.totalDeleted} entries | Duration: {result.durationMs}ms
                             </p>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        if (job.id === 'ingest_inward') {
+            return (
+                <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                    <div className="bg-white p-2 rounded border">
+                        <p className="font-medium text-gray-700">Ingested</p>
+                        <p className="text-lg font-semibold text-emerald-600">{result.inwardIngested || 0}</p>
+                    </div>
+                    <div className="bg-white p-2 rounded border">
+                        <p className="font-medium text-gray-700">Skipped</p>
+                        <p className="text-lg font-semibold text-gray-600">{result.skipped || 0}</p>
+                    </div>
+                    <div className="bg-white p-2 rounded border">
+                        <p className="font-medium text-gray-700">SKUs Updated</p>
+                        <p className="text-lg font-semibold text-purple-600">{result.skusUpdated || 0}</p>
+                    </div>
+                    <div className="bg-white p-2 rounded border">
+                        <p className="font-medium text-gray-700">Rows Deleted</p>
+                        <p className="text-lg font-semibold text-gray-600">{result.rowsDeleted || 0}</p>
+                    </div>
+                    {result.durationMs && (
+                        <div className="bg-white p-2 rounded border col-span-2 md:col-span-4">
+                            <p className="text-gray-600">
+                                Duration: {(result.durationMs / 1000).toFixed(1)}s
+                                {result.errors > 0 && <span className="text-red-600"> | Errors: {result.errors}</span>}
+                            </p>
+                        </div>
+                    )}
+                    {result.error && (
+                        <div className="bg-red-50 p-2 rounded border border-red-200 col-span-2 md:col-span-4">
+                            <p className="text-red-700">{result.error}</p>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        if (job.id === 'ingest_outward') {
+            return (
+                <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                    <div className="bg-white p-2 rounded border">
+                        <p className="font-medium text-gray-700">Ingested</p>
+                        <p className="text-lg font-semibold text-blue-600">{result.outwardIngested || 0}</p>
+                    </div>
+                    <div className="bg-white p-2 rounded border">
+                        <p className="font-medium text-gray-700">Orders Linked</p>
+                        <p className="text-lg font-semibold text-green-600">{result.ordersLinked || 0}</p>
+                    </div>
+                    <div className="bg-white p-2 rounded border">
+                        <p className="font-medium text-gray-700">SKUs Updated</p>
+                        <p className="text-lg font-semibold text-purple-600">{result.skusUpdated || 0}</p>
+                    </div>
+                    <div className="bg-white p-2 rounded border">
+                        <p className="font-medium text-gray-700">Skipped</p>
+                        <p className="text-lg font-semibold text-gray-600">{result.skipped || 0}</p>
+                    </div>
+                    {result.durationMs && (
+                        <div className="bg-white p-2 rounded border col-span-2 md:col-span-4">
+                            <p className="text-gray-600">
+                                Duration: {(result.durationMs / 1000).toFixed(1)}s
+                                {result.errors > 0 && <span className="text-red-600"> | Errors: {result.errors}</span>}
+                            </p>
+                        </div>
+                    )}
+                    {result.error && (
+                        <div className="bg-red-50 p-2 rounded border border-red-200 col-span-2 md:col-span-4">
+                            <p className="text-red-700">{result.error}</p>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        if (job.id === 'move_shipped_to_outward') {
+            return (
+                <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                    <div className="bg-white p-2 rounded border">
+                        <p className="font-medium text-gray-700">Shipped Found</p>
+                        <p className="text-lg font-semibold text-gray-900">{result.shippedRowsFound || 0}</p>
+                    </div>
+                    <div className="bg-white p-2 rounded border">
+                        <p className="font-medium text-gray-700">Written</p>
+                        <p className="text-lg font-semibold text-amber-600">{result.rowsWrittenToOutward || 0}</p>
+                    </div>
+                    <div className="bg-white p-2 rounded border">
+                        <p className="font-medium text-gray-700">Verified</p>
+                        <p className="text-lg font-semibold text-green-600">{result.rowsVerified || 0}</p>
+                    </div>
+                    <div className="bg-white p-2 rounded border">
+                        <p className="font-medium text-gray-700">Deleted</p>
+                        <p className="text-lg font-semibold text-gray-600">{result.rowsDeletedFromOrders || 0}</p>
+                    </div>
+                    {result.durationMs && (
+                        <div className="bg-white p-2 rounded border col-span-2 md:col-span-4">
+                            <p className="text-gray-600">
+                                Duration: {(result.durationMs / 1000).toFixed(1)}s
+                                {result.skippedRows > 0 && <span className="text-amber-600"> | Skipped: {result.skippedRows}</span>}
+                                {result.errors?.length > 0 && <span className="text-red-600"> | Errors: {result.errors.length}</span>}
+                            </p>
+                        </div>
+                    )}
+                    {result.errors?.length > 0 && (
+                        <div className="bg-red-50 p-2 rounded border border-red-200 col-span-2 md:col-span-4">
+                            {result.errors.slice(0, 3).map((err: string, i: number) => (
+                                <p key={i} className="text-red-700 text-xs">{err}</p>
+                            ))}
                         </div>
                     )}
                 </div>
@@ -404,8 +522,11 @@ export function BackgroundJobsTab() {
                         <ul className="list-disc list-inside space-y-1 text-xs">
                             <li><strong>Shopify Order Sync:</strong> Fetches recent orders from Shopify every 60 minutes to catch any missed webhooks. Looks back 24 hours.</li>
                             <li><strong>Tracking Status Sync:</strong> Updates delivery tracking every 30 minutes via iThink Logistics API. Handles deliveries and RTOs.</li>
-                            <li><strong>Cache Cleanup:</strong> Removes old cache entries daily at 2 AM to prevent database bloat. Retains 6 months of order cache, 3 months of products, 30 days of webhook logs.</li>
-                            <li><strong>Auto-Archive:</strong> Archives completed orders older than 90 days on server startup. Keeps active order lists fast.</li>
+                            <li><strong>Cache Cleanup:</strong> Removes old cache entries daily at 2 AM to prevent database bloat.</li>
+                            <li><strong>Auto-Archive:</strong> Archives completed orders older than 90 days on server startup.</li>
+                            <li><strong>Ingest Inward:</strong> Reads Inward (Live) buffer tab and creates INWARD inventory transactions. Runs on scheduled interval.</li>
+                            <li><strong>Move Shipped → Outward:</strong> Copies shipped orders from "Orders from COH" to "Outward (Live)". Manual trigger only.</li>
+                            <li><strong>Ingest Outward:</strong> Reads Outward (Live) buffer tab, creates OUTWARD inventory transactions, and links to OrderLines. Runs on scheduled interval.</li>
                         </ul>
                         <p className="mt-2 text-xs text-blue-700">
                             Sync jobs run automatically and cannot be disabled (managed at server level). Cache cleanup can be toggled on/off.

@@ -17,9 +17,7 @@ import {
 
 import { planSyncFromSheet, executeSyncJob, getSyncJobStatus } from '../../../server/functions/sheetSync';
 import {
-    getBackgroundJobs,
     startBackgroundJob,
-    type BackgroundJob,
 } from '../../../server/functions/admin';
 
 // ============================================
@@ -157,26 +155,11 @@ const ExecutionProgress = React.memo(function ExecutionProgress({
 // OFFLOAD WORKER MONITOR
 // ============================================
 
-interface OffloadLastResult {
-    startedAt?: string;
-    inwardIngested?: number;
-    outwardIngested?: number;
-    rowsDeleted?: number;
-    skusUpdated?: number;
-    skipped?: number;
-    errors?: number;
-    durationMs?: number;
-    error?: string | null;
-    sheetRowCounts?: Record<string, number>;
-    ingestedCounts?: Record<string, number>;
-}
-
-interface RecentRun {
-    startedAt: string;
-    durationMs: number;
-    inwardIngested: number;
-    outwardIngested: number;
-    error: string | null;
+interface JobStateResponse {
+    isRunning: boolean;
+    lastRunAt: string | null;
+    lastResult: Record<string, unknown> | null;
+    recentRuns: Array<{ startedAt: string; durationMs: number; count: number; error: string | null }>;
 }
 
 interface BufferCounts {
@@ -185,35 +168,19 @@ interface BufferCounts {
 }
 
 interface OffloadStatusResponse {
-    isRunning: boolean;
+    ingestInward: JobStateResponse;
+    ingestOutward: JobStateResponse;
+    moveShipped: JobStateResponse;
     schedulerActive: boolean;
     intervalMs: number;
-    lastRunAt: string | null;
-    lastResult: OffloadLastResult | null;
-    recentRuns: RecentRun[];
     bufferCounts: BufferCounts;
 }
 
 const OffloadMonitor = React.memo(function OffloadMonitor() {
     const queryClient = useQueryClient();
-    const [showRecent, setShowRecent] = useState(false);
-
-    const getJobsFn = useServerFn(getBackgroundJobs);
     const triggerFn = useServerFn(startBackgroundJob);
 
-    const { data: job, isLoading, refetch } = useQuery({
-        queryKey: ['sheetOffloadStatus'],
-        queryFn: async (): Promise<BackgroundJob | null> => {
-            const result = await getJobsFn();
-            if (!result.success) return null;
-            const jobs = (result.data || []) as BackgroundJob[];
-            return jobs.find(j => j.id === 'sheet_offload') ?? null;
-        },
-        refetchInterval: 15000,
-    });
-
-    // Dedicated status endpoint with buffer counts
-    const { data: offloadStatus } = useQuery({
+    const { data: offloadStatus, isLoading, refetch } = useQuery({
         queryKey: ['sheetOffloadDetailedStatus'],
         queryFn: async (): Promise<OffloadStatusResponse | null> => {
             try {
@@ -226,19 +193,44 @@ const OffloadMonitor = React.memo(function OffloadMonitor() {
                 return null;
             }
         },
-        refetchInterval: 30000,
+        refetchInterval: 15000,
     });
 
-    const triggerMutation = useMutation({
+    const triggerInwardMutation = useMutation({
         mutationFn: async () => {
             const result = await triggerFn({
-                data: { jobId: 'sheet_offload' as 'shopify_sync' | 'tracking_sync' | 'cache_cleanup' | 'sheet_offload' },
+                data: { jobId: 'ingest_inward' as const },
             });
             if (!result.success) throw new Error(result.error?.message);
             return result.data;
         },
         onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['sheetOffloadStatus'] });
+            queryClient.invalidateQueries({ queryKey: ['sheetOffloadDetailedStatus'] });
+        },
+    });
+
+    const triggerOutwardMutation = useMutation({
+        mutationFn: async () => {
+            const result = await triggerFn({
+                data: { jobId: 'ingest_outward' as const },
+            });
+            if (!result.success) throw new Error(result.error?.message);
+            return result.data;
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['sheetOffloadDetailedStatus'] });
+        },
+    });
+
+    const triggerMoveMutation = useMutation({
+        mutationFn: async () => {
+            const result = await triggerFn({
+                data: { jobId: 'move_shipped_to_outward' as const },
+            });
+            if (!result.success) throw new Error(result.error?.message);
+            return result.data;
+        },
+        onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['sheetOffloadDetailedStatus'] });
         },
     });
@@ -270,12 +262,9 @@ const OffloadMonitor = React.memo(function OffloadMonitor() {
         );
     }
 
-    if (!job) return null;
+    if (!offloadStatus) return null;
 
-    const lastResult = job.lastResult as OffloadLastResult | null;
-    const stats = job.stats as { recentRuns?: RecentRun[] } | undefined;
-    const recentRuns = stats?.recentRuns ?? [];
-    const config = job.config as Record<string, unknown> | undefined;
+    const anyRunning = offloadStatus.ingestInward.isRunning || offloadStatus.ingestOutward.isRunning || offloadStatus.moveShipped.isRunning;
 
     return (
         <div className="card space-y-4">
@@ -287,69 +276,38 @@ const OffloadMonitor = React.memo(function OffloadMonitor() {
                     </div>
                     <div>
                         <div className="flex items-center gap-2">
-                            <h3 className="font-semibold text-gray-900">Sheet Offload Worker</h3>
-                            {job.isRunning && (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
-                                    <RefreshCw size={10} className="animate-spin" /> Running
-                                </span>
-                            )}
-                            {job.enabled && !job.isRunning && (
+                            <h3 className="font-semibold text-gray-900">Sheet Offload Jobs</h3>
+                            {offloadStatus.schedulerActive && !anyRunning && (
                                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
                                     <CheckCircle size={10} /> Active
                                 </span>
                             )}
-                            {!job.enabled && (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
-                                    <XCircle size={10} /> Disabled
+                            {anyRunning && (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
+                                    <RefreshCw size={10} className="animate-spin" /> Running
                                 </span>
                             )}
                         </div>
                         <p className="text-xs text-gray-500 mt-0.5">
-                            Ingests entries from Inward/Outward (Live) buffer tabs into ERP
+                            3 independent jobs: Ingest Inward, Move Shipped, Ingest Outward
                         </p>
                     </div>
                 </div>
 
-                <div className="flex items-center gap-2">
-                    <button
-                        onClick={() => refetch()}
-                        className="btn btn-secondary text-xs py-1 px-2"
-                    >
-                        <RefreshCw size={12} />
-                    </button>
-                    <button
-                        onClick={() => triggerMutation.mutate()}
-                        disabled={job.isRunning || triggerMutation.isPending}
-                        className="btn btn-primary text-xs py-1 px-2.5 flex items-center gap-1"
-                    >
-                        <Play size={12} />
-                        {triggerMutation.isPending ? 'Triggering...' : 'Run Now'}
-                    </button>
-                </div>
+                <button
+                    onClick={() => refetch()}
+                    className="btn btn-secondary text-xs py-1 px-2"
+                >
+                    <RefreshCw size={12} />
+                </button>
             </div>
 
-            {/* Config + Last Run + Buffer Counts */}
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-xs">
-                <div className="bg-gray-50 rounded-lg p-2.5">
-                    <p className="text-gray-500">Interval</p>
-                    <p className="font-medium text-gray-900">
-                        {job.intervalMinutes ? `${job.intervalMinutes} min` : 'N/A'}
-                    </p>
-                </div>
-                <div className="bg-gray-50 rounded-lg p-2.5">
-                    <p className="text-gray-500">Last Run</p>
-                    <p className="font-medium text-gray-900">{formatTime(job.lastRunAt)}</p>
-                </div>
-                <div className="bg-gray-50 rounded-lg p-2.5">
-                    <p className="text-gray-500">Deletion</p>
-                    <p className="font-medium text-gray-900">
-                        {config?.deletionEnabled ? 'Enabled' : 'Disabled'}
-                    </p>
-                </div>
+            {/* Buffer Counts */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
                 <div className="bg-emerald-50 rounded-lg p-2.5">
                     <p className="text-gray-500">Inward Pending</p>
                     <p className="font-medium text-emerald-700">
-                        {offloadStatus?.bufferCounts?.inward != null && offloadStatus.bufferCounts.inward >= 0
+                        {offloadStatus.bufferCounts.inward >= 0
                             ? `${offloadStatus.bufferCounts.inward} rows`
                             : '—'}
                     </p>
@@ -357,119 +315,114 @@ const OffloadMonitor = React.memo(function OffloadMonitor() {
                 <div className="bg-blue-50 rounded-lg p-2.5">
                     <p className="text-gray-500">Outward Pending</p>
                     <p className="font-medium text-blue-700">
-                        {offloadStatus?.bufferCounts?.outward != null && offloadStatus.bufferCounts.outward >= 0
+                        {offloadStatus.bufferCounts.outward >= 0
                             ? `${offloadStatus.bufferCounts.outward} rows`
                             : '—'}
                     </p>
                 </div>
+                <div className="bg-gray-50 rounded-lg p-2.5">
+                    <p className="text-gray-500">Interval</p>
+                    <p className="font-medium text-gray-900">{Math.round(offloadStatus.intervalMs / 60000)} min</p>
+                </div>
+                <div className="bg-gray-50 rounded-lg p-2.5">
+                    <p className="text-gray-500">Scheduler</p>
+                    <p className="font-medium text-gray-900">{offloadStatus.schedulerActive ? 'Active' : 'Stopped'}</p>
+                </div>
             </div>
 
-            {/* Last Result */}
-            {lastResult && (
-                <div className="space-y-2">
-                    <p className="text-xs font-medium text-gray-700">Last Run Results</p>
-                    <div className="grid grid-cols-3 md:grid-cols-6 gap-2 text-xs">
-                        <div className="bg-white border rounded p-2">
-                            <p className="text-gray-500">Inward</p>
-                            <p className="text-lg font-semibold text-green-600">
-                                {lastResult.inwardIngested ?? 0}
-                            </p>
+            {/* Per-Job Summary */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                {/* Ingest Inward */}
+                <div className="border rounded-lg p-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium text-gray-900">Ingest Inward</span>
+                            {offloadStatus.ingestInward.isRunning && (
+                                <RefreshCw size={12} className="animate-spin text-blue-600" />
+                            )}
                         </div>
-                        <div className="bg-white border rounded p-2">
-                            <p className="text-gray-500">Outward</p>
-                            <p className="text-lg font-semibold text-blue-600">
-                                {lastResult.outwardIngested ?? 0}
-                            </p>
-                        </div>
-                        <div className="bg-white border rounded p-2">
-                            <p className="text-gray-500">Skipped</p>
-                            <p className="text-lg font-semibold text-gray-600">
-                                {lastResult.skipped ?? 0}
-                            </p>
-                        </div>
-                        <div className="bg-white border rounded p-2">
-                            <p className="text-gray-500">SKUs Updated</p>
-                            <p className="text-lg font-semibold text-purple-600">
-                                {lastResult.skusUpdated ?? 0}
-                            </p>
-                        </div>
-                        <div className="bg-white border rounded p-2">
-                            <p className="text-gray-500">Errors</p>
-                            <p className={`text-lg font-semibold ${(lastResult.errors ?? 0) > 0 ? 'text-red-600' : 'text-gray-400'}`}>
-                                {lastResult.errors ?? 0}
-                            </p>
-                        </div>
-                        <div className="bg-white border rounded p-2">
-                            <p className="text-gray-500">Duration</p>
-                            <p className="text-lg font-semibold text-gray-700">
-                                {lastResult.durationMs ? formatDuration(lastResult.durationMs) : '-'}
-                            </p>
-                        </div>
+                        <button
+                            onClick={() => triggerInwardMutation.mutate()}
+                            disabled={offloadStatus.ingestInward.isRunning || triggerInwardMutation.isPending}
+                            className="btn btn-primary text-xs py-0.5 px-2 flex items-center gap-1"
+                        >
+                            <Play size={10} /> Run
+                        </button>
                     </div>
-
-                    {lastResult.error && (
-                        <div className="bg-red-50 border border-red-200 rounded p-2 text-xs text-red-700">
-                            {lastResult.error}
-                        </div>
-                    )}
-
-                    {/* Ingested per tab */}
-                    {lastResult.ingestedCounts && Object.keys(lastResult.ingestedCounts).length > 0 && (
-                        <div className="text-xs text-gray-500 flex flex-wrap gap-x-4 gap-y-1">
-                            {Object.entries(lastResult.ingestedCounts).map(([tab, count]) => (
-                                <span key={tab}>
-                                    {tab}: <span className="font-medium text-gray-700">{count}</span>
-                                </span>
-                            ))}
-                        </div>
-                    )}
+                    <div className="text-xs text-gray-500">
+                        Last: {formatTime(offloadStatus.ingestInward.lastRunAt)}
+                        {offloadStatus.ingestInward.lastResult && (
+                            <span className="ml-2 text-emerald-600 font-medium">
+                                +{(offloadStatus.ingestInward.lastResult as Record<string, number>).inwardIngested ?? 0}
+                            </span>
+                        )}
+                        {offloadStatus.ingestInward.lastResult?.durationMs != null && (
+                            <span className="ml-1 text-gray-400">
+                                ({formatDuration(Number(offloadStatus.ingestInward.lastResult.durationMs))})
+                            </span>
+                        )}
+                    </div>
                 </div>
-            )}
 
-            {/* Recent Runs */}
-            {recentRuns.length > 0 && (
-                <div>
-                    <button
-                        onClick={() => setShowRecent(!showRecent)}
-                        className="flex items-center gap-1 text-xs font-medium text-gray-600 hover:text-gray-900"
-                    >
-                        {showRecent ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                        Recent Runs ({recentRuns.length})
-                    </button>
-                    {showRecent && (
-                        <div className="mt-2 border rounded-lg overflow-hidden">
-                            <table className="w-full text-xs">
-                                <thead className="bg-gray-50">
-                                    <tr>
-                                        <th className="text-left px-3 py-1.5 font-medium text-gray-600">Time</th>
-                                        <th className="text-right px-3 py-1.5 font-medium text-gray-600">Duration</th>
-                                        <th className="text-right px-3 py-1.5 font-medium text-gray-600">Inward</th>
-                                        <th className="text-right px-3 py-1.5 font-medium text-gray-600">Outward</th>
-                                        <th className="text-left px-3 py-1.5 font-medium text-gray-600">Status</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y">
-                                    {recentRuns.map((run, i) => (
-                                        <tr key={i} className="hover:bg-gray-50">
-                                            <td className="px-3 py-1.5 text-gray-700">{formatTime(run.startedAt)}</td>
-                                            <td className="px-3 py-1.5 text-right text-gray-600">{formatDuration(run.durationMs)}</td>
-                                            <td className="px-3 py-1.5 text-right text-green-600 font-medium">{run.inwardIngested}</td>
-                                            <td className="px-3 py-1.5 text-right text-blue-600 font-medium">{run.outwardIngested}</td>
-                                            <td className="px-3 py-1.5">
-                                                {run.error ? (
-                                                    <span className="text-red-600" title={run.error}>Failed</span>
-                                                ) : (
-                                                    <span className="text-green-600">OK</span>
-                                                )}
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
+                {/* Move Shipped */}
+                <div className="border rounded-lg p-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium text-gray-900">Move Shipped</span>
+                            {offloadStatus.moveShipped.isRunning && (
+                                <RefreshCw size={12} className="animate-spin text-blue-600" />
+                            )}
                         </div>
-                    )}
+                        <button
+                            onClick={() => triggerMoveMutation.mutate()}
+                            disabled={offloadStatus.moveShipped.isRunning || triggerMoveMutation.isPending}
+                            className="btn btn-primary text-xs py-0.5 px-2 flex items-center gap-1"
+                        >
+                            <Play size={10} /> Run
+                        </button>
+                    </div>
+                    <div className="text-xs text-gray-500">
+                        Last: {formatTime(offloadStatus.moveShipped.lastRunAt)}
+                        {offloadStatus.moveShipped.lastResult && (
+                            <span className="ml-2 text-amber-600 font-medium">
+                                {(offloadStatus.moveShipped.lastResult as Record<string, number>).rowsWrittenToOutward ?? 0} moved
+                            </span>
+                        )}
+                    </div>
                 </div>
-            )}
+
+                {/* Ingest Outward */}
+                <div className="border rounded-lg p-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium text-gray-900">Ingest Outward</span>
+                            {offloadStatus.ingestOutward.isRunning && (
+                                <RefreshCw size={12} className="animate-spin text-blue-600" />
+                            )}
+                        </div>
+                        <button
+                            onClick={() => triggerOutwardMutation.mutate()}
+                            disabled={offloadStatus.ingestOutward.isRunning || triggerOutwardMutation.isPending}
+                            className="btn btn-primary text-xs py-0.5 px-2 flex items-center gap-1"
+                        >
+                            <Play size={10} /> Run
+                        </button>
+                    </div>
+                    <div className="text-xs text-gray-500">
+                        Last: {formatTime(offloadStatus.ingestOutward.lastRunAt)}
+                        {offloadStatus.ingestOutward.lastResult && (
+                            <span className="ml-2 text-blue-600 font-medium">
+                                +{(offloadStatus.ingestOutward.lastResult as Record<string, number>).outwardIngested ?? 0}
+                            </span>
+                        )}
+                        {offloadStatus.ingestOutward.lastResult?.durationMs != null && (
+                            <span className="ml-1 text-gray-400">
+                                ({formatDuration(Number(offloadStatus.ingestOutward.lastResult.durationMs))})
+                            </span>
+                        )}
+                    </div>
+                </div>
+            </div>
         </div>
     );
 });

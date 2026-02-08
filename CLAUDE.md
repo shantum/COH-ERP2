@@ -18,8 +18,16 @@
 | `/returns` | Customer returns, refunds, exchanges, return eligibility |
 | `/customers` | Customer tiers, LTV calculation, customer stats |
 | `/production` | Production batches, tailors, capacity planning |
+| `/shopify` | Shopify webhooks, product/order sync, fulfillment, cache-first pattern |
+| `/tracking` | iThink API, AWB generation, tracking sync, RTO workflow, courier integration |
 | `/database` | Prisma, Kysely, triggers, migrations, transactions |
 | `/railway` | Railway CLI, deployments, database access |
+| `/google-sheets` | Google Sheets hybrid system, buffer tabs, balance push, ingestion |
+| `/sync-from-sheet` | Sheet Sync feature in Settings, CSV uploads, sync jobs |
+| `/review` | Strict code review of recent changes |
+| `/plan` | Multi-session implementation plans, phase tracking |
+| `/update-skill` | Refresh skill files after codebase changes |
+| `/qmd` | QMD search engine config, collections, indexing |
 
 ### Search Tools: Grep vs QMD vsearch
 
@@ -72,7 +80,7 @@ cd client && npm run dev
 
 **Note:** Root uses pnpm workspace (`pnpm-workspace.yaml`). Railway builds use npm (`nixpacks.toml`).
 
-Login: `admin@coh.com` / `XOFiya@34`
+Login: See user project instructions (not checked into git)
 
 ---
 
@@ -266,16 +274,49 @@ prisma/schema.prisma         # Database schema
 
 ## Pages Overview
 
+**Core:**
+
 | Page | Purpose |
 |------|---------|
 | `/orders` | Order fulfillment (AG-Grid, 4 views) |
+| `/orders-simple` | Simplified orders view |
+| `/orders-mobile` | Mobile-optimized orders |
+| `/order-search` | Cross-order search |
 | `/products` | Catalog + BOM (9 tabs) |
-| `/inventory` | Stock management |
 | `/customers` | Customer management |
-| `/returns` | Customer returns processing |
-| `/production` | Production planning |
-| `/ledgers` | FabricColour transaction history |
 | `/settings` | System settings |
+| `/users` | User management |
+
+**Inventory & Materials:**
+
+| Page | Purpose |
+|------|---------|
+| `/inventory` | Stock management |
+| `/inventory-inward` | Inward receipt entry |
+| `/inventory-count` | Physical stock count |
+| `/inventory-mobile` | Mobile inventory operations |
+| `/ledgers` | FabricColour transaction history |
+| `/fabric-reconciliation` | Fabric stock reconciliation |
+| `/fabric-receipt` | Fabric receipt entry |
+| `/costing` | Product costing management |
+
+**Returns & Tracking:**
+
+| Page | Purpose |
+|------|---------|
+| `/returns` | Customer returns processing |
+| `/returns-rto` | RTO (Return to Origin) management |
+| `/return-prime` | Return Prime integration |
+| `/tracking` | Shipment tracking dashboard |
+
+**Operations:**
+
+| Page | Purpose |
+|------|---------|
+| `/production` | Production planning |
+| `/channels` | Multi-channel order management |
+| `/sheets-monitor` | Google Sheets sync monitoring |
+| `/analytics` | Revenue/customer/product analytics |
 
 ---
 
@@ -300,9 +341,17 @@ All domain skills are in `.claude/skills/{domain}/SKILL.md`:
 | `returns/SKILL.md` | Return lifecycle, eligibility, refund calculation |
 | `customers/SKILL.md` | Tiers, LTV, customer stats |
 | `production/SKILL.md` | Batches, capacity, scheduling |
+| `shopify/SKILL.md` | Webhooks, cache-first pattern, product matching, fulfillment sync |
+| `tracking/SKILL.md` | iThink API, status mapping, RTO workflow, line-level tracking |
 | `database/SKILL.md` | Prisma vs Kysely, triggers, migrations |
 | `railway/SKILL.md` | Deployment, CLI, database access |
+| `google-sheets/SKILL.md` | Hybrid system, buffer tabs, balance push, ingestion |
+| `sync-from-sheet/SKILL.md` | Sheet Sync UI, CSV uploads, sync jobs |
+| `review/SKILL.md` | Code review prompts and standards |
+| `plan/SKILL.md` | Multi-session plan lifecycle |
+| `update-skill/SKILL.md` | Skill file refresh workflow |
+| `qmd/SKILL.md` | Search engine config, collections, MCP integration |
 
 ---
 
-**Updated:** 2026-01-30 (streamlined QMD: 3 collections, no full-file reads)
+**Updated:** 2026-02-08 (added 8 missing skills, expanded pages to 25 routes, moved credentials to private instructions)

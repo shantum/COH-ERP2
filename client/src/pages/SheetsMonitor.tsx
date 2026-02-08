@@ -23,28 +23,14 @@ import {
 } from '../server/functions/admin';
 
 // ============================================
-// TYPES (matching server response)
+// TYPES (matching new per-job server response)
 // ============================================
 
-interface OffloadLastResult {
-    startedAt?: string;
-    inwardIngested?: number;
-    outwardIngested?: number;
-    ordersLinked?: number;
-    rowsDeleted?: number;
-    skusUpdated?: number;
-    skipped?: number;
-    errors?: number;
-    durationMs?: number;
-    error?: string | null;
-}
-
-interface RecentRun {
-    startedAt: string;
-    durationMs: number;
-    inwardIngested: number;
-    outwardIngested: number;
-    error: string | null;
+interface JobStateResponse {
+    isRunning: boolean;
+    lastRunAt: string | null;
+    lastResult: Record<string, unknown> | null;
+    recentRuns: Array<{ startedAt: string; durationMs: number; count: number; error: string | null }>;
 }
 
 interface BufferCounts {
@@ -53,21 +39,12 @@ interface BufferCounts {
 }
 
 interface OffloadStatusResponse {
-    isRunning: boolean;
+    ingestInward: JobStateResponse;
+    ingestOutward: JobStateResponse;
+    moveShipped: JobStateResponse;
     schedulerActive: boolean;
     intervalMs: number;
-    lastRunAt: string | null;
-    lastResult: OffloadLastResult | null;
-    recentRuns: RecentRun[];
     bufferCounts: BufferCounts;
-}
-
-interface MoveShippedResult {
-    shippedRowsFound: number;
-    rowsWrittenToOutward: number;
-    rowsDeletedFromOrders: number;
-    errors: string[];
-    durationMs: number;
 }
 
 // ============================================
@@ -93,15 +70,6 @@ function formatTime(ts: string | Date | null | undefined): string {
     return d.toLocaleDateString();
 }
 
-function formatAbsoluteTime(ts: string | Date | null | undefined): string {
-    if (!ts) return 'Never';
-    const d = new Date(ts);
-    return d.toLocaleString('en-IN', {
-        day: '2-digit', month: 'short',
-        hour: '2-digit', minute: '2-digit', second: '2-digit',
-        hour12: false,
-    });
-}
 
 // ============================================
 // SUB-COMPONENTS
@@ -190,8 +158,7 @@ export default function SheetsMonitor() {
         refetchInterval: 15000,
     });
 
-    const sheetOffloadJob = jobs?.find(j => j.id === 'sheet_offload') ?? null;
-    const moveShippedJob = jobs?.find(j => j.id === 'shipped_to_outward') ?? null;
+    const ingestInwardJob = jobs?.find(j => j.id === 'ingest_inward') ?? null;
 
     // ── Query 2: Offload status with buffer counts (30s poll) ──
     const { data: offloadStatus } = useQuery({
@@ -228,10 +195,10 @@ export default function SheetsMonitor() {
         queryClient.invalidateQueries({ queryKey: ['sheetsMonitorStats'] });
     };
 
-    const offloadMutation = useMutation({
+    const triggerInwardMutation = useMutation({
         mutationFn: async () => {
             const result = await triggerFn({
-                data: { jobId: 'sheet_offload' as const },
+                data: { jobId: 'ingest_inward' as const },
             });
             if (!result.success) throw new Error(result.error?.message);
             return result.data;
@@ -239,10 +206,21 @@ export default function SheetsMonitor() {
         onSuccess: invalidateAll,
     });
 
-    const moveShippedMutation = useMutation({
+    const triggerOutwardMutation = useMutation({
         mutationFn: async () => {
             const result = await triggerFn({
-                data: { jobId: 'shipped_to_outward' as const },
+                data: { jobId: 'ingest_outward' as const },
+            });
+            if (!result.success) throw new Error(result.error?.message);
+            return result.data;
+        },
+        onSuccess: invalidateAll,
+    });
+
+    const triggerMoveMutation = useMutation({
+        mutationFn: async () => {
+            const result = await triggerFn({
+                data: { jobId: 'move_shipped_to_outward' as const },
             });
             if (!result.success) throw new Error(result.error?.message);
             return result.data;
@@ -252,10 +230,15 @@ export default function SheetsMonitor() {
 
     // Derived data
     const bufferCounts = offloadStatus?.bufferCounts ?? { inward: 0, outward: 0 };
-    const lastResult = (sheetOffloadJob?.lastResult ?? offloadStatus?.lastResult ?? null) as OffloadLastResult | null;
-    const recentRuns = (offloadStatus?.recentRuns ?? sheetOffloadJob?.stats?.recentRuns ?? []) as RecentRun[];
-    const moveShippedLastResult = (moveShippedJob?.lastResult ?? null) as MoveShippedResult | null;
-    const deletionEnabled = sheetOffloadJob?.config?.deletionEnabled ?? false;
+    const inwardState = offloadStatus?.ingestInward;
+    const outwardState = offloadStatus?.ingestOutward;
+    const moveState = offloadStatus?.moveShipped;
+    const deletionEnabled = ingestInwardJob?.config?.deletionEnabled ?? false;
+    // Combine recent runs from both ingest jobs for the history table
+    const recentRuns = [
+        ...(inwardState?.recentRuns?.map(r => ({ ...r, type: 'inward' as const })) ?? []),
+        ...(outwardState?.recentRuns?.map(r => ({ ...r, type: 'outward' as const })) ?? []),
+    ].sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
 
     return (
         <div className="p-4 sm:p-6 max-w-6xl mx-auto space-y-4">
@@ -271,16 +254,10 @@ export default function SheetsMonitor() {
             {/* ── Section 1: System Status Bar ── */}
             <div className="bg-white rounded-lg border border-gray-200 p-4 shadow-sm">
                 <div className="flex flex-wrap items-center gap-4">
-                    {/* Worker status */}
+                    {/* Scheduler status */}
                     <div className="flex items-center gap-2">
-                        <span className="text-xs text-gray-500">Worker</span>
-                        {sheetOffloadJob?.isRunning ? (
-                            <StatusBadge active label="Running" />
-                        ) : sheetOffloadJob?.enabled ? (
-                            <StatusBadge active label="Active" />
-                        ) : (
-                            <StatusBadge active={false} label="Disabled" />
-                        )}
+                        <span className="text-xs text-gray-500">Scheduler</span>
+                        <StatusBadge active={offloadStatus?.schedulerActive ?? false} label={offloadStatus?.schedulerActive ? 'Active' : 'Disabled'} />
                     </div>
 
                     {/* Buffer pending */}
@@ -312,73 +289,88 @@ export default function SheetsMonitor() {
                     {/* Action buttons */}
                     <div className="flex items-center gap-2 ml-auto">
                         <button
-                            onClick={() => moveShippedMutation.mutate()}
-                            disabled={moveShippedMutation.isPending}
+                            onClick={() => triggerMoveMutation.mutate()}
+                            disabled={triggerMoveMutation.isPending || moveState?.isRunning}
                             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                            {moveShippedMutation.isPending ? (
+                            {triggerMoveMutation.isPending ? (
                                 <Loader2 size={14} className="animate-spin" />
                             ) : (
                                 <ArrowRightLeft size={14} />
                             )}
-                            Move Shipped → Outward
+                            Move Shipped
                         </button>
                         <button
-                            onClick={() => offloadMutation.mutate()}
-                            disabled={offloadMutation.isPending || sheetOffloadJob?.isRunning}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                            onClick={() => triggerInwardMutation.mutate()}
+                            disabled={triggerInwardMutation.isPending || inwardState?.isRunning}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                            {offloadMutation.isPending ? (
+                            {triggerInwardMutation.isPending ? (
                                 <Loader2 size={14} className="animate-spin" />
                             ) : (
                                 <Play size={14} />
                             )}
-                            Run Offload Now
+                            Ingest Inward
+                        </button>
+                        <button
+                            onClick={() => triggerOutwardMutation.mutate()}
+                            disabled={triggerOutwardMutation.isPending || outwardState?.isRunning}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            {triggerOutwardMutation.isPending ? (
+                                <Loader2 size={14} className="animate-spin" />
+                            ) : (
+                                <Play size={14} />
+                            )}
+                            Ingest Outward
                         </button>
                     </div>
                 </div>
 
                 {/* Mutation errors */}
-                {offloadMutation.error && (
+                {triggerInwardMutation.error && (
                     <div className="mt-2 text-xs text-red-600 flex items-center gap-1">
-                        <AlertCircle size={12} /> {offloadMutation.error.message}
+                        <AlertCircle size={12} /> Ingest Inward: {triggerInwardMutation.error.message}
                     </div>
                 )}
-                {moveShippedMutation.error && (
+                {triggerOutwardMutation.error && (
                     <div className="mt-2 text-xs text-red-600 flex items-center gap-1">
-                        <AlertCircle size={12} /> {moveShippedMutation.error.message}
+                        <AlertCircle size={12} /> Ingest Outward: {triggerOutwardMutation.error.message}
+                    </div>
+                )}
+                {triggerMoveMutation.error && (
+                    <div className="mt-2 text-xs text-red-600 flex items-center gap-1">
+                        <AlertCircle size={12} /> Move Shipped: {triggerMoveMutation.error.message}
                     </div>
                 )}
             </div>
 
-            {/* ── Section 2: Last Sync Results ── */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* Left: Last Offload */}
+            {/* ── Section 2: Last Sync Results (3 columns) ── */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {/* Ingest Inward */}
                 <div className="bg-white rounded-lg border border-gray-200 p-4 shadow-sm">
-                    <h3 className="text-sm font-medium text-gray-900 mb-3">Last Offload</h3>
-                    {lastResult ? (
+                    <div className="flex items-center justify-between mb-3">
+                        <h3 className="text-sm font-medium text-gray-900">Ingest Inward</h3>
+                        {inwardState?.isRunning && <Loader2 size={14} className="animate-spin text-emerald-600" />}
+                    </div>
+                    {inwardState?.lastResult ? (
                         <>
-                            <div className="flex items-center gap-3 text-xs text-gray-500 mb-3">
-                                <span>{formatTime(lastResult.startedAt)}</span>
-                                {lastResult.durationMs != null && (
-                                    <span className="text-gray-400">{formatDuration(lastResult.durationMs)}</span>
-                                )}
-                                {lastResult.startedAt && (
-                                    <span className="text-gray-400">{formatAbsoluteTime(lastResult.startedAt)}</span>
+                            <div className="text-xs text-gray-500 mb-2">
+                                {formatTime(inwardState.lastRunAt)}
+                                {inwardState.lastResult.durationMs != null && (
+                                    <span className="ml-2 text-gray-400">{formatDuration(Number(inwardState.lastResult.durationMs))}</span>
                                 )}
                             </div>
-                            <div className="grid grid-cols-3 gap-2">
-                                <SmallMetric label="Inward" value={lastResult.inwardIngested ?? 0} />
-                                <SmallMetric label="Outward" value={lastResult.outwardIngested ?? 0} />
-                                <SmallMetric label="Orders Linked" value={lastResult.ordersLinked ?? 0} />
-                                <SmallMetric label="Deleted" value={lastResult.rowsDeleted ?? 0} />
-                                <SmallMetric label="SKUs Updated" value={lastResult.skusUpdated ?? 0} />
-                                <SmallMetric label="Skipped" value={lastResult.skipped ?? 0} />
-                                <SmallMetric label="Errors" value={lastResult.errors ?? 0} highlight={(lastResult.errors ?? 0) > 0} />
+                            <div className="grid grid-cols-2 gap-2">
+                                <SmallMetric label="Ingested" value={Number(inwardState.lastResult.inwardIngested ?? 0)} />
+                                <SmallMetric label="Skipped" value={Number(inwardState.lastResult.skipped ?? 0)} />
+                                <SmallMetric label="Rows Deleted" value={Number(inwardState.lastResult.rowsDeleted ?? 0)} />
+                                <SmallMetric label="SKUs Updated" value={Number(inwardState.lastResult.skusUpdated ?? 0)} />
+                                <SmallMetric label="Errors" value={Number(inwardState.lastResult.errors ?? 0)} highlight={Number(inwardState.lastResult.errors ?? 0) > 0} />
                             </div>
-                            {lastResult.error && (
+                            {inwardState.lastResult.error && (
                                 <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded text-xs text-red-700">
-                                    {lastResult.error}
+                                    {String(inwardState.lastResult.error)}
                                 </div>
                             )}
                         </>
@@ -387,30 +379,68 @@ export default function SheetsMonitor() {
                     )}
                 </div>
 
-                {/* Right: Last Move Shipped */}
+                {/* Move Shipped */}
                 <div className="bg-white rounded-lg border border-gray-200 p-4 shadow-sm">
-                    <h3 className="text-sm font-medium text-gray-900 mb-3">Last Move Shipped → Outward</h3>
-                    {moveShippedLastResult ? (
+                    <div className="flex items-center justify-between mb-3">
+                        <h3 className="text-sm font-medium text-gray-900">Move Shipped</h3>
+                        {moveState?.isRunning && <Loader2 size={14} className="animate-spin text-amber-600" />}
+                    </div>
+                    {moveState?.lastResult ? (
                         <>
-                            <div className="flex items-center gap-3 text-xs text-gray-500 mb-3">
-                                {moveShippedLastResult.durationMs != null && (
-                                    <span>{formatDuration(moveShippedLastResult.durationMs)}</span>
+                            <div className="text-xs text-gray-500 mb-2">
+                                {formatTime(moveState.lastRunAt)}
+                                {moveState.lastResult.durationMs != null && (
+                                    <span className="ml-2 text-gray-400">{formatDuration(Number(moveState.lastResult.durationMs))}</span>
                                 )}
                             </div>
                             <div className="grid grid-cols-2 gap-2">
-                                <SmallMetric label="Rows Found" value={moveShippedLastResult.shippedRowsFound} />
-                                <SmallMetric label="Written to Outward" value={moveShippedLastResult.rowsWrittenToOutward} />
-                                <SmallMetric label="Deleted from Orders" value={moveShippedLastResult.rowsDeletedFromOrders} />
-                                <SmallMetric label="Errors" value={moveShippedLastResult.errors?.length ?? 0} highlight={(moveShippedLastResult.errors?.length ?? 0) > 0} />
+                                <SmallMetric label="Rows Found" value={Number(moveState.lastResult.shippedRowsFound ?? 0)} />
+                                <SmallMetric label="Written" value={Number(moveState.lastResult.rowsWrittenToOutward ?? 0)} />
+                                <SmallMetric label="Deleted" value={Number(moveState.lastResult.rowsDeletedFromOrders ?? 0)} />
+                                <SmallMetric label="Errors" value={Array.isArray(moveState.lastResult.errors) ? moveState.lastResult.errors.length : 0}
+                                    highlight={Array.isArray(moveState.lastResult.errors) && moveState.lastResult.errors.length > 0} />
                             </div>
-                            {moveShippedLastResult.errors?.length > 0 && (
+                            {Array.isArray(moveState.lastResult.errors) && moveState.lastResult.errors.length > 0 && (
                                 <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded text-xs text-red-700 space-y-0.5">
-                                    {moveShippedLastResult.errors.slice(0, 3).map((err, i) => (
+                                    {(moveState.lastResult.errors as string[]).slice(0, 3).map((err, i) => (
                                         <div key={i}>{err}</div>
                                     ))}
-                                    {moveShippedLastResult.errors.length > 3 && (
-                                        <div className="text-red-400">...and {moveShippedLastResult.errors.length - 3} more</div>
+                                    {moveState.lastResult.errors.length > 3 && (
+                                        <div className="text-red-400">...and {moveState.lastResult.errors.length - 3} more</div>
                                     )}
+                                </div>
+                            )}
+                        </>
+                    ) : (
+                        <div className="text-sm text-gray-400">No results yet</div>
+                    )}
+                </div>
+
+                {/* Ingest Outward */}
+                <div className="bg-white rounded-lg border border-gray-200 p-4 shadow-sm">
+                    <div className="flex items-center justify-between mb-3">
+                        <h3 className="text-sm font-medium text-gray-900">Ingest Outward</h3>
+                        {outwardState?.isRunning && <Loader2 size={14} className="animate-spin text-blue-600" />}
+                    </div>
+                    {outwardState?.lastResult ? (
+                        <>
+                            <div className="text-xs text-gray-500 mb-2">
+                                {formatTime(outwardState.lastRunAt)}
+                                {outwardState.lastResult.durationMs != null && (
+                                    <span className="ml-2 text-gray-400">{formatDuration(Number(outwardState.lastResult.durationMs))}</span>
+                                )}
+                            </div>
+                            <div className="grid grid-cols-2 gap-2">
+                                <SmallMetric label="Ingested" value={Number(outwardState.lastResult.outwardIngested ?? 0)} />
+                                <SmallMetric label="Orders Linked" value={Number(outwardState.lastResult.ordersLinked ?? 0)} />
+                                <SmallMetric label="Rows Deleted" value={Number(outwardState.lastResult.rowsDeleted ?? 0)} />
+                                <SmallMetric label="SKUs Updated" value={Number(outwardState.lastResult.skusUpdated ?? 0)} />
+                                <SmallMetric label="Skipped" value={Number(outwardState.lastResult.skipped ?? 0)} />
+                                <SmallMetric label="Errors" value={Number(outwardState.lastResult.errors ?? 0)} highlight={Number(outwardState.lastResult.errors ?? 0) > 0} />
+                            </div>
+                            {outwardState.lastResult.error && (
+                                <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded text-xs text-red-700">
+                                    {String(outwardState.lastResult.error)}
                                 </div>
                             )}
                         </>
@@ -493,19 +523,29 @@ export default function SheetsMonitor() {
                             <thead className="bg-gray-50">
                                 <tr>
                                     <th className="text-left px-3 py-1.5 font-medium text-gray-600">Time</th>
+                                    <th className="text-left px-3 py-1.5 font-medium text-gray-600">Job</th>
                                     <th className="text-right px-3 py-1.5 font-medium text-gray-600">Duration</th>
-                                    <th className="text-right px-3 py-1.5 font-medium text-gray-600">Inward</th>
-                                    <th className="text-right px-3 py-1.5 font-medium text-gray-600">Outward</th>
+                                    <th className="text-right px-3 py-1.5 font-medium text-gray-600">Count</th>
                                     <th className="text-left px-3 py-1.5 font-medium text-gray-600">Status</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y">
-                                {recentRuns.slice(0, 10).map((run, i) => (
+                                {recentRuns.slice(0, 15).map((run, i) => (
                                     <tr key={i} className="hover:bg-gray-50">
                                         <td className="px-3 py-1.5 text-gray-700">{formatTime(run.startedAt)}</td>
+                                        <td className="px-3 py-1.5">
+                                            <span className={`inline-flex px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                                                run.type === 'inward'
+                                                    ? 'bg-emerald-100 text-emerald-700'
+                                                    : 'bg-blue-100 text-blue-700'
+                                            }`}>
+                                                {run.type === 'inward' ? 'Inward' : 'Outward'}
+                                            </span>
+                                        </td>
                                         <td className="px-3 py-1.5 text-right text-gray-600">{formatDuration(run.durationMs)}</td>
-                                        <td className="px-3 py-1.5 text-right text-emerald-600 font-medium">{run.inwardIngested}</td>
-                                        <td className="px-3 py-1.5 text-right text-blue-600 font-medium">{run.outwardIngested}</td>
+                                        <td className={`px-3 py-1.5 text-right font-medium ${
+                                            run.type === 'inward' ? 'text-emerald-600' : 'text-blue-600'
+                                        }`}>{run.count}</td>
                                         <td className="px-3 py-1.5">
                                             {run.error ? (
                                                 <span className="text-red-600" title={run.error}>Failed</span>
