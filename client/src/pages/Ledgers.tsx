@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
-import { ArrowDownCircle, ArrowUpCircle, Search, Calendar, Trash2, Wrench } from 'lucide-react';
+import { ArrowDownCircle, ArrowUpCircle, Search, Calendar, Trash2, Wrench, MapPin, User, Package, Hash, Warehouse } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { invalidateOrderView } from '../hooks/orders/orderMutationUtils';
 
@@ -17,7 +17,7 @@ export default function Ledgers() {
     const { user } = useAuth();
     const isAdmin = user?.role === 'admin';
     const [activeTab, setActiveTab] = useState<Tab>('inventory');
-    const [inventoryFilter, setInventoryFilter] = useState({ search: '', txnType: '', reason: '', customOnly: false });
+    const [inventoryFilter, setInventoryFilter] = useState({ search: '', txnType: '', reason: '', source: '', customOnly: false });
     const [materialsFilter, setMaterialsFilter] = useState({ search: '', txnType: '', materialId: '', fabricId: '' });
 
     // Fetch all inventory transactions using Server Function
@@ -81,10 +81,18 @@ export default function Ledgers() {
             const search = inventoryFilter.search.toLowerCase();
             const skuMatch = txn.sku?.skuCode?.toLowerCase().includes(search);
             const productMatch = txn.sku?.variation?.product?.name?.toLowerCase().includes(search);
-            if (!skuMatch && !productMatch) return false;
+            const orderMatch = txn.orderNumber?.toLowerCase().includes(search);
+            const performedByMatch = txn.performedBy?.toLowerCase().includes(search);
+            const sourceMatch = txn.source?.toLowerCase().includes(search);
+            const destMatch = txn.destination?.toLowerCase().includes(search);
+            if (!skuMatch && !productMatch && !orderMatch && !performedByMatch && !sourceMatch && !destMatch) return false;
         }
         if (inventoryFilter.txnType && txn.txnType !== inventoryFilter.txnType) return false;
         if (inventoryFilter.reason && txn.reason !== inventoryFilter.reason) return false;
+        if (inventoryFilter.source) {
+            const src = txn.txnType === 'inward' ? txn.source : txn.destination;
+            if (src !== inventoryFilter.source) return false;
+        }
         // Custom SKU filter - check isCustomSku flag or skuCode starting with 'C-'
         if (inventoryFilter.customOnly) {
             const isCustom = txn.sku?.isCustomSku || txn.sku?.skuCode?.startsWith('C-');
@@ -165,8 +173,12 @@ export default function Ledgers() {
         onError: (err: Error) => alert(err.message || 'Failed to delete transaction')
     });
 
-    // Get unique reasons for filter dropdown
+    // Get unique reasons and sources for filter dropdowns
     const inventoryReasons = [...new Set(inventoryTxns?.map((t: InventoryTransactionItem) => t.reason as string) || [])] as string[];
+    const inventorySources = [...new Set(
+        inventoryTxns?.map((t: InventoryTransactionItem) => t.txnType === 'inward' ? t.source : t.destination)
+            .filter((s): s is string => !!s) || []
+    )].sort();
 
     return (
         <div className="space-y-4 md:space-y-6">
@@ -230,6 +242,16 @@ export default function Ledgers() {
                                 <option key={r} value={r}>{r.replace(/_/g, ' ')}</option>
                             ))}
                         </select>
+                        <select
+                            className="input w-full sm:w-auto sm:max-w-[180px]"
+                            value={inventoryFilter.source}
+                            onChange={(e) => setInventoryFilter(f => ({ ...f, source: e.target.value }))}
+                        >
+                            <option value="">All Sources</option>
+                            {inventorySources.map(s => (
+                                <option key={s} value={s}>{s}</option>
+                            ))}
+                        </select>
                         {/* Custom SKU toggle */}
                         <button
                             onClick={() => setInventoryFilter(f => ({ ...f, customOnly: !f.customOnly }))}
@@ -274,20 +296,22 @@ export default function Ledgers() {
                                         <span className="text-xs text-gray-400">({txns.length} transactions)</span>
                                     </div>
                                     <div className="card divide-y">
-                                        {txns.map((txn: InventoryTransactionItem) => (
-                                            <div key={txn.id} className="py-3 flex items-center justify-between">
-                                                <div className="flex items-center gap-3">
+                                        {txns.map((txn: InventoryTransactionItem) => {
+                                            const hasSheetMeta = txn.source || txn.destination || txn.tailorNumber || txn.performedBy || txn.orderNumber || txn.warehouseLocation;
+                                            return (
+                                            <div key={txn.id} className="py-3 flex items-start justify-between gap-3">
+                                                <div className="flex items-start gap-3 min-w-0 flex-1">
                                                     {txn.txnType === 'inward' ? (
-                                                        <div className="p-2 rounded-full bg-green-100">
+                                                        <div className="p-2 rounded-full bg-green-100 shrink-0 mt-0.5">
                                                             <ArrowDownCircle size={18} className="text-green-600" />
                                                         </div>
                                                     ) : (
-                                                        <div className="p-2 rounded-full bg-red-100">
+                                                        <div className="p-2 rounded-full bg-red-100 shrink-0 mt-0.5">
                                                             <ArrowUpCircle size={18} className="text-red-600" />
                                                         </div>
                                                     )}
-                                                    <div>
-                                                        <p className="font-medium text-gray-900 flex items-center gap-2">
+                                                    <div className="min-w-0">
+                                                        <p className="font-medium text-gray-900 flex items-center gap-2 flex-wrap">
                                                             <span className={txn.sku?.isCustomSku || txn.sku?.skuCode?.startsWith('C-') ? 'text-orange-700' : ''}>
                                                                 {txn.sku?.skuCode}
                                                             </span>
@@ -301,17 +325,63 @@ export default function Ledgers() {
                                                                 {txn.sku?.variation?.product?.name} • {txn.sku?.variation?.colorName} • {txn.sku?.size}
                                                             </span>
                                                         </p>
-                                                        <div className="flex items-center gap-2 text-xs text-gray-500">
+                                                        <div className="flex items-center gap-2 text-xs text-gray-500 mt-0.5">
                                                             <span className="capitalize">{txn.reason?.replace(/_/g, ' ')}</span>
                                                             <span>•</span>
                                                             <span>{new Date(txn.createdAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>
                                                             <span>•</span>
                                                             <span>{txn.createdBy?.name || 'System'}</span>
                                                         </div>
+                                                        {/* Sheet-ingested metadata pills */}
+                                                        {hasSheetMeta && (
+                                                            <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                                                                {txn.source && (
+                                                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-blue-50 text-blue-700 border border-blue-200">
+                                                                        <MapPin size={10} />
+                                                                        Source: {txn.source}
+                                                                    </span>
+                                                                )}
+                                                                {txn.destination && (
+                                                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-purple-50 text-purple-700 border border-purple-200">
+                                                                        <MapPin size={10} />
+                                                                        Dest: {txn.destination}
+                                                                    </span>
+                                                                )}
+                                                                {txn.orderNumber && (
+                                                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-50 text-amber-700 border border-amber-200">
+                                                                        <Hash size={10} />
+                                                                        Order: #{txn.orderNumber}
+                                                                    </span>
+                                                                )}
+                                                                {txn.performedBy && (
+                                                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-teal-50 text-teal-700 border border-teal-200">
+                                                                        <User size={10} />
+                                                                        By: {txn.performedBy}
+                                                                    </span>
+                                                                )}
+                                                                {txn.tailorNumber && (
+                                                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                                                        <Package size={10} />
+                                                                        Tailor: {txn.tailorNumber}
+                                                                    </span>
+                                                                )}
+                                                                {txn.warehouseLocation && (
+                                                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-gray-100 text-gray-700 border border-gray-300">
+                                                                        <Warehouse size={10} />
+                                                                        Loc: {txn.warehouseLocation}
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                        )}
+                                                        {txn.referenceId && (
+                                                            <p className="text-[10px] text-gray-400 mt-1 font-mono truncate" title={txn.referenceId}>
+                                                                ref: {txn.referenceId}
+                                                            </p>
+                                                        )}
                                                         {txn.notes && <p className="text-xs text-gray-500 mt-1">{txn.notes}</p>}
                                                     </div>
                                                 </div>
-                                                <div className="flex items-center gap-3">
+                                                <div className="flex items-center gap-3 shrink-0">
                                                     <div className={`text-lg font-semibold ${txn.txnType === 'inward' ? 'text-green-600' : 'text-red-600'}`}>
                                                         {txn.txnType === 'inward' ? '+' : '-'}{txn.qty}
                                                     </div>
@@ -330,7 +400,8 @@ export default function Ledgers() {
                                                     )}
                                                 </div>
                                             </div>
-                                        ))}
+                                            );
+                                        })}
                                     </div>
                                 </div>
                             ))}

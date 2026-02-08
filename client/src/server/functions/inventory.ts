@@ -1112,6 +1112,12 @@ export interface InventoryTransactionItem {
     reason: string | null;
     referenceId: string | null;
     notes: string | null;
+    source: string | null;
+    destination: string | null;
+    tailorNumber: string | null;
+    performedBy: string | null;
+    orderNumber: string | null;
+    warehouseLocation: string | null;
     createdAt: string;
     createdBy: { id: string; name: string } | null;
     sku: {
@@ -1174,6 +1180,12 @@ export const getInventoryTransactions = createServerFn({ method: 'GET' })
                 reason: true,
                 referenceId: true,
                 notes: true,
+                source: true,
+                destination: true,
+                tailorNumber: true,
+                performedBy: true,
+                orderNumber: true,
+                warehouseLocation: true,
                 createdAt: true,
                 sku: {
                     select: {
@@ -1200,6 +1212,12 @@ export const getInventoryTransactions = createServerFn({ method: 'GET' })
             reason: t.reason,
             referenceId: t.referenceId,
             notes: t.notes,
+            source: t.source,
+            destination: t.destination,
+            tailorNumber: t.tailorNumber,
+            performedBy: t.performedBy,
+            orderNumber: t.orderNumber,
+            warehouseLocation: t.warehouseLocation,
             createdAt: t.createdAt.toISOString(),
             createdBy: t.createdBy,
             sku: t.sku,
