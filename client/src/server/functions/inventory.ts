@@ -1225,6 +1225,246 @@ export const getInventoryTransactions = createServerFn({ method: 'GET' })
     });
 
 // ============================================
+// LEDGER TRANSACTIONS SERVER FUNCTION
+// ============================================
+
+const getLedgerTransactionsSchema = z.object({
+    txnType: z.enum(['inward', 'outward']),
+    search: z.string().optional(),
+    reason: z.string().optional(),
+    location: z.string().optional(),
+    origin: z.enum(['all', 'sheet', 'app']).optional().default('all'),
+    limit: z.number().int().positive().max(200).optional().default(50),
+    offset: z.number().int().nonnegative().optional().default(0),
+});
+
+/** Ledger transaction item with isSheetImported derived field */
+export interface LedgerTransactionItem {
+    id: string;
+    skuId: string;
+    txnType: 'inward' | 'outward';
+    qty: number;
+    reason: string | null;
+    referenceId: string | null;
+    notes: string | null;
+    source: string | null;
+    destination: string | null;
+    tailorNumber: string | null;
+    performedBy: string | null;
+    repackingBarcode: string | null;
+    orderNumber: string | null;
+    warehouseLocation: string | null;
+    createdAt: string;
+    createdBy: { id: string; name: string } | null;
+    sku: {
+        skuCode: string;
+        size: string;
+        isCustomSku: boolean;
+        variation: {
+            colorName: string;
+            product: { name: string };
+        };
+    } | null;
+    isSheetImported: boolean;
+}
+
+export interface LedgerTransactionsResult {
+    items: LedgerTransactionItem[];
+    pagination: { total: number; limit: number; offset: number; hasMore: boolean };
+    stats: { totalCount: number; totalQty: number; distinctSkuCount: number };
+    availableReasons: string[];
+    availableLocations: string[];
+}
+
+/**
+ * Get ledger transactions with server-side search, filtering, and pagination
+ *
+ * Used by the redesigned Ledgers page. Supports full-text search across
+ * SKU, product, color, order#, source/destination, and performedBy.
+ * Filters by reason, location, and origin (sheet vs app).
+ */
+export const getLedgerTransactions = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator(
+        (input: unknown): z.infer<typeof getLedgerTransactionsSchema> =>
+            getLedgerTransactionsSchema.parse(input)
+    )
+    .handler(async ({ data }): Promise<LedgerTransactionsResult> => {
+        const prisma = await getPrisma();
+        const { txnType, search, reason, location, origin, limit, offset } = data;
+
+        // Build WHERE clause
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const where: Record<string, any> = { txnType };
+
+        // Search across multiple fields
+        if (search) {
+            where.OR = [
+                { sku: { skuCode: { contains: search, mode: 'insensitive' } } },
+                { sku: { variation: { product: { name: { contains: search, mode: 'insensitive' } } } } },
+                { sku: { variation: { colorName: { contains: search, mode: 'insensitive' } } } },
+                { orderNumber: { contains: search, mode: 'insensitive' } },
+                { source: { contains: search, mode: 'insensitive' } },
+                { destination: { contains: search, mode: 'insensitive' } },
+                { performedBy: { contains: search, mode: 'insensitive' } },
+            ];
+        }
+
+        // Reason filter
+        if (reason) {
+            where.reason = reason;
+        }
+
+        // Location maps to source (inward) or destination (outward)
+        if (location) {
+            if (txnType === 'inward') {
+                where.source = location;
+            } else {
+                where.destination = location;
+            }
+        }
+
+        // Origin filter: sheet-imported vs app-created
+        if (origin === 'sheet') {
+            where.notes = { startsWith: '[sheet-offload]' };
+        } else if (origin === 'app') {
+            where.OR = where.OR || [];
+            // If we already have search OR conditions, wrap them with origin filter
+            if (search) {
+                // Need to use AND to combine search OR with origin filter
+                const searchOr = where.OR;
+                delete where.OR;
+                where.AND = [
+                    { OR: searchOr },
+                    { OR: [{ notes: null }, { NOT: { notes: { startsWith: '[sheet-offload]' } } }] },
+                ];
+            } else {
+                where.OR = [{ notes: null }, { NOT: { notes: { startsWith: '[sheet-offload]' } } }];
+            }
+        }
+
+        // Run count, stats, data, and filter options queries in parallel
+        const [transactions, totalCount, statsResult, reasonsResult, locationsResult] = await Promise.all([
+            // Data query with pagination
+            prisma.inventoryTransaction.findMany({
+                where,
+                orderBy: { createdAt: 'desc' },
+                take: limit,
+                skip: offset,
+                select: {
+                    id: true,
+                    skuId: true,
+                    txnType: true,
+                    qty: true,
+                    reason: true,
+                    referenceId: true,
+                    notes: true,
+                    source: true,
+                    destination: true,
+                    tailorNumber: true,
+                    performedBy: true,
+                    repackingBarcode: true,
+                    orderNumber: true,
+                    warehouseLocation: true,
+                    createdAt: true,
+                    sku: {
+                        select: {
+                            skuCode: true,
+                            size: true,
+                            isCustomSku: true,
+                            variation: {
+                                select: {
+                                    colorName: true,
+                                    product: { select: { name: true } },
+                                },
+                            },
+                        },
+                    },
+                    createdBy: { select: { id: true, name: true } },
+                },
+            }),
+            // Total count
+            prisma.inventoryTransaction.count({ where }),
+            // Stats: total qty and distinct SKU count
+            prisma.inventoryTransaction.aggregate({
+                where,
+                _sum: { qty: true },
+                _count: { skuId: true },
+            }).then(async (agg) => {
+                // Prisma aggregate _count doesn't do DISTINCT, so use groupBy
+                const distinctSkus = await prisma.inventoryTransaction.groupBy({
+                    by: ['skuId'],
+                    where,
+                    _count: true,
+                });
+                return {
+                    totalQty: agg._sum.qty ?? 0,
+                    distinctSkuCount: distinctSkus.length,
+                };
+            }),
+            // Available reasons for filter dropdown (for this txnType)
+            prisma.inventoryTransaction.groupBy({
+                by: ['reason'],
+                where: { txnType },
+                _count: true,
+                orderBy: { _count: { reason: 'desc' } },
+            }),
+            // Available locations for filter dropdown (for this txnType)
+            txnType === 'inward'
+                ? prisma.inventoryTransaction.groupBy({
+                    by: ['source'],
+                    where: { txnType, source: { not: null } },
+                    _count: true,
+                    orderBy: { _count: { source: 'desc' } },
+                }).then(r => r.map(item => item.source).filter((s): s is string => !!s))
+                : prisma.inventoryTransaction.groupBy({
+                    by: ['destination'],
+                    where: { txnType, destination: { not: null } },
+                    _count: true,
+                    orderBy: { _count: { destination: 'desc' } },
+                }).then(r => r.map(item => item.destination).filter((s): s is string => !!s)),
+        ]);
+
+        const items: LedgerTransactionItem[] = transactions.map((t) => ({
+            id: t.id,
+            skuId: t.skuId,
+            txnType: t.txnType as 'inward' | 'outward',
+            qty: t.qty,
+            reason: t.reason,
+            referenceId: t.referenceId,
+            notes: t.notes,
+            source: t.source,
+            destination: t.destination,
+            tailorNumber: t.tailorNumber,
+            performedBy: t.performedBy,
+            repackingBarcode: t.repackingBarcode,
+            orderNumber: t.orderNumber,
+            warehouseLocation: t.warehouseLocation,
+            createdAt: t.createdAt.toISOString(),
+            createdBy: t.createdBy,
+            sku: t.sku,
+            isSheetImported: t.notes?.startsWith('[sheet-offload]') ?? false,
+        }));
+
+        return {
+            items,
+            pagination: {
+                total: totalCount,
+                limit,
+                offset,
+                hasMore: offset + items.length < totalCount,
+            },
+            stats: {
+                totalCount,
+                totalQty: statsResult.totalQty,
+                distinctSkuCount: statsResult.distinctSkuCount,
+            },
+            availableReasons: reasonsResult.map(r => r.reason),
+            availableLocations: locationsResult,
+        };
+    });
+
+// ============================================
 // RECENT INWARDS SERVER FUNCTION
 // ============================================
 

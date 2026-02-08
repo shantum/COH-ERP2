@@ -186,14 +186,24 @@ export type AnalyticsSearchParams = z.infer<typeof AnalyticsSearchParams>;
 
 /**
  * Ledgers page search params
+ * Supports 3 tabs: inward, outward, materials
+ * With server-side search, filters, and pagination
  */
 export const LedgersSearchParams = z.object({
-    /** Transaction type filter */
-    type: z.enum(['all', 'inward', 'outward', 'adjustment']).catch('all'),
-    /** Search query */
+    /** Active tab: inward (SKU in), outward (SKU out), materials (fabric txns) */
+    tab: z.enum(['inward', 'outward', 'materials']).catch('inward'),
+    /** Full-text search across SKU, product, color, order#, source/destination */
     search: z.string().optional().catch(undefined),
+    /** Filter by transaction reason */
+    reason: z.string().optional().catch(undefined),
+    /** Filter by location: source (inward) or destination (outward) */
+    location: z.string().optional().catch(undefined),
+    /** Filter by data origin: sheet-imported vs app-created */
+    origin: z.enum(['all', 'sheet', 'app']).catch('all'),
     /** Page number */
     page: z.coerce.number().int().positive().catch(1),
+    /** Items per page (default 50) */
+    limit: z.coerce.number().int().positive().max(200).optional().transform(v => v ?? 50),
 });
 export type LedgersSearchParams = z.infer<typeof LedgersSearchParams>;
 
