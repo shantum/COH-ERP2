@@ -186,7 +186,7 @@ interface PermissionsUpdateBody {
 }
 
 /** Background job trigger params */
-type JobId = 'shopify_sync' | 'tracking_sync' | 'cache_cleanup' | 'ingest_inward' | 'ingest_outward' | 'move_shipped_to_outward';
+type JobId = 'shopify_sync' | 'tracking_sync' | 'cache_cleanup' | 'ingest_inward' | 'ingest_outward' | 'move_shipped_to_outward' | 'preview_ingest_inward' | 'preview_ingest_outward';
 
 /** Background job update body */
 interface JobUpdateBody {
@@ -1326,7 +1326,6 @@ router.get('/background-jobs', authenticateToken, asyncHandler(async (req: Reque
             name: 'Ingest Inward',
             description: 'Reads Inward (Live) buffer tab and creates INWARD inventory transactions in ERP. Updates sheet balances after ingestion.',
             enabled: offloadStatus.schedulerActive,
-            intervalMinutes: offloadStatus.intervalMs / 60000,
             isRunning: offloadStatus.ingestInward.isRunning,
             lastRunAt: offloadStatus.ingestInward.lastRunAt,
             lastResult: offloadStatus.ingestInward.lastResult,
@@ -1355,7 +1354,6 @@ router.get('/background-jobs', authenticateToken, asyncHandler(async (req: Reque
             name: 'Ingest Outward',
             description: 'Reads Outward (Live) buffer tab, creates OUTWARD inventory transactions, and links shipped entries to OrderLines. Updates sheet balances after ingestion.',
             enabled: offloadStatus.schedulerActive,
-            intervalMinutes: offloadStatus.intervalMs / 60000,
             isRunning: offloadStatus.ingestOutward.isRunning,
             lastRunAt: offloadStatus.ingestOutward.lastRunAt,
             lastResult: offloadStatus.ingestOutward.lastResult,
@@ -1365,6 +1363,24 @@ router.get('/background-jobs', authenticateToken, asyncHandler(async (req: Reque
             stats: {
                 recentRuns: offloadStatus.ingestOutward.recentRuns,
             },
+        },
+        {
+            id: 'preview_ingest_inward',
+            name: 'Preview Ingest Inward',
+            description: 'Dry run of inward ingestion: parses, validates, and dedup-checks rows without creating transactions or deleting rows. Writes Import Errors column.',
+            enabled: offloadStatus.schedulerActive,
+            isRunning: offloadStatus.ingestInward.isRunning,
+            lastRunAt: null,
+            note: 'Preview only — no data changes',
+        },
+        {
+            id: 'preview_ingest_outward',
+            name: 'Preview Ingest Outward',
+            description: 'Dry run of outward ingestion: parses, validates orders, and dedup-checks rows without creating transactions or deleting rows. Writes Import Errors column.',
+            enabled: offloadStatus.schedulerActive,
+            isRunning: offloadStatus.ingestOutward.isRunning,
+            lastRunAt: null,
+            note: 'Preview only — no data changes',
         }
     ];
 
@@ -1434,6 +1450,16 @@ router.post('/background-jobs/:jobId/trigger', requireAdmin, asyncHandler(async 
         case 'move_shipped_to_outward': {
             const result = await sheetOffloadWorker.triggerMoveShipped();
             res.json({ message: 'Move shipped → outward completed', result });
+            break;
+        }
+        case 'preview_ingest_inward': {
+            const result = await sheetOffloadWorker.previewIngestInward();
+            res.json({ message: 'Preview ingest inward completed', result });
+            break;
+        }
+        case 'preview_ingest_outward': {
+            const result = await sheetOffloadWorker.previewIngestOutward();
+            res.json({ message: 'Preview ingest outward completed', result });
             break;
         }
         default:
@@ -1665,7 +1691,6 @@ router.get('/sheet-offload/status', requireAdmin, asyncHandler(async (_req: Requ
         ingestOutward: status.ingestOutward,
         moveShipped: status.moveShipped,
         schedulerActive: status.schedulerActive,
-        intervalMs: status.intervalMs,
         bufferCounts,
     });
 }));

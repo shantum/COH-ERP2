@@ -50,8 +50,6 @@ import {
     DEFAULT_OUTWARD_REASON,
     REF_PREFIX,
     OFFLOAD_NOTES_PREFIX,
-    OFFLOAD_INTERVAL_MS,
-    STARTUP_DELAY_MS,
     BATCH_SIZE,
 } from '../config/sync/sheets.js';
 
@@ -95,6 +93,18 @@ interface MoveShippedResult {
     durationMs: number;
 }
 
+interface IngestPreviewResult {
+    tab: string;
+    totalRows: number;
+    valid: number;
+    invalid: number;
+    duplicates: number;
+    validationErrors: Record<string, number>;
+    skipReasons?: Record<string, number>;
+    affectedSkuCodes: string[];
+    durationMs: number;
+}
+
 interface RunSummary {
     startedAt: string;
     durationMs: number;
@@ -114,7 +124,6 @@ interface OffloadStatus {
     ingestOutward: JobState<IngestOutwardResult>;
     moveShipped: JobState<MoveShippedResult>;
     schedulerActive: boolean;
-    intervalMs: number;
 }
 
 interface ParsedRow {
@@ -151,8 +160,6 @@ interface DeleteTracker {
 // STATE
 // ============================================
 
-let syncInterval: ReturnType<typeof setInterval> | null = null;
-let startupTimeout: ReturnType<typeof setTimeout> | null = null;
 let schedulerActive = false;
 
 const MAX_RECENT_RUNS = 10;
@@ -277,6 +284,47 @@ function buildReferenceId(
     return `${prefix}:${skuCode}:${qty}:${datePart}${extraPart}`;
 }
 
+/**
+ * Write error strings to the Import Errors column for parsed rows.
+ * Valid rows get empty string (clears stale errors), invalid rows get their error message.
+ */
+async function writeImportErrors(
+    spreadsheetId: string,
+    tab: string,
+    errors: Array<{ rowIndex: number; error: string }>,
+    errorColLetter: string
+): Promise<void> {
+    if (errors.length === 0) return;
+
+    // Sort by rowIndex for efficient batching
+    const sorted = [...errors].sort((a, b) => a.rowIndex - b.rowIndex);
+
+    // Group consecutive rows into ranges
+    const ranges: Array<{ startRow: number; values: string[][] }> = [];
+    let current: { startRow: number; values: string[][] } | null = null;
+
+    for (const { rowIndex, error } of sorted) {
+        const sheetRow = rowIndex + 1; // 0-based index to 1-based row
+        if (current && sheetRow === current.startRow + current.values.length) {
+            current.values.push([error]);
+        } else {
+            if (current) ranges.push(current);
+            current = { startRow: sheetRow, values: [[error]] };
+        }
+    }
+    if (current) ranges.push(current);
+
+    for (const range of ranges) {
+        const rangeStr = `'${tab}'!${errorColLetter}${range.startRow}:${errorColLetter}${range.startRow + range.values.length - 1}`;
+        await writeRange(spreadsheetId, rangeStr, range.values);
+    }
+
+    const errorCount = sorted.filter(e => e.error).length;
+    if (errorCount > 0) {
+        sheetsLogger.info({ tab, totalRows: sorted.length, errors: errorCount }, 'Wrote import errors to sheet');
+    }
+}
+
 async function bulkLookupSkus(skuCodes: string[]): Promise<Map<string, string>> {
     if (skuCodes.length === 0) return new Map();
     const unique = [...new Set(skuCodes)];
@@ -290,7 +338,7 @@ async function bulkLookupSkus(skuCodes: string[]): Promise<Map<string, string>> 
 interface OutwardValidationResult {
     validRows: ParsedRow[];
     skipReasons: Record<string, number>;
-    orderMap: Map<string, { id: string; orderLines: Array<{ id: string; skuId: string }> }>;
+    orderMap: Map<string, { id: string; orderLines: Array<{ id: string; skuId: string; qty: number; lineStatus: string }> }>;
 }
 
 /**
@@ -322,14 +370,14 @@ async function validateOutwardRows(
             .filter(Boolean)
     )];
 
-    const orderMap = new Map<string, { id: string; orderLines: Array<{ id: string; skuId: string }> }>();
+    const orderMap = new Map<string, { id: string; orderLines: Array<{ id: string; skuId: string; qty: number; lineStatus: string }> }>();
     if (orderNumbers.length > 0) {
         const orders = await prisma.order.findMany({
             where: { orderNumber: { in: orderNumbers } },
             select: {
                 id: true,
                 orderNumber: true,
-                orderLines: { select: { id: true, skuId: true } },
+                orderLines: { select: { id: true, skuId: true, qty: true, lineStatus: true } },
             },
         });
         for (const o of orders) {
@@ -493,14 +541,17 @@ async function ingestInwardLive(result: IngestInwardResult): Promise<Set<string>
     // --- Step 3: Validate each row ---
     const validRows: ParsedRow[] = [];
     const validationErrors: Record<string, number> = {};
+    const importErrors: Array<{ rowIndex: number; error: string }> = [];
     let invalidCount = 0;
 
     for (const p of parsed) {
         const reasons = validateInwardRow(p, rows[p.rowIndex], skuMap);
         if (reasons.length === 0) {
             validRows.push(p);
+            importErrors.push({ rowIndex: p.rowIndex, error: '' });
         } else {
             invalidCount++;
+            importErrors.push({ rowIndex: p.rowIndex, error: reasons.join('; ') });
             for (const reason of reasons) {
                 validationErrors[reason] = (validationErrors[reason] ?? 0) + 1;
             }
@@ -514,6 +565,9 @@ async function ingestInwardLive(result: IngestInwardResult): Promise<Set<string>
 
     result.inwardValidationErrors = validationErrors;
     result.skipped += invalidCount;
+
+    // Write Import Errors column for all parsed rows (clears valid, shows errors for invalid)
+    await writeImportErrors(ORDERS_MASTERSHEET_ID, tab, importErrors, 'J');
 
     if (invalidCount > 0) {
         sheetsLogger.warn({
@@ -608,7 +662,7 @@ async function ingestInwardLive(result: IngestInwardResult): Promise<Set<string>
 
 async function ingestOutwardLive(
     result: IngestOutwardResult
-): Promise<{ affectedSkuIds: Set<string>; linkableItems: LinkableOutward[] }> {
+): Promise<{ affectedSkuIds: Set<string>; linkableItems: LinkableOutward[]; orderMap: Map<string, { id: string; orderLines: Array<{ id: string; skuId: string; qty: number; lineStatus: string }> }> }> {
     const tab = LIVE_TABS.OUTWARD;
     const affectedSkuIds = new Set<string>();
     const linkableItems: LinkableOutward[] = [];
@@ -618,7 +672,7 @@ async function ingestOutwardLive(
     const rows = await readRange(ORDERS_MASTERSHEET_ID, `'${tab}'!A:AE`);
     if (rows.length <= 1) {
         sheetsLogger.info({ tab }, 'No data rows');
-        return { affectedSkuIds, linkableItems };
+        return { affectedSkuIds, linkableItems, orderMap: new Map() };
     }
 
     const parsed: ParsedRow[] = [];
@@ -640,7 +694,7 @@ async function ingestOutwardLive(
 
         if (!skuCode || qty === 0) continue;
 
-        let refId = buildReferenceId(REF_PREFIX.OUTWARD_LIVE, skuCode, qty, dateStr, dest || orderNo);
+        let refId = buildReferenceId(REF_PREFIX.OUTWARD_LIVE, skuCode, qty, dateStr, orderNo || dest);
         if (seenRefs.has(refId)) {
             let counter = 2;
             while (seenRefs.has(`${refId}:${counter}`)) counter++;
@@ -665,7 +719,7 @@ async function ingestOutwardLive(
 
     if (parsed.length === 0) {
         sheetsLogger.info({ tab }, 'No valid rows to ingest');
-        return { affectedSkuIds, linkableItems };
+        return { affectedSkuIds, linkableItems, orderMap: new Map() };
     }
 
     const existingRefs = await findExistingReferenceIds(parsed.map(r => r.referenceId));
@@ -676,18 +730,47 @@ async function ingestOutwardLive(
         if (ENABLE_SHEET_DELETION) {
             await deleteIngestedRows(ORDERS_MASTERSHEET_ID, tab, parsed.map(r => r.rowIndex), result);
         }
-        return { affectedSkuIds, linkableItems };
+        return { affectedSkuIds, linkableItems, orderMap: new Map() };
     }
 
     const skuMap = await bulkLookupSkus(newRows.map(r => r.skuCode));
 
-    const { validRows, skipReasons } = await validateOutwardRows(newRows, skuMap);
+    const { validRows, skipReasons, orderMap } = await validateOutwardRows(newRows, skuMap);
     const skippedCount = newRows.length - validRows.length;
     result.skipped += skippedCount;
     if (Object.keys(skipReasons).length > 0) {
         result.outwardSkipReasons = skipReasons;
         sheetsLogger.info({ tab, skipped: skippedCount, skipReasons }, 'Outward validation complete');
     }
+
+    // Write Import Errors column for ALL parsed rows
+    // Valid rows + duplicates get empty string, invalid rows get their skip reason
+    const validRefIds = new Set(validRows.map(r => r.referenceId));
+    const outwardImportErrors: Array<{ rowIndex: number; error: string }> = [];
+    for (const row of parsed) {
+        if (existingRefs.has(row.referenceId)) {
+            // Already ingested (duplicate) — clear error
+            outwardImportErrors.push({ rowIndex: row.rowIndex, error: '' });
+        } else if (validRefIds.has(row.referenceId)) {
+            // Valid row — clear error
+            outwardImportErrors.push({ rowIndex: row.rowIndex, error: '' });
+        } else {
+            // Skipped — determine reason
+            const skuId = skuMap.get(row.skuCode);
+            let reason = 'unknown';
+            if (!row.skuCode) reason = 'empty_sku';
+            else if (row.qty <= 0) reason = 'zero_qty';
+            else if (!skuId) reason = 'unknown_sku';
+            else if (!row.date) reason = 'invalid_date';
+            else if (row.extra) {
+                const order = orderMap.get(row.extra);
+                if (!order) reason = 'order_not_found';
+                else if (!order.orderLines.some(l => l.skuId === skuId)) reason = 'order_line_not_found';
+            }
+            outwardImportErrors.push({ rowIndex: row.rowIndex, error: reason });
+        }
+    }
+    await writeImportErrors(ORDERS_MASTERSHEET_ID, tab, outwardImportErrors, 'AG');
 
     const adminUserId = await getAdminUserId();
     const ingestedRowIndices: number[] = [];
@@ -748,11 +831,14 @@ async function ingestOutwardLive(
 
     sheetsLogger.info({ tab, ingested: ingestedRowIndices.length }, 'Outward ingestion complete');
 
+    // Delete only ingested + already-deduped rows — invalid rows stay on sheet
     if (ENABLE_SHEET_DELETION) {
-        await deleteIngestedRows(ORDERS_MASTERSHEET_ID, tab, parsed.map(r => r.rowIndex), result);
+        const duplicateIndices = parsed.filter(r => existingRefs.has(r.referenceId)).map(r => r.rowIndex);
+        const safeToDelete = [...ingestedRowIndices, ...duplicateIndices];
+        await deleteIngestedRows(ORDERS_MASTERSHEET_ID, tab, safeToDelete, result);
     }
 
-    return { affectedSkuIds, linkableItems };
+    return { affectedSkuIds, linkableItems, orderMap };
 }
 
 // ============================================
@@ -763,7 +849,8 @@ const LINKABLE_STATUSES = ['pending', 'allocated', 'picked', 'packed'];
 
 async function linkOutwardToOrders(
     items: LinkableOutward[],
-    result: IngestOutwardResult
+    result: IngestOutwardResult,
+    preloadedOrderMap: Map<string, { id: string; orderLines: Array<{ id: string; skuId: string; qty: number; lineStatus: string }> }>
 ): Promise<void> {
     if (items.length === 0) return;
 
@@ -780,23 +867,8 @@ async function linkOutwardToOrders(
     const orderNumbers = [...byOrder.keys()];
     sheetsLogger.info({ uniqueOrders: orderNumbers.length, totalItems: items.length }, 'Linking outward to orders');
 
-    const orders = await prisma.order.findMany({
-        where: { orderNumber: { in: orderNumbers } },
-        select: {
-            id: true,
-            orderNumber: true,
-            orderLines: {
-                select: {
-                    id: true,
-                    skuId: true,
-                    qty: true,
-                    lineStatus: true,
-                },
-            },
-        },
-    });
-
-    const orderMap = new Map(orders.map(o => [o.orderNumber, o]));
+    // Use pre-loaded orderMap from validation (avoids duplicate query)
+    const orderMap = preloadedOrderMap;
 
     let linked = 0;
     let skippedAlreadyShipped = 0;
@@ -926,6 +998,9 @@ async function updateSheetBalances(
     }
 
     sheetsLogger.info({ affectedSkus: affectedSkuIds.size }, 'Updating sheet balances');
+
+    // Wait for DB triggers to update currentBalance after createMany
+    await new Promise(resolve => setTimeout(resolve, 5000));
 
     const skus = await prisma.sku.findMany({
         where: { id: { in: [...affectedSkuIds] } },
@@ -1101,6 +1176,114 @@ async function triggerIngestInward(): Promise<IngestInwardResult | null> {
 }
 
 // ============================================
+// JOB 1B: PREVIEW INGEST INWARD (DRY-RUN)
+// ============================================
+
+async function previewIngestInward(): Promise<IngestPreviewResult | null> {
+    if (ingestInwardState.isRunning) {
+        sheetsLogger.debug('Ingest inward already in progress, skipping preview');
+        return null;
+    }
+
+    ingestInwardState.isRunning = true;
+    const startTime = Date.now();
+
+    try {
+        const tab = LIVE_TABS.INWARD;
+        sheetsLogger.info({ tab }, 'Preview: reading inward live tab');
+
+        const rows = await readRange(ORDERS_MASTERSHEET_ID, `'${tab}'!A:I`);
+        if (rows.length <= 1) {
+            return { tab, totalRows: 0, valid: 0, invalid: 0, duplicates: 0, validationErrors: {}, affectedSkuCodes: [], durationMs: Date.now() - startTime };
+        }
+
+        // Parse
+        const parsed: ParsedRow[] = [];
+        const seenRefs = new Set<string>();
+        for (let i = 1; i < rows.length; i++) {
+            const row = rows[i];
+            const skuCode = String(row[INWARD_LIVE_COLS.SKU] ?? '').trim();
+            if (!skuCode) continue;
+
+            const qty = parseQty(String(row[INWARD_LIVE_COLS.QTY] ?? ''));
+            const dateStr = String(row[INWARD_LIVE_COLS.DATE] ?? '');
+            const source = String(row[INWARD_LIVE_COLS.SOURCE] ?? '').trim();
+            const doneBy = String(row[INWARD_LIVE_COLS.DONE_BY] ?? '').trim();
+            const tailor = String(row[INWARD_LIVE_COLS.TAILOR] ?? '').trim();
+
+            let refId = buildReferenceId(REF_PREFIX.INWARD_LIVE, skuCode, qty, dateStr, source);
+            if (seenRefs.has(refId)) {
+                let counter = 2;
+                while (seenRefs.has(`${refId}:${counter}`)) counter++;
+                refId = `${refId}:${counter}`;
+            }
+            seenRefs.add(refId);
+
+            parsed.push({
+                rowIndex: i, skuCode, qty, date: parseSheetDate(dateStr),
+                source, extra: doneBy, tailor, courier: '', awb: '',
+                referenceId: refId, notes: `${OFFLOAD_NOTES_PREFIX} ${tab}`,
+            });
+        }
+
+        if (parsed.length === 0) {
+            return { tab, totalRows: 0, valid: 0, invalid: 0, duplicates: 0, validationErrors: {}, affectedSkuCodes: [], durationMs: Date.now() - startTime };
+        }
+
+        // Validate
+        const skuMap = await bulkLookupSkus(parsed.map(r => r.skuCode));
+        const validRows: ParsedRow[] = [];
+        const validationErrors: Record<string, number> = {};
+        const importErrors: Array<{ rowIndex: number; error: string }> = [];
+
+        for (const p of parsed) {
+            const reasons = validateInwardRow(p, rows[p.rowIndex], skuMap);
+            if (reasons.length === 0) {
+                validRows.push(p);
+                importErrors.push({ rowIndex: p.rowIndex, error: '' });
+            } else {
+                importErrors.push({ rowIndex: p.rowIndex, error: reasons.join('; ') });
+                for (const reason of reasons) {
+                    validationErrors[reason] = (validationErrors[reason] ?? 0) + 1;
+                }
+            }
+        }
+
+        // Write import errors to sheet (even in preview mode)
+        await writeImportErrors(ORDERS_MASTERSHEET_ID, tab, importErrors, 'J');
+
+        // Dedup
+        const existingRefs = await findExistingReferenceIds(validRows.map(r => r.referenceId));
+        const newRows = validRows.filter(r => !existingRefs.has(r.referenceId));
+        const duplicates = validRows.length - newRows.length;
+
+        const affectedSkuCodes = [...new Set(newRows.map(r => r.skuCode))];
+
+        sheetsLogger.info({
+            tab, total: parsed.length, valid: validRows.length,
+            invalid: parsed.length - validRows.length, duplicates, new: newRows.length,
+        }, 'Preview inward complete');
+
+        return {
+            tab,
+            totalRows: parsed.length,
+            valid: newRows.length,
+            invalid: parsed.length - validRows.length,
+            duplicates,
+            validationErrors,
+            affectedSkuCodes,
+            durationMs: Date.now() - startTime,
+        };
+    } catch (error: unknown) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        sheetsLogger.error({ error: err.message }, 'Preview ingest inward failed');
+        throw err;
+    } finally {
+        ingestInwardState.isRunning = false;
+    }
+}
+
+// ============================================
 // JOB 2: TRIGGER INGEST OUTWARD
 // ============================================
 
@@ -1128,11 +1311,11 @@ async function triggerIngestOutward(): Promise<IngestOutwardResult | null> {
     try {
         sheetsLogger.info({ deletionEnabled: ENABLE_SHEET_DELETION }, 'Starting ingest outward');
 
-        const { affectedSkuIds, linkableItems } = await ingestOutwardLive(result);
+        const { affectedSkuIds, linkableItems, orderMap } = await ingestOutwardLive(result);
 
         // Link outward to order lines
         if (linkableItems.length > 0) {
-            await linkOutwardToOrders(linkableItems, result);
+            await linkOutwardToOrders(linkableItems, result, orderMap);
         }
 
         // Balance update + cache invalidation if anything was ingested
@@ -1175,6 +1358,130 @@ async function triggerIngestOutward(): Promise<IngestOutwardResult | null> {
             error: result.error,
         });
         return result;
+    } finally {
+        ingestOutwardState.isRunning = false;
+    }
+}
+
+// ============================================
+// JOB 2B: PREVIEW INGEST OUTWARD (DRY-RUN)
+// ============================================
+
+async function previewIngestOutward(): Promise<IngestPreviewResult | null> {
+    if (ingestOutwardState.isRunning) {
+        sheetsLogger.debug('Ingest outward already in progress, skipping preview');
+        return null;
+    }
+
+    ingestOutwardState.isRunning = true;
+    const startTime = Date.now();
+
+    try {
+        const tab = LIVE_TABS.OUTWARD;
+        sheetsLogger.info({ tab }, 'Preview: reading outward live tab');
+
+        const rows = await readRange(ORDERS_MASTERSHEET_ID, `'${tab}'!A:AE`);
+        if (rows.length <= 1) {
+            return { tab, totalRows: 0, valid: 0, invalid: 0, duplicates: 0, validationErrors: {}, affectedSkuCodes: [], durationMs: Date.now() - startTime };
+        }
+
+        // Parse
+        const parsed: ParsedRow[] = [];
+        const seenRefs = new Set<string>();
+        for (let i = 1; i < rows.length; i++) {
+            const row = rows[i];
+            const skuCode = String(row[OUTWARD_LIVE_COLS.SKU] ?? '').trim();
+            const qty = parseQty(String(row[OUTWARD_LIVE_COLS.QTY] ?? ''));
+            const orderNo = String(row[OUTWARD_LIVE_COLS.ORDER_NO] ?? '').trim();
+            const courier = String(row[OUTWARD_LIVE_COLS.COURIER] ?? '').trim();
+            const awb = String(row[OUTWARD_LIVE_COLS.AWB] ?? '').trim();
+            const outwardDateStr = String(row[OUTWARD_LIVE_COLS.OUTWARD_DATE] ?? '');
+            const orderDateStr = String(row[OUTWARD_LIVE_COLS.ORDER_DATE] ?? '');
+            const dateStr = outwardDateStr.trim() || orderDateStr;
+            const dest = orderNo ? 'Customer' : '';
+
+            if (!skuCode || qty === 0) continue;
+
+            let refId = buildReferenceId(REF_PREFIX.OUTWARD_LIVE, skuCode, qty, dateStr, orderNo || dest);
+            if (seenRefs.has(refId)) {
+                let counter = 2;
+                while (seenRefs.has(`${refId}:${counter}`)) counter++;
+                refId = `${refId}:${counter}`;
+            }
+            seenRefs.add(refId);
+
+            parsed.push({
+                rowIndex: i, skuCode, qty,
+                date: parseSheetDate(outwardDateStr) ?? parseSheetDate(orderDateStr),
+                source: dest, extra: orderNo, tailor: '', courier, awb,
+                referenceId: refId, notes: `${OFFLOAD_NOTES_PREFIX} ${tab}`,
+            });
+        }
+
+        if (parsed.length === 0) {
+            return { tab, totalRows: 0, valid: 0, invalid: 0, duplicates: 0, validationErrors: {}, affectedSkuCodes: [], durationMs: Date.now() - startTime };
+        }
+
+        // Dedup first (same order as ingestOutwardLive)
+        const existingRefs = await findExistingReferenceIds(parsed.map(r => r.referenceId));
+        const newRows = parsed.filter(r => !existingRefs.has(r.referenceId));
+        const duplicateCount = parsed.length - newRows.length;
+
+        if (newRows.length === 0) {
+            return { tab, totalRows: parsed.length, valid: 0, invalid: 0, duplicates: duplicateCount, validationErrors: {}, affectedSkuCodes: [], durationMs: Date.now() - startTime };
+        }
+
+        // Validate
+        const skuMap = await bulkLookupSkus(newRows.map(r => r.skuCode));
+        const { validRows, skipReasons, orderMap } = await validateOutwardRows(newRows, skuMap);
+
+        // Write import errors (same logic as ingestOutwardLive)
+        const validRefIds = new Set(validRows.map(r => r.referenceId));
+        const outwardImportErrors: Array<{ rowIndex: number; error: string }> = [];
+        for (const row of parsed) {
+            if (existingRefs.has(row.referenceId)) {
+                outwardImportErrors.push({ rowIndex: row.rowIndex, error: '' });
+            } else if (validRefIds.has(row.referenceId)) {
+                outwardImportErrors.push({ rowIndex: row.rowIndex, error: '' });
+            } else {
+                const skuId = skuMap.get(row.skuCode);
+                let reason = 'unknown';
+                if (!row.skuCode) reason = 'empty_sku';
+                else if (row.qty <= 0) reason = 'zero_qty';
+                else if (!skuId) reason = 'unknown_sku';
+                else if (!row.date) reason = 'invalid_date';
+                else if (row.extra) {
+                    const order = orderMap.get(row.extra);
+                    if (!order) reason = 'order_not_found';
+                    else if (!order.orderLines.some(l => l.skuId === skuId)) reason = 'order_line_not_found';
+                }
+                outwardImportErrors.push({ rowIndex: row.rowIndex, error: reason });
+            }
+        }
+        await writeImportErrors(ORDERS_MASTERSHEET_ID, tab, outwardImportErrors, 'AG');
+
+        const affectedSkuCodes = [...new Set(validRows.map(r => r.skuCode))];
+
+        sheetsLogger.info({
+            tab, total: parsed.length, valid: validRows.length,
+            invalid: newRows.length - validRows.length, duplicates: duplicateCount,
+        }, 'Preview outward complete');
+
+        return {
+            tab,
+            totalRows: parsed.length,
+            valid: validRows.length,
+            invalid: newRows.length - validRows.length,
+            duplicates: duplicateCount,
+            validationErrors: {},
+            skipReasons,
+            affectedSkuCodes,
+            durationMs: Date.now() - startTime,
+        };
+    } catch (error: unknown) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        sheetsLogger.error({ error: err.message }, 'Preview ingest outward failed');
+        throw err;
     } finally {
         ingestOutwardState.isRunning = false;
     }
@@ -1431,19 +1738,6 @@ async function getBufferCounts(): Promise<{ inward: number; outward: number }> {
 }
 
 // ============================================
-// SCHEDULED RUNNER
-// ============================================
-
-/**
- * Scheduled cycle: runs inward then outward sequentially
- * to avoid Google API rate limit conflicts.
- */
-async function runScheduledCycle(): Promise<void> {
-    await triggerIngestInward();
-    await triggerIngestOutward();
-}
-
-// ============================================
 // PUBLIC API
 // ============================================
 
@@ -1461,31 +1755,13 @@ function start(): void {
     schedulerActive = true;
 
     sheetsLogger.info({
-        intervalMs: OFFLOAD_INTERVAL_MS,
-        startupDelayMs: STARTUP_DELAY_MS,
         deletionEnabled: ENABLE_SHEET_DELETION,
-    }, 'Starting sheet offload scheduler');
-
-    // Run after startup delay, then start repeating interval
-    startupTimeout = setTimeout(async () => {
-        await runScheduledCycle();
-        if (schedulerActive && !syncInterval) {
-            syncInterval = setInterval(runScheduledCycle, OFFLOAD_INTERVAL_MS);
-        }
-    }, STARTUP_DELAY_MS);
+    }, 'Sheet offload worker ready (manual trigger only)');
 }
 
 function stop(): void {
     schedulerActive = false;
-    if (startupTimeout) {
-        clearTimeout(startupTimeout);
-        startupTimeout = null;
-    }
-    if (syncInterval) {
-        clearInterval(syncInterval);
-        syncInterval = null;
-    }
-    sheetsLogger.info('Sheet offload scheduler stopped');
+    sheetsLogger.info('Sheet offload worker stopped');
 }
 
 function getStatus(): OffloadStatus {
@@ -1509,7 +1785,6 @@ function getStatus(): OffloadStatus {
             recentRuns: [...moveShippedState.recentRuns],
         },
         schedulerActive,
-        intervalMs: OFFLOAD_INTERVAL_MS,
     };
 }
 
@@ -1525,6 +1800,8 @@ export default {
     triggerIngestOutward,
     triggerMoveShipped,
     getBufferCounts,
+    previewIngestInward,
+    previewIngestOutward,
 };
 
-export type { IngestInwardResult, IngestOutwardResult, MoveShippedResult, OffloadStatus, RunSummary };
+export type { IngestInwardResult, IngestOutwardResult, IngestPreviewResult, MoveShippedResult, OffloadStatus, RunSummary };

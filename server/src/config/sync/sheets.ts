@@ -186,9 +186,10 @@ export const INWARD_COLS = {
 
 /**
  * Inward (Live) — buffer tab in COH Orders Mastersheet.
- * Same structure as Inward (Final) + Notes column.
+ * Same structure as Inward (Final) + Notes column + Import Errors.
  * A: SKU, B: Qty, C: Product Details, D: Inward Date,
- * E: Source, F: Done By, G: Unique Barcode, H: Tailor Number, I: Notes
+ * E: Source, F: Done By, G: Unique Barcode, H: Tailor Number, I: Notes,
+ * J: Import Errors
  */
 export const INWARD_LIVE_COLS = {
     SKU: 0,         // A
@@ -200,6 +201,7 @@ export const INWARD_LIVE_COLS = {
     BARCODE: 6,     // G
     TAILOR: 7,      // H
     NOTES: 8,       // I
+    IMPORT_ERRORS: 9, // J
 } as const;
 
 // ============================================
@@ -208,7 +210,7 @@ export const INWARD_LIVE_COLS = {
 
 /**
  * Outward (Live) — buffer tab in COH Orders Mastersheet.
- * Layout matches "Orders from COH" (cols A-AD) + Outward Date at AE + Unique ID at AF.
+ * Layout matches "Orders from COH" (cols A-AD) + Outward Date at AE + Unique ID at AF + Import Errors at AG.
  * This allows simple copy-paste from Orders from COH for emergency outward.
  *
  * A: Order Date, B: Order#, C: Name, D: City, E: Mob, F: Channel,
@@ -216,7 +218,8 @@ export const INWARD_LIVE_COLS = {
  * M-P: (Qty Balance, Assigned, Picked, Order Age), Q: source_, R: samplingDate,
  * S: Fabric Stock, T: (empty), U: Packed, V-W: (empty), X: Shipped,
  * Y: Shopify Status, Z: Courier, AA: AWB, AB: Ready To Ship,
- * AC: AWB Scan, AD: Outward Done, AE: Outward Date, AF: Unique ID
+ * AC: AWB Scan, AD: Outward Done, AE: Outward Date, AF: Unique ID,
+ * AG: Import Errors
  */
 export const OUTWARD_LIVE_COLS = {
     ORDER_DATE: 0,      // A — order placement date
@@ -239,6 +242,7 @@ export const OUTWARD_LIVE_COLS = {
     OUTWARD_DONE: 29,   // AD
     OUTWARD_DATE: 30,   // AE — outward/dispatch date
     UNIQUE_ID: 31,      // AF — generated: order#+sku+qty (for move verification)
+    IMPORT_ERRORS: 32,  // AG
 } as const;
 
 // ============================================
