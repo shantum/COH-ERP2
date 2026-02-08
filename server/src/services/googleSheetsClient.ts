@@ -45,20 +45,29 @@ let lastCallAt = 0;
 /**
  * Get or create the authenticated Sheets client.
  * Lazy: first call reads the service account key and creates the JWT.
+ *
+ * Credential sources (checked in order):
+ *   1. GOOGLE_SERVICE_ACCOUNT_JSON env var (JSON string — ideal for Railway/CI)
+ *   2. JSON key file at GOOGLE_SERVICE_ACCOUNT_PATH (local dev)
  */
 function getClient(): sheets_v4.Sheets {
     if (sheetsClient) return sheetsClient;
 
-    if (!existsSync(GOOGLE_SERVICE_ACCOUNT_PATH)) {
+    let keyFile: ServiceAccountKey;
+
+    const envJson = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+    if (envJson) {
+        keyFile = JSON.parse(envJson);
+        sheetsLogger.info('Using Google service account from GOOGLE_SERVICE_ACCOUNT_JSON env var');
+    } else if (existsSync(GOOGLE_SERVICE_ACCOUNT_PATH)) {
+        keyFile = JSON.parse(readFileSync(GOOGLE_SERVICE_ACCOUNT_PATH, 'utf-8'));
+        sheetsLogger.info('Using Google service account from key file');
+    } else {
         throw new Error(
-            `Google service account key not found at ${GOOGLE_SERVICE_ACCOUNT_PATH}. ` +
-            'Place the JSON key file at server/config/google-service-account.json'
+            'Google service account credentials not found. ' +
+            'Set GOOGLE_SERVICE_ACCOUNT_JSON env var or place key file at server/config/google-service-account.json'
         );
     }
-
-    const keyFile: ServiceAccountKey = JSON.parse(
-        readFileSync(GOOGLE_SERVICE_ACCOUNT_PATH, 'utf-8')
-    );
 
     const auth = new google.auth.JWT({
         email: keyFile.client_email,
