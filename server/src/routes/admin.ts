@@ -1654,4 +1654,93 @@ router.post('/sheet-offload/trigger', requireAdmin, asyncHandler(async (_req: Re
     res.json({ message: 'Sheet offload sync completed', result });
 }));
 
+// ============================================
+// SHEET MONITOR — INVENTORY & INGESTION STATS
+// ============================================
+
+/**
+ * Get sheet monitor stats: inventory totals, ingestion counts, recent sheet transactions
+ * @route GET /api/admin/sheet-monitor/stats
+ */
+router.get('/sheet-monitor/stats', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
+    const prisma = req.prisma;
+
+    const [
+        totalSkus,
+        balanceAgg,
+        inStockCount,
+        inwardLiveCount,
+        outwardLiveCount,
+        historicalInwardCount,
+        historicalOutwardCount,
+        recentTransactions,
+    ] = await Promise.all([
+        prisma.sku.count(),
+        prisma.sku.aggregate({ _sum: { currentBalance: true } }),
+        prisma.sku.count({ where: { currentBalance: { gt: 0 } } }),
+        prisma.inventoryTransaction.count({ where: { referenceId: { startsWith: 'sheet:inward-live' } } }),
+        prisma.inventoryTransaction.count({ where: { referenceId: { startsWith: 'sheet:outward-live' } } }),
+        prisma.inventoryTransaction.count({
+            where: {
+                OR: [
+                    { referenceId: { startsWith: 'sheet:inward-final' } },
+                    { referenceId: { startsWith: 'sheet:inward-archive' } },
+                ],
+            },
+        }),
+        prisma.inventoryTransaction.count({
+            where: {
+                OR: [
+                    { referenceId: { startsWith: 'sheet:outward:' } },
+                    { referenceId: { startsWith: 'sheet:ms-outward' } },
+                    { referenceId: { startsWith: 'sheet:orders-outward' } },
+                ],
+            },
+        }),
+        prisma.inventoryTransaction.findMany({
+            where: {
+                OR: [
+                    { referenceId: { startsWith: 'sheet:inward-live' } },
+                    { referenceId: { startsWith: 'sheet:outward-live' } },
+                ],
+            },
+            select: {
+                id: true,
+                txnType: true,
+                qty: true,
+                reason: true,
+                referenceId: true,
+                createdAt: true,
+                sku: { select: { skuCode: true } },
+            },
+            orderBy: { createdAt: 'desc' },
+            take: 20,
+        }),
+    ]);
+
+    res.json({
+        inventory: {
+            totalSkus,
+            totalBalance: balanceAgg._sum.currentBalance ?? 0,
+            inStock: inStockCount,
+            outOfStock: totalSkus - inStockCount,
+        },
+        ingestion: {
+            totalInwardLive: inwardLiveCount,
+            totalOutwardLive: outwardLiveCount,
+            historicalInward: historicalInwardCount,
+            historicalOutward: historicalOutwardCount,
+        },
+        recentTransactions: recentTransactions.map(t => ({
+            id: t.id,
+            skuCode: t.sku.skuCode,
+            txnType: t.txnType,
+            quantity: t.qty,
+            reason: t.reason,
+            referenceId: t.referenceId,
+            createdAt: t.createdAt.toISOString(),
+        })),
+    });
+}));
+
 export default router;

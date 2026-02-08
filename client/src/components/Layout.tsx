@@ -2,7 +2,7 @@ import { Outlet, Link, useNavigate, useRouterState } from '@tanstack/react-route
 import { useAuth } from '../hooks/useAuth';
 import {
     LayoutDashboard, ShoppingCart,
-    Users, RotateCcw, Factory, LogOut, Menu, X, BookOpen, Settings, ClipboardCheck, PackagePlus, Clipboard, BarChart3, UserCog, ChevronLeft, ChevronRight, Search, Package, PackageX, ChevronDown, Minimize2, Maximize2, Calculator, Truck, Store, RefreshCcw
+    Users, RotateCcw, Factory, LogOut, Menu, X, BookOpen, Settings, ClipboardCheck, PackagePlus, Clipboard, BarChart3, UserCog, ChevronLeft, ChevronRight, Search, Package, PackageX, ChevronDown, Minimize2, Maximize2, Calculator, Truck, Store, RefreshCcw, FileSpreadsheet
 } from 'lucide-react';
 import { usePermissions } from '../hooks/usePermissions';
 import { useAccess, type AccessFeature } from '../hooks/useAccess';
@@ -94,6 +94,7 @@ const navGroups: NavGroup[] = [
         label: 'Admin',
         collapsible: true,
         items: [
+            { to: '/sheets-monitor', icon: FileSpreadsheet, label: 'Sheets', access: 'manage-users' },
             { to: '/settings', icon: Settings, label: 'Settings' },
             { to: '/users', icon: UserCog, label: 'Users', access: 'manage-users' },
         ],

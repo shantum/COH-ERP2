@@ -20,6 +20,7 @@ import { Route as AuthenticatedRouteImport } from './routes/_authenticated'
 import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/index'
 import { Route as AuthenticatedUsersRouteImport } from './routes/_authenticated/users'
 import { Route as AuthenticatedTrackingRouteImport } from './routes/_authenticated/tracking'
+import { Route as AuthenticatedSheetsMonitorRouteImport } from './routes/_authenticated/sheets-monitor'
 import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings'
 import { Route as AuthenticatedReturnsRtoRouteImport } from './routes/_authenticated/returns-rto'
 import { Route as AuthenticatedReturnsRouteImport } from './routes/_authenticated/returns'
@@ -96,6 +97,12 @@ const AuthenticatedTrackingRoute = AuthenticatedTrackingRouteImport.update({
   path: '/tracking',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
+const AuthenticatedSheetsMonitorRoute =
+  AuthenticatedSheetsMonitorRouteImport.update({
+    id: '/sheets-monitor',
+    path: '/sheets-monitor',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
 const AuthenticatedSettingsRoute = AuthenticatedSettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
@@ -241,6 +248,7 @@ export interface FileRoutesByFullPath {
   '/returns': typeof AuthenticatedReturnsRoute
   '/returns-rto': typeof AuthenticatedReturnsRtoRoute
   '/settings': typeof AuthenticatedSettingsRoute
+  '/sheets-monitor': typeof AuthenticatedSheetsMonitorRoute
   '/tracking': typeof AuthenticatedTrackingRoute
   '/users': typeof AuthenticatedUsersRoute
 }
@@ -273,6 +281,7 @@ export interface FileRoutesByTo {
   '/returns': typeof AuthenticatedReturnsRoute
   '/returns-rto': typeof AuthenticatedReturnsRtoRoute
   '/settings': typeof AuthenticatedSettingsRoute
+  '/sheets-monitor': typeof AuthenticatedSheetsMonitorRoute
   '/tracking': typeof AuthenticatedTrackingRoute
   '/users': typeof AuthenticatedUsersRoute
   '/': typeof AuthenticatedIndexRoute
@@ -308,6 +317,7 @@ export interface FileRoutesById {
   '/_authenticated/returns': typeof AuthenticatedReturnsRoute
   '/_authenticated/returns-rto': typeof AuthenticatedReturnsRtoRoute
   '/_authenticated/settings': typeof AuthenticatedSettingsRoute
+  '/_authenticated/sheets-monitor': typeof AuthenticatedSheetsMonitorRoute
   '/_authenticated/tracking': typeof AuthenticatedTrackingRoute
   '/_authenticated/users': typeof AuthenticatedUsersRoute
   '/_authenticated/': typeof AuthenticatedIndexRoute
@@ -344,6 +354,7 @@ export interface FileRouteTypes {
     | '/returns'
     | '/returns-rto'
     | '/settings'
+    | '/sheets-monitor'
     | '/tracking'
     | '/users'
   fileRoutesByTo: FileRoutesByTo
@@ -376,6 +387,7 @@ export interface FileRouteTypes {
     | '/returns'
     | '/returns-rto'
     | '/settings'
+    | '/sheets-monitor'
     | '/tracking'
     | '/users'
     | '/'
@@ -410,6 +422,7 @@ export interface FileRouteTypes {
     | '/_authenticated/returns'
     | '/_authenticated/returns-rto'
     | '/_authenticated/settings'
+    | '/_authenticated/sheets-monitor'
     | '/_authenticated/tracking'
     | '/_authenticated/users'
     | '/_authenticated/'
@@ -503,6 +516,13 @@ declare module '@tanstack/react-router' {
       path: '/tracking'
       fullPath: '/tracking'
       preLoaderRoute: typeof AuthenticatedTrackingRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/sheets-monitor': {
+      id: '/_authenticated/sheets-monitor'
+      path: '/sheets-monitor'
+      fullPath: '/sheets-monitor'
+      preLoaderRoute: typeof AuthenticatedSheetsMonitorRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
     '/_authenticated/settings': {
@@ -677,6 +697,7 @@ interface AuthenticatedRouteChildren {
   AuthenticatedReturnsRoute: typeof AuthenticatedReturnsRoute
   AuthenticatedReturnsRtoRoute: typeof AuthenticatedReturnsRtoRoute
   AuthenticatedSettingsRoute: typeof AuthenticatedSettingsRoute
+  AuthenticatedSheetsMonitorRoute: typeof AuthenticatedSheetsMonitorRoute
   AuthenticatedTrackingRoute: typeof AuthenticatedTrackingRoute
   AuthenticatedUsersRoute: typeof AuthenticatedUsersRoute
   AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
@@ -705,6 +726,7 @@ const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedReturnsRoute: AuthenticatedReturnsRoute,
   AuthenticatedReturnsRtoRoute: AuthenticatedReturnsRtoRoute,
   AuthenticatedSettingsRoute: AuthenticatedSettingsRoute,
+  AuthenticatedSheetsMonitorRoute: AuthenticatedSheetsMonitorRoute,
   AuthenticatedTrackingRoute: AuthenticatedTrackingRoute,
   AuthenticatedUsersRoute: AuthenticatedUsersRoute,
   AuthenticatedIndexRoute: AuthenticatedIndexRoute,
