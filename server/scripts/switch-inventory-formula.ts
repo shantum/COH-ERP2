@@ -138,11 +138,12 @@ async function main() {
 
         // ── Step 6: Build col C formulas ────────────────────
         // Formula: =R{row} + SUMIF('Inward (Live)'!$A:$A, $A{row}, 'Inward (Live)'!$B:$B)
-        //                   - SUMIF('Outward (Live)'!$A:$A, $A{row}, 'Outward (Live)'!$B:$B)
+        //                   - SUMIF('Outward (Live)'!$G:$G, $A{row}, 'Outward (Live)'!$I:$I)
+        // Note: Outward (Live) layout matches Orders from COH — SKU is in col G, Qty in col I
         const colCFormulas: string[][] = [];
         for (let i = dataStartIdx; i < allRows.length; i++) {
             const row = i + 1; // 1-based
-            const formula = `=R${row}+SUMIF('Inward (Live)'!$A:$A,$A${row},'Inward (Live)'!$B:$B)-SUMIF('Outward (Live)'!$A:$A,$A${row},'Outward (Live)'!$B:$B)`;
+            const formula = `=R${row}+SUMIF('Inward (Live)'!$A:$A,$A${row},'Inward (Live)'!$B:$B)-SUMIF('Outward (Live)'!$G:$G,$A${row},'Outward (Live)'!$I:$I)`;
             colCFormulas.push([formula]);
         }
 

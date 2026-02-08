@@ -202,25 +202,36 @@ export const INWARD_LIVE_COLS = {
 
 /**
  * Outward (Live) — buffer tab in COH Orders Mastersheet.
- * A: SKU, B: Qty, C: Product Details, D: Outward Date, E: Destination,
- * F: Order Number, G: Sampling Date, H: Order Note, I: COH Note,
- * J: Courier, K: AWB, L: AWB Scan, M: Notes, N: Order Date
+ * Layout matches "Orders from COH" (cols A-AD) + Outward Date at AE.
+ * This allows simple copy-paste from Orders from COH for emergency outward.
+ *
+ * A: Order Date, B: Order#, C: Name, D: City, E: Mob, F: Channel,
+ * G: SKU, H: Product Name, I: Qty, J: Status, K: Order Note, L: COH Note,
+ * M-P: (Qty Balance, Assigned, Picked, Order Age), Q: source_, R: samplingDate,
+ * S: Fabric Stock, T: (empty), U: Packed, V-W: (empty), X: Shipped,
+ * Y: Shopify Status, Z: Courier, AA: AWB, AB: Ready To Ship,
+ * AC: AWB Scan, AD: Outward Done, AE: Outward Date
  */
 export const OUTWARD_LIVE_COLS = {
-    SKU: 0,         // A
-    QTY: 1,         // B
-    PRODUCT: 2,     // C
-    DATE: 3,        // D
-    DESTINATION: 4, // E
-    ORDER_NO: 5,    // F
-    SAMPLING_DATE: 6, // G
-    ORDER_NOTE: 7,  // H
-    COH_NOTE: 8,    // I
-    COURIER: 9,     // J
-    AWB: 10,        // K
-    AWB_SCAN: 11,   // L
-    NOTES: 12,      // M
-    ORDER_DATE: 13, // N — original order date (from Orders from COH col A)
+    ORDER_DATE: 0,      // A — order placement date
+    ORDER_NO: 1,        // B
+    NAME: 2,            // C
+    CITY: 3,            // D
+    MOB: 4,             // E
+    CHANNEL: 5,         // F
+    SKU: 6,             // G
+    PRODUCT: 7,         // H — Product Name (value, not formula)
+    QTY: 8,             // I
+    STATUS: 9,          // J
+    ORDER_NOTE: 10,     // K
+    COH_NOTE: 11,       // L
+    // M-T: not used by ingestion (Qty Balance, Assigned, Picked, Order Age, source_, samplingDate, Fabric Stock, empty)
+    SAMPLING_DATE: 17,  // R
+    COURIER: 25,        // Z
+    AWB: 26,            // AA
+    AWB_SCAN: 28,       // AC
+    OUTWARD_DONE: 29,   // AD
+    OUTWARD_DATE: 30,   // AE — outward/dispatch date
 } as const;
 
 // ============================================
@@ -573,6 +584,9 @@ export const PHASE2_BALANCE_FORMULA = `=F3+SUMIF('Inward (Final)'!$A:$A,$A3,'Inw
  *
  * NOTE: Live tabs are in the COH Orders Mastersheet, so Balance (Final) in Office Ledger
  * needs IMPORTRANGE. The formula uses the Mastersheet ID for cross-sheet references.
+ *
+ * Outward (Live) layout matches Orders from COH (A-AD) + AE=Outward Date.
+ * SKU is in col G (not A), Qty is in col I (not B) — hence $G:$G and $I:$I.
  */
 export const LIVE_BALANCE_FORMULA_TEMPLATE = (row: number) =>
-    `=F${row}+IFERROR(SUMIF(IMPORTRANGE("${ORDERS_MASTERSHEET_ID}","'Inward (Live)'!$A:$A"),$A${row},IMPORTRANGE("${ORDERS_MASTERSHEET_ID}","'Inward (Live)'!$B:$B")),0)-IFERROR(SUMIF(IMPORTRANGE("${ORDERS_MASTERSHEET_ID}","'Outward (Live)'!$A:$A"),$A${row},IMPORTRANGE("${ORDERS_MASTERSHEET_ID}","'Outward (Live)'!$B:$B")),0)`;
+    `=F${row}+IFERROR(SUMIF(IMPORTRANGE("${ORDERS_MASTERSHEET_ID}","'Inward (Live)'!$A:$A"),$A${row},IMPORTRANGE("${ORDERS_MASTERSHEET_ID}","'Inward (Live)'!$B:$B")),0)-IFERROR(SUMIF(IMPORTRANGE("${ORDERS_MASTERSHEET_ID}","'Outward (Live)'!$G:$G"),$A${row},IMPORTRANGE("${ORDERS_MASTERSHEET_ID}","'Outward (Live)'!$I:$I")),0)`;

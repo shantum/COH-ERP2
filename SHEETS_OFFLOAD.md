@@ -54,7 +54,7 @@ Google Sheets remains the team's daily working surface for **order management** 
 | **Orders from COH** | ~219 | Active open orders. Line-level: order#, customer, SKU, qty, status, assigned, picked, packed, shipped. GCF webhook writes new orders here. |
 | **Inventory** | 6,510 | Per-SKU balance + allocation. Col R = ERP balance (worker writes), Col C = R + Live SUMIFs, Col D = allocated, Col E = available. |
 | **Inward (Live)** | buffer | Team enters inward here. Worker ingests rows → ERP → deletes. Cols: SKU, Qty, Product, Date, Source, Done By, Barcode, Tailor#, Notes. |
-| **Outward (Live)** | buffer | Team enters outward here. Worker ingests rows → ERP → deletes. Cols: SKU, Qty, Product, Date, Destination, Order#, etc. |
+| **Outward (Live)** | buffer | Team enters outward here. Worker ingests rows → ERP → deletes. Layout matches "Orders from COH" (A-AD) + AE=Outward Date. SKU in col G, Qty in col I. Enables simple copy-paste from Orders from COH. |
 | **Office Inventory** | 6,510 | Mirror of Balance (Final) from ledger (legacy — Inventory tab no longer depends on this). |
 | **Outward** | 39,424 | Dispatched order lines (frozen — all future outward goes to "Outward (Live)"). |
 | **ShopifyAllOrderData** | 40,670 | Order-level data from GCF webhook #2. |
@@ -79,15 +79,17 @@ Google Sheets remains the team's daily working surface for **order management** 
 
 **Balance (Final) Col E** — ERP base + IMPORTRANGE to live buffer tabs:
 ```
-=F{row}+SUMIF(IMPORTRANGE("mastersheet-id",'Inward (Live)'!$A:$A),$A{row},IMPORTRANGE("mastersheet-id",'Inward (Live)'!$B:$B))-SUMIF(IMPORTRANGE("mastersheet-id",'Outward (Live)'!$A:$A),$A{row},IMPORTRANGE("mastersheet-id",'Outward (Live)'!$B:$B))
+=F{row}+IFERROR(SUMIF(IMPORTRANGE("mastersheet-id","'Inward (Live)'!$A:$A"),$A{row},IMPORTRANGE("mastersheet-id","'Inward (Live)'!$B:$B")),0)-IFERROR(SUMIF(IMPORTRANGE("mastersheet-id","'Outward (Live)'!$G:$G"),$A{row},IMPORTRANGE("mastersheet-id","'Outward (Live)'!$I:$I")),0)
 ```
 Where F = ERP `currentBalance` (written by worker after each ingestion cycle).
+Note: Outward (Live) uses G:G (SKU) and I:I (Qty) because its layout matches Orders from COH.
 
 **Inventory Tab Col C** (Balance) — ERP base + same-sheet SUMIF on live tabs:
 ```
-=R{row}+SUMIF('Inward (Live)'!$A:$A,$A{row},'Inward (Live)'!$B:$B)-SUMIF('Outward (Live)'!$A:$A,$A{row},'Outward (Live)'!$B:$B)
+=R{row}+SUMIF('Inward (Live)'!$A:$A,$A{row},'Inward (Live)'!$B:$B)-SUMIF('Outward (Live)'!$G:$G,$A{row},'Outward (Live)'!$I:$I)
 ```
 Where R = ERP `currentBalance` (written by worker). No IMPORTRANGE needed — live tabs are in the same spreadsheet.
+Note: Outward (Live) layout matches Orders from COH — SKU is in col G, Qty in col I.
 
 **Inventory Tab Col D** (Allocated) — counts assigned order qty (unchanged):
 ```
@@ -125,11 +127,46 @@ Where R = ERP `currentBalance` (written by worker). No IMPORTRANGE needed — li
 3. GCF webhook #2 → writes line items to "Orders from COH" (SKU, qty, customer, etc.)
 4. Inventory tab auto-updates: SUMIFS counts allocated qty (col N = Assigned flag)
 5. Team works in "Orders from COH": assigns, picks, packs
-6. On dispatch: team copies row to Mastersheet "Outward" tab, deletes from orders tab
-   (Outward Summary aggregates by SKU → IMPORTRANGE to OL "Orders Outward")
-7. Balance (Final) recalculates (outward SUMIF increases)
-8. Inventory tab available balance decreases
+6. On dispatch: shipped rows auto-move to "Outward (Live)" (1:1 copy + Outward Date)
+   - Via moveShippedToOutward() (ERP admin trigger) or Apps Script (manual menu)
+   - Outward (Live) layout matches Orders from COH — simple copy-paste for emergencies
+7. Worker ingests Outward (Live) → ERP InventoryTransactions → auto-ships OrderLines
+8. Balance recalculates: ERP balance updated, SUMIF(Outward Live) clears after ingestion
 ```
+
+### Outward (Live) Column Layout
+
+Matches "Orders from COH" (A-AD) + Outward Date at AE. This enables simple copy-paste for emergency outward.
+
+| Col | Index | Field | Used by ingestion? |
+|-----|-------|-------|--------------------|
+| A | 0 | Order Date | Yes (fallback date) |
+| B | 1 | Order # | Yes (order linking) |
+| C | 2 | Name | No |
+| D | 3 | City | No |
+| E | 4 | Mob | No |
+| F | 5 | Channel | No |
+| G | 6 | **SKU** | **Yes** |
+| H | 7 | Product Name | No |
+| I | 8 | **Qty** | **Yes** |
+| J | 9 | Status | No |
+| K | 10 | Order Note | No |
+| L | 11 | COH Note | No |
+| M-P | 12-15 | Qty Balance, Assigned, Picked, Order Age | No |
+| Q | 16 | source_ | No |
+| R | 17 | samplingDate | No |
+| S | 18 | Fabric Stock | No |
+| T | 19 | (empty) | No |
+| U | 20 | Packed | No |
+| V-W | 21-22 | (empty) | No |
+| X | 23 | Shipped | No |
+| Y | 24 | Shopify Status | No |
+| Z | 25 | **Courier** | **Yes** |
+| AA | 26 | **AWB** | **Yes** |
+| AB | 27 | Ready To Ship | No |
+| AC | 28 | **AWB Scan** | **Yes** |
+| AD | 29 | Outward Done | No |
+| AE | 30 | **Outward Date** | **Yes** (primary date) |
 
 ---
 
@@ -293,7 +330,7 @@ After:   Balance = F (ERP past bal) + SUMIF(recent inward) - SUMIF(recent outwar
 |-----------|------|--------|
 | Config (IDs, tabs, cols, timing, formulas) | `server/src/config/sync/sheets.ts` | ✅ Done |
 | Google Sheets API client (auth, rate limit, retry) | `server/src/services/googleSheetsClient.ts` | ✅ Done |
-| Offload worker (4 phases) | `server/src/services/sheetOffloadWorker.ts` | ⚠️ Needs revision (outward source + new fields) |
+| Offload worker (4 phases) | `server/src/services/sheetOffloadWorker.ts` | ✅ Done (updated for new Outward Live layout matching Orders from COH) |
 | Logger (`sheetsLogger`) | `server/src/utils/logger.ts` | ✅ Done |
 | Config re-exports | `server/src/config/sync/index.ts` | ✅ Done |
 | Server integration (start/stop/shutdown) | `server/src/index.js` | ✅ Done |
@@ -673,10 +710,10 @@ The balance stays correct regardless. The periodic ingestion (Phase 0 worker) re
 | **Transition** | Both app + sheet | F (app) + SUMIF(sheet outward) |
 | **End state** | App only | F (app), sheet outward tabs empty |
 
-Similar path. The outward workflow is more complex because it's tied to order dispatch:
-- Currently: team copies rows from "Orders from COH" → Mastersheet "Outward" tab (which aggregates via "Outward Summary" → IMPORTRANGE to OL "Orders Outward")
+Similar path. The outward workflow is now simplified because Outward (Live) matches the Orders from COH layout:
+- Currently: shipped rows are copied 1:1 from "Orders from COH" → "Outward (Live)" (via `moveShippedToOutward()` or Apps Script), worker ingests → auto-ships OrderLines
+- For emergencies: team can manually copy-paste rows directly from "Orders from COH" → "Outward (Live)" (same layout)
 - Future: ERP records outward when order is marked shipped
-- The dispatch action could eventually be triggered from either system
 
 ### Reconciliation / Matching
 
@@ -1334,6 +1371,7 @@ Link `ReturnedPiece` to existing ERP returns:
 | `backfill-outward-order-numbers.ts` | **Evidence-based fulfillment**: Backfill `orderNumber` on 37,345 historical ms-outward InventoryTransactions |
 | `analyze-outward-order-matching.ts` | Diagnostic: analyze outward txn order number patterns and match rates |
 | `link-historical-outward-to-orders.ts` | Link historical outward txns to OrderLines (set lineStatus=shipped). `--write` to apply |
+| `migrate-outward-live-layout.ts` | **Phase 4**: Migrate Outward (Live) layout to match Orders from COH. Updates headers, remaps existing rows, updates Inventory + Balance formulas. `--dry-run` supported |
 
 ## Key Design Decisions
 
@@ -1355,6 +1393,7 @@ Link `ReturnedPiece` to existing ERP returns:
 16. **Raw SQL batch updates for backfill** — Individual Prisma updates (95K round trips to remote DB) take hours. Raw SQL `UPDATE ... FROM (VALUES ...)` batches 500 rows per statement — 95K records in ~1 minute.
 17. **`repackingBarcode` field naming** — Column G in Inward sheets contains unique barcodes mostly for Repacking source. Named `repackingBarcode` (not generic `barcode`) to clearly convey purpose and avoid confusion with SKU barcode (col A).
 18. **Ledgers page: server-side everything** — 134K+ records can't be client-filtered. Server function handles search (OR across 7 fields), pagination, stats aggregation, and filter option enumeration. Route loader prefetches for SSR.
+19. **Outward (Live) layout matches Orders from COH** — eliminates complex column remapping (G→A, I→B, B→F, etc.). Team can copy-paste a row directly for emergency outward. Worker ingestion reads G:G (SKU) and I:I (Qty). Formulas use same refs.
 
 ---
 
@@ -1379,6 +1418,7 @@ Link `ReturnedPiece` to existing ERP returns:
 | Phase 3, Steps 8-11 | DONE | Live tabs created, formulas switched (both Inventory + Balance Final), worker rewritten for dual-target, admin endpoints |
 | Evidence-Based Fulfillment | DONE | orderNumber backfilled on 37,345 historical txns, auto-linking in worker (Phase B2), 237 historical OrderLines corrected, manual sync Steps 1 & 4 disabled |
 | Ledgers Redesign & Sheet Field Backfill | DONE | Ledgers page rewritten (table layout, 3 tabs, server-side search/pagination), backfilled source/performedBy/tailorNumber/repackingBarcode/destination on 95K records from Google Sheets |
+| Outward (Live) Layout Alignment | DONE | Layout matches Orders from COH (A-AD + AE=Outward Date), 1:1 copy, formulas updated (G:G/I:I), migration run |
 
 ### Future Phases
 
@@ -1609,3 +1649,24 @@ const ENABLE_FULFILLMENT_UI = process.env.ENABLE_FULFILLMENT_UI !== 'false'; // 
 - **Outward columns**: Date, SKU, Product, Color, Size, Qty, Reason, Destination, Order #, Origin
 - **Backfill**: Raw SQL `UPDATE ... FROM (VALUES ...)` — 95K records in ~1 minute (vs hours with individual Prisma updates)
 - **Field coverage**: source=83,090 | performedBy=59,314 | tailorNumber=8,953 | repackingBarcode=9,922 | destination=11,326
+
+### Outward (Live) Layout Alignment — COMPLETED (2026-02-08)
+
+| Component | Status | Files |
+|-----------|--------|-------|
+| New `OUTWARD_LIVE_COLS` config (matches Orders from COH) | Done | `server/src/config/sync/sheets.ts` |
+| Update `ingestOutwardLive()` (range A:AE, date priority AE→A) | Done | `server/src/services/sheetOffloadWorker.ts` |
+| Simplify `moveShippedToOutward()` (1:1 copy + AE) | Done | `server/src/services/sheetOffloadWorker.ts` |
+| Update Apps Script (1:1 copy, remove split write) | Done | `server/scripts/apps-script-outward.js` |
+| Update formula scripts (Outward cols A→G, B→I) | Done | `switch-inventory-formula.ts`, `switch-balance-formula.ts` |
+| Update sheet protection (remove col C protection for Outward) | Done | `server/scripts/push-sheet-protection.ts` |
+| Migration script (headers + formulas) | Done | `server/scripts/migrate-outward-live-layout.ts` |
+| Update `LIVE_BALANCE_FORMULA_TEMPLATE` | Done | `server/src/config/sync/sheets.ts` |
+| TypeScript check | Pass | Both client and server |
+
+**Key changes:**
+- **Outward (Live) now matches Orders from COH layout** (A-AD) + Outward Date at AE — team can copy-paste rows directly for emergency outward
+- **No more column remapping** — `moveShippedToOutward()` copies entire row as-is, just appends today's date at AE
+- **Formula refs updated** — Inventory col C and Balance (Final) col E SUMIFs now reference `$G:$G` (SKU) and `$I:$I` (Qty) instead of `$A:$A` / `$B:$B`
+- **Col C protection removed** from Outward (Live) — no more ARRAYFORMULA, product name comes from pasted data in col H
+- **Migration run**: 0 existing rows (buffer was empty), 6,507 Inventory formulas + 6,508 Balance formulas updated

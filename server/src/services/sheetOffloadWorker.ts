@@ -407,7 +407,8 @@ async function ingestOutwardLive(
 
     sheetsLogger.info({ tab }, 'Reading outward live tab');
 
-    const rows = await readRange(ORDERS_MASTERSHEET_ID, `'${tab}'!A:M`);
+    // Read A:AE (cols 0-30) to capture all columns including Outward Date
+    const rows = await readRange(ORDERS_MASTERSHEET_ID, `'${tab}'!A:AE`);
     result.sheetRowCounts[tab] = rows.length > 1 ? rows.length - 1 : 0;
     if (rows.length <= 1) {
         sheetsLogger.info({ tab }, 'No data rows');
@@ -421,11 +422,17 @@ async function ingestOutwardLive(
         const row = rows[i];
         const skuCode = String(row[OUTWARD_LIVE_COLS.SKU] ?? '').trim();
         const qty = parseQty(String(row[OUTWARD_LIVE_COLS.QTY] ?? ''));
-        const dateStr = String(row[OUTWARD_LIVE_COLS.DATE] ?? '');
-        const dest = String(row[OUTWARD_LIVE_COLS.DESTINATION] ?? '').trim();
         const orderNo = String(row[OUTWARD_LIVE_COLS.ORDER_NO] ?? '').trim();
         const courier = String(row[OUTWARD_LIVE_COLS.COURIER] ?? '').trim();
         const awb = String(row[OUTWARD_LIVE_COLS.AWB] ?? '').trim();
+
+        // Date priority: Outward Date (AE) > Order Date (A) > today
+        const outwardDateStr = String(row[OUTWARD_LIVE_COLS.OUTWARD_DATE] ?? '');
+        const orderDateStr = String(row[OUTWARD_LIVE_COLS.ORDER_DATE] ?? '');
+        const dateStr = outwardDateStr.trim() || orderDateStr;
+
+        // Destination: "Customer" for order-linked rows, empty otherwise
+        const dest = orderNo ? 'Customer' : '';
 
         if (!skuCode || qty === 0) continue;
 
@@ -441,7 +448,7 @@ async function ingestOutwardLive(
             rowIndex: i,
             skuCode,
             qty,
-            date: parseSheetDate(dateStr),
+            date: parseSheetDate(outwardDateStr) ?? parseSheetDate(orderDateStr),
             source: dest,
             extra: orderNo,
             tailor: '',
@@ -943,10 +950,13 @@ interface MoveShippedResult {
 /**
  * Move shipped orders from "Orders from COH" to "Outward (Live)".
  *
- * 1. Read "Orders from COH" tab
+ * Since Outward (Live) now mirrors the Orders from COH column layout (A-AD),
+ * this is a simple 1:1 copy + append Outward Date in col AE.
+ *
+ * 1. Read "Orders from COH" tab (A:AE)
  * 2. Find rows where col X (Shipped) = TRUE and col AD (Outward Done) ≠ 1
- * 3. Map fields to Outward (Live) format
- * 4. Append to Outward (Live) — writes cols A-B and D-M (skips C, protected formula)
+ * 3. Copy entire row (A-AD) as-is, append today's date at AE (Outward Date)
+ * 4. Append to Outward (Live)
  * 5. Mark col AD = 1 on source rows (Outward Done flag)
  * 6. Delete source rows from "Orders from COH"
  *
@@ -966,8 +976,8 @@ async function moveShippedToOutward(): Promise<MoveShippedResult> {
         const tab = MASTERSHEET_TABS.ORDERS_FROM_COH;
         sheetsLogger.info({ tab }, 'Reading Orders from COH for shipped rows');
 
-        // Read all data — cols A through AE (index 0-30)
-        const rows = await readRange(ORDERS_MASTERSHEET_ID, `'${tab}'!A:AE`);
+        // Read all data — cols A through AD (index 0-29)
+        const rows = await readRange(ORDERS_MASTERSHEET_ID, `'${tab}'!A:AD`);
         if (rows.length <= 1) {
             sheetsLogger.info({ tab }, 'No data rows');
             result.durationMs = Date.now() - startTime;
@@ -997,50 +1007,26 @@ async function moveShippedToOutward(): Promise<MoveShippedResult> {
 
         sheetsLogger.info({ tab, shipped: shippedRows.length }, 'Found shipped rows to move');
 
-        // Map Orders from COH → Outward (Live) format
-        // Outward (Live) cols: A=SKU, B=Qty, C=Product(skip), D=Date, E=Destination,
-        //   F=Order#, G=SamplingDate, H=OrderNote, I=COHNote, J=Courier, K=AWB, L=AWBScan, M=Notes
+        // 1:1 copy — same column layout, just append Outward Date at col AE
         const today = new Date().toLocaleDateString('en-GB'); // DD/MM/YYYY
         const outwardRows: (string | number)[][] = [];
 
         for (const { row } of shippedRows) {
-            const sku = String(row[ORDERS_FROM_COH_COLS.SKU] ?? '').trim();
-            const qty = String(row[ORDERS_FROM_COH_COLS.QTY] ?? '').trim();
-            const orderNo = String(row[ORDERS_FROM_COH_COLS.ORDER_NO] ?? '').trim();
-            const orderDate = String(row[ORDERS_FROM_COH_COLS.ORDER_DATE] ?? '').trim();
-            const samplingDate = String(row[ORDERS_FROM_COH_COLS.SAMPLING_DATE] ?? '').trim();
-            const orderNote = String(row[ORDERS_FROM_COH_COLS.ORDER_NOTE] ?? '').trim();
-            const cohNote = String(row[ORDERS_FROM_COH_COLS.COH_NOTE] ?? '').trim();
-            const courier = String(row[ORDERS_FROM_COH_COLS.COURIER] ?? '').trim();
-            const awb = String(row[ORDERS_FROM_COH_COLS.AWB] ?? '').trim();
-            const awbScan = String(row[ORDERS_FROM_COH_COLS.AWB_SCAN] ?? '').trim();
-
-            // Outward (Live) row: A=SKU, B=Qty, C=(skip, formula), D=OutwardDate, E=Destination,
-            //   F=Order#, G=SamplingDate, H=OrderNote, I=COHNote, J=Courier, K=AWB,
-            //   L=AWBScan, M=(Notes, empty), N=OrderDate
-            outwardRows.push([
-                sku,            // A
-                qty,            // B
-                '',             // C — skip (protected product details formula)
-                today,          // D — outward date
-                'Customer',     // E — destination
-                orderNo,        // F — order number
-                samplingDate,   // G — sampling date
-                orderNote,      // H — order note
-                cohNote,        // I — COH note
-                courier,        // J — courier
-                awb,            // K — AWB
-                awbScan,        // L — AWB scan
-                '',             // M — notes (empty)
-                orderDate,      // N — order date (from Orders from COH col A)
-            ]);
+            // Copy all 30 columns (A-AD, indices 0-29) as-is, pad if row is shorter
+            const copiedRow: (string | number)[] = [];
+            for (let c = 0; c < 30; c++) {
+                copiedRow.push(row[c] ?? '');
+            }
+            // Append today's date as Outward Date (col AE, index 30)
+            copiedRow.push(today);
+            outwardRows.push(copiedRow);
         }
 
         // Step 1: Write to Outward (Live) — safety first
         const outwardTab = LIVE_TABS.OUTWARD;
         await appendRows(
             ORDERS_MASTERSHEET_ID,
-            `'${outwardTab}'!A:N`,
+            `'${outwardTab}'!A:AE`,
             outwardRows
         );
         result.rowsWrittenToOutward = outwardRows.length;

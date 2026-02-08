@@ -116,11 +116,12 @@ async function main() {
 
         // ── Step 4: Build col E formulas ────────────────────
         // Formula: =F{row}+IFERROR(SUMIF(IMPORTRANGE(...Inward Live A:A), $A{row}, IMPORTRANGE(...Inward Live B:B)),0)
-        //          -IFERROR(SUMIF(IMPORTRANGE(...Outward Live A:A), $A{row}, IMPORTRANGE(...Outward Live B:B)),0)
+        //          -IFERROR(SUMIF(IMPORTRANGE(...Outward Live G:G), $A{row}, IMPORTRANGE(...Outward Live I:I)),0)
+        // Note: Outward (Live) layout matches Orders from COH — SKU is in col G, Qty in col I
         const colEFormulas: string[][] = [];
         for (let i = dataStartIndex; i < balanceRows.length; i++) {
             const row = i + 1; // 1-based sheet row
-            const formula = `=F${row}+IFERROR(SUMIF(IMPORTRANGE("${ORDERS_MASTERSHEET_ID}","'Inward (Live)'!$A:$A"),$A${row},IMPORTRANGE("${ORDERS_MASTERSHEET_ID}","'Inward (Live)'!$B:$B")),0)-IFERROR(SUMIF(IMPORTRANGE("${ORDERS_MASTERSHEET_ID}","'Outward (Live)'!$A:$A"),$A${row},IMPORTRANGE("${ORDERS_MASTERSHEET_ID}","'Outward (Live)'!$B:$B")),0)`;
+            const formula = `=F${row}+IFERROR(SUMIF(IMPORTRANGE("${ORDERS_MASTERSHEET_ID}","'Inward (Live)'!$A:$A"),$A${row},IMPORTRANGE("${ORDERS_MASTERSHEET_ID}","'Inward (Live)'!$B:$B")),0)-IFERROR(SUMIF(IMPORTRANGE("${ORDERS_MASTERSHEET_ID}","'Outward (Live)'!$G:$G"),$A${row},IMPORTRANGE("${ORDERS_MASTERSHEET_ID}","'Outward (Live)'!$I:$I")),0)`;
             colEFormulas.push([formula]);
         }
 

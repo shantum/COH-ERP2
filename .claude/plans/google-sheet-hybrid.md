@@ -88,6 +88,7 @@ Google Sheets is the team's daily working surface for order management — it's 
   - [x] Redesign Ledgers page: table layout, server-side search/pagination, 3 tabs (inward/outward/materials)
   - [x] Backfill sheet fields: `source` (83K), `performedBy` (59K), `tailorNumber` (9K), `repackingBarcode` (10K), `destination` (11K) via raw SQL batch updates
   - [x] Add `repackingBarcode` field to InventoryTransaction schema
+  - [x] Align Outward (Live) layout with Orders from COH (A-AD + AE=Outward Date), update formulas, migration run
   - [ ] Add `ENABLE_FULFILLMENT_UI` feature flag (default ON)
   - [ ] Replace dashboard pipeline counts with inventory-focused metrics
   - [ ] Turn off allocation mutations
@@ -160,52 +161,46 @@ Google Sheets is the team's daily working surface for order management — it's 
 | 2026-02-08 | Ledgers page redesign: table layout with server-side pagination | Card-list layout inadequate for 134K+ records. Table with search, filters (reason, location, origin), stats row, and pagination. Three tabs: inward (with source, performedBy, tailor#, barcode), outward (destination, order#), materials. |
 | 2026-02-08 | `repackingBarcode` field on InventoryTransaction | Column G in Inward sheets contains unique barcodes (10K records, mostly Repacking source). Named `repackingBarcode` (not `barcode`) to clarify purpose. |
 | 2026-02-08 | Raw SQL batch updates for backfill | Individual Prisma updates (95K round trips to remote DB) too slow. Raw SQL `UPDATE ... FROM (VALUES ...)` does 500 rows per statement — 95K records in ~1 minute. |
+| 2026-02-08 | Outward (Live) layout matches Orders from COH | Old layout required complex column remapping (G→A, I→B, B→F, Z→J). New layout = same cols A-AD + AE=Outward Date. Enables team copy-paste for emergencies, simplifies code. SKU in G, Qty in I. |
 
 ---
 
 ## Current Context
 <!-- This section gets REWRITTEN each session. Ephemeral working state. -->
 
-**Active Phase**: Phase 4 (ERP Clean-Up) — Phases 1-3 complete, evidence-based fulfillment operational, Ledgers page redesigned
-**Working On**: Ledgers page + sheet field backfill complete
+**Active Phase**: Phase 4 (ERP Clean-Up) — Phases 1-3 complete, evidence-based fulfillment operational, Outward layout aligned
+**Working On**: Outward (Live) layout alignment complete
 **Blocked By**: Nothing
 **Next Up**:
   1. Phase 4 — deprecate fulfillment UI, update dashboard metrics
   2. OR Phase 6 — Barcode Mastersheet & Fabric Ledger
   3. OR Phase 7 — Piece-Level Tracking & Returns
 
+**Session 2026-02-08 (Outward Live Layout Alignment):**
+- Aligned Outward (Live) layout with Orders from COH — same columns A-AD + AE=Outward Date
+- Updated `OUTWARD_LIVE_COLS` config: SKU=6(G), QTY=8(I), ORDER_NO=1(B), COURIER=25(Z), AWB=26(AA), OUTWARD_DATE=30(AE)
+- Simplified `moveShippedToOutward()`: 1:1 copy of 30 cols + append date at AE (was complex 14-field remapping)
+- Updated `ingestOutwardLive()`: range A:AE, date priority AE→A, destination inferred from order#
+- Updated Apps Script: same 1:1 copy, removed split-write hack
+- Updated all formula scripts: Outward Live refs from $A:$A/$B:$B → $G:$G/$I:$I
+- Updated `LIVE_BALANCE_FORMULA_TEMPLATE` in config
+- Removed col C protection from Outward (Live) (no longer has ARRAYFORMULA)
+- Migration run: 0 data rows, 6,507 Inventory + 6,508 Balance formulas updated
+- Balances verified correct after formula update
+
 **Session 2026-02-08 (Ledgers Redesign & Sheet Field Backfill):**
 - Redesigned Ledgers page: card-list → table layout, 3 tabs (inward/outward/materials)
 - Built `getLedgerTransactions` server function with search (7 fields), pagination, stats, filter dropdowns
-- Updated `LedgersSearchParams` schema: tab, search, reason, location, origin (sheet/app), page, limit
-- Backfilled sheet fields from Google Sheets via raw SQL batch updates (95K records in ~1 min):
-  - `source`: 83,090 records
-  - `performedBy`: 59,314 records
-  - `tailorNumber`: 8,953 records
-  - `repackingBarcode`: 9,922 records (new field — column G from Inward sheets)
-  - `destination`: 11,326 records
-- Added `repackingBarcode String?` to InventoryTransaction schema
+- Backfilled sheet fields from Google Sheets via raw SQL batch updates (95K records in ~1 min)
 - Commit: `e4ea035`
 
 **Session 2026-02-08 (Evidence-Based Fulfillment):**
-- Backfilled `orderNumber` on 37,345 historical ms-outward InventoryTransactions (extracted from referenceId)
-- Built `linkOutwardToOrders()` — Phase B2 in offload worker that auto-ships OrderLines from outward evidence
-- Ran historical linking script: 237 OrderLines corrected (227 pending→shipped, 7 allocated→shipped, 3 packed→shipped), 0 remaining
-- Current data state: 88,600 shipped lines (99.87%), 117 in pipeline (110 pending, 3 allocated, 4 packed)
-- Disabled Steps 1 (Ship & Release) and 4 (Sync Line Statuses) in manual CSV sheetSyncService — they conflict with evidence-based fulfillment
-- Commits: `92b5591` (historical linking), `647fba3` (disable manual sync steps)
+- Backfilled `orderNumber` on 37,345 historical ms-outward InventoryTransactions
+- Built `linkOutwardToOrders()` (Phase B2), 237 historical OrderLines corrected
+- Disabled Steps 1 & 4 in manual CSV sync
+- Commits: `92b5591`, `647fba3`
 
 **Session 2026-02-07 (Phase 3 build + test):**
-- Built `moveShippedToOutward()` in sheetOffloadWorker.ts
-- Config: `ORDERS_FROM_COH_COLS` (13 columns), `ORDER_DATE` added to `OUTWARD_LIVE_COLS`
-- Admin: `shipped_to_outward` job trigger + listing in background jobs panel
-- First test run: 137 shipped rows written to Outward (Live), but hit API quota on individual col AD writes — deletion failed (safety-first design prevented data loss)
-- Fixed: batched col AD writes via `groupIntoRanges()` — 137 calls → ~5 calls
-- Second run: 70 remaining rows moved + deleted successfully (11s vs 63s)
-- Cleaned up 70 duplicates from Outward (Live), then 67 leftover rows from Orders from COH (cross-verified against Outward before deleting)
-- Added Order Date column (N) to Outward (Live) for reversibility
-- Triggered sheet offload: 137 outward transactions ingested into ERP
-- Balance verification: total went from 157 → 17 (net -140, exactly matching sheet qty)
-- Deleted 137 ingested rows from Outward (Live)
-- Enabled `ENABLE_SHEET_OFFLOAD=true` + `ENABLE_SHEET_DELETION=true` in .env
-- Pushed commit `c62b759` to main
+- Built `moveShippedToOutward()`, tested with 137 shipped rows, batched col AD writes
+- Balance verification: -140 net change correct
+- Enabled `ENABLE_SHEET_OFFLOAD=true` + `ENABLE_SHEET_DELETION=true`
