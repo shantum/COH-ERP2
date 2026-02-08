@@ -304,12 +304,13 @@ After:   Balance = F (ERP past bal) + SUMIF(recent inward) - SUMIF(recent outwar
 
 ### Worker Phases
 
-1. **Phase A — Ingest Inward:** Read Inward (Final) old rows + all Inward (Archive), create InventoryTransactions
-2. **Phase B — Ingest Outward:** Read old Outward + Mastersheet Outward (individual order lines), create InventoryTransactions
-3. **Phase C — Update Past Balance:** Query ingested transactions per SKU, write net balance to col F
-4. **Phase D — Invalidate Caches:** Clear inventory balance cache, broadcast SSE update
+1. **Phase A — Ingest Inward:** Read Inward (Live) buffer tab, create InventoryTransactions, delete ingested rows
+2. **Phase B — Ingest Outward:** Read Outward (Live) buffer tab, create InventoryTransactions, extract linkable items (with order numbers), delete ingested rows
+3. **Phase B2 — Link Outward to Orders (Evidence-Based Fulfillment):** Match outward InventoryTransactions to OrderLines by orderNumber + skuId, mark as shipped
+4. **Phase C — Update Sheet Balances:** Write ERP `currentBalance` to Inventory col R (Mastersheet) + Balance (Final) col F (Office Ledger)
+5. **Phase D — Invalidate Caches:** Clear inventory balance cache, broadcast SSE update
 
-> **REVISION NEEDED:** The current worker ingests from Office Ledger "Orders Outward" (aggregate). It must be **revised** to ingest from **Mastersheet "Outward"** (individual order lines with order numbers). It also needs to capture new metadata fields (see Schema Changes below).
+> **Phase B2 is the core of evidence-based fulfillment.** Outward entries from sheets ARE the shipping evidence. When an outward entry has an order number, the corresponding OrderLine is automatically set to `shipped`. Only lines in LINKABLE_STATUSES (`pending`, `allocated`, `picked`, `packed`) are updated. Already-shipped or cancelled lines are skipped.
 
 ### Deduplication
 - Content-based `referenceId`: `sheet:{tab}:{sku}:{qty}:{date}:{source}` — stable across row deletions
@@ -1316,6 +1317,9 @@ Link `ReturnedPiece` to existing ERP returns:
 | `analyze-returns-workflow.ts` | Diagnostic: analyze source distribution, inward status, linkages |
 | `analyze-unique-barcodes.ts` | Diagnostic: analyze piece barcode format (DDMMYY + sequence) |
 | `import-returned-pieces.ts` | Import existing pieces from sheet to ERP. `--dry-run` / `--apply` |
+| `backfill-outward-order-numbers.ts` | **Evidence-based fulfillment**: Backfill `orderNumber` on 37,345 historical ms-outward InventoryTransactions |
+| `analyze-outward-order-matching.ts` | Diagnostic: analyze outward txn order number patterns and match rates |
+| `link-historical-outward-to-orders.ts` | Link historical outward txns to OrderLines (set lineStatus=shipped). `--write` to apply |
 
 ## Key Design Decisions
 
@@ -1332,10 +1336,12 @@ Link `ReturnedPiece` to existing ERP returns:
 11. **Non-destructive by default** — every change is additive first (new columns, new DB rows), switchable second (formula swap with `--restore`), destructive never (row deletion disabled, requires explicit opt-in after weeks of verification). Full sheet backup before any modification.
 12. **Side-by-side verification** — new formulas are tested in a temporary column (col G) and compared against the original (col E) before switching. The team never sees wrong balances.
 13. **Deprecate, don't delete** — redundant ERP features are feature-flagged off, not removed. Code stays for reference and fallback. Gradual phase-out over months.
+14. **Evidence-based fulfillment** — outward InventoryTransactions from sheets ARE the shipping evidence. When an outward entry has an order number, the corresponding OrderLine is automatically set to `shipped`. No explicit Ship & Release or Line Status Sync needed — the presence of outward evidence IS the proof.
+15. **Disable conflicting manual sync steps** — sheetSyncService Steps 1 (Ship & Release) and 4 (Sync Line Statuses) create duplicate outward transactions and bypass evidence-based flow. Disabled with no-op results, preserving step indices for UI compatibility.
 
 ---
 
-## Remaining Work (as of 2026-02-07)
+## Remaining Work (as of 2026-02-08)
 
 ### Phase 3, Step 12: Deploy & Monitor
 
@@ -1354,6 +1360,7 @@ Link `ReturnedPiece` to existing ERP returns:
 | Phase 1: Build | DONE | Worker, config, backup/restore, monitoring, admin UI |
 | Phase 2: Historical Ingestion | DONE | 134K+ txns ingested, 4,257 SKUs verified, 73 missing SKUs imported |
 | Phase 3, Steps 8-11 | DONE | Live tabs created, formulas switched (both Inventory + Balance Final), worker rewritten for dual-target, admin endpoints |
+| Evidence-Based Fulfillment | DONE | orderNumber backfilled on 37,345 historical txns, auto-linking in worker (Phase B2), 237 historical OrderLines corrected, manual sync Steps 1 & 4 disabled |
 
 ### Future Phases
 
@@ -1548,3 +1555,20 @@ const ENABLE_FULFILLMENT_UI = process.env.ENABLE_FULFILLMENT_UI !== 'false'; // 
 - Removed `OFFLOAD_AGE_DAYS` — buffer tabs are always fresh
 
 **Next**: Step 12 — Deploy & Monitor (enable `ENABLE_SHEET_OFFLOAD=true` on staging, test with sample data)
+
+### Evidence-Based Fulfillment — COMPLETED (2026-02-08)
+
+| Component | Status | Files |
+|-----------|--------|-------|
+| Backfill `orderNumber` on 37,345 historical ms-outward txns | Done | `server/scripts/backfill-outward-order-numbers.ts` |
+| Auto-link outward to OrderLines (Phase B2 in worker) | Done | `server/src/services/sheetOffloadWorker.ts` (`linkOutwardToOrders()`) |
+| Historical OrderLine linking (237 lines corrected) | Done | `server/scripts/link-historical-outward-to-orders.ts` |
+| Disable Steps 1 & 4 in manual CSV sync | Done | `server/src/services/sheetSyncService.ts` |
+| TypeScript check | Pass | Both client and server |
+
+**Key changes:**
+- **Phase B2 added to worker:** After ingesting outward, `linkOutwardToOrders()` matches outward txns to OrderLines by orderNumber + skuId, sets lineStatus='shipped' with courier/AWB data
+- **LINKABLE_STATUSES:** `['pending', 'allocated', 'picked', 'packed']` — only these get auto-shipped. Already-shipped/cancelled lines are skipped
+- **Array-based SKU lookup with FIFO consumption:** Handles duplicate SKUs in same order correctly
+- **Manual sync disabled:** sheetSyncService Steps 1 (Ship & Release) and 4 (Sync Line Statuses) were creating duplicate outward transactions and bypassing evidence-based flow
+- **Historical data:** 88,600 shipped lines (99.87%), 117 in pipeline (110 pending, 3 allocated, 4 packed), 0 lines with outward evidence but pre-ship status

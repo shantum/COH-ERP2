@@ -142,15 +142,15 @@ If step 2 or 3 fails, the data is already safe in Outward (Live). The col AD mar
 
 ---
 
-## 4. Offload Worker (4 Phases)
+## 4. Offload Worker (5 Phases)
 
-**Function:** `runOffloadSync()` in `sheetOffloadWorker.ts` (lines 684-752)
+**Function:** `runOffloadSync()` in `sheetOffloadWorker.ts`
 
 Runs on a configurable interval (default 30 min). Requires `ENABLE_SHEET_OFFLOAD=true`.
 
 ### Phase A: Ingest Inward (Live)
 
-**Function:** `ingestInwardLive()` (lines 252-380)
+**Function:** `ingestInwardLive()`
 
 1. Reads `'Inward (Live)'!A:I` from Mastersheet
 2. Parses rows: extracts SKU, qty, date, source, doneBy, tailor
@@ -165,17 +165,37 @@ Runs on a configurable interval (default 30 min). Requires `ENABLE_SHEET_OFFLOAD
 
 ### Phase B: Ingest Outward (Live)
 
-**Function:** `ingestOutwardLive()` (lines 386-511)
+**Function:** `ingestOutwardLive()`
 
 Same parse/dedup pattern as Phase A, but:
 - Reads `'Outward (Live)'!A:M`
 - `txnType: TXN_TYPE.OUTWARD`
 - If order number present: `reason = 'sale'`. Otherwise: maps via `OUTWARD_DESTINATION_MAP`
 - `metadata`: `{ destination, orderNumber }`
+- Also extracts **courier** (col J) and **AWB** (col K) for order linking
+- Returns `{ affectedSkuIds, linkableItems }` — linkable items are outward entries with an order number
+
+### Phase B2: Link Outward to OrderLines (Evidence-Based Fulfillment)
+
+**Function:** `linkOutwardToOrders()`
+
+**This is the core of evidence-based fulfillment.** Outward InventoryTransactions from sheets ARE the evidence of shipping — when an outward entry has an order number, the corresponding OrderLine is marked as shipped.
+
+1. Groups linkable items by `orderNumber`
+2. Batch-queries `Order` + `OrderLine` by order number
+3. For each outward item, finds matching OrderLine by `skuId`:
+   - Uses array-based SKU lookup to handle duplicate SKUs in same order (FIFO consumption)
+   - Only updates lines in `LINKABLE_STATUSES`: `['pending', 'allocated', 'picked', 'packed']`
+   - Skips already-shipped or cancelled lines
+4. Builds update batch: `{ lineStatus: 'shipped', shippedAt, courier?, awbNumber? }`
+5. Applies all updates in a single `prisma.$transaction()`
+6. Reports: `{ linked, skippedAlreadyShipped, skippedNoOrder, skippedNoLine }`
+
+**Key insight:** The team doesn't use ERP allocation/pick/pack mutations. They fulfill in Sheets, then the worker auto-ships OrderLines when outward evidence arrives.
 
 ### Phase C: Update Sheet Balances
 
-**Function:** `updateSheetBalances()` (lines 567-655)
+**Function:** `updateSheetBalances()`
 
 Only runs if Phases A/B affected any SKUs.
 
@@ -185,7 +205,7 @@ Only runs if Phases A/B affected any SKUs.
 
 ### Phase D: Invalidate Caches
 
-**Function:** `invalidateCaches()` (lines 661-665)
+**Function:** `invalidateCaches()`
 
 Only runs if something was ingested.
 - `inventoryBalanceCache.invalidateAll()`
@@ -194,10 +214,11 @@ Only runs if something was ingested.
 ### Sync Cycle Summary
 
 ```
-Phase A: Ingest Inward (Live) → InventoryTransactions
-Phase B: Ingest Outward (Live) → InventoryTransactions
-Phase C: Write ERP balance → Sheet col R (Inventory) + col F (Balance Final)
-Phase D: Invalidate caches + SSE broadcast
+Phase A:  Ingest Inward (Live) → InventoryTransactions
+Phase B:  Ingest Outward (Live) → InventoryTransactions + collect linkable items
+Phase B2: Link outward to OrderLines → mark as shipped (evidence-based fulfillment)
+Phase C:  Write ERP balance → Sheet col R (Inventory) + col F (Balance Final)
+Phase D:  Invalidate caches + SSE broadcast
 ```
 
 ---
@@ -406,7 +427,7 @@ Lists all background jobs including `sheet_offload` and `shipped_to_outward`. Ea
 | File | Purpose |
 |------|---------|
 | `server/src/services/googleSheetsFetcher.ts` | Unauthenticated CSV fetcher (used by Sheet Sync, not offload) |
-| `server/src/services/sheetSyncService.ts` | CSV-based sync orchestrator: 6-step plan/execute |
+| `server/src/services/sheetSyncService.ts` | CSV-based sync orchestrator: 6-step plan/execute (Steps 1 & 4 disabled — evidence-based fulfillment) |
 | `server/src/index.js` | Worker registration + shutdown handler |
 | `server/src/utils/logger.ts` | `sheetsLogger` child logger |
 | `server/config/google-service-account.json` | Service account key (gitignored) |
@@ -422,6 +443,8 @@ Lists all background jobs including `sheet_offload` and `shipped_to_outward`. Ea
 | `server/scripts/backup-sheets.ts` | Full snapshot of all tabs to JSON |
 | `server/scripts/restore-sheets.ts` | Restore from backup |
 | `server/scripts/check-sheet-totals.ts` | Row counts and qty totals per tab |
+| `server/scripts/backfill-outward-order-numbers.ts` | Backfill `orderNumber` on historical ms-outward InventoryTransactions |
+| `server/scripts/link-historical-outward-to-orders.ts` | Link historical outward txns to OrderLines (set shipped). `--write` to apply |
 
 ### Documentation
 
@@ -453,6 +476,8 @@ Lists all background jobs including `sheet_offload` and `shipped_to_outward`. Ea
 - **Concurrency guard** — Module-level `isRunning` boolean prevents concurrent runs. If already running, `runOffloadSync()` returns `null`.
 - **setInterval timing** — Starts counting from `start()`, not from when startup timeout fires. Interval is started AFTER first run completes.
 - **Admin user requirement** — `createdById` on InventoryTransaction is a required FK. Worker looks up first admin user by role and caches the ID.
+- **Evidence-based fulfillment** — Phase B2 (`linkOutwardToOrders`) only updates lines in `LINKABLE_STATUSES` (`pending`, `allocated`, `picked`, `packed`). Already-shipped/cancelled lines are safely skipped. Uses FIFO consumption for duplicate SKUs in same order.
+- **Manual sync conflict** — sheetSyncService Steps 1 (Ship & Release) and 4 (Sync Line Statuses) are DISABLED because they create duplicate outward transactions and bypass evidence-based flow.
 
 ### Tabs
 
