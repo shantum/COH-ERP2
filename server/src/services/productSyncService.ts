@@ -449,9 +449,13 @@ async function syncSingleSku(
 
     if (sku) {
         // Update existing SKU
+        // If Shopify now has a proper SKU (barcode) and our stored code is a slug fallback, update it
+        const shopifySku = variant.sku?.trim();
+        const shouldUpdateSkuCode = shopifySku && shopifySku !== sku.skuCode && /[a-zA-Z].*-/.test(sku.skuCode);
         await prisma.sku.update({
             where: { id: sku.id },
             data: {
+                ...(shouldUpdateSkuCode ? { skuCode: shopifySku } : {}),
                 shopifyVariantId,
                 shopifyInventoryItemId: variant.inventory_item_id ? String(variant.inventory_item_id) : null,
                 mrp: parseFloat(variant.price) || sku.mrp,
