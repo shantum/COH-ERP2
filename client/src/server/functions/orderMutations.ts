@@ -1565,6 +1565,14 @@ export const createOrder = createServerFn({ method: 'POST' })
             context.user.id
         );
 
+        // Push to "Orders from COH" sheet (fire-and-forget, same pattern as SSE broadcast)
+        const baseUrl = process.env.VITE_API_URL || 'http://localhost:3001';
+        fetch(`${baseUrl}/api/internal/push-order-to-sheet`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ orderId: order.id }),
+        }).catch(() => {});
+
         return {
             success: true,
             data: {

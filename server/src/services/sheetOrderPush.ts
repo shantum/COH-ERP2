@@ -15,6 +15,7 @@ import {
     ORDERS_MASTERSHEET_ID,
     MASTERSHEET_TABS,
 } from '../config/sync/sheets.js';
+import prisma from '../lib/prisma.js';
 
 const log = sheetsLogger.child({ service: 'sheetOrderPush' });
 
@@ -136,6 +137,87 @@ export async function pushNewOrderToSheet(
         log.error(
             { orderName: orderNumber, lineCount: rows.length, err: message },
             'Failed to push order to sheet'
+        );
+    }
+}
+
+// ============================================
+// ERP-CREATED ORDER PUSH
+// ============================================
+
+/**
+ * Push an ERP-created order (manual or exchange) to the "Orders from COH" sheet.
+ * Queries the order from DB and maps to the same 30-column row format as Shopify orders.
+ * Never throws — errors are logged silently.
+ */
+export async function pushERPOrderToSheet(orderId: string): Promise<void> {
+    const order = await prisma.order.findUnique({
+        where: { id: orderId },
+        include: {
+            orderLines: {
+                include: { sku: { select: { skuCode: true } } },
+            },
+        },
+    });
+
+    if (!order) {
+        log.warn({ orderId }, 'pushERPOrderToSheet: order not found');
+        return;
+    }
+
+    if (order.orderLines.length === 0) {
+        log.warn({ orderId, orderNumber: order.orderNumber }, 'pushERPOrderToSheet: no line items');
+        return;
+    }
+
+    // Parse city from shippingAddress (may be JSON with city field, or plain text)
+    let city = '';
+    if (order.shippingAddress) {
+        try {
+            const addr = JSON.parse(order.shippingAddress);
+            city = addr.city ?? '';
+        } catch {
+            // Not JSON — leave city empty
+        }
+    }
+
+    const orderDate = formatDate(order.orderDate.toISOString());
+
+    const rows: (string | number)[][] = order.orderLines.map(line => {
+        const row: (string | number)[] = new Array(TOTAL_COLS).fill('');
+        row[0] = orderDate;                   // A: Order Date
+        row[1] = order.orderNumber;           // B: Order#
+        row[2] = order.customerName;          // C: Name
+        row[3] = city;                        // D: City
+        row[4] = order.customerPhone ?? '';    // E: Mobile
+        row[5] = order.channel;               // F: Channel
+        row[6] = line.sku.skuCode;            // G: SKU
+        // row[7] left empty                  // H: Product Name (VLOOKUP)
+        row[8] = line.qty;                    // I: Qty
+        row[10] = order.internalNotes ?? '';   // K: Order Note
+        return row;
+    });
+
+    const range = `'${MASTERSHEET_TABS.ORDERS_FROM_COH}'!A:AD`;
+
+    try {
+        const startRow = await appendRows(ORDERS_MASTERSHEET_ID, range, rows);
+
+        if (startRow >= 0) {
+            const lastRowIdx = startRow + rows.length - 1;
+            const sheetId = await getSheetId(ORDERS_MASTERSHEET_ID, MASTERSHEET_TABS.ORDERS_FROM_COH);
+            await addBottomBorders(ORDERS_MASTERSHEET_ID, sheetId, [lastRowIdx]);
+        }
+
+        log.info(
+            { orderNumber: order.orderNumber, lineCount: rows.length },
+            'Pushed ERP order to Orders from COH sheet'
+        );
+    } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        log.error(
+            { orderNumber: order.orderNumber, lineCount: rows.length, err: message },
+            'Failed to push ERP order to sheet'
         );
     }
 }

@@ -30,7 +30,9 @@ Buffer tabs are in the Mastersheet so the Inventory tab formula can reference th
 ### Data Flow
 
 ```
-Orders from COH (shipped) ──[move_shipped_to_outward]──► Outward (Live) ──┐
+Shopify webhook (new order) ──[pushNewOrderToSheet]──► Orders from COH ──┐
+                                                                          │
+Orders from COH (shipped) ──[move_shipped_to_outward]──► Outward (Live) ──┤
                                                                            │
 Ops team manual entry ──────────────────────────────────► Inward (Live) ──┤
                                                                            │
@@ -52,6 +54,62 @@ Three independent jobs replace the old monolithic `runOffloadSync()` (Phases A-D
 - **`ingest_inward`** -- Scheduled (30 min). Reads Inward (Live), creates INWARD transactions, updates balances, invalidates caches.
 - **`move_shipped_to_outward`** -- Manual trigger only. Copies shipped rows from "Orders from COH" to "Outward (Live)". No balance updates.
 - **`ingest_outward`** -- Scheduled (30 min). Reads Outward (Live), creates OUTWARD transactions, links to OrderLines (evidence-based fulfillment), updates balances, invalidates caches.
+
+---
+
+## 1b. Sheet Order Push (Webhook to Sheet)
+
+**File:** `server/src/services/sheetOrderPush.ts`
+
+When a new Shopify order arrives via webhook and is processed (action === 'created'), the ERP automatically appends one row per line item to the "Orders from COH" tab in the COH Orders Mastersheet. This lets the ops team start processing immediately without manual entry.
+
+### Trigger
+
+In `server/src/routes/webhooks.ts`, after `processShopifyOrderWebhook()` returns `action === 'created'`:
+
+```typescript
+if (result.action === 'created') {
+    deferredExecutor.enqueue(async () => {
+        await pushNewOrderToSheet(shopifyOrder);
+    }, { orderId: result.orderId, action: 'push_order_to_sheet' });
+}
+```
+
+**Important:** Shopify sometimes sends new orders as `orders/updated` (not `orders/create`), so the trigger checks `result.action` not the webhook topic.
+
+### Column Mapping
+
+Each line item becomes one row in "Orders from COH" (A:AD = 30 columns):
+
+| Column | Index | Content | Source |
+|--------|-------|---------|--------|
+| A | 0 | Order Date | `created_at` formatted as `YYYY-MM-DD HH:MM:SS` in IST |
+| B | 1 | Order # | `name` (e.g., `#1234`) |
+| C | 2 | Customer Name | `shipping_address.first_name + last_name` |
+| D | 3 | City | `shipping_address.city` |
+| E | 4 | Phone | `shipping_address.phone` |
+| F | 5 | Channel | `payment_gateway_names[0]` (e.g., "shopflo", "Cash on Delivery (COD)") |
+| G | 6 | SKU | `line_items[].sku` |
+| H | 7 | Product Name | **Left empty** -- populated by VLOOKUP array formula on the sheet |
+| I | 8 | Qty | `line_items[].quantity` |
+| K | 10 | Order Note | `note` |
+
+### Formatting
+
+After appending rows, adds a bottom border on the last row of the order (visual separator between orders). Uses `addBottomBorders()` from `googleSheetsClient.ts`.
+
+### Design Decisions
+
+- **Fire-and-forget** via `deferredExecutor` -- never blocks webhook response
+- **No feature flag** -- always on (relies on Google Sheets auth being configured)
+- **Channel uses `payment_gateway_names[0]`** not `source_name` (matches ops team expectations)
+- **Errors logged but never block** order processing (try/catch with log.error)
+- **Col H left empty** because the sheet has a VLOOKUP array formula that fills Product Name from SKU
+
+### googleSheetsClient Changes
+
+- `appendRows()` now returns the 0-based start row index (parsed from the API's `updatedRange` response)
+- New export: `addBottomBorders(spreadsheetId, sheetId, rowIndices, endCol?)` -- applies bottom borders via Sheets `batchUpdate` API using `updateBorders` requests
 
 ---
 
@@ -521,7 +579,8 @@ Lists all background jobs including the 3 sheet jobs (`ingest_inward`, `move_shi
 | File | Purpose |
 |------|---------|
 | `server/src/services/sheetOffloadWorker.ts` | Main worker: 3 independent jobs (triggerIngestInward, triggerIngestOutward, triggerMoveShipped), per-job state, start/stop/getStatus/getBufferCounts |
-| `server/src/services/googleSheetsClient.ts` | Authenticated Sheets API client: JWT auth, rate limiter, retry, CRUD ops (325 lines) |
+| `server/src/services/googleSheetsClient.ts` | Authenticated Sheets API client: JWT auth, rate limiter, retry, CRUD ops + border formatting |
+| `server/src/services/sheetOrderPush.ts` | Push new Shopify orders to "Orders from COH" tab (one row per line item) |
 | `server/src/config/sync/sheets.ts` | All config: spreadsheet IDs, tab names, column mappings, timing, formulas (579 lines) |
 | `server/src/config/sync/index.ts` | Re-exports all sheets config |
 

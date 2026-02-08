@@ -13,6 +13,8 @@ import { Router } from 'express';
 import type { Request, Response, NextFunction } from 'express';
 import { broadcastOrderUpdate } from './sse.js';
 import type { OrderUpdateEvent } from './sse.js';
+import { deferredExecutor } from '../services/deferredExecutor.js';
+import { pushERPOrderToSheet } from '../services/sheetOrderPush.js';
 
 const router: Router = Router();
 
@@ -83,6 +85,36 @@ router.post('/sse-broadcast', verifyInternalRequest, (req: Request, res: Respons
         const message = error instanceof Error ? error.message : 'Unknown error';
         console.error('[Internal API] SSE broadcast error:', message);
         res.status(500).json({ error: 'Failed to broadcast event' });
+    }
+});
+
+/**
+ * POST /api/internal/push-order-to-sheet
+ *
+ * Pushes an ERP-created order (manual/exchange) to the "Orders from COH" sheet.
+ * Called by Server Functions after createOrder to sync with the ops sheet.
+ *
+ * Body: { orderId: string }
+ */
+router.post('/push-order-to-sheet', verifyInternalRequest, (req: Request, res: Response): void => {
+    try {
+        const { orderId } = req.body as { orderId: string };
+
+        if (!orderId) {
+            res.status(400).json({ error: 'Missing orderId' });
+            return;
+        }
+
+        deferredExecutor.enqueue(
+            async () => { await pushERPOrderToSheet(orderId); },
+            { orderId, action: 'push_erp_order_to_sheet' }
+        );
+
+        res.json({ success: true, orderId });
+    } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        console.error('[Internal API] Push order to sheet error:', message);
+        res.status(500).json({ error: 'Failed to enqueue sheet push' });
     }
 });
 
