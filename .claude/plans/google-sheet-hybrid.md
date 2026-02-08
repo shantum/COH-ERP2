@@ -26,7 +26,7 @@ Google Sheets is the team's daily working surface for order management — it's 
 
 ### Key Decisions
 - Ingest from **Mastersheet Outward** (39K individual rows with order#), NOT Office Ledger "Orders Outward" (3K aggregate IMPORTRANGE)
-- 5 new optional fields on InventoryTransaction: `source`, `destination`, `tailorNumber`, `performedBy`, `orderNumber`
+- 6 optional fields on InventoryTransaction: `source`, `destination`, `tailorNumber`, `performedBy`, `repackingBarcode`, `orderNumber`
 - Content-based referenceIds for dedup (SKU+qty+date+source), not row indices
 - Side-by-side formula test in col G before switching col E
 - Dashboard pipeline counts replaced with inventory-focused metrics
@@ -39,7 +39,7 @@ Google Sheets is the team's daily working surface for order management — it's 
 - **Status**: DONE (2026-02-07)
 - **Goal**: All code ready — worker revised, backup/restore scripts, monitoring page, schema migration
 - **Tasks**:
-  - [x] Prisma migration: 5 new fields on InventoryTransaction (`source`, `destination`, `tailorNumber`, `performedBy`, `orderNumber` + index on `orderNumber`)
+  - [x] Prisma migration: 6 fields on InventoryTransaction (`source`, `destination`, `tailorNumber`, `performedBy`, `repackingBarcode`, `orderNumber` + index on `orderNumber`)
   - [x] Revise offload worker: ingest from Mastersheet Outward (individual order lines)
   - [x] Revise offload worker: capture new fields (source, destination, tailorNumber, performedBy, orderNumber)
   - [x] Expand source mapping (warehouse, op stock, alteration, rto, reject)
@@ -79,12 +79,15 @@ Google Sheets is the team's daily working surface for order management — it's 
 
 ### Phase 4: ERP Clean-Up
 - **Status**: IN PROGRESS
-- **Goal**: Evidence-based fulfillment operational, redundant fulfillment UI deprecated, dashboard updated
+- **Goal**: Evidence-based fulfillment operational, Ledgers page redesigned, redundant fulfillment UI deprecated, dashboard updated
 - **Tasks**:
   - [x] Backfill `orderNumber` on 37,345 historical outward InventoryTransactions
   - [x] Add `linkOutwardToOrders()` (Phase B2) to offload worker — auto-ship OrderLines from outward evidence
   - [x] Link 237 historical OrderLines with outward evidence to shipped status
   - [x] Disable Steps 1 (Ship & Release) and 4 (Sync Line Statuses) in manual CSV sync
+  - [x] Redesign Ledgers page: table layout, server-side search/pagination, 3 tabs (inward/outward/materials)
+  - [x] Backfill sheet fields: `source` (83K), `performedBy` (59K), `tailorNumber` (9K), `repackingBarcode` (10K), `destination` (11K) via raw SQL batch updates
+  - [x] Add `repackingBarcode` field to InventoryTransaction schema
   - [ ] Add `ENABLE_FULFILLMENT_UI` feature flag (default ON)
   - [ ] Replace dashboard pipeline counts with inventory-focused metrics
   - [ ] Turn off allocation mutations
@@ -154,19 +157,35 @@ Google Sheets is the team's daily working surface for order management — it's 
 | 2026-02-08 | Disable manual sync Steps 1 & 4 | Ship & Release creates duplicate outward transactions, Line Status Sync bypasses evidence-based flow. Both replaced with no-op results. Step indices preserved for UI compatibility. |
 | 2026-02-08 | LINKABLE_STATUSES for auto-shipping | Only `['pending', 'allocated', 'picked', 'packed']` get auto-shipped. Already-shipped/cancelled lines are safely skipped. |
 | 2026-02-08 | FIFO SKU consumption for duplicate SKUs | When same order has multiple lines with same SKU, array-based lookup with consumption prevents double-matching. |
+| 2026-02-08 | Ledgers page redesign: table layout with server-side pagination | Card-list layout inadequate for 134K+ records. Table with search, filters (reason, location, origin), stats row, and pagination. Three tabs: inward (with source, performedBy, tailor#, barcode), outward (destination, order#), materials. |
+| 2026-02-08 | `repackingBarcode` field on InventoryTransaction | Column G in Inward sheets contains unique barcodes (10K records, mostly Repacking source). Named `repackingBarcode` (not `barcode`) to clarify purpose. |
+| 2026-02-08 | Raw SQL batch updates for backfill | Individual Prisma updates (95K round trips to remote DB) too slow. Raw SQL `UPDATE ... FROM (VALUES ...)` does 500 rows per statement — 95K records in ~1 minute. |
 
 ---
 
 ## Current Context
 <!-- This section gets REWRITTEN each session. Ephemeral working state. -->
 
-**Active Phase**: Phase 4 (ERP Clean-Up) — Phases 1-3 complete, evidence-based fulfillment operational
-**Working On**: Documentation updates after evidence-based fulfillment implementation
+**Active Phase**: Phase 4 (ERP Clean-Up) — Phases 1-3 complete, evidence-based fulfillment operational, Ledgers page redesigned
+**Working On**: Ledgers page + sheet field backfill complete
 **Blocked By**: Nothing
 **Next Up**:
   1. Phase 4 — deprecate fulfillment UI, update dashboard metrics
   2. OR Phase 6 — Barcode Mastersheet & Fabric Ledger
   3. OR Phase 7 — Piece-Level Tracking & Returns
+
+**Session 2026-02-08 (Ledgers Redesign & Sheet Field Backfill):**
+- Redesigned Ledgers page: card-list → table layout, 3 tabs (inward/outward/materials)
+- Built `getLedgerTransactions` server function with search (7 fields), pagination, stats, filter dropdowns
+- Updated `LedgersSearchParams` schema: tab, search, reason, location, origin (sheet/app), page, limit
+- Backfilled sheet fields from Google Sheets via raw SQL batch updates (95K records in ~1 min):
+  - `source`: 83,090 records
+  - `performedBy`: 59,314 records
+  - `tailorNumber`: 8,953 records
+  - `repackingBarcode`: 9,922 records (new field — column G from Inward sheets)
+  - `destination`: 11,326 records
+- Added `repackingBarcode String?` to InventoryTransaction schema
+- Commit: `e4ea035`
 
 **Session 2026-02-08 (Evidence-Based Fulfillment):**
 - Backfilled `orderNumber` on 37,345 historical ms-outward InventoryTransactions (extracted from referenceId)
@@ -174,7 +193,6 @@ Google Sheets is the team's daily working surface for order management — it's 
 - Ran historical linking script: 237 OrderLines corrected (227 pending→shipped, 7 allocated→shipped, 3 packed→shipped), 0 remaining
 - Current data state: 88,600 shipped lines (99.87%), 117 in pipeline (110 pending, 3 allocated, 4 packed)
 - Disabled Steps 1 (Ship & Release) and 4 (Sync Line Statuses) in manual CSV sheetSyncService — they conflict with evidence-based fulfillment
-- Updated documentation: SKILL.md, SHEETS_OFFLOAD.md, this plan file
 - Commits: `92b5591` (historical linking), `647fba3` (disable manual sync steps)
 
 **Session 2026-02-07 (Phase 3 build + test):**

@@ -415,7 +415,7 @@ npx tsx server/scripts/restore-sheets.ts --backup 2026-02-07T14-30-00 --all --dr
 
 Once data is ingested into the ERP, the database itself is a backup:
 - Every ingested row has `referenceId` starting with `sheet:` and `notes` starting with `[sheet-offload]`
-- Original sheet data is preserved in the transaction fields (`source`, `destination`, `tailorNumber`, `performedBy`, `orderNumber`)
+- Original sheet data is preserved in the transaction fields (`source`, `destination`, `tailorNumber`, `performedBy`, `repackingBarcode`, `orderNumber`)
 - A restore script can read from DB and write back to sheets if needed
 
 ### Go-Live Steps (Safety-First Sequence)
@@ -488,18 +488,19 @@ Sheet row deletion (Step 6) only happens after weeks of verified stable operatio
 
 ### New Fields on InventoryTransaction
 
-The existing `InventoryTransaction` model needs **5 new optional fields** to capture metadata from sheet data that doesn't fit into the current schema:
+The existing `InventoryTransaction` model needs **6 optional fields** to capture metadata from sheet data that doesn't fit into the current schema:
 
 ```prisma
 model InventoryTransaction {
   // ... existing fields ...
 
-  // New optional fields for sheet-imported data
-  source          String?   // Original source text from sheet (e.g. "sampling", "warehouse")
-  destination     String?   // Outward destination (e.g. "for order", "sourcing", "office")
-  tailorNumber    String?   // Tailor identifier (23% of Final inward rows have this)
-  performedBy     String?   // "Done By" column from inward sheets
-  orderNumber     String?   // Shopify order# or marketplace order ID (from Mastersheet Outward)
+  // Optional fields for sheet-imported data
+  source            String?   // Original source text from sheet (e.g. "sampling", "warehouse")
+  destination       String?   // Outward destination (e.g. "for order", "sourcing", "office")
+  tailorNumber      String?   // Tailor identifier (23% of Final inward rows have this)
+  performedBy       String?   // "Done By" column from inward sheets
+  repackingBarcode  String?   // Unique barcode from col G (Repacking source inward rows)
+  orderNumber       String?   // Shopify order# or marketplace order ID (from Mastersheet Outward)
 }
 ```
 
@@ -511,9 +512,21 @@ model InventoryTransaction {
 | `destination` | Outward col E | No existing field for outward destination |
 | `tailorNumber` | Inward (Final) col H | Links to tailor entity for production tracking |
 | `performedBy` | Inward col F | Different from `createdById` (system user) — this is the actual person who did the inward |
+| `repackingBarcode` | Inward col G | Unique barcode for repacked pieces — links inward transaction to piece in Return & Exchange Pending Pieces tab |
 | `orderNumber` | Mastersheet Outward col B | Enables linking dispatch records to Shopify orders for reconciliation |
 
-**Migration:** Simple `ALTER TABLE ADD COLUMN` — all nullable, no data backfill needed. Run before enabling the offload worker.
+**Migration:** Simple `ALTER TABLE ADD COLUMN` — all nullable. Fields backfilled from sheets via `backfill-sheet-fields.ts` (raw SQL batch updates).
+
+**Backfill Results (2026-02-08):**
+
+| Field | Records populated |
+|-------|------------------|
+| `source` | 83,090 |
+| `performedBy` | 59,314 |
+| `tailorNumber` | 8,953 |
+| `repackingBarcode` | 9,922 |
+| `destination` | 11,326 |
+| `orderNumber` | 37,345 (separate backfill script) |
 
 ### Reconciliation via `orderNumber`
 
@@ -1317,6 +1330,7 @@ Link `ReturnedPiece` to existing ERP returns:
 | `analyze-returns-workflow.ts` | Diagnostic: analyze source distribution, inward status, linkages |
 | `analyze-unique-barcodes.ts` | Diagnostic: analyze piece barcode format (DDMMYY + sequence) |
 | `import-returned-pieces.ts` | Import existing pieces from sheet to ERP. `--dry-run` / `--apply` |
+| `backfill-sheet-fields.ts` | **Ledgers backfill**: Re-reads Google Sheets, updates `source`, `performedBy`, `tailorNumber`, `repackingBarcode` (inward) and `destination` (outward) on existing DB records. Raw SQL batch updates. `--write` to apply |
 | `backfill-outward-order-numbers.ts` | **Evidence-based fulfillment**: Backfill `orderNumber` on 37,345 historical ms-outward InventoryTransactions |
 | `analyze-outward-order-matching.ts` | Diagnostic: analyze outward txn order number patterns and match rates |
 | `link-historical-outward-to-orders.ts` | Link historical outward txns to OrderLines (set lineStatus=shipped). `--write` to apply |
@@ -1329,7 +1343,7 @@ Link `ReturnedPiece` to existing ERP returns:
 4. **No migration cutover needed** — the formula guarantees correctness whether data lives in Sheet, ERP, or both. Team migrates at their own pace.
 5. **Content-based referenceIds** — row indices shift on deletion; SKU+qty+date+source is stable for dedup.
 6. **Feature-flagged** — everything can be disabled instantly without code changes.
-7. **5 new optional fields** — `source`, `destination`, `tailorNumber`, `performedBy`, `orderNumber` on InventoryTransaction. All nullable, zero-impact migration. Preserves rich metadata from sheets that doesn't fit existing fields.
+7. **6 optional fields** — `source`, `destination`, `tailorNumber`, `performedBy`, `repackingBarcode`, `orderNumber` on InventoryTransaction. All nullable, zero-impact migration. Preserves rich metadata from sheets that doesn't fit existing fields.
 8. **Ingestion = reconciliation** — running the offload worker doesn't change balances, it just shifts where data lives (from SUMIF-counted to F-counted). Safe to run anytime.
 9. **Mastersheet Outward for order dispatch** — Ingest from Mastersheet "Outward" (39K individual rows with order numbers), NOT Office Ledger "Orders Outward" (3K aggregate IMPORTRANGE). Individual rows enable order-level reconciliation.
 10. **`orderNumber` enables reconciliation** — linking dispatch records to Shopify/marketplace orders lets us find gaps in both directions (orders without dispatches, dispatches without orders).
@@ -1338,6 +1352,9 @@ Link `ReturnedPiece` to existing ERP returns:
 13. **Deprecate, don't delete** — redundant ERP features are feature-flagged off, not removed. Code stays for reference and fallback. Gradual phase-out over months.
 14. **Evidence-based fulfillment** — outward InventoryTransactions from sheets ARE the shipping evidence. When an outward entry has an order number, the corresponding OrderLine is automatically set to `shipped`. No explicit Ship & Release or Line Status Sync needed — the presence of outward evidence IS the proof.
 15. **Disable conflicting manual sync steps** — sheetSyncService Steps 1 (Ship & Release) and 4 (Sync Line Statuses) create duplicate outward transactions and bypass evidence-based flow. Disabled with no-op results, preserving step indices for UI compatibility.
+16. **Raw SQL batch updates for backfill** — Individual Prisma updates (95K round trips to remote DB) take hours. Raw SQL `UPDATE ... FROM (VALUES ...)` batches 500 rows per statement — 95K records in ~1 minute.
+17. **`repackingBarcode` field naming** — Column G in Inward sheets contains unique barcodes mostly for Repacking source. Named `repackingBarcode` (not generic `barcode`) to clearly convey purpose and avoid confusion with SKU barcode (col A).
+18. **Ledgers page: server-side everything** — 134K+ records can't be client-filtered. Server function handles search (OR across 7 fields), pagination, stats aggregation, and filter option enumeration. Route loader prefetches for SSR.
 
 ---
 
@@ -1361,17 +1378,18 @@ Link `ReturnedPiece` to existing ERP returns:
 | Phase 2: Historical Ingestion | DONE | 134K+ txns ingested, 4,257 SKUs verified, 73 missing SKUs imported |
 | Phase 3, Steps 8-11 | DONE | Live tabs created, formulas switched (both Inventory + Balance Final), worker rewritten for dual-target, admin endpoints |
 | Evidence-Based Fulfillment | DONE | orderNumber backfilled on 37,345 historical txns, auto-linking in worker (Phase B2), 237 historical OrderLines corrected, manual sync Steps 1 & 4 disabled |
+| Ledgers Redesign & Sheet Field Backfill | DONE | Ledgers page rewritten (table layout, 3 tabs, server-side search/pagination), backfilled source/performedBy/tailorNumber/repackingBarcode/destination on 95K records from Google Sheets |
 
 ### Future Phases
 
 | # | Task | Status |
 |---|------|--------|
+| — | ERP clean-up: deprecate fulfillment UI, update dashboard metrics | Not started |
 | P4 | **Barcode Mastersheet & Fabric Ledger** | Not started (see Phase 4 section) |
 | P5 | **Piece-Level Tracking & Returns** | Not started (see Phase 5 section) |
 | — | Add order reconciliation to monitoring page | Not started |
 | — | Improve ERP inward UI for team adoption | Not started |
 | — | ERP outward on order dispatch | Not started |
-| — | ERP clean-up: deprecate redundant features | Not started |
 
 ---
 
@@ -1516,7 +1534,7 @@ const ENABLE_FULFILLMENT_UI = process.env.ENABLE_FULFILLMENT_UI !== 'false'; // 
 
 | Component | Status | Files |
 |-----------|--------|-------|
-| Prisma migration (5 fields) | Done | `prisma/schema.prisma`, `prisma/migrations/20260207_add_sheet_metadata_fields/` |
+| Prisma migration (6 fields) | Done | `prisma/schema.prisma`, `prisma/migrations/20260207_add_sheet_metadata_fields/` |
 | Config: Mastersheet Outward + mappings | Done | `server/src/config/sync/sheets.ts`, `server/src/config/sync/index.ts` |
 | Worker: Phase A metadata | Done | `server/src/services/sheetOffloadWorker.ts` |
 | Worker: Phase B Mastersheet Outward | Done | `server/src/services/sheetOffloadWorker.ts` |
@@ -1572,3 +1590,22 @@ const ENABLE_FULFILLMENT_UI = process.env.ENABLE_FULFILLMENT_UI !== 'false'; // 
 - **Array-based SKU lookup with FIFO consumption:** Handles duplicate SKUs in same order correctly
 - **Manual sync disabled:** sheetSyncService Steps 1 (Ship & Release) and 4 (Sync Line Statuses) were creating duplicate outward transactions and bypassing evidence-based flow
 - **Historical data:** 88,600 shipped lines (99.87%), 117 in pipeline (110 pending, 3 allocated, 4 packed), 0 lines with outward evidence but pre-ship status
+
+### Ledgers Redesign & Sheet Field Backfill — COMPLETED (2026-02-08)
+
+| Component | Status | Files |
+|-----------|--------|-------|
+| `LedgersSearchParams` schema (tab, search, reason, location, origin, page, limit) | Done | `shared/src/schemas/searchParams.ts` |
+| `getLedgerTransactions` server function (search, pagination, stats, filters) | Done | `client/src/server/functions/inventory.ts` |
+| Route loader with SSR prefetch | Done | `client/src/routes/_authenticated/ledgers.tsx` |
+| Ledgers page rewrite (3 tabs, table layout, filter bar, stats, pagination) | Done | `client/src/pages/Ledgers.tsx` |
+| Add `repackingBarcode` field to InventoryTransaction | Done | `prisma/schema.prisma` |
+| Backfill sheet fields (source, performedBy, tailorNumber, repackingBarcode, destination) | Done | `server/scripts/backfill-sheet-fields.ts` |
+| TypeScript check | Pass | Both client and server |
+
+**Key changes:**
+- **Ledgers page**: Table layout with 3 tabs (inward/outward/materials), server-side search across 7 fields, reason/location/origin filters, stats row, pagination
+- **Inward columns**: Date, SKU, Product, Color, Size, Qty, Reason, Source, Performed By, Tailor #, Barcode, Origin (Sheet/App badge)
+- **Outward columns**: Date, SKU, Product, Color, Size, Qty, Reason, Destination, Order #, Origin
+- **Backfill**: Raw SQL `UPDATE ... FROM (VALUES ...)` — 95K records in ~1 minute (vs hours with individual Prisma updates)
+- **Field coverage**: source=83,090 | performedBy=59,314 | tailorNumber=8,953 | repackingBarcode=9,922 | destination=11,326
