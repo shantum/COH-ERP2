@@ -501,21 +501,6 @@ export const OUTWARD_DESTINATION_MAP: Record<string, TxnReason> = {
 export const DEFAULT_OUTWARD_REASON: TxnReason = 'sale';
 
 // ============================================
-// SHOPIFY CHANNEL MAPPING (for sheet order push)
-// ============================================
-
-/**
- * Maps Shopify source_name to display channel for "Orders from COH" sheet.
- */
-export const SHOPIFY_CHANNEL_MAP: Record<string, string> = {
-    web: 'COH Website',
-    shopify_draft_order: 'COH Website',
-    pos: 'POS',
-};
-
-export const DEFAULT_CHANNEL = 'COH Website';
-
-// ============================================
 // TIMING
 // ============================================
 

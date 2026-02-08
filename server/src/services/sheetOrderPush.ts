@@ -14,8 +14,6 @@ import { appendRows } from './googleSheetsClient.js';
 import {
     ORDERS_MASTERSHEET_ID,
     MASTERSHEET_TABS,
-    SHOPIFY_CHANNEL_MAP,
-    DEFAULT_CHANNEL,
 } from '../config/sync/sheets.js';
 
 const log = sheetsLogger.child({ service: 'sheetOrderPush' });
@@ -51,21 +49,20 @@ interface ShopifyOrder {
 // HELPERS
 // ============================================
 
-/** Format ISO date string as DD/MM/YYYY for Indian ops team */
+/** Format ISO date string as YYYY-MM-DD HH:MM:SS in IST */
 function formatDate(isoDate: string | null | undefined): string {
     if (!isoDate) return '';
     const d = new Date(isoDate);
     if (isNaN(d.getTime())) return '';
-    const dd = String(d.getDate()).padStart(2, '0');
-    const mm = String(d.getMonth() + 1).padStart(2, '0');
-    const yyyy = d.getFullYear();
-    return `${dd}/${mm}/${yyyy}`;
-}
-
-/** Map Shopify source_name to display channel */
-function resolveChannel(sourceName: string | null | undefined): string {
-    if (!sourceName) return DEFAULT_CHANNEL;
-    return SHOPIFY_CHANNEL_MAP[sourceName] ?? DEFAULT_CHANNEL;
+    // Format in IST (Asia/Kolkata)
+    const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Kolkata',
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit',
+        hour12: false,
+    }).formatToParts(d);
+    const p = (type: string) => parts.find(x => x.type === type)?.value ?? '';
+    return `${p('year')}-${p('month')}-${p('day')} ${p('hour')}:${p('minute')}:${p('second')}`;
 }
 
 // Total columns in "Orders from COH" tab (A through AD = 30 columns)
@@ -99,7 +96,7 @@ export async function pushNewOrderToSheet(
     const customerName = [addr?.first_name, addr?.last_name].filter(Boolean).join(' ');
     const city = addr?.city ?? '';
     const phone = addr?.phone ?? '';
-    const channel = resolveChannel(shopifyOrder.source_name);
+    const channel = shopifyOrder.source_name ?? '';
     const orderNote = shopifyOrder.note ?? '';
 
     // Build one row per line item
