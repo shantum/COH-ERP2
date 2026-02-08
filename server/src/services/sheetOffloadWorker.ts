@@ -64,6 +64,7 @@ interface OffloadResult {
     startedAt: string;
     inwardIngested: number;
     outwardIngested: number;
+    ordersLinked: number;
     rowsDeleted: number;
     skusUpdated: number;
     skipped: number;
@@ -101,8 +102,20 @@ interface ParsedRow {
     source: string;         // inward: source, outward: destination
     extra: string;          // inward: doneBy, outward: orderNumber
     tailor: string;         // inward only
+    courier: string;        // outward only — from sheet col J
+    awb: string;            // outward only — from sheet col K
     referenceId: string;
     notes: string;
+}
+
+/** An outward item that has an orderNumber and can be linked to an OrderLine. */
+interface LinkableOutward {
+    orderNumber: string;
+    skuId: string;
+    qty: number;
+    date: Date | null;
+    courier: string;
+    awb: string;
 }
 
 // ============================================
@@ -293,6 +306,8 @@ async function ingestInwardLive(result: OffloadResult): Promise<Set<string>> {
             source,
             extra: doneBy,
             tailor,
+            courier: '',
+            awb: '',
             referenceId: refId,
             notes: `${OFFLOAD_NOTES_PREFIX} ${tab}`,
         });
@@ -383,9 +398,12 @@ async function ingestInwardLive(result: OffloadResult): Promise<Set<string>> {
 // PHASE B: INGEST OUTWARD (LIVE)
 // ============================================
 
-async function ingestOutwardLive(result: OffloadResult): Promise<Set<string>> {
+async function ingestOutwardLive(
+    result: OffloadResult
+): Promise<{ affectedSkuIds: Set<string>; linkableItems: LinkableOutward[] }> {
     const tab = LIVE_TABS.OUTWARD;
     const affectedSkuIds = new Set<string>();
+    const linkableItems: LinkableOutward[] = [];
 
     sheetsLogger.info({ tab }, 'Reading outward live tab');
 
@@ -393,7 +411,7 @@ async function ingestOutwardLive(result: OffloadResult): Promise<Set<string>> {
     result.sheetRowCounts[tab] = rows.length > 1 ? rows.length - 1 : 0;
     if (rows.length <= 1) {
         sheetsLogger.info({ tab }, 'No data rows');
-        return affectedSkuIds;
+        return { affectedSkuIds, linkableItems };
     }
 
     const parsed: ParsedRow[] = [];
@@ -406,6 +424,8 @@ async function ingestOutwardLive(result: OffloadResult): Promise<Set<string>> {
         const dateStr = String(row[OUTWARD_LIVE_COLS.DATE] ?? '');
         const dest = String(row[OUTWARD_LIVE_COLS.DESTINATION] ?? '').trim();
         const orderNo = String(row[OUTWARD_LIVE_COLS.ORDER_NO] ?? '').trim();
+        const courier = String(row[OUTWARD_LIVE_COLS.COURIER] ?? '').trim();
+        const awb = String(row[OUTWARD_LIVE_COLS.AWB] ?? '').trim();
 
         if (!skuCode || qty === 0) continue;
 
@@ -425,6 +445,8 @@ async function ingestOutwardLive(result: OffloadResult): Promise<Set<string>> {
             source: dest,
             extra: orderNo,
             tailor: '',
+            courier,
+            awb,
             referenceId: refId,
             notes: `${OFFLOAD_NOTES_PREFIX} ${tab}`,
         });
@@ -432,7 +454,7 @@ async function ingestOutwardLive(result: OffloadResult): Promise<Set<string>> {
 
     if (parsed.length === 0) {
         sheetsLogger.info({ tab }, 'No valid rows to ingest');
-        return affectedSkuIds;
+        return { affectedSkuIds, linkableItems };
     }
 
     const existingRefs = await findExistingReferenceIds(parsed.map(r => r.referenceId));
@@ -443,7 +465,7 @@ async function ingestOutwardLive(result: OffloadResult): Promise<Set<string>> {
         if (ENABLE_SHEET_DELETION) {
             await deleteIngestedRows(ORDERS_MASTERSHEET_ID, tab, parsed.map(r => r.rowIndex), result);
         }
-        return affectedSkuIds;
+        return { affectedSkuIds, linkableItems };
     }
 
     const skuMap = await bulkLookupSkus(newRows.map(r => r.skuCode));
@@ -492,6 +514,18 @@ async function ingestOutwardLive(result: OffloadResult): Promise<Set<string>> {
 
             affectedSkuIds.add(skuId);
             ingestedRowIndices.push(row.rowIndex);
+
+            // Collect linkable items for order-line matching
+            if (row.extra) {
+                linkableItems.push({
+                    orderNumber: row.extra,
+                    skuId,
+                    qty: row.qty,
+                    date: row.date,
+                    courier: row.courier,
+                    awb: row.awb,
+                });
+            }
         }
 
         if (txnData.length > 0) {
@@ -507,7 +541,143 @@ async function ingestOutwardLive(result: OffloadResult): Promise<Set<string>> {
         await deleteIngestedRows(ORDERS_MASTERSHEET_ID, tab, parsed.map(r => r.rowIndex), result);
     }
 
-    return affectedSkuIds;
+    return { affectedSkuIds, linkableItems };
+}
+
+// ============================================
+// PHASE B2: LINK OUTWARD TO ORDER LINES
+// ============================================
+
+/** Statuses that should be updated to 'shipped' when outward evidence is found. */
+const LINKABLE_STATUSES = ['pending', 'allocated', 'picked', 'packed'];
+
+/**
+ * Link newly ingested outward transactions to their OrderLines.
+ *
+ * For each outward item with an orderNumber:
+ * 1. Look up the Order by orderNumber
+ * 2. Find the matching OrderLine by skuId
+ * 3. Update lineStatus to 'shipped', set shippedAt, awbNumber, courier
+ *
+ * Non-destructive: only updates lines in pre-ship statuses.
+ * Failures are logged but don't abort the sync.
+ */
+async function linkOutwardToOrders(
+    items: LinkableOutward[],
+    result: OffloadResult
+): Promise<void> {
+    if (items.length === 0) return;
+
+    // Group by orderNumber for batch lookup
+    const byOrder = new Map<string, LinkableOutward[]>();
+    for (const item of items) {
+        const existing = byOrder.get(item.orderNumber);
+        if (existing) {
+            existing.push(item);
+        } else {
+            byOrder.set(item.orderNumber, [item]);
+        }
+    }
+
+    const orderNumbers = [...byOrder.keys()];
+    sheetsLogger.info({ uniqueOrders: orderNumbers.length, totalItems: items.length }, 'Linking outward to orders');
+
+    // Batch-query orders by orderNumber
+    const orders = await prisma.order.findMany({
+        where: { orderNumber: { in: orderNumbers } },
+        select: {
+            id: true,
+            orderNumber: true,
+            orderLines: {
+                select: {
+                    id: true,
+                    skuId: true,
+                    qty: true,
+                    lineStatus: true,
+                },
+            },
+        },
+    });
+
+    const orderMap = new Map(orders.map(o => [o.orderNumber, o]));
+
+    let linked = 0;
+    let skippedAlreadyShipped = 0;
+    let skippedNoOrder = 0;
+    let skippedNoLine = 0;
+
+    // Collect all updates, then batch-apply
+    const updates: Array<{ lineId: string; data: Record<string, unknown> }> = [];
+
+    for (const [orderNumber, outwardItems] of byOrder) {
+        const order = orderMap.get(orderNumber);
+        if (!order) {
+            skippedNoOrder += outwardItems.length;
+            continue;
+        }
+
+        // Build SKU → OrderLine[] lookup (supports multiple lines with same SKU)
+        const linesBySkuId = new Map<string, Array<typeof order.orderLines[0]>>();
+        for (const line of order.orderLines) {
+            const existing = linesBySkuId.get(line.skuId);
+            if (existing) {
+                existing.push(line);
+            } else {
+                linesBySkuId.set(line.skuId, [line]);
+            }
+        }
+
+        for (const item of outwardItems) {
+            const lines = linesBySkuId.get(item.skuId);
+            if (!lines || lines.length === 0) {
+                skippedNoLine++;
+                continue;
+            }
+
+            // Pick the first line in a linkable status
+            const line = lines.find(l => LINKABLE_STATUSES.includes(l.lineStatus));
+            if (!line) {
+                skippedAlreadyShipped++;
+                continue;
+            }
+
+            const updateData: Record<string, unknown> = {
+                lineStatus: 'shipped',
+                shippedAt: item.date ?? new Date(),
+            };
+            if (item.courier) updateData.courier = item.courier;
+            if (item.awb) updateData.awbNumber = item.awb;
+
+            updates.push({ lineId: line.id, data: updateData });
+
+            // Mark this line as consumed so the next outward item for the same SKU
+            // picks a different line (mutate status in memory to exclude from future finds)
+            line.lineStatus = 'shipped';
+        }
+    }
+
+    // Batch-apply all updates in a transaction
+    if (updates.length > 0) {
+        try {
+            await prisma.$transaction(
+                updates.map(u => prisma.orderLine.update({ where: { id: u.lineId }, data: u.data }))
+            );
+            linked = updates.length;
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : 'Unknown error';
+            sheetsLogger.error({ error: message, count: updates.length }, 'Batch order linking failed');
+            result.errors += updates.length;
+        }
+    }
+
+    result.ordersLinked = linked;
+
+    sheetsLogger.info({
+        linked,
+        skippedAlreadyShipped,
+        skippedNoOrder,
+        skippedNoLine,
+    }, 'Order linking complete');
 }
 
 // ============================================
@@ -694,6 +864,7 @@ async function runOffloadSync(): Promise<OffloadResult | null> {
         startedAt: new Date().toISOString(),
         inwardIngested: 0,
         outwardIngested: 0,
+        ordersLinked: 0,
         rowsDeleted: 0,
         skusUpdated: 0,
         skipped: 0,
@@ -710,8 +881,13 @@ async function runOffloadSync(): Promise<OffloadResult | null> {
         // Phase A: Ingest Inward (Live)
         const inwardSkuIds = await ingestInwardLive(result);
 
-        // Phase B: Ingest Outward (Live)
-        const outwardSkuIds = await ingestOutwardLive(result);
+        // Phase B: Ingest Outward (Live) + collect linkable items
+        const { affectedSkuIds: outwardSkuIds, linkableItems } = await ingestOutwardLive(result);
+
+        // Phase B2: Link outward to OrderLines (mark as shipped)
+        if (linkableItems.length > 0) {
+            await linkOutwardToOrders(linkableItems, result);
+        }
 
         // Phase C: Update sheet balances (Inventory col R + Balance (Final) col F)
         const allAffectedSkuIds = new Set([...inwardSkuIds, ...outwardSkuIds]);
@@ -731,6 +907,7 @@ async function runOffloadSync(): Promise<OffloadResult | null> {
             durationMs: result.durationMs,
             inwardIngested: result.inwardIngested,
             outwardIngested: result.outwardIngested,
+            ordersLinked: result.ordersLinked,
             rowsDeleted: result.rowsDeleted,
             skusUpdated: result.skusUpdated,
             skipped: result.skipped,

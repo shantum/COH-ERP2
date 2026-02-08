@@ -30,6 +30,7 @@ interface OffloadLastResult {
     startedAt?: string;
     inwardIngested?: number;
     outwardIngested?: number;
+    ordersLinked?: number;
     rowsDeleted?: number;
     skusUpdated?: number;
     skipped?: number;
@@ -369,6 +370,7 @@ export default function SheetsMonitor() {
                             <div className="grid grid-cols-3 gap-2">
                                 <SmallMetric label="Inward" value={lastResult.inwardIngested ?? 0} />
                                 <SmallMetric label="Outward" value={lastResult.outwardIngested ?? 0} />
+                                <SmallMetric label="Orders Linked" value={lastResult.ordersLinked ?? 0} />
                                 <SmallMetric label="Deleted" value={lastResult.rowsDeleted ?? 0} />
                                 <SmallMetric label="SKUs Updated" value={lastResult.skusUpdated ?? 0} />
                                 <SmallMetric label="Skipped" value={lastResult.skipped ?? 0} />
