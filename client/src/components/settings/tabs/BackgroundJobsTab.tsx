@@ -50,7 +50,7 @@ export function BackgroundJobsTab() {
         mutationFn: async (jobId: string) => {
             // Cast jobId to the expected enum type
             const result = await startBackgroundJobFn({
-                data: { jobId: jobId as 'shopify_sync' | 'tracking_sync' | 'cache_cleanup' },
+                data: { jobId: jobId as 'shopify_sync' | 'tracking_sync' | 'cache_cleanup' | 'sheet_offload' | 'shipped_to_outward' },
             });
             if (!result.success) throw new Error(result.error?.message);
             return result.data;

@@ -96,11 +96,11 @@ const getServerLogsSchema = z.object({
 
 // Background Jobs
 const startBackgroundJobSchema = z.object({
-    jobId: z.enum(['shopify_sync', 'tracking_sync', 'cache_cleanup', 'sheet_offload']),
+    jobId: z.enum(['shopify_sync', 'tracking_sync', 'cache_cleanup', 'sheet_offload', 'shipped_to_outward']),
 });
 
 const cancelBackgroundJobSchema = z.object({
-    jobId: z.enum(['shopify_sync', 'tracking_sync', 'cache_cleanup', 'sheet_offload']),
+    jobId: z.enum(['shopify_sync', 'tracking_sync', 'cache_cleanup', 'sheet_offload', 'shipped_to_outward']),
 });
 
 const updateBackgroundJobSchema = z.object({
@@ -1011,12 +1011,14 @@ export const getBackgroundJobs = createServerFn({ method: 'GET' })
         }
 
         // Call the Express backend API for background jobs
-        const baseUrl = process.env.VITE_API_URL || 'http://localhost:3001';
+        const baseUrl = getApiBaseUrl();
+        const authToken = getCookie('auth_token');
 
         try {
             const response = await fetch(`${baseUrl}/api/admin/background-jobs`, {
                 headers: {
                     'Content-Type': 'application/json',
+                    ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
                 },
             });
 
@@ -1058,13 +1060,15 @@ export const startBackgroundJob = createServerFn({ method: 'POST' })
         const { jobId } = data;
 
         // Call the Express backend API to trigger the job
-        const baseUrl = process.env.VITE_API_URL || 'http://localhost:3001';
+        const baseUrl = getApiBaseUrl();
+        const authToken = getCookie('auth_token');
 
         try {
             const response = await fetch(`${baseUrl}/api/admin/background-jobs/${jobId}/trigger`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
+                    ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
                 },
             });
 
@@ -1155,13 +1159,15 @@ export const updateBackgroundJob = createServerFn({ method: 'POST' })
         const { jobId, enabled } = data;
 
         // Call the Express backend API to update job settings
-        const baseUrl = process.env.VITE_API_URL || 'http://localhost:3001';
+        const baseUrl = getApiBaseUrl();
+        const authToken = getCookie('auth_token');
 
         try {
             const response = await fetch(`${baseUrl}/api/admin/background-jobs/${jobId}`, {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',
+                    ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
                 },
                 body: JSON.stringify({ enabled }),
             });
