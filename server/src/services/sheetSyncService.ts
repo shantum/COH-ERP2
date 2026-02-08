@@ -10,14 +10,12 @@ import type { PrismaClient } from '@prisma/client';
 import { parseAllCsvsFromStrings } from '../scripts/lib/csvParser.js';
 import type { ParsedData } from '../scripts/lib/csvParser.js';
 import {
-    planShipAndRelease,
-    executeShipAndRelease,
+    // planShipAndRelease, executeShipAndRelease — disabled (evidence-based fulfillment)
     planCreateOrders,
     executeCreateOrders,
     planSyncNotes,
     executeSyncNotes,
-    planLineStatusSync,
-    executeLineStatusSync,
+    // planLineStatusSync, executeLineStatusSync — disabled (evidence-based fulfillment)
     planProductionBatchSync,
     executeProductionBatchSync,
     type ShipAndReleaseReport,
@@ -160,13 +158,15 @@ export async function planSync(
         // Step 1: Parse CSVs
         const parsedData = parseAllCsvsFromStrings(ordersCsv, inventoryCsv);
 
-        // Run all plan functions
-        const [shipReport, createReport, notesReport, statusReport, batchReport, inventoryReport] =
+        // Run plan functions (Ship & Release and Line Status Sync are disabled —
+        // fulfillment is now evidence-based via sheet outward transactions)
+        const shipReport: ShipAndReleaseReport = { ordersToRelease: [] };
+        const statusReport: LineStatusSyncReport = { transitions: [], awbUpdates: [], skipped: [] };
+
+        const [createReport, notesReport, batchReport, inventoryReport] =
             await Promise.all([
-                planShipAndRelease(prisma, parsedData.orderNumberSet),
                 planCreateOrders(prisma, parsedData.ordersByNumber),
                 planSyncNotes(prisma, parsedData.ordersByNumber),
-                planLineStatusSync(prisma, parsedData.ordersByNumber),
                 planProductionBatchSync(prisma, parsedData.ordersByNumber),
                 planInventoryReconcile(prisma, parsedData.inventoryBySkuCode),
             ]);
@@ -193,12 +193,8 @@ export async function planSync(
                 {
                     stepIndex: 0,
                     stepName: 'Ship & Release',
-                    summary: `${shipReport.ordersToRelease.length} orders to release (${shipReport.ordersToRelease.filter(o => !o.allCancelled).length} to ship)`,
-                    details: {
-                        ordersToRelease: shipReport.ordersToRelease.length,
-                        toShip: shipReport.ordersToRelease.filter(o => !o.allCancelled).length,
-                        allCancelled: shipReport.ordersToRelease.filter(o => o.allCancelled).length,
-                    },
+                    summary: 'Disabled — fulfillment is now evidence-based via sheet outward transactions',
+                    details: { disabled: true },
                 },
                 {
                     stepIndex: 1,
@@ -220,12 +216,8 @@ export async function planSync(
                 {
                     stepIndex: 3,
                     stepName: 'Sync Line Statuses',
-                    summary: `${statusReport.transitions.length} transitions, ${statusReport.awbUpdates.length} AWB updates, ${statusReport.skipped.length} skipped`,
-                    details: {
-                        transitions: statusReport.transitions.length,
-                        awbUpdates: statusReport.awbUpdates.length,
-                        skipped: statusReport.skipped.length,
-                    },
+                    summary: 'Disabled — fulfillment is now evidence-based via sheet outward transactions',
+                    details: { disabled: true },
                 },
                 {
                     stepIndex: 4,
@@ -297,12 +289,9 @@ async function runSteps(
     const userId = job.userId;
 
     const steps: Array<() => Promise<string>> = [
-        // Step 0: Ship & Release
+        // Step 0: Ship & Release (DISABLED — evidence-based fulfillment)
         async () => {
-            if (shipReport.ordersToRelease.length === 0) return 'Nothing to do';
-            const r = await executeShipAndRelease(prisma, shipReport, userId);
-            if (r.errors.length > 0) job.stepResults[0].errors = r.errors;
-            return `${r.shipped} shipped, ${r.released} released`;
+            return 'Skipped — fulfillment is now evidence-based';
         },
         // Step 1: Create Orders
         async () => {
@@ -318,12 +307,9 @@ async function runSteps(
             if (r.errors.length > 0) job.stepResults[2].errors = r.errors;
             return `${r.updated} orders updated`;
         },
-        // Step 3: Sync Line Statuses
+        // Step 3: Sync Line Statuses (DISABLED — evidence-based fulfillment)
         async () => {
-            if (statusReport.transitions.length === 0 && statusReport.awbUpdates.length === 0) return 'Nothing to do';
-            const r = await executeLineStatusSync(prisma, statusReport, userId);
-            if (r.errors.length > 0) job.stepResults[3].errors = r.errors;
-            return `${r.transitioned} transitions, ${r.awbUpdated} AWB updates`;
+            return 'Skipped — fulfillment is now evidence-based';
         },
         // Step 4: Production Batches
         async () => {
