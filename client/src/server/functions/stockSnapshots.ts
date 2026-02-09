@@ -5,7 +5,8 @@
  * with reason breakdowns per SKU or rolled up by product.
  *
  * IMPORTANT: All DB imports are dynamic to prevent Node.js code
- * from being bundled into the client.
+ * from being bundled into the client. Uses getKysely()/getPrisma()
+ * from @coh/shared — NOT direct server imports.
  */
 
 import { createServerFn } from '@tanstack/react-start';
@@ -94,17 +95,123 @@ export interface SkuTrendPoint {
 // HELPERS
 // ============================================
 
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+
 function isCurrentMonth(year: number, month: number): boolean {
-    const now = new Date();
-    // Use IST-aware check: shift by 5.5 hours
-    const istNow = new Date(now.getTime() + 5.5 * 60 * 60 * 1000);
+    const istNow = new Date(Date.now() + IST_OFFSET_MS);
     return istNow.getUTCFullYear() === year && istNow.getUTCMonth() + 1 === month;
+}
+
+function monthBoundariesIST(year: number, month: number): { start: Date; end: Date } {
+    return {
+        start: new Date(Date.UTC(year, month - 1, 1) - IST_OFFSET_MS),
+        end: new Date(Date.UTC(year, month, 1) - IST_OFFSET_MS),
+    };
 }
 
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 function monthLabel(year: number, month: number): string {
     return `${MONTH_NAMES[month - 1]} ${year}`;
+}
+
+// ============================================
+// LIVE COMPUTATION (inline — no server import)
+// ============================================
+
+interface RawSnapshotRow {
+    skuId: string;
+    openingStock: number;
+    totalInward: number;
+    totalOutward: number;
+    closingStock: number;
+    inwardBreakdown: Record<string, number>;
+    outwardBreakdown: Record<string, number>;
+}
+
+/**
+ * Compute current month's snapshot on the fly using getKysely()
+ * This runs inside server functions — safe for production builds.
+ */
+async function computeLive(year: number, month: number): Promise<RawSnapshotRow[]> {
+    const { getKysely } = await import('@coh/shared/services/db');
+    const db = await getKysely();
+    const { sql } = await import('kysely');
+    const prisma = await getPrisma();
+
+    const { start, end } = monthBoundariesIST(year, month);
+
+    // 1. Aggregate transactions for this month
+    const txnRows = await db
+        .selectFrom('InventoryTransaction')
+        .select([
+            'InventoryTransaction.skuId',
+            'InventoryTransaction.txnType',
+            'InventoryTransaction.reason',
+            sql<number>`COALESCE(SUM("InventoryTransaction"."qty"), 0)::int`.as('totalQty'),
+        ])
+        .where('InventoryTransaction.createdAt', '>=', start)
+        .where('InventoryTransaction.createdAt', '<', end)
+        .groupBy([
+            'InventoryTransaction.skuId',
+            'InventoryTransaction.txnType',
+            'InventoryTransaction.reason',
+        ])
+        .execute();
+
+    // Build aggregation map
+    const aggMap = new Map<string, { totalInward: number; totalOutward: number; inwardBreakdown: Record<string, number>; outwardBreakdown: Record<string, number> }>();
+    for (const row of txnRows) {
+        let agg = aggMap.get(row.skuId);
+        if (!agg) {
+            agg = { totalInward: 0, totalOutward: 0, inwardBreakdown: {}, outwardBreakdown: {} };
+            aggMap.set(row.skuId, agg);
+        }
+        const qty = Number(row.totalQty);
+        const reason = row.reason ?? 'unknown';
+        if (row.txnType === 'inward') {
+            agg.totalInward += qty;
+            agg.inwardBreakdown[reason] = (agg.inwardBreakdown[reason] ?? 0) + qty;
+        } else if (row.txnType === 'outward') {
+            agg.totalOutward += qty;
+            agg.outwardBreakdown[reason] = (agg.outwardBreakdown[reason] ?? 0) + qty;
+        }
+    }
+
+    // 2. Get opening stocks from previous month's snapshots
+    const prevMonth = month === 1 ? 12 : month - 1;
+    const prevYear = month === 1 ? year - 1 : year;
+    const prevMonthDate = new Date(Date.UTC(prevYear, prevMonth - 1, 1));
+
+    const prevSnapshots = await prisma.monthlyStockSnapshot.findMany({
+        where: { month: prevMonthDate },
+        select: { skuId: true, closingStock: true },
+    });
+    const openingMap = new Map(prevSnapshots.map(s => [s.skuId, s.closingStock]));
+
+    // 3. Merge
+    const allSkuIds = new Set([...openingMap.keys(), ...aggMap.keys()]);
+    const rows: RawSnapshotRow[] = [];
+
+    for (const skuId of allSkuIds) {
+        const opening = openingMap.get(skuId) ?? 0;
+        const agg = aggMap.get(skuId);
+        const totalInward = agg?.totalInward ?? 0;
+        const totalOutward = agg?.totalOutward ?? 0;
+        const closing = opening + totalInward - totalOutward;
+        if (opening === 0 && totalInward === 0 && totalOutward === 0) continue;
+        rows.push({
+            skuId,
+            openingStock: opening,
+            totalInward,
+            totalOutward,
+            closingStock: closing,
+            inwardBreakdown: agg?.inwardBreakdown ?? {},
+            outwardBreakdown: agg?.outwardBreakdown ?? {},
+        });
+    }
+
+    return rows;
 }
 
 // ============================================
@@ -127,20 +234,10 @@ export const getMonthlySnapshot = createServerFn({ method: 'POST' })
         const prisma = await getPrisma();
         const isLive = isCurrentMonth(year, month);
 
-        let rawRows: Array<{
-            skuId: string;
-            openingStock: number;
-            totalInward: number;
-            totalOutward: number;
-            closingStock: number;
-            inwardBreakdown: Record<string, number>;
-            outwardBreakdown: Record<string, number>;
-        }>;
+        let rawRows: RawSnapshotRow[];
 
         if (isLive) {
-            // Dynamic import to avoid bundling server code in client
-            const { computeCurrentMonthLive } = await import('../../../../server/src/services/stockSnapshotCompute.js');
-            rawRows = await computeCurrentMonthLive();
+            rawRows = await computeLive(year, month);
         } else {
             const monthDate = new Date(Date.UTC(year, month - 1, 1));
             const snapshots = await prisma.monthlyStockSnapshot.findMany({
@@ -235,7 +332,6 @@ export const getMonthlySnapshot = createServerFn({ method: 'POST' })
                     existing.totalInward += row.totalInward;
                     existing.totalOutward += row.totalOutward;
                     existing.closingStock += row.closingStock;
-                    // Merge breakdowns
                     for (const [k, v] of Object.entries(row.inwardBreakdown)) {
                         existing.inwardBreakdown[k] = (existing.inwardBreakdown[k] ?? 0) + v;
                     }
@@ -245,8 +341,8 @@ export const getMonthlySnapshot = createServerFn({ method: 'POST' })
                 } else {
                     productMap.set(extRow._productId, {
                         ...row,
-                        size: 'All', // Rolled up
-                        skuCode: row.productName, // Use product name as primary identifier
+                        size: 'All',
+                        skuCode: row.productName,
                         inwardBreakdown: { ...row.inwardBreakdown },
                         outwardBreakdown: { ...row.outwardBreakdown },
                         _category: extRow._category,
@@ -263,7 +359,6 @@ export const getMonthlySnapshot = createServerFn({ method: 'POST' })
         const total = enriched.length;
         const offset = (page - 1) * limit;
         const items = enriched.slice(offset, offset + limit).map(r => {
-            // Strip internal fields
             const { _category, _productId, ...clean } = r as SnapshotRow & { _category?: string | null; _productId?: string };
             return clean;
         });
@@ -285,23 +380,16 @@ export const getSnapshotSummary = createServerFn({ method: 'POST' })
         const prisma = await getPrisma();
         const isLive = isCurrentMonth(year, month);
 
-        let rows: Array<{
-            openingStock: number;
-            totalInward: number;
-            totalOutward: number;
-            closingStock: number;
-            inwardBreakdown: Record<string, number>;
-            outwardBreakdown: Record<string, number>;
-        }>;
+        let rows: RawSnapshotRow[];
 
         if (isLive) {
-            const { computeCurrentMonthLive } = await import('../../../../server/src/services/stockSnapshotCompute.js');
-            rows = await computeCurrentMonthLive();
+            rows = await computeLive(year, month);
         } else {
             const monthDate = new Date(Date.UTC(year, month - 1, 1));
             const snapshots = await prisma.monthlyStockSnapshot.findMany({
                 where: { month: monthDate },
                 select: {
+                    skuId: true,
                     openingStock: true,
                     totalInward: true,
                     totalOutward: true,
@@ -358,7 +446,6 @@ export const getAvailableMonths = createServerFn({ method: 'GET' })
     .handler(async (): Promise<AvailableMonth[]> => {
         const prisma = await getPrisma();
 
-        // Get distinct months from snapshots
         const snapshots = await prisma.monthlyStockSnapshot.findMany({
             distinct: ['month'],
             select: { month: true },
@@ -372,9 +459,7 @@ export const getAvailableMonths = createServerFn({ method: 'GET' })
             return { year: y, month: m, label: monthLabel(y, m) };
         });
 
-        // Always include current month
-        const now = new Date();
-        const istNow = new Date(now.getTime() + 5.5 * 60 * 60 * 1000);
+        const istNow = new Date(Date.now() + IST_OFFSET_MS);
         const curYear = istNow.getUTCFullYear();
         const curMonth = istNow.getUTCMonth() + 1;
 
