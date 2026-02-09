@@ -1,14 +1,17 @@
 import { useState } from 'react';
 import { ChevronRight, ChevronDown } from 'lucide-react';
 
+/** Recursive JSON value type */
+type JsonValue = string | number | boolean | null | undefined | JsonValue[] | { [key: string]: JsonValue };
+
 interface JsonViewerProps {
-    data: any;
+    data: JsonValue;
     rootName?: string;
 }
 
 interface JsonNodeProps {
     name: string;
-    value: any;
+    value: JsonValue;
     depth: number;
     initialExpanded?: boolean;
 }

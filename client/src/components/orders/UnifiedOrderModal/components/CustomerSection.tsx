@@ -9,6 +9,7 @@ import { User, Mail, Phone, MapPin, Search, ChevronDown, ChevronUp, CreditCard, 
 import { getCustomer } from '../../../../server/functions/customers';
 import { CustomerSearch } from '../../../common/CustomerSearch';
 import type { Order } from '../../../../types';
+import type { Customer } from '../../../common/CustomerSearch';
 import type { ModalMode, AddressData, EditFormState, OrderWithShopifyDetails } from '../types';
 import { cn } from '@/lib/utils';
 
@@ -68,7 +69,7 @@ export function CustomerSection({
     rtoCount: customerData.rtoCount || 0,
   } : null;
 
-  const handleSelectCustomer = (customer: any) => {
+  const handleSelectCustomer = (customer: Customer) => {
     const firstName = customer.firstName || '';
     const lastName = customer.lastName || '';
     const displayName = firstName || lastName ? `${firstName} ${lastName}`.trim() : customer.email?.split('@')[0] || '';

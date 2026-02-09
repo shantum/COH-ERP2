@@ -16,7 +16,7 @@
  */
 
 import { useState, useEffect } from 'react';
-import { useForm, Controller } from 'react-hook-form';
+import { useForm, Controller, type Control, type FieldErrors, type UseFormSetValue } from 'react-hook-form';
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { X, Box, Layers, Palette, Loader2, AlertCircle } from 'lucide-react';
@@ -432,16 +432,16 @@ export function UnifiedMaterialModal({
                         <div className="px-6 py-4 max-h-[60vh] overflow-y-auto">
                             {type === 'material' && (
                                 <MaterialForm
-                                    control={control}
-                                    errors={errors}
+                                    control={control as unknown as Control<MaterialFormData>}
+                                    errors={errors as unknown as FieldErrors<MaterialFormData>}
                                     activeTab={activeTab}
                                     mode={mode}
                                 />
                             )}
                             {type === 'fabric' && (
                                 <FabricForm
-                                    control={control}
-                                    errors={errors}
+                                    control={control as unknown as Control<FabricFormData>}
+                                    errors={errors as unknown as FieldErrors<FabricFormData>}
                                     activeTab={activeTab}
                                     mode={mode}
                                     suppliers={suppliers}
@@ -450,8 +450,8 @@ export function UnifiedMaterialModal({
                             )}
                             {type === 'colour' && (
                                 <ColourForm
-                                    control={control}
-                                    errors={errors}
+                                    control={control as unknown as Control<ColourFormData>}
+                                    errors={errors as unknown as FieldErrors<ColourFormData>}
                                     activeTab={activeTab}
                                     mode={mode}
                                     suppliers={suppliers}
@@ -459,7 +459,7 @@ export function UnifiedMaterialModal({
                                     useInheritedCost={useInheritedCost as boolean}
                                     useInheritedLeadTime={useInheritedLeadTime as boolean}
                                     useInheritedMinOrder={useInheritedMinOrder as boolean}
-                                    setValue={setValue}
+                                    setValue={setValue as unknown as UseFormSetValue<ColourFormData>}
                                 />
                             )}
                         </div>
@@ -569,8 +569,8 @@ function MaterialForm({
     activeTab,
     mode,
 }: {
-    control: any;
-    errors: any;
+    control: Control<MaterialFormData>;
+    errors: FieldErrors<MaterialFormData>;
     activeTab: TabId;
     mode: 'add' | 'edit';
 }) {
@@ -648,8 +648,8 @@ function FabricForm({
     suppliers,
     constructionType,
 }: {
-    control: any;
-    errors: any;
+    control: Control<FabricFormData>;
+    errors: FieldErrors<FabricFormData>;
     activeTab: TabId;
     mode: 'add' | 'edit';
     suppliers: Array<{ id: string; name: string }>;
@@ -946,8 +946,8 @@ function ColourForm({
     useInheritedMinOrder,
     setValue,
 }: {
-    control: any;
-    errors: any;
+    control: Control<ColourFormData>;
+    errors: FieldErrors<ColourFormData>;
     activeTab: TabId;
     mode: 'add' | 'edit';
     suppliers: Array<{ id: string; name: string }>;
@@ -955,7 +955,7 @@ function ColourForm({
     useInheritedCost: boolean;
     useInheritedLeadTime: boolean;
     useInheritedMinOrder: boolean;
-    setValue: any;
+    setValue: UseFormSetValue<ColourFormData>;
 }) {
     // Get the quantity unit from parent fabric: knit=kg, woven=m
     const qtyUnit = parentNode?.unit || (parentNode?.constructionType === 'knit' ? 'kg' : 'm');

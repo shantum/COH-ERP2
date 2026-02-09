@@ -18,6 +18,7 @@ import {
   XCircle, Printer
 } from 'lucide-react';
 import { getShippingRates, createShipment, cancelShipment, getShippingLabel } from '../../../server/functions/tracking';
+import type { Order } from '../../../types';
 import { getProductMrpForShipping } from '../../../utils/orderPricing';
 import { invalidateOrderViews } from '../../../hooks/orders/orderMutationUtils';
 
@@ -42,8 +43,17 @@ interface AddressData {
   country?: string;
 }
 
+/**
+ * Extended order type for shipment booking.
+ * The order data from the modal includes enriched fields like trackingStatus
+ * that aren't on the base Order type.
+ */
+interface BookShipmentOrder extends Order {
+  trackingStatus?: string | null;
+}
+
 interface BookShipmentSectionProps {
-  order: any;
+  order: BookShipmentOrder;
   addressForm: AddressData;
   onShipmentBooked?: () => void;
 }
@@ -68,14 +78,14 @@ export function BookShipmentSection({
 
   // Check if order already has AWB
   const hasAwb = !!order.awbNumber;
-  const canCancel = hasAwb && !['delivered', 'rto_delivered'].includes(order.trackingStatus);
+  const canCancel = hasAwb && !['delivered', 'rto_delivered'].includes(order.trackingStatus ?? '');
 
   // Validate address has pincode
   const customerPincode = addressForm.zip || '';
   const hasValidPincode = customerPincode.length === 6;
 
   // Determine payment method for COD check
-  const isCod = order.paymentStatus === 'cod_pending' || order.shopifyCache?.financialStatus === 'pending';
+  const isCod = order.shopifyCache?.paymentMethod?.toUpperCase() === 'COD';
 
   const orderTotal = getProductMrpForShipping(order);
 

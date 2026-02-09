@@ -45,9 +45,9 @@ export interface UnifiedBomLine {
         templateId?: string;
         variationLineId?: string;
         skuLineId?: string;
-        trimItem?: any;
-        serviceItem?: any;
-        fabricColour?: any;
+        trimItem?: { id: string; name: string; code: string; costPerUnit: number } | null;
+        serviceItem?: { id: string; name: string; code: string; costPerJob: number } | null;
+        fabricColour?: { id: string; name: string; colourHex?: string | null } | null;
     };
 }
 

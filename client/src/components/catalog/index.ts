@@ -11,4 +11,4 @@ export { EditModal } from './EditModal';
 export type { EditModalProps } from './EditModal';
 
 export { CatalogFilters, PAGE_SIZE_OPTIONS, VIEW_OPTIONS } from './CatalogFilters';
-export type { CatalogFiltersProps } from './CatalogFilters';
+export type { CatalogFiltersProps, CatalogFilter } from './CatalogFilters';

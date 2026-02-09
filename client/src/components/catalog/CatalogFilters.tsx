@@ -24,18 +24,23 @@ export const VIEW_OPTIONS: { value: ViewLevel; label: string }[] = [
     { value: 'consumption', label: 'Fabric Consumption' },
 ];
 
+/** Filter state for the catalog page */
+export interface CatalogFilter {
+    gender: string;
+    category: string;
+    productId: string;
+    variationId: string;
+    colorName: string;
+    status: string;
+}
+
 export interface CatalogFiltersProps {
     viewLevel: ViewLevel;
     setViewLevel: (level: ViewLevel) => void;
     searchInput: string;
     setSearchInput: (value: string) => void;
-    filter: {
-        gender: string;
-        category: string;
-        productId: string;
-        status: string;
-    };
-    setFilter: React.Dispatch<React.SetStateAction<any>>;
+    filter: CatalogFilter;
+    setFilter: React.Dispatch<React.SetStateAction<CatalogFilter>>;
     filterOptions?: {
         genders?: string[];
         categories?: string[];
@@ -152,7 +157,7 @@ export function CatalogFilters({
                         className="text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white hover:border-gray-300 focus:outline-none focus:ring-2 focus:ring-slate-200 transition-all max-w-[180px]"
                     >
                         <option value="">All Products</option>
-                        {filteredProducts.map((p: any) => (
+                        {filteredProducts.map((p) => (
                             <option key={p.id} value={p.id}>{p.name}</option>
                         ))}
                     </select>

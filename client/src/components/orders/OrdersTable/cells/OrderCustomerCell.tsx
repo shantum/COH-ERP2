@@ -6,6 +6,7 @@
 
 import { memo } from 'react';
 import type { CellProps } from '../types';
+import type { Order } from '../../../../types';
 import { cn } from '../../../../lib/utils';
 
 /**
@@ -70,7 +71,7 @@ export const OrderCustomerCell = memo(function OrderCustomerCell({ row, handlers
                 <button
                     onClick={(e) => {
                         e.stopPropagation();
-                        onViewCustomer(row.order);
+                        onViewCustomer(row.order as unknown as Order);
                     }}
                     className="text-gray-700 hover:text-blue-600 hover:underline truncate"
                     title={row.customerName}

@@ -23,6 +23,7 @@ import { BomProductList, ConsumptionGridView, ConsumptionImportView } from '../c
 import { FabricMappingView } from '../components/products/fabric-mapping';
 import { StyleCodesTable } from '../components/products/StyleCodesTable';
 import type { ProductTreeNode, ProductNodeType, ProductsTabType } from '../components/products/types';
+import type { ProductsSearchParams } from '@coh/shared';
 import { Route } from '../routes/_authenticated/products';
 
 export default function Products() {
@@ -84,7 +85,7 @@ export default function Products() {
     const setActiveTab = useCallback((tab: ProductsTabType) => {
         navigate({
             to: '/products',
-            search: { ...search, tab, id: undefined, type: undefined } as any,
+            search: { ...search, tab, id: undefined, type: undefined } as ProductsSearchParams,
             replace: true,
         });
         // Clear selection when switching tabs
@@ -101,8 +102,8 @@ export default function Products() {
                     ...search,
                     tab: 'bom' as const,
                     id: node.id,
-                    type: node.type,
-                } as any,
+                    type: node.type as ProductsSearchParams['type'],
+                } as ProductsSearchParams,
                 replace: true,
             });
         } else {
@@ -112,7 +113,7 @@ export default function Products() {
                     ...search,
                     id: undefined,
                     type: undefined,
-                } as any,
+                } as ProductsSearchParams,
                 replace: true,
             });
         }
@@ -127,7 +128,7 @@ export default function Products() {
                 ...search,
                 id: undefined,
                 type: undefined,
-            } as any,
+            } as ProductsSearchParams,
             replace: true,
         });
     }, [navigate, search]);
@@ -137,7 +138,7 @@ export default function Products() {
         setSelectedNode(product);
         navigate({
             to: '/products',
-            search: { ...search, tab: 'bom' as const, id: product.id, type: product.type } as any,
+            search: { ...search, tab: 'bom' as const, id: product.id, type: product.type as ProductsSearchParams['type'] } as ProductsSearchParams,
             replace: true,
         });
     }, [navigate, search]);
@@ -147,7 +148,7 @@ export default function Products() {
         setSelectedNode(product);
         navigate({
             to: '/products',
-            search: { ...search, tab: 'bom' as const, id: product.id, type: product.type } as any,
+            search: { ...search, tab: 'bom' as const, id: product.id, type: product.type as ProductsSearchParams['type'] } as ProductsSearchParams,
             replace: true,
         });
     }, [navigate, search]);

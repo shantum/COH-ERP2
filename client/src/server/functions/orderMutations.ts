@@ -963,8 +963,7 @@ export const updateLine = createServerFn({ method: 'POST' })
         }
 
         // Build update data
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const updateData: any = {};
+        const updateData: Prisma.OrderLineUpdateInput = {};
         if (qty !== undefined) updateData.qty = qty;
         if (unitPrice !== undefined) updateData.unitPrice = unitPrice;
         if (notes !== undefined) updateData.notes = notes;
@@ -1246,8 +1245,7 @@ export const updateOrder = createServerFn({ method: 'POST' })
             };
         }
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const updateData: any = {};
+        const updateData: Prisma.OrderUpdateInput = {};
         if (customerName !== undefined) updateData.customerName = customerName;
         if (customerEmail !== undefined) updateData.customerEmail = customerEmail;
         if (customerPhone !== undefined) updateData.customerPhone = customerPhone;
@@ -2341,8 +2339,7 @@ export const setLineStatus = createServerFn({ method: 'POST' })
 
         await prisma.$transaction(async (tx: PrismaTransaction) => {
             // Build update data based on transition
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const updateData: any = { lineStatus: targetStatus };
+            const updateData: Prisma.OrderLineUpdateInput = { lineStatus: targetStatus };
 
             // Handle inventory effects
             if (currentStatus === 'pending' && targetStatus === 'allocated') {

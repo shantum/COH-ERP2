@@ -7,7 +7,7 @@ import {
   Truck, Package, CheckCircle, AlertCircle, XCircle,
   ScanBarcode, ChevronDown, ChevronUp, ExternalLink
 } from 'lucide-react';
-import type { Order } from '../../../../types';
+import type { Order, OrderLine } from '../../../../types';
 import type { ModalMode, ShipFormState, CategorizedLines } from '../types';
 import { COURIER_OPTIONS } from '../types';
 import { BookShipmentSection } from '../../shared/BookShipmentSection';
@@ -69,9 +69,11 @@ export function ShippingSection({
     const courier = order.courier || order.shopifyCache?.trackingCompany;
 
     // Group shipped lines by AWB
-    const shippedByAwb: Record<string, any[]> = {};
+    // OrderLine type doesn't have awbNumber - it may be joined at runtime
+    const shippedByAwb: Record<string, OrderLine[]> = {};
     for (const line of categorizedLines.shipped) {
-      const awb = (line as any).awbNumber || trackingNumber || 'Unknown';
+      const lineRecord = line as unknown as Record<string, unknown>;
+      const awb = (typeof lineRecord.awbNumber === 'string' ? lineRecord.awbNumber : null) || trackingNumber || 'Unknown';
       if (!shippedByAwb[awb]) shippedByAwb[awb] = [];
       shippedByAwb[awb].push(line);
     }
@@ -124,7 +126,7 @@ export function ShippingSection({
                     )}
                   </div>
                   <div className="space-y-1">
-                    {lines.map((line: any) => (
+                    {lines.map((line) => (
                       <div key={line.id} className="flex items-center gap-2 text-xs text-slate-600">
                         <CheckCircle size={12} className="text-emerald-500" />
                         <span>{line.sku?.skuCode || line.skuId}</span>

@@ -8,8 +8,14 @@ import { Package, Plus, X, RotateCcw, Square, CheckSquare, Tag, Truck, Percent, 
 import type { Order, OrderLine } from '../../../../types';
 import type { ModalMode, CategorizedLines, ShipFormState } from '../types';
 import { LINE_STATUS_CONFIG, LINE_STATUS_BAR_COLORS } from '../types';
-import { ProductSearch } from '../../../common/ProductSearch';
+import { ProductSearch, type SKUData } from '../../../common/ProductSearch';
 import { getOptimizedImageUrl } from '../../../../utils/imageOptimization';
+
+/** Data shape for inline line updates (qty or price changes) */
+interface LineUpdateData {
+  unitPrice?: number;
+  qty?: number;
+}
 
 // Shopify line item data (from shopifyDetails)
 interface ShopifyLineItem {
@@ -44,7 +50,7 @@ interface ItemsSectionProps {
   isAddingProduct: boolean;
   updatingLineIds?: Set<string>;
   onSetAddingProduct: (value: boolean) => void;
-  onUpdateLine?: (lineId: string, data: any) => void;
+  onUpdateLine?: (lineId: string, data: LineUpdateData) => void;
   onAddLine?: (data: { skuId: string; qty: number; unitPrice: number }) => void;
   onCancelLine?: (lineId: string) => void;
   onUncancelLine?: (lineId: string) => void;
@@ -88,7 +94,7 @@ function LineItem({
   isSelected?: boolean;
   isUpdating?: boolean;
   financialInfo?: LineFinancialInfo;
-  onUpdateLine?: (lineId: string, data: any) => void;
+  onUpdateLine?: (lineId: string, data: LineUpdateData) => void;
   onCancelLine?: (lineId: string) => void;
   onUncancelLine?: (lineId: string) => void;
   onToggleSelection?: () => void;
@@ -516,7 +522,7 @@ export function ItemsSection({
   const hasShopifyData = !!shopifyDetails?.subtotalPrice;
 
   // Handle product selection from search
-  const handleSelectProduct = useCallback((sku: any, _stock: number) => {
+  const handleSelectProduct = useCallback((sku: SKUData, _stock: number) => {
     if (onAddLine) {
       const unitPrice = Number(sku.mrp) || 0;
       onAddLine({

@@ -20,7 +20,7 @@ import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { AgGridReact } from 'ag-grid-react';
-import type { ColDef } from 'ag-grid-community';
+import type { ColDef, CellClassParams, ICellRendererParams, ValueFormatterParams } from 'ag-grid-community';
 import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community';
 import { Package, Search, TrendingUp, Warehouse, ChevronDown, ChevronUp, RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useNavigate } from '@tanstack/react-router';
@@ -188,11 +188,11 @@ export default function Inventory() {
             field: 'availableBalance',
             width: 100,
             type: 'numericColumn' as const,
-            cellStyle: (params: any) => {
+            cellStyle: (params: CellClassParams) => {
                 if (params.value === 0) {
                     return { color: '#dc2626', fontWeight: 600 };
                 }
-                if (params.data.status === 'below_target') {
+                if (params.data?.status === 'below_target') {
                     return { color: '#f59e0b', fontWeight: 600 };
                 }
                 return { color: '#059669', fontWeight: 600 };
@@ -218,14 +218,14 @@ export default function Inventory() {
             width: 90,
             type: 'numericColumn' as const,
             cellStyle: { color: '#6b7280' },
-            valueFormatter: (params: any) => params.value || '-',
+            valueFormatter: (params: ValueFormatterParams) => params.value || '-',
         },
         {
             headerName: 'Status',
             field: 'status',
             width: 100,
-            cellRenderer: (params: any) => {
-                if (params.data.availableBalance === 0) {
+            cellRenderer: (params: ICellRendererParams) => {
+                if (params.data?.availableBalance === 0) {
                     return <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-700">Out of Stock</span>;
                 }
                 if (params.value === 'below_target') {

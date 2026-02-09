@@ -404,9 +404,12 @@ class SyncWorker {
                 }
 
                 shopifyOrders = await shopifyClient.getOrders(fetchOptions);
-            } catch (fetchError: any) {
-                syncLogger.error({ jobId, error: fetchError.response?.data || fetchError.message }, 'Shopify API error');
-                throw new Error(`Shopify API: ${fetchError.response?.data?.errors || fetchError.message}`);
+            } catch (fetchError: unknown) {
+                const errMsg = fetchError instanceof Error ? fetchError.message : String(fetchError);
+                // Axios errors have response.data with API error details
+                const axiosData = (fetchError as { response?: { data?: { errors?: string } } })?.response?.data;
+                syncLogger.error({ jobId, error: axiosData || errMsg }, 'Shopify API error');
+                throw new Error(`Shopify API: ${axiosData?.errors || errMsg}`);
             }
 
             if (shopifyOrders.length === 0) {

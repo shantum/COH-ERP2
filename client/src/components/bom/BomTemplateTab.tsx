@@ -49,7 +49,7 @@ interface BomTemplateTabProps {
         trims: Array<{ id: string; code: string; name: string; category: string; costPerUnit: number; unit: string }>;
         services: Array<{ id: string; code: string; name: string; category: string; costPerJob: number }>;
     };
-    onUpdate: (updates: any) => void;
+    onUpdate: (updates: { template: TemplateLineData[] }) => void;
 }
 
 export default function BomTemplateTab({

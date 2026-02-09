@@ -17,7 +17,7 @@ import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { inventoryQueryKeys, ORDERS_PAGE_SIZE } from '../constants/queryKeys';
-import { getOrders, getOrderViewCounts } from '../server/functions/orders';
+import { getOrders, getOrderViewCounts, type FlattenedOrderRow } from '../server/functions/orders';
 import { getInventoryBalances } from '../server/functions/inventory';
 import { getProductionLockedDates } from '../server/functions/production';
 import { getFabricStockAnalysis } from '../server/functions/fabrics';
@@ -35,7 +35,7 @@ type OpenViewCounts = {
 };
 
 type GetOrdersResponse = {
-    rows: any[];
+    rows: FlattenedOrderRow[];
     view: string;
     hasInventory: boolean;
     pagination: {
@@ -187,7 +187,7 @@ export function useUnifiedOrdersData({
         // Extract SKU IDs directly from rows
         const dataRows = ordersQuery.data?.rows || [];
         const skuSet = new Set<string>();
-        dataRows.forEach((row: any) => {
+        dataRows.forEach((row) => {
             if (row.skuId) skuSet.add(row.skuId);
         });
         return Array.from(skuSet);

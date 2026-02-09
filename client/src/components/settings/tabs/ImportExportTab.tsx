@@ -8,10 +8,20 @@ import { useMutation } from '@tanstack/react-query';
 import { importExportApi } from '../../../services/api';
 import { Download, Upload, FileSpreadsheet } from 'lucide-react';
 
+interface ImportResult {
+    totalRows: number;
+    results?: {
+        created?: Record<string, number>;
+        updated?: Record<string, number>;
+        skipped?: number;
+        errors?: string[];
+    };
+}
+
 export function ImportExportTab() {
     const [importFile, setImportFile] = useState<File | null>(null);
     const [importType, setImportType] = useState<'products' | 'fabrics'>('products');
-    const [importResult, setImportResult] = useState<any>(null);
+    const [importResult, setImportResult] = useState<ImportResult | null>(null);
 
     const importMutation = useMutation({
         mutationFn: async () => {
@@ -26,8 +36,8 @@ export function ImportExportTab() {
             setImportResult(res.data);
             setImportFile(null);
         },
-        onError: (error: any) => {
-            alert(error.response?.data?.error || 'Import failed');
+        onError: (error: unknown) => {
+            alert(error instanceof Error ? error.message : 'Import failed');
         },
     });
 
@@ -137,18 +147,18 @@ export function ImportExportTab() {
                                         Updated: {Object.entries(importResult.results.updated).map(([k, v]) => `${v} ${k}`).join(', ')}
                                     </p>
                                 )}
-                                {importResult.results?.skipped > 0 && (
-                                    <p className="text-yellow-700">Skipped: {importResult.results.skipped}</p>
+                                {(importResult.results?.skipped ?? 0) > 0 && (
+                                    <p className="text-yellow-700">Skipped: {importResult.results?.skipped}</p>
                                 )}
-                                {importResult.results?.errors?.length > 0 && (
+                                {(importResult.results?.errors?.length ?? 0) > 0 && (
                                     <div className="mt-2">
                                         <p className="text-red-700 font-medium">Errors:</p>
                                         <ul className="list-disc list-inside text-red-600">
-                                            {importResult.results.errors.slice(0, 5).map((err: string, i: number) => (
+                                            {importResult.results?.errors?.slice(0, 5).map((err: string, i: number) => (
                                                 <li key={i}>{err}</li>
                                             ))}
-                                            {importResult.results.errors.length > 5 && (
-                                                <li>...and {importResult.results.errors.length - 5} more</li>
+                                            {(importResult.results?.errors?.length ?? 0) > 5 && (
+                                                <li>...and {(importResult.results?.errors?.length ?? 0) - 5} more</li>
                                             )}
                                         </ul>
                                     </div>

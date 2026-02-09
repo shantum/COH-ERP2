@@ -10,6 +10,7 @@
 
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
+import type { Prisma } from '@prisma/client';
 import { authMiddleware } from '../middleware/auth';
 import { getPrisma, type PrismaTransaction } from '@coh/shared/services/db';
 
@@ -122,11 +123,11 @@ export const getRepackingQueue = createServerFn({ method: 'GET' })
             }),
         ]);
 
-        const queueItems: QueueItem[] = items.map((item: any) => ({
+        const queueItems: QueueItem[] = items.map((item) => ({
             id: item.id,
             skuId: item.skuId,
             skuCode: item.sku.skuCode,
-            barcode: item.sku.barcode,
+            barcode: null, // SKU model has no barcode field
             productName: item.sku.variation.product.name,
             colorName: item.sku.variation.colorName,
             size: item.sku.size,
@@ -167,16 +168,10 @@ export const getRepackingQueueHistory = createServerFn({ method: 'GET' })
         const { limit, offset, status } = data;
 
         // Build where clause
-        const where: any =
+        const where: Prisma.RepackingQueueItemWhereInput =
             status === 'all'
-                ? {
-                      status: {
-                          in: ['approved', 'written_off'],
-                      },
-                  }
-                : {
-                      status: status,
-                  };
+                ? { status: { in: ['approved', 'written_off'] } }
+                : { status };
 
         // Get processed items
         const [items, total] = await Promise.all([
@@ -200,11 +195,11 @@ export const getRepackingQueueHistory = createServerFn({ method: 'GET' })
             prisma.repackingQueueItem.count({ where }),
         ]);
 
-        const queueItems: QueueItem[] = items.map((item: any) => ({
+        const queueItems: QueueItem[] = items.map((item) => ({
             id: item.id,
             skuId: item.skuId,
             skuCode: item.sku.skuCode,
-            barcode: item.sku.barcode,
+            barcode: null, // SKU model has no barcode field
             productName: item.sku.variation.product.name,
             colorName: item.sku.variation.colorName,
             size: item.sku.size,

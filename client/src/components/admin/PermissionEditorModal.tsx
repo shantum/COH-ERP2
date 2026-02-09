@@ -77,7 +77,7 @@ export default function PermissionEditorModal({
         (user.role as UserRole) || 'staff'
     );
     const [selectedExtras, setSelectedExtras] = useState<Set<AccessFeature>>(
-        new Set((user as any).extraAccess ?? [])
+        new Set((user.extraAccess ?? []) as AccessFeature[])
     );
     const [hasChanges, setHasChanges] = useState(false);
 
@@ -85,7 +85,7 @@ export default function PermissionEditorModal({
     useEffect(() => {
         if (isOpen) {
             setSelectedRole((user.role as UserRole) || 'staff');
-            setSelectedExtras(new Set((user as any).extraAccess ?? []));
+            setSelectedExtras(new Set((user.extraAccess ?? []) as AccessFeature[]));
             setHasChanges(false);
         }
     }, [isOpen, user.id]);

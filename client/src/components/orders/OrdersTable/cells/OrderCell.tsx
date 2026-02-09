@@ -8,6 +8,7 @@
 
 import { memo } from 'react';
 import type { CellProps } from '../types';
+import type { Order } from '../../../../types';
 import { cn } from '../../../../lib/utils';
 
 /**
@@ -141,7 +142,7 @@ export const OrderCell = memo(function OrderCell({ row, handlersRef }: CellProps
                     <button
                         onClick={(e) => {
                             e.stopPropagation();
-                            onViewCustomer(row.order);
+                            onViewCustomer(row.order as unknown as Order);
                         }}
                         className="text-gray-600 hover:text-blue-600 hover:underline truncate max-w-[100px]"
                         title={row.customerName}

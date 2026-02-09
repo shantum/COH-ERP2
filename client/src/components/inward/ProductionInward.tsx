@@ -80,7 +80,7 @@ export default function ProductionInward({ onSuccess, onError }: ProductionInwar
     // Check if this is a custom SKU
     const skuCode = scanResult?.sku?.skuCode || '';
     const isCustomByPattern = /-C\d{2}$/.test(skuCode);
-    const isCustomSku = (scanResult?.sku as any)?.isCustomSku || (matchedItem as any)?.isCustomSku || isCustomByPattern;
+    const isCustomSku = isCustomByPattern;
     const maxQty = matchedItem?.qtyPending || 999;
 
     // Handle queue item selection - auto-scan the SKU

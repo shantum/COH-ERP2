@@ -1371,7 +1371,7 @@ function SettingsTab({ config, loading, onRefresh }: SettingsTabProps) {
         },
     });
 
-    const handleChange = (setter: (val: any) => void, value: any) => {
+    const handleChange = <T,>(setter: (val: T) => void, value: T) => {
         setter(value);
         setHasChanges(true);
     };
@@ -1776,7 +1776,7 @@ function InitiateReturnModal({
                                     {resolutionOptions.map((res) => (
                                         <button
                                             key={res.value}
-                                            onClick={() => setReturnResolution(res.value as any)}
+                                            onClick={() => setReturnResolution(res.value)}
                                             className={`px-4 py-2 rounded-lg border ${
                                                 returnResolution === res.value
                                                     ? 'border-blue-600 bg-blue-50 text-blue-700'

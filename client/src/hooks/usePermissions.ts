@@ -67,7 +67,7 @@ export function usePermissions(): PermissionContext {
 
     const permissions = user?.permissions ?? [];
     const roleName = user?.roleName ?? null;
-    const legacyRole = (user as any)?.role ?? null; // Legacy role field for users without roleId
+    const legacyRole = user?.role ?? null; // Legacy role field for users without roleId
 
     // Check by role name OR by having wildcard permission (owner has '*')
     // Also check legacy 'role' field for backwards compatibility (admin = owner equivalent)

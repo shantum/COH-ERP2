@@ -6,7 +6,7 @@
 import { useState, useMemo, useCallback } from 'react';
 import { BarChart, Bar, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { AgGridReact } from 'ag-grid-react';
-import type { ColDef, ValueFormatterParams } from 'ag-grid-community';
+import type { ColDef, ValueFormatterParams, ColumnResizedEvent, Column } from 'ag-grid-community';
 import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community';
 import { TrendingUp, Package, ShoppingCart, DollarSign, Calendar } from 'lucide-react';
 import { useSalesAnalytics, getDateRange } from '../hooks/useSalesAnalytics';
@@ -50,9 +50,9 @@ export default function Analytics() {
         return {};
     });
 
-    const handleColumnResized = useCallback((event: any) => {
+    const handleColumnResized = useCallback((event: ColumnResizedEvent) => {
         if (event.finished && event.columns?.length) {
-            event.columns.forEach((col: any) => {
+            event.columns.forEach((col: Column) => {
                 const colId = col.getColId();
                 const width = col.getActualWidth();
                 if (colId && width) {

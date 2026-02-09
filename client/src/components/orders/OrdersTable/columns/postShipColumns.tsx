@@ -133,7 +133,7 @@ export function buildPostShipColumns(ctx: OrdersTableContext): ColumnDef<Flatten
             cell: ({ row }) => {
                 // Would come from order.codRemittedAt
                 const order = row.original.order;
-                const date = order?.codRemittedAt;
+                const date = order?.codRemittedAt as string | null | undefined;
                 if (!date) return <span className="text-gray-300">-</span>;
                 return <span className="text-green-700">{formatDate(date)}</span>;
             },
@@ -147,7 +147,7 @@ export function buildPostShipColumns(ctx: OrdersTableContext): ColumnDef<Flatten
             size: DEFAULT_COLUMN_WIDTHS.archivedAt,
             cell: ({ row }) => {
                 const order = row.original.order;
-                const date = order?.archivedAt;
+                const date = order?.archivedAt as string | null | undefined;
                 if (!date) return <span className="text-gray-300">-</span>;
                 return <span className="text-gray-600">{formatDate(date)}</span>;
             },

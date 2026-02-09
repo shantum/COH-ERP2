@@ -290,10 +290,10 @@ export function AddBomLineModal({
                                             <span className="italic text-purple-600">Per variation</span>
                                         </SelectItem>
                                     )}
-                                    {components.map((comp: any) => (
+                                    {components.map((comp) => (
                                         <SelectItem key={comp.id} value={comp.id}>
                                             <div className="flex items-center gap-2">
-                                                {comp.colourHex && (
+                                                {'colourHex' in comp && comp.colourHex && (
                                                     <span
                                                         className="w-3 h-3 rounded-full border border-gray-200"
                                                         style={{ backgroundColor: comp.colourHex }}

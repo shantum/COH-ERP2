@@ -161,7 +161,7 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
         mutationFn: async (input: { lineIds: string[]; awbNumber?: string; courier?: string }) => {
             // Server Function expects orderId, get it from first line
             const cachedData = getCachedData();
-            const firstLineRow = cachedData?.rows.find((r: any) => r.lineId === input.lineIds[0]);
+            const firstLineRow = cachedData?.rows.find((r) => r.lineId === input.lineIds[0]);
             if (!firstLineRow?.orderId) {
                 throw new Error('Could not determine order ID for admin ship');
             }
@@ -230,8 +230,8 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
 
             // Get all shipped line IDs for this order from the cache
             const shippedLineIds = previousData?.rows
-                .filter((row: any) => row.orderId === orderId && row.lineStatus === 'shipped' && row.lineId)
-                .map((row: any) => row.lineId as string) || [];
+                .filter((row) => row.orderId === orderId && row.lineStatus === 'shipped' && row.lineId != null)
+                .map((row) => row.lineId!) || [];
 
             // Update ALL shipped view caches
             setCachedDataForView(
@@ -289,7 +289,7 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
 
                     return {
                         ...old,
-                        rows: old.rows.map((row: any) => {
+                        rows: old.rows.map((row) => {
                             if (row.lineId !== lineId) return row;
                             return {
                                 ...row,
@@ -299,9 +299,9 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
                                 lineShippedAt: new Date().toISOString(),
                             };
                         }),
-                        ...(old.orders ? { orders: old.orders.map((order: any) => ({
+                        ...(old.orders ? { orders: old.orders.map((order) => ({
                             ...order,
-                            orderLines: order.orderLines?.map((line: any) =>
+                            orderLines: order.orderLines?.map((line) =>
                                 line.id === lineId
                                     ? {
                                         ...line,

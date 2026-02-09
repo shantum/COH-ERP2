@@ -4,6 +4,7 @@
 
 import { memo } from 'react';
 import type { CellProps } from '../types';
+import type { Order } from '../../../../types';
 
 export const CustomerNameCell = memo(function CustomerNameCell({ row, handlersRef }: CellProps) {
     if (!row.isFirstLine) return null;
@@ -14,7 +15,7 @@ export const CustomerNameCell = memo(function CustomerNameCell({ row, handlersRe
         <button
             onClick={(e) => {
                 e.stopPropagation();
-                onViewCustomer(row.order);
+                onViewCustomer(row.order as unknown as Order);
             }}
             className="text-gray-700 hover:text-blue-600 hover:underline truncate max-w-[140px]"
             title={row.customerName}

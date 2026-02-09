@@ -4,6 +4,28 @@
 
 import type { MutableRefObject } from 'react';
 import type { FlattenedOrderRow } from '../../../utils/orderHelpers';
+import type { Order } from '../../../types';
+
+/**
+ * Data shape for creating a production batch from the orders table.
+ * Matches the payload sent from ProductionCell when scheduling production.
+ * Uses undefined (not null) for optional fields to match mutation expectations.
+ */
+export interface CreateBatchData {
+    skuId?: string;
+    qtyPlanned: number;
+    priority?: 'low' | 'normal' | 'high' | 'urgent' | 'order_fulfillment';
+    sourceOrderLineId?: string;
+    batchDate?: string;
+    notes?: string;
+}
+
+/**
+ * Data shape for updating a production batch (e.g., rescheduling date).
+ */
+export interface UpdateBatchData {
+    batchDate?: string;
+}
 
 /**
  * View type for unified order views
@@ -55,8 +77,8 @@ export interface DynamicColumnHandlers {
     onForceShipLine?: (lineId: string, data: { awbNumber?: string; courier?: string }) => void;
 
     // Production handlers
-    onCreateBatch: (data: any) => void;
-    onUpdateBatch: (id: string, data: any) => void;
+    onCreateBatch: (data: CreateBatchData) => void;
+    onUpdateBatch: (id: string, data: UpdateBatchData) => void;
     onDeleteBatch: (id: string) => void;
 
     // Line handlers
@@ -76,7 +98,7 @@ export interface DynamicColumnHandlers {
 
     // Order Info handlers
     onViewOrder: (orderId: string) => void;
-    onViewCustomer: (order: any) => void;
+    onViewCustomer: (order: Order) => void;
     onUpdateShipByDate?: (orderId: string, date: string | null) => void;
 
     /**
@@ -129,18 +151,18 @@ export interface OrdersTableProps {
     onMarkShippedLine: (lineId: string, data?: { awbNumber?: string; courier?: string }) => void;
     onUnmarkShippedLine: (lineId: string) => void;
     onUpdateLineTracking: (lineId: string, data: { awbNumber?: string; courier?: string }) => void;
-    onShip?: (order: any) => void;
-    onCreateBatch: (data: any) => void;
-    onUpdateBatch: (id: string, data: any) => void;
+    onShip?: (order: Order) => void;
+    onCreateBatch: (data: CreateBatchData) => void;
+    onUpdateBatch: (id: string, data: UpdateBatchData) => void;
     onDeleteBatch: (id: string) => void;
     onUpdateLineNotes: (lineId: string, notes: string) => void;
     onViewOrder: (orderId: string) => void;
-    onEditOrder: (order: any) => void;
+    onEditOrder: (order: Order) => void;
     onCancelOrder: (id: string, reason?: string) => void;
     onDeleteOrder: (id: string) => void;
     onCancelLine: (lineId: string) => void;
     onUncancelLine: (lineId: string) => void;
-    onViewCustomer: (order: any) => void;
+    onViewCustomer: (order: Order) => void;
     onCustomize?: (lineId: string, lineData: CustomizeLineData) => void;
     onEditCustomization?: (lineId: string, lineData: EditCustomizationData) => void;
     onRemoveCustomization?: (lineId: string, skuCode: string) => void;

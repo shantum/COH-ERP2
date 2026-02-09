@@ -223,8 +223,8 @@ export async function logAuditEvent(
     event: AuditEvent
 ): Promise<void> {
     try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        await (prisma as any).permissionAuditLog.create({
+        // PermissionAuditLog model may not exist in schema yet — cast to access dynamically
+        await (prisma as unknown as Record<string, { create: (args: unknown) => Promise<unknown> }>).permissionAuditLog.create({
             data: {
                 userId: event.userId,
                 action: event.action,

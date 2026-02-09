@@ -16,7 +16,7 @@ import {
     X,
 } from 'lucide-react';
 import { CustomerSearch } from '../common/CustomerSearch';
-import { ProductSearch } from '../common/ProductSearch';
+import { ProductSearch, type SKUData } from '../common/ProductSearch';
 import { getCustomerAddresses } from '../../server/functions/customers';
 import { getOrderForExchange, type OrderForExchange } from '../../server/functions/orders';
 import { getOptimizedImageUrl } from '../../utils/imageOptimization';
@@ -57,9 +57,33 @@ interface OrderLine {
     imageUrl?: string;
 }
 
+/** Channel option for order creation */
+interface ChannelOption {
+    id: string;
+    name: string;
+}
+
+/** Data shape passed to onCreate callback */
+export interface CreateOrderData {
+    customerId: string | null;
+    customerName: string;
+    customerEmail?: string;
+    customerPhone?: string;
+    channel: string;
+    isExchange: boolean;
+    paymentMethod: 'Prepaid' | 'COD';
+    paymentStatus: 'pending' | 'paid';
+    shipByDate?: string;
+    orderNumber: undefined;
+    totalAmount: number;
+    shippingAddress: string;
+    originalOrderId: string | null;
+    lines: Array<{ skuId: string; qty: number; unitPrice: number }>;
+}
+
 export interface CreateOrderFormProps {
-    channels: any[];
-    onCreate: (data: any) => void;
+    channels: ChannelOption[];
+    onCreate: (data: CreateOrderData) => void;
     isCreating: boolean;
     onCancel?: () => void;
     /** When true, uses wider layout suitable for full-page rendering */
@@ -238,7 +262,7 @@ export function CreateOrderForm({
         setAddressForm((f) => ({ ...f, [field]: value }));
     };
 
-    const handleSelectCustomer = (customer: any) => {
+    const handleSelectCustomer = (customer: { id: string; firstName?: string; lastName?: string; email?: string; phone?: string }) => {
         const firstName = customer.firstName || '';
         const lastName = customer.lastName || '';
         const displayName =
@@ -316,7 +340,7 @@ export function CreateOrderForm({
         setAddressForm({});
     };
 
-    const handleSelectSku = (sku: any, stock: number) => {
+    const handleSelectSku = (sku: SKUData, stock: number) => {
         const mrpPrice = Number(sku.mrp) || 0;
         const imageUrl = sku.variation?.imageUrl || sku.variation?.product?.imageUrl || '';
         const newLine: OrderLine = {
@@ -477,7 +501,7 @@ export function CreateOrderForm({
                     <Label className="text-xs text-muted-foreground mb-1.5 block">Channel *</Label>
                     <div className="flex flex-wrap gap-1.5">
                         {/* Regular channels (excluding Shopify) */}
-                        {channels?.filter((ch: any) => ch.name?.toLowerCase() !== 'shopify').map((ch: any) => {
+                        {channels?.filter((ch: ChannelOption) => ch.name?.toLowerCase() !== 'shopify').map((ch: ChannelOption) => {
                             const name = ch.name?.toLowerCase() || '';
                             const isSelected = orderForm.channel === ch.id && !orderForm.isExchange;
 
@@ -515,7 +539,7 @@ export function CreateOrderForm({
                                 </button>
                             );
                         })}
-                        {(!channels || channels.filter((ch: any) => ch.name?.toLowerCase() !== 'shopify').length === 0) && (
+                        {(!channels || channels.filter((ch: ChannelOption) => ch.name?.toLowerCase() !== 'shopify').length === 0) && (
                             <button
                                 type="button"
                                 onClick={() => {
@@ -1025,7 +1049,7 @@ export function CreateOrderForm({
                             <Button
                                 type="button"
                                 size="sm"
-                                onClick={(e) => handleSubmit(e as any, true)}
+                                onClick={(e) => handleSubmit(e as unknown as React.FormEvent, true)}
                                 disabled={isCreating}
                                 className="flex-1 h-7 text-xs bg-amber-500 hover:bg-amber-600"
                             >

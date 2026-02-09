@@ -40,7 +40,7 @@ export function optimisticLineStatusUpdate(
         ...(data.orders ? {
             orders: data.orders.map((order) => ({
                 ...order,
-                orderLines: order.orderLines?.map((line: any) =>
+                orderLines: order.orderLines?.map((line) =>
                     line.id === lineId
                         ? { ...line, lineStatus: newStatus }
                         : line
@@ -83,7 +83,7 @@ export function optimisticBatchLineStatusUpdate(
         ...(data.orders ? {
             orders: data.orders.map((order) => ({
                 ...order,
-                orderLines: order.orderLines?.map((line: any) =>
+                orderLines: order.orderLines?.map((line) =>
                     lineIdSet.has(line.id)
                         ? { ...line, lineStatus: newStatus }
                         : line
@@ -125,7 +125,7 @@ export function optimisticCancelLine(
         ...(data.orders ? {
             orders: data.orders.map((order) => ({
                 ...order,
-                orderLines: order.orderLines?.map((line: any) =>
+                orderLines: order.orderLines?.map((line) =>
                     line.id === lineId
                         ? { ...line, lineStatus: 'cancelled' }
                         : line
@@ -155,7 +155,7 @@ export function optimisticUncancelLine(
         ...(data.orders ? {
             orders: data.orders.map((order) => ({
                 ...order,
-                orderLines: order.orderLines?.map((line: any) =>
+                orderLines: order.orderLines?.map((line) =>
                     line.id === lineId
                         ? { ...line, lineStatus: 'pending' }
                         : line
@@ -201,7 +201,7 @@ export function optimisticShipLines(
         ...(data.orders ? {
             orders: data.orders.map((order) => ({
                 ...order,
-                orderLines: order.orderLines?.map((line: any) =>
+                orderLines: order.orderLines?.map((line) =>
                     lineIdSet.has(line.id) && line.lineStatus === 'packed'
                         ? {
                             ...line,
@@ -246,7 +246,7 @@ export function optimisticUnshipLines(
         ...(data.orders ? {
             orders: data.orders.map((order) => ({
                 ...order,
-                orderLines: order.orderLines?.map((line: any) =>
+                orderLines: order.orderLines?.map((line) =>
                     lineIdSet.has(line.id) && line.lineStatus === 'shipped'
                         ? {
                             ...line,
@@ -285,7 +285,7 @@ export function optimisticUpdateLineTracking(
         ...(data.orders ? {
             orders: data.orders.map((order) => ({
                 ...order,
-                orderLines: order.orderLines?.map((line: any) =>
+                orderLines: order.orderLines?.map((line) =>
                     line.id === lineId
                         ? {
                             ...line,
@@ -331,7 +331,7 @@ export function optimisticMarkDelivered(
                     status: 'delivered',
                     trackingStatus: 'delivered',
                     deliveredAt,
-                    orderLines: order.orderLines?.map((line: any) => ({
+                    orderLines: order.orderLines?.map((line) => ({
                         ...line,
                         trackingStatus: 'delivered',
                         deliveredAt,
@@ -465,7 +465,7 @@ export function optimisticCancelOrder(
                 return {
                     ...order,
                     status: newOrderStatus,
-                    orderLines: order.orderLines?.map((line: any) =>
+                    orderLines: order.orderLines?.map((line) =>
                         line.lineStatus === 'shipped'
                             ? line
                             : { ...line, lineStatus: 'cancelled' }
@@ -513,7 +513,7 @@ export function optimisticUncancelOrder(
                 return {
                     ...order,
                     status: newOrderStatus,
-                    orderLines: order.orderLines?.map((line: any) =>
+                    orderLines: order.orderLines?.map((line) =>
                         line.lineStatus === 'cancelled'
                             ? { ...line, lineStatus: 'pending' }
                             : line
@@ -554,7 +554,7 @@ export function optimisticCreateBatch(
         ...(data.orders ? {
             orders: data.orders.map((order) => ({
                 ...order,
-                orderLines: order.orderLines?.map((line: any) =>
+                orderLines: order.orderLines?.map((line) =>
                     line.id === sourceOrderLineId
                         ? { ...line, productionBatchId: batchId }
                         : line
@@ -612,7 +612,7 @@ export function optimisticDeleteBatch(
         ...(data.orders ? {
             orders: data.orders.map((order) => ({
                 ...order,
-                orderLines: order.orderLines?.map((line: any) =>
+                orderLines: order.orderLines?.map((line) =>
                     line.productionBatchId === batchId
                         ? { ...line, productionBatchId: null }
                         : line

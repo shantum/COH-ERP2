@@ -30,7 +30,7 @@ export function NameCell({ row }: NameCellProps) {
         case 'variation':
             displayName = node.colorName || node.name;
             // fabricColourName may not exist on ProductTreeNode, use optional chaining
-            subText = (node as any).fabricColourName || '';
+            subText = node.fabricColourName || '';
             break;
         case 'sku':
             displayName = node.size || node.name;

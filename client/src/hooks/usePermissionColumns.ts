@@ -19,7 +19,7 @@
  */
 
 import { useMemo } from 'react';
-import type { ColDef } from 'ag-grid-community';
+import type { ColDef, EditableCallbackParams } from 'ag-grid-community';
 import { usePermissions } from './usePermissions';
 import { formatCurrency } from '../utils/agGridHelpers';
 
@@ -75,7 +75,7 @@ export function usePermissionColumns<T extends PermissionColDef>(
 
                 return {
                     ...col,
-                    editable: (params: any) => {
+                    editable: (params: EditableCallbackParams) => {
                         // First check permission
                         if (!hasPermission(col.editPermission!)) return false;
 

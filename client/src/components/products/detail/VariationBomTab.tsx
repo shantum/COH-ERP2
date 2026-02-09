@@ -10,7 +10,7 @@ import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Loader2, AlertCircle } from 'lucide-react';
 import { useServerFn } from '@tanstack/react-start';
-import { getProductBom, type ProductBomResult } from '../../../server/functions/bomMutations';
+import { getProductBom, type ProductBomResult, type VariationBomData } from '../../../server/functions/bomMutations';
 import {
     BomLinesTable,
     BomCostSummary,
@@ -57,12 +57,12 @@ export function VariationBomTab({ variation }: VariationBomTabProps) {
 
         // Find this variation's BOM data
         const variationBom = bomData.variations?.find(
-            (v: any) => v.id === variation.id
+            (v) => v.id === variation.id
         );
         const variationLines = variationBom?.bomLines || [];
 
         // Create a map of variation-level overrides
-        const variationLinesByRole = new Map<string, any>();
+        const variationLinesByRole = new Map<string, VariationBomData['bomLines'][number]>();
         for (const line of variationLines) {
             variationLinesByRole.set(line.roleId, line);
         }

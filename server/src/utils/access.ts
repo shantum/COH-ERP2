@@ -129,7 +129,7 @@ export function requireAllAccess(
  */
 export function accessMiddleware(feature: AccessFeature) {
     return (req: Request, res: Response, next: NextFunction) => {
-        const user = (req as any).user as AccessUser | undefined;
+        const user = req.user as AccessUser | undefined;
 
         if (!user) {
             return res.status(401).json({ error: 'Authentication required' });
@@ -151,7 +151,7 @@ export function accessMiddleware(feature: AccessFeature) {
  */
 export function accessAnyMiddleware(...features: AccessFeature[]) {
     return (req: Request, res: Response, next: NextFunction) => {
-        const user = (req as any).user as AccessUser | undefined;
+        const user = req.user as AccessUser | undefined;
 
         if (!user) {
             return res.status(401).json({ error: 'Authentication required' });

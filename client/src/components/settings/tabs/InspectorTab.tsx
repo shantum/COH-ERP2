@@ -16,7 +16,7 @@ export function InspectorTab() {
     const [selectedTable, setSelectedTable] = useState<string>('');
     const [tableSearch, setTableSearch] = useState('');
     const [inspectorLimit, setInspectorLimit] = useState(100);
-    const [inspectorData, setInspectorData] = useState<any>(null);
+    const [inspectorData, setInspectorData] = useState<{ data: Record<string, unknown>[]; total: number; table: string } | null>(null);
     const [inspectorLoading, setInspectorLoading] = useState(false);
 
     // Fetch all tables on mount
@@ -49,7 +49,7 @@ export function InspectorTab() {
         try {
             const result = await inspectTable({
                 data: { tableName: selectedTable, limit: inspectorLimit, offset: 0 },
-            }) as { success: boolean; data?: { data: unknown[]; total: number; table: string }; error?: { message: string } };
+            }) as { success: boolean; data?: { data: Record<string, unknown>[]; total: number; table: string }; error?: { message: string } };
             if (result.success && result.data) {
                 setInspectorData(result.data);
             } else {
@@ -279,7 +279,7 @@ export function InspectorTab() {
 }
 
 // Format cell value for display
-function formatCellValue(value: any, key: string): React.ReactNode {
+function formatCellValue(value: unknown, key: string): React.ReactNode {
     if (value === null || value === undefined) return <span className="text-gray-300">—</span>;
 
     // Handle booleans
@@ -291,7 +291,7 @@ function formatCellValue(value: any, key: string): React.ReactNode {
 
     // Handle dates
     if (key.toLowerCase().includes('at') || key.toLowerCase().includes('date')) {
-        const date = new Date(value);
+        const date = new Date(value as string | number);
         if (!isNaN(date.getTime())) {
             return (
                 <span className="whitespace-nowrap text-gray-600">
@@ -365,8 +365,8 @@ function formatCellValue(value: any, key: string): React.ReactNode {
             picked: 'bg-cyan-100 text-cyan-700',
             packed: 'bg-emerald-100 text-emerald-700',
         };
-        const color = statusColors[value] || 'bg-gray-100 text-gray-700';
-        return <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${color}`}>{value}</span>;
+        const color = statusColors[String(value)] || 'bg-gray-100 text-gray-700';
+        return <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${color}`}>{String(value)}</span>;
     }
 
     // Default: show as string (truncated if too long)
@@ -378,7 +378,7 @@ function formatCellValue(value: any, key: string): React.ReactNode {
 }
 
 // Get all unique keys from data array
-function getAllKeys(data: any[]): string[] {
+function getAllKeys(data: Record<string, unknown>[]): string[] {
     const keySet = new Set<string>();
     for (const row of data) {
         for (const key of Object.keys(row)) {
@@ -402,7 +402,7 @@ function getAllKeys(data: any[]): string[] {
 }
 
 // Inspector Table component for table view - shows ALL columns dynamically
-function InspectorTable({ data }: { data: any[] }) {
+function InspectorTable({ data }: { data: Record<string, unknown>[] }) {
     if (!data || data.length === 0) {
         return (
             <div className="p-8 text-center text-gray-400">
@@ -434,7 +434,7 @@ function InspectorTable({ data }: { data: any[] }) {
             </thead>
             <tbody className="divide-y divide-gray-100">
                 {data.map((row, rowIndex) => (
-                    <tr key={row.id || rowIndex} className="hover:bg-blue-50/30 transition-colors">
+                    <tr key={String(row.id ?? rowIndex)} className="hover:bg-blue-50/30 transition-colors">
                         <td className="px-3 py-2 text-gray-400 text-xs font-mono">{rowIndex + 1}</td>
                         {columns.map((col) => (
                             <td key={col} className="px-3 py-2 text-gray-700 text-xs max-w-[300px]">

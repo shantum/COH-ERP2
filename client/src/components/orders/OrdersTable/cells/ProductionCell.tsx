@@ -40,10 +40,10 @@ export const ProductionCell = memo(function ProductionCell({ row, handlersRef, i
                 onUpdateBatch(row.productionBatchId, { batchDate: date });
             } else {
                 onCreateBatch({
-                    skuId: row.skuId,
+                    skuId: row.skuId ?? undefined,
                     qtyPlanned: row.qty,
                     priority: 'order_fulfillment',
-                    sourceOrderLineId: row.lineId,
+                    sourceOrderLineId: row.lineId ?? undefined,
                     batchDate: date,
                     notes: `For ${row.orderNumber}`,
                 });

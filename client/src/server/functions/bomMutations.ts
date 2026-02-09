@@ -2400,8 +2400,7 @@ export const getFabricAssignments = createServerFn({ method: 'GET' })
         });
 
         // Transform to flat response
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const assignments: FabricAssignment[] = bomLines.map((line: any) => ({
+        const assignments: FabricAssignment[] = bomLines.map((line) => ({
             variationId: line.variationId,
             colourId: line.fabricColour?.id || '',
             colourName: line.fabricColour?.colourName || '',
@@ -2494,8 +2493,7 @@ export const linkVariationsToColour = createServerFn({ method: 'POST' })
             const productIds = [...new Set(variations.map(v => v.productId))];
 
             // Create/update BOM lines - BOM is now the single source of truth for fabric
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const results = await prisma.$transaction(async (tx: any) => {
+            const results = await prisma.$transaction(async (tx) => {
                 // Ensure ProductBomTemplate exists for each product+role
                 // This is required for BOM cost calculation to work
                 for (const productId of productIds) {
@@ -2621,8 +2619,7 @@ export const clearVariationsFabricMapping = createServerFn({ method: 'POST' })
 
             // Clear fabric assignments by deleting BOM lines
             // NOTE: BOM is now the single source of truth - no variation fields to update
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            await prisma.$transaction(async (tx: any) => {
+            await prisma.$transaction(async (tx) => {
                 // Delete the BOM lines for the main fabric role
                 await tx.variationBomLine.deleteMany({
                     where: {

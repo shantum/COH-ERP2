@@ -221,7 +221,7 @@ export function useDebouncedAutoSave<TValue, TPayload>({
 /**
  * Simple debounced callback hook (for non-auto-save use cases)
  */
-export function useDebouncedCallback<T extends (...args: any[]) => any>(
+export function useDebouncedCallback<T extends (...args: unknown[]) => unknown>(
     callback: T,
     delay: number
 ): T {

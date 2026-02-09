@@ -69,8 +69,7 @@ const SIZING_KEY = `${TABLE_ID}ColumnSizing`;
 function getDefaultVisibility(): VisibilityState {
     const visibility: VisibilityState = {};
     ALL_COLUMN_IDS.forEach(id => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        visibility[id] = DEFAULT_VISIBLE_COLUMNS.includes(id as any);
+        visibility[id] = (DEFAULT_VISIBLE_COLUMNS as readonly string[]).includes(id);
     });
     return visibility;
 }

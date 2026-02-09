@@ -344,7 +344,7 @@ export default function QuickOrder() {
                         Channel *
                     </label>
                     <div className="flex flex-wrap gap-1.5">
-                        {channelsWithoutShopify.map((ch: any) => {
+                        {channelsWithoutShopify.map((ch: { id: string; name: string }) => {
                             const name = ch.name?.toLowerCase() || '';
                             const isSelected = channel === ch.id && !isExchange;
                             const colors = CHANNEL_COLORS[name] || DEFAULT_CHANNEL_COLOR;

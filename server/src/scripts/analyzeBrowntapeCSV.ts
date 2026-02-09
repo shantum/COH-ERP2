@@ -236,7 +236,7 @@ async function main() {
     console.log(`  ${csvCol.padEnd(35)} -> ${erpField}`);
   }
 
-  await (prisma as any).$disconnect();
+  await prisma.$disconnect();
   console.log('\nDone.');
 }
 

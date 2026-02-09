@@ -13,7 +13,7 @@
  * All public exports are validated against Zod schemas to catch schema drift.
  */
 
-import { sql } from 'kysely';
+import { sql, type SqlBool } from 'kysely';
 import { kysely } from '../index.js';
 import type { CustomerTier } from '../../utils/tierUtils.js';
 import {
@@ -77,40 +77,40 @@ export async function listCustomersKysely(
 
         if (words.length === 1) {
             const searchTerm = `%${words[0]}%`;
-            mainQuery = mainQuery.where((eb: any) =>
+            mainQuery = mainQuery.where((eb) =>
                 eb.or([
-                    sql`LOWER("Customer"."email") LIKE ${searchTerm}`,
-                    sql`LOWER("Customer"."firstName") LIKE ${searchTerm}`,
-                    sql`LOWER("Customer"."lastName") LIKE ${searchTerm}`,
-                    sql`"Customer"."phone" LIKE ${searchTerm}`,
+                    sql<SqlBool>`LOWER("Customer"."email") LIKE ${searchTerm}`,
+                    sql<SqlBool>`LOWER("Customer"."firstName") LIKE ${searchTerm}`,
+                    sql<SqlBool>`LOWER("Customer"."lastName") LIKE ${searchTerm}`,
+                    sql<SqlBool>`"Customer"."phone" LIKE ${searchTerm}`,
                 ])
             ) as typeof mainQuery;
-            countQuery = countQuery.where((eb: any) =>
+            countQuery = countQuery.where((eb) =>
                 eb.or([
-                    sql`LOWER("Customer"."email") LIKE ${searchTerm}`,
-                    sql`LOWER("Customer"."firstName") LIKE ${searchTerm}`,
-                    sql`LOWER("Customer"."lastName") LIKE ${searchTerm}`,
-                    sql`"Customer"."phone" LIKE ${searchTerm}`,
+                    sql<SqlBool>`LOWER("Customer"."email") LIKE ${searchTerm}`,
+                    sql<SqlBool>`LOWER("Customer"."firstName") LIKE ${searchTerm}`,
+                    sql<SqlBool>`LOWER("Customer"."lastName") LIKE ${searchTerm}`,
+                    sql<SqlBool>`"Customer"."phone" LIKE ${searchTerm}`,
                 ])
             ) as typeof countQuery;
         } else {
             // Multi-word search: all words must match
             for (const word of words) {
                 const searchTerm = `%${word}%`;
-                mainQuery = mainQuery.where((eb: any) =>
+                mainQuery = mainQuery.where((eb) =>
                     eb.or([
-                        sql`LOWER("Customer"."email") LIKE ${searchTerm}`,
-                        sql`LOWER("Customer"."firstName") LIKE ${searchTerm}`,
-                        sql`LOWER("Customer"."lastName") LIKE ${searchTerm}`,
-                        sql`"Customer"."phone" LIKE ${searchTerm}`,
+                        sql<SqlBool>`LOWER("Customer"."email") LIKE ${searchTerm}`,
+                        sql<SqlBool>`LOWER("Customer"."firstName") LIKE ${searchTerm}`,
+                        sql<SqlBool>`LOWER("Customer"."lastName") LIKE ${searchTerm}`,
+                        sql<SqlBool>`"Customer"."phone" LIKE ${searchTerm}`,
                     ])
                 ) as typeof mainQuery;
-                countQuery = countQuery.where((eb: any) =>
+                countQuery = countQuery.where((eb) =>
                     eb.or([
-                        sql`LOWER("Customer"."email") LIKE ${searchTerm}`,
-                        sql`LOWER("Customer"."firstName") LIKE ${searchTerm}`,
-                        sql`LOWER("Customer"."lastName") LIKE ${searchTerm}`,
-                        sql`"Customer"."phone" LIKE ${searchTerm}`,
+                        sql<SqlBool>`LOWER("Customer"."email") LIKE ${searchTerm}`,
+                        sql<SqlBool>`LOWER("Customer"."firstName") LIKE ${searchTerm}`,
+                        sql<SqlBool>`LOWER("Customer"."lastName") LIKE ${searchTerm}`,
+                        sql<SqlBool>`"Customer"."phone" LIKE ${searchTerm}`,
                     ])
                 ) as typeof countQuery;
             }

@@ -11,9 +11,11 @@ import {
     flexRender,
     type SortingState,
     type RowSelectionState,
+    type Column,
 } from '@tanstack/react-table';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { cn } from '../../../lib/utils';
+import type { FlattenedOrderRow } from '../../../utils/orderHelpers';
 import type { OrdersTableProps, DynamicColumnHandlers, OrdersTableContext } from './types';
 import { buildAllColumns, getColumnsForView } from './columns';
 import { useOrdersTableState } from './useOrdersTableState';
@@ -324,7 +326,7 @@ export function OrdersTable({
     const tableWidth = Math.max(baseTableWidth * scaleFactor, 900);
 
     // Get scaled column width
-    const getScaledColumnWidth = useCallback((col: any) => {
+    const getScaledColumnWidth = useCallback((col: Column<FlattenedOrderRow, unknown>) => {
         return Math.round(col.getSize() * scaleFactor);
     }, [scaleFactor]);
 

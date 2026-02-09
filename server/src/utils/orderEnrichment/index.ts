@@ -15,6 +15,7 @@ import type {
     EnrichmentType,
     OrderWithRelations,
     EnrichedOrder,
+    CustomerStatsResult,
     ShopifyCache,
 } from './types.js';
 
@@ -67,7 +68,7 @@ export async function enrichOrdersForView<T extends OrderWithRelations>(
             }, 0) || 0;
 
         // Fallback to shopifyCache totalPrice if no line prices
-        const shopifyTotal = (order.shopifyCache as any)?.totalPrice;
+        const shopifyTotal = order.shopifyCache?.totalPrice;
         if (linesTotal === 0 && shopifyTotal != null) {
             return { ...order, totalAmount: Number(shopifyTotal) || null } as EnrichedOrder;
         }
@@ -187,22 +188,24 @@ export async function enrichOrdersForView<T extends OrderWithRelations>(
             enriched = statsEnriched as EnrichedOrder[];
         } else {
             // Merge customer stats into CPU-enriched orders
-            const statsMap = new Map(statsEnriched.map((o: any) => [o.id, o]));
+            const statsMap = new Map<string, CustomerStatsResult>(
+                statsEnriched.map((o) => [o.id as string, o as CustomerStatsResult])
+            );
             enriched = enriched.map((order) => {
-                const statsOrder = statsMap.get(order.id);
+                const statsOrder = statsMap.get(order.id as string);
                 if (statsOrder) {
                     return {
                         ...order,
-                        customerLtv: (statsOrder as any).customerLtv,
-                        customerOrderCount: (statsOrder as any).customerOrderCount,
-                        customerTier: (statsOrder as any).customerTier,
-                        fulfillmentStage: (statsOrder as any).fulfillmentStage ?? order.fulfillmentStage,
-                        pendingCount: (statsOrder as any).pendingCount ?? order.pendingCount,
-                        allocatedCount: (statsOrder as any).allocatedCount ?? order.allocatedCount,
-                        pickedCount: (statsOrder as any).pickedCount ?? order.pickedCount,
-                        packedCount: (statsOrder as any).packedCount ?? order.packedCount,
-                        shippedCount: (statsOrder as any).shippedCount ?? order.shippedCount,
-                        cancelledCount: (statsOrder as any).cancelledCount ?? order.cancelledCount,
+                        customerLtv: statsOrder.customerLtv ?? undefined,
+                        customerOrderCount: statsOrder.customerOrderCount ?? undefined,
+                        customerTier: statsOrder.customerTier ?? undefined,
+                        fulfillmentStage: statsOrder.fulfillmentStage ?? order.fulfillmentStage,
+                        pendingCount: statsOrder.pendingCount ?? order.pendingCount,
+                        allocatedCount: statsOrder.allocatedCount ?? order.allocatedCount,
+                        pickedCount: statsOrder.pickedCount ?? order.pickedCount,
+                        packedCount: statsOrder.packedCount ?? order.packedCount,
+                        shippedCount: statsOrder.shippedCount ?? order.shippedCount,
+                        cancelledCount: statsOrder.cancelledCount ?? order.cancelledCount,
                     };
                 }
                 return order;

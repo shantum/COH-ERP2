@@ -1133,8 +1133,81 @@ export const LINE_SSE_SELECT = {
  * @param customerStats - Customer stats (ltv, orderCount, rtoCount)
  * @returns Flattened row or null if data incomplete
  */
+/** Shape of a line fetched with LINE_SSE_SELECT (manually declared because the select references a removed fabric relation) */
+interface LineSsePayload {
+    id: string;
+    lineStatus: string;
+    qty: number;
+    unitPrice: number | null;
+    skuId: string | null;
+    notes: string | null;
+    awbNumber: string | null;
+    courier: string | null;
+    shippedAt: Date | null;
+    deliveredAt: Date | null;
+    isCustomized: boolean;
+    trackingStatus: string | null;
+    lastTrackingUpdate: Date | null;
+    productionBatchId: string | null;
+    orderId: string;
+    sku: {
+        id: string;
+        skuCode: string;
+        size: string;
+        isCustomSku: boolean;
+        customizationType: string | null;
+        customizationValue: string | null;
+        customizationNotes: string | null;
+        variation: {
+            id: string;
+            colorName: string;
+            colorHex: string | null;
+            imageUrl: string | null;
+            product: { id: string; name: string; imageUrl: string | null };
+            fabric: { colorHex: string | null; colours: Array<{ colourName: string; colourHex: string | null }> } | null;
+        };
+    } | null;
+    productionBatch: {
+        id: string;
+        batchCode: string | null;
+        batchDate: Date;
+        status: string;
+    } | null;
+    order: {
+        id: string;
+        orderNumber: string;
+        orderDate: Date;
+        shipByDate: Date | null;
+        customerName: string;
+        customerEmail: string | null;
+        customerPhone: string | null;
+        customerId: string | null;
+        shippingAddress: string | null;
+        totalAmount: number | null;
+        paymentMethod: string | null;
+        channel: string | null;
+        status: string;
+        isArchived: boolean;
+        releasedToShipped: boolean | null;
+        releasedToCancelled: boolean | null;
+        internalNotes: string | null;
+        isExchange: boolean;
+        customer: { tags: string | null } | null;
+        shopifyCache: {
+            discountCodes: string | null;
+            customerNotes: string | null;
+            tags: string | null;
+            trackingNumber: string | null;
+            trackingCompany: string | null;
+            trackingUrl: string | null;
+            fulfillmentStatus: string | null;
+        } | null;
+        _count: { orderLines: number } | null;
+    };
+}
+
 export function flattenLineForSSE(
-    line: any,
+    line: LineSsePayload | null,
     customerStats?: { ltv: number; orderCount: number; rtoCount: number; tier?: string }
 ): FlattenedOrderRow | null {
     if (!line || !line.order) return null;
@@ -1180,8 +1253,8 @@ export function flattenLineForSSE(
 
         // Order-level fields
         orderNumber: order.orderNumber,
-        orderDate: order.orderDate,
-        shipByDate: order.shipByDate || null,
+        orderDate: order.orderDate instanceof Date ? order.orderDate.toISOString() : order.orderDate,
+        shipByDate: order.shipByDate instanceof Date ? order.shipByDate.toISOString() : (order.shipByDate || null),
         customerName: order.customerName,
         customerEmail: order.customerEmail || null,
         customerPhone: order.customerPhone || null,
@@ -1205,7 +1278,7 @@ export function flattenLineForSSE(
         isOnHold: false, // isOnHold no longer exists on Order
         orderAwbNumber: line.awbNumber || null, // Use line-level AWB
         orderCourier: line.courier || null, // Use line-level courier
-        orderShippedAt: line.shippedAt || null, // Use line-level shippedAt
+        orderShippedAt: line.shippedAt instanceof Date ? line.shippedAt.toISOString() : (line.shippedAt || null), // Use line-level shippedAt
         orderTrackingStatus: line.trackingStatus || null, // Use line-level trackingStatus
 
         // Line-level fields
@@ -1230,8 +1303,8 @@ export function flattenLineForSSE(
         // Production
         productionBatch: productionBatch ? {
             id: productionBatch.id,
-            batchCode: productionBatch.batchCode,
-            batchDate: productionBatch.batchDate,
+            batchCode: productionBatch.batchCode || '',
+            batchDate: productionBatch.batchDate instanceof Date ? productionBatch.batchDate.toISOString() : productionBatch.batchDate,
             status: productionBatch.status,
         } : null,
         productionBatchId: productionBatch?.id || null,
@@ -1242,8 +1315,8 @@ export function flattenLineForSSE(
         totalLines: order._count?.orderLines || 1,
         fulfillmentStage: null, // Would need full order context
 
-        // Full order reference (minimal for SSE)
-        order: order,
+        // Full order reference (minimal for SSE — cast because SSE provides partial order data)
+        order: order as unknown as EnrichedOrder,
 
         // Customization
         isCustomized,
@@ -1255,8 +1328,8 @@ export function flattenLineForSSE(
         originalSkuCode: null,
 
         // Line-level tracking
-        lineShippedAt: line.shippedAt || null,
-        lineDeliveredAt: line.deliveredAt || null,
+        lineShippedAt: line.shippedAt instanceof Date ? line.shippedAt.toISOString() : (line.shippedAt || null),
+        lineDeliveredAt: line.deliveredAt instanceof Date ? line.deliveredAt.toISOString() : (line.deliveredAt || null),
         lineTrackingStatus: line.trackingStatus || null,
         lineAwbNumber: line.awbNumber || null,
         lineCourier: line.courier || null,
@@ -1275,7 +1348,7 @@ export function flattenLineForSSE(
         shopifyCourier: shopifyCache?.trackingCompany || null,
         shopifyTrackingUrl: shopifyCache?.trackingUrl || null,
 
-        // Customer tags
-        customerTags: customer?.tags || null,
+        // Customer tags (stored as comma-separated string, split for display)
+        customerTags: customer?.tags ? customer.tags.split(',').map(t => t.trim()) : null,
     };
 }

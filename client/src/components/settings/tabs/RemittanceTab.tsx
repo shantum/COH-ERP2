@@ -66,8 +66,8 @@ export function RemittanceTab() {
             queryClient.invalidateQueries({ queryKey: ['remittanceSummary'] });
             queryClient.invalidateQueries({ queryKey: ['remittanceFailed'] });
         },
-        onError: (error: any) => {
-            alert(error.response?.data?.error || 'Upload failed');
+        onError: (error: unknown) => {
+            alert(error instanceof Error ? error.message : 'Upload failed');
         },
     });
 
@@ -79,8 +79,8 @@ export function RemittanceTab() {
             alert(`${result.message}`);
             queryClient.invalidateQueries({ queryKey: ['remittanceFailed'] });
         },
-        onError: (error: any) => {
-            alert(error.response?.data?.error || 'Retry failed');
+        onError: (error: unknown) => {
+            alert(error instanceof Error ? error.message : 'Retry failed');
         },
     });
 
@@ -90,8 +90,8 @@ export function RemittanceTab() {
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['remittanceFailed'] });
         },
-        onError: (error: any) => {
-            alert(error.response?.data?.error || 'Approval failed');
+        onError: (error: unknown) => {
+            alert(error instanceof Error ? error.message : 'Approval failed');
         },
     });
 

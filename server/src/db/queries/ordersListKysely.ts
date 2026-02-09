@@ -10,7 +10,7 @@
  * - D3: Lean payload - only fields used by frontend
  */
 
-import { sql } from 'kysely';
+import { sql, type SqlBool } from 'kysely';
 import { kysely } from '../index.js';
 
 // ============================================
@@ -50,8 +50,9 @@ export interface OrdersListParams {
 // VIEW WHERE CLAUSES
 // ============================================
 
-// Note: We use dynamic where clause builders instead of typed ExpressionBuilder
-// to handle the complex CTE join requirements
+// Note: applyViewWhereClause uses inferred eb types from Kysely.
+// applyViewWhereClauseToFullQuery uses `as never` casts because
+// the generic T erases Kysely's table-aware .where() overloads.
 
 function applyViewWhereClause(
     qb: ReturnType<typeof kysely.selectFrom<'Order'>>,
@@ -108,15 +109,17 @@ function applyViewWhereClause(
     }
 }
 
-// Version for the full query with joins (uses same logic but different base type)
-function applyViewWhereClauseToFullQuery<T extends { where: (...args: unknown[]) => T }>(
+// Version for the full query with joins (uses same logic but different base type).
+// Generic T erases Kysely's table-aware .where() overloads after joins; `as never` casts are required in each branch.
+function applyViewWhereClauseToFullQuery<T extends { where(...args: never[]): T }>(
     qb: T,
     view: ViewName,
     shippedFilter?: ShippedFilter
 ): T {
+    // All branches use `as never` casts because generic T cannot carry Kysely's column-specific .where() signatures
     switch (view) {
         case 'open':
-            return (qb as any).where((eb: any) =>
+            return qb.where(((eb: { and: (c: unknown[]) => unknown; or: (c: unknown[]) => unknown; (...a: unknown[]): unknown }) =>
                 eb.and([
                     eb('Order.isArchived', '=', false),
                     eb.or([
@@ -127,37 +130,36 @@ function applyViewWhereClauseToFullQuery<T extends { where: (...args: unknown[])
                         ]),
                     ]),
                 ])
-            ) as T;
+            ) as never) as unknown as T;
 
-        case 'shipped':
-            let shippedQb = (qb as any)
-                .where('Order.isArchived', '=', false)
-                .where('Order.releasedToShipped', '=', true);
+        case 'shipped': {
+            const shippedBase = qb
+                .where('Order.isArchived' as never, '=' as never, false as never)
+                .where('Order.releasedToShipped' as never, '=' as never, true as never);
 
             if (shippedFilter === 'rto') {
-                // Filter orders that have at least one line with RTO tracking status
-                return shippedQb.where(
-                    sql`EXISTS (SELECT 1 FROM "OrderLine" WHERE "orderId" = "Order".id AND "trackingStatus" IN ('rto_in_transit', 'rto_delivered'))`,
-                    '=',
-                    sql`true`
-                ) as T;
+                return shippedBase.where(
+                    sql`EXISTS (SELECT 1 FROM "OrderLine" WHERE "orderId" = "Order".id AND "trackingStatus" IN ('rto_in_transit', 'rto_delivered'))` as never,
+                    '=' as never,
+                    sql`true` as never
+                ) as unknown as T;
             } else if (shippedFilter === 'cod_pending') {
-                // Filter COD orders with at least one delivered line awaiting remittance
-                return shippedQb
-                    .where('Order.paymentMethod', '=', 'COD')
+                return shippedBase
+                    .where('Order.paymentMethod' as never, '=' as never, 'COD' as never)
                     .where(
-                        sql`EXISTS (SELECT 1 FROM "OrderLine" WHERE "orderId" = "Order".id AND "trackingStatus" = 'delivered')`,
-                        '=',
-                        sql`true`
+                        sql`EXISTS (SELECT 1 FROM "OrderLine" WHERE "orderId" = "Order".id AND "trackingStatus" = 'delivered')` as never,
+                        '=' as never,
+                        sql`true` as never
                     )
-                    .where('Order.codRemittedAt', 'is', null) as T;
+                    .where('Order.codRemittedAt' as never, 'is' as never, null as never) as unknown as T;
             }
-            return shippedQb as T;
+            return shippedBase as unknown as T;
+        }
 
         case 'cancelled':
-            return (qb as any)
-                .where('Order.isArchived', '=', false)
-                .where('Order.releasedToCancelled', '=', true) as T;
+            return qb
+                .where('Order.isArchived' as never, '=' as never, false as never)
+                .where('Order.releasedToCancelled' as never, '=' as never, true as never) as unknown as T;
 
         default:
             return qb;
@@ -322,13 +324,13 @@ export async function listOrdersKysely(params: OrdersListParams) {
     // Apply search filter (case-insensitive search across multiple fields)
     if (search && search.trim()) {
         const searchTerm = `%${search.trim().toLowerCase()}%`;
-        filteredQuery = filteredQuery.where((eb: any) =>
+        filteredQuery = filteredQuery.where((eb) =>
             eb.or([
-                sql`LOWER("Order"."orderNumber") LIKE ${searchTerm}`,
-                sql`LOWER("Order"."customerName") LIKE ${searchTerm}`,
-                sql`EXISTS (SELECT 1 FROM "OrderLine" WHERE "orderId" = "Order".id AND "awbNumber" LIKE ${searchTerm})`,
-                sql`LOWER("Order"."customerEmail") LIKE ${searchTerm}`,
-                sql`"Order"."customerPhone" LIKE ${searchTerm}`,
+                sql<SqlBool>`LOWER("Order"."orderNumber") LIKE ${searchTerm}`,
+                sql<SqlBool>`LOWER("Order"."customerName") LIKE ${searchTerm}`,
+                sql<SqlBool>`EXISTS (SELECT 1 FROM "OrderLine" WHERE "orderId" = "Order".id AND "awbNumber" LIKE ${searchTerm})`,
+                sql<SqlBool>`LOWER("Order"."customerEmail") LIKE ${searchTerm}`,
+                sql<SqlBool>`"Order"."customerPhone" LIKE ${searchTerm}`,
             ])
         ) as typeof filteredQuery;
     }
@@ -358,13 +360,13 @@ export async function listOrdersKysely(params: OrdersListParams) {
     // Apply search filter to count query
     if (search && search.trim()) {
         const searchTerm = `%${search.trim().toLowerCase()}%`;
-        countQuery = countQuery.where((eb: any) =>
+        countQuery = countQuery.where((eb) =>
             eb.or([
-                sql`LOWER("Order"."orderNumber") LIKE ${searchTerm}`,
-                sql`LOWER("Order"."customerName") LIKE ${searchTerm}`,
-                sql`EXISTS (SELECT 1 FROM "OrderLine" WHERE "orderId" = "Order".id AND "awbNumber" LIKE ${searchTerm})`,
-                sql`LOWER("Order"."customerEmail") LIKE ${searchTerm}`,
-                sql`"Order"."customerPhone" LIKE ${searchTerm}`,
+                sql<SqlBool>`LOWER("Order"."orderNumber") LIKE ${searchTerm}`,
+                sql<SqlBool>`LOWER("Order"."customerName") LIKE ${searchTerm}`,
+                sql<SqlBool>`EXISTS (SELECT 1 FROM "OrderLine" WHERE "orderId" = "Order".id AND "awbNumber" LIKE ${searchTerm})`,
+                sql<SqlBool>`LOWER("Order"."customerEmail") LIKE ${searchTerm}`,
+                sql<SqlBool>`"Order"."customerPhone" LIKE ${searchTerm}`,
             ])
         ) as typeof countQuery;
     }

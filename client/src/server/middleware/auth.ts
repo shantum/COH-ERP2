@@ -15,7 +15,7 @@
 import { createMiddleware } from '@tanstack/react-start';
 import { getCookie, getRequestHeader } from '@tanstack/react-start/server';
 import { z } from 'zod';
-import { getPrisma } from '@coh/shared/services/db';
+import { getPrisma, type PrismaInstance } from '@coh/shared/services/db';
 
 // ============================================
 // TYPES
@@ -105,8 +105,7 @@ async function verifyToken(token: string, secret: string): Promise<JwtPayload | 
  * Validate token version against database
  */
 async function validateTokenVersion(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    prisma: any,
+    prisma: PrismaInstance,
     userId: string,
     tokenVersion: number
 ): Promise<boolean> {
@@ -126,8 +125,7 @@ async function validateTokenVersion(
  * Get user permissions and extraAccess from database
  */
 async function getUserPermissionsAndAccess(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    prisma: any,
+    prisma: PrismaInstance,
     userId: string
 ): Promise<{ permissions: string[]; extraAccess: string[] }> {
     try {
@@ -183,8 +181,7 @@ async function getUserPermissionsAndAccess(
  */
 async function validateAuth(
     token: string | undefined,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    prisma: any
+    prisma: PrismaInstance
 ): Promise<AuthResult> {
     // 1. Check token exists
     if (!token) {

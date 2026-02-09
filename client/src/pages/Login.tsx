@@ -28,8 +28,9 @@ export default function Login({ onLoginSuccess }: LoginProps) {
             } else {
                 navigate({ to: '/' });
             }
-        } catch (err: any) {
-            setError(err.response?.data?.error || 'Login failed');
+        } catch (err: unknown) {
+            const axiosErr = err as { response?: { data?: { error?: string } } };
+            setError(axiosErr.response?.data?.error || 'Login failed');
         } finally {
             setLoading(false);
         }

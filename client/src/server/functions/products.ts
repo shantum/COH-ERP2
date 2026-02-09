@@ -326,8 +326,7 @@ export const getProductsTree = createServerFn({ method: 'GET' })
             const bomFabricVariationIds = new Set(variationsWithBomFabric.map(v => v.variationId));
 
             // Step 2: Build search filter
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            let searchFilter: Record<string, any> = {};
+            let searchFilter: Record<string, unknown> = {};
             if (search) {
                 searchFilter = {
                     OR: [
@@ -642,8 +641,7 @@ export const getProductsList = createServerFn({ method: 'GET' })
         }
         if (search) {
             const searchTerm = `%${search.toLowerCase()}%`;
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            countQuery = countQuery.where((eb: any) =>
+            countQuery = countQuery.where((eb) =>
                 eb.or([sql`LOWER("Product"."name") LIKE ${searchTerm}`])
             ) as typeof countQuery;
         }
@@ -667,8 +665,7 @@ export const getProductsList = createServerFn({ method: 'GET' })
                 'Product.isActive',
                 'Product.createdAt',
             ])
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            .$call((qb: any) => {
+            .$call((qb) => {
                 let q = qb;
                 if (category) {
                     q = q.where('Product.category', '=', category) as typeof q;
@@ -678,8 +675,7 @@ export const getProductsList = createServerFn({ method: 'GET' })
                 }
                 if (search) {
                     const searchTerm = `%${search.toLowerCase()}%`;
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                    q = q.where((eb: any) =>
+                    q = q.where((eb) =>
                         eb.or([sql`LOWER("Product"."name") LIKE ${searchTerm}`])
                     ) as typeof q;
                 }
@@ -691,8 +687,7 @@ export const getProductsList = createServerFn({ method: 'GET' })
             .execute();
 
         // Get product IDs for fetching variations
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const productIds = productsRaw.map((p: any) => p.id);
+        const productIds = productsRaw.map((p) => p.id);
 
         if (productIds.length === 0) {
             return {
@@ -723,8 +718,7 @@ export const getProductsList = createServerFn({ method: 'GET' })
             .execute();
 
         // Get variation IDs for fetching SKUs
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const variationIds = variationsRaw.map((v: any) => v.id);
+        const variationIds = variationsRaw.map((v) => v.id);
 
         // Fetch SKUs for these variations
         const skusRaw =
@@ -780,8 +774,7 @@ export const getProductsList = createServerFn({ method: 'GET' })
         }
 
         // Assemble final products
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const products: ProductWithVariations[] = productsRaw.map((p: any) => ({
+        const products: ProductWithVariations[] = productsRaw.map((p) => ({
             id: p.id,
             name: p.name,
             styleCode: p.styleCode,
@@ -791,12 +784,8 @@ export const getProductsList = createServerFn({ method: 'GET' })
             imageUrl: p.imageUrl,
             isActive: p.isActive,
             createdAt: p.createdAt,
-            fabricType: p.fabricTypeId
-                ? {
-                      id: p.fabricTypeId,
-                      name: p.fabricTypeName ?? '',
-                  }
-                : null,
+            // NOTE: FabricType removed from schema - always null
+            fabricType: null,
             variations: variationsByProduct.get(p.id) || [],
         }));
 
@@ -1057,8 +1046,7 @@ export const getCatalogFilters = createServerFn({ method: 'GET' })
 
             // Transform fabricColours for the "fabrics" response (backward compatibility)
             // Uses materialId as fabricTypeId for older code
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const fabrics = fabricColoursRaw.map((fc: any) => ({
+            const fabrics = fabricColoursRaw.map((fc) => ({
                 id: fc.id,
                 name: `${fc.fabric?.name ?? ''} - ${fc.colourName}`,
                 fabricTypeId: fc.fabric?.materialId ?? '',  // materialId for backward compat
@@ -1068,8 +1056,7 @@ export const getCatalogFilters = createServerFn({ method: 'GET' })
             }));
 
             // Transform fabricColours to expected format
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const fabricColours = fabricColoursRaw.map((fc: any) => ({
+            const fabricColours = fabricColoursRaw.map((fc) => ({
                 id: fc.id,
                 name: fc.colourName,
                 hex: fc.colourHex,

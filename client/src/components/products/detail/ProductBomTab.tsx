@@ -263,10 +263,10 @@ export function ProductBomTab({ product }: ProductBomTabProps) {
                         Variation Fabric Assignments
                     </h4>
                     <div className="space-y-2">
-                        {bomData.variations.slice(0, 5).map((v: any) => {
+                        {bomData.variations.slice(0, 5).map((v) => {
                             // Find main fabric assignment
                             const mainFabric = v.bomLines?.find(
-                                (l: any) => l.roleCode === 'main' && l.typeCode === 'FABRIC'
+                                (l) => l.roleCode === 'main' && l.typeCode === 'FABRIC'
                             );
                             return (
                                 <div

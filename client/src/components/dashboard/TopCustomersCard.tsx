@@ -21,7 +21,7 @@ const TIME_PERIODS = [
     { value: '1year', label: '1 Year' },
 ];
 
-const TIER_STYLES: Record<string, { bg: string; text: string; icon: any }> = {
+const TIER_STYLES: Record<string, { bg: string; text: string; icon: React.ComponentType<{ size?: number }> }> = {
     vip: { bg: 'bg-purple-100', text: 'text-purple-700', icon: Crown },
     loyal: { bg: 'bg-blue-100', text: 'text-blue-700', icon: Star },
     bronze: { bg: 'bg-amber-100', text: 'text-amber-700', icon: Award },

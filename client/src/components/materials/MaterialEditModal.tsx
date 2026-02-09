@@ -23,9 +23,45 @@ import {
 // Types
 export type MaterialEditType = 'material' | 'fabric' | 'colour' | 'trim' | 'service';
 
+/** Item data passed from the materials tree - uses MaterialNode shape */
+interface MaterialEditItem {
+    id: string;
+    name?: string;
+    description?: string;
+    fabricId?: string;
+    materialName?: string;
+    fabricName?: string;
+    constructionType?: string;
+    pattern?: string;
+    weight?: number | null;
+    weightUnit?: string;
+    composition?: string;
+    defaultCostPerUnit?: number | null;
+    defaultLeadTimeDays?: number | null;
+    defaultMinOrderQty?: number | null;
+    avgShrinkagePct?: number;
+    colourName?: string;
+    standardColour?: string;
+    colourHex?: string;
+    costPerUnit?: number | null;
+    supplierId?: string | null;
+    leadTimeDays?: number | null;
+    minOrderQty?: number | null;
+    inheritedCostPerUnit?: number | null;
+    inheritedLeadTimeDays?: number | null;
+    inheritedMinOrderQty?: number | null;
+    colourId?: string;
+    code?: string;
+    category?: string;
+    unit?: string;
+    costPerJob?: number | null;
+    costUnit?: string;
+    vendorId?: string | null;
+}
+
 interface MaterialEditModalProps {
     type: MaterialEditType;
-    item: any;
+    item: MaterialEditItem;
     isOpen: boolean;
     onClose: () => void;
     onSuccess?: () => void;

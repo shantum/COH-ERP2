@@ -11,8 +11,16 @@
 
 export type ViewLevel = 'sku' | 'variation' | 'product' | 'consumption';
 
+/** Row fields accessed by the fabric display cell */
+interface FabricRowData {
+    fabricTypeName?: string;
+    materialName?: string;
+    fabricName?: string;
+    fabricColourName?: string;
+}
+
 export interface FabricDisplayCellProps {
-    row: any;
+    row: FabricRowData;
     viewLevel: ViewLevel;
     columnType: 'fabricType' | 'fabric';
 }
@@ -52,14 +60,14 @@ export function FabricDisplayCell({
 // Legacy export for backward compatibility during migration
 // TODO: Remove after all usages are updated
 export interface FabricEditPopoverProps {
-    row: any;
+    row: FabricRowData;
     viewLevel: ViewLevel;
     columnType: 'fabricType' | 'fabric';
     fabricTypes?: Array<{ id: string; name: string }>;
     fabrics?: Array<{ id: string; name: string; colorName: string; fabricTypeId: string | null; displayName: string }>;
     onUpdateFabricType?: (productId: string, fabricTypeId: string | null, affectedCount: number) => void;
     onUpdateFabric?: (variationId: string, fabricId: string, affectedCount: number) => void;
-    rawItems?: any[];
+    rawItems?: Array<{ id: string; name: string }>;
 }
 
 /**

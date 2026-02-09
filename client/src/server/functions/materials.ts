@@ -11,6 +11,7 @@
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth';
+import type { Prisma } from '@prisma/client';
 import { getPrisma } from '@coh/shared/services/db';
 import { getFabricSalesMetricsKysely, type FabricSalesMetrics } from '@coh/shared/services/db/queries';
 
@@ -81,7 +82,7 @@ export const getMaterialsHierarchy = createServerFn({ method: 'GET' })
     .handler(async ({ data }) => {
         const prisma = await getPrisma();
             // Build where clause based on filters
-            const where: any = {};
+            const where: Prisma.MaterialWhereInput = {};
 
             if (data.materialId) {
                 where.id = data.materialId;

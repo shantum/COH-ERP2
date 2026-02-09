@@ -66,7 +66,7 @@ interface CreateBatchData {
     sampleColour?: string;
     sampleSize?: string;
     qtyPlanned: number;
-    priority?: 'low' | 'normal' | 'high' | 'urgent';
+    priority?: 'low' | 'normal' | 'high' | 'urgent' | 'order_fulfillment';
     sourceOrderLineId?: string;
     notes?: string;
 }

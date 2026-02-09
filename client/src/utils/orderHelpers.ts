@@ -3,7 +3,106 @@
  * Shared helpers for order-related formatting, parsing, and data transformations
  */
 
-import { SIZE_ORDER } from '../constants/sizes';
+import { SIZE_ORDER, type StandardSize } from '../constants/sizes';
+
+// --- Minimal reference interfaces for type-safe helpers ---
+
+export interface InventoryBalanceRef {
+    skuId: string;
+    currentBalance: number;
+    availableBalance?: number;
+}
+
+export interface FabricStockRef {
+    fabricId: string;
+    currentBalance: number | string;
+}
+
+export interface SkuForSelection {
+    id: string;
+    size: string;
+    mrp: number;
+    variation?: {
+        id: string;
+        colorName: string;
+        product?: { id: string; name: string };
+    };
+}
+
+export interface OrderForStats {
+    customerEmail?: string | null;
+    customerName?: string | null;
+}
+
+export interface OrderForFlatten {
+    id: string;
+    orderNumber: string;
+    orderDate: string;
+    shipByDate?: string | null;
+    customerName: string;
+    customerEmail?: string | null;
+    customerPhone?: string | null;
+    customerId?: string | null;
+    shippingAddress?: string | null;
+    totalAmount?: number | null;
+    paymentMethod?: string | null;
+    channel?: string | null;
+    internalNotes?: string | null;
+    fulfillmentStage?: string | null;
+    customerLtv?: number;
+    customerOrderCount?: number;
+    customerTier?: string | null;
+    customerRtoCount?: number;
+    status?: string;
+    shopifyCache?: {
+        fulfillmentStatus?: string;
+        trackingNumber?: string;
+        trackingCompany?: string;
+        tags?: string;
+    } | null;
+    orderLines?: Array<{
+        id: string;
+        skuId: string;
+        qty: number;
+        lineStatus: string;
+        notes?: string | null;
+        shippedAt?: string | null;
+        deliveredAt?: string | null;
+        trackingStatus?: string | null;
+        lastTrackingUpdate?: string | null;
+        isCustomized?: boolean;
+        isNonReturnable?: boolean;
+        originalSkuId?: string | null;
+        originalSku?: { skuCode: string } | null;
+        returnStatus?: string | null;
+        returnQty?: number | null;
+        productionBatch?: {
+            id: string;
+            batchCode: string;
+            batchDate?: string | null;
+            status: string;
+        } | null;
+        sku?: {
+            skuCode: string;
+            size: string;
+            isCustomSku?: boolean;
+            customizationType?: string | null;
+            customizationValue?: string | null;
+            customizationNotes?: string | null;
+            variation?: {
+                id: string;
+                colorName: string;
+                colorHex?: string | null;
+                imageUrl?: string | null;
+                product?: {
+                    name: string;
+                    imageUrl?: string | null;
+                };
+                fabric?: { id: string } | null;
+            };
+        } | null;
+    }>;
+}
 
 /**
  * Format a date string into separate date and time components
@@ -32,26 +131,26 @@ export function parseCity(shippingAddress: string | null): string {
 /**
  * Get available inventory balance for a SKU
  */
-export function getSkuBalance(inventoryBalance: any[] | undefined, skuId: string): number {
-    const inv = inventoryBalance?.find((i: any) => i.skuId === skuId);
+export function getSkuBalance(inventoryBalance: InventoryBalanceRef[] | undefined, skuId: string): number {
+    const inv = inventoryBalance?.find((i) => i.skuId === skuId);
     return inv?.availableBalance ?? inv?.currentBalance ?? 0;
 }
 
 /**
  * Get fabric balance for a fabric ID
  */
-export function getFabricBalance(fabricStock: any[] | undefined, fabricId: string): number {
-    const fab = fabricStock?.find((f: any) => f.fabricId === fabricId);
-    return fab ? parseFloat(fab.currentBalance) : 0;
+export function getFabricBalance(fabricStock: FabricStockRef[] | undefined, fabricId: string): number {
+    const fab = fabricStock?.find((f) => f.fabricId === fabricId);
+    return fab ? parseFloat(String(fab.currentBalance)) : 0;
 }
 
 // Pre-built Maps for O(1) lookups during flattenOrders
 let inventoryMap: Map<string, number> | null = null;
 let fabricMap: Map<string, number> | null = null;
-let lastInventoryRef: any[] | undefined = undefined;
-let lastFabricRef: any[] | undefined = undefined;
+let lastInventoryRef: InventoryBalanceRef[] | undefined = undefined;
+let lastFabricRef: FabricStockRef[] | undefined = undefined;
 
-function getInventoryMap(inventoryBalance: any[] | undefined): Map<string, number> {
+function getInventoryMap(inventoryBalance: InventoryBalanceRef[] | undefined): Map<string, number> {
     // Rebuild if reference changed OR map is null (first call)
     if (inventoryMap === null || inventoryBalance !== lastInventoryRef) {
         inventoryMap = new Map();
@@ -65,13 +164,13 @@ function getInventoryMap(inventoryBalance: any[] | undefined): Map<string, numbe
     return inventoryMap;
 }
 
-function getFabricMap(fabricStock: any[] | undefined): Map<string, number> {
+function getFabricMap(fabricStock: FabricStockRef[] | undefined): Map<string, number> {
     // Rebuild if reference changed OR map is null (first call)
     if (fabricMap === null || fabricStock !== lastFabricRef) {
         fabricMap = new Map();
         if (fabricStock) {
             for (const item of fabricStock) {
-                fabricMap.set(item.fabricId, parseFloat(item.currentBalance) || 0);
+                fabricMap.set(item.fabricId, parseFloat(String(item.currentBalance)) || 0);
             }
         }
         lastFabricRef = fabricStock;
@@ -84,8 +183,8 @@ function getFabricMap(fabricStock: any[] | undefined): Map<string, number> {
  * Note: LTV is now provided by the server for consistency
  */
 export function computeCustomerStats(
-    openOrders: any[] | undefined,
-    shippedOrders: any[] | undefined
+    openOrders: OrderForStats[] | undefined,
+    shippedOrders: OrderForStats[] | undefined
 ): Record<string, { orderCount: number }> {
     const stats: Record<string, { orderCount: number }> = {};
     const allOrders = [...(openOrders || []), ...(shippedOrders || [])];
@@ -110,8 +209,8 @@ export function computeCustomerStats(
  */
 export function enrichRowsWithInventory<T extends { skuId: string | null; skuStock?: number; fabricBalance?: number }>(
     rows: T[],
-    inventoryBalance: any[] | undefined,
-    fabricStock: any[] | undefined
+    inventoryBalance: InventoryBalanceRef[] | undefined,
+    fabricStock: FabricStockRef[] | undefined
 ): T[] {
     if (!rows || rows.length === 0) return rows;
 
@@ -190,7 +289,7 @@ export interface FlattenedOrderRow {
     // Production batch
     productionBatch: {
         id: string;
-        batchCode: string;
+        batchCode: string | null;
         batchDate: string | null;
         status: string;
     } | null;
@@ -203,7 +302,7 @@ export interface FlattenedOrderRow {
     fulfillmentStage: string | null;
 
     // Full order reference (for modals, actions)
-    order: any;
+    order: Record<string, unknown>;
 
     // Customization fields
     isCustomized: boolean;
@@ -253,10 +352,10 @@ export interface FlattenedOrderRow {
  * (order count now comes from server via order.customerOrderCount)
  */
 export function flattenOrders(
-    orders: any[] | undefined,
+    orders: OrderForFlatten[] | undefined,
     _customerStats: Record<string, { orderCount: number }>,
-    inventoryBalance: any[] | undefined,
-    fabricStock: any[] | undefined
+    inventoryBalance: InventoryBalanceRef[] | undefined,
+    fabricStock: FabricStockRef[] | undefined
 ): FlattenedOrderRow[] {
     if (!orders) return [];
 
@@ -296,7 +395,7 @@ export function flattenOrders(
                 customerEmail: order.customerEmail || null,
                 customerPhone: order.customerPhone || null,
                 customerId: order.customerId || null,
-                city: parseCity(order.shippingAddress),
+                city: parseCity(order.shippingAddress ?? null),
                 customerOrderCount: serverOrderCount,
                 customerLtv: serverLtv,
                 customerTier: order.customerTier || null,
@@ -328,7 +427,7 @@ export function flattenOrders(
                 isFirstLine: true,
                 totalLines: 0,
                 fulfillmentStage: order.fulfillmentStage || null,
-                order: order,
+                order: order as unknown as Record<string, unknown>,
                 // Customization fields
                 isCustomized: false,
                 isNonReturnable: false,
@@ -378,7 +477,7 @@ export function flattenOrders(
                 customerEmail: order.customerEmail || null,
                 customerPhone: order.customerPhone || null,
                 customerId: order.customerId || null,
-                city: parseCity(order.shippingAddress),
+                city: parseCity(order.shippingAddress ?? null),
                 customerOrderCount: serverOrderCount,
                 customerLtv: serverLtv,
                 customerTier: order.customerTier || null,
@@ -404,13 +503,13 @@ export function flattenOrders(
                 shopifyAwb: order.shopifyCache?.trackingNumber || null,
                 shopifyCourier: order.shopifyCache?.trackingCompany || null,
                 shopifyTags: order.shopifyCache?.tags || null,
-                productionBatch,
+                productionBatch: productionBatch ? { ...productionBatch, batchDate: productionBatch.batchDate ?? null } : null,
                 productionBatchId: productionBatch?.id || null,
                 productionDate: productionBatch?.batchDate?.split('T')[0] || null,
                 isFirstLine: idx === 0,
                 totalLines: orderLines.length,
                 fulfillmentStage: order.fulfillmentStage || null,
-                order: order,
+                order: order as unknown as Record<string, unknown>,
                 // Customization fields
                 isCustomized,
                 isNonReturnable,
@@ -485,11 +584,11 @@ export interface SizeOption {
 /**
  * Get unique products from SKU list
  */
-export function getUniqueProducts(allSkus: any[] | undefined): ProductOption[] {
+export function getUniqueProducts(allSkus: SkuForSelection[] | undefined): ProductOption[] {
     if (!allSkus) return [];
     const products = new Map<string, ProductOption>();
 
-    allSkus.forEach((sku: any) => {
+    allSkus.forEach((sku) => {
         const product = sku.variation?.product;
         if (product && !products.has(product.id)) {
             products.set(product.id, { id: product.id, name: product.name });
@@ -502,11 +601,11 @@ export function getUniqueProducts(allSkus: any[] | undefined): ProductOption[] {
 /**
  * Get colors/variations for a specific product
  */
-export function getColorsForProduct(allSkus: any[] | undefined, productId: string): ColorOption[] {
+export function getColorsForProduct(allSkus: SkuForSelection[] | undefined, productId: string): ColorOption[] {
     if (!allSkus || !productId) return [];
     const colors = new Map<string, ColorOption>();
 
-    allSkus.forEach((sku: any) => {
+    allSkus.forEach((sku) => {
         if (sku.variation?.product?.id === productId) {
             const variation = sku.variation;
             if (!colors.has(variation.id)) {
@@ -522,21 +621,21 @@ export function getColorsForProduct(allSkus: any[] | undefined, productId: strin
  * Get sizes for a specific variation, with stock info
  */
 export function getSizesForVariation(
-    allSkus: any[] | undefined,
+    allSkus: SkuForSelection[] | undefined,
     variationId: string,
-    inventoryBalance: any[] | undefined
+    inventoryBalance: InventoryBalanceRef[] | undefined
 ): SizeOption[] {
     if (!allSkus || !variationId) return [];
 
     return allSkus
-        .filter((sku: any) => sku.variation?.id === variationId)
-        .map((sku: any) => ({
+        .filter((sku) => sku.variation?.id === variationId)
+        .map((sku) => ({
             id: sku.id,
             size: sku.size,
             stock: getSkuBalance(inventoryBalance, sku.id),
             mrp: sku.mrp
         }))
-        .sort((a, b) => SIZE_ORDER.indexOf(a.size as any) - SIZE_ORDER.indexOf(b.size as any));
+        .sort((a, b) => SIZE_ORDER.indexOf(a.size as StandardSize) - SIZE_ORDER.indexOf(b.size as StandardSize));
 }
 
 // Default column headers for the orders grid (cleaner, more readable names)

@@ -59,7 +59,7 @@ export function useAccess(): AccessContext {
 
     // Extract role and extraAccess from user
     const role = user?.role ?? null;
-    const extraAccess: string[] = (user as any)?.extraAccess ?? [];
+    const extraAccess: string[] = user?.extraAccess ?? [];
 
     // Role checks
     const isOwner = role === 'owner' || role === 'admin';

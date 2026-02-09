@@ -8,9 +8,31 @@ import { X, Package, TrendingUp, TrendingDown, Clock, Info, DollarSign } from 'l
 import { useQuery } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { getColourTransactions } from '../../server/functions/materials';
+import type { MaterialNode } from './types';
+
+/**
+ * The detail panel displays MaterialNode, TrimItem, or ServiceItem data.
+ * We use Partial<MaterialNode> plus extra fields so all three types are assignable.
+ */
+type DetailPanelItemData = Partial<MaterialNode> & {
+    id: string;
+    // Fabric fields not on base MaterialNode
+    description?: string | null;
+    defaultCostPerUnit?: number | null;
+    defaultLeadTimeDays?: number | null;
+    defaultMinOrderQty?: number | null;
+    // Trim/Service fields
+    code?: string;
+    category?: string;
+    costPerJob?: number | null;
+    costUnit?: string;
+    vendorId?: string | null;
+    vendorName?: string | null;
+    usageCount?: number;
+};
 
 interface DetailPanelProps {
-    item: any;
+    item: DetailPanelItemData;
     type: 'colour' | 'fabric' | 'material' | 'trim' | 'service';
     isOpen: boolean;
     onClose: () => void;
@@ -135,12 +157,12 @@ export function DetailPanel({ item, type, isOpen, onClose, onEdit }: DetailPanel
                                         <p className="text-sm text-gray-500">Current Balance</p>
                                     </div>
                                     <div className={`rounded-xl p-4 text-center ${
-                                        item.daysOfStock <= 7 ? 'bg-red-50' :
-                                        item.daysOfStock <= 14 ? 'bg-yellow-50' : 'bg-green-50'
+                                        (item.daysOfStock ?? 999) <= 7 ? 'bg-red-50' :
+                                        (item.daysOfStock ?? 999) <= 14 ? 'bg-yellow-50' : 'bg-green-50'
                                     }`}>
                                         <p className={`text-2xl font-bold ${
-                                            item.daysOfStock <= 7 ? 'text-red-600' :
-                                            item.daysOfStock <= 14 ? 'text-yellow-600' : 'text-green-600'
+                                            (item.daysOfStock ?? 999) <= 7 ? 'text-red-600' :
+                                            (item.daysOfStock ?? 999) <= 14 ? 'text-yellow-600' : 'text-green-600'
                                         }`}>
                                             {item.daysOfStock != null ? `${item.daysOfStock}d` : '-'}
                                         </p>
@@ -180,7 +202,7 @@ export function DetailPanel({ item, type, isOpen, onClose, onEdit }: DetailPanel
                                         Recent Transactions
                                     </h3>
                                     <div className="space-y-2">
-                                        {transactions.items.slice(0, 10).map((txn: any) => (
+                                        {transactions.items.slice(0, 10).map((txn: { id: string; txnType: string; reason?: string; createdAt: string; qty: number }) => (
                                             <div
                                                 key={txn.id}
                                                 className="flex items-center justify-between p-3 bg-gray-50 rounded-lg text-sm"
@@ -355,7 +377,7 @@ export function DetailPanel({ item, type, isOpen, onClose, onEdit }: DetailPanel
 }
 
 // Helper component for info rows
-function InfoRow({ label, value, inherited }: { label: string; value: string | number; inherited?: boolean }) {
+function InfoRow({ label, value, inherited }: { label: string; value: React.ReactNode; inherited?: boolean }) {
     return (
         <div className="flex justify-between items-center">
             <span className="text-sm text-gray-500">{label}</span>

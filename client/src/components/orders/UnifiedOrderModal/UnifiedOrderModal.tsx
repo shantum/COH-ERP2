@@ -224,7 +224,7 @@ export function UnifiedOrderModal({
 
     try {
       // Build update data
-      const updateData: Record<string, any> = {};
+      const updateData: Record<string, unknown> = {};
 
       // Customer info
       if (editForm.customerName !== order.customerName) {
@@ -240,7 +240,7 @@ export function UnifiedOrderModal({
       // Address
       const addressFields = ['address1', 'address2', 'city', 'province', 'zip', 'country'] as const;
       const hasAddressChanges = addressFields.some(field => {
-        const originalAddress = order.shippingAddress as Record<string, any> | null;
+        const originalAddress = order.shippingAddress as Record<string, unknown> | null;
         return addressForm[field] !== (originalAddress?.[field] || '');
       });
 
@@ -297,8 +297,8 @@ export function UnifiedOrderModal({
 
     // Get all packed line IDs from the order
     const packedLineIds = order.orderLines
-      ?.filter((line: any) => line.lineStatus === 'packed')
-      .map((line: any) => line.id) || [];
+      ?.filter((line) => line.lineStatus === 'packed')
+      .map((line) => line.id) || [];
 
     if (packedLineIds.length === 0) {
       alert('No packed lines to ship');

@@ -18,7 +18,7 @@ export const TrackingStatusCell = memo(function TrackingStatusCell({ row }: Trac
     const status = row.lineTrackingStatus;
 
     // Use order-level lastScanAt (courier's scan time) or fall back to line-level lastTrackingUpdate
-    const lastTrackingTime = row.order?.lastScanAt || row.lineLastTrackingUpdate;
+    const lastTrackingTime = (row.order?.lastScanAt as string | null | undefined) || row.lineLastTrackingUpdate;
 
     // Only show tracking status if there's actual tracking data from iThink
     // The default 'in_transit' status is set when orders ship, but without real tracking data it's misleading
@@ -35,7 +35,7 @@ export const TrackingStatusCell = memo(function TrackingStatusCell({ row }: Trac
         label: status,
     };
 
-    const lastUpdate = formatLastUpdate(lastTrackingTime);
+    const lastUpdate = formatLastUpdate(lastTrackingTime ?? null);
 
     return (
         <div className="flex items-center gap-1.5">

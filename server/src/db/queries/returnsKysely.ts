@@ -18,6 +18,102 @@ import {
 } from '@coh/shared';
 
 // ============================================
+// ROW TYPES (for typed query results after joins)
+// ============================================
+
+/** Shape of a row from the list returns main query */
+interface ReturnListRow {
+    id: string;
+    requestNumber: string;
+    requestType: string;
+    status: string;
+    reason: string | null;
+    customerNotes: string | null;
+    createdAt: Date;
+    orderId: string | null;
+    orderNumber: string | null;
+    orderDate: Date | null;
+    customerId: string | null;
+    customerFirstName: string | null;
+    customerLastName: string | null;
+    customerEmail: string | null;
+}
+
+/** Shape of a row from the return lines query */
+interface ReturnLineQueryRow {
+    id: string;
+    requestId: string;
+    skuId: string;
+    skuCode: string;
+    skuSize: string;
+    qty: number;
+    reason: string | null;
+    itemCondition: string | null;
+    productId: string | null;
+    productName: string | null;
+    colorName: string | null;
+}
+
+/** Shape of a row from the detail return request query */
+interface ReturnDetailRow {
+    id: string;
+    requestNumber: string;
+    requestType: string;
+    status: string;
+    reason: string | null;
+    customerNotes: string | null;
+    resolutionNotes: string | null;
+    createdAt: Date;
+    updatedAt: Date;
+    originalOrderId: string | null;
+    originalOrderNumber: string | null;
+    originalOrderDate: Date | null;
+    originalOrderTotal: number | null;
+    originalOrderAddress: string | null;
+    exchangeOrderId: string | null;
+    exchangeOrderNumber: string | null;
+    exchangeOrderDate: Date | null;
+    customerId: string | null;
+    customerFirstName: string | null;
+    customerLastName: string | null;
+    customerEmail: string | null;
+    customerPhone: string | null;
+    shippingId: string | null;
+    shippingAwb: string | null;
+    shippingCourier: string | null;
+    shippingStatus: string | null;
+}
+
+/** Shape of a row from the detail lines query */
+interface DetailLineRow {
+    id: string;
+    skuId: string;
+    skuCode: string;
+    skuSize: string;
+    qty: number;
+    reason: string | null;
+    itemCondition: string | null;
+    processingAction: string | null;
+    productId: string | null;
+    productName: string | null;
+    productImageUrl: string | null;
+    colorName: string | null;
+    exchangeSkuId: string | null;
+    exchangeSkuCode: string | null;
+    exchangeSkuSize: string | null;
+}
+
+/** Shape of a row from the status history query */
+interface StatusHistoryRow {
+    id: string;
+    fromStatus: string;
+    toStatus: string;
+    notes: string | null;
+    createdAt: Date;
+    changedByName: string | null;
+}
+
+// ============================================
 // INPUT TYPES
 // ============================================
 
@@ -55,7 +151,8 @@ export async function listReturnsKysely(
     const countResult = await countQuery.executeTakeFirst();
     const total = countResult?.count ?? 0;
 
-    // Build main query - use type assertion to work around Kysely strict typing on joins
+    // Build main query - type assertion needed: Kysely loses column tracking after multiple leftJoin aliases
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Kysely cannot infer select columns across 3+ leftJoins with aliases
     const mainQuery = (kysely
         .selectFrom('ReturnRequest')
         .leftJoin('Order', 'Order.id', 'ReturnRequest.originalOrderId')
@@ -81,11 +178,11 @@ export async function listReturnsKysely(
         mainQuery.where('ReturnRequest.status', '=', status);
     }
 
-    const returnRows = await mainQuery
+    const returnRows: ReturnListRow[] = await mainQuery
         .orderBy('ReturnRequest.createdAt', 'desc')
         .limit(limit)
         .offset(offset)
-        .execute() as any[];
+        .execute();
 
     if (returnRows.length === 0) {
         const result = {
@@ -96,7 +193,7 @@ export async function listReturnsKysely(
     }
 
     // Get return IDs for fetching lines
-    const returnIds = returnRows.map((r: any) => r.id).filter(Boolean) as string[];
+    const returnIds = returnRows.map((r) => r.id).filter(Boolean);
 
     if (returnIds.length === 0) {
         const result = {
@@ -107,7 +204,8 @@ export async function listReturnsKysely(
     }
 
     // Fetch lines with SKU/product info
-    const lines = await (kysely
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Kysely cannot infer select columns across 4 joins with aliases
+    const lines: ReturnLineQueryRow[] = await (kysely
         .selectFrom('ReturnRequestLine')
         .innerJoin('Sku', 'Sku.id', 'ReturnRequestLine.skuId')
         .leftJoin('Variation', 'Variation.id', 'Sku.variationId')
@@ -126,7 +224,7 @@ export async function listReturnsKysely(
             'Variation.colorName',
         ])
         .where('ReturnRequestLine.requestId', 'in', returnIds)
-        .execute() as any[];
+        .execute();
 
     // Build lines lookup
     const linesByReturn = new Map<string, ReturnLineRow[]>();
@@ -150,7 +248,7 @@ export async function listReturnsKysely(
     }
 
     // Assemble results
-    const items = returnRows.map((r: any) => ({
+    const items = returnRows.map((r) => ({
         id: r.id,
         requestNumber: r.requestNumber,
         requestType: r.requestType,
@@ -186,8 +284,9 @@ export async function listReturnsKysely(
  * Get single return request by ID with full details
  */
 export async function getReturnKysely(id: string): Promise<ReturnDetailResult | null> {
-    // Get main return request - use type assertion for complex joins
-    const returnReq = await (kysely
+    // Get main return request - type assertion needed: Kysely cannot infer columns across 5 leftJoins with aliases
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Kysely loses table-aware types after aliased joins (OriginalOrder, ExchangeOrder)
+    const returnReq: ReturnDetailRow | undefined = await (kysely
         .selectFrom('ReturnRequest')
         .leftJoin('Order as OriginalOrder', 'OriginalOrder.id', 'ReturnRequest.originalOrderId')
         .leftJoin('Order as ExchangeOrder', 'ExchangeOrder.id', 'ReturnRequest.exchangeOrderId')
@@ -226,12 +325,13 @@ export async function getReturnKysely(id: string): Promise<ReturnDetailResult | 
             'ReturnShipping.status as shippingStatus',
         ])
         .where('ReturnRequest.id', '=', id)
-        .executeTakeFirst() as any;
+        .executeTakeFirst();
 
     if (!returnReq) return null;
 
     // Get lines with SKU/product info
-    const lines = await (kysely
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Kysely cannot infer columns across 5 joins with aliased tables (ExchangeSku)
+    const lines: DetailLineRow[] = await (kysely
         .selectFrom('ReturnRequestLine')
         .innerJoin('Sku', 'Sku.id', 'ReturnRequestLine.skuId')
         .leftJoin('Variation', 'Variation.id', 'Sku.variationId')
@@ -255,10 +355,11 @@ export async function getReturnKysely(id: string): Promise<ReturnDetailResult | 
             'ExchangeSku.size as exchangeSkuSize',
         ])
         .where('ReturnRequestLine.requestId', '=', id)
-        .execute() as any[];
+        .execute();
 
     // Get status history
-    const history = await (kysely
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Kysely loses table-aware types after leftJoin with alias
+    const history: StatusHistoryRow[] = await (kysely
         .selectFrom('ReturnStatusHistory')
         .leftJoin('User', 'User.id', 'ReturnStatusHistory.changedById') as any)
         .select([
@@ -271,7 +372,7 @@ export async function getReturnKysely(id: string): Promise<ReturnDetailResult | 
         ])
         .where('ReturnStatusHistory.requestId', '=', id)
         .orderBy('ReturnStatusHistory.createdAt', 'asc')
-        .execute() as any[];
+        .execute();
 
     // Assemble result
     const result = {
@@ -317,7 +418,7 @@ export async function getReturnKysely(id: string): Promise<ReturnDetailResult | 
                   status: returnReq.shippingStatus,
               }
             : null,
-        lines: lines.map((l: any) => ({
+        lines: lines.map((l) => ({
             id: l.id,
             skuId: l.skuId,
             skuCode: l.skuCode,
@@ -347,7 +448,7 @@ export async function getReturnKysely(id: string): Promise<ReturnDetailResult | 
                   }
                 : null,
         })),
-        statusHistory: history.map((h: any) => ({
+        statusHistory: history.map((h) => ({
             id: h.id,
             fromStatus: h.fromStatus,
             toStatus: h.toStatus,

@@ -236,9 +236,9 @@ export function broadcastOrderUpdate(data: OrderUpdateEvent, excludeUserId: stri
             try {
                 client.write(message);
                 broadcastCount++;
-            } catch (err: any) {
+            } catch (err: unknown) {
                 // Client disconnected - clean up immediately to avoid repeated failures
-                console.error(`SSE broadcast error for user ${userId}:`, err.message);
+                console.error(`SSE broadcast error for user ${userId}:`, err instanceof Error ? err.message : String(err));
                 clientSet.delete(client);
                 if (clientSet.size === 0) {
                     clients.delete(userId);

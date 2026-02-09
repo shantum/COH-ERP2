@@ -327,6 +327,18 @@ export type Material = {
     createdAt: Generated<Timestamp>;
     updatedAt: Timestamp;
 };
+export type MonthlyStockSnapshot = {
+    id: Generated<string>;
+    skuId: string;
+    month: Timestamp;
+    openingStock: number;
+    totalInward: number;
+    totalOutward: number;
+    closingStock: number;
+    inwardBreakdown: Generated<unknown>;
+    outwardBreakdown: Generated<unknown>;
+    computedAt: Generated<Timestamp>;
+};
 export type Order = {
     id: Generated<string>;
     orderNumber: string;
@@ -1042,6 +1054,7 @@ export type DB = {
     InventoryReconciliationItem: InventoryReconciliationItem;
     InventoryTransaction: InventoryTransaction;
     Material: Material;
+    MonthlyStockSnapshot: MonthlyStockSnapshot;
     Order: Order;
     OrderLine: OrderLine;
     OrderPayment: OrderPayment;

@@ -13,12 +13,20 @@ import { getGstRate } from '@coh/shared/domain/constants';
 export const CONSUMPTION_SIZES = ['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL', 'Free'];
 
 /**
+ * Catalog SKU item from server — dynamic row shape used across all aggregation levels.
+ * Using Record because server returns many optional fields and aggregation
+ * adds/removes temporary sum fields dynamically.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type CatalogRow = Record<string, any>;
+
+/**
  * Groups SKUs by variation (color). Sums: balances, shopifyQty. Uses variation-level costs.
  * @param items - Flat SKU list from API with inventory + pricing data
  * @returns Aggregated rows keyed by variationId, skuIds[] for bulk updates
  */
-export function aggregateByVariation(items: any[]): any[] {
-    const groups = new Map<string, any>();
+export function aggregateByVariation(items: CatalogRow[]): CatalogRow[] {
+    const groups = new Map<string, CatalogRow>();
 
     for (const item of items) {
         const key = item.variationId;
@@ -117,8 +125,8 @@ export function aggregateByVariation(items: any[]): any[] {
  * @param items - Flat SKU list from API with inventory + pricing data
  * @returns Aggregated rows keyed by productId, skuIds[] for bulk updates
  */
-export function aggregateByProduct(items: any[]): any[] {
-    const groups = new Map<string, any>();
+export function aggregateByProduct(items: CatalogRow[]): CatalogRow[] {
+    const groups = new Map<string, CatalogRow>();
 
     for (const item of items) {
         const key = item.productId;
@@ -242,8 +250,8 @@ export function aggregateByProduct(items: any[]): any[] {
  * @param items - Flat SKU list from API
  * @returns Aggregated rows with consumption_<size> columns
  */
-export function aggregateByConsumption(items: any[]): any[] {
-    const groups = new Map<string, any>();
+export function aggregateByConsumption(items: CatalogRow[]): CatalogRow[] {
+    const groups = new Map<string, CatalogRow>();
 
     for (const item of items) {
         const key = item.productId;

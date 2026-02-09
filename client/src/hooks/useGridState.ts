@@ -497,11 +497,9 @@ export function useGridState({
 /**
  * Helper to get column order from AG-Grid API
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function getColumnOrderFromApi(api: any): string[] {
+export function getColumnOrderFromApi(api: { getAllDisplayedColumns(): Array<{ getColId(): string | undefined }> }): string[] {
     return api.getAllDisplayedColumns()
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        .map((col: any) => col.getColId())
+        .map((col) => col.getColId())
         .filter((id: string | undefined): id is string => id !== undefined);
 }
 

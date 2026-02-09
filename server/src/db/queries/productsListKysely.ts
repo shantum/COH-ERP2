@@ -12,7 +12,7 @@
  * All public exports are validated against Zod schemas to catch schema drift.
  */
 
-import { sql } from 'kysely';
+import { sql, type SqlBool } from 'kysely';
 import { kysely } from '../index.js';
 import {
     productsListResultSchema,
@@ -59,8 +59,8 @@ export async function listProductsKysely(
     }
     if (search) {
         const searchTerm = `%${search.toLowerCase()}%`;
-        countQuery = countQuery.where((eb: any) =>
-            eb.or([sql`LOWER("Product"."name") LIKE ${searchTerm}`])
+        countQuery = countQuery.where((eb) =>
+            eb.or([sql<SqlBool>`LOWER("Product"."name") LIKE ${searchTerm}`])
         ) as typeof countQuery;
     }
 

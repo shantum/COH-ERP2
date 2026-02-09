@@ -81,8 +81,9 @@ export function useUrlModal<TModalType extends string = string>({
         };
 
         navigate({
-            to: routeId as any,
-            search: newSearch as any,
+            // Route ID is dynamic string — type-safe navigation not possible here
+            to: routeId as '.',
+            search: newSearch as Record<string, unknown>,
             replace: false, // Allow back button to close modal
         });
     }, [navigate, routeId, search, modalKey, idKey, modeKey]);
@@ -95,8 +96,9 @@ export function useUrlModal<TModalType extends string = string>({
         delete newSearch[modeKey];
 
         navigate({
-            to: routeId as any,
-            search: newSearch as any,
+            // Route ID is dynamic string — type-safe navigation not possible here
+            to: routeId as '.',
+            search: newSearch as Record<string, unknown>,
             replace: false, // Allow back button navigation
         });
     }, [navigate, routeId, search, modalKey, idKey, modeKey]);
@@ -112,8 +114,9 @@ export function useUrlModal<TModalType extends string = string>({
         }
 
         navigate({
-            to: routeId as any,
-            search: newSearch as any,
+            // Route ID is dynamic string — type-safe navigation not possible here
+            to: routeId as '.',
+            search: newSearch as Record<string, unknown>,
             replace: true, // Don't add to history for mode changes
         });
     }, [navigate, routeId, search, modeKey]);

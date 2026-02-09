@@ -124,8 +124,8 @@ function RtoInwardForm({ scanResult, rtoData, onSuccess, onCancel }: RtoInwardFo
             queryClient.invalidateQueries({ queryKey: ['pendingQueue'] });
             onSuccess();
         },
-        onError: (err: any) => {
-            setError(err.response?.data?.error || 'Failed to process RTO inward');
+        onError: (err: Error) => {
+            setError(err.message || 'Failed to process RTO inward');
         },
     });
 
@@ -403,8 +403,8 @@ export default function RtoInward({ onSuccess: _onSuccess, onError: _onError }: 
 
             setRtoMatch(rtoMatchItem.data as RtoScanMatchData);
             setScanCode('');
-        } catch (err: any) {
-            setError(err.response?.data?.error || 'Failed to lookup SKU');
+        } catch (err: unknown) {
+            setError(err instanceof Error ? err.message : 'Failed to lookup SKU');
         } finally {
             setIsSearching(false);
             inputRef.current?.focus();

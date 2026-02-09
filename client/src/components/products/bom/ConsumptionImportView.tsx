@@ -102,7 +102,7 @@ function parseCsv(csvText: string): CsvRow[] {
             productName,
             uom: values[1] || '',
             sizes,
-            avgConsumption: isNaN(avgConsumption as number) ? null : avgConsumption,
+            avgConsumption: avgConsumption !== null && isNaN(avgConsumption) ? null : avgConsumption,
             fabricCode: values[10] || '',
             mappedProductId: null,
             mappedProductName: null,

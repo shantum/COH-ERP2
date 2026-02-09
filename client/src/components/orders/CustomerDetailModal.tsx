@@ -19,6 +19,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { getCustomer } from '../../server/functions/customers';
 import { getOptimizedImageUrl } from '../../utils/imageOptimization';
+import type { LucideIcon } from 'lucide-react';
 import {
     TIER_CONFIG,
     calculateHealthScore,
@@ -37,9 +38,60 @@ import {
 // TYPES
 // ============================================================================
 
+/** Color affinity entry from customer detail API */
+interface ColorAffinityItem {
+    color: string;
+    hex?: string;
+    qty: number;
+}
+
+/** Product affinity entry from customer detail API */
+interface ProductAffinityItem {
+    productName: string;
+    qty: number;
+}
+
+/** Fabric affinity entry from customer detail API */
+interface FabricAffinityItem {
+    fabricType: string;
+    qty: number;
+}
+
+/**
+ * Customer detail shape used by this modal.
+ * Matches the return type of the getCustomer server function.
+ */
+interface CustomerDetail {
+    id: string;
+    email: string;
+    firstName: string | null;
+    lastName: string | null;
+    phone: string | null;
+    tier?: string | null;
+    customerTier: string | null;
+    tags: string | null;
+    totalOrders: number;
+    lifetimeValue: number;
+    avgOrderValue: number;
+    returnRate: number;
+    returnCount: number;
+    exchangeCount: number;
+    rtoCount: number;
+    firstOrderDate: string | Date | null;
+    lastOrderDate: string | Date | null;
+    acceptsMarketing: boolean;
+    defaultAddress?: Record<string, unknown> | null;
+    colorAffinity: ColorAffinityItem[] | null;
+    productAffinity: ProductAffinityItem[] | null;
+    fabricAffinity: FabricAffinityItem[] | null;
+    orders: Order[] | null;
+    // Optional fields that may exist
+    returnRequests?: { length: number } | null;
+}
+
 interface CustomerDetailModalProps {
     // Either provide customer data directly OR customerId to fetch
-    customer?: any;
+    customer?: CustomerDetail;
     customerId?: string | null;
     isLoading?: boolean;
     onClose: () => void;
@@ -62,8 +114,8 @@ interface Order {
     id: string;
     orderNumber: string;
     status: string;
-    totalAmount: number;
-    orderDate: string;
+    totalAmount: number | null;
+    orderDate: string | Date;
     orderLines?: OrderLine[];
 }
 
@@ -204,7 +256,7 @@ const STAT_COLOR_CLASSES: Record<string, { bg: string; iconBg: string; iconText:
 function StatCard({ label, value, icon: Icon, trend, subtext, color = 'slate' }: {
     label: string;
     value: string | number;
-    icon: any;
+    icon: LucideIcon;
     trend?: 'up' | 'down' | null;
     subtext?: string;
     color?: string;
@@ -305,7 +357,7 @@ function OrderCard({ order, isExpanded, onToggle }: { order: Order; isExpanded: 
                         <div className="font-semibold text-slate-900 tabular-nums">
                             ₹{Number(order.totalAmount).toLocaleString()}
                         </div>
-                        <div className="text-[10px] text-slate-500">{getRelativeTime(order.orderDate)}</div>
+                        <div className="text-[10px] text-slate-500">{getRelativeTime(String(order.orderDate))}</div>
                         <div className="text-[10px] text-slate-400">{actualDate}</div>
                     </div>
                     {isExpanded ? <ChevronUp size={16} className="text-slate-400" /> : <ChevronDown size={16} className="text-slate-400" />}
@@ -394,7 +446,9 @@ export function CustomerDetailModal({
     });
 
     // Use provided customer or fetched customer
-    const customer = providedCustomer || fetchedCustomer;
+    // The server function returns CustomerDetailResult (Zod-parsed), which is structurally
+    // compatible with CustomerDetail but has Date objects where we accept string | Date.
+    const customer: CustomerDetail | undefined = providedCustomer || (fetchedCustomer as CustomerDetail | undefined);
     const isLoading = providedLoading || fetchLoading;
 
     // Calculate size preferences from orders - MUST be before any early return
@@ -433,20 +487,25 @@ export function CustomerDetailModal({
     };
 
     // Calculated metrics
-    const healthScore = calculateHealthScore(customer);
-    const tenure = calculateTenure(customer?.firstOrderDate);
+    const healthScore = calculateHealthScore(customer ?? null);
+    // Convert Date to string for functions that expect string | null
+    const firstOrderStr = customer?.firstOrderDate
+        ? String(customer.firstOrderDate) : null;
+    const lastOrderStr = customer?.lastOrderDate
+        ? String(customer.lastOrderDate) : null;
+    const tenure = calculateTenure(firstOrderStr);
     const tierProgress = calculateTierProgress(
         customer?.lifetimeValue || 0,
         customer?.customerTier || 'bronze'
     );
-    const daysSinceOrder = getDaysSinceLastOrder(customer?.lastOrderDate);
+    const daysSinceOrder = getDaysSinceLastOrder(lastOrderStr);
 
     // Calculate AVG order value properly (fallback if API returns 0)
     const avgOrderValue = customer?.avgOrderValue ||
-        (customer?.totalOrders > 0 ? Math.round(customer.lifetimeValue / customer.totalOrders) : 0);
+        ((customer?.totalOrders ?? 0) > 0 ? Math.round((customer?.lifetimeValue ?? 0) / (customer?.totalOrders ?? 1)) : 0);
 
     // Calculate order frequency (orders per month)
-    const orderFrequency = calculateOrderFrequency(customer?.totalOrders || 0, customer?.firstOrderDate);
+    const orderFrequency = calculateOrderFrequency(customer?.totalOrders || 0, firstOrderStr);
 
     // Risk indicators
     const risks: Array<{ type: string; message: string; severity: 'high' | 'medium' | 'low' }> = [];
@@ -459,24 +518,26 @@ export function CustomerDetailModal({
         });
     }
 
-    if ((customer?.returnRate || 0) > 25) {
+    const returnRate = customer?.returnRate ?? 0;
+    if (returnRate > 25) {
         risks.push({
             type: 'High Return Rate',
-            message: `${customer.returnRate.toFixed(1)}% return rate`,
-            severity: customer.returnRate > 40 ? 'high' : 'medium'
+            message: `${returnRate.toFixed(1)}% return rate`,
+            severity: returnRate > 40 ? 'high' : 'medium'
         });
     }
 
-    if ((customer?.rtoCount || 0) > 2) {
+    const rtoCount = customer?.rtoCount ?? 0;
+    if (rtoCount > 2) {
         risks.push({
             type: 'Multiple RTOs',
-            message: `${customer.rtoCount} RTO incidents`,
-            severity: customer.rtoCount > 5 ? 'high' : 'medium'
+            message: `${rtoCount} RTO incidents`,
+            severity: rtoCount > 5 ? 'high' : 'medium'
         });
     }
 
     // Calculate total colors for percentage
-    const totalColorQty = customer?.colorAffinity?.reduce((sum: number, c: any) => sum + c.qty, 0) || 1;
+    const totalColorQty = customer?.colorAffinity?.reduce((sum: number, c: { qty: number }) => sum + c.qty, 0) || 1;
 
     // Tier config for avatar
     const tierConfig = TIER_CONFIG[customer?.customerTier?.toLowerCase() as keyof typeof TIER_CONFIG] || TIER_CONFIG.bronze;
@@ -534,7 +595,7 @@ export function CustomerDetailModal({
 
                                 {/* Tier Badge */}
                                 <div className="mt-2">
-                                    <TierBadge tier={customer.customerTier} />
+                                    <TierBadge tier={customer.customerTier || 'bronze'} />
                                 </div>
                             </div>
 
@@ -609,7 +670,7 @@ export function CustomerDetailModal({
                                 </div>
                                 <div className="bg-white rounded-lg p-3 border border-slate-100 text-center">
                                     <div className="text-sm font-bold text-slate-900">
-                                        {customer.lastOrderDate ? getRelativeTime(customer.lastOrderDate) : 'Never'}
+                                        {customer.lastOrderDate ? getRelativeTime(String(customer.lastOrderDate)) : 'Never'}
                                     </div>
                                     <div className="text-[9px] uppercase tracking-wider text-slate-500">Last Order</div>
                                 </div>
@@ -743,11 +804,11 @@ export function CustomerDetailModal({
 
                                     <div className="p-5 space-y-5">
                                         {/* Color Palette */}
-                                        {customer.colorAffinity?.length > 0 && (
+                                        {(customer.colorAffinity?.length ?? 0) > 0 && (
                                             <div>
                                                 <div className="text-[10px] uppercase tracking-wider text-slate-500 mb-3">Color Palette</div>
                                                 <div className="flex gap-4 overflow-x-auto pb-2">
-                                                    {customer.colorAffinity.slice(0, 8).map((c: any, i: number) => (
+                                                    {customer.colorAffinity!.slice(0, 8).map((c: { color: string; qty: number; hex?: string }, i: number) => (
                                                         <ColorSwatch
                                                             key={i}
                                                             color={c.color}
@@ -761,14 +822,14 @@ export function CustomerDetailModal({
                                         )}
 
                                         {/* Products */}
-                                        {customer.productAffinity?.length > 0 && (
+                                        {(customer.productAffinity?.length ?? 0) > 0 && (
                                             <div>
                                                 <div className="text-[10px] uppercase tracking-wider text-slate-500 mb-3 flex items-center gap-2">
                                                     <Package size={12} />
                                                     Top Products
                                                 </div>
                                                 <div className="flex flex-wrap gap-2">
-                                                    {customer.productAffinity.map((p: any, i: number) => (
+                                                    {customer.productAffinity!.map((p: { productName: string; qty: number }, i: number) => (
                                                         <span
                                                             key={i}
                                                             className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg text-sm transition-colors"
@@ -782,14 +843,14 @@ export function CustomerDetailModal({
                                         )}
 
                                         {/* Fabrics */}
-                                        {customer.fabricAffinity?.length > 0 && (
+                                        {(customer.fabricAffinity?.length ?? 0) > 0 && (
                                             <div>
                                                 <div className="text-[10px] uppercase tracking-wider text-slate-500 mb-3 flex items-center gap-2">
                                                     <Layers size={12} />
                                                     Fabric Preferences
                                                 </div>
                                                 <div className="flex flex-wrap gap-2">
-                                                    {customer.fabricAffinity.map((f: any, i: number) => (
+                                                    {customer.fabricAffinity!.map((f: { fabricType: string; qty: number }, i: number) => (
                                                         <span
                                                             key={i}
                                                             className="px-3 py-1.5 bg-amber-50 text-amber-800 hover:bg-amber-100 rounded-lg text-sm transition-colors"
@@ -825,7 +886,7 @@ export function CustomerDetailModal({
                                 </div>
 
                                 {/* Order History */}
-                                {customer.orders?.length > 0 && (
+                                {(customer.orders?.length ?? 0) > 0 && (
                                     <div className="bg-white rounded-xl border border-slate-100 overflow-hidden">
                                         <div className="px-5 py-3 bg-gradient-to-r from-slate-50 to-white border-b border-slate-100 flex items-center justify-between">
                                             <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-600 flex items-center gap-2">
@@ -833,12 +894,12 @@ export function CustomerDetailModal({
                                                 Order History
                                             </h4>
                                             <span className="text-xs text-slate-400">
-                                                {customer.orders.length} {pluralize(customer.orders.length, 'order')}
+                                                {customer.orders!.length} {pluralize(customer.orders!.length, 'order')}
                                             </span>
                                         </div>
 
                                         <div className="p-4 space-y-2">
-                                            {customer.orders.slice(0, 5).map((order: Order) => (
+                                            {customer.orders!.slice(0, 5).map((order: Order) => (
                                                 <OrderCard
                                                     key={order.id}
                                                     order={order}
@@ -847,10 +908,10 @@ export function CustomerDetailModal({
                                                 />
                                             ))}
 
-                                            {customer.orders.length > 5 && (
+                                            {customer.orders!.length > 5 && (
                                                 <div className="text-center pt-2">
                                                     <span className="text-sm text-slate-500">
-                                                        +{customer.orders.length - 5} more orders
+                                                        +{customer.orders!.length - 5} more orders
                                                     </span>
                                                 </div>
                                             )}

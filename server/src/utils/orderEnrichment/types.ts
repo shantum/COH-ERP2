@@ -82,6 +82,31 @@ export interface EnrichedOrder {
     customerOrderCount?: number;
     customerRtoCount?: number;
     customerTier?: string;
+    pendingCount?: number;
+    allocatedCount?: number;
+    pickedCount?: number;
+    packedCount?: number;
+    shippedCount?: number;
+    cancelledCount?: number;
+    [key: string]: unknown;
+}
+
+/**
+ * Fields returned by the customer stats enrichment query.
+ * Used when merging stats results back into CPU-enriched orders.
+ */
+export interface CustomerStatsResult {
+    id: string;
+    customerLtv?: number | null;
+    customerOrderCount?: number | null;
+    customerTier?: string | null;
+    fulfillmentStage?: string | null;
+    pendingCount?: number | null;
+    allocatedCount?: number | null;
+    pickedCount?: number | null;
+    packedCount?: number | null;
+    shippedCount?: number | null;
+    cancelledCount?: number | null;
     [key: string]: unknown;
 }
 

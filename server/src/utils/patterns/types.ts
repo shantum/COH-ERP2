@@ -209,6 +209,7 @@ export interface OrderLineWithAddress {
 
 export interface ShopifyCache {
     rawData?: string | null;
+    totalPrice?: string | number | null;
     discountCodes?: string | null;
     customerNotes?: string | null;
     fulfillmentStatus?: string | null;

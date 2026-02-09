@@ -13,12 +13,31 @@ import { FormModal } from '../Modal';
 
 type EditLevel = 'sku' | 'variation' | 'product';
 
+/** Data passed into the modal for display context (title, subtitle) */
+interface EditModalData {
+    skuCode?: string;
+    fabricConsumption?: string | number;
+    mrp?: string | number;
+    targetStockQty?: string | number;
+    colorName?: string;
+    hasLining?: boolean;
+    productName?: string;
+    styleCode?: string;
+    category?: string;
+    gender?: string;
+    productType?: string;
+    size?: string;
+}
+
+/** Internal form state - uses Record since fields change based on level */
+type EditFormState = Record<string, string | boolean>;
+
 export interface EditModalProps {
     isOpen: boolean;
     level: EditLevel;
-    data: any;
+    data: EditModalData | null;
     onClose: () => void;
-    onSubmit: (formData: any) => void;
+    onSubmit: (formData: Record<string, unknown>) => void;
     // Legacy props - kept for backward compatibility but no longer used
     fabricTypes?: Array<{ id: string; name: string }>;
     fabrics?: Array<{ id: string; name: string; colorName: string; fabricTypeId: string | null; displayName: string }>;
@@ -33,7 +52,7 @@ export function EditModal({
     onSubmit,
     isLoading
 }: EditModalProps) {
-    const [formData, setFormData] = useState<any>({});
+    const [formData, setFormData] = useState<EditFormState>({});
 
     // Reset form when data changes
     // NOTE: fabricId and fabricTypeId removed - fabric is now managed via BOM Editor
@@ -41,9 +60,9 @@ export function EditModal({
         if (data) {
             if (level === 'sku') {
                 setFormData({
-                    fabricConsumption: data.fabricConsumption || '',
-                    mrp: data.mrp || '',
-                    targetStockQty: data.targetStockQty || '',
+                    fabricConsumption: String(data.fabricConsumption || ''),
+                    mrp: String(data.mrp || ''),
+                    targetStockQty: String(data.targetStockQty || ''),
                 });
             } else if (level === 'variation') {
                 setFormData({
@@ -67,9 +86,12 @@ export function EditModal({
         onSubmit(formData);
     };
 
-    const handleChange = (field: string, value: any) => {
-        setFormData((prev: any) => ({ ...prev, [field]: value }));
+    const handleChange = (field: string, value: string | boolean) => {
+        setFormData((prev) => ({ ...prev, [field]: value }));
     };
+
+    /** Get a string field value from form state */
+    const str = (field: string): string => String(formData[field] ?? '');
 
     const getTitle = () => {
         if (level === 'sku') return `Edit SKU: ${data?.skuCode}`;
@@ -103,7 +125,7 @@ export function EditModal({
                             <input
                                 type="number"
                                 step="0.01"
-                                value={formData.fabricConsumption}
+                                value={str('fabricConsumption')}
                                 onChange={(e) => handleChange('fabricConsumption', e.target.value)}
                                 className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100"
                             />
@@ -113,7 +135,7 @@ export function EditModal({
                             <input
                                 type="number"
                                 step="1"
-                                value={formData.mrp}
+                                value={str('mrp')}
                                 onChange={(e) => handleChange('mrp', e.target.value)}
                                 className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100"
                             />
@@ -123,7 +145,7 @@ export function EditModal({
                             <input
                                 type="number"
                                 step="1"
-                                value={formData.targetStockQty}
+                                value={str('targetStockQty')}
                                 onChange={(e) => handleChange('targetStockQty', e.target.value)}
                                 className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100"
                             />
@@ -137,7 +159,7 @@ export function EditModal({
                             <label className="block text-sm font-medium text-gray-700 mb-1">Color Name</label>
                             <input
                                 type="text"
-                                value={formData.colorName}
+                                value={str('colorName')}
                                 onChange={(e) => handleChange('colorName', e.target.value)}
                                 className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100"
                             />
@@ -179,7 +201,7 @@ export function EditModal({
                             <label className="block text-sm font-medium text-gray-700 mb-1">Product Name</label>
                             <input
                                 type="text"
-                                value={formData.name}
+                                value={str('name')}
                                 onChange={(e) => handleChange('name', e.target.value)}
                                 className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100"
                             />
@@ -188,7 +210,7 @@ export function EditModal({
                             <label className="block text-sm font-medium text-gray-700 mb-1">Style Code</label>
                             <input
                                 type="text"
-                                value={formData.styleCode}
+                                value={str('styleCode')}
                                 onChange={(e) => handleChange('styleCode', e.target.value)}
                                 className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100"
                             />
@@ -197,7 +219,7 @@ export function EditModal({
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
                                 <select
-                                    value={formData.category}
+                                    value={str('category')}
                                     onChange={(e) => handleChange('category', e.target.value)}
                                     className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100"
                                 >
@@ -211,7 +233,7 @@ export function EditModal({
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-1">Gender</label>
                                 <select
-                                    value={formData.gender}
+                                    value={str('gender')}
                                     onChange={(e) => handleChange('gender', e.target.value)}
                                     className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100"
                                 >
@@ -224,7 +246,7 @@ export function EditModal({
                         <div>
                             <label className="block text-sm font-medium text-gray-700 mb-1">Product Type</label>
                             <select
-                                value={formData.productType}
+                                value={str('productType')}
                                 onChange={(e) => handleChange('productType', e.target.value)}
                                 className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100"
                             >

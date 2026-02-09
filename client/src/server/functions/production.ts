@@ -321,8 +321,7 @@ export const getProductionBatches = createServerFn({ method: 'GET' })
         const rows = await query.orderBy('ProductionBatch.batchDate', 'desc').execute();
 
         // Transform to match tRPC router output format
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const batches = rows.map((r: any) => {
+        const batches = rows.map((r) => {
             // Extract date-only string to avoid timezone interpretation issues
             // Kysely returns Date objects interpreted in server timezone, but we need just the date part
             const batchDateRaw = r.batchDate;
@@ -374,8 +373,7 @@ export const getProductionBatches = createServerFn({ method: 'GET' })
         });
 
         // Fetch order lines for all batches
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const batchIds = batches.map((b: any) => b.id);
+        const batchIds = batches.map((b) => b.id);
         const orderLines = batchIds.length > 0
             ? await db
                 .selectFrom('OrderLine')
@@ -400,8 +398,7 @@ export const getProductionBatches = createServerFn({ method: 'GET' })
         }
 
         // Enrich batches with customization display info and sample info
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        return batches.map((batch: any) => {
+        return batches.map((batch) => {
             const isCustom = batch.isCustomSku || false;
             const isSample = !batch.skuId && batch.sampleCode;
             const batchOrderLines = orderLinesByBatch.get(batch.id) || [];
@@ -434,8 +431,7 @@ export const getProductionBatches = createServerFn({ method: 'GET' })
                           },
                       }
                     : null,
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                orderLines: batchOrderLines.map((ol: any) => ({
+                orderLines: batchOrderLines.map((ol) => ({
                     id: ol.orderLineId,
                     order: {
                         id: ol.orderId,
@@ -533,12 +529,9 @@ export const getProductionCapacity = createServerFn({ method: 'GET' })
             .execute();
 
         // Calculate capacity for each tailor
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        return tailors.map((tailor: any) => {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const tailorBatches = batches.filter((b: any) => b.tailorId === tailor.id);
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const allocatedMins = tailorBatches.reduce((sum: number, b: any) => {
+        return tailors.map((tailor) => {
+            const tailorBatches = batches.filter((b) => b.tailorId === tailor.id);
+            const allocatedMins = tailorBatches.reduce((sum: number, b) => {
                 const timePer = b.baseProductionTimeMins || 0;
                 return sum + timePer * b.qtyPlanned;
             }, 0);
@@ -590,10 +583,8 @@ export const getProductionRequirements = createServerFn({ method: 'GET' })
 
         // Collect unique SKU IDs from pending order lines
         const pendingSkuIds = new Set<string>();
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        openOrders.forEach((order: any) => {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            order.orderLines.forEach((line: any) => {
+        openOrders.forEach((order) => {
+            order.orderLines.forEach((line) => {
                 pendingSkuIds.add(line.skuId);
             });
         });
@@ -625,8 +616,7 @@ export const getProductionRequirements = createServerFn({ method: 'GET' })
         // Calculate scheduled production per SKU
         const scheduledProduction: Record<string, number> = {};
         const scheduledByOrderLine: Record<string, number> = {};
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        plannedBatches.forEach((batch: any) => {
+        plannedBatches.forEach((batch) => {
             if (batch.skuId) {
                 if (!scheduledProduction[batch.skuId]) scheduledProduction[batch.skuId] = 0;
                 scheduledProduction[batch.skuId] += (batch.qtyPlanned - batch.qtyCompleted);
@@ -658,10 +648,8 @@ export const getProductionRequirements = createServerFn({ method: 'GET' })
 
         const requirements: RequirementItem[] = [];
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        openOrders.forEach((order: any) => {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            order.orderLines.forEach((line: any) => {
+        openOrders.forEach((order) => {
+            order.orderLines.forEach((line) => {
                 const sku = line.sku;
                 const currentInventory = inventoryBalance[line.skuId] || 0;
                 const scheduledForThisLine = scheduledByOrderLine[line.id] || 0;
@@ -744,8 +732,7 @@ export const getProductionPendingBySku = createServerFn({ method: 'GET' })
             .orderBy('ProductionBatch.batchDate', 'asc')
             .execute();
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const batches = rows.map((r: any) => ({
+        const batches = rows.map((r) => ({
             id: r.id,
             batchCode: r.batchCode,
             batchDate: r.batchDate,

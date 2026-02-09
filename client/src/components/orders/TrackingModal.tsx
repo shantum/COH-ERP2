@@ -5,7 +5,7 @@
  */
 
 import { useQuery } from '@tanstack/react-query';
-import { X, Package, Truck, MapPin, Clock, CheckCircle, AlertTriangle, RotateCcw, RefreshCw } from 'lucide-react';
+import { X, Package, Truck, MapPin, Clock, CheckCircle, AlertTriangle, RotateCcw, RefreshCw, type LucideIcon } from 'lucide-react';
 import { getAwbTracking, type AwbTrackingResponse, type TrackingScan } from '../../server/functions/tracking';
 
 interface TrackingModalProps {
@@ -15,8 +15,8 @@ interface TrackingModalProps {
 }
 
 // Status icon mapping
-function getStatusIcon(statusCode: string) {
-    const icons: Record<string, any> = {
+function getStatusIcon(statusCode: string): LucideIcon {
+    const icons: Record<string, LucideIcon> = {
         'M': Package,           // Manifested
         'NP': Package,          // Not Picked
         'PP': Truck,            // Picked Up
@@ -107,7 +107,7 @@ export function TrackingModal({ awbNumber, orderNumber, onClose }: TrackingModal
                             <AlertTriangle className="mx-auto h-12 w-12 text-amber-400" />
                             <p className="mt-3 text-gray-600">Unable to fetch tracking information</p>
                             <p className="text-sm text-gray-400 mt-1">
-                                {(error as any)?.response?.data?.error || 'Please try again later'}
+                                {error instanceof Error ? error.message : 'Please try again later'}
                             </p>
                             <button
                                 onClick={() => refetch()}

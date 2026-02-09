@@ -47,7 +47,7 @@ interface ExtendedShopifyFulfillment extends ShopifyFulfillment {
     line_items?: Array<{
         id: number;
         fulfillment_status?: string;
-        [key: string]: any;
+        [key: string]: unknown;
     }>;
 }
 

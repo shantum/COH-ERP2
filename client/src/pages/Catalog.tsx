@@ -42,8 +42,10 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { AgGridReact } from 'ag-grid-react';
 import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community';
+import type { ColumnResizedEvent, GridReadyEvent, CellValueChangedEvent, Column } from 'ag-grid-community';
 import { Layers, Package, AlertTriangle, XCircle, ArrowLeft, X, ChevronDown, ChevronRight } from 'lucide-react';
 import { getCatalogProducts, getCatalogCategories } from '@/server/functions/catalog';
+import type { CatalogSkuItem, CatalogProductsResponse } from '@/server/functions/catalog';
 import { updateProduct, updateVariation, updateSku } from '@/server/functions/productsMutations';
 import BomEditorPanel from '../components/bom/BomEditorPanel';
 import { ConfirmModal } from '../components/Modal';
@@ -129,7 +131,7 @@ export default function Catalog() {
     const [editModal, setEditModal] = useState<{
         isOpen: boolean;
         level: EditLevel;
-        data: any;
+        data: Record<string, unknown> | null;
     }>({ isOpen: false, level: 'sku', data: null });
 
     // BOM editor panel state
@@ -140,11 +142,11 @@ export default function Catalog() {
     }>({ isOpen: false, productId: '', productName: '' });
 
     // Open BOM editor for a product
-    const openBomEditor = useCallback((row: any) => {
+    const openBomEditor = useCallback((row: Record<string, unknown>) => {
         setBomEditor({
             isOpen: true,
-            productId: row.productId,
-            productName: row.productName,
+            productId: String(row.productId ?? ''),
+            productName: String(row.productName ?? ''),
         });
     }, []);
 
@@ -196,11 +198,11 @@ export default function Catalog() {
             // Optimistically update the cache
             queryClient.setQueryData(
                 ['catalog', filter.gender, filter.category, filter.productId, filter.status],
-                (old: any) => {
+                (old: CatalogProductsResponse | undefined) => {
                     if (!old?.items) return old;
                     return {
                         ...old,
-                        items: old.items.map((item: any) =>
+                        items: old.items.map((item: CatalogSkuItem) =>
                             item.variationId === variationId
                                 ? { ...item, hasLining }
                                 : item
@@ -237,13 +239,13 @@ export default function Catalog() {
     } | null>(null);
 
     // Show confirmation dialog for lining change
-    const promptLiningChange = useCallback((row: any) => {
+    const promptLiningChange = useCallback((row: Record<string, unknown>) => {
         setLiningConfirm({
             isOpen: true,
-            variationId: row.variationId,
-            colorName: row.colorName,
-            productName: row.productName,
-            currentValue: row.hasLining,
+            variationId: String(row.variationId ?? ''),
+            colorName: String(row.colorName ?? ''),
+            productName: String(row.productName ?? ''),
+            currentValue: Boolean(row.hasLining),
         });
     }, []);
 
@@ -341,49 +343,49 @@ export default function Catalog() {
 
     // Handle edit modal submit
     // NOTE: fabricId and fabricTypeId removed - fabric is now managed via BOM Editor
-    const handleEditSubmit = useCallback((formData: any) => {
+    const handleEditSubmit = useCallback((formData: Record<string, unknown>) => {
         if (!editModal.data) return;
 
         if (editModal.level === 'sku') {
             updateSkuMutation.mutate({
-                skuId: editModal.data.skuId,
+                skuId: String(editModal.data.skuId),
                 data: {
-                    fabricConsumption: parseFloat(formData.fabricConsumption) || undefined,
-                    mrp: parseFloat(formData.mrp) || undefined,
-                    targetStockQty: parseInt(formData.targetStockQty) || undefined,
+                    fabricConsumption: parseFloat(String(formData.fabricConsumption)) || undefined,
+                    mrp: parseFloat(String(formData.mrp)) || undefined,
+                    targetStockQty: parseInt(String(formData.targetStockQty)) || undefined,
                 },
             });
         } else if (editModal.level === 'variation') {
             updateVariationFullMutation.mutate({
-                variationId: editModal.data.variationId,
+                variationId: String(editModal.data.variationId),
                 data: {
-                    colorName: formData.colorName,
+                    colorName: String(formData.colorName),
                     hasLining: formData.hasLining === 'true' || formData.hasLining === true,
                 },
             });
         } else if (editModal.level === 'product') {
             updateProductFullMutation.mutate({
-                productId: editModal.data.productId,
+                productId: String(editModal.data.productId),
                 data: {
-                    name: formData.name,
-                    styleCode: formData.styleCode || null,
-                    category: formData.category,
-                    gender: formData.gender,
-                    productType: formData.productType,
+                    name: String(formData.name),
+                    styleCode: String(formData.styleCode) || null,
+                    category: String(formData.category),
+                    gender: String(formData.gender),
+                    productType: String(formData.productType),
                 },
             });
         }
     }, [editModal, updateSkuMutation, updateVariationFullMutation, updateProductFullMutation]);
 
     // Open edit modal
-    const openEditModal = useCallback((row: any, level: EditLevel) => {
+    const openEditModal = useCallback((row: Record<string, unknown>, level: EditLevel) => {
         setEditModal({ isOpen: true, level, data: row });
     }, []);
 
     // Filtered products based on selected gender/category
     const filteredProducts = useMemo(() => {
         if (!filterOptions?.products) return [];
-        return filterOptions.products.filter((p: any) => {
+        return filterOptions.products.filter((p: { id: string; name: string; gender: string | null; category: string | null }) => {
             if (filter.gender && p.gender !== filter.gender) return false;
             if (filter.category && p.category !== filter.category) return false;
             return true;
@@ -399,7 +401,7 @@ export default function Catalog() {
 
         // Filter by variationId if set (when drilling down to SKU level for a specific color)
         if (filter.variationId && viewLevel === 'sku') {
-            items = items.filter((item: any) => item.variationId === filter.variationId);
+            items = items.filter((item: CatalogSkuItem) => item.variationId === filter.variationId);
         }
 
         switch (viewLevel) {
@@ -423,10 +425,10 @@ export default function Catalog() {
     };
 
     // Handle column resize - save width when user finishes resizing
-    const onColumnResized = (event: any) => {
+    const onColumnResized = (event: ColumnResizedEvent) => {
         // Only save when resize is complete (finished=true) and it's a user resize
         if (event.finished && event.columns?.length) {
-            event.columns.forEach((col: any) => {
+            event.columns.forEach((col: Column) => {
                 const colId = col.getColId();
                 const width = col.getActualWidth();
                 if (colId && width) {
@@ -437,7 +439,7 @@ export default function Catalog() {
     };
 
     // Set default filter for shopifyStatus to "active" when grid is ready
-    const onGridReady = useCallback((params: any) => {
+    const onGridReady = useCallback((params: GridReadyEvent) => {
         // Only apply default filter for SKU view (not consumption view)
         if (viewLevel !== 'consumption') {
             params.api.setFilterModel({
@@ -466,7 +468,7 @@ export default function Catalog() {
         mutationFn: async ({ skuIds, fabricConsumption }: { skuIds: string[]; fabricConsumption: number }) => {
             // Batch updates to prevent server overload (5 concurrent requests at a time)
             const batchSize = 5;
-            const results: any[] = [];
+            const results: Record<string, unknown>[] = [];
 
             for (let i = 0; i < skuIds.length; i += batchSize) {
                 const batch = skuIds.slice(i, i + batchSize);
@@ -493,7 +495,7 @@ export default function Catalog() {
     });
 
     // Handle consumption cell value change (called by AG-Grid)
-    const handleConsumptionChange = useCallback((params: any) => {
+    const handleConsumptionChange = useCallback((params: CellValueChangedEvent) => {
         const { data, colDef, newValue } = params;
         const size = colDef.field?.replace('consumption_', '');
         if (!size) return;
@@ -507,7 +509,7 @@ export default function Catalog() {
     }, [updateConsumption]);
 
     // Handle cost cell value change (trimsCost, liningCost, packagingCost, or laborMinutes)
-    const handleCostChange = useCallback((params: any) => {
+    const handleCostChange = useCallback((params: CellValueChangedEvent) => {
         const { data, colDef, newValue } = params;
         const field = colDef.field as 'trimsCost' | 'liningCost' | 'packagingCost' | 'laborMinutes';
         if (field !== 'trimsCost' && field !== 'liningCost' && field !== 'packagingCost' && field !== 'laborMinutes') return;
@@ -565,8 +567,8 @@ export default function Catalog() {
         return {
             total: items.length,
             label,
-            belowTarget: items.filter((i: any) => i.status === 'below_target' || i.status === 'out_of_stock').length,
-            outOfStock: items.filter((i: any) => i.availableBalance === 0).length,
+            belowTarget: items.filter((i: Record<string, unknown>) => i.status === 'below_target' || i.status === 'out_of_stock').length,
+            outOfStock: items.filter((i: Record<string, unknown>) => i.availableBalance === 0).length,
         };
     }, [displayData, viewLevel]);
 
@@ -807,11 +809,11 @@ export default function Catalog() {
                                         }}
                                         className="text-gray-500 hover:text-blue-600 transition-colors font-medium"
                                     >
-                                        {filterOptions?.products?.find((p: any) => p.id === filter.productId)?.name || 'Product'}
+                                        {filterOptions?.products?.find((p: { id: string; name: string }) => p.id === filter.productId)?.name || 'Product'}
                                     </button>
                                 ) : (
                                     <span className="font-semibold text-gray-900">
-                                        {filterOptions?.products?.find((p: any) => p.id === filter.productId)?.name || 'Selected Product'}
+                                        {filterOptions?.products?.find((p: { id: string; name: string }) => p.id === filter.productId)?.name || 'Selected Product'}
                                     </span>
                                 )}
 

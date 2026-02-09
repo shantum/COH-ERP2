@@ -8,7 +8,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { getCustomerAddresses } from '../../../../server/functions/customers';
 import { calculateOrderTotal } from '../../../../utils/orderPricing';
-import type { Order } from '../../../../types';
+import type { Order, OrderLine } from '../../../../types';
 import type {
   ModalMode,
   EditFormState,
@@ -246,9 +246,9 @@ export function useUnifiedOrderModal({ order, initialMode, onNavigateToOrder }: 
   // Categorize lines for display
   const categorizedLines = useMemo<CategorizedLines>(() => {
     const lines = order.orderLines || [];
-    const shipped: any[] = [];
-    const packed: any[] = [];
-    const other: any[] = [];
+    const shipped: OrderLine[] = [];
+    const packed: OrderLine[] = [];
+    const other: OrderLine[] = [];
 
     for (const line of lines) {
       if (line.lineStatus === 'cancelled') continue;

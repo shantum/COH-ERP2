@@ -31,6 +31,20 @@ interface Reconciliation {
     items: ReconciliationItem[];
 }
 
+/** Shape of upload result data returned from CSV upload */
+interface UploadResultData {
+    matched: number;
+    updated: number;
+    total: number;
+    columns?: string[];
+    delimiter?: string;
+    reconItemCount?: number;
+    notFoundCount?: number;
+    notFound?: string[];
+    errorsCount?: number;
+    errors?: string[];
+}
+
 const ADJUSTMENT_REASONS = {
     shortage: [
         { value: 'shrinkage', label: 'Shrinkage' },
@@ -54,8 +68,7 @@ export default function InventoryReconciliation() {
     const [currentRecon, setCurrentRecon] = useState<Reconciliation | null>(null);
     const [searchTerm, setSearchTerm] = useState('');
     const [localItems, setLocalItems] = useState<ReconciliationItem[]>([]);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const [uploadResult, setUploadResult] = useState<{ success: boolean; message: string; results?: any } | null>(null);
+    const [uploadResult, setUploadResult] = useState<{ success: boolean; message: string; results?: UploadResultData } | null>(null);
     const [viewingReconId, setViewingReconId] = useState<string | null>(null);
     const [historySearchTerm, setHistorySearchTerm] = useState('');
     const [submittingFromHistory, setSubmittingFromHistory] = useState(false);
@@ -108,7 +121,7 @@ export default function InventoryReconciliation() {
             setUploadResult({
                 success: true,
                 message: result.message,
-                results: result.results,
+                results: result.results as UploadResultData | undefined,
             });
             // Refresh the reconciliation data using Server Function
             if (currentRecon) {
@@ -368,17 +381,17 @@ export default function InventoryReconciliation() {
                                                             )}
                                                         </>
                                                     )}
-                                                    {(uploadResult.results.notFoundCount > 0 || uploadResult.results.notFound?.length > 0) && (
+                                                    {((uploadResult.results.notFoundCount ?? 0) > 0 || (uploadResult.results.notFound?.length ?? 0) > 0) && (
                                                         <p className="text-orange-600">
                                                             SKUs not found in system: {uploadResult.results.notFoundCount || uploadResult.results.notFound?.length}
-                                                            {uploadResult.results.notFound?.length > 0 && (
+                                                            {(uploadResult.results.notFound?.length ?? 0) > 0 && (
                                                                 <span className="text-gray-500 text-xs ml-2">
-                                                                    (e.g., {uploadResult.results.notFound.slice(0, 5).join(', ')}{uploadResult.results.notFound.length > 5 ? '...' : ''})
+                                                                    (e.g., {uploadResult.results.notFound?.slice(0, 5).join(', ')}{(uploadResult.results.notFound?.length ?? 0) > 5 ? '...' : ''})
                                                                 </span>
                                                             )}
                                                         </p>
                                                     )}
-                                                    {(uploadResult.results.errorsCount > 0 || uploadResult.results.errors?.length > 0) && (
+                                                    {((uploadResult.results.errorsCount ?? 0) > 0 || (uploadResult.results.errors?.length ?? 0) > 0) && (
                                                         <p className="text-red-600">
                                                             Errors: {uploadResult.results.errorsCount || uploadResult.results.errors?.length}
                                                         </p>

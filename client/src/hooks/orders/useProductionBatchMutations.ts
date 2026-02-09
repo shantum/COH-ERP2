@@ -80,7 +80,7 @@ export function useProductionBatchMutations(options: UseProductionBatchMutations
             sampleColour?: string;
             sampleSize?: string;
             qtyPlanned: number;
-            priority?: 'low' | 'normal' | 'high' | 'urgent';
+            priority?: 'low' | 'normal' | 'high' | 'urgent' | 'order_fulfillment';
             sourceOrderLineId?: string;
             notes?: string;
         }) => {
@@ -152,7 +152,7 @@ export function useProductionBatchMutations(options: UseProductionBatchMutations
                         }),
                         // Also update nested order.orderLines if present on each row
                         ...(old.orders ? {
-                            orders: old.orders.map((order: { orderLines?: Array<{ productionBatchId?: string | null }> }) => ({
+                            orders: old.orders.map((order) => ({
                                 ...order,
                                 orderLines: order.orderLines?.map((line) =>
                                     line.productionBatchId === context.tempBatchId

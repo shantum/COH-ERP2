@@ -12,7 +12,15 @@
  * - Actions column
  */
 
-import type { ColDef, ICellRendererParams, ValueFormatterParams, CellClassParams } from 'ag-grid-community';
+import type {
+    ColDef,
+    ICellRendererParams,
+    ValueFormatterParams,
+    CellClassParams,
+    ValueGetterParams,
+    EditableCallbackParams,
+    ValueParserParams,
+} from 'ag-grid-community';
 import type { PermissionColDef } from '../hooks/usePermissionColumns';
 import { InventoryStatusBadge } from '../components/common/grid';
 import type { ViewLevel } from '../components/catalog/FabricEditPopover';
@@ -73,21 +81,40 @@ export const HIDDEN_COLUMNS_BY_VIEW: Record<ViewLevel, string[]> = {
     consumption: [], // Uses completely different columns
 };
 
+/** Row data shape for catalog grid rows (product/variation/SKU views) */
+export interface CatalogRow {
+    productId?: string;
+    variationId?: string;
+    skuId?: string;
+    productName?: string;
+    colorName?: string;
+    hasLining?: boolean;
+    skuCode?: string;
+    [key: string]: unknown;
+}
+
+/** Filter state for catalog grid drill-down navigation */
+export interface CatalogFilter {
+    gender: string;
+    category: string;
+    productId: string;
+    variationId: string;
+    colorName: string;
+    status: string;
+    [key: string]: string;
+}
+
 export interface CreateColumnDefsParams {
     viewLevel: ViewLevel;
-    filterOptions?: any;
-    catalogData?: any;
     // Legacy - no longer used since fabric editing moved to BOM
     uniqueFabricTypes?: Array<{ id: string; name: string }>;
     handleUpdateFabricType?: (productId: string, fabricTypeId: string | null, affectedCount: number) => void;
     handleUpdateFabric?: (variationId: string, fabricId: string, affectedCount: number) => void;
-    promptLiningChange: (row: any) => void;
-    openEditModal: (row: any, level: 'sku' | 'variation' | 'product') => void;
-    openBomEditor?: (row: any) => void;
-    setFilter: React.Dispatch<React.SetStateAction<any>>;
+    promptLiningChange: (row: CatalogRow) => void;
+    openEditModal: (row: CatalogRow, level: 'sku' | 'variation' | 'product') => void;
+    openBomEditor?: (row: CatalogRow) => void;
+    setFilter: React.Dispatch<React.SetStateAction<CatalogFilter>>;
     setViewLevel: (level: ViewLevel) => void;
-    // Legacy - FabricEditPopover no longer used, fabric is read-only
-    FabricEditPopover?: React.ComponentType<any>;
 }
 
 /**
@@ -136,7 +163,7 @@ export function createColumnDefs({
                     return (
                         <button
                             onClick={() => {
-                                setFilter((f: any) => ({ ...f, productId: row.productId, variationId: '', colorName: '' }));
+                                setFilter((f: CatalogFilter) => ({ ...f, productId: row.productId, variationId: '', colorName: '' }));
                                 setViewLevel('variation');
                             }}
                             className="font-medium text-left text-blue-600 hover:text-blue-800 hover:underline truncate w-full"
@@ -151,7 +178,7 @@ export function createColumnDefs({
                     return (
                         <button
                             onClick={() => {
-                                setFilter((f: any) => ({
+                                setFilter((f: CatalogFilter) => ({
                                     ...f,
                                     productId: row.productId,
                                     variationId: row.variationId,
@@ -202,7 +229,7 @@ export function createColumnDefs({
             headerName: DEFAULT_HEADERS.fabricTypeName,
             width: 120,
             // Material name derived from BOM fabric colour
-            valueGetter: (params: any) => {
+            valueGetter: (params: ValueGetterParams) => {
                 const row = params.data;
                 if (!row) return '';
                 return row.fabricTypeName || row.materialName || '';
@@ -256,7 +283,7 @@ export function createColumnDefs({
             headerName: DEFAULT_HEADERS.fabricName,
             width: 140,
             // Fabric colour name derived from BOM
-            valueGetter: (params: any) => {
+            valueGetter: (params: ValueGetterParams) => {
                 const row = params.data;
                 if (!row) return '';
                 return row.fabricName || row.fabricColourName || '';
@@ -366,7 +393,7 @@ export function createColumnDefs({
             width: 65,
             viewPermission: 'products:view:cost',
             editPermission: 'products:edit:cost',
-            editable: (params: any) => params.data?.hasLining === true, // Only editable if hasLining
+            editable: (params: EditableCallbackParams) => params.data?.hasLining === true, // Only editable if hasLining
             valueFormatter: (params: ValueFormatterParams) => {
                 // Show "-" if no lining
                 if (!params.data?.hasLining) return '-';
@@ -376,7 +403,7 @@ export function createColumnDefs({
                 if (!params.data?.hasLining) return 'text-right text-xs text-gray-300';
                 return 'text-right text-xs cursor-pointer hover:bg-blue-50';
             },
-            cellStyle: (params: any) => params.data?.hasLining ? { backgroundColor: '#f0f9ff' } : undefined,
+            cellStyle: (params: CellClassParams) => params.data?.hasLining ? { backgroundColor: '#f0f9ff' } : undefined,
         },
         {
             colId: 'packagingCost',
@@ -615,28 +642,28 @@ export function createConsumptionColumnDefs(CONSUMPTION_SIZES: string[]): ColDef
             headerName: size,
             field: `consumption_${size}`,
             width: 65,
-            editable: (params: any) => {
+            editable: (params: EditableCallbackParams) => {
                 // Only editable if there are SKUs for this size
                 const skuIds = params.data?.[`skuIds_${size}`] || [];
-                return skuIds.length > 0;
+                return (skuIds as unknown[]).length > 0;
             },
-            cellClass: (params: any) => {
+            cellClass: (params: CellClassParams) => {
                 const skuIds = params.data?.[`skuIds_${size}`] || [];
-                if (skuIds.length === 0) return 'text-center text-gray-300';
+                if ((skuIds as unknown[]).length === 0) return 'text-center text-gray-300';
                 return 'text-right text-xs cursor-pointer hover:bg-blue-50';
             },
             valueFormatter: (params: ValueFormatterParams) => {
                 const skuIds = params.data?.[`skuIds_${params.colDef.field?.replace('consumption_', '')}`] || [];
-                if (skuIds.length === 0) return '-';
+                if ((skuIds as unknown[]).length === 0) return '-';
                 return params.value != null ? Number(params.value).toFixed(2) : '1.50';
             },
-            valueParser: (params: any) => {
+            valueParser: (params: ValueParserParams) => {
                 const val = parseFloat(params.newValue);
                 return isNaN(val) ? params.oldValue : val;
             },
-            cellStyle: (params: any) => {
+            cellStyle: (params: CellClassParams) => {
                 const skuIds = params.data?.[`skuIds_${size}`] || [];
-                if (skuIds.length === 0) return { backgroundColor: '#f9fafb' };
+                if ((skuIds as unknown[]).length === 0) return { backgroundColor: '#f9fafb' };
                 return { backgroundColor: '#f0f9ff' }; // Light blue for editable
             },
         })),

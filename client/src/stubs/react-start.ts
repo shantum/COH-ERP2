@@ -14,8 +14,14 @@ export function createServerFn(_options?: unknown) {
     return null;
   };
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const builder: any = {
+  interface ServerFnBuilder {
+    inputValidator: (_validator: unknown) => ServerFnBuilder;
+    validator: (_validator: unknown) => ServerFnBuilder;
+    middleware: (_middlewares: unknown[]) => ServerFnBuilder;
+    handler: (_handler: unknown) => typeof noopFn;
+  }
+
+  const builder: ServerFnBuilder = {
     inputValidator: (_validator: unknown) => builder,
     validator: (_validator: unknown) => builder,
     middleware: (_middlewares: unknown[]) => builder,

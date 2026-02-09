@@ -65,8 +65,8 @@ export function ProductCostsTab({ product }: ProductCostsTabProps) {
             return { avgCogs: 0, avgMargin: 0, minMargin: 0, maxMargin: 0 };
         }
 
-        const cogs = cogsData.map((c: any) => c.totalCogs);
-        const margins = cogsData.map((c: any) => c.marginPct);
+        const cogs = cogsData.map((c) => c.totalCogs);
+        const margins = cogsData.map((c) => c.marginPct);
 
         return {
             avgCogs: cogs.reduce((a: number, b: number) => a + b, 0) / cogs.length,
@@ -193,7 +193,7 @@ export function ProductCostsTab({ product }: ProductCostsTabProps) {
                                 </tr>
                             </thead>
                             <tbody className="divide-y">
-                                {cogsData.slice(0, 10).map((sku: any) => (
+                                {cogsData.slice(0, 10).map((sku) => (
                                     <tr key={sku.skuId} className="hover:bg-gray-50">
                                         <td className="px-3 py-2">
                                             <div>

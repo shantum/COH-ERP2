@@ -16,7 +16,7 @@
  * All public exports are validated against Zod schemas to catch schema drift.
  */
 
-import { sql } from 'kysely';
+import { sql, type SqlBool } from 'kysely';
 import { kysely } from '../index.js';
 import {
     inventorySkuRowArraySchema,
@@ -93,10 +93,10 @@ export async function listInventorySkusKysely(
     // Apply search filter
     if (search) {
         const searchTerm = `%${search.toLowerCase()}%`;
-        query = query.where((eb: any) =>
+        query = query.where((eb) =>
             eb.or([
-                sql`LOWER("Sku"."skuCode") LIKE ${searchTerm}`,
-                sql`LOWER("Product"."name") LIKE ${searchTerm}`,
+                sql<SqlBool>`LOWER("Sku"."skuCode") LIKE ${searchTerm}`,
+                sql<SqlBool>`LOWER("Product"."name") LIKE ${searchTerm}`,
             ])
         ) as typeof query;
     }

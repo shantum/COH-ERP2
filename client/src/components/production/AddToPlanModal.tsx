@@ -18,6 +18,14 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Search, FlaskConical, Package, X, Loader2 } from 'lucide-react';
 import { getOptimizedImageUrl } from '@/utils/imageOptimization';
+import type { SkuRow, VariationRow, ProductWithVariations } from '@coh/shared';
+
+/** Flattened SKU with nested variation+product for display in the search dropdown */
+interface FlattenedSku extends SkuRow {
+    variation: VariationRow & {
+        product: ProductWithVariations;
+    };
+}
 
 interface AddToPlanModalProps {
     open: boolean;
@@ -57,11 +65,11 @@ export function AddToPlanModal({
         queryFn: () => getProductsListFn({ data: { limit: 1000 } }),
         enabled: open,
         staleTime: 60000,
-        select: (data) => {
-            const skus: any[] = [];
-            data.products.forEach((product: any) => {
-                product.variations?.forEach((variation: any) => {
-                    variation.skus?.forEach((sku: any) => {
+        select: (data): FlattenedSku[] => {
+            const skus: FlattenedSku[] = [];
+            data.products.forEach((product) => {
+                product.variations?.forEach((variation) => {
+                    variation.skus?.forEach((sku) => {
                         skus.push({
                             ...sku,
                             // Include variation with product reference for display
@@ -80,7 +88,7 @@ export function AddToPlanModal({
     const isLoadingSkus = allSkusQueryResult.isLoading;
 
     // Helper to get image URL (variation image or fallback to product image)
-    const getSkuImageUrl = (sku: any) => {
+    const getSkuImageUrl = (sku: FlattenedSku): string | null => {
         return sku.variation?.imageUrl || sku.variation?.product?.imageUrl || null;
     };
 
@@ -131,7 +139,7 @@ export function AddToPlanModal({
         if (!allSkus || !searchQuery.trim()) return [];
         const search = searchQuery.toLowerCase().trim();
         return allSkus
-            .filter((sku: any) => {
+            .filter((sku) => {
                 const skuCode = sku.skuCode?.toLowerCase() || '';
                 const productName = sku.variation?.product?.name?.toLowerCase() || '';
                 const colorName = sku.variation?.colorName?.toLowerCase() || '';
@@ -144,7 +152,7 @@ export function AddToPlanModal({
     // Get selected SKU details for display
     const selectedSku = useMemo(() => {
         if (!skuId || !allSkus) return null;
-        return allSkus.find((s: any) => s.id === skuId);
+        return allSkus.find((s) => s.id === skuId);
     }, [skuId, allSkus]);
 
     const handleSubmit = (e: React.FormEvent) => {
@@ -212,7 +220,7 @@ export function AddToPlanModal({
                                         <div className="flex h-auto w-full items-center gap-3 rounded-md border border-input bg-muted px-3 py-2 text-sm">
                                             {getSkuImageUrl(selectedSku) ? (
                                                 <img
-                                                    src={getOptimizedImageUrl(getSkuImageUrl(selectedSku), 'sm') || getSkuImageUrl(selectedSku)}
+                                                    src={getOptimizedImageUrl(getSkuImageUrl(selectedSku), 'sm') ?? undefined}
                                                     alt=""
                                                     className="w-10 h-10 object-cover rounded flex-shrink-0"
                                                     loading="lazy"
@@ -275,7 +283,7 @@ export function AddToPlanModal({
                                                 No products found for "{searchQuery}"
                                             </div>
                                         ) : (
-                                            filteredSkus.map((sku: any) => (
+                                            filteredSkus.map((sku) => (
                                                 <button
                                                     key={sku.id}
                                                     type="button"
@@ -288,7 +296,7 @@ export function AddToPlanModal({
                                                 >
                                                     {getSkuImageUrl(sku) ? (
                                                         <img
-                                                            src={getOptimizedImageUrl(getSkuImageUrl(sku), 'sm') || getSkuImageUrl(sku)}
+                                                            src={getOptimizedImageUrl(getSkuImageUrl(sku), 'sm') ?? undefined}
                                                             alt=""
                                                             className="w-10 h-10 object-cover rounded flex-shrink-0"
                                                             loading="lazy"

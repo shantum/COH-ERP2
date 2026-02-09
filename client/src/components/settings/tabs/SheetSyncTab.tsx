@@ -182,7 +182,7 @@ const OffloadMonitor = React.memo(function OffloadMonitor() {
         queryFn: async (): Promise<OffloadStatusResponse | null> => {
             const result = await getStatusFn();
             if (!result.success) return null;
-            return result.data as OffloadStatusResponse;
+            return result.data as unknown as OffloadStatusResponse;
         },
         refetchInterval: 15000,
     });
@@ -192,7 +192,7 @@ const OffloadMonitor = React.memo(function OffloadMonitor() {
         mutationFn: async (): Promise<IngestPreviewResult | null> => {
             const result = await triggerFn({ data: { jobId: 'preview_ingest_inward' } });
             if (!result.success) return null;
-            return (result.data?.result as IngestPreviewResult) ?? null;
+            return (result.data?.result as unknown as IngestPreviewResult) ?? null;
         },
     });
 
@@ -200,7 +200,7 @@ const OffloadMonitor = React.memo(function OffloadMonitor() {
         mutationFn: async (): Promise<IngestPreviewResult | null> => {
             const result = await triggerFn({ data: { jobId: 'preview_ingest_outward' } });
             if (!result.success) return null;
-            return (result.data?.result as IngestPreviewResult) ?? null;
+            return (result.data?.result as unknown as IngestPreviewResult) ?? null;
         },
     });
 

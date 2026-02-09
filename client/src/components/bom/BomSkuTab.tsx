@@ -62,7 +62,7 @@ interface BomSkuTabProps {
     variations: VariationData[];
     template: TemplateLineData[];
     componentRoles: ComponentRole[];
-    onUpdate: (updates: any) => void;
+    onUpdate: (updates: { skus: SkuData[] }) => void;
 }
 
 export default function BomSkuTab({

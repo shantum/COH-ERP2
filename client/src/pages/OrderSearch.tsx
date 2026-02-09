@@ -15,6 +15,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
 import { Search, Loader2, ChevronRight, Package } from 'lucide-react';
+import type { OrdersSearchParams } from '@coh/shared';
 import { useDebounce } from '../hooks/useDebounce';
 import {
     searchAllOrders,
@@ -78,9 +79,11 @@ export default function OrderSearch() {
         // Map tab to view for Orders page - open/cancelled stay, shipped tabs become shipped view
         const view = (ordersPageTabs as string[]).includes(mappedTab as string) ? mappedTab : 'shipped';
         // Navigate with modal=view to directly open the order modal
+        // Navigate to orders page with modal open — cast needed because OrderSearch
+        // maps tab names (e.g. 'cancelled') to valid order views at runtime
         navigate({
             to: '/orders',
-            search: { view: view as 'open' | 'shipped' | 'cancelled', orderId, modal: 'view' } as any,
+            search: { view, orderId, modal: 'view' } as unknown as OrdersSearchParams,
         });
     };
 

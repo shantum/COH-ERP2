@@ -2,6 +2,7 @@ import { Router } from 'express';
 import type { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import type { SignOptions } from 'jsonwebtoken';
 import { z } from 'zod';
 import { requireAdmin } from '../middleware/auth.js';
 import { validatePassword } from '@coh/shared';
@@ -88,11 +89,11 @@ router.post(
         });
 
         // Generate token (expiry configurable via JWT_EXPIRY env var)
+        const signOptions: SignOptions = { expiresIn: (process.env.JWT_EXPIRY || '7d') as SignOptions['expiresIn'] };
         const token = jwt.sign(
             { id: user.id, email: user.email, role: user.role },
             process.env.JWT_SECRET as string,
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            { expiresIn: process.env.JWT_EXPIRY || '7d' } as any
+            signOptions
         );
 
         res.status(201).json({ user, token });
@@ -137,6 +138,7 @@ router.post(
         }
 
         // Generate token with tokenVersion for immediate invalidation
+        const loginSignOptions: SignOptions = { expiresIn: (process.env.JWT_EXPIRY || '7d') as SignOptions['expiresIn'] };
         const token = jwt.sign(
             {
                 id: user.id,
@@ -146,8 +148,7 @@ router.post(
                 tokenVersion: user.tokenVersion, // For instant logout on permission change
             },
             process.env.JWT_SECRET as string,
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            { expiresIn: process.env.JWT_EXPIRY || '7d' } as any
+            loginSignOptions
         );
 
         // Calculate effective permissions (role + overrides)

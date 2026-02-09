@@ -8,11 +8,11 @@ import {
     DialogHeader,
     DialogTitle,
 } from '@/components/ui/dialog';
-import { CreateOrderForm } from './CreateOrderForm';
+import { CreateOrderForm, type CreateOrderData } from './CreateOrderForm';
 
 interface CreateOrderModalProps {
-    channels: any[];
-    onCreate: (data: any) => void;
+    channels: Array<{ id: string; name: string }>;
+    onCreate: (data: CreateOrderData) => void;
     onClose: () => void;
     isCreating: boolean;
 }

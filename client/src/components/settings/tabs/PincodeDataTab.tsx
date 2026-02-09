@@ -38,8 +38,8 @@ export function PincodeDataTab() {
             setUploadFile(null);
             refetchStats();
         },
-        onError: (error: any) => {
-            alert(error.response?.data?.error || 'Upload failed');
+        onError: (error: unknown) => {
+            alert(error instanceof Error ? error.message : 'Upload failed');
         },
     });
 

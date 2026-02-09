@@ -15,9 +15,35 @@ export interface OrdersQueryInput {
     limit: number;
 }
 
+/** Minimal order line shape for optimistic updates */
+export interface OrderLineForOptimistic {
+    id: string;
+    lineStatus: string;
+    productionBatchId?: string | null;
+    awbNumber?: string | null;
+    courier?: string | null;
+    shippedAt?: string | null;
+    trackingStatus?: string | null;
+    deliveredAt?: string | null;
+    [key: string]: unknown; // Allow extra fields to pass through
+}
+
+/** Minimal order shape for optimistic updates */
+export interface OrderForOptimistic {
+    id: string;
+    status?: string;
+    trackingStatus?: string;
+    deliveredAt?: string | null;
+    rtoStatus?: string | null;
+    rtoInitiatedAt?: string | null;
+    rtoReceivedAt?: string | null;
+    orderLines?: OrderLineForOptimistic[];
+    [key: string]: unknown; // Allow extra fields to pass through
+}
+
 // Type for the orders list response (must match tRPC orders.list return type)
 export interface OrdersListData {
-    orders: any[];
+    orders: OrderForOptimistic[];
     rows: FlattenedOrderRow[];
     view: string;
     viewName: string;

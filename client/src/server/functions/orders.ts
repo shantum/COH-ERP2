@@ -1186,8 +1186,7 @@ export const searchAllOrders = createServerFn({ method: 'GET' })
             };
 
             // Define tab filters (matching buildWhereClause logic from getOrders)
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const tabs: Record<string, any> = {
+            const tabs: Record<string, Prisma.OrderWhereInput> = {
                 open: {
                     AND: [
                         searchWhere,
@@ -1709,8 +1708,7 @@ export const getOrderById = createServerFn({ method: 'GET' })
                 codRemittedAt: order.codRemittedAt ? order.codRemittedAt.toISOString() : null,
                 customer: order.customer,
                 shopifyCache: order.shopifyCache,
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                orderLines: order.orderLines.map((line: any) => ({
+                orderLines: order.orderLines.map((line) => ({
                     id: line.id,
                     skuId: line.skuId,
                     qty: line.qty,
@@ -2005,14 +2003,13 @@ export const getOrdersAnalytics = createServerFn({ method: 'GET' })
                 },
             });
 
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const skuMap = new Map<string, any>(skuDetails.map((s: any) => [s.id, s]));
+            type SkuDetail = typeof skuDetails[number];
+            const skuMap = new Map<string, SkuDetail>(skuDetails.map((s) => [s.id, s]));
 
             // Aggregate by product
             const productAggregates = new Map<string, TopProduct>();
             for (const item of topProductsData) {
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                const sku: any = skuMap.get(item.skuId);
+                const sku = skuMap.get(item.skuId);
                 if (!sku) continue;
 
                 const product = sku.variation.product;

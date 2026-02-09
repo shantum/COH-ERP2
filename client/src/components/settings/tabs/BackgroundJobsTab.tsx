@@ -147,11 +147,11 @@ export function BackgroundJobsTab() {
 
         switch (job.id) {
             case 'shopify_sync':
-                return <ShopifySyncResultCard result={result as ShopifySyncResult} />;
+                return <ShopifySyncResultCard result={result as unknown as ShopifySyncResult} />;
             case 'tracking_sync':
-                return <TrackingSyncResultCard result={result as TrackingSyncResult} />;
+                return <TrackingSyncResultCard result={result as unknown as TrackingSyncResult} />;
             case 'cache_cleanup':
-                return <CacheCleanupResultCard result={result as CacheCleanupResult} stats={job.stats as CacheStats | undefined} />;
+                return <CacheCleanupResultCard result={result as unknown as CacheCleanupResult} stats={job.stats as unknown as CacheStats | undefined} />;
             default:
                 return null;
         }

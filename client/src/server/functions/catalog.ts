@@ -143,13 +143,15 @@ export interface CatalogFiltersResponse {
 // MUTATION RESPONSE TYPES
 // ============================================
 
+/** JSON-safe value type for serializable server function data */
+type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
+
 /**
  * Success response for catalog mutations
  */
 export interface CatalogMutationSuccess {
     success: true;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    data: any;
+    data: Record<string, JsonValue>;
 }
 
 /**
@@ -172,8 +174,7 @@ export interface SyncResultData {
     message: string;
     fetched: number;
     syncAll: boolean;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    results: any;
+    results: JsonValue;
 }
 
 /**
@@ -628,7 +629,8 @@ export const updateCatalogProduct = createServerFn({ method: 'POST' })
                     },
                 });
 
-                return { success: true, data: sku };
+                // Prisma result is serialized to JSON by TanStack Start
+                return { success: true, data: sku as unknown as Record<string, JsonValue> };
         } catch (error: unknown) {
             console.error('updateCatalogProduct error:', error);
             const message = error instanceof Error ? error.message : 'Failed to update catalog product';

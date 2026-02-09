@@ -21,6 +21,87 @@ import {
 import type { ProductsTreeResponse } from '../../../server/functions/products';
 import type { ProductTreeResponse, ProductTreeNode } from '../types';
 
+// ============================================
+// Infer mutation data types from Zod schemas
+// via the server functions' inputValidator shapes.
+// We re-declare the accepted shapes here (excluding 'id')
+// because the Zod schemas themselves are not exported.
+// ============================================
+
+/** Fields accepted by updateProduct (minus 'id' which is passed separately) */
+type UpdateProductData = {
+    name?: string;
+    styleCode?: string | null;
+    category?: string;
+    productType?: string;
+    gender?: string;
+    baseProductionTimeMins?: number;
+    defaultFabricConsumption?: number | null;
+    imageUrl?: string | null;
+    isActive?: boolean;
+    trimsCost?: number | null;
+    packagingCost?: number | null;
+    liningCost?: number | null;
+};
+
+/** Fields accepted by updateVariation (minus 'id') */
+type UpdateVariationData = {
+    colorName?: string;
+    standardColor?: string | null;
+    colorHex?: string | null;
+    imageUrl?: string | null;
+    hasLining?: boolean;
+    isActive?: boolean;
+    trimsCost?: number | null;
+    packagingCost?: number | null;
+    liningCost?: number | null;
+    laborMinutes?: number | null;
+};
+
+/** Fields accepted by updateSku (minus 'id') */
+type UpdateSkuData = {
+    fabricConsumption?: number;
+    mrp?: number;
+    targetStockQty?: number;
+    targetStockMethod?: string;
+    isActive?: boolean;
+    trimsCost?: number | null;
+    packagingCost?: number | null;
+    liningCost?: number | null;
+    laborMinutes?: number | null;
+};
+
+/** Fields accepted by createProduct */
+type CreateProductData = {
+    name: string;
+    category: string;
+    productType: string;
+    styleCode?: string | null;
+    gender?: string;
+    baseProductionTimeMins?: number;
+    defaultFabricConsumption?: number | null;
+    imageUrl?: string | null;
+};
+
+/** Fields accepted by createVariation (minus 'productId' which is passed separately) */
+type CreateVariationData = {
+    colorName: string;
+    standardColor?: string | null;
+    colorHex?: string | null;
+    imageUrl?: string | null;
+    hasLining?: boolean;
+};
+
+/** Fields accepted by createSku (minus 'variationId' which is passed separately) */
+type CreateSkuData = {
+    size: string;
+    skuCode: string;
+    fabricConsumption?: number;
+    mrp: number;
+    targetStockQty?: number;
+    targetStockMethod?: string;
+};
+
 // Query key factory
 export const productsTreeKeys = {
     all: ['productsTree'] as const,
@@ -101,8 +182,7 @@ export function useProductsTreeMutations() {
     const createSkuServerFn = useServerFn(createSkuFn);
 
     const updateProduct = useMutation({
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        mutationFn: async ({ id, data }: { id: string; data: any }) => {
+        mutationFn: async ({ id, data }: { id: string; data: UpdateProductData }) => {
             const response = await updateProductServerFn({ data: { id, ...data } });
             return response;
         },
@@ -112,8 +192,7 @@ export function useProductsTreeMutations() {
     });
 
     const updateVariation = useMutation({
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        mutationFn: async ({ id, data }: { id: string; data: any }) => {
+        mutationFn: async ({ id, data }: { id: string; data: UpdateVariationData }) => {
             const response = await updateVariationServerFn({ data: { id, ...data } });
             return response;
         },
@@ -123,8 +202,7 @@ export function useProductsTreeMutations() {
     });
 
     const updateSku = useMutation({
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        mutationFn: async ({ id, data }: { id: string; data: any }) => {
+        mutationFn: async ({ id, data }: { id: string; data: UpdateSkuData }) => {
             const response = await updateSkuServerFn({ data: { id, ...data } });
             return response;
         },
@@ -134,8 +212,7 @@ export function useProductsTreeMutations() {
     });
 
     const createProduct = useMutation({
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        mutationFn: async (data: any) => {
+        mutationFn: async (data: CreateProductData) => {
             const response = await createProductServerFn({ data });
             return response;
         },
@@ -145,8 +222,7 @@ export function useProductsTreeMutations() {
     });
 
     const createVariation = useMutation({
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        mutationFn: async ({ productId, data }: { productId: string; data: any }) => {
+        mutationFn: async ({ productId, data }: { productId: string; data: CreateVariationData }) => {
             const response = await createVariationServerFn({ data: { productId, ...data } });
             return response;
         },
@@ -156,8 +232,7 @@ export function useProductsTreeMutations() {
     });
 
     const createSku = useMutation({
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        mutationFn: async ({ variationId, data }: { variationId: string; data: any }) => {
+        mutationFn: async ({ variationId, data }: { variationId: string; data: CreateSkuData }) => {
             const response = await createSkuServerFn({ data: { variationId, ...data } });
             return response;
         },
