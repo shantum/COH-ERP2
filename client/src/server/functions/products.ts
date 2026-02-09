@@ -1265,3 +1265,47 @@ export const searchSkusForAutocomplete = createServerFn({ method: 'POST' })
 
         return skuAutocompleteResultSchema.parse({ items, hasMore });
     });
+
+// ============================================
+// RESOLVE SKU CODES → IDs (for Quick Order form)
+// ============================================
+
+/**
+ * Takes an array of SKU codes and returns matching { skuCode, skuId, productName, mrp }.
+ * Used by the Quick Order form where users type SKU codes directly.
+ */
+export const resolveSkuCodes = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => {
+        const schema = z.object({
+            skuCodes: z.array(z.string().min(1)).min(1).max(100),
+        });
+        return schema.parse(input);
+    })
+    .handler(async ({ data }) => {
+        const prisma = await getPrisma();
+
+        const skus = await prisma.sku.findMany({
+            where: {
+                skuCode: { in: data.skuCodes },
+                isActive: true,
+            },
+            select: {
+                id: true,
+                skuCode: true,
+                mrp: true,
+                variation: {
+                    select: {
+                        product: { select: { name: true } },
+                    },
+                },
+            },
+        });
+
+        return skus.map((s) => ({
+            skuId: s.id,
+            skuCode: s.skuCode,
+            productName: s.variation?.product?.name || 'Unknown',
+            mrp: s.mrp,
+        }));
+    });

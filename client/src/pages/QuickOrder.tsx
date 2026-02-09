@@ -1,30 +1,19 @@
 /**
- * QuickOrder page - Simple order form matching COH Google Sheet columns
+ * QuickOrder page - Dead simple order form
  *
- * Fields map to "Orders from COH" sheet:
- * A: Order Date (auto), B: Order# (auto), C: Name, D: City,
- * E: Phone, F: Channel, G: SKU, I: Qty, K: Order Note
+ * All text fields, no search components. Type SKU codes directly.
+ * On submit: resolves SKU codes → IDs, creates order in ERP, pushes to Google Sheet.
  */
 
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { useNavigate } from '@tanstack/react-router';
-import {
-    ArrowLeft,
-    Plus,
-    X,
-    Loader2,
-    Search,
-    Minus,
-    Zap,
-} from 'lucide-react';
+import { ArrowLeft, Plus, Loader2, Zap, Trash2 } from 'lucide-react';
 import { getChannels } from '../server/functions/admin';
+import { resolveSkuCodes } from '../server/functions/products';
 import { useOrderCrudMutations } from '../hooks/orders/useOrderCrudMutations';
-import { ProductSearch, type SKUData } from '../components/common/ProductSearch';
-import { CustomerSearch } from '../components/common/CustomerSearch';
-import { getOptimizedImageUrl } from '../utils/imageOptimization';
-import { showSuccess } from '../utils/toast';
+import { showSuccess, showError } from '../utils/toast';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -34,15 +23,9 @@ import { cn } from '@/lib/utils';
 // TYPES
 // ============================================
 
-interface OrderLine {
-    skuId: string;
-    qty: number;
-    unitPrice: number;
+interface SkuLine {
     skuCode: string;
-    productName: string;
-    colorName: string;
-    size: string;
-    imageUrl: string;
+    qty: number;
 }
 
 // ============================================
@@ -74,93 +57,6 @@ const DEFAULT_CHANNEL_COLOR = {
 };
 
 // ============================================
-// LINE ITEM ROW
-// ============================================
-
-function LineItem({
-    line,
-    onQtyChange,
-    onRemove,
-}: {
-    line: OrderLine;
-    onQtyChange: (qty: number) => void;
-    onRemove: () => void;
-}) {
-    return (
-        <div className="group flex items-center gap-3 py-2.5 px-3 rounded-lg border bg-card hover:border-ring/50 transition-colors">
-            {/* Thumbnail */}
-            <div className="w-10 h-10 rounded-md bg-muted border overflow-hidden shrink-0">
-                {line.imageUrl ? (
-                    <img
-                        src={getOptimizedImageUrl(line.imageUrl, 'sm') || line.imageUrl}
-                        alt={line.productName}
-                        className="w-full h-full object-cover"
-                        loading="lazy"
-                    />
-                ) : (
-                    <div className="w-full h-full flex items-center justify-center text-muted-foreground text-xs font-bold">
-                        {line.productName?.charAt(0)?.toUpperCase() || '?'}
-                    </div>
-                )}
-            </div>
-
-            {/* Product details */}
-            <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium truncate">{line.productName}</p>
-                <div className="flex items-center gap-1.5 mt-0.5">
-                    <span className="text-xs text-muted-foreground">{line.colorName}</span>
-                    <span className="text-muted-foreground/40">·</span>
-                    <span className="text-xs font-medium">{line.size}</span>
-                    <span className="text-muted-foreground/40">·</span>
-                    <span className="text-xs text-muted-foreground font-mono">{line.skuCode}</span>
-                </div>
-            </div>
-
-            {/* Qty controls */}
-            <div className="flex items-center border rounded-md shrink-0">
-                <button
-                    type="button"
-                    onClick={() => onQtyChange(Math.max(1, line.qty - 1))}
-                    className="h-7 w-7 flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors rounded-l-md"
-                >
-                    <Minus className="h-3 w-3" />
-                </button>
-                <input
-                    type="number"
-                    value={line.qty}
-                    onChange={(e) => onQtyChange(Math.max(1, Number(e.target.value) || 1))}
-                    className="h-7 w-10 text-center bg-transparent border-x text-sm focus:outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                    min={1}
-                />
-                <button
-                    type="button"
-                    onClick={() => onQtyChange(line.qty + 1)}
-                    className="h-7 w-7 flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors rounded-r-md"
-                >
-                    <Plus className="h-3 w-3" />
-                </button>
-            </div>
-
-            {/* Price */}
-            <div className="shrink-0 text-right w-16">
-                <span className="text-sm font-medium">
-                    ₹{(line.qty * line.unitPrice).toLocaleString('en-IN')}
-                </span>
-            </div>
-
-            {/* Remove */}
-            <button
-                type="button"
-                onClick={onRemove}
-                className="shrink-0 h-6 w-6 flex items-center justify-center rounded-full opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-all"
-            >
-                <X className="h-3.5 w-3.5" />
-            </button>
-        </div>
-    );
-}
-
-// ============================================
 // MAIN PAGE
 // ============================================
 
@@ -170,16 +66,13 @@ export default function QuickOrder() {
     // Form state
     const [channel, setChannel] = useState('');
     const [customerName, setCustomerName] = useState('');
-    const [customerId, setCustomerId] = useState<string | null>(null);
     const [phone, setPhone] = useState('');
-    const [email, setEmail] = useState('');
     const [city, setCity] = useState('');
     const [orderNote, setOrderNote] = useState('');
     const [paymentMethod, setPaymentMethod] = useState<'Prepaid' | 'COD'>('Prepaid');
     const [paymentStatus, setPaymentStatus] = useState<'pending' | 'paid'>('pending');
-    const [lines, setLines] = useState<OrderLine[]>([]);
-    const [showProductSearch, setShowProductSearch] = useState(false);
-    const [showCustomerSearch, setShowCustomerSearch] = useState(false);
+    const [lines, setLines] = useState<SkuLine[]>([{ skuCode: '', qty: 1 }]);
+    const [isResolving, setIsResolving] = useState(false);
 
     // Fetch channels
     const getChannelsFn = useServerFn(getChannels);
@@ -193,6 +86,9 @@ export default function QuickOrder() {
         staleTime: 300000,
     });
 
+    // Resolve SKU codes server function
+    const resolveSkuCodesFn = useServerFn(resolveSkuCodes);
+
     // Create order mutation
     const { createOrder } = useOrderCrudMutations({
         onCreateSuccess: () => {
@@ -203,77 +99,83 @@ export default function QuickOrder() {
 
     const goBack = () => navigate({ to: '/orders', search: { view: 'open', page: 1, limit: 250 } });
 
-    // Handlers
-    const handleSelectSku = (sku: SKUData, _stock: number) => {
-        const newLine: OrderLine = {
-            skuId: sku.id,
-            qty: 1,
-            unitPrice: Number(sku.mrp) || 0,
-            skuCode: sku.skuCode || '-',
-            productName: sku.variation?.product?.name || 'Unknown',
-            colorName: sku.variation?.colorName || '-',
-            size: sku.size || '-',
-            imageUrl: sku.variation?.imageUrl || sku.variation?.product?.imageUrl || '',
-        };
-        setLines((prev) => [...prev, newLine]);
-        setShowProductSearch(false);
+    // Line handlers
+    const updateLine = (idx: number, field: keyof SkuLine, value: string | number) => {
+        setLines((prev) => prev.map((l, i) => (i === idx ? { ...l, [field]: value } : l)));
     };
 
-    const handleSelectCustomer = (customer: any) => {
-        const firstName = customer.firstName || '';
-        const lastName = customer.lastName || '';
-        const displayName = firstName || lastName
-            ? `${firstName} ${lastName}`.trim()
-            : customer.email?.split('@')[0] || '';
-
-        setCustomerId(customer.id);
-        setCustomerName(displayName);
-        setEmail(customer.email || '');
-        setPhone(customer.phone || '');
-        setShowCustomerSearch(false);
-    };
-
-    const updateLineQty = (idx: number, qty: number) => {
-        setLines((prev) => prev.map((l, i) => (i === idx ? { ...l, qty } : l)));
+    const addLine = () => {
+        setLines((prev) => [...prev, { skuCode: '', qty: 1 }]);
     };
 
     const removeLine = (idx: number) => {
-        setLines((prev) => prev.filter((_, i) => i !== idx));
+        setLines((prev) => (prev.length <= 1 ? prev : prev.filter((_, i) => i !== idx)));
     };
 
-    const totalAmount = lines.reduce((sum, l) => sum + l.qty * l.unitPrice, 0);
-    const totalItems = lines.reduce((sum, l) => sum + l.qty, 0);
-    const isReady = channel && customerName.trim() && lines.length > 0;
+    // Validation
+    const validLines = lines.filter((l) => l.skuCode.trim() && l.qty > 0);
+    const isReady = channel && customerName.trim() && validLines.length > 0;
+    const isBusy = isResolving || createOrder.isPending;
 
-    const handleSubmit = (e: React.FormEvent) => {
+    // Submit: resolve SKU codes → IDs, then create order
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!isReady) return;
+        if (!isReady || isBusy) return;
 
-        createOrder.mutate({
-            channel,
-            customerName: customerName.trim(),
-            ...(customerId ? { customerId } : {}),
-            ...(email.trim() ? { customerEmail: email.trim() } : {}),
-            ...(phone.trim() ? { customerPhone: phone.trim() } : {}),
-            ...(city.trim() ? { shippingAddress: JSON.stringify({ city: city.trim() }) } : {}),
-            ...(orderNote.trim() ? { internalNotes: orderNote.trim() } : {}),
-            paymentMethod,
-            paymentStatus,
-            totalAmount,
-            lines: lines.map((l) => ({
-                skuId: l.skuId,
-                qty: l.qty,
-                unitPrice: l.unitPrice,
-            })),
-        });
+        setIsResolving(true);
+
+        try {
+            // 1. Resolve SKU codes to IDs
+            const skuCodes = validLines.map((l) => l.skuCode.trim());
+            const resolved = await resolveSkuCodesFn({ data: { skuCodes } });
+
+            // Build a map: skuCode → resolved data
+            const codeMap = new Map(resolved.map((r) => [r.skuCode.toLowerCase(), r]));
+
+            // Check for unresolved SKUs
+            const missing = skuCodes.filter((code) => !codeMap.has(code.toLowerCase()));
+            if (missing.length > 0) {
+                showError(`SKU not found: ${missing.join(', ')}`);
+                setIsResolving(false);
+                return;
+            }
+
+            // 2. Build order lines with resolved IDs
+            const orderLines = validLines.map((l) => {
+                const match = codeMap.get(l.skuCode.trim().toLowerCase())!;
+                return {
+                    skuId: match.skuId,
+                    qty: l.qty,
+                    unitPrice: match.mrp ?? 0,
+                };
+            });
+
+            const totalAmount = orderLines.reduce((sum, l) => sum + l.qty * l.unitPrice, 0);
+
+            // 3. Create order
+            createOrder.mutate({
+                channel,
+                customerName: customerName.trim(),
+                ...(phone.trim() ? { customerPhone: phone.trim() } : {}),
+                ...(city.trim() ? { shippingAddress: JSON.stringify({ city: city.trim() }) } : {}),
+                ...(orderNote.trim() ? { internalNotes: orderNote.trim() } : {}),
+                paymentMethod,
+                paymentStatus,
+                totalAmount,
+                lines: orderLines,
+            });
+        } catch (error: unknown) {
+            showError(error instanceof Error ? error.message : 'Failed to resolve SKU codes');
+        } finally {
+            setIsResolving(false);
+        }
     };
 
-    const channelsWithoutShopify = channels?.filter(
-        (ch: any) => ch.name?.toLowerCase() !== 'shopify'
-    ) || [];
+    const channelsWithoutShopify =
+        channels?.filter((ch: any) => ch.name?.toLowerCase() !== 'shopify') || [];
 
     return (
-        <div className="max-w-2xl mx-auto pb-8">
+        <div className="max-w-xl mx-auto pb-8">
             {/* Header */}
             <div className="flex items-center gap-3 mb-6">
                 <Button variant="ghost" size="sm" onClick={goBack} className="h-8 px-2">
@@ -284,20 +186,23 @@ export default function QuickOrder() {
                         <Zap className="h-5 w-5" />
                         Quick Order
                     </h1>
-                    <p className="text-xs text-muted-foreground">Creates in ERP + pushes to Google Sheet</p>
+                    <p className="text-xs text-muted-foreground">
+                        Creates in ERP + pushes to Google Sheet
+                    </p>
                 </div>
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-5">
                 {/* ── Channel ── */}
                 <div>
-                    <label className="text-xs font-medium text-muted-foreground mb-2 block">Channel *</label>
+                    <label className="text-xs font-medium text-muted-foreground mb-2 block">
+                        Channel *
+                    </label>
                     <div className="flex flex-wrap gap-1.5">
                         {channelsWithoutShopify.map((ch: any) => {
                             const name = ch.name?.toLowerCase() || '';
                             const isSelected = channel === ch.id;
                             const colors = CHANNEL_COLORS[name] || DEFAULT_CHANNEL_COLOR;
-
                             return (
                                 <button
                                     key={ch.id}
@@ -316,63 +221,43 @@ export default function QuickOrder() {
                 </div>
 
                 {/* ── Rest (disabled until channel selected) ── */}
-                <div className={cn('space-y-5 transition-opacity', !channel && 'opacity-40 pointer-events-none')}>
-                    {/* ── Customer ── */}
-                    <div>
-                        <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Customer *</label>
-                        <div className="relative">
-                            <Input
-                                placeholder="Customer name..."
-                                value={customerName}
-                                onChange={(e) => {
-                                    setCustomerName(e.target.value);
-                                    setCustomerId(null);
-                                }}
-                                className="h-9 pr-9"
-                                required
-                            />
-                            <button
-                                type="button"
-                                onClick={() => setShowCustomerSearch(!showCustomerSearch)}
-                                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                            >
-                                <Search className="h-3.5 w-3.5" />
-                            </button>
-                            {showCustomerSearch && (
-                                <CustomerSearch
-                                    onSelect={handleSelectCustomer}
-                                    onCancel={() => setShowCustomerSearch(false)}
-                                    initialQuery={customerName}
-                                    showTags
-                                />
-                            )}
-                        </div>
-                    </div>
-
+                <div
+                    className={cn(
+                        'space-y-5 transition-opacity',
+                        !channel && 'opacity-40 pointer-events-none',
+                    )}
+                >
+                    {/* ── Customer Info ── */}
                     <div className="grid grid-cols-3 gap-3">
                         <div>
-                            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Phone</label>
+                            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
+                                Name *
+                            </label>
                             <Input
-                                placeholder="Phone..."
+                                placeholder="Customer name"
+                                value={customerName}
+                                onChange={(e) => setCustomerName(e.target.value)}
+                                className="h-9"
+                                required
+                            />
+                        </div>
+                        <div>
+                            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
+                                Phone
+                            </label>
+                            <Input
+                                placeholder="Phone"
                                 value={phone}
                                 onChange={(e) => setPhone(e.target.value)}
                                 className="h-9"
                             />
                         </div>
                         <div>
-                            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Email</label>
+                            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
+                                City
+                            </label>
                             <Input
-                                type="email"
-                                placeholder="Email..."
-                                value={email}
-                                onChange={(e) => setEmail(e.target.value)}
-                                className="h-9"
-                            />
-                        </div>
-                        <div>
-                            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">City</label>
-                            <Input
-                                placeholder="City..."
+                                placeholder="City"
                                 value={city}
                                 onChange={(e) => setCity(e.target.value)}
                                 className="h-9"
@@ -380,59 +265,79 @@ export default function QuickOrder() {
                         </div>
                     </div>
 
-                    {/* ── Items ── */}
+                    {/* ── SKU Lines ── */}
                     <div>
                         <div className="flex items-center justify-between mb-2">
-                            <label className="text-xs font-medium text-muted-foreground">Items *</label>
-                            {lines.length > 0 && !showProductSearch && (
-                                <button
-                                    type="button"
-                                    onClick={() => setShowProductSearch(true)}
-                                    className="text-xs text-primary hover:underline flex items-center gap-1"
-                                >
-                                    <Plus className="h-3 w-3" />
-                                    Add item
-                                </button>
-                            )}
-                        </div>
-
-                        {/* Line items */}
-                        {lines.length > 0 && (
-                            <div className="space-y-1.5 mb-3">
-                                {lines.map((line, idx) => (
-                                    <LineItem
-                                        key={`${line.skuId}-${idx}`}
-                                        line={line}
-                                        onQtyChange={(qty) => updateLineQty(idx, qty)}
-                                        onRemove={() => removeLine(idx)}
-                                    />
-                                ))}
-                            </div>
-                        )}
-
-                        {/* Product search */}
-                        {showProductSearch ? (
-                            <ProductSearch
-                                onSelect={handleSelectSku}
-                                onCancel={() => setShowProductSearch(false)}
-                            />
-                        ) : lines.length === 0 ? (
+                            <label className="text-xs font-medium text-muted-foreground">
+                                Items *
+                            </label>
                             <button
                                 type="button"
-                                onClick={() => setShowProductSearch(true)}
-                                className="w-full py-6 border-2 border-dashed rounded-lg text-sm text-muted-foreground hover:border-primary hover:text-primary transition-colors"
+                                onClick={addLine}
+                                className="text-xs text-primary hover:underline flex items-center gap-1"
                             >
-                                <Search className="h-4 w-4 inline mr-2" />
-                                Search products to add...
+                                <Plus className="h-3 w-3" />
+                                Add row
                             </button>
-                        ) : null}
+                        </div>
+
+                        <div className="space-y-2">
+                            {/* Header */}
+                            <div className="grid grid-cols-[1fr_80px_32px] gap-2 px-1">
+                                <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                                    SKU Code
+                                </span>
+                                <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                                    Qty
+                                </span>
+                                <span />
+                            </div>
+
+                            {lines.map((line, idx) => (
+                                <div
+                                    key={idx}
+                                    className="grid grid-cols-[1fr_80px_32px] gap-2 items-center"
+                                >
+                                    <Input
+                                        placeholder="e.g. COH-ABC-M"
+                                        value={line.skuCode}
+                                        onChange={(e) => updateLine(idx, 'skuCode', e.target.value)}
+                                        className="h-9 font-mono text-sm"
+                                    />
+                                    <Input
+                                        type="number"
+                                        min={1}
+                                        value={line.qty}
+                                        onChange={(e) =>
+                                            updateLine(idx, 'qty', Math.max(1, Number(e.target.value) || 1))
+                                        }
+                                        className="h-9 text-center"
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => removeLine(idx)}
+                                        disabled={lines.length <= 1}
+                                        className={cn(
+                                            'h-8 w-8 flex items-center justify-center rounded-md transition-colors',
+                                            lines.length <= 1
+                                                ? 'text-muted-foreground/30 cursor-not-allowed'
+                                                : 'text-muted-foreground hover:text-destructive hover:bg-destructive/10',
+                                        )}
+                                    >
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
                     </div>
 
                     {/* ── Order Note ── */}
                     <div>
-                        <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Order Note</label>
+                        <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
+                            Order Note
+                        </label>
                         <textarea
-                            placeholder="Any notes for this order..."
+                            placeholder="Any notes..."
                             value={orderNote}
                             onChange={(e) => setOrderNote(e.target.value)}
                             className="w-full h-16 px-3 py-2 text-sm border rounded-md bg-transparent resize-none focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1"
@@ -442,7 +347,9 @@ export default function QuickOrder() {
                     {/* ── Payment ── */}
                     <div className="flex gap-4">
                         <div>
-                            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Payment</label>
+                            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
+                                Payment
+                            </label>
                             <div className="flex rounded-md border overflow-hidden">
                                 <button
                                     type="button"
@@ -471,7 +378,9 @@ export default function QuickOrder() {
                             </div>
                         </div>
                         <div>
-                            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Status</label>
+                            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
+                                Status
+                            </label>
                             <div className="flex rounded-md border overflow-hidden">
                                 <button
                                     type="button"
@@ -502,30 +411,13 @@ export default function QuickOrder() {
                     </div>
                 </div>
 
-                {/* ── Footer ── */}
-                {lines.length > 0 && (
-                    <div className="pt-4 border-t">
-                        <div className="flex items-center justify-between mb-4">
-                            <span className="text-sm text-muted-foreground">
-                                {totalItems} item{totalItems !== 1 ? 's' : ''}
-                            </span>
-                            <span className="text-lg font-semibold">
-                                ₹{totalAmount.toLocaleString('en-IN')}
-                            </span>
-                        </div>
-                    </div>
-                )}
-
-                <div className="flex gap-3">
+                {/* ── Submit ── */}
+                <div className="flex gap-3 pt-2">
                     <Button type="button" variant="outline" onClick={goBack} className="flex-1">
                         Cancel
                     </Button>
-                    <Button
-                        type="submit"
-                        disabled={!isReady || createOrder.isPending}
-                        className="flex-1"
-                    >
-                        {createOrder.isPending ? (
+                    <Button type="submit" disabled={!isReady || isBusy} className="flex-1">
+                        {isBusy ? (
                             <Loader2 className="h-4 w-4 animate-spin" />
                         ) : (
                             'Create Order'
