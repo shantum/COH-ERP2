@@ -18,7 +18,11 @@ import {
 import { planSyncFromSheet, executeSyncJob, getSyncJobStatus } from '../../../server/functions/sheetSync';
 import {
     startBackgroundJob,
+    getSheetOffloadStatus,
 } from '../../../server/functions/admin';
+import type { OffloadStatusResponse, IngestInwardResult, IngestOutwardResult, IngestPreviewResult, MoveShippedResult, CleanupDoneResult, MigrateFormulasResult } from '../jobs/sheetJobTypes';
+import { IngestInwardResultCard, IngestOutwardResultCard, IngestPreviewCard, MoveShippedResultCard, CleanupDoneResultCard, MigrateFormulasResultCard } from '../jobs/JobResultCards';
+import ConfirmModal from '../../common/ConfirmModal';
 
 // ============================================
 // TYPES (matching server types)
@@ -155,83 +159,68 @@ const ExecutionProgress = React.memo(function ExecutionProgress({
 // OFFLOAD WORKER MONITOR
 // ============================================
 
-interface JobStateResponse {
-    isRunning: boolean;
-    lastRunAt: string | null;
-    lastResult: Record<string, unknown> | null;
-    recentRuns: Array<{ startedAt: string; durationMs: number; count: number; error: string | null }>;
-}
+type OffloadJobId = 'ingest_inward' | 'ingest_outward' | 'move_shipped_to_outward' | 'cleanup_done_rows' | 'migrate_sheet_formulas';
 
-interface BufferCounts {
-    inward: number;
-    outward: number;
-}
-
-interface OffloadStatusResponse {
-    ingestInward: JobStateResponse;
-    ingestOutward: JobStateResponse;
-    moveShipped: JobStateResponse;
-    schedulerActive: boolean;
-    intervalMs: number;
-    bufferCounts: BufferCounts;
-}
+const OFFLOAD_JOB_CONFIRM_MESSAGES: Record<OffloadJobId, string> = {
+    ingest_inward: 'This will create inventory transactions from Inward (Live) buffer rows and mark them as DONE.',
+    move_shipped_to_outward: 'This will copy shipped orders from Orders from COH to the Outward (Live) buffer tab.',
+    ingest_outward: 'This will create inventory transactions from Outward (Live) buffer rows and mark them as DONE.',
+    cleanup_done_rows: 'This will delete DONE rows older than 7 days from both live tabs. Safe — only removes already-ingested rows.',
+    migrate_sheet_formulas: 'This will rewrite Inventory col C and Balance (Final) col E formulas to exclude DONE rows. Safe to re-run.',
+};
 
 const OffloadMonitor = React.memo(function OffloadMonitor() {
     const queryClient = useQueryClient();
     const triggerFn = useServerFn(startBackgroundJob);
+    const getStatusFn = useServerFn(getSheetOffloadStatus);
 
-    const { data: offloadStatus, isLoading, refetch } = useQuery({
+    const [expandedJob, setExpandedJob] = useState<string | null>(null);
+    const [confirmAction, setConfirmAction] = useState<{ jobId: OffloadJobId; jobName: string } | null>(null);
+
+    const { data: offloadStatus, isLoading, isFetching, refetch } = useQuery({
         queryKey: ['sheetOffloadDetailedStatus'],
         queryFn: async (): Promise<OffloadStatusResponse | null> => {
-            try {
-                const response = await fetch('/api/admin/sheet-offload/status', {
-                    credentials: 'include',
-                });
-                if (!response.ok) return null;
-                return await response.json() as OffloadStatusResponse;
-            } catch {
-                return null;
-            }
+            const result = await getStatusFn();
+            if (!result.success) return null;
+            return result.data as OffloadStatusResponse;
         },
         refetchInterval: 15000,
     });
 
-    const triggerInwardMutation = useMutation({
-        mutationFn: async () => {
-            const result = await triggerFn({
-                data: { jobId: 'ingest_inward' as const },
-            });
-            if (!result.success) throw new Error(result.error?.message);
-            return result.data;
-        },
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['sheetOffloadDetailedStatus'] });
+    // Preview mutations — triggered by clicking "Preview" button
+    const inwardPreviewMutation = useMutation({
+        mutationFn: async (): Promise<IngestPreviewResult | null> => {
+            const result = await triggerFn({ data: { jobId: 'preview_ingest_inward' } });
+            if (!result.success) return null;
+            return (result.data?.result as IngestPreviewResult) ?? null;
         },
     });
 
-    const triggerOutwardMutation = useMutation({
-        mutationFn: async () => {
-            const result = await triggerFn({
-                data: { jobId: 'ingest_outward' as const },
-            });
-            if (!result.success) throw new Error(result.error?.message);
-            return result.data;
-        },
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['sheetOffloadDetailedStatus'] });
+    const outwardPreviewMutation = useMutation({
+        mutationFn: async (): Promise<IngestPreviewResult | null> => {
+            const result = await triggerFn({ data: { jobId: 'preview_ingest_outward' } });
+            if (!result.success) return null;
+            return (result.data?.result as IngestPreviewResult) ?? null;
         },
     });
 
-    const triggerMoveMutation = useMutation({
-        mutationFn: async () => {
+    const inwardPreview = inwardPreviewMutation.data ?? null;
+    const outwardPreview = outwardPreviewMutation.data ?? null;
+
+    // Single generic trigger mutation
+    const triggerMutation = useMutation({
+        mutationFn: async (jobId: OffloadJobId) => {
             const result = await triggerFn({
-                data: { jobId: 'move_shipped_to_outward' as const },
+                data: { jobId },
             });
             if (!result.success) throw new Error(result.error?.message);
             return result.data;
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['sheetOffloadDetailedStatus'] });
+            // Clear stale preview data after running a job
+            inwardPreviewMutation.reset();
+            outwardPreviewMutation.reset();
         },
     });
 
@@ -252,6 +241,27 @@ const OffloadMonitor = React.memo(function OffloadMonitor() {
         const diffHours = Math.floor(diffMins / 60);
         if (diffHours < 24) return `${diffHours}h ago`;
         return d.toLocaleDateString();
+    };
+
+    const getConfirmMessage = (jobId: OffloadJobId): string => {
+        const base = OFFLOAD_JOB_CONFIRM_MESSAGES[jobId];
+        if (jobId === 'ingest_inward' && inwardPreview) {
+            const { valid, invalid } = inwardPreview;
+            return `This will ingest ${valid} valid row${valid !== 1 ? 's' : ''} into inventory` +
+                (invalid > 0 ? ` (${invalid} invalid will be skipped)` : '') +
+                '. Create inventory transactions?';
+        }
+        if (jobId === 'ingest_outward' && outwardPreview) {
+            const { valid, invalid } = outwardPreview;
+            return `This will ingest ${valid} valid row${valid !== 1 ? 's' : ''} into inventory` +
+                (invalid > 0 ? ` (${invalid} invalid will be skipped)` : '') +
+                '. Create inventory transactions and link orders?';
+        }
+        return base;
+    };
+
+    const handleRunClick = (jobId: OffloadJobId, jobName: string) => {
+        setConfirmAction({ jobId, jobName });
     };
 
     if (isLoading) {
@@ -296,14 +306,15 @@ const OffloadMonitor = React.memo(function OffloadMonitor() {
 
                 <button
                     onClick={() => refetch()}
+                    disabled={isFetching}
                     className="btn btn-secondary text-xs py-1 px-2"
                 >
-                    <RefreshCw size={12} />
+                    <RefreshCw size={12} className={isFetching ? 'animate-spin' : ''} />
                 </button>
             </div>
 
             {/* Buffer Counts */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-xs">
                 <div className="bg-emerald-50 rounded-lg p-2.5">
                     <p className="text-gray-500">Inward Pending</p>
                     <p className="font-medium text-emerald-700">
@@ -319,10 +330,6 @@ const OffloadMonitor = React.memo(function OffloadMonitor() {
                             ? `${offloadStatus.bufferCounts.outward} rows`
                             : '—'}
                     </p>
-                </div>
-                <div className="bg-gray-50 rounded-lg p-2.5">
-                    <p className="text-gray-500">Interval</p>
-                    <p className="font-medium text-gray-900">{Math.round(offloadStatus.intervalMs / 60000)} min</p>
                 </div>
                 <div className="bg-gray-50 rounded-lg p-2.5">
                     <p className="text-gray-500">Scheduler</p>
@@ -341,13 +348,22 @@ const OffloadMonitor = React.memo(function OffloadMonitor() {
                                 <RefreshCw size={12} className="animate-spin text-blue-600" />
                             )}
                         </div>
-                        <button
-                            onClick={() => triggerInwardMutation.mutate()}
-                            disabled={offloadStatus.ingestInward.isRunning || triggerInwardMutation.isPending}
-                            className="btn btn-primary text-xs py-0.5 px-2 flex items-center gap-1"
-                        >
-                            <Play size={10} /> Run
-                        </button>
+                        <div className="flex items-center gap-1">
+                            <button
+                                onClick={() => inwardPreviewMutation.mutate()}
+                                disabled={offloadStatus.ingestInward.isRunning || inwardPreviewMutation.isPending}
+                                className="btn btn-secondary text-xs py-0.5 px-2 flex items-center gap-1"
+                            >
+                                {inwardPreviewMutation.isPending ? <Loader2 size={10} className="animate-spin" /> : <FileSpreadsheet size={10} />} Preview
+                            </button>
+                            <button
+                                onClick={() => handleRunClick('ingest_inward', 'Ingest Inward')}
+                                disabled={offloadStatus.ingestInward.isRunning || triggerMutation.isPending}
+                                className="btn btn-primary text-xs py-0.5 px-2 flex items-center gap-1"
+                            >
+                                <Play size={10} /> Run
+                            </button>
+                        </div>
                     </div>
                     <div className="text-xs text-gray-500">
                         Last: {formatTime(offloadStatus.ingestInward.lastRunAt)}
@@ -362,6 +378,21 @@ const OffloadMonitor = React.memo(function OffloadMonitor() {
                             </span>
                         )}
                     </div>
+                    {/* Preview result */}
+                    {inwardPreview && <IngestPreviewCard preview={inwardPreview} />}
+                    {/* Expandable detail */}
+                    {offloadStatus.ingestInward.lastResult && (
+                        <button
+                            onClick={() => setExpandedJob(expandedJob === 'ingest_inward' ? null : 'ingest_inward')}
+                            className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1"
+                        >
+                            {expandedJob === 'ingest_inward' ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                            Details
+                        </button>
+                    )}
+                    {expandedJob === 'ingest_inward' && offloadStatus.ingestInward.lastResult && (
+                        <IngestInwardResultCard result={offloadStatus.ingestInward.lastResult as unknown as IngestInwardResult} />
+                    )}
                 </div>
 
                 {/* Move Shipped */}
@@ -374,8 +405,8 @@ const OffloadMonitor = React.memo(function OffloadMonitor() {
                             )}
                         </div>
                         <button
-                            onClick={() => triggerMoveMutation.mutate()}
-                            disabled={offloadStatus.moveShipped.isRunning || triggerMoveMutation.isPending}
+                            onClick={() => handleRunClick('move_shipped_to_outward', 'Move Shipped')}
+                            disabled={offloadStatus.moveShipped.isRunning || triggerMutation.isPending}
                             className="btn btn-primary text-xs py-0.5 px-2 flex items-center gap-1"
                         >
                             <Play size={10} /> Run
@@ -389,6 +420,19 @@ const OffloadMonitor = React.memo(function OffloadMonitor() {
                             </span>
                         )}
                     </div>
+                    {/* Expandable detail */}
+                    {offloadStatus.moveShipped.lastResult && (
+                        <button
+                            onClick={() => setExpandedJob(expandedJob === 'move_shipped' ? null : 'move_shipped')}
+                            className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1"
+                        >
+                            {expandedJob === 'move_shipped' ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                            Details
+                        </button>
+                    )}
+                    {expandedJob === 'move_shipped' && offloadStatus.moveShipped.lastResult && (
+                        <MoveShippedResultCard result={offloadStatus.moveShipped.lastResult as unknown as MoveShippedResult} />
+                    )}
                 </div>
 
                 {/* Ingest Outward */}
@@ -400,13 +444,22 @@ const OffloadMonitor = React.memo(function OffloadMonitor() {
                                 <RefreshCw size={12} className="animate-spin text-blue-600" />
                             )}
                         </div>
-                        <button
-                            onClick={() => triggerOutwardMutation.mutate()}
-                            disabled={offloadStatus.ingestOutward.isRunning || triggerOutwardMutation.isPending}
-                            className="btn btn-primary text-xs py-0.5 px-2 flex items-center gap-1"
-                        >
-                            <Play size={10} /> Run
-                        </button>
+                        <div className="flex items-center gap-1">
+                            <button
+                                onClick={() => outwardPreviewMutation.mutate()}
+                                disabled={offloadStatus.ingestOutward.isRunning || outwardPreviewMutation.isPending}
+                                className="btn btn-secondary text-xs py-0.5 px-2 flex items-center gap-1"
+                            >
+                                {outwardPreviewMutation.isPending ? <Loader2 size={10} className="animate-spin" /> : <FileSpreadsheet size={10} />} Preview
+                            </button>
+                            <button
+                                onClick={() => handleRunClick('ingest_outward', 'Ingest Outward')}
+                                disabled={offloadStatus.ingestOutward.isRunning || triggerMutation.isPending}
+                                className="btn btn-primary text-xs py-0.5 px-2 flex items-center gap-1"
+                            >
+                                <Play size={10} /> Run
+                            </button>
+                        </div>
                     </div>
                     <div className="text-xs text-gray-500">
                         Last: {formatTime(offloadStatus.ingestOutward.lastRunAt)}
@@ -421,8 +474,86 @@ const OffloadMonitor = React.memo(function OffloadMonitor() {
                             </span>
                         )}
                     </div>
+                    {/* Preview result */}
+                    {outwardPreview && <IngestPreviewCard preview={outwardPreview} />}
+                    {/* Expandable detail */}
+                    {offloadStatus.ingestOutward.lastResult && (
+                        <button
+                            onClick={() => setExpandedJob(expandedJob === 'ingest_outward' ? null : 'ingest_outward')}
+                            className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1"
+                        >
+                            {expandedJob === 'ingest_outward' ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                            Details
+                        </button>
+                    )}
+                    {expandedJob === 'ingest_outward' && offloadStatus.ingestOutward.lastResult && (
+                        <IngestOutwardResultCard result={offloadStatus.ingestOutward.lastResult as unknown as IngestOutwardResult} />
+                    )}
                 </div>
             </div>
+
+            {/* --- Maintenance Jobs --- */}
+            <div className="border-t pt-3 mt-3">
+                <p className="text-xs font-medium text-gray-500 mb-2">Maintenance</p>
+                <div className="flex gap-2">
+                    <button
+                        onClick={() => handleRunClick('cleanup_done_rows', 'Cleanup DONE Rows')}
+                        disabled={triggerMutation.isPending || offloadStatus.cleanupDone?.isRunning}
+                        className="px-2.5 py-1.5 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 rounded border disabled:opacity-50"
+                    >
+                        {offloadStatus.cleanupDone?.isRunning ? 'Cleaning...' : 'Cleanup DONE Rows'}
+                    </button>
+                    <button
+                        onClick={() => handleRunClick('migrate_sheet_formulas', 'Migrate Formulas')}
+                        disabled={triggerMutation.isPending || offloadStatus.migrateFormulas?.isRunning}
+                        className="px-2.5 py-1.5 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 rounded border disabled:opacity-50"
+                    >
+                        {offloadStatus.migrateFormulas?.isRunning ? 'Migrating...' : 'Migrate Formulas'}
+                    </button>
+                </div>
+                {offloadStatus.cleanupDone?.lastResult && (
+                    <div className="mt-2">
+                        <button
+                            onClick={() => setExpandedJob(expandedJob === 'cleanup_done' ? null : 'cleanup_done')}
+                            className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1"
+                        >
+                            {expandedJob === 'cleanup_done' ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                            Cleanup Details
+                        </button>
+                        {expandedJob === 'cleanup_done' && (
+                            <CleanupDoneResultCard result={offloadStatus.cleanupDone.lastResult as unknown as CleanupDoneResult} />
+                        )}
+                    </div>
+                )}
+                {offloadStatus.migrateFormulas?.lastResult && (
+                    <div className="mt-2">
+                        <button
+                            onClick={() => setExpandedJob(expandedJob === 'migrate_formulas' ? null : 'migrate_formulas')}
+                            className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1"
+                        >
+                            {expandedJob === 'migrate_formulas' ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                            Migration Details
+                        </button>
+                        {expandedJob === 'migrate_formulas' && (
+                            <MigrateFormulasResultCard result={offloadStatus.migrateFormulas.lastResult as unknown as MigrateFormulasResult} />
+                        )}
+                    </div>
+                )}
+            </div>
+
+            {/* Confirm Modal */}
+            <ConfirmModal
+                isOpen={confirmAction !== null}
+                onClose={() => setConfirmAction(null)}
+                onConfirm={() => {
+                    if (confirmAction) triggerMutation.mutate(confirmAction.jobId);
+                }}
+                title={`Run ${confirmAction?.jobName ?? 'Job'}?`}
+                message={confirmAction ? getConfirmMessage(confirmAction.jobId) : ''}
+                confirmText="Run Now"
+                confirmVariant="warning"
+                isLoading={triggerMutation.isPending}
+            />
         </div>
     );
 });

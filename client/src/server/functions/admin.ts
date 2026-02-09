@@ -96,11 +96,11 @@ const getServerLogsSchema = z.object({
 
 // Background Jobs
 const startBackgroundJobSchema = z.object({
-    jobId: z.enum(['shopify_sync', 'tracking_sync', 'cache_cleanup', 'ingest_inward', 'ingest_outward', 'move_shipped_to_outward', 'preview_ingest_inward', 'preview_ingest_outward']),
+    jobId: z.enum(['shopify_sync', 'tracking_sync', 'cache_cleanup', 'ingest_inward', 'ingest_outward', 'move_shipped_to_outward', 'preview_ingest_inward', 'preview_ingest_outward', 'cleanup_done_rows', 'migrate_sheet_formulas']),
 });
 
 const cancelBackgroundJobSchema = z.object({
-    jobId: z.enum(['shopify_sync', 'tracking_sync', 'cache_cleanup', 'ingest_inward', 'ingest_outward', 'move_shipped_to_outward', 'preview_ingest_inward', 'preview_ingest_outward']),
+    jobId: z.enum(['shopify_sync', 'tracking_sync', 'cache_cleanup', 'ingest_inward', 'ingest_outward', 'move_shipped_to_outward', 'preview_ingest_inward', 'preview_ingest_outward', 'cleanup_done_rows', 'migrate_sheet_formulas']),
 });
 
 const updateBackgroundJobSchema = z.object({
@@ -1035,6 +1035,51 @@ export const getBackgroundJobs = createServerFn({ method: 'GET' })
             return {
                 success: false,
                 error: { code: 'BAD_REQUEST', message: 'Failed to connect to job service' },
+            };
+        }
+    });
+
+/**
+ * Get sheet offload worker status including buffer counts
+ * Wraps GET /api/admin/sheet-offload/status
+ */
+export const getSheetOffloadStatus = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    .handler(async ({ context }): Promise<MutationResult<any>> => {
+        try {
+            requireAdminRole(context.user.role);
+        } catch {
+            return {
+                success: false,
+                error: { code: 'FORBIDDEN', message: 'Admin access required' },
+            };
+        }
+
+        const baseUrl = getApiBaseUrl();
+        const authToken = getCookie('auth_token');
+
+        try {
+            const response = await fetch(`${baseUrl}/api/admin/sheet-offload/status`, {
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+                },
+            });
+
+            if (!response.ok) {
+                return {
+                    success: false,
+                    error: { code: 'BAD_REQUEST', message: 'Failed to fetch sheet offload status' },
+                };
+            }
+
+            const result = await response.json();
+            return { success: true, data: result };
+        } catch {
+            return {
+                success: false,
+                error: { code: 'BAD_REQUEST', message: 'Failed to connect to sheet offload service' },
             };
         }
     });

@@ -25,10 +25,21 @@ const __dirname = fileURLToPath(new URL('.', import.meta.url));
 export const ENABLE_SHEET_OFFLOAD = process.env.ENABLE_SHEET_OFFLOAD === 'true';
 
 /**
- * Deletion switch — when false, worker ingests data but does NOT delete sheet rows.
- * Phase 1: ingest-only. Phase 2: enable deletion after verifying data.
+ * @deprecated No longer used by ingestion — replaced by non-destructive DONE marking.
+ * Kept for reference only. Ingestion now writes "DONE:{referenceId}" to the status column.
  */
 export const ENABLE_SHEET_DELETION = process.env.ENABLE_SHEET_DELETION === 'true';
+
+/**
+ * Prefix written to the Import Status column when a row is successfully ingested.
+ * Format: "DONE:{referenceId}" — fully traceable back to the InventoryTransaction.
+ */
+export const INGESTED_PREFIX = 'DONE:' as const;
+
+/**
+ * How many days to keep DONE rows before cleanup deletes them.
+ */
+export const CLEANUP_RETENTION_DAYS = 7;
 
 // ============================================
 // SPREADSHEET IDS
@@ -607,3 +618,19 @@ export const PHASE2_BALANCE_FORMULA = `=F3+SUMIF('Inward (Final)'!$A:$A,$A3,'Inw
  */
 export const LIVE_BALANCE_FORMULA_TEMPLATE = (row: number) =>
     `=F${row}+IFERROR(SUMIF(IMPORTRANGE("${ORDERS_MASTERSHEET_ID}","'Inward (Live)'!$A:$A"),$A${row},IMPORTRANGE("${ORDERS_MASTERSHEET_ID}","'Inward (Live)'!$B:$B")),0)-IFERROR(SUMIF(IMPORTRANGE("${ORDERS_MASTERSHEET_ID}","'Outward (Live)'!$G:$G"),$A${row},IMPORTRANGE("${ORDERS_MASTERSHEET_ID}","'Outward (Live)'!$I:$I")),0)`;
+
+/**
+ * V2 Inventory balance formula — Mastersheet Inventory col C.
+ * Uses SUMIFS with "<>DONE:*" to exclude ingested rows from live buffer counts.
+ * Same spreadsheet (no IMPORTRANGE needed).
+ */
+export const INVENTORY_BALANCE_FORMULA_TEMPLATE = (row: number) =>
+    `=R${row}+SUMIFS('Inward (Live)'!$B:$B,'Inward (Live)'!$A:$A,$A${row},'Inward (Live)'!$J:$J,"<>DONE:*")-SUMIFS('Outward (Live)'!$I:$I,'Outward (Live)'!$G:$G,$A${row},'Outward (Live)'!$AG:$AG,"<>DONE:*")`;
+
+/**
+ * V2 Balance (Final) formula — Office Ledger col E.
+ * Uses SUMIFS with IMPORTRANGE + "<>DONE:*" to exclude ingested rows.
+ * "id" placeholder is replaced with the Mastersheet ID at runtime.
+ */
+export const LIVE_BALANCE_FORMULA_V2_TEMPLATE = (row: number) =>
+    `=F${row}+IFERROR(SUMIFS(IMPORTRANGE("${ORDERS_MASTERSHEET_ID}","'Inward (Live)'!$B:$B"),IMPORTRANGE("${ORDERS_MASTERSHEET_ID}","'Inward (Live)'!$A:$A"),$A${row},IMPORTRANGE("${ORDERS_MASTERSHEET_ID}","'Inward (Live)'!$J:$J"),"<>DONE:*"),0)-IFERROR(SUMIFS(IMPORTRANGE("${ORDERS_MASTERSHEET_ID}","'Outward (Live)'!$I:$I"),IMPORTRANGE("${ORDERS_MASTERSHEET_ID}","'Outward (Live)'!$G:$G"),$A${row},IMPORTRANGE("${ORDERS_MASTERSHEET_ID}","'Outward (Live)'!$AG:$AG"),"<>DONE:*"),0)`;

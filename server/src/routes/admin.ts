@@ -37,7 +37,7 @@ import { invalidateUserTokens } from '../middleware/permissions.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { ValidationError, NotFoundError, ConflictError, BusinessLogicError } from '../utils/errors.js';
 import sheetOffloadWorker from '../services/sheetOffloadWorker.js';
-import { ENABLE_SHEET_DELETION } from '../config/sync/sheets.js';
+// ENABLE_SHEET_DELETION deprecated — ingestion now marks rows as DONE
 
 const router: Router = Router();
 
@@ -186,7 +186,7 @@ interface PermissionsUpdateBody {
 }
 
 /** Background job trigger params */
-type JobId = 'shopify_sync' | 'tracking_sync' | 'cache_cleanup' | 'ingest_inward' | 'ingest_outward' | 'move_shipped_to_outward' | 'preview_ingest_inward' | 'preview_ingest_outward';
+type JobId = 'shopify_sync' | 'tracking_sync' | 'cache_cleanup' | 'ingest_inward' | 'ingest_outward' | 'move_shipped_to_outward' | 'preview_ingest_inward' | 'preview_ingest_outward' | 'cleanup_done_rows' | 'migrate_sheet_formulas';
 
 /** Background job update body */
 interface JobUpdateBody {
@@ -1324,14 +1324,11 @@ router.get('/background-jobs', authenticateToken, asyncHandler(async (req: Reque
         {
             id: 'ingest_inward',
             name: 'Ingest Inward',
-            description: 'Reads Inward (Live) buffer tab and creates INWARD inventory transactions in ERP. Updates sheet balances after ingestion.',
+            description: 'Reads Inward (Live) buffer tab, creates INWARD inventory transactions, and marks ingested rows as DONE. Updates sheet balances after ingestion.',
             enabled: offloadStatus.schedulerActive,
             isRunning: offloadStatus.ingestInward.isRunning,
             lastRunAt: offloadStatus.ingestInward.lastRunAt,
             lastResult: offloadStatus.ingestInward.lastResult,
-            config: {
-                deletionEnabled: ENABLE_SHEET_DELETION,
-            },
             stats: {
                 recentRuns: offloadStatus.ingestInward.recentRuns,
             },
@@ -1352,14 +1349,11 @@ router.get('/background-jobs', authenticateToken, asyncHandler(async (req: Reque
         {
             id: 'ingest_outward',
             name: 'Ingest Outward',
-            description: 'Reads Outward (Live) buffer tab, creates OUTWARD inventory transactions, and links shipped entries to OrderLines. Updates sheet balances after ingestion.',
+            description: 'Reads Outward (Live) buffer tab, creates OUTWARD inventory transactions, links to OrderLines, and marks ingested rows as DONE. Updates sheet balances after ingestion.',
             enabled: offloadStatus.schedulerActive,
             isRunning: offloadStatus.ingestOutward.isRunning,
             lastRunAt: offloadStatus.ingestOutward.lastRunAt,
             lastResult: offloadStatus.ingestOutward.lastResult,
-            config: {
-                deletionEnabled: ENABLE_SHEET_DELETION,
-            },
             stats: {
                 recentRuns: offloadStatus.ingestOutward.recentRuns,
             },
@@ -1381,6 +1375,32 @@ router.get('/background-jobs', authenticateToken, asyncHandler(async (req: Reque
             isRunning: offloadStatus.ingestOutward.isRunning,
             lastRunAt: null,
             note: 'Preview only — no data changes',
+        },
+        {
+            id: 'cleanup_done_rows',
+            name: 'Cleanup DONE Rows',
+            description: 'Deletes rows marked "DONE" that are older than 7 days from Inward (Live) and Outward (Live). Safe to run — only removes already-ingested rows.',
+            enabled: true,
+            isRunning: offloadStatus.cleanupDone.isRunning,
+            lastRunAt: offloadStatus.cleanupDone.lastRunAt,
+            lastResult: offloadStatus.cleanupDone.lastResult,
+            note: 'Manual trigger only — removes old DONE rows to keep sheets clean',
+            stats: {
+                recentRuns: offloadStatus.cleanupDone.recentRuns,
+            },
+        },
+        {
+            id: 'migrate_sheet_formulas',
+            name: 'Migrate Sheet Formulas',
+            description: 'One-time migration: rewrites Inventory col C and Balance (Final) col E formulas from SUMIF to SUMIFS with DONE-row exclusion. Safe to re-run.',
+            enabled: true,
+            isRunning: offloadStatus.migrateFormulas.isRunning,
+            lastRunAt: offloadStatus.migrateFormulas.lastRunAt,
+            lastResult: offloadStatus.migrateFormulas.lastResult,
+            note: 'One-time setup — idempotent, safe to re-run',
+            stats: {
+                recentRuns: offloadStatus.migrateFormulas.recentRuns,
+            },
         }
     ];
 
@@ -1460,6 +1480,16 @@ router.post('/background-jobs/:jobId/trigger', requireAdmin, asyncHandler(async 
         case 'preview_ingest_outward': {
             const result = await sheetOffloadWorker.previewIngestOutward();
             res.json({ message: 'Preview ingest outward completed', result });
+            break;
+        }
+        case 'cleanup_done_rows': {
+            const result = await sheetOffloadWorker.triggerCleanupDoneRows();
+            res.json({ message: 'Cleanup DONE rows completed', result });
+            break;
+        }
+        case 'migrate_sheet_formulas': {
+            const result = await sheetOffloadWorker.triggerMigrateFormulas();
+            res.json({ message: 'Formula migration completed', result });
             break;
         }
         default:
@@ -1690,6 +1720,8 @@ router.get('/sheet-offload/status', requireAdmin, asyncHandler(async (_req: Requ
         ingestInward: status.ingestInward,
         ingestOutward: status.ingestOutward,
         moveShipped: status.moveShipped,
+        cleanupDone: status.cleanupDone,
+        migrateFormulas: status.migrateFormulas,
         schedulerActive: status.schedulerActive,
         bufferCounts,
     });

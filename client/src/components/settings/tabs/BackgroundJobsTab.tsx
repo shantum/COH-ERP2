@@ -2,7 +2,9 @@
  * BackgroundJobsTab component
  * View and manage background sync jobs and scheduled tasks
  *
- * Migrated to use TanStack Start Server Functions
+ * Sheet offload jobs (ingest_inward, ingest_outward, move_shipped_to_outward,
+ * preview_ingest_inward, preview_ingest_outward) are filtered out here —
+ * they're shown in the OffloadMonitor inside SheetSyncTab instead.
  */
 
 import { useState } from 'react';
@@ -10,8 +12,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import {
     RefreshCw, Play, Clock, CheckCircle, XCircle, Info,
-    Store, Truck, Trash2, Archive, AlertTriangle, Database,
-    ArrowDownToLine, ArrowUpFromLine, ArrowRightLeft,
+    Store, Truck, Trash2, Archive, AlertTriangle,
 } from 'lucide-react';
 
 // Server Functions
@@ -22,6 +23,32 @@ import {
     type BackgroundJob,
 } from '../../../server/functions/admin';
 
+// Result card components
+import {
+    ShopifySyncResultCard,
+    TrackingSyncResultCard,
+    CacheCleanupResultCard,
+} from '../jobs/JobResultCards';
+import type {
+    ShopifySyncResult,
+    TrackingSyncResult,
+    CacheCleanupResult,
+    CacheStats,
+} from '../jobs/sheetJobTypes';
+
+import ConfirmModal from '../../common/ConfirmModal';
+
+// Sheet job IDs — filtered out of this tab (shown in SheetSyncTab's OffloadMonitor)
+const SHEET_JOB_IDS = new Set([
+    'ingest_inward',
+    'ingest_outward',
+    'move_shipped_to_outward',
+    'preview_ingest_inward',
+    'preview_ingest_outward',
+    'cleanup_done_rows',
+    'migrate_sheet_formulas',
+]);
+
 interface JobsResponse {
     jobs: BackgroundJob[];
 }
@@ -29,6 +56,7 @@ interface JobsResponse {
 export function BackgroundJobsTab() {
     const queryClient = useQueryClient();
     const [expandedJob, setExpandedJob] = useState<string | null>(null);
+    const [confirmJob, setConfirmJob] = useState<{ id: string; name: string } | null>(null);
 
     // Server Function wrappers
     const getBackgroundJobsFn = useServerFn(getBackgroundJobs);
@@ -43,15 +71,17 @@ export function BackgroundJobsTab() {
             if (!result.success) throw new Error(result.error?.message);
             return { jobs: result.data || [] };
         },
-        refetchInterval: 10000, // Refresh every 10 seconds to show running status
+        refetchInterval: 10000,
     });
+
+    // Filter out sheet jobs
+    const visibleJobs = data?.jobs.filter(j => !SHEET_JOB_IDS.has(j.id)) ?? [];
 
     // Trigger job mutation
     const triggerMutation = useMutation({
         mutationFn: async (jobId: string) => {
-            // Cast jobId to the expected enum type
             const result = await startBackgroundJobFn({
-                data: { jobId: jobId as 'shopify_sync' | 'tracking_sync' | 'cache_cleanup' | 'ingest_inward' | 'ingest_outward' | 'move_shipped_to_outward' },
+                data: { jobId: jobId as 'shopify_sync' | 'tracking_sync' | 'cache_cleanup' },
             });
             if (!result.success) throw new Error(result.error?.message);
             return result.data;
@@ -85,12 +115,6 @@ export function BackgroundJobsTab() {
                 return <Trash2 size={20} className="text-orange-600" />;
             case 'auto_archive':
                 return <Archive size={20} className="text-purple-600" />;
-            case 'ingest_inward':
-                return <ArrowDownToLine size={20} className="text-emerald-600" />;
-            case 'ingest_outward':
-                return <ArrowUpFromLine size={20} className="text-blue-600" />;
-            case 'move_shipped_to_outward':
-                return <ArrowRightLeft size={20} className="text-amber-600" />;
             default:
                 return <RefreshCw size={20} className="text-gray-600" />;
         }
@@ -121,244 +145,35 @@ export function BackgroundJobsTab() {
         const result = job.lastResult;
         if (!result) return null;
 
-        if (job.id === 'shopify_sync') {
-            return (
-                <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
-                    {result.step1_dump && (
-                        <div className="bg-white p-2 rounded border">
-                            <p className="font-medium text-gray-700">Order Fetch</p>
-                            <p className="text-gray-600">
-                                Fetched: {result.step1_dump.fetched} | Cached: {result.step1_dump.cached}
-                            </p>
-                        </div>
-                    )}
-                    {result.step2_process && (
-                        <div className="bg-white p-2 rounded border">
-                            <p className="font-medium text-gray-700">Processing</p>
-                            <p className="text-gray-600">
-                                Found: {result.step2_process.found} | Processed: {result.step2_process.processed}
-                                {result.step2_process.failed > 0 && (
-                                    <span className="text-red-600"> | Failed: {result.step2_process.failed}</span>
-                                )}
-                            </p>
-                        </div>
-                    )}
-                    {result.durationMs && (
-                        <div className="bg-white p-2 rounded border col-span-2">
-                            <p className="text-gray-600">
-                                Duration: {(result.durationMs / 1000).toFixed(1)}s
-                            </p>
-                        </div>
-                    )}
-                    {result.error && (
-                        <div className="bg-red-50 p-2 rounded border border-red-200 col-span-2">
-                            <p className="text-red-700">{result.error}</p>
-                        </div>
-                    )}
-                </div>
-            );
+        switch (job.id) {
+            case 'shopify_sync':
+                return <ShopifySyncResultCard result={result as ShopifySyncResult} />;
+            case 'tracking_sync':
+                return <TrackingSyncResultCard result={result as TrackingSyncResult} />;
+            case 'cache_cleanup':
+                return <CacheCleanupResultCard result={result as CacheCleanupResult} stats={job.stats as CacheStats | undefined} />;
+            default:
+                return null;
         }
-
-        if (job.id === 'tracking_sync') {
-            return (
-                <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
-                    <div className="bg-white p-2 rounded border">
-                        <p className="font-medium text-gray-700">AWBs Checked</p>
-                        <p className="text-lg font-semibold text-gray-900">{result.awbsChecked || 0}</p>
-                    </div>
-                    <div className="bg-white p-2 rounded border">
-                        <p className="font-medium text-gray-700">Updated</p>
-                        <p className="text-lg font-semibold text-blue-600">{result.updated || 0}</p>
-                    </div>
-                    <div className="bg-white p-2 rounded border">
-                        <p className="font-medium text-gray-700">Delivered</p>
-                        <p className="text-lg font-semibold text-green-600">{result.delivered || 0}</p>
-                    </div>
-                    <div className="bg-white p-2 rounded border">
-                        <p className="font-medium text-gray-700">RTO</p>
-                        <p className="text-lg font-semibold text-orange-600">{result.rto || 0}</p>
-                    </div>
-                    {result.durationMs && (
-                        <div className="bg-white p-2 rounded border col-span-2 md:col-span-4">
-                            <p className="text-gray-600">
-                                Duration: {(result.durationMs / 1000).toFixed(1)}s | API Calls: {result.apiCalls || 0}
-                                {result.errors > 0 && <span className="text-red-600"> | Errors: {result.errors}</span>}
-                            </p>
-                        </div>
-                    )}
-                </div>
-            );
-        }
-
-        if (job.id === 'cache_cleanup') {
-            return (
-                <div className="mt-2 text-xs">
-                    {result.totalDeleted !== undefined && (
-                        <div className="bg-white p-2 rounded border">
-                            <p className="text-gray-600">
-                                Deleted: {result.totalDeleted} entries | Duration: {result.durationMs}ms
-                            </p>
-                        </div>
-                    )}
-                </div>
-            );
-        }
-
-        if (job.id === 'ingest_inward') {
-            return (
-                <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
-                    <div className="bg-white p-2 rounded border">
-                        <p className="font-medium text-gray-700">Ingested</p>
-                        <p className="text-lg font-semibold text-emerald-600">{result.inwardIngested || 0}</p>
-                    </div>
-                    <div className="bg-white p-2 rounded border">
-                        <p className="font-medium text-gray-700">Skipped</p>
-                        <p className="text-lg font-semibold text-gray-600">{result.skipped || 0}</p>
-                    </div>
-                    <div className="bg-white p-2 rounded border">
-                        <p className="font-medium text-gray-700">SKUs Updated</p>
-                        <p className="text-lg font-semibold text-purple-600">{result.skusUpdated || 0}</p>
-                    </div>
-                    <div className="bg-white p-2 rounded border">
-                        <p className="font-medium text-gray-700">Rows Deleted</p>
-                        <p className="text-lg font-semibold text-gray-600">{result.rowsDeleted || 0}</p>
-                    </div>
-                    {result.durationMs && (
-                        <div className="bg-white p-2 rounded border col-span-2 md:col-span-4">
-                            <p className="text-gray-600">
-                                Duration: {(result.durationMs / 1000).toFixed(1)}s
-                                {result.errors > 0 && <span className="text-red-600"> | Errors: {result.errors}</span>}
-                            </p>
-                        </div>
-                    )}
-                    {result.error && (
-                        <div className="bg-red-50 p-2 rounded border border-red-200 col-span-2 md:col-span-4">
-                            <p className="text-red-700">{result.error}</p>
-                        </div>
-                    )}
-                </div>
-            );
-        }
-
-        if (job.id === 'ingest_outward') {
-            return (
-                <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
-                    <div className="bg-white p-2 rounded border">
-                        <p className="font-medium text-gray-700">Ingested</p>
-                        <p className="text-lg font-semibold text-blue-600">{result.outwardIngested || 0}</p>
-                    </div>
-                    <div className="bg-white p-2 rounded border">
-                        <p className="font-medium text-gray-700">Orders Linked</p>
-                        <p className="text-lg font-semibold text-green-600">{result.ordersLinked || 0}</p>
-                    </div>
-                    <div className="bg-white p-2 rounded border">
-                        <p className="font-medium text-gray-700">SKUs Updated</p>
-                        <p className="text-lg font-semibold text-purple-600">{result.skusUpdated || 0}</p>
-                    </div>
-                    <div className="bg-white p-2 rounded border">
-                        <p className="font-medium text-gray-700">Skipped</p>
-                        <p className="text-lg font-semibold text-gray-600">{result.skipped || 0}</p>
-                    </div>
-                    {result.durationMs && (
-                        <div className="bg-white p-2 rounded border col-span-2 md:col-span-4">
-                            <p className="text-gray-600">
-                                Duration: {(result.durationMs / 1000).toFixed(1)}s
-                                {result.errors > 0 && <span className="text-red-600"> | Errors: {result.errors}</span>}
-                            </p>
-                        </div>
-                    )}
-                    {result.error && (
-                        <div className="bg-red-50 p-2 rounded border border-red-200 col-span-2 md:col-span-4">
-                            <p className="text-red-700">{result.error}</p>
-                        </div>
-                    )}
-                </div>
-            );
-        }
-
-        if (job.id === 'move_shipped_to_outward') {
-            return (
-                <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
-                    <div className="bg-white p-2 rounded border">
-                        <p className="font-medium text-gray-700">Shipped Found</p>
-                        <p className="text-lg font-semibold text-gray-900">{result.shippedRowsFound || 0}</p>
-                    </div>
-                    <div className="bg-white p-2 rounded border">
-                        <p className="font-medium text-gray-700">Written</p>
-                        <p className="text-lg font-semibold text-amber-600">{result.rowsWrittenToOutward || 0}</p>
-                    </div>
-                    <div className="bg-white p-2 rounded border">
-                        <p className="font-medium text-gray-700">Verified</p>
-                        <p className="text-lg font-semibold text-green-600">{result.rowsVerified || 0}</p>
-                    </div>
-                    <div className="bg-white p-2 rounded border">
-                        <p className="font-medium text-gray-700">Deleted</p>
-                        <p className="text-lg font-semibold text-gray-600">{result.rowsDeletedFromOrders || 0}</p>
-                    </div>
-                    {result.durationMs && (
-                        <div className="bg-white p-2 rounded border col-span-2 md:col-span-4">
-                            <p className="text-gray-600">
-                                Duration: {(result.durationMs / 1000).toFixed(1)}s
-                                {result.skippedRows > 0 && <span className="text-amber-600"> | Skipped: {result.skippedRows}</span>}
-                                {result.errors?.length > 0 && <span className="text-red-600"> | Errors: {result.errors.length}</span>}
-                            </p>
-                        </div>
-                    )}
-                    {result.errors?.length > 0 && (
-                        <div className="bg-red-50 p-2 rounded border border-red-200 col-span-2 md:col-span-4">
-                            {result.errors.slice(0, 3).map((err: string, i: number) => (
-                                <p key={i} className="text-red-700 text-xs">{err}</p>
-                            ))}
-                        </div>
-                    )}
-                </div>
-            );
-        }
-
-        return null;
     };
 
-    const renderCacheStats = (stats: BackgroundJob['stats']) => {
-        if (!stats) return null;
+    const getConfirmMessage = (jobId: string): string => {
+        switch (jobId) {
+            case 'shopify_sync':
+                return 'This will fetch recent orders from Shopify and process any that are new or updated.';
+            case 'tracking_sync':
+                return 'This will check tracking status for all active shipments via iThink Logistics API.';
+            default:
+                return 'Are you sure you want to run this job?';
+        }
+    };
 
-        return (
-            <div className="mt-3 pt-3 border-t">
-                <p className="text-xs font-medium text-gray-700 mb-2 flex items-center gap-1">
-                    <Database size={14} /> Cache Statistics
-                </p>
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-xs">
-                    <div className="bg-white p-2 rounded border">
-                        <p className="font-medium text-gray-600">Order Cache</p>
-                        <p className="text-gray-900">
-                            {stats.orderCache?.total || 0} total
-                            <span className="text-gray-500"> ({stats.orderCache?.olderThan30Days || 0} older than 30d)</span>
-                        </p>
-                    </div>
-                    <div className="bg-white p-2 rounded border">
-                        <p className="font-medium text-gray-600">Product Cache</p>
-                        <p className="text-gray-900">
-                            {stats.productCache?.total || 0} total
-                            <span className="text-gray-500"> ({stats.productCache?.olderThan30Days || 0} older than 30d)</span>
-                        </p>
-                    </div>
-                    <div className="bg-white p-2 rounded border">
-                        <p className="font-medium text-gray-600">Webhook Logs</p>
-                        <p className="text-gray-900">
-                            {stats.webhookLogs?.total || 0} total
-                            <span className="text-gray-500"> ({stats.webhookLogs?.olderThan30Days || 0} older than 30d)</span>
-                        </p>
-                    </div>
-                    <div className="bg-white p-2 rounded border">
-                        <p className="font-medium text-gray-600">Failed Syncs</p>
-                        <p className="text-gray-900">{stats.failedSyncItems?.total || 0}</p>
-                    </div>
-                    <div className="bg-white p-2 rounded border">
-                        <p className="font-medium text-gray-600">Sync Jobs</p>
-                        <p className="text-gray-900">{stats.syncJobs?.total || 0}</p>
-                    </div>
-                </div>
-            </div>
-        );
+    const handleRunClick = (job: BackgroundJob) => {
+        if (job.id === 'shopify_sync' || job.id === 'tracking_sync') {
+            setConfirmJob({ id: job.id, name: job.name });
+        } else {
+            triggerMutation.mutate(job.id);
+        }
     };
 
     return (
@@ -391,7 +206,7 @@ export function BackgroundJobsTab() {
                 </div>
             )}
 
-            {!isLoading && data?.jobs && data.jobs.map((job) => {
+            {!isLoading && visibleJobs.map((job) => {
                 const isExpanded = expandedJob === job.id;
                 const nextRun = getNextRun(job);
                 const canTrigger = !job.isRunning && job.id !== 'auto_archive';
@@ -472,7 +287,7 @@ export function BackgroundJobsTab() {
                                 )}
                                 {canTrigger && (
                                     <button
-                                        onClick={() => triggerMutation.mutate(job.id)}
+                                        onClick={() => handleRunClick(job)}
                                         disabled={triggerMutation.isPending}
                                         className="btn btn-primary flex items-center gap-1 text-sm"
                                     >
@@ -500,9 +315,6 @@ export function BackgroundJobsTab() {
                                     </div>
                                 )}
 
-                                {/* Cache Stats for cleanup job */}
-                                {job.id === 'cache_cleanup' && job.stats && renderCacheStats(job.stats)}
-
                                 {/* No results yet */}
                                 {!job.lastResult && (
                                     <p className="text-sm text-gray-500">No results available yet. Run the job to see details.</p>
@@ -524,16 +336,27 @@ export function BackgroundJobsTab() {
                             <li><strong>Tracking Status Sync:</strong> Updates delivery tracking every 30 minutes via iThink Logistics API. Handles deliveries and RTOs.</li>
                             <li><strong>Cache Cleanup:</strong> Removes old cache entries daily at 2 AM to prevent database bloat.</li>
                             <li><strong>Auto-Archive:</strong> Archives completed orders older than 90 days on server startup.</li>
-                            <li><strong>Ingest Inward:</strong> Reads Inward (Live) buffer tab and creates INWARD inventory transactions. Runs on scheduled interval.</li>
-                            <li><strong>Move Shipped → Outward:</strong> Copies shipped orders from "Orders from COH" to "Outward (Live)". Manual trigger only.</li>
-                            <li><strong>Ingest Outward:</strong> Reads Outward (Live) buffer tab, creates OUTWARD inventory transactions, and links to OrderLines. Runs on scheduled interval.</li>
                         </ul>
                         <p className="mt-2 text-xs text-blue-700">
-                            Sync jobs run automatically and cannot be disabled (managed at server level). Cache cleanup can be toggled on/off.
+                            Sheet offload jobs (Ingest Inward, Move Shipped, Ingest Outward) are managed in Settings &gt; Sheet Sync.
                         </p>
                     </div>
                 </div>
             </div>
+
+            {/* Confirm Modal for Run Now */}
+            <ConfirmModal
+                isOpen={confirmJob !== null}
+                onClose={() => setConfirmJob(null)}
+                onConfirm={() => {
+                    if (confirmJob) triggerMutation.mutate(confirmJob.id);
+                }}
+                title={`Run ${confirmJob?.name ?? 'Job'}?`}
+                message={confirmJob ? getConfirmMessage(confirmJob.id) : ''}
+                confirmText="Run Now"
+                confirmVariant="warning"
+                isLoading={triggerMutation.isPending}
+            />
         </div>
     );
 }
