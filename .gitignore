@@ -60,3 +60,8 @@ server/coverage/
 
 Claude_Code_-_CLI_Quickstart-oauth-credentials.txt
 mcp-chat/
+
+# One-off scripts and backups
+server/scripts/
+server/analyze-*.ts
+backups/
