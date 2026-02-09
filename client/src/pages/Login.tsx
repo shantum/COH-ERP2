@@ -82,6 +82,11 @@ export default function Login({ onLoginSuccess }: LoginProps) {
                         </button>
                     </form>
 
+                    <div className="mt-6 text-center text-xs text-gray-400 space-x-3">
+                        <a href="/privacy" target="_blank" rel="noopener noreferrer" className="hover:text-gray-600">Privacy Policy</a>
+                        <span>&middot;</span>
+                        <a href="/terms" target="_blank" rel="noopener noreferrer" className="hover:text-gray-600">Terms of Service</a>
+                    </div>
                 </div>
             </div>
         </div>
