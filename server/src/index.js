@@ -150,6 +150,47 @@ app.use('/api/webhooks/returnprime', returnPrimeWebhooks);
 app.use('/api/returnprime/admin', returnPrimeAdminRoutes);  // Must be before /api/returnprime
 app.use('/api/returnprime', returnPrimeSync);
 
+// Public legal pages (for Google OAuth verification)
+app.get('/privacy', (req, res) => {
+  res.send(`<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Privacy Policy — COH ERP</title>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,-apple-system,sans-serif;max-width:720px;margin:0 auto;padding:40px 20px;color:#1a1a1a;line-height:1.7}h1{font-size:24px;margin-bottom:8px}p.date{color:#888;font-size:14px;margin-bottom:32px}h2{font-size:18px;margin:28px 0 12px}p,li{font-size:15px;margin-bottom:12px}ul{padding-left:24px}</style></head><body>
+<h1>Privacy Policy</h1><p class="date">Last updated: February 2026</p>
+<p>Canoe One House ("COH", "we", "us") operates the COH ERP system at coh.one. This policy explains how we handle data when you use our internal tools, including Google Apps Script integrations.</p>
+<h2>What We Access</h2>
+<p>Our Google Apps Script integration accesses Google Sheets data solely to manage order entries within our shared business spreadsheets. We access only the specific sheets required for COH operations.</p>
+<h2>How We Use Data</h2>
+<ul><li>To insert, read, and manage order rows in COH business spreadsheets</li><li>To run internal business operations through our ERP system</li><li>We do not sell, share, or transfer data to third parties</li></ul>
+<h2>Data Storage</h2>
+<p>Data remains within Google Sheets and our secure ERP database hosted on Railway. We do not copy your Google account data to external services.</p>
+<h2>Who Can Access</h2>
+<p>Only authorised COH team members and business partners with explicit access to our shared spreadsheets.</p>
+<h2>Data Retention</h2>
+<p>Business data is retained as long as needed for operations. You can request removal of your personal data by contacting us.</p>
+<h2>Contact</h2>
+<p>For privacy questions, reach us at <strong>hello@canoedesign.in</strong></p>
+</body></html>`);
+});
+
+app.get('/terms', (req, res) => {
+  res.send(`<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Terms of Service — COH ERP</title>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,-apple-system,sans-serif;max-width:720px;margin:0 auto;padding:40px 20px;color:#1a1a1a;line-height:1.7}h1{font-size:24px;margin-bottom:8px}p.date{color:#888;font-size:14px;margin-bottom:32px}h2{font-size:18px;margin:28px 0 12px}p,li{font-size:15px;margin-bottom:12px}ul{padding-left:24px}</style></head><body>
+<h1>Terms of Service</h1><p class="date">Last updated: February 2026</p>
+<p>These terms govern your use of the COH ERP system and related Google Apps Script tools operated by Canoe One House ("COH").</p>
+<h2>Use of Service</h2>
+<p>The COH ERP tools are provided for authorised business use by COH team members and partners. By using these tools, you agree to use them only for legitimate COH business operations.</p>
+<h2>Google Integration</h2>
+<p>Our tools integrate with Google Sheets to manage business data. By authorising the integration, you grant our application access to read and write data in the specific COH business spreadsheets you have access to.</p>
+<h2>Your Responsibilities</h2>
+<ul><li>Use the tools only for authorised COH business purposes</li><li>Do not share access credentials with unauthorised persons</li><li>Report any security concerns to the COH team promptly</li></ul>
+<h2>Limitations</h2>
+<p>The tools are provided "as is" for internal business use. We do our best to keep them running smoothly but do not guarantee uninterrupted availability.</p>
+<h2>Changes</h2>
+<p>We may update these terms as needed. Continued use of the tools constitutes acceptance of any changes.</p>
+<h2>Contact</h2>
+<p>Questions? Reach us at <strong>hello@canoedesign.in</strong></p>
+</body></html>`);
+});
+
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
