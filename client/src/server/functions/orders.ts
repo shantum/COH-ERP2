@@ -2103,6 +2103,8 @@ export interface OrderForExchange {
     shippingAddress: string | null;
     totalAmount: number;
     orderDate: string;
+    /** Number of existing exchanges for this order (for order number preview) */
+    exchangeCount: number;
     orderLines: Array<{
         id: string;
         skuId: string;
@@ -2171,6 +2173,11 @@ export const getOrderForExchange = createServerFn({ method: 'GET' })
                 return { success: false, error: 'Order not found' };
             }
 
+            // Count existing exchanges for order number preview
+            const exchangeCount = await prisma.order.count({
+                where: { originalOrderId: order.id },
+            });
+
             return {
                 success: true,
                 data: {
@@ -2183,6 +2190,7 @@ export const getOrderForExchange = createServerFn({ method: 'GET' })
                     shippingAddress: order.shippingAddress,
                     totalAmount: order.totalAmount,
                     orderDate: order.orderDate.toISOString(),
+                    exchangeCount,
                     orderLines: order.orderLines.map((line) => ({
                         id: line.id,
                         skuId: line.skuId,

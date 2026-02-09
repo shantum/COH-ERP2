@@ -1293,9 +1293,11 @@ export const resolveSkuCodes = createServerFn({ method: 'POST' })
             select: {
                 id: true,
                 skuCode: true,
+                size: true,
                 mrp: true,
                 variation: {
                     select: {
+                        colorName: true,
                         product: { select: { name: true } },
                     },
                 },
@@ -1306,6 +1308,8 @@ export const resolveSkuCodes = createServerFn({ method: 'POST' })
             skuId: s.id,
             skuCode: s.skuCode,
             productName: s.variation?.product?.name || 'Unknown',
+            colorName: s.variation?.colorName || '',
+            size: s.size || '',
             mrp: s.mrp,
         }));
     });
