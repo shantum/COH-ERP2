@@ -52,6 +52,7 @@ import trackingSync from './services/trackingSync.js';
 import cacheProcessor from './services/cacheProcessor.js';
 import cacheDumpWorker from './services/cacheDumpWorker.js';
 import sheetOffloadWorker from './services/sheetOffloadWorker.js';
+import stockSnapshotWorker from './services/stockSnapshotWorker.js';
 import { runAllCleanup } from './utils/cacheCleanup.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import shutdownCoordinator from './utils/shutdownCoordinator.js';
@@ -301,6 +302,9 @@ app.listen(PORT, '0.0.0.0', async () => {
     // Start sheet offload worker (feature-flagged — only runs if ENABLE_SHEET_OFFLOAD=true)
     sheetOffloadWorker.start();
 
+    // Start stock snapshot worker (manual trigger only)
+    stockSnapshotWorker.start();
+
     // Register shutdown handlers for graceful shutdown
     shutdownCoordinator.register('scheduledSync', () => {
       scheduledSync.stop();
@@ -320,6 +324,10 @@ app.listen(PORT, '0.0.0.0', async () => {
 
     shutdownCoordinator.register('sheetOffloadWorker', () => {
       sheetOffloadWorker.stop();
+    }, 5000);
+
+    shutdownCoordinator.register('stockSnapshotWorker', () => {
+      stockSnapshotWorker.stop();
     }, 5000);
   }
 

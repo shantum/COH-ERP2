@@ -89,6 +89,7 @@ const navGroups: NavGroup[] = [
             { to: '/channels', icon: Store, label: 'Marketplaces' },
             { to: '/analytics', icon: BarChart3, label: 'Analytics', access: 'view-analytics' },
             { to: '/costing', icon: Calculator, label: 'Costing', access: 'costing-dashboard' },
+            { to: '/stock-report', icon: Package, label: 'Stock Report' },
         ],
     },
     {

@@ -144,6 +144,23 @@ export function sameTimeYesterdayIST(): Date {
 }
 
 /**
+ * Get IST midnight boundaries for any given month
+ * Returns UTC Date objects representing IST midnight start/end of the month
+ * @param year - Full year (e.g. 2026)
+ * @param month - 1-based month (1=Jan, 12=Dec)
+ */
+export function monthBoundariesIST(year: number, month: number): { start: Date; end: Date } {
+    // IST midnight on 1st of the given month → UTC
+    const monthStartUTC = Date.UTC(year, month - 1, 1) - IST_OFFSET_MS;
+    // IST midnight on 1st of NEXT month → UTC
+    const nextMonthStartUTC = Date.UTC(year, month, 1) - IST_OFFSET_MS;
+    return {
+        start: new Date(monthStartUTC),
+        end: new Date(nextMonthStartUTC),
+    };
+}
+
+/**
  * Get same time last month (for same-time comparisons)
  * Note: Uses UTC methods for consistency.
  */

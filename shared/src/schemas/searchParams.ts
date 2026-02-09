@@ -279,6 +279,35 @@ export const ChannelsSearchParams = z.object({
 export type ChannelsSearchParams = z.infer<typeof ChannelsSearchParams>;
 
 // ============================================
+// STOCK REPORT PAGE SEARCH PARAMS
+// ============================================
+
+/**
+ * Stock Report page search params
+ * Monthly stock snapshots: Opening + Inward - Outward = Closing
+ *
+ * @example
+ * /stock-report?year=2026&month=1&rollup=sku
+ */
+export const StockReportSearchParams = z.object({
+    /** Year (defaults to current year) */
+    year: z.coerce.number().int().positive().optional().catch(undefined),
+    /** Month 1-12 (defaults to current month) */
+    month: z.coerce.number().int().min(1).max(12).optional().catch(undefined),
+    /** Search query for SKU/product name */
+    search: z.string().optional().catch(undefined),
+    /** Category/product filter */
+    category: z.string().optional().catch(undefined),
+    /** Rollup level: sku (individual) or product (grouped) */
+    rollup: z.enum(['sku', 'product']).catch('sku'),
+    /** Page number */
+    page: z.coerce.number().int().positive().catch(1),
+    /** Items per page */
+    limit: z.coerce.number().int().positive().max(500).catch(100),
+});
+export type StockReportSearchParams = z.infer<typeof StockReportSearchParams>;
+
+// ============================================
 // EMPTY SEARCH PARAMS (for pages without params)
 // ============================================
 

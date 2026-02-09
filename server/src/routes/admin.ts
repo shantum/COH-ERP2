@@ -37,6 +37,7 @@ import { invalidateUserTokens } from '../middleware/permissions.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { ValidationError, NotFoundError, ConflictError, BusinessLogicError } from '../utils/errors.js';
 import sheetOffloadWorker from '../services/sheetOffloadWorker.js';
+import stockSnapshotWorker from '../services/stockSnapshotWorker.js';
 // ENABLE_SHEET_DELETION deprecated — ingestion now marks rows as DONE
 
 const router: Router = Router();
@@ -186,7 +187,7 @@ interface PermissionsUpdateBody {
 }
 
 /** Background job trigger params */
-type JobId = 'shopify_sync' | 'tracking_sync' | 'cache_cleanup' | 'ingest_inward' | 'ingest_outward' | 'move_shipped_to_outward' | 'preview_ingest_inward' | 'preview_ingest_outward' | 'cleanup_done_rows' | 'migrate_sheet_formulas';
+type JobId = 'shopify_sync' | 'tracking_sync' | 'cache_cleanup' | 'ingest_inward' | 'ingest_outward' | 'move_shipped_to_outward' | 'preview_ingest_inward' | 'preview_ingest_outward' | 'cleanup_done_rows' | 'migrate_sheet_formulas' | 'snapshot_compute' | 'snapshot_backfill';
 
 /** Background job update body */
 interface JobUpdateBody {
@@ -1401,6 +1402,26 @@ router.get('/background-jobs', authenticateToken, asyncHandler(async (req: Reque
             stats: {
                 recentRuns: offloadStatus.migrateFormulas.recentRuns,
             },
+        },
+        {
+            id: 'snapshot_compute',
+            name: 'Stock Snapshot (Monthly)',
+            description: 'Computes the stock snapshot for the last completed month: Opening + Inward - Outward = Closing, with reason breakdowns.',
+            enabled: true,
+            isRunning: stockSnapshotWorker.getStatus().isRunning,
+            lastRunAt: stockSnapshotWorker.getStatus().lastRunAt,
+            lastResult: stockSnapshotWorker.getStatus().lastRunResult,
+            note: 'Manual trigger only — computes last completed month',
+        },
+        {
+            id: 'snapshot_backfill',
+            name: 'Stock Snapshot Backfill',
+            description: 'Backfills all historical monthly snapshots from the earliest transaction to last month. Runs sequentially (each month depends on previous closing).',
+            enabled: true,
+            isRunning: stockSnapshotWorker.getStatus().isRunning,
+            lastRunAt: stockSnapshotWorker.getStatus().lastRunAt,
+            lastResult: stockSnapshotWorker.getStatus().lastRunResult,
+            note: 'One-time setup — run once to populate historical data',
         }
     ];
 
@@ -1490,6 +1511,16 @@ router.post('/background-jobs/:jobId/trigger', requireAdmin, asyncHandler(async 
         case 'migrate_sheet_formulas': {
             const result = await sheetOffloadWorker.triggerMigrateFormulas();
             res.json({ message: 'Formula migration completed', result });
+            break;
+        }
+        case 'snapshot_compute': {
+            const result = await stockSnapshotWorker.triggerSnapshot();
+            res.json({ message: 'Stock snapshot computed', result });
+            break;
+        }
+        case 'snapshot_backfill': {
+            const result = await stockSnapshotWorker.triggerBackfill();
+            res.json({ message: 'Stock snapshot backfill completed', result });
             break;
         }
         default:

@@ -96,11 +96,11 @@ const getServerLogsSchema = z.object({
 
 // Background Jobs
 const startBackgroundJobSchema = z.object({
-    jobId: z.enum(['shopify_sync', 'tracking_sync', 'cache_cleanup', 'ingest_inward', 'ingest_outward', 'move_shipped_to_outward', 'preview_ingest_inward', 'preview_ingest_outward', 'cleanup_done_rows', 'migrate_sheet_formulas']),
+    jobId: z.enum(['shopify_sync', 'tracking_sync', 'cache_cleanup', 'ingest_inward', 'ingest_outward', 'move_shipped_to_outward', 'preview_ingest_inward', 'preview_ingest_outward', 'cleanup_done_rows', 'migrate_sheet_formulas', 'snapshot_compute', 'snapshot_backfill']),
 });
 
 const cancelBackgroundJobSchema = z.object({
-    jobId: z.enum(['shopify_sync', 'tracking_sync', 'cache_cleanup', 'ingest_inward', 'ingest_outward', 'move_shipped_to_outward', 'preview_ingest_inward', 'preview_ingest_outward', 'cleanup_done_rows', 'migrate_sheet_formulas']),
+    jobId: z.enum(['shopify_sync', 'tracking_sync', 'cache_cleanup', 'ingest_inward', 'ingest_outward', 'move_shipped_to_outward', 'preview_ingest_inward', 'preview_ingest_outward', 'cleanup_done_rows', 'migrate_sheet_formulas', 'snapshot_compute', 'snapshot_backfill']),
 });
 
 const updateBackgroundJobSchema = z.object({
@@ -151,12 +151,14 @@ export interface UserPreferences {
     adminVersion: string | null;
 }
 
+/** JSON-safe value type for serializable server function data */
+export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
+
 export interface LogEntry {
     timestamp: string;
     level: string;
     message: string;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    meta?: Record<string, any>;
+    meta?: Record<string, JsonValue>;
 }
 
 export interface LogsResult {
@@ -176,12 +178,9 @@ export interface BackgroundJob {
     schedule?: string;
     isRunning?: boolean;
     lastRunAt?: string | null;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    lastResult?: any;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    config?: Record<string, any>;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    stats?: any;
+    lastResult?: Record<string, JsonValue>;
+    config?: Record<string, JsonValue>;
+    stats?: Record<string, JsonValue>;
     note?: string;
 }
 
@@ -1045,8 +1044,7 @@ export const getBackgroundJobs = createServerFn({ method: 'GET' })
  */
 export const getSheetOffloadStatus = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    .handler(async ({ context }): Promise<MutationResult<any>> => {
+    .handler(async ({ context }): Promise<MutationResult<Record<string, JsonValue>>> => {
         try {
             requireAdminRole(context.user.role);
         } catch {
@@ -1074,7 +1072,7 @@ export const getSheetOffloadStatus = createServerFn({ method: 'GET' })
                 };
             }
 
-            const result = await response.json();
+            const result = await response.json() as Record<string, JsonValue>;
             return { success: true, data: result };
         } catch {
             return {
@@ -1091,8 +1089,7 @@ export const getSheetOffloadStatus = createServerFn({ method: 'GET' })
 export const startBackgroundJob = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => startBackgroundJobSchema.parse(input))
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    .handler(async ({ data, context }): Promise<MutationResult<{ triggered: boolean; result?: any }>> => {
+    .handler(async ({ data, context }): Promise<MutationResult<{ triggered: boolean; result?: JsonValue }>> => {
         try {
             requireAdminRole(context.user.role);
         } catch {
@@ -1125,7 +1122,7 @@ export const startBackgroundJob = createServerFn({ method: 'POST' })
                 };
             }
 
-            const result = await response.json() as { result?: unknown };
+            const result = await response.json() as { result?: JsonValue };
             return { success: true, data: { triggered: true, result: result.result } };
         } catch {
             return {
@@ -1757,8 +1754,7 @@ export interface TableInfo {
 }
 
 export interface InspectResult {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    data: any[];
+    data: Record<string, JsonValue>[];
     total: number;
     table: string;
 }
@@ -1812,11 +1808,12 @@ export const getTables = createServerFn({ method: 'GET' })
 
         const tables: TableInfo[] = [];
 
+        // Dynamic model access — Prisma Client doesn't expose a string-indexed type
+        const prismaModels = prisma as unknown as Record<string, { count?: () => Promise<number> }>;
+
         for (const config of tableConfigs) {
             try {
-                // Use Prisma's count method for each model
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                const count = await (prisma as any)[config.model]?.count?.() ?? 0;
+                const count = await prismaModels[config.model]?.count?.() ?? 0;
                 tables.push({
                     name: config.model,
                     displayName: config.displayName,
@@ -1858,9 +1855,15 @@ export const inspectTable = createServerFn({ method: 'GET' })
         const prisma = await getPrisma();
         const { tableName, limit, offset } = data;
 
+        // Dynamic model access — Prisma Client doesn't expose a string-indexed type
+        type DynamicModel = {
+            findMany: (args: Record<string, unknown>) => Promise<Record<string, JsonValue>[]>;
+            count: () => Promise<number>;
+        };
+        const prismaModels = prisma as unknown as Record<string, DynamicModel | undefined>;
+
         try {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const model = (prisma as any)[tableName];
+            const model = prismaModels[tableName];
 
             if (!model || typeof model.findMany !== 'function') {
                 return {
@@ -1889,8 +1892,7 @@ export const inspectTable = createServerFn({ method: 'GET' })
         } catch (err) {
             // Try without ordering if createdAt doesn't exist
             try {
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                const model = (prisma as any)[tableName];
+                const model = prismaModels[tableName]!;
                 const [rows, total] = await Promise.all([
                     model.findMany({
                         take: limit,

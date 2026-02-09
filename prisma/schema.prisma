@@ -195,6 +195,7 @@ model Sku {
   skuCosting             SkuCosting?
   writeOffLogs           WriteOffLog[]
   bomLines               SkuBomLine[]                  // NEW: BOM overrides for this SKU
+  monthlySnapshots       MonthlyStockSnapshot[]
 
   @@index([variationId])
   @@index([parentSkuId])
@@ -1697,4 +1698,22 @@ model ReturnPrimeRequest {
   @@index([isApproved, isReceived, isRefunded])
   @@index([customerEmail])
   @@index([syncedAt])
+}
+
+model MonthlyStockSnapshot {
+  id               String   @id @default(uuid())
+  skuId            String
+  month            DateTime // 1st of month in UTC (e.g. 2026-01-01T00:00:00Z)
+  openingStock     Int
+  totalInward      Int
+  totalOutward     Int
+  closingStock     Int      // = opening + inward - outward
+  inwardBreakdown  Json     @default("{}")  // {"production": 50, "return_receipt": 5}
+  outwardBreakdown Json     @default("{}")  // {"sale": 40, "damage": 1}
+  computedAt       DateTime @default(now())
+  sku              Sku      @relation(fields: [skuId], references: [id])
+
+  @@unique([skuId, month])
+  @@index([month])
+  @@index([skuId])
 }
