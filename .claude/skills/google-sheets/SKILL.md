@@ -22,8 +22,8 @@ The system is designed so that **ingestion never causes double-counting** — th
 
 ### Two Buffer Tabs (in Mastersheet)
 
-- **Inward (Live)**: Ops team enters new inward transactions (columns A-I: SKU, Qty, Product, Date, Source, Done By, Barcode, Tailor Number, Notes)
-- **Outward (Live)**: Ops team enters outward transactions OR shipped orders are auto-moved here (columns A-N: SKU, Qty, [formula], Date, Destination, Order Number, Sampling Date, Order Note, COH Note, Courier, AWB, AWB Scan, Notes, Order Date)
+- **Inward (Live)**: Ops team enters new inward transactions (columns A-J: SKU, Qty, Product, Date, Source, Done By, Barcode, Tailor Number, Notes, Import Errors)
+- **Outward (Live)**: Ops team enters outward transactions OR shipped orders are auto-moved here (columns A-AG: matches Orders from COH layout + Outward Date, Unique ID, Import Errors)
 
 Buffer tabs are in the Mastersheet so the Inventory tab formula can reference them via same-sheet SUMIF (no IMPORTRANGE needed).
 
@@ -212,9 +212,9 @@ If step 2 or 3 fails, the data is already safe in Outward (Live). The col AD mar
 
 ## 4. Offload Worker (3 Independent Jobs)
 
-**File:** `sheetOffloadWorker.ts` -- exports `{ start, stop, getStatus, triggerIngestInward, triggerIngestOutward, triggerMoveShipped, getBufferCounts }`
+**File:** `sheetOffloadWorker.ts` -- exports `{ start, stop, getStatus, triggerIngestInward, triggerIngestOutward, triggerMoveShipped, getBufferCounts, previewIngestInward, previewIngestOutward }`
 
-The worker manages 3 independently triggerable background jobs, each with its own `JobState<T>` (concurrency guard, `isRunning`, `lastRunAt`, `lastResult`, `recentRuns`). The scheduler runs `ingest_inward` then `ingest_outward` sequentially on a 30-min interval. `move_shipped_to_outward` is manual-trigger only. Requires `ENABLE_SHEET_OFFLOAD=true`.
+The worker manages 3 independently triggerable background jobs + 2 preview (dry-run) jobs, each with its own `JobState<T>` (concurrency guard, `isRunning`, `lastRunAt`, `lastResult`, `recentRuns`). All jobs are manual-trigger only (no scheduled interval). Requires `ENABLE_SHEET_OFFLOAD=true`.
 
 ### Result Types
 
@@ -222,6 +222,7 @@ The worker manages 3 independently triggerable background jobs, each with its ow
 |------|------------|
 | `IngestInwardResult` | `inwardIngested`, `skipped`, `rowsDeleted`, `skusUpdated`, `errors`, `durationMs`, `error`, `inwardValidationErrors` |
 | `IngestOutwardResult` | `outwardIngested`, `ordersLinked`, `skipped`, `rowsDeleted`, `skusUpdated`, `errors`, `durationMs`, `error`, `outwardSkipReasons?` |
+| `IngestPreviewResult` | `tab`, `totalRows`, `valid`, `invalid`, `duplicates`, `validationErrors`, `skipReasons?`, `affectedSkuCodes`, `durationMs` |
 | `MoveShippedResult` | `shippedRowsFound`, `skippedRows`, `skipReasons`, `rowsWrittenToOutward`, `rowsVerified`, `rowsDeletedFromOrders`, `errors`, `durationMs` |
 
 ### Status Structure (`getStatus()`)
@@ -232,7 +233,6 @@ interface OffloadStatus {
     ingestOutward: JobState<IngestOutwardResult>;
     moveShipped: JobState<MoveShippedResult>;
     schedulerActive: boolean;
-    intervalMs: number;
 }
 ```
 
@@ -244,7 +244,7 @@ Structured as 5 clear steps:
 
 1. **Step 1 -- Parse rows**: Reads `'Inward (Live)'!A:I` from Mastersheet. Skips rows with no SKU (col A). Extracts SKU, qty, date, source, doneBy, tailor. Builds content-based referenceIds: `sheet:inward-live:{sku}:{qty}:{date}:{source}`
 2. **Step 2 -- Bulk lookup SKUs**: Queries ERP `Sku` table for all parsed SKU codes (used for validation in Step 3)
-3. **Step 3 -- Validate each row**: Runs `validateInwardRow()` against 7 business rules (see below). Invalid rows are counted in `result.inwardValidationErrors` and added to `result.skipped`. **Invalid rows are NOT deleted from the sheet** -- they remain for the ops team to fix.
+3. **Step 3 -- Validate each row**: Runs `validateInwardRow()` against 7 business rules (see below). Invalid rows are counted in `result.inwardValidationErrors` and added to `result.skipped`. **Invalid rows are NOT deleted from the sheet** -- they remain for the ops team to fix. Writes Import Errors column (J) for ALL parsed rows — valid rows get empty string (clears stale errors), invalid rows get their error reasons joined by `;`.
 4. **Step 4 -- Dedup valid rows**: Checks valid rows against existing DB via `findExistingReferenceIds()` (chunked at 2,000)
 5. **Step 5 -- Create transactions**: Creates `InventoryTransaction` records in batches:
    - `txnType: TXN_TYPE.INWARD`
@@ -312,18 +312,22 @@ After dedup, all new outward rows pass through a two-pass validation before inge
 
 Non-order rows (no `orderNumber`) skip Pass 2 entirely.
 
-The validation returns an `OutwardValidationResult` containing `validRows`, `skipReasons` (a `Record<string, number>` breakdown), and the `orderMap` for potential reuse.
+The validation returns an `OutwardValidationResult` containing `validRows`, `skipReasons` (a `Record<string, number>` breakdown), and the `orderMap` (with `qty` and `lineStatus` on orderLines) for reuse by `linkOutwardToOrders()`.
+
+After validation, writes Import Errors column (AG) for ALL parsed rows — valid + duplicate rows get empty string, invalid rows get their skip reason (e.g., `unknown_sku`, `order_not_found`).
+
+**Outward deletion** only removes rows that were successfully ingested + already-deduped duplicates. Invalid rows stay on the sheet with their error in col AG.
 
 **`IngestOutwardResult.outwardSkipReasons`** -- When any outward rows are skipped, the `outwardSkipReasons` field (optional `Record<string, number>`) is populated on the result, making skip reasons visible in the OffloadMonitor UI and logs.
 
 ### Outward Phase B2: Link Outward to OrderLines (Evidence-Based Fulfillment)
 
-**Function:** `linkOutwardToOrders()`
+**Function:** `linkOutwardToOrders(items, result, preloadedOrderMap)`
 
 **This is the core of evidence-based fulfillment.** Outward InventoryTransactions from sheets ARE the evidence of shipping — when an outward entry has an order number, the corresponding OrderLine is marked as shipped.
 
 1. Groups linkable items by `orderNumber`
-2. Batch-queries `Order` + `OrderLine` by order number
+2. Uses the pre-loaded `orderMap` from `validateOutwardRows()` (avoids duplicate DB query)
 3. For each outward item, finds matching OrderLine by `skuId`:
    - Uses array-based SKU lookup to handle duplicate SKUs in same order (FIFO consumption)
    - Only updates lines in `LINKABLE_STATUSES`: `['pending', 'allocated', 'picked', 'packed']`
@@ -340,7 +344,8 @@ The validation returns an `OutwardValidationResult` containing `validRows`, `ski
 
 Runs at the end of each ingest job (inward or outward) if any SKUs were affected. No longer a separate "Phase C".
 
-1. Queries `Sku.currentBalance` for all affected SKUs
+1. Waits 5 seconds for DB triggers to update `currentBalance` after `createMany`
+2. Queries `Sku.currentBalance` for all affected SKUs
 2. **Target 1 -- Inventory tab col R** (Mastersheet): reads SKU column, builds update array, writes via batched `groupIntoRanges()`
 3. **Target 2 -- Balance (Final) col F** (Office Ledger): same approach
 
@@ -352,18 +357,28 @@ Runs at the end of each ingest job if anything was ingested. No longer a separat
 - `inventoryBalanceCache.invalidateAll()`
 - SSE broadcast: `{ type: 'inventory_updated' }`
 
-### Scheduled Cycle
+### Manual Trigger Only (No Scheduled Interval)
 
-The scheduler (`runScheduledCycle`) runs both ingest jobs sequentially -- inward first, then outward -- to avoid Google API rate limit conflicts. `move_shipped_to_outward` is NOT part of the scheduled cycle (manual trigger only).
+All jobs are manual-trigger only — there is no automatic scheduled cycle. This gives ops full control via the Background Jobs UI.
 
 ```
-Scheduler (30 min interval):
-  1. triggerIngestInward()  → Inward (Live) → DB + balance + caches
-  2. triggerIngestOutward() → Outward (Live) → DB + link OrderLines + balance + caches
-
-Manual trigger only:
-  triggerMoveShipped() → Orders from COH → Outward (Live) [no balance updates]
+Manual trigger via Background Jobs UI:
+  triggerIngestInward()     → Inward (Live) → DB + balance + caches
+  triggerIngestOutward()    → Outward (Live) → DB + link OrderLines + balance + caches
+  triggerMoveShipped()      → Orders from COH → Outward (Live) [no balance updates]
+  previewIngestInward()     → Dry run: parse + validate + dedup + write errors (no DB writes)
+  previewIngestOutward()    → Dry run: parse + validate + dedup + write errors (no DB writes)
 ```
+
+### Preview / Dry-Run Mode
+
+`previewIngestInward()` and `previewIngestOutward()` run the same parse → validate → dedup pipeline as the real ingestion but do NOT:
+- Create `InventoryTransaction` records
+- Delete rows from the sheet
+- Update sheet balances
+- Invalidate caches
+
+They DO write Import Errors to the sheet, so ops can see validation errors from a preview without any data being committed. Returns `IngestPreviewResult` with counts and affected SKU codes.
 
 ---
 
