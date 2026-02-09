@@ -1459,27 +1459,31 @@ export const createOrder = createServerFn({ method: 'POST' })
             }
         }
 
-        // Generate order number
+        // Generate order number: COH-MMYYXXXX or EXC-MMYYXXXX (sequential per month)
         let orderNumber = providedOrderNumber;
         if (!orderNumber) {
-            if (isExchange && originalOrderId) {
-                // Exchange order: derive from source order EXC-{sourceNumeric}-{n}
-                const sourceOrder = await prisma.order.findUnique({
-                    where: { id: originalOrderId },
-                    select: { orderNumber: true },
-                });
-                const exchangeCount = await prisma.order.count({
-                    where: { originalOrderId },
-                });
-                // Extract numeric portion from source order number (last 6 digits)
-                const sourceNumeric = sourceOrder?.orderNumber?.replace(/\D/g, '').slice(-6) || 'X';
-                orderNumber = `EXC-${sourceNumeric}-${exchangeCount + 1}`;
-            } else if (isExchange) {
-                // Exchange without source order - fallback to timestamp
-                orderNumber = `EXC-${Date.now().toString().slice(-8)}`;
-            } else {
-                orderNumber = `COH-${Date.now().toString().slice(-8)}`;
+            const prefix = isExchange ? 'EXC' : 'COH';
+            const now = new Date();
+            const mm = String(now.getMonth() + 1).padStart(2, '0');
+            const yy = String(now.getFullYear()).slice(-2);
+            const monthPrefix = `${prefix}-${mm}${yy}`;
+
+            // Find the highest existing number with this month prefix
+            const latest = await prisma.order.findFirst({
+                where: { orderNumber: { startsWith: monthPrefix } },
+                orderBy: { orderNumber: 'desc' },
+                select: { orderNumber: true },
+            });
+
+            let nextSeq = 1;
+            if (latest) {
+                // Extract the sequence part after the prefix (e.g. "COH-02260005" → "0005")
+                const seqStr = latest.orderNumber.slice(monthPrefix.length);
+                const parsed = parseInt(seqStr, 10);
+                if (!isNaN(parsed)) nextSeq = parsed + 1;
             }
+
+            orderNumber = `${monthPrefix}${String(nextSeq).padStart(4, '0')}`;
         }
 
         // Use provided customerId if given, otherwise find or create

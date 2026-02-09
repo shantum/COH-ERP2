@@ -119,7 +119,7 @@ export default function QuickOrder() {
     const goBack = () => navigate({ to: '/orders', search: { view: 'open', page: 1, limit: 250 } });
 
     const channelsWithoutShopify =
-        channels?.filter((ch: any) => ch.name?.toLowerCase() !== 'shopify') || [];
+        channels?.filter((ch: { id: string; name: string }) => ch.name?.toLowerCase() !== 'shopify') || [];
 
     // Exchange handlers
     const handleExchangeToggle = (on: boolean) => {
@@ -241,14 +241,13 @@ export default function QuickOrder() {
     const isReady = channel && customerName.trim() && validLines.length > 0;
     const isBusy = isResolving || createOrder.isPending;
 
-    // Order number preview
+    // Order number preview (format: COH-MMYYXXXX or EXC-MMYYXXXX)
     const previewOrderNumber = (() => {
-        if (isExchange && sourceOrder) {
-            const sourceNumeric = sourceOrder.orderNumber.replace(/\D/g, '').slice(-6) || 'X';
-            return `EXC-${sourceNumeric}-${sourceOrder.exchangeCount + 1}`;
-        }
-        if (isExchange) return `EXC-${Date.now().toString().slice(-8)}`;
-        return `COH-${Date.now().toString().slice(-8)}`;
+        const prefix = isExchange ? 'EXC' : 'COH';
+        const now = new Date();
+        const mm = String(now.getMonth() + 1).padStart(2, '0');
+        const yy = String(now.getFullYear()).slice(-2);
+        return `${prefix}-${mm}${yy}____`;
     })();
 
     // Submit: resolve SKU codes → IDs, then create order
