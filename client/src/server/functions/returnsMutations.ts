@@ -1497,6 +1497,14 @@ export const createExchangeOrder = createServerFn({ method: 'POST' })
             return newOrder;
         });
 
+        // Push exchange order to "Orders from COH" sheet (fire-and-forget)
+        const PORT = process.env.PORT || 3001;
+        fetch(`http://127.0.0.1:${PORT}/api/internal/push-order-to-sheet`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ orderId: exchangeOrder.id }),
+        }).catch(() => {});
+
         return returnSuccess(
             {
                 exchangeOrderId: exchangeOrder.id,
