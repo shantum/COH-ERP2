@@ -24,7 +24,7 @@ export const CancelLineCell = memo(function CancelLineCell({ row, handlersRef }:
             <button
                 onClick={(e) => {
                     e.stopPropagation();
-                    onUncancelLine(row.lineId!);
+                    onUncancelLine?.(row.lineId!);
                 }}
                 disabled={isToggling}
                 className={cn(
@@ -45,7 +45,7 @@ export const CancelLineCell = memo(function CancelLineCell({ row, handlersRef }:
         <button
             onClick={(e) => {
                 e.stopPropagation();
-                onCancelLine(row.lineId!);
+                onCancelLine?.(row.lineId!);
             }}
             disabled={isToggling}
             className={cn(

@@ -2,41 +2,21 @@
  * useOrdersMutations hook - Facade
  *
  * Centralizes all mutations for the Orders page by composing focused sub-hooks.
- * This facade maintains backward compatibility while allowing consumers to
- * optionally import individual hooks for better tree-shaking.
  *
- * OPTIMISTIC UPDATES:
- * - Workflow mutations (allocate/pick/pack) use optimistic updates for instant UI
- * - Status mutations (cancel/uncancel line) use optimistic updates
- * - Background revalidation ensures data consistency
- * - Rollback on error restores previous state
- *
- * Individual hooks available in ./orders/:
- * - useOrderWorkflowMutations: allocate/pick/pack
- * - useOrderShipMutations: ship operations
- * - useOrderCrudMutations: create/update/delete
- * - useOrderStatusMutations: cancel/uncancel
- * - useOrderDeliveryMutations: delivery tracking
- * - useOrderLineMutations: line ops + customization
- * - useOrderReleaseMutations: release workflows
- * - useProductionBatchMutations: production batches
+ * STRIPPED: Workflow (allocate/pick/pack), ship, delivery, and release hooks removed.
+ * Fulfillment now managed in Google Sheets. Only CRUD, status (cancel order-level),
+ * line ops, and production remain.
  */
 
 import {
-    useOrderWorkflowMutations,
-    useOrderShipMutations,
     useOrderCrudMutations,
     useOrderStatusMutations,
-    useOrderDeliveryMutations,
     useOrderLineMutations,
-    useOrderReleaseMutations,
     useProductionBatchMutations,
     useOrderInvalidation,
 } from './orders';
 
 interface UseOrdersMutationsOptions {
-    /** Callback fired after successful ship */
-    onShipSuccess?: () => void;
     /** Callback fired after successful order creation */
     onCreateSuccess?: () => void;
     /** Callback fired after successful order deletion */
@@ -52,15 +32,11 @@ interface UseOrdersMutationsOptions {
 }
 
 export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
-    // Extract optimistic update options
     const optimisticOptions = {
         currentView: options.currentView,
         page: options.page,
     };
 
-    // Compose all sub-hooks with optimistic update options
-    const workflow = useOrderWorkflowMutations(optimisticOptions);
-    const ship = useOrderShipMutations({ ...optimisticOptions, onShipSuccess: options.onShipSuccess });
     const crud = useOrderCrudMutations({
         onCreateSuccess: options.onCreateSuccess,
         onDeleteSuccess: options.onDeleteSuccess,
@@ -68,43 +44,11 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
         onNotesSuccess: options.onNotesSuccess,
     });
     const status = useOrderStatusMutations(optimisticOptions);
-    const delivery = useOrderDeliveryMutations();
     const line = useOrderLineMutations({ onEditSuccess: options.onEditSuccess });
-    const release = useOrderReleaseMutations();
     const production = useProductionBatchMutations(optimisticOptions);
     const { invalidateAll } = useOrderInvalidation();
 
     return {
-        // Ship (line-level only - no order-level ship, UI resolves to line IDs)
-        shipLines: ship.shipLines,
-        adminShip: ship.adminShip,
-        unship: ship.unship,
-
-        // Delivery tracking (order-level)
-        markDelivered: delivery.markDelivered,
-        markRto: delivery.markRto,
-        receiveRto: delivery.receiveRto,
-        // Delivery tracking (line-level)
-        markLineDelivered: delivery.markLineDelivered,
-        markLineRto: delivery.markLineRto,
-        receiveLineRto: delivery.receiveLineRto,
-
-        // Allocate/Pick/Pack
-        allocate: workflow.allocate,
-        unallocate: workflow.unallocate,
-        pickLine: workflow.pickLine,
-        unpickLine: workflow.unpickLine,
-        packLine: workflow.packLine,
-        unpackLine: workflow.unpackLine,
-
-        // Ship line (direct: packed → shipped)
-        markShippedLine: ship.markShippedLine,
-        unmarkShippedLine: ship.unmarkShippedLine,
-        updateLineTracking: ship.updateLineTracking,
-
-        // Migration (onboarding)
-        migrateShopifyFulfilled: release.migrateShopifyFulfilled,
-
         // Production
         createBatch: production.createBatch,
         updateBatch: production.updateBatch,
@@ -116,23 +60,19 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
         updateOrder: crud.updateOrder,
         updateOrderNotes: crud.updateOrderNotes,
 
-        // Order status
+        // Order status (order-level cancel/uncancel still works)
         cancelOrder: status.cancelOrder,
         uncancelOrder: status.uncancelOrder,
 
-        // Order lines
+        // Line status (cancel/uncancel line still works)
         cancelLine: status.cancelLine,
         uncancelLine: status.uncancelLine,
+
+        // Order lines
         updateLine: line.updateLine,
         updateLineNotes: crud.updateLineNotes,
         updateShipByDate: crud.updateShipByDate,
         addLine: line.addLine,
-
-        // Release to shipped view
-        releaseToShipped: release.releaseToShipped,
-
-        // Release to cancelled view
-        releaseToCancelled: release.releaseToCancelled,
 
         // Customization
         customizeLine: line.customizeLine,

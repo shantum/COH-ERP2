@@ -62,15 +62,15 @@ export interface DynamicColumnHandlers {
     isCancellingOrder: boolean;
     isDeletingOrder: boolean;
 
-    // Fulfillment handlers
-    onAllocate: (lineId: string, orderId: string) => void;
-    onUnallocate: (lineId: string, orderId: string) => void;
-    onPick: (lineId: string) => void;
-    onUnpick: (lineId: string) => void;
-    onPack: (lineId: string) => void;
-    onUnpack: (lineId: string) => void;
-    onMarkShippedLine: (lineId: string, data?: { awbNumber?: string; courier?: string }) => void;
-    onUnmarkShippedLine: (lineId: string) => void;
+    // Fulfillment handlers (DISABLED — fulfillment now managed in Google Sheets)
+    onAllocate?: (lineId: string, orderId: string) => void;
+    onUnallocate?: (lineId: string, orderId: string) => void;
+    onPick?: (lineId: string) => void;
+    onUnpick?: (lineId: string) => void;
+    onPack?: (lineId: string) => void;
+    onUnpack?: (lineId: string) => void;
+    onMarkShippedLine?: (lineId: string, data?: { awbNumber?: string; courier?: string }) => void;
+    onUnmarkShippedLine?: (lineId: string) => void;
 
     // Admin actions (optional)
     isAdmin?: boolean;
@@ -83,9 +83,9 @@ export interface DynamicColumnHandlers {
 
     // Line handlers
     onUpdateLineNotes: (lineId: string, notes: string) => void;
-    onCancelLine: (lineId: string) => void;
-    onUncancelLine: (lineId: string) => void;
-    onUpdateLineTracking: (lineId: string, data: { awbNumber?: string; courier?: string }) => void;
+    onCancelLine?: (lineId: string) => void;
+    onUncancelLine?: (lineId: string) => void;
+    onUpdateLineTracking?: (lineId: string, data: { awbNumber?: string; courier?: string }) => void;
 
     // Customization handlers
     onCustomize?: (lineId: string, lineData: CustomizeLineData) => void;
@@ -142,15 +142,16 @@ export interface OrdersTableProps {
     rows: FlattenedOrderRow[];
     lockedDates: string[];
     currentView?: OrderViewType;
-    onAllocate: (lineId: string, orderId: string) => void;
-    onUnallocate: (lineId: string, orderId: string) => void;
-    onPick: (lineId: string) => void;
-    onUnpick: (lineId: string) => void;
-    onPack: (lineId: string) => void;
-    onUnpack: (lineId: string) => void;
-    onMarkShippedLine: (lineId: string, data?: { awbNumber?: string; courier?: string }) => void;
-    onUnmarkShippedLine: (lineId: string) => void;
-    onUpdateLineTracking: (lineId: string, data: { awbNumber?: string; courier?: string }) => void;
+    // DISABLED: Fulfillment now managed in Google Sheets
+    onAllocate?: (lineId: string, orderId: string) => void;
+    onUnallocate?: (lineId: string, orderId: string) => void;
+    onPick?: (lineId: string) => void;
+    onUnpick?: (lineId: string) => void;
+    onPack?: (lineId: string) => void;
+    onUnpack?: (lineId: string) => void;
+    onMarkShippedLine?: (lineId: string, data?: { awbNumber?: string; courier?: string }) => void;
+    onUnmarkShippedLine?: (lineId: string) => void;
+    onUpdateLineTracking?: (lineId: string, data: { awbNumber?: string; courier?: string }) => void;
     onShip?: (order: Order) => void;
     onCreateBatch: (data: CreateBatchData) => void;
     onUpdateBatch: (id: string, data: UpdateBatchData) => void;
@@ -158,10 +159,10 @@ export interface OrdersTableProps {
     onUpdateLineNotes: (lineId: string, notes: string) => void;
     onViewOrder: (orderId: string) => void;
     onEditOrder: (order: Order) => void;
-    onCancelOrder: (id: string, reason?: string) => void;
-    onDeleteOrder: (id: string) => void;
-    onCancelLine: (lineId: string) => void;
-    onUncancelLine: (lineId: string) => void;
+    onCancelOrder?: (id: string, reason?: string) => void;
+    onDeleteOrder?: (id: string) => void;
+    onCancelLine?: (lineId: string) => void;
+    onUncancelLine?: (lineId: string) => void;
     onViewCustomer: (order: Order) => void;
     onCustomize?: (lineId: string, lineData: CustomizeLineData) => void;
     onEditCustomization?: (lineId: string, lineData: EditCustomizationData) => void;

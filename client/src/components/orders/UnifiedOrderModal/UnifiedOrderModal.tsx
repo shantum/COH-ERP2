@@ -58,7 +58,7 @@ export function UnifiedOrderModal({
 }: UnifiedOrderModalProps) {
   const queryClient = useQueryClient();
   const [isSaving, setIsSaving] = useState(false);
-  const [isShipping, setIsShipping] = useState(false);
+  const [isShipping] = useState(false);
   const [updatingLineIds, setUpdatingLineIds] = useState<Set<string>>(new Set());
   // Track which line is open for pickup scheduling dialog
   const [pickupDialogLineId, setPickupDialogLineId] = useState<string | null>(null);
@@ -175,11 +175,6 @@ export function UnifiedOrderModal({
     onEditSuccess: () => {
       setIsSaving(false);
       onSuccess?.();
-    },
-    onShipSuccess: () => {
-      setIsShipping(false);
-      onSuccess?.();
-      onClose();
     },
   });
 
@@ -305,49 +300,15 @@ export function UnifiedOrderModal({
       return;
     }
 
-    setIsShipping(true);
-    try {
-      await mutations.shipLines.mutateAsync({
-        lineIds: packedLineIds,
-        awbNumber: shipForm.awbNumber.trim(),
-        courier: shipForm.courier.trim(),
-      });
-    } catch (error) {
-      setIsShipping(false);
-      console.error('Failed to ship order:', error);
-    }
-  }, [shipForm, expectedAwb, awbMatches, order.orderLines, mutations]);
+    // DISABLED: Shipping now managed in Google Sheets
+    alert('Shipping is now managed in Google Sheets. This action is disabled in the ERP.');
+    return;
+  }, [shipForm, expectedAwb, awbMatches, order.orderLines]);
 
-  // Ship selected lines (partial shipment)
+  // Ship selected lines — DISABLED
   const handleShipLines = useCallback(async () => {
-    if (!shipForm.awbNumber.trim() || !shipForm.courier.trim()) {
-      alert('Please enter AWB number and select a courier');
-      return;
-    }
-
-    if (shipForm.selectedLineIds.size === 0) {
-      alert('Please select at least one line to ship');
-      return;
-    }
-
-    // Verify AWB if expected
-    if (expectedAwb && !awbMatches && !shipForm.bypassVerification) {
-      alert('AWB number does not match Shopify tracking. Check the "Use this AWB anyway" box to proceed.');
-      return;
-    }
-
-    setIsShipping(true);
-    try {
-      await mutations.shipLines.mutateAsync({
-        lineIds: Array.from(shipForm.selectedLineIds),
-        awbNumber: shipForm.awbNumber.trim(),
-        courier: shipForm.courier.trim(),
-      });
-    } catch (error) {
-      setIsShipping(false);
-      console.error('Failed to ship lines:', error);
-    }
-  }, [shipForm, expectedAwb, awbMatches, order.id, mutations]);
+    alert('Shipping is now managed in Google Sheets. This action is disabled in the ERP.');
+  }, []);
 
   // Handle add line
   const handleAddLineWithMutation = useCallback(async (data: { skuId: string; qty: number; unitPrice: number }) => {
@@ -401,17 +362,10 @@ export function UnifiedOrderModal({
     }
   }, [mutations, handleUncancelLine]);
 
-  // Handle mark line as delivered
-  const handleMarkLineDeliveredWithMutation = useCallback(async (lineId: string) => {
-    try {
-      await mutations.markLineDelivered.mutateAsync({ lineId });
-      // Invalidate order query to refresh modal data
-      queryClient.invalidateQueries({ queryKey: ['order', order.id] });
-      onSuccess?.();
-    } catch (error) {
-      console.error('Failed to mark line as delivered:', error);
-    }
-  }, [mutations, queryClient, order.id, onSuccess]);
+  // Handle mark line as delivered — DISABLED (tracking sync handles this automatically)
+  const handleMarkLineDeliveredWithMutation = useCallback(async (_lineId: string) => {
+    alert('Delivery status is now updated automatically via tracking sync.');
+  }, []);
 
   // Handle initiate return (multi-select)
   const handleInitiateReturn = useCallback(async () => {

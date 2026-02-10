@@ -168,7 +168,7 @@ export default function Orders() {
     const unifiedModalMode = (modalType === 'view' || modalType === 'edit' || modalType === 'ship' || modalType === 'customer') ? modalType : 'view';
 
     // Track which lines are currently being processed (for loading spinners)
-    const [processingLines, setProcessingLines] = useState<Set<string>>(new Set());
+    const [processingLines] = useState<Set<string>>(new Set());
 
     // Customization modal state
     const [customizingLine, setCustomizingLine] = useState<{
@@ -282,14 +282,9 @@ export default function Orders() {
         openUnifiedModal(order, 'edit');
     }, [openUnifiedModal]);
 
-    const handleShipOrderUnified = useCallback((order: Order) => {
-        openUnifiedModal(order, 'ship');
-    }, [openUnifiedModal]);
-
     // Mutations hook with optimistic update support
     // Pass currentView and page so mutations can target the correct cache
     const mutations = useOrdersMutations({
-        onShipSuccess: () => closeModal(),
         onCreateSuccess: () => closeModal(),
         onDeleteSuccess: () => closeModal(),
         onEditSuccess: () => closeModal(),
@@ -367,101 +362,9 @@ export default function Orders() {
     // Pipeline counts from server (Open view only)
     // Server computes these efficiently via SQL COUNT queries
     const pipelineCounts = openViewCounts ?? { pending: 0, allocated: 0, ready: 0 };
-    const releasableOrderCount = openViewCounts?.releasableShipped ?? 0;
-    const releasableCancelledCount = openViewCounts?.releasableCancelled ?? 0;
 
-    // Helper to add/remove lineId from processingLines set
-    const startProcessing = useCallback((lineId: string) => {
-        setProcessingLines(prev => new Set(prev).add(lineId));
-    }, []);
-
-    const stopProcessing = useCallback((lineId: string) => {
-        setProcessingLines(prev => {
-            const next = new Set(prev);
-            next.delete(lineId);
-            return next;
-        });
-    }, []);
-
-    // Handlers with loading state tracking
-    const handleMarkShippedLine = useCallback(
-        (lineId: string, data?: { awbNumber?: string; courier?: string }) => {
-            // Shipping requires AWB and courier - if not provided, do nothing (UI should prompt)
-            if (!data?.awbNumber || !data?.courier) {
-                console.warn('Cannot ship without AWB number and courier');
-                return;
-            }
-            // No spinner - optimistic update shows "Shipped" instantly
-            mutations.markShippedLine.mutate({ lineId, data: { awbNumber: data.awbNumber, courier: data.courier } });
-        },
-        [mutations.markShippedLine]
-    );
-
-    const handleUnmarkShippedLine = useCallback(
-        (lineId: string) => {
-            // No spinner - optimistic update shows "Packed" instantly
-            mutations.unmarkShippedLine.mutate(lineId);
-        },
-        [mutations.unmarkShippedLine]
-    );
-
-    const handleUpdateLineTracking = useCallback(
-        (lineId: string, data: { awbNumber?: string; courier?: string }) => {
-            // Note: Don't use startProcessing here - TrackingInfoCell manages its own state
-            // and we don't want to trigger loading indicators on unrelated cells (e.g., CancelLineCell)
-            mutations.updateLineTracking.mutate({ lineId, data });
-        },
-        [mutations.updateLineTracking]
-    );
-
-    const handleAllocate = useCallback(
-        (lineId: string, orderId: string) => {
-            // No spinner needed - optimistic update shows "Allocated" instantly at ~1ms
-            // Spinner was making it FEEL slow by masking the instant feedback
-            mutations.allocate.mutate({ lineIds: [lineId], orderId });
-        },
-        [mutations.allocate]
-    );
-
-    const handleUnallocate = useCallback(
-        (lineId: string, _orderId: string) => {
-            // No spinner - optimistic update shows "Pending" instantly
-            mutations.unallocate.mutate(lineId);
-        },
-        [mutations.unallocate]
-    );
-
-    const handlePick = useCallback(
-        (lineId: string) => {
-            // No spinner - optimistic update shows "Picked" instantly
-            mutations.pickLine.mutate(lineId);
-        },
-        [mutations.pickLine]
-    );
-
-    const handleUnpick = useCallback(
-        (lineId: string) => {
-            // No spinner - optimistic update shows "Allocated" instantly
-            mutations.unpickLine.mutate(lineId);
-        },
-        [mutations.unpickLine]
-    );
-
-    const handlePack = useCallback(
-        (lineId: string) => {
-            // No spinner - optimistic update shows "Packed" instantly
-            mutations.packLine.mutate(lineId);
-        },
-        [mutations.packLine]
-    );
-
-    const handleUnpack = useCallback(
-        (lineId: string) => {
-            // No spinner - optimistic update shows "Picked" instantly
-            mutations.unpackLine.mutate(lineId);
-        },
-        [mutations.unpackLine]
-    );
+    // STRIPPED: Fulfillment handlers (allocate, pick, pack, ship, unship, tracking) removed.
+    // Fulfillment now managed in Google Sheets.
 
     const handleCustomize = useCallback(
         (_lineId: string, lineData: {
@@ -558,16 +461,7 @@ export default function Orders() {
         rows: filteredRows,
         lockedDates: lockedDates || [],
         currentView: view,
-        onAllocate: handleAllocate,
-        onUnallocate: handleUnallocate,
-        onPick: handlePick,
-        onUnpick: handleUnpick,
-        onPack: handlePack,
-        onUnpack: handleUnpack,
-        onMarkShippedLine: handleMarkShippedLine,
-        onUnmarkShippedLine: handleUnmarkShippedLine,
-        onUpdateLineTracking: handleUpdateLineTracking,
-        onShip: handleShipOrderUnified,
+        // Fulfillment handlers stripped — managed in Google Sheets
         onCreateBatch: (data: CreateBatchData) => mutations.createBatch.mutate(data),
         onUpdateBatch: (id: string, data: UpdateBatchData) => mutations.updateBatch.mutate({ id, data }),
         onDeleteBatch: (id: string) => mutations.deleteBatch.mutate(id),
@@ -577,26 +471,12 @@ export default function Orders() {
         onEditOrder: handleEditOrderUnified,
         onCancelOrder: (id: string, reason?: string) => mutations.cancelOrder.mutate({ id, reason }),
         onDeleteOrder: (id: string) => mutations.deleteOrder.mutate(id),
-        onCancelLine: (lineId: string) => {
-            startProcessing(lineId);
-            mutations.cancelLine.mutate(lineId, { onSettled: () => stopProcessing(lineId) });
-        },
-        onUncancelLine: (lineId: string) => {
-            startProcessing(lineId);
-            mutations.uncancelLine.mutate(lineId, { onSettled: () => stopProcessing(lineId) });
-        },
         onViewCustomer: handleViewCustomer,
         onCustomize: handleCustomize,
         onEditCustomization: handleEditCustomization,
         onRemoveCustomization: handleRemoveCustomization,
         onUpdateShipByDate: (orderId: string, date: string | null) => mutations.updateShipByDate.mutate({ orderId, date }),
-        onForceShipLine: (lineId: string, data: { awbNumber?: string; courier?: string }) => {
-            startProcessing(lineId);
-            mutations.adminShip.mutate(
-                { lineIds: [lineId], awbNumber: data.awbNumber, courier: data.courier },
-                { onSettled: () => stopProcessing(lineId) }
-            );
-        },
+        // onForceShipLine removed — fulfillment managed in Google Sheets
         allocatingLines: processingLines,
         isCancellingOrder: mutations.cancelOrder.isPending,
         isCancellingLine: mutations.cancelLine.isPending,
@@ -723,38 +603,7 @@ export default function Orders() {
                                     </>
                                 )}
 
-                                {/* Actions */}
-                                {view === 'open' && (releasableOrderCount > 0 || releasableCancelledCount > 0) && (
-                                    <>
-                                        <div className="w-px h-4 bg-gray-200" />
-                                        {releasableOrderCount > 0 && (
-                                            <button
-                                                onClick={() => {
-                                                    if (confirm(`Release ${releasableOrderCount} shipped orders?`)) {
-                                                        mutations.releaseToShipped.mutate(undefined);
-                                                    }
-                                                }}
-                                                disabled={mutations.releaseToShipped.isPending}
-                                                className="text-[9px] px-1.5 py-0.5 rounded bg-blue-600 text-white font-medium"
-                                            >
-                                                Release {releasableOrderCount}
-                                            </button>
-                                        )}
-                                        {releasableCancelledCount > 0 && (
-                                            <button
-                                                onClick={() => {
-                                                    if (confirm(`Release ${releasableCancelledCount} cancelled orders?`)) {
-                                                        mutations.releaseToCancelled.mutate(undefined);
-                                                    }
-                                                }}
-                                                disabled={mutations.releaseToCancelled.isPending}
-                                                className="text-[9px] px-1.5 py-0.5 rounded bg-red-600 text-white font-medium"
-                                            >
-                                                {releasableCancelledCount} Cancelled
-                                            </button>
-                                        )}
-                                    </>
-                                )}
+                                {/* Release buttons removed — fulfillment managed in Google Sheets */}
                             </>
                         )}
                     </div>

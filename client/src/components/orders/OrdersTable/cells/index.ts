@@ -5,14 +5,10 @@
 // Shared components
 export { CheckboxSpinner } from './CheckboxSpinner';
 
-// Fulfillment action cells
-export { AdminShipCell } from './AdminShipCell';
-export { AssignStockCell } from './AssignStockCell';
-export { CancelLineCell } from './CancelLineCell';
-export { PickPackCell } from './PickPackCell';
+// Fulfillment action cells (STRIPPED — fulfillment now in Google Sheets)
+// AdminShipCell, AssignStockCell, CancelLineCell, PickPackCell, WorkflowCell removed from UI
 export { ProductionCell } from './ProductionCell';
 export { ProductionDatePopover } from './ProductionDatePopover';
-export { WorkflowCell } from './WorkflowCell';
 
 // Order info cells
 export { ChannelCell } from './ChannelCell';

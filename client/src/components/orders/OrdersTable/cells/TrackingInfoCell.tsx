@@ -99,7 +99,7 @@ export const TrackingInfoCell = memo(function TrackingInfoCell({ row, handlersRe
 
         // Call handler with validated data
         try {
-            await onUpdateLineTracking(row.lineId!, {
+            await onUpdateLineTracking?.(row.lineId!, {
                 awbNumber: awbValue.trim() || undefined,
                 courier: courierValue || undefined,
             });
@@ -124,7 +124,7 @@ export const TrackingInfoCell = memo(function TrackingInfoCell({ row, handlersRe
         // Send empty string to clear - server converts '' to null
         // (undefined gets stripped from JSON and won't update)
         try {
-            await onUpdateLineTracking(row.lineId!, {
+            await onUpdateLineTracking?.(row.lineId!, {
                 awbNumber: '',
                 courier: '',
             });

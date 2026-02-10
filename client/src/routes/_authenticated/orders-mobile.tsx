@@ -12,7 +12,6 @@ import { useServerFn } from '@tanstack/react-start';
 import { MobileOrdersView } from '../../components/orders/mobile';
 import { getOrders } from '../../server/functions/orders';
 import { useProductionBatchMutations } from '../../hooks/orders/useProductionBatchMutations';
-import { useOrderStatusMutations } from '../../hooks/orders/useOrderStatusMutations';
 import type { FlattenedOrderRow } from '../../utils/orderHelpers';
 
 export const Route = createFileRoute('/_authenticated/orders-mobile')({
@@ -38,7 +37,6 @@ function MobileOrdersPage() {
 
     // Use the same mutations as the desktop orders page
     const production = useProductionBatchMutations({ currentView: 'open' });
-    const status = useOrderStatusMutations({ currentView: 'open' });
 
     // Handlers
     const handleCreateBatch = useCallback((params: {
@@ -67,11 +65,10 @@ function MobileOrdersPage() {
         production.deleteBatch.mutate(id);
     }, [production.deleteBatch]);
 
-    const handleCancelLines = useCallback((lineIds: string[]) => {
-        lineIds.forEach(lineId => {
-            status.cancelLine.mutate(lineId);
-        });
-    }, [status.cancelLine]);
+    // Cancel lines disabled — fulfillment now managed in Google Sheets
+    const handleCancelLines = useCallback((_lineIds: string[]) => {
+        console.warn('Cancel lines disabled — fulfillment managed in Google Sheets');
+    }, []);
 
     // Locked dates (none for now - can be fetched from settings)
     const isDateLocked = useCallback((_date: string) => false, []);

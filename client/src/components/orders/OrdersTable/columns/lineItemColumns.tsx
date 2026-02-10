@@ -10,7 +10,6 @@ import { DEFAULT_COLUMN_WIDTHS } from '../constants';
 import {
     ProductNameCell,
     QtyStockCell,
-    AssignStockCell,
     ReturnStatusCell,
     CustomizeCell,
     FabricBalanceCell,
@@ -54,15 +53,6 @@ export function buildLineItemColumns(ctx: OrdersTableContext): ColumnDef<Flatten
             cell: ({ row }) => <QtyStockCell row={row.original} />,
             enableSorting: true,
             sortingFn: (a, b) => (a.original.qty || 0) - (b.original.qty || 0),
-        },
-
-        // Assign Stock
-        {
-            id: 'assignStock',
-            header: getHeaderName('assignStock'),
-            size: DEFAULT_COLUMN_WIDTHS.assignStock,
-            cell: ({ row }) => <AssignStockCell row={row.original} handlersRef={handlersRef} />,
-            enableSorting: false,
         },
 
         // Fabric Balance
