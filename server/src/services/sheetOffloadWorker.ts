@@ -20,7 +20,7 @@
 
 import prisma from '../lib/prisma.js';
 import { sheetsLogger } from '../utils/logger.js';
-import { TXN_TYPE } from '../utils/patterns/types.js';
+import { TXN_TYPE, FABRIC_TXN_TYPE } from '../utils/patterns/types.js';
 import type { TxnReason } from '../utils/patterns/types.js';
 import { inventoryBalanceCache } from './inventoryBalanceCache.js';
 import { broadcastOrderUpdate } from '../routes/sse.js';
@@ -44,6 +44,7 @@ import {
     ORDERS_FROM_COH_COLS,
     INWARD_SOURCE_MAP,
     VALID_INWARD_LIVE_SOURCES,
+    FABRIC_DEDUCT_SOURCES,
     DEFAULT_INWARD_REASON,
     OUTWARD_DESTINATION_MAP,
     DEFAULT_OUTWARD_REASON,
@@ -360,14 +361,20 @@ async function writeImportErrors(
     }
 }
 
-async function bulkLookupSkus(skuCodes: string[]): Promise<Map<string, string>> {
+interface SkuLookupInfo {
+    id: string;
+    variationId: string;
+    fabricConsumption: number;
+}
+
+async function bulkLookupSkus(skuCodes: string[]): Promise<Map<string, SkuLookupInfo>> {
     if (skuCodes.length === 0) return new Map();
     const unique = [...new Set(skuCodes)];
     const skus = await prisma.sku.findMany({
         where: { skuCode: { in: unique } },
-        select: { id: true, skuCode: true },
+        select: { id: true, skuCode: true, variationId: true, fabricConsumption: true },
     });
-    return new Map(skus.map(s => [s.skuCode, s.id]));
+    return new Map(skus.map(s => [s.skuCode, { id: s.id, variationId: s.variationId, fabricConsumption: s.fabricConsumption }]));
 }
 
 interface OutwardValidationResult {
@@ -381,7 +388,7 @@ interface OutwardValidationResult {
  */
 async function validateOutwardRows(
     rows: ParsedRow[],
-    skuMap: Map<string, string>
+    skuMap: Map<string, SkuLookupInfo>
 ): Promise<OutwardValidationResult> {
     const skipReasons: Record<string, number> = {};
     const addSkip = (reason: string) => {
@@ -434,7 +441,7 @@ async function validateOutwardRows(
             continue;
         }
 
-        const skuId = skuMap.get(row.skuCode)!;
+        const skuId = skuMap.get(row.skuCode)!.id;
         const hasMatchingLine = order.orderLines.some(l => l.skuId === skuId);
         if (!hasMatchingLine) {
             addSkip('order_line_not_found');
@@ -466,6 +473,34 @@ async function findExistingReferenceIds(referenceIds: string[]): Promise<Set<str
     return result;
 }
 
+async function findExistingFabricReferenceIds(referenceIds: string[]): Promise<Set<string>> {
+    if (referenceIds.length === 0) return new Set();
+
+    const result = new Set<string>();
+    for (let i = 0; i < referenceIds.length; i += DEDUP_CHUNK_SIZE) {
+        const chunk = referenceIds.slice(i, i + DEDUP_CHUNK_SIZE);
+        const existing = await prisma.fabricColourTransaction.findMany({
+            where: { referenceId: { in: chunk } },
+            select: { referenceId: true },
+        });
+        for (const t of existing) {
+            if (t.referenceId) result.add(t.referenceId);
+        }
+    }
+    return result;
+}
+
+/**
+ * Normalize Fabric.unit to FabricColourTransaction unit format.
+ * Fabric stores 'm' or 'kg', transactions expect 'meter' or 'kg'.
+ */
+function normalizeFabricUnit(unit: string | null): string {
+    if (!unit) return 'meter';
+    const lower = unit.toLowerCase().trim();
+    if (lower === 'm') return 'meter';
+    return lower || 'meter';
+}
+
 // ============================================
 // INWARD VALIDATION
 // ============================================
@@ -473,7 +508,7 @@ async function findExistingReferenceIds(referenceIds: string[]): Promise<Set<str
 function validateInwardRow(
     parsed: ParsedRow,
     rawRow: unknown[],
-    skuMap: Map<string, string>,
+    skuMap: Map<string, SkuLookupInfo>,
 ): string[] {
     const reasons: string[] = [];
 
@@ -509,6 +544,131 @@ function validateInwardRow(
     }
 
     return reasons;
+}
+
+// ============================================
+// FABRIC DEDUCTION FOR SAMPLING INWARDS
+// ============================================
+
+/**
+ * After sampling inward rows are created, deduct fabric used.
+ * Formula: fabric qty = row.qty × Sku.fabricConsumption
+ * Creates FabricColourTransaction (outward) records.
+ */
+async function deductFabricForSamplingRows(
+    successfulRows: ParsedRow[],
+    skuMap: Map<string, SkuLookupInfo>,
+    adminUserId: string
+): Promise<void> {
+    // Filter to only sampling source rows
+    const samplingRows = successfulRows.filter(
+        r => FABRIC_DEDUCT_SOURCES.some(s => s === r.source.toLowerCase().trim())
+    );
+    if (samplingRows.length === 0) return;
+
+    // Collect unique variationIds from sampling rows
+    const variationIds = [...new Set(
+        samplingRows
+            .map(r => skuMap.get(r.skuCode)?.variationId)
+            .filter((v): v is string => !!v)
+    )];
+
+    if (variationIds.length === 0) return;
+
+    // Batch lookup fabric assignments via BOM
+    const { getVariationsMainFabrics } = await import('@coh/shared/services/bom');
+    const fabricMap = await getVariationsMainFabrics(prisma, variationIds);
+
+    // Dedup: check existing referenceIds in FabricColourTransaction
+    const existingFabricRefs = await findExistingFabricReferenceIds(
+        samplingRows.map(r => r.referenceId)
+    );
+
+    // Build fabric transaction data
+    const fabricTxnData: Array<{
+        fabricColourId: string;
+        txnType: string;
+        qty: number;
+        unit: string;
+        reason: string;
+        referenceId: string;
+        notes: string;
+        createdById: string;
+        createdAt: Date;
+    }> = [];
+    const affectedFabricColourIds = new Set<string>();
+    let skippedNoFabric = 0;
+    let skippedZeroConsumption = 0;
+    let skippedDuplicate = 0;
+
+    for (const row of samplingRows) {
+        // Skip duplicates
+        if (existingFabricRefs.has(row.referenceId)) {
+            skippedDuplicate++;
+            continue;
+        }
+
+        const skuInfo = skuMap.get(row.skuCode);
+        if (!skuInfo) continue;
+
+        // Skip if fabricConsumption is 0
+        if (skuInfo.fabricConsumption <= 0) {
+            skippedZeroConsumption++;
+            continue;
+        }
+
+        // Look up fabric assignment
+        const fabric = fabricMap.get(skuInfo.variationId);
+        if (!fabric) {
+            skippedNoFabric++;
+            sheetsLogger.debug({ skuCode: row.skuCode, variationId: skuInfo.variationId }, 'No fabric assigned — skipping fabric deduction');
+            continue;
+        }
+
+        const fabricQty = row.qty * skuInfo.fabricConsumption;
+
+        fabricTxnData.push({
+            fabricColourId: fabric.fabricColourId,
+            txnType: FABRIC_TXN_TYPE.OUTWARD,
+            qty: fabricQty,
+            unit: normalizeFabricUnit(fabric.fabricUnit),
+            reason: 'production',
+            referenceId: row.referenceId,
+            notes: `${OFFLOAD_NOTES_PREFIX} Auto fabric deduction for sampling inward`,
+            createdById: adminUserId,
+            createdAt: row.date ?? new Date(),
+        });
+
+        affectedFabricColourIds.add(fabric.fabricColourId);
+    }
+
+    // Create in batches
+    let fabricTxnCreated = 0;
+    for (let i = 0; i < fabricTxnData.length; i += BATCH_SIZE) {
+        const chunk = fabricTxnData.slice(i, i + BATCH_SIZE);
+        try {
+            await prisma.fabricColourTransaction.createMany({ data: chunk });
+            fabricTxnCreated += chunk.length;
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : 'Unknown error';
+            sheetsLogger.error({ batchStart: i, error: message }, 'Fabric deduction batch failed');
+        }
+    }
+
+    // Invalidate fabric colour balance cache
+    if (affectedFabricColourIds.size > 0) {
+        const { fabricColourBalanceCache } = await import('@coh/shared/services/inventory');
+        fabricColourBalanceCache.invalidate([...affectedFabricColourIds]);
+    }
+
+    sheetsLogger.info({
+        samplingRows: samplingRows.length,
+        fabricTxnCreated,
+        skippedNoFabric,
+        skippedZeroConsumption,
+        skippedDuplicate,
+        affectedFabricColours: affectedFabricColourIds.size,
+    }, 'Fabric deduction for sampling inwards complete');
 }
 
 // ============================================
@@ -659,10 +819,10 @@ async function ingestInwardLive(result: IngestInwardResult): Promise<Set<string>
         }> = [];
 
         for (const row of chunk) {
-            const skuId = skuMap.get(row.skuCode)!;
+            const skuInfo = skuMap.get(row.skuCode)!;
 
             txnData.push({
-                skuId,
+                skuId: skuInfo.id,
                 txnType: TXN_TYPE.INWARD,
                 qty: row.qty,
                 reason: mapSourceToReason(row.source),
@@ -675,7 +835,7 @@ async function ingestInwardLive(result: IngestInwardResult): Promise<Set<string>
                 tailorNumber: row.tailor || null,
             });
 
-            affectedSkuIds.add(skuId);
+            affectedSkuIds.add(skuInfo.id);
         }
 
         if (txnData.length > 0) {
@@ -696,6 +856,16 @@ async function ingestInwardLive(result: IngestInwardResult): Promise<Set<string>
         ingested: successfulRows.length,
         skippedInvalid: invalidCount,
     }, 'Inward ingestion complete');
+
+    // --- Step 6: Auto-deduct fabric for sampling inwards ---
+    if (successfulRows.length > 0) {
+        try {
+            await deductFabricForSamplingRows(successfulRows, skuMap, adminUserId);
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : 'Unknown error';
+            sheetsLogger.error({ error: message }, 'Fabric deduction failed (non-fatal)');
+        }
+    }
 
     // Mark successfully ingested rows + already-deduped rows as DONE
     const dupeRows = validRows.filter(r => existingRefs.has(r.referenceId));
@@ -809,16 +979,16 @@ async function ingestOutwardLive(
         if (existingRefs.has(row.referenceId)) continue;  // dupe — will be marked DONE
         if (validRefIds.has(row.referenceId)) continue;    // valid — will be marked DONE
         // Skipped — determine reason
-        const skuId = skuMap.get(row.skuCode);
+        const skuInfo = skuMap.get(row.skuCode);
         let reason = 'unknown';
         if (!row.skuCode) reason = 'empty_sku';
         else if (row.qty <= 0) reason = 'zero_qty';
-        else if (!skuId) reason = 'unknown_sku';
+        else if (!skuInfo) reason = 'unknown_sku';
         else if (!row.date) reason = 'invalid_date';
         else if (row.extra) {
             const order = orderMap.get(row.extra);
             if (!order) reason = 'order_not_found';
-            else if (!order.orderLines.some(l => l.skuId === skuId)) reason = 'order_line_not_found';
+            else if (!order.orderLines.some(l => l.skuId === skuInfo.id)) reason = 'order_line_not_found';
         }
         outwardImportErrors.push({ rowIndex: row.rowIndex, error: reason });
     }
@@ -847,10 +1017,10 @@ async function ingestOutwardLive(
         const chunkLinkable: LinkableOutward[] = [];
 
         for (const row of chunk) {
-            const skuId = skuMap.get(row.skuCode)!;
+            const skuInfo = skuMap.get(row.skuCode)!;
 
             txnData.push({
-                skuId,
+                skuId: skuInfo.id,
                 txnType: TXN_TYPE.OUTWARD,
                 qty: row.qty,
                 reason: row.extra
@@ -864,12 +1034,12 @@ async function ingestOutwardLive(
                 orderNumber: row.extra || null,
             });
 
-            affectedSkuIds.add(skuId);
+            affectedSkuIds.add(skuInfo.id);
 
             if (row.extra) {
                 chunkLinkable.push({
                     orderNumber: row.extra,
-                    skuId,
+                    skuId: skuInfo.id,
                     qty: row.qty,
                     date: row.date,
                     courier: row.courier,
@@ -1532,16 +1702,16 @@ async function previewIngestOutward(): Promise<IngestPreviewResult | null> {
             } else if (validRefIds.has(row.referenceId)) {
                 outwardImportErrors.push({ rowIndex: row.rowIndex, error: 'ok' });
             } else {
-                const skuId = skuMap.get(row.skuCode);
+                const skuInfo = skuMap.get(row.skuCode);
                 let reason = 'unknown';
                 if (!row.skuCode) reason = 'empty_sku';
                 else if (row.qty <= 0) reason = 'zero_qty';
-                else if (!skuId) reason = 'unknown_sku';
+                else if (!skuInfo) reason = 'unknown_sku';
                 else if (!row.date) reason = 'invalid_date';
                 else if (row.extra) {
                     const order = orderMap.get(row.extra);
                     if (!order) reason = 'order_not_found';
-                    else if (!order.orderLines.some(l => l.skuId === skuId)) reason = 'order_line_not_found';
+                    else if (!order.orderLines.some(l => l.skuId === skuInfo.id)) reason = 'order_line_not_found';
                 }
                 outwardImportErrors.push({ rowIndex: row.rowIndex, error: reason });
             }

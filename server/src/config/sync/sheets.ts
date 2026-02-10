@@ -495,6 +495,13 @@ export const DEFAULT_INWARD_REASON: TxnReason = 'production';
  */
 export const VALID_INWARD_LIVE_SOURCES = ['sampling', 'repacking', 'adjustment'] as const;
 
+/**
+ * Inward sources that trigger automatic fabric deduction.
+ * When these sources come in, the system also creates FabricColourTransaction (outward)
+ * to deduct the fabric used: qty × Sku.fabricConsumption.
+ */
+export const FABRIC_DEDUCT_SOURCES = ['sampling'] as const;
+
 // ============================================
 // OUTWARD DESTINATION MAPPING
 // ============================================

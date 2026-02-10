@@ -22,6 +22,7 @@ export interface VariationMainFabric {
   fabricColourHex: string | null;
   fabricId: string;
   fabricName: string;
+  fabricUnit: string | null;
   materialId: string;
   materialName: string;
   costPerUnit: number | null;
@@ -85,6 +86,7 @@ export async function getVariationMainFabric(
     fabricColourHex: fabricColour.colourHex,
     fabricId: fabric.id,
     fabricName: fabric.name,
+    fabricUnit: fabric.unit ?? null,
     materialId: material.id,
     materialName: material.name,
     costPerUnit: fabricColour.costPerUnit,
@@ -158,6 +160,7 @@ export async function getVariationsMainFabrics(
       fabricColourHex: fabricColour.colourHex,
       fabricId: fabric.id,
       fabricName: fabric.name,
+      fabricUnit: fabric.unit ?? null,
       materialId: material!.id,
       materialName: material!.name,
       costPerUnit: fabricColour.costPerUnit,
