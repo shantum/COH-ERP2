@@ -84,3 +84,11 @@ export {
     RETURN_SOURCE_MAP,
     DEFAULT_RETURN_SOURCE,
 } from './sheets.js';
+
+// Facebook Feed Health
+export {
+    FACEBOOK_FEED_URL,
+    FEED_HEALTH_CACHE_DURATION_MS,
+    PRICE_TOLERANCE,
+    DB_CHUNK_SIZE,
+} from './facebookFeed.js';

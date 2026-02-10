@@ -8,6 +8,7 @@ import jobsRouter from './jobs.js';
 import cacheRouter from './cache.js';
 import debugRouter from './debug.js';
 import inventoryRouter from './inventory.js';
+import facebookFeedRouter from './facebook-feed.js';
 
 const router = Router();
 
@@ -33,5 +34,8 @@ router.use('/inventory', inventoryRouter);
 
 // Debug endpoints: /debug/locks, /debug/sync-progress, /debug/circuit-breaker
 router.use('/debug', debugRouter);
+
+// Facebook feed health: /facebook-feed-health
+router.use('/', facebookFeedRouter);
 
 export default router;

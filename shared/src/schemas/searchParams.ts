@@ -308,6 +308,54 @@ export const StockReportSearchParams = z.object({
 export type StockReportSearchParams = z.infer<typeof StockReportSearchParams>;
 
 // ============================================
+// SHOPIFY CATALOG PAGE SEARCH PARAMS
+// ============================================
+
+/**
+ * Shopify Catalog monitoring page search params
+ * Browse all Shopify product metadata: titles, descriptions, prices, variants
+ *
+ * @example
+ * /shopify-catalog?status=active&search=cotton
+ */
+export const ShopifyCatalogSearchParams = z.object({
+    /** Search by title, handle, SKU, or vendor */
+    search: z.string().optional().catch(undefined),
+    /** Filter by Shopify product status */
+    status: z.enum(['all', 'active', 'archived', 'draft']).catch('all'),
+});
+export type ShopifyCatalogSearchParams = z.infer<typeof ShopifyCatalogSearchParams>;
+
+// ============================================
+// FACEBOOK FEED HEALTH PAGE SEARCH PARAMS
+// ============================================
+
+/**
+ * Facebook Feed Health monitoring page search params
+ * Compare the Facebook catalog XML feed against ERP + Shopify data
+ *
+ * @example
+ * /facebook-feed-health?severity=critical&issueType=price_mismatch
+ */
+export const FacebookFeedHealthSearchParams = z.object({
+    /** Search by title, SKU, or variant ID */
+    search: z.string().optional().catch(undefined),
+    /** Filter by issue severity */
+    severity: z.enum(['all', 'critical', 'warning', 'info']).catch('all'),
+    /** Filter by issue type */
+    issueType: z.enum([
+        'all',
+        'price_mismatch',
+        'stock_mismatch',
+        'availability_wrong',
+        'not_in_erp',
+        'not_in_shopify_cache',
+        'metadata_mismatch',
+    ]).catch('all'),
+});
+export type FacebookFeedHealthSearchParams = z.infer<typeof FacebookFeedHealthSearchParams>;
+
+// ============================================
 // EMPTY SEARCH PARAMS (for pages without params)
 // ============================================
 

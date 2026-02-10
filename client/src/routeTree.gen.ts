@@ -21,6 +21,7 @@ import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/
 import { Route as AuthenticatedUsersRouteImport } from './routes/_authenticated/users'
 import { Route as AuthenticatedTrackingRouteImport } from './routes/_authenticated/tracking'
 import { Route as AuthenticatedStockReportRouteImport } from './routes/_authenticated/stock-report'
+import { Route as AuthenticatedShopifyCatalogRouteImport } from './routes/_authenticated/shopify-catalog'
 import { Route as AuthenticatedSheetsMonitorRouteImport } from './routes/_authenticated/sheets-monitor'
 import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings'
 import { Route as AuthenticatedReturnsRtoRouteImport } from './routes/_authenticated/returns-rto'
@@ -39,6 +40,7 @@ import { Route as AuthenticatedInventoryMobileRouteImport } from './routes/_auth
 import { Route as AuthenticatedInventoryInwardRouteImport } from './routes/_authenticated/inventory-inward'
 import { Route as AuthenticatedInventoryCountRouteImport } from './routes/_authenticated/inventory-count'
 import { Route as AuthenticatedInventoryRouteImport } from './routes/_authenticated/inventory'
+import { Route as AuthenticatedFacebookFeedHealthRouteImport } from './routes/_authenticated/facebook-feed-health'
 import { Route as AuthenticatedFabricReconciliationRouteImport } from './routes/_authenticated/fabric-reconciliation'
 import { Route as AuthenticatedFabricReceiptRouteImport } from './routes/_authenticated/fabric-receipt'
 import { Route as AuthenticatedCustomersRouteImport } from './routes/_authenticated/customers'
@@ -104,6 +106,12 @@ const AuthenticatedStockReportRoute =
   AuthenticatedStockReportRouteImport.update({
     id: '/stock-report',
     path: '/stock-report',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
+const AuthenticatedShopifyCatalogRoute =
+  AuthenticatedShopifyCatalogRouteImport.update({
+    id: '/shopify-catalog',
+    path: '/shopify-catalog',
     getParentRoute: () => AuthenticatedRoute,
   } as any)
 const AuthenticatedSheetsMonitorRoute =
@@ -204,6 +212,12 @@ const AuthenticatedInventoryRoute = AuthenticatedInventoryRouteImport.update({
   path: '/inventory',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
+const AuthenticatedFacebookFeedHealthRoute =
+  AuthenticatedFacebookFeedHealthRouteImport.update({
+    id: '/facebook-feed-health',
+    path: '/facebook-feed-health',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
 const AuthenticatedFabricReconciliationRoute =
   AuthenticatedFabricReconciliationRouteImport.update({
     id: '/fabric-reconciliation',
@@ -252,6 +266,7 @@ export interface FileRoutesByFullPath {
   '/customers': typeof AuthenticatedCustomersRoute
   '/fabric-receipt': typeof AuthenticatedFabricReceiptRoute
   '/fabric-reconciliation': typeof AuthenticatedFabricReconciliationRoute
+  '/facebook-feed-health': typeof AuthenticatedFacebookFeedHealthRoute
   '/inventory': typeof AuthenticatedInventoryRoute
   '/inventory-count': typeof AuthenticatedInventoryCountRoute
   '/inventory-inward': typeof AuthenticatedInventoryInwardRoute
@@ -270,6 +285,7 @@ export interface FileRoutesByFullPath {
   '/returns-rto': typeof AuthenticatedReturnsRtoRoute
   '/settings': typeof AuthenticatedSettingsRoute
   '/sheets-monitor': typeof AuthenticatedSheetsMonitorRoute
+  '/shopify-catalog': typeof AuthenticatedShopifyCatalogRoute
   '/stock-report': typeof AuthenticatedStockReportRoute
   '/tracking': typeof AuthenticatedTrackingRoute
   '/users': typeof AuthenticatedUsersRoute
@@ -288,6 +304,7 @@ export interface FileRoutesByTo {
   '/customers': typeof AuthenticatedCustomersRoute
   '/fabric-receipt': typeof AuthenticatedFabricReceiptRoute
   '/fabric-reconciliation': typeof AuthenticatedFabricReconciliationRoute
+  '/facebook-feed-health': typeof AuthenticatedFacebookFeedHealthRoute
   '/inventory': typeof AuthenticatedInventoryRoute
   '/inventory-count': typeof AuthenticatedInventoryCountRoute
   '/inventory-inward': typeof AuthenticatedInventoryInwardRoute
@@ -306,6 +323,7 @@ export interface FileRoutesByTo {
   '/returns-rto': typeof AuthenticatedReturnsRtoRoute
   '/settings': typeof AuthenticatedSettingsRoute
   '/sheets-monitor': typeof AuthenticatedSheetsMonitorRoute
+  '/shopify-catalog': typeof AuthenticatedShopifyCatalogRoute
   '/stock-report': typeof AuthenticatedStockReportRoute
   '/tracking': typeof AuthenticatedTrackingRoute
   '/users': typeof AuthenticatedUsersRoute
@@ -327,6 +345,7 @@ export interface FileRoutesById {
   '/_authenticated/customers': typeof AuthenticatedCustomersRoute
   '/_authenticated/fabric-receipt': typeof AuthenticatedFabricReceiptRoute
   '/_authenticated/fabric-reconciliation': typeof AuthenticatedFabricReconciliationRoute
+  '/_authenticated/facebook-feed-health': typeof AuthenticatedFacebookFeedHealthRoute
   '/_authenticated/inventory': typeof AuthenticatedInventoryRoute
   '/_authenticated/inventory-count': typeof AuthenticatedInventoryCountRoute
   '/_authenticated/inventory-inward': typeof AuthenticatedInventoryInwardRoute
@@ -345,6 +364,7 @@ export interface FileRoutesById {
   '/_authenticated/returns-rto': typeof AuthenticatedReturnsRtoRoute
   '/_authenticated/settings': typeof AuthenticatedSettingsRoute
   '/_authenticated/sheets-monitor': typeof AuthenticatedSheetsMonitorRoute
+  '/_authenticated/shopify-catalog': typeof AuthenticatedShopifyCatalogRoute
   '/_authenticated/stock-report': typeof AuthenticatedStockReportRoute
   '/_authenticated/tracking': typeof AuthenticatedTrackingRoute
   '/_authenticated/users': typeof AuthenticatedUsersRoute
@@ -367,6 +387,7 @@ export interface FileRouteTypes {
     | '/customers'
     | '/fabric-receipt'
     | '/fabric-reconciliation'
+    | '/facebook-feed-health'
     | '/inventory'
     | '/inventory-count'
     | '/inventory-inward'
@@ -385,6 +406,7 @@ export interface FileRouteTypes {
     | '/returns-rto'
     | '/settings'
     | '/sheets-monitor'
+    | '/shopify-catalog'
     | '/stock-report'
     | '/tracking'
     | '/users'
@@ -403,6 +425,7 @@ export interface FileRouteTypes {
     | '/customers'
     | '/fabric-receipt'
     | '/fabric-reconciliation'
+    | '/facebook-feed-health'
     | '/inventory'
     | '/inventory-count'
     | '/inventory-inward'
@@ -421,6 +444,7 @@ export interface FileRouteTypes {
     | '/returns-rto'
     | '/settings'
     | '/sheets-monitor'
+    | '/shopify-catalog'
     | '/stock-report'
     | '/tracking'
     | '/users'
@@ -441,6 +465,7 @@ export interface FileRouteTypes {
     | '/_authenticated/customers'
     | '/_authenticated/fabric-receipt'
     | '/_authenticated/fabric-reconciliation'
+    | '/_authenticated/facebook-feed-health'
     | '/_authenticated/inventory'
     | '/_authenticated/inventory-count'
     | '/_authenticated/inventory-inward'
@@ -459,6 +484,7 @@ export interface FileRouteTypes {
     | '/_authenticated/returns-rto'
     | '/_authenticated/settings'
     | '/_authenticated/sheets-monitor'
+    | '/_authenticated/shopify-catalog'
     | '/_authenticated/stock-report'
     | '/_authenticated/tracking'
     | '/_authenticated/users'
@@ -560,6 +586,13 @@ declare module '@tanstack/react-router' {
       path: '/stock-report'
       fullPath: '/stock-report'
       preLoaderRoute: typeof AuthenticatedStockReportRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/shopify-catalog': {
+      id: '/_authenticated/shopify-catalog'
+      path: '/shopify-catalog'
+      fullPath: '/shopify-catalog'
+      preLoaderRoute: typeof AuthenticatedShopifyCatalogRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
     '/_authenticated/sheets-monitor': {
@@ -688,6 +721,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedInventoryRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/facebook-feed-health': {
+      id: '/_authenticated/facebook-feed-health'
+      path: '/facebook-feed-health'
+      fullPath: '/facebook-feed-health'
+      preLoaderRoute: typeof AuthenticatedFacebookFeedHealthRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/fabric-reconciliation': {
       id: '/_authenticated/fabric-reconciliation'
       path: '/fabric-reconciliation'
@@ -740,6 +780,7 @@ interface AuthenticatedRouteChildren {
   AuthenticatedCustomersRoute: typeof AuthenticatedCustomersRoute
   AuthenticatedFabricReceiptRoute: typeof AuthenticatedFabricReceiptRoute
   AuthenticatedFabricReconciliationRoute: typeof AuthenticatedFabricReconciliationRoute
+  AuthenticatedFacebookFeedHealthRoute: typeof AuthenticatedFacebookFeedHealthRoute
   AuthenticatedInventoryRoute: typeof AuthenticatedInventoryRoute
   AuthenticatedInventoryCountRoute: typeof AuthenticatedInventoryCountRoute
   AuthenticatedInventoryInwardRoute: typeof AuthenticatedInventoryInwardRoute
@@ -758,6 +799,7 @@ interface AuthenticatedRouteChildren {
   AuthenticatedReturnsRtoRoute: typeof AuthenticatedReturnsRtoRoute
   AuthenticatedSettingsRoute: typeof AuthenticatedSettingsRoute
   AuthenticatedSheetsMonitorRoute: typeof AuthenticatedSheetsMonitorRoute
+  AuthenticatedShopifyCatalogRoute: typeof AuthenticatedShopifyCatalogRoute
   AuthenticatedStockReportRoute: typeof AuthenticatedStockReportRoute
   AuthenticatedTrackingRoute: typeof AuthenticatedTrackingRoute
   AuthenticatedUsersRoute: typeof AuthenticatedUsersRoute
@@ -772,6 +814,7 @@ const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedFabricReceiptRoute: AuthenticatedFabricReceiptRoute,
   AuthenticatedFabricReconciliationRoute:
     AuthenticatedFabricReconciliationRoute,
+  AuthenticatedFacebookFeedHealthRoute: AuthenticatedFacebookFeedHealthRoute,
   AuthenticatedInventoryRoute: AuthenticatedInventoryRoute,
   AuthenticatedInventoryCountRoute: AuthenticatedInventoryCountRoute,
   AuthenticatedInventoryInwardRoute: AuthenticatedInventoryInwardRoute,
@@ -790,6 +833,7 @@ const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedReturnsRtoRoute: AuthenticatedReturnsRtoRoute,
   AuthenticatedSettingsRoute: AuthenticatedSettingsRoute,
   AuthenticatedSheetsMonitorRoute: AuthenticatedSheetsMonitorRoute,
+  AuthenticatedShopifyCatalogRoute: AuthenticatedShopifyCatalogRoute,
   AuthenticatedStockReportRoute: AuthenticatedStockReportRoute,
   AuthenticatedTrackingRoute: AuthenticatedTrackingRoute,
   AuthenticatedUsersRoute: AuthenticatedUsersRoute,
