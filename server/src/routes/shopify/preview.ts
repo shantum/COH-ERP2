@@ -163,4 +163,48 @@ router.post('/preview/products', authenticateToken, asyncHandler(async (req: Req
   }
 }));
 
+// GET /products/:id/metafields - Fetch metafields for a single product
+router.get('/products/:id/metafields', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+  await shopifyClient.loadFromDatabase();
+  if (!shopifyClient.isConfigured()) {
+    throw new ValidationError('Shopify is not configured');
+  }
+
+  const productId = String(req.params.id);
+  if (!productId) {
+    throw new ValidationError('Product ID is required');
+  }
+
+  try {
+    const metafields = await shopifyClient.getProductMetafields(Number(productId));
+    res.json({ productId, metafields });
+  } catch (error) {
+    const axiosError = error as AxiosErrorLike;
+    shopifyLogger.error({ productId, error: axiosError.message }, 'Metafield fetch failed');
+    throw new ExternalServiceError(axiosError.response?.data?.errors as string || axiosError.message, 'Shopify');
+  }
+}));
+
+// GET /products/:id/feed-data - Fetch full feed enrichment data (collections, channels, inventory by location, variant metafields)
+router.get('/products/:id/feed-data', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+  await shopifyClient.loadFromDatabase();
+  if (!shopifyClient.isConfigured()) {
+    throw new ValidationError('Shopify is not configured');
+  }
+
+  const productId = String(req.params.id);
+  if (!productId) {
+    throw new ValidationError('Product ID is required');
+  }
+
+  try {
+    const feedData = await shopifyClient.getProductFeedData(productId);
+    res.json({ productId, ...feedData });
+  } catch (error) {
+    const axiosError = error as AxiosErrorLike;
+    shopifyLogger.error({ productId, error: axiosError.message }, 'Feed data fetch failed');
+    throw new ExternalServiceError(axiosError.response?.data?.errors as string || axiosError.message, 'Shopify');
+  }
+}));
+
 export default router;

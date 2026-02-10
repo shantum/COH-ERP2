@@ -521,6 +521,385 @@ const getProductShopifyStatusesSchema = z.object({
     productIds: z.array(z.string()),
 });
 
+// ============================================
+// SHOPIFY CATALOG (METADATA MONITOR)
+// ============================================
+
+const getShopifyCatalogSchema = z.object({
+    search: z.string().optional(),
+    status: z.enum(['all', 'active', 'archived', 'draft']).optional(),
+});
+
+export interface ShopifyCatalogVariant {
+    id: string;
+    title: string;
+    sku: string | null;
+    price: string;
+    compareAtPrice: string | null;
+    inventoryQuantity: number | null;
+    option1: string | null;
+    option2: string | null;
+    option3: string | null;
+    barcode: string | null;
+    weight: number | null;
+    weightUnit: string | null;
+    taxable: boolean;
+    requiresShipping: boolean;
+    inventoryPolicy: string | null;
+    fulfillmentService: string | null;
+    inventoryManagement: string | null;
+}
+
+export interface ShopifyCatalogProduct {
+    shopifyId: string;
+    title: string;
+    handle: string;
+    status: string;
+    bodyHtml: string | null;
+    vendor: string | null;
+    productType: string | null;
+    tags: string[];
+    publishedAt: string | null;
+    createdAt: string | null;
+    updatedAt: string | null;
+    imageUrl: string | null;
+    images: Array<{ src: string; alt: string | null }>;
+    options: Array<{ name: string; values: string[] }>;
+    variants: ShopifyCatalogVariant[];
+    erpProductId: string | null;
+    erpProductName: string | null;
+    lastWebhookAt: string;
+    webhookTopic: string | null;
+}
+
+export interface ShopifyCatalogResult {
+    products: ShopifyCatalogProduct[];
+    total: number;
+    stats: {
+        total: number;
+        active: number;
+        archived: number;
+        draft: number;
+        linkedToErp: number;
+    };
+}
+
+interface RawShopifyProduct {
+    id: number;
+    title?: string;
+    handle?: string;
+    body_html?: string;
+    vendor?: string;
+    product_type?: string;
+    created_at?: string;
+    updated_at?: string;
+    published_at?: string;
+    status?: string;
+    tags?: string;
+    image?: { src?: string };
+    images?: Array<{ src: string; alt?: string }>;
+    options?: Array<{ name: string; values?: string[] }>;
+    variants?: Array<{
+        id: number;
+        title?: string;
+        sku?: string;
+        price?: string;
+        compare_at_price?: string | null;
+        inventory_quantity?: number;
+        option1?: string;
+        option2?: string;
+        option3?: string;
+        barcode?: string;
+        weight?: number;
+        weight_unit?: string;
+        taxable?: boolean;
+        requires_shipping?: boolean;
+        inventory_policy?: string;
+        fulfillment_service?: string;
+        inventory_management?: string;
+    }>;
+}
+
+/**
+ * Get all Shopify products with full metadata for monitoring.
+ * Parses rawData from ShopifyProductCache and joins with ERP products.
+ */
+export const getShopifyCatalog = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => {
+        if (input === undefined || input === null) return {};
+        return getShopifyCatalogSchema.parse(input);
+    })
+    .handler(async ({ data }): Promise<ShopifyCatalogResult> => {
+        const prisma = await getPrisma();
+        const { search, status } = data as z.infer<typeof getShopifyCatalogSchema>;
+
+        // Fetch all cached products
+        const cacheEntries = await prisma.shopifyProductCache.findMany({
+            select: {
+                id: true,
+                rawData: true,
+                lastWebhookAt: true,
+                webhookTopic: true,
+            },
+        });
+
+        // Parse rawData, skip entries that fail to parse
+        const parsed: Array<{
+            id: string;
+            raw: RawShopifyProduct;
+            lastWebhookAt: Date;
+            webhookTopic: string | null;
+        }> = [];
+        for (const entry of cacheEntries) {
+            try {
+                const raw = JSON.parse(entry.rawData) as RawShopifyProduct;
+                parsed.push({ id: entry.id, raw, lastWebhookAt: entry.lastWebhookAt, webhookTopic: entry.webhookTopic });
+            } catch {
+                // Skip corrupt entries
+            }
+        }
+
+        // Stats from ALL products (before filtering)
+        const stats = {
+            total: parsed.length,
+            active: parsed.filter(p => p.raw.status === 'active').length,
+            archived: parsed.filter(p => p.raw.status === 'archived').length,
+            draft: parsed.filter(p => p.raw.status === 'draft').length,
+            linkedToErp: 0,
+        };
+
+        // Apply status filter
+        let filtered = parsed;
+        if (status && status !== 'all') {
+            filtered = filtered.filter(p => p.raw.status === status);
+        }
+
+        // Apply search filter
+        if (search) {
+            const q = search.toLowerCase();
+            filtered = filtered.filter(p =>
+                (p.raw.title ?? '').toLowerCase().includes(q) ||
+                (p.raw.handle ?? '').toLowerCase().includes(q) ||
+                (p.raw.vendor ?? '').toLowerCase().includes(q) ||
+                (p.raw.tags ?? '').toLowerCase().includes(q) ||
+                (p.raw.variants ?? []).some(v => (v.sku ?? '').toLowerCase().includes(q))
+            );
+        }
+
+        // Sort by title
+        filtered.sort((a, b) => (a.raw.title ?? '').localeCompare(b.raw.title ?? ''));
+
+        // Fetch ERP product links
+        const shopifyIds = parsed.map(p => p.id);
+        const erpProducts = shopifyIds.length > 0
+            ? await prisma.product.findMany({
+                where: {
+                    OR: [
+                        { shopifyProductId: { in: shopifyIds } },
+                        { shopifyProductIds: { hasSome: shopifyIds } },
+                    ],
+                },
+                select: { id: true, name: true, shopifyProductId: true, shopifyProductIds: true },
+            })
+            : [];
+
+        // Build shopifyId -> ERP product lookup
+        const erpLinkMap = new Map<string, { id: string; name: string }>();
+        for (const p of erpProducts) {
+            if (p.shopifyProductId) {
+                erpLinkMap.set(p.shopifyProductId, { id: p.id, name: p.name });
+            }
+            for (const sid of p.shopifyProductIds) {
+                if (!erpLinkMap.has(sid)) {
+                    erpLinkMap.set(sid, { id: p.id, name: p.name });
+                }
+            }
+        }
+        stats.linkedToErp = erpLinkMap.size;
+
+        // Transform to clean output
+        const products: ShopifyCatalogProduct[] = filtered.map(entry => {
+            const { raw } = entry;
+            const erpLink = erpLinkMap.get(entry.id);
+            const tags = raw.tags
+                ? raw.tags.split(',').map(t => t.trim()).filter(Boolean)
+                : [];
+
+            return {
+                shopifyId: entry.id,
+                title: raw.title ?? 'Untitled',
+                handle: raw.handle ?? '',
+                status: raw.status ?? 'unknown',
+                bodyHtml: raw.body_html ?? null,
+                vendor: raw.vendor ?? null,
+                productType: raw.product_type ?? null,
+                tags,
+                publishedAt: raw.published_at ?? null,
+                createdAt: raw.created_at ?? null,
+                updatedAt: raw.updated_at ?? null,
+                imageUrl: raw.image?.src ?? raw.images?.[0]?.src ?? null,
+                images: (raw.images ?? []).map(img => ({ src: img.src, alt: img.alt ?? null })),
+                options: (raw.options ?? []).map(opt => ({ name: opt.name, values: opt.values ?? [] })),
+                variants: (raw.variants ?? []).map(v => ({
+                    id: String(v.id),
+                    title: v.title ?? '',
+                    sku: v.sku ?? null,
+                    price: v.price ?? '0',
+                    compareAtPrice: v.compare_at_price ?? null,
+                    inventoryQuantity: v.inventory_quantity ?? null,
+                    option1: v.option1 ?? null,
+                    option2: v.option2 ?? null,
+                    option3: v.option3 ?? null,
+                    barcode: v.barcode ?? null,
+                    weight: v.weight ?? null,
+                    weightUnit: v.weight_unit ?? null,
+                    taxable: v.taxable ?? true,
+                    requiresShipping: v.requires_shipping ?? true,
+                    inventoryPolicy: v.inventory_policy ?? null,
+                    fulfillmentService: v.fulfillment_service ?? null,
+                    inventoryManagement: v.inventory_management ?? null,
+                })),
+                erpProductId: erpLink?.id ?? null,
+                erpProductName: erpLink?.name ?? null,
+                lastWebhookAt: entry.lastWebhookAt.toISOString(),
+                webhookTopic: entry.webhookTopic,
+            };
+        });
+
+        return { products, total: filtered.length, stats };
+    });
+
+// ============================================
+// PRODUCT METAFIELDS (LIVE FROM SHOPIFY API)
+// ============================================
+
+const getShopifyMetafieldsSchema = z.object({
+    shopifyProductId: z.string().min(1),
+});
+
+export interface ShopifyMetafieldEntry {
+    id: number;
+    namespace: string;
+    key: string;
+    value: string;
+    type: string;
+    updatedAt: string;
+}
+
+export interface ShopifyMetafieldsResult {
+    productId: string;
+    metafields: ShopifyMetafieldEntry[];
+}
+
+/**
+ * Fetch metafields for a single Shopify product.
+ * Calls the Shopify API live — includes Google product category, SEO, and other feed data.
+ */
+export const getShopifyMetafields = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => getShopifyMetafieldsSchema.parse(input))
+    .handler(async ({ data }): Promise<MutationResult<ShopifyMetafieldsResult>> => {
+        const { shopifyProductId } = data;
+
+        try {
+            const result = await callExpressApi<{
+                productId: string;
+                metafields: Array<{
+                    id: number;
+                    namespace: string;
+                    key: string;
+                    value: string;
+                    type: string;
+                    updated_at: string;
+                }>;
+            }>(`/api/shopify/products/${shopifyProductId}/metafields`);
+
+            return {
+                success: true,
+                data: {
+                    productId: result.productId,
+                    metafields: result.metafields.map(m => ({
+                        id: m.id,
+                        namespace: m.namespace,
+                        key: m.key,
+                        value: m.value,
+                        type: m.type,
+                        updatedAt: m.updated_at,
+                    })),
+                },
+            };
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : 'Unknown error';
+            return {
+                success: false,
+                error: { code: 'EXTERNAL_ERROR', message },
+            };
+        }
+    });
+
+// ============================================
+// PRODUCT FEED ENRICHMENT (COLLECTIONS, CHANNELS, INVENTORY BY LOCATION)
+// ============================================
+
+const getShopifyFeedDataSchema = z.object({
+    shopifyProductId: z.string().min(1),
+});
+
+export interface VariantInventoryLevel {
+    locationName: string;
+    quantities: Record<string, number>;
+}
+
+export interface VariantFeedEnrichment {
+    variantId: string;
+    sku: string | null;
+    title: string;
+    metafields: Array<{ namespace: string; key: string; value: string; type: string }>;
+    inventoryLevels: VariantInventoryLevel[];
+}
+
+export interface ShopifyFeedDataResult {
+    productId: string;
+    collections: Array<{ title: string; handle: string }>;
+    salesChannels: Array<{ name: string; isPublished: boolean }>;
+    variantEnrichments: VariantFeedEnrichment[];
+}
+
+/**
+ * Fetch full feed enrichment data for a product via GraphQL:
+ * collections, sales channels, variant metafields, and inventory by location.
+ */
+export const getShopifyFeedData = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => getShopifyFeedDataSchema.parse(input))
+    .handler(async ({ data }): Promise<MutationResult<ShopifyFeedDataResult>> => {
+        const { shopifyProductId } = data;
+
+        try {
+            const result = await callExpressApi<{
+                productId: string;
+                collections: Array<{ title: string; handle: string }>;
+                salesChannels: Array<{ name: string; isPublished: boolean }>;
+                variantEnrichments: Array<{
+                    variantId: string;
+                    sku: string | null;
+                    title: string;
+                    metafields: Array<{ namespace: string; key: string; value: string; type: string }>;
+                    inventoryLevels: Array<{ locationName: string; quantities: Record<string, number> }>;
+                }>;
+            }>(`/api/shopify/products/${shopifyProductId}/feed-data`);
+
+            return { success: true, data: result };
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : 'Unknown error';
+            return {
+                success: false,
+                error: { code: 'EXTERNAL_ERROR', message },
+            };
+        }
+    });
+
 /**
  * Get Shopify product statuses for given product IDs
  * Fetches from ShopifyProductCache and returns status for each product

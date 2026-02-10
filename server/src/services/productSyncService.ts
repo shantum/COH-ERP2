@@ -334,13 +334,13 @@ export async function syncSingleProduct(
         });
         result.created++;
     } else {
-        // Product exists - update fields if changed
+        // Product exists - refresh key fields from Shopify on every resync
         const updates: Partial<Product> = {};
-        if (mainImageUrl && !product.imageUrl) updates.imageUrl = mainImageUrl;
-        // Only update handle if not set (preserve original)
-        if (shopifyProduct.handle && !product.shopifyHandle) {
+        if (mainImageUrl && mainImageUrl !== product.imageUrl) updates.imageUrl = mainImageUrl;
+        if (shopifyProduct.handle && shopifyProduct.handle !== product.shopifyHandle) {
             updates.shopifyHandle = shopifyProduct.handle;
         }
+        if (gender && gender !== product.gender) updates.gender = gender;
 
         // Update category if Shopify tags changed (recalculate from current data)
         const resolvedCategory = resolveProductCategory({
@@ -388,13 +388,13 @@ export async function syncSingleProduct(
             });
             result.created++;
         } else {
-            // Update source tracking and image if missing
+            // Update source tracking and refresh image from Shopify
             const variationUpdates: Record<string, string | null> = {};
             if (!variation.shopifySourceProductId) {
                 variationUpdates.shopifySourceProductId = shopifyProductId;
                 variationUpdates.shopifySourceHandle = shopifyProduct.handle;
             }
-            if (variationImageUrl && !variation.imageUrl) {
+            if (variationImageUrl && variationImageUrl !== variation.imageUrl) {
                 variationUpdates.imageUrl = variationImageUrl;
             }
 
@@ -452,13 +452,15 @@ async function syncSingleSku(
         // If Shopify now has a proper SKU (barcode) and our stored code is a slug fallback, update it
         const shopifySku = variant.sku?.trim();
         const shouldUpdateSkuCode = shopifySku && shopifySku !== sku.skuCode && /[a-zA-Z].*-/.test(sku.skuCode);
+        const shopifyPrice = parseFloat(variant.price);
+        const newMrp = shopifyPrice > 0 ? shopifyPrice : sku.mrp;
         await prisma.sku.update({
             where: { id: sku.id },
             data: {
                 ...(shouldUpdateSkuCode ? { skuCode: shopifySku } : {}),
                 shopifyVariantId,
                 shopifyInventoryItemId: variant.inventory_item_id ? String(variant.inventory_item_id) : null,
-                mrp: parseFloat(variant.price) || sku.mrp,
+                mrp: newMrp,
             },
         });
 
