@@ -318,12 +318,9 @@ async function runSteps(
             if (r.errors.length > 0) job.stepResults[4].errors = r.errors;
             return `${r.created} created, ${r.dateUpdated} date updates`;
         },
-        // Step 5: Inventory Reconcile
+        // Step 5: Inventory Reconcile (DISABLED — offload system handles balances)
         async () => {
-            if (inventoryReport.adjustments.length === 0) return 'Nothing to do';
-            const r = await executeInventoryReconcile(prisma, inventoryReport, userId);
-            if (r.errors.length > 0) job.stepResults[5].errors = r.errors;
-            return `${r.adjusted} adjustments applied`;
+            return 'Skipped — balance is managed by the sheet offload system';
         },
     ];
 
