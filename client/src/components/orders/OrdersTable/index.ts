@@ -12,8 +12,6 @@ export type {
     OrdersTableContext,
     DynamicColumnHandlers,
     CellProps,
-    CustomizeLineData,
-    EditCustomizationData,
 } from './types';
 
 // Hooks

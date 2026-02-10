@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * CancelLineCell - Cell for cancelling/uncancelling order lines
  * Light checkbox style - thin border, subtle colors

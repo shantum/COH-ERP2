@@ -26,15 +26,12 @@ const searchAllInputSchema = z.object({
 export type SearchAllInput = z.infer<typeof searchAllInputSchema>;
 
 const ordersListInputSchema = z.object({
-    view: z.enum(['open', 'shipped', 'rto', 'all', 'cancelled'] as const),
+    view: z.enum(['all', 'in_transit', 'delivered', 'rto', 'cancelled'] as const),
     page: z.number().int().positive().default(1),
     limit: z.number().int().positive().max(1000).default(250),
     search: z.string().optional(),
     days: z.number().int().positive().optional(),
     sortBy: z.enum(['orderDate', 'archivedAt', 'shippedAt', 'createdAt'] as const).optional(),
-    // Open view filters (server-side filtering for performance)
-    allocatedFilter: z.enum(['all', 'allocated', 'pending']).optional(),
-    productionFilter: z.enum(['all', 'scheduled', 'needs', 'ready']).optional(),
 });
 
 export type OrdersListInput = z.infer<typeof ordersListInputSchema>;
@@ -42,23 +39,6 @@ export type OrdersListInput = z.infer<typeof ordersListInputSchema>;
 // ============================================
 // RESPONSE TYPES
 // ============================================
-
-/**
- * Pipeline counts for Open view
- * Computed server-side for efficiency (SQL vs client iteration)
- */
-export interface OpenViewCounts {
-    /** Orders in pending state (not all lines allocated+) */
-    pending: number;
-    /** Orders in allocated state (all lines allocated but not all packed) */
-    allocated: number;
-    /** Orders ready to ship (all lines packed or shipped) */
-    ready: number;
-    /** Orders fully shipped but not released */
-    releasableShipped: number;
-    /** Orders fully cancelled but not released */
-    releasableCancelled: number;
-}
 
 /**
  * Response type matching useUnifiedOrdersData expectations
@@ -74,8 +54,6 @@ export interface OrdersResponse {
         totalPages: number;
         hasMore: boolean;
     };
-    /** Pipeline counts - only present for 'open' view */
-    openViewCounts?: OpenViewCounts;
 }
 
 /**
@@ -116,6 +94,10 @@ export interface FlattenedOrderRow {
     lineStatus: string | null;
     lineNotes: string;
     unitPrice: number;
+    bomCost: number;
+    margin: number;
+    fabricColourName: string | null;
+    fabricColourId: string | null;
     skuStock: number;
     fabricBalance: number;
     shopifyStatus: string;
@@ -214,6 +196,7 @@ interface PrismaOrderLine {
         customizationValue: string | null;
         customizationNotes: string | null;
         currentBalance: number;
+        bomCost: number | null;
         variation: {
             colorName: string;
             colorHex: string | null;
@@ -224,6 +207,9 @@ interface PrismaOrderLine {
             };
             bomLines: Array<{
                 fabricColour: {
+                    id: string;
+                    colourName: string;
+                    currentBalance: number;
                     isOutOfStock: boolean;
                 } | null;
             }>;
@@ -374,168 +360,52 @@ function parseCustomerTags(tags: string | null): string[] | null {
  * Build Prisma where clause for view filtering
  */
 function buildWhereClause(
-    view: 'open' | 'shipped' | 'rto' | 'all' | 'cancelled',
-    search: string | undefined,
-    sinceDate: Date | null,
-    allocatedFilter?: 'all' | 'allocated' | 'pending',
-    productionFilter?: 'all' | 'scheduled' | 'needs' | 'ready'
+    view: string,
+    search?: string,
+    sinceDate?: Date | null,
 ): Prisma.OrderWhereInput {
     const where: Prisma.OrderWhereInput = {
         isArchived: false,
     };
 
-    // View-specific filtering
     switch (view) {
-        case 'open':
-            // Must match ORDER_VIEWS.open from orderViews.ts exactly
-            // Base open view conditions
-            const openBaseConditions: Prisma.OrderWhereInput[] = [
-                // Still has lines being processed (not shipped, not cancelled)
-                {
-                    orderLines: {
-                        some: {
-                            lineStatus: { notIn: ['shipped', 'cancelled'] },
-                        },
+        case 'in_transit':
+            // Orders with at least one line shipped but not delivered/RTO
+            where.orderLines = {
+                some: {
+                    lineStatus: 'shipped',
+                    trackingStatus: {
+                        notIn: ['delivered', 'rto_in_transit', 'rto_delivered', 'rto_initiated', 'rto_received'],
                     },
                 },
-                // Fully shipped but not released yet
-                {
-                    releasedToShipped: false,
-                    orderLines: { some: { lineStatus: 'shipped' } },
-                    NOT: {
-                        orderLines: {
-                            some: {
-                                lineStatus: { notIn: ['shipped', 'cancelled'] },
-                            },
-                        },
-                    },
-                },
-                // Fully cancelled but not released yet
-                {
-                    releasedToCancelled: false,
-                    orderLines: { some: { lineStatus: 'cancelled' } },
-                    NOT: {
-                        orderLines: {
-                            some: {
-                                lineStatus: { not: 'cancelled' },
-                            },
-                        },
-                    },
-                },
-            ];
-
-            // Apply allocated filter (filters orders with matching lines)
-            if (allocatedFilter === 'allocated') {
-                // Orders with at least one allocated/picked/packed line
-                where.AND = [
-                    { OR: openBaseConditions },
-                    {
-                        orderLines: {
-                            some: {
-                                lineStatus: { in: ['allocated', 'picked', 'packed'] },
-                            },
-                        },
-                    },
-                ];
-            } else if (allocatedFilter === 'pending') {
-                // Orders with at least one pending line
-                where.AND = [
-                    { OR: openBaseConditions },
-                    {
-                        orderLines: {
-                            some: {
-                                lineStatus: 'pending',
-                            },
-                        },
-                    },
-                ];
-            } else {
-                where.OR = openBaseConditions;
-            }
-
-            // Apply production filter (additional narrowing)
-            if (productionFilter && productionFilter !== 'all') {
-                // Ensure AND array exists
-                if (!where.AND) {
-                    where.AND = where.OR ? [{ OR: where.OR }] : [];
-                    delete where.OR;
-                }
-
-                if (productionFilter === 'scheduled') {
-                    // Orders with at least one scheduled line
-                    (where.AND as Prisma.OrderWhereInput[]).push({
-                        orderLines: {
-                            some: {
-                                productionBatchId: { not: null },
-                            },
-                        },
-                    });
-                } else if (productionFilter === 'needs') {
-                    // Orders with pending lines without production batch
-                    // Note: Stock comparison (skuStock < qty) still done client-side
-                    // because it requires comparing sku.currentBalance with qty
-                    (where.AND as Prisma.OrderWhereInput[]).push({
-                        orderLines: {
-                            some: {
-                                lineStatus: 'pending',
-                                productionBatchId: null,
-                            },
-                        },
-                    });
-                } else if (productionFilter === 'ready') {
-                    // Orders where ALL non-cancelled lines are allocated/picked/packed
-                    // This means NO lines exist that are pending or in other non-ready states
-                    (where.AND as Prisma.OrderWhereInput[]).push(
-                        // Must have at least one allocated/picked/packed line
-                        {
-                            orderLines: {
-                                some: {
-                                    lineStatus: { in: ['allocated', 'picked', 'packed'] },
-                                },
-                            },
-                        },
-                        // Must NOT have any pending lines (shipped/cancelled are OK)
-                        {
-                            NOT: {
-                                orderLines: {
-                                    some: {
-                                        lineStatus: 'pending',
-                                    },
-                                },
-                            },
-                        }
-                    );
-                }
-            }
+            };
             break;
 
-        case 'shipped':
-            where.releasedToShipped = true;
-            // Exclude RTO orders from shipped view
-            where.NOT = {
-                orderLines: {
-                    some: {
-                        trackingStatus: { in: ['rto_in_transit', 'rto_delivered', 'rto_initiated'] },
-                    },
+        case 'delivered':
+            // Orders where tracking shows delivered
+            where.orderLines = {
+                some: {
+                    trackingStatus: 'delivered',
                 },
             };
             break;
 
         case 'rto':
-            // Orders with at least one line in RTO status
+            // Orders with RTO tracking status
             where.orderLines = {
                 some: {
-                    trackingStatus: { in: ['rto_in_transit', 'rto_delivered', 'rto_initiated'] },
+                    trackingStatus: { in: ['rto_in_transit', 'rto_delivered', 'rto_initiated', 'rto_received'] },
                 },
             };
             break;
 
-        case 'all':
-            // No additional filters - shows all non-archived orders
-            break;
-
         case 'cancelled':
             where.releasedToCancelled = true;
+            break;
+
+        case 'all':
+        default:
+            // No additional filters - shows all non-archived orders
             break;
     }
 
@@ -634,6 +504,10 @@ function flattenOrdersToRows(orders: PrismaOrder[]): FlattenedOrderRow[] {
                 lineStatus: null,
                 lineNotes: '',
                 unitPrice: 0,
+                bomCost: 0,
+                margin: 0,
+                fabricColourName: null,
+                fabricColourId: null,
                 skuStock: 0,
                 fabricBalance: 0,
                 shopifyStatus,
@@ -717,8 +591,14 @@ function flattenOrdersToRows(orders: PrismaOrder[]): FlattenedOrderRow[] {
                 lineStatus: line.lineStatus,
                 lineNotes: line.notes || '',
                 unitPrice: line.unitPrice,
+                bomCost: line.sku.bomCost ?? 0,
+                margin: line.unitPrice > 0 && line.sku.bomCost
+                    ? Math.round(((line.unitPrice - line.sku.bomCost) / line.unitPrice) * 100)
+                    : 0,
+                fabricColourName: line.sku.variation.bomLines[0]?.fabricColour?.colourName ?? null,
+                fabricColourId: line.sku.variation.bomLines[0]?.fabricColour?.id ?? null,
                 skuStock: line.sku.currentBalance ?? 0,
-                fabricBalance: 0,
+                fabricBalance: line.sku.variation.bomLines[0]?.fabricColour?.currentBalance ?? 0,
                 shopifyStatus,
                 productionBatch: line.productionBatch
                     ? {
@@ -775,114 +655,6 @@ function flattenOrdersToRows(orders: PrismaOrder[]): FlattenedOrderRow[] {
     return rows;
 }
 
-/**
- * Compute pipeline counts for Open view
- *
- * Runs efficient SQL count queries to determine order distribution:
- * - pending: has at least one pending line
- * - allocated: no pending lines, has at least one allocated/picked line (not all packed)
- * - ready: all non-cancelled lines are packed or shipped
- * - releasableShipped: fully shipped but not released
- * - releasableCancelled: fully cancelled but not released
- */
-async function computeOpenViewCounts(
-    prisma: Awaited<ReturnType<typeof getPrisma>>
-): Promise<OpenViewCounts> {
-    // Base condition for open orders (not archived)
-    const baseCondition = { isArchived: false };
-
-    // Run all count queries in parallel for efficiency
-    const [pending, allocated, ready, releasableShipped, releasableCancelled] = await Promise.all([
-        // Pending: orders with at least one pending line (not shipped/cancelled)
-        prisma.order.count({
-            where: {
-                ...baseCondition,
-                orderLines: {
-                    some: { lineStatus: 'pending' },
-                },
-                // Must be in open view (not released)
-                releasedToShipped: false,
-                releasedToCancelled: false,
-            },
-        }),
-
-        // Allocated: no pending lines, but has allocated/picked lines (not all packed/shipped)
-        prisma.order.count({
-            where: {
-                ...baseCondition,
-                releasedToShipped: false,
-                releasedToCancelled: false,
-                // No pending lines
-                NOT: {
-                    orderLines: { some: { lineStatus: 'pending' } },
-                },
-                // Has at least one allocated or picked line
-                orderLines: {
-                    some: { lineStatus: { in: ['allocated', 'picked'] } },
-                },
-            },
-        }),
-
-        // Ready: all non-cancelled lines are packed or shipped
-        prisma.order.count({
-            where: {
-                ...baseCondition,
-                releasedToShipped: false,
-                releasedToCancelled: false,
-                // No pending, allocated, or picked lines
-                NOT: {
-                    orderLines: { some: { lineStatus: { in: ['pending', 'allocated', 'picked'] } } },
-                },
-                // Has at least one packed line (not yet shipped)
-                orderLines: {
-                    some: { lineStatus: 'packed' },
-                },
-            },
-        }),
-
-        // Releasable Shipped: fully shipped, not released
-        // All non-cancelled lines must be shipped
-        prisma.order.count({
-            where: {
-                ...baseCondition,
-                releasedToShipped: false,
-                // Has at least one shipped line
-                orderLines: { some: { lineStatus: 'shipped' } },
-                // No lines that aren't shipped or cancelled
-                NOT: {
-                    orderLines: {
-                        some: { lineStatus: { notIn: ['shipped', 'cancelled'] } },
-                    },
-                },
-            },
-        }),
-
-        // Releasable Cancelled: all lines cancelled, not released
-        prisma.order.count({
-            where: {
-                ...baseCondition,
-                releasedToCancelled: false,
-                // Has at least one line
-                orderLines: { some: {} },
-                // All lines must be cancelled (no non-cancelled lines)
-                NOT: {
-                    orderLines: {
-                        some: { lineStatus: { not: 'cancelled' } },
-                    },
-                },
-            },
-        }),
-    ]);
-
-    return {
-        pending,
-        allocated,
-        ready,
-        releasableShipped,
-        releasableCancelled,
-    };
-}
-
 // ============================================
 // SERVER FUNCTION
 // ============================================
@@ -901,7 +673,7 @@ export const getOrders = createServerFn({ method: 'GET' })
         try {
             const prisma = await getPrisma();
 
-            const { view, page, limit, search, days, sortBy, allocatedFilter, productionFilter } = data;
+            const { view, page, limit, search, days, sortBy } = data;
             const offset = (page - 1) * limit;
 
             // Calculate date filter if days specified
@@ -911,22 +683,15 @@ export const getOrders = createServerFn({ method: 'GET' })
                 sinceDate.setDate(sinceDate.getDate() - days);
             }
 
-            // Build where clause with filters (filters only apply to 'open' view)
-            const where = buildWhereClause(
-                view,
-                search,
-                sinceDate,
-                view === 'open' ? allocatedFilter : undefined,
-                view === 'open' ? productionFilter : undefined
-            );
+            // Build where clause
+            const where = buildWhereClause(view, search, sinceDate);
 
             // Determine sort field
             const sortField = sortBy || 'orderDate';
             const orderBy = { [sortField]: 'desc' as const };
 
-            // Execute count, data, and pipeline counts queries in parallel
-            // Pipeline counts only computed for 'open' view (where they're displayed)
-            const [totalCount, orders, openViewCounts] = await Promise.all([
+            // Execute count and data queries in parallel
+            const [totalCount, orders] = await Promise.all([
                 prisma.order.count({ where }),
                 prisma.order.findMany({
                     where,
@@ -967,7 +732,12 @@ export const getOrders = createServerFn({ method: 'GET' })
                                                     where: { fabricColourId: { not: null } },
                                                     select: {
                                                         fabricColour: {
-                                                            select: { isOutOfStock: true },
+                                                            select: {
+                                                                id: true,
+                                                                colourName: true,
+                                                                currentBalance: true,
+                                                                isOutOfStock: true,
+                                                            },
                                                         },
                                                     },
                                                     take: 1,
@@ -992,8 +762,6 @@ export const getOrders = createServerFn({ method: 'GET' })
                     skip: offset,
                     take: limit,
                 }),
-                // Only compute pipeline counts for 'open' view
-                view === 'open' ? computeOpenViewCounts(prisma) : Promise.resolve(undefined),
             ]);
 
             console.log('[Server Function] Query returned', orders.length, 'orders, total:', totalCount);
@@ -1015,8 +783,6 @@ export const getOrders = createServerFn({ method: 'GET' })
                     totalPages,
                     hasMore: data.page < totalPages,
                 },
-                // Only include for 'open' view
-                ...(openViewCounts ? { openViewCounts } : {}),
             };
         } catch (error: unknown) {
             console.error('[Server Function] Error in getOrders:', error);
@@ -1029,10 +795,11 @@ export const getOrders = createServerFn({ method: 'GET' })
 // ============================================
 
 export interface OrderViewCounts {
-    open: number;
-    shipped: number;
-    rto: number;
     all: number;
+    in_transit: number;
+    delivered: number;
+    rto: number;
+    cancelled: number;
 }
 
 /**
@@ -1048,25 +815,25 @@ export const getOrderViewCounts = createServerFn({ method: 'GET' })
         try {
             const prisma = await getPrisma();
 
-            // Build where clauses for each view
-            const openWhere = {
+            const allWhere = { isArchived: false };
+
+            const inTransitWhere = {
                 isArchived: false,
-                OR: [
-                    { status: 'open' },
-                    {
-                        AND: [{ releasedToShipped: false }, { releasedToCancelled: false }],
+                orderLines: {
+                    some: {
+                        lineStatus: 'shipped',
+                        trackingStatus: {
+                            notIn: ['delivered', 'rto_in_transit', 'rto_delivered', 'rto_initiated', 'rto_received'],
+                        },
                     },
-                ],
+                },
             };
 
-            const shippedWhere = {
+            const deliveredWhere = {
                 isArchived: false,
-                releasedToShipped: true,
-                NOT: {
-                    orderLines: {
-                        some: {
-                            trackingStatus: { in: ['rto_in_transit', 'rto_delivered', 'rto_initiated'] },
-                        },
+                orderLines: {
+                    some: {
+                        trackingStatus: 'delivered',
                     },
                 },
             };
@@ -1075,28 +842,30 @@ export const getOrderViewCounts = createServerFn({ method: 'GET' })
                 isArchived: false,
                 orderLines: {
                     some: {
-                        trackingStatus: { in: ['rto_in_transit', 'rto_delivered', 'rto_initiated'] },
+                        trackingStatus: { in: ['rto_in_transit', 'rto_delivered', 'rto_initiated', 'rto_received'] },
                     },
                 },
             };
 
-            const allWhere = {
+            const cancelledWhere = {
                 isArchived: false,
+                releasedToCancelled: true,
             };
 
-            // Execute all count queries in parallel
-            const [openCount, shippedCount, rtoCount, allCount] = await Promise.all([
-                prisma.order.count({ where: openWhere }),
-                prisma.order.count({ where: shippedWhere }),
-                prisma.order.count({ where: rtoWhere }),
+            const [allCount, inTransitCount, deliveredCount, rtoCount, cancelledCount] = await Promise.all([
                 prisma.order.count({ where: allWhere }),
+                prisma.order.count({ where: inTransitWhere }),
+                prisma.order.count({ where: deliveredWhere }),
+                prisma.order.count({ where: rtoWhere }),
+                prisma.order.count({ where: cancelledWhere }),
             ]);
 
             return {
-                open: openCount,
-                shipped: shippedCount,
-                rto: rtoCount,
                 all: allCount,
+                in_transit: inTransitCount,
+                delivered: deliveredCount,
+                rto: rtoCount,
+                cancelled: cancelledCount,
             };
         } catch (error: unknown) {
             console.error('[Server Function] Error in getOrderViewCounts:', error);

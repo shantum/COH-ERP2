@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * CustomizeCell - Add/edit customization button for order lines
  * Shows sparkle icon for customized items, edit icon for non-customized

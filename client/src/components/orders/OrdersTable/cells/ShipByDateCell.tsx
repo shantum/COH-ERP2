@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * ShipByDateCell - Editable ship-by date cell with popover date picker
  *

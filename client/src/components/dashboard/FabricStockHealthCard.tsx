@@ -84,13 +84,14 @@ const statusColors = {
     'no-usage': { bg: 'bg-gray-100', text: 'text-gray-500', bar: 'bg-gray-300', label: 'No usage' },
 };
 
-const statusSortOrder: Record<DerivedMetrics['healthStatus'], number> = {
-    critical: 0,
-    warning: 1,
-    healthy: 2,
-    safe: 3,
-    'no-usage': 4,
-};
+// Kept for future use when sorting by health status is re-enabled
+// const statusSortOrder: Record<DerivedMetrics['healthStatus'], number> = {
+//     critical: 0,
+//     warning: 1,
+//     healthy: 2,
+//     safe: 3,
+//     'no-usage': 4,
+// };
 
 export function FabricStockHealthCard() {
     const [expanded, setExpanded] = useState<Set<string>>(new Set());

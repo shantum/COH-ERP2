@@ -112,11 +112,11 @@ export default function QuickOrder() {
     const { createOrder } = useOrderCrudMutations({
         onCreateSuccess: () => {
             showSuccess('Order created and pushed to sheet');
-            navigate({ to: '/orders', search: { view: 'open', page: 1, limit: 250 } });
+            navigate({ to: '/orders', search: { view: 'all', page: 1, limit: 250 } });
         },
     });
 
-    const goBack = () => navigate({ to: '/orders', search: { view: 'open', page: 1, limit: 250 } });
+    const goBack = () => navigate({ to: '/orders', search: { view: 'all', page: 1, limit: 250 } });
 
     const channelsWithoutShopify =
         channels?.filter((ch: { id: string; name: string }) => ch.name?.toLowerCase() !== 'shopify') || [];

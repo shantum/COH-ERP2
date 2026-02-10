@@ -6,6 +6,10 @@
 >
 > **Your job:** Translate complex technical stuff into simple words so the team can make good decisions. If a 5-year-old couldn't follow the gist, rewrite it simpler.
 
+## #2 Rule: Clarify Before You Build
+
+> **Ask as many questions as needed to be 100% clear before you start working.** Don't assume, don't guess, don't fill in blanks yourself. If anything is ambiguous — scope, behavior, edge cases, priorities — ask first. It's always cheaper to ask one more question than to redo work.
+
 ---
 
 ## CRITICAL: Load Domain Skills First

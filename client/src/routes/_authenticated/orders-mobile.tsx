@@ -25,8 +25,8 @@ function MobileOrdersPage() {
     // Fetch orders with reduced page size for mobile performance
     const getOrdersFn = useServerFn(getOrders);
     const { data: ordersData, isLoading } = useQuery({
-        queryKey: ['orders', 'list', 'getOrders', { view: 'open', limit: MOBILE_PAGE_SIZE }],
-        queryFn: () => getOrdersFn({ data: { view: 'open', limit: MOBILE_PAGE_SIZE } }),
+        queryKey: ['orders', 'list', 'getOrders', { view: 'all', limit: MOBILE_PAGE_SIZE }],
+        queryFn: () => getOrdersFn({ data: { view: 'all', limit: MOBILE_PAGE_SIZE } }),
     });
 
     // Convert to flattened rows (server already provides this)
@@ -36,7 +36,7 @@ function MobileOrdersPage() {
     }, [ordersData]);
 
     // Use the same mutations as the desktop orders page
-    const production = useProductionBatchMutations({ currentView: 'open' });
+    const production = useProductionBatchMutations({ currentView: 'all' });
 
     // Handlers
     const handleCreateBatch = useCallback((params: {

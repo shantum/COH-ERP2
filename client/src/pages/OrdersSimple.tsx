@@ -1,18 +1,9 @@
-import { useMemo, useCallback, useRef } from 'react';
+import { useMemo } from 'react';
 import { Link, useSearch } from '@tanstack/react-router';
 import { useUnifiedOrdersData } from '../hooks/useUnifiedOrdersData';
-import { useOrdersMutations } from '../hooks/useOrdersMutations';
 import { useOrderSSE } from '../hooks/useOrderSSE';
-import { enrichRowsWithInventory } from '../utils/orderHelpers';
 import { formatDate } from '../utils/agGridHelpers';
-import type { DynamicColumnHandlers } from '../components/orders/OrdersTable/types';
 import { ORDERS_PAGE_SIZE } from '../constants/queryKeys';
-
-// Cell components (reused from main orders table)
-import { ProductionCell } from '../components/orders/OrdersTable/cells/ProductionCell';
-import { NotesCell } from '../components/orders/OrdersTable/cells/NotesCell';
-import { QtyStockCell } from '../components/orders/OrdersTable/cells/QtyStockCell';
-import { ShipByDateCell } from '../components/orders/OrdersTable/cells/ShipByDateCell';
 
 const PAGE_SIZE = ORDERS_PAGE_SIZE;
 
@@ -21,13 +12,12 @@ const HEADERS = [
     { label: 'Order #', width: 90 },
     { label: 'Customer', width: 150 },
     { label: 'City', width: 100 },
-    { label: 'Ship By', width: 100 },
     { label: 'Product', width: 180 },
     { label: 'Color', width: 80 },
     { label: 'Size', width: 50 },
-    { label: 'Qty/Stock', width: 90 },
+    { label: 'Qty', width: 50 },
+    { label: 'Price', width: 80 },
     { label: 'Status', width: 80 },
-    { label: 'Production', width: 100 },
     { label: 'Notes', width: 140 },
     { label: 'Amount', width: 80 },
     { label: 'Payment', width: 65 },
@@ -39,58 +29,19 @@ export function OrdersSimplePage() {
 
     // SSE for real-time updates
     const { isConnected } = useOrderSSE({
-        currentView: 'open',
+        currentView: 'all',
         page: 1,
     });
 
-    // Data fetching with inventory enrichment & SSE support
+    // Data fetching
     const {
-        rows: rawRows,
-        inventoryBalance,
-        fabricStock,
-        lockedDates,
+        rows: allRows,
         isLoading,
     } = useUnifiedOrdersData({
-        currentView: 'open',
+        currentView: 'all',
         page: 1,
         isSSEConnected: isConnected,
     });
-
-    // Enrich rows with live inventory data
-    const allRows = useMemo(
-        () => enrichRowsWithInventory(rawRows, inventoryBalance, fabricStock),
-        [rawRows, inventoryBalance, fabricStock],
-    );
-
-    // Mutations (only CRUD, status, production — no fulfillment)
-    const mutations = useOrdersMutations({
-        currentView: 'open',
-        page: 1,
-    });
-
-    // isDateLocked helper for ProductionCell
-    const isDateLocked = useCallback(
-        (date: string) => (lockedDates || []).includes(date),
-        [lockedDates],
-    );
-
-    // Build handlersRef (mutable ref avoids re-renders while always having latest handlers)
-    const handlersRef = useRef<DynamicColumnHandlers>({} as DynamicColumnHandlers);
-    handlersRef.current = {
-        allocatingLines: new Set(),
-        isCancellingLine: false,
-        isUncancellingLine: false,
-        isCancellingOrder: false,
-        isDeletingOrder: false,
-        onCreateBatch: (data) => mutations.createBatch.mutate(data),
-        onUpdateBatch: (id, data) => mutations.updateBatch.mutate({ id, data }),
-        onDeleteBatch: (id) => mutations.deleteBatch.mutate(id),
-        onUpdateLineNotes: (lineId, notes) => mutations.updateLineNotes.mutateAsync({ lineId, notes }),
-        onViewOrder: () => {},
-        onViewCustomer: () => {},
-        onUpdateShipByDate: (orderId, date) => mutations.updateShipByDate.mutate({ orderId, date }),
-        onSettled: () => mutations.invalidateAll(),
-    };
 
     // Client-side pagination
     const totalPages = Math.max(1, Math.ceil(allRows.length / PAGE_SIZE));
@@ -113,7 +64,7 @@ export function OrdersSimplePage() {
             {/* Header bar */}
             <div className="flex items-center justify-between border-b bg-white px-3 py-2">
                 <span className="font-semibold">
-                    Open Orders ({allRows.length} rows)
+                    All Orders ({allRows.length} rows)
                 </span>
                 <div className="flex items-center gap-3">
                     <span className={`h-2 w-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-400'}`} />
@@ -158,7 +109,7 @@ export function OrdersSimplePage() {
                                     {row.isFirstLine ? (
                                         <Link
                                             to="/orders"
-                                            search={{ view: 'open', page: 1, limit: 250, search: row.orderNumber }}
+                                            search={{ view: 'all', page: 1, limit: 250, search: row.orderNumber }}
                                             className="text-blue-700 underline"
                                         >
                                             {row.orderNumber}
@@ -173,12 +124,6 @@ export function OrdersSimplePage() {
                                 <td className="border border-gray-200 px-2 py-1">
                                     {row.isFirstLine ? row.city : ''}
                                 </td>
-                                {/* Ship By */}
-                                <td className="border border-gray-200 px-1 py-0.5">
-                                    {row.isFirstLine ? (
-                                        <ShipByDateCell row={row} handlersRef={handlersRef} />
-                                    ) : ''}
-                                </td>
                                 {/* Product */}
                                 <td className="border border-gray-200 px-2 py-1">
                                     {row.productName}
@@ -191,11 +136,15 @@ export function OrdersSimplePage() {
                                 <td className="border border-gray-200 px-2 py-1">
                                     {row.size}
                                 </td>
-                                {/* Qty/Stock */}
-                                <td className="border border-gray-200 px-1 py-0.5">
-                                    <QtyStockCell row={row} />
+                                {/* Qty */}
+                                <td className="border border-gray-200 px-2 py-1">
+                                    {row.qty}
                                 </td>
-                                {/* Status (read-only badge) */}
+                                {/* Price */}
+                                <td className="border border-gray-200 px-2 py-1 text-right">
+                                    {row.unitPrice > 0 ? `\u20B9${row.unitPrice.toLocaleString('en-IN')}` : '-'}
+                                </td>
+                                {/* Status */}
                                 <td className="border border-gray-200 px-2 py-1">
                                     <span className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-medium ${
                                         row.lineStatus === 'shipped' ? 'bg-green-100 text-green-700' :
@@ -208,13 +157,9 @@ export function OrdersSimplePage() {
                                         {row.lineStatus}
                                     </span>
                                 </td>
-                                {/* Production */}
-                                <td className="border border-gray-200 px-1 py-0.5">
-                                    <ProductionCell row={row} handlersRef={handlersRef} isDateLocked={isDateLocked} />
-                                </td>
                                 {/* Notes */}
-                                <td className="border border-gray-200 px-1 py-0.5">
-                                    <NotesCell row={row} handlersRef={handlersRef} />
+                                <td className="border border-gray-200 px-2 py-1 truncate max-w-[140px]">
+                                    {row.lineNotes || '-'}
                                 </td>
                                 {/* Amount */}
                                 <td className="border border-gray-200 px-2 py-1 text-right">

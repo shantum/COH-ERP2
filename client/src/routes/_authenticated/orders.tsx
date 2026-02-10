@@ -8,36 +8,22 @@ import { createFileRoute } from '@tanstack/react-router';
 import { OrdersSearchParams } from '@coh/shared';
 import { getOrders, type OrdersResponse } from '../../server/functions/orders';
 
-// Direct import (no lazy loading) for SSR routes with loader data
-// React's lazy() causes hydration flicker: SSR content → Suspense fallback → content again
 import Orders from '../../pages/Orders';
 
 export const Route = createFileRoute('/_authenticated/orders')({
     validateSearch: (search) => OrdersSearchParams.parse(search),
-    // Extract search params for loader
     loaderDeps: ({ search }) => ({
-        view: search.view || 'open',
+        view: search.view || 'all',
         page: search.page || 1,
         limit: search.limit || 250,
-        // Pass filter params for server-side filtering
-        allocatedFilter: search.allocatedFilter,
-        productionFilter: search.productionFilter,
     }),
-    // Pre-fetch orders data on server
     loader: async ({ deps }): Promise<OrdersLoaderData> => {
         try {
             const orders = await getOrders({
                 data: {
-                    view: deps.view as 'open' | 'shipped' | 'rto' | 'all',
+                    view: deps.view as 'all' | 'in_transit' | 'delivered' | 'rto' | 'cancelled',
                     page: deps.page,
                     limit: deps.limit,
-                    // Server-side filters (only apply to 'open' view)
-                    ...(deps.allocatedFilter && deps.allocatedFilter !== 'all'
-                        ? { allocatedFilter: deps.allocatedFilter }
-                        : {}),
-                    ...(deps.productionFilter && deps.productionFilter !== 'all'
-                        ? { productionFilter: deps.productionFilter }
-                        : {}),
                 },
             });
             return { orders, error: null };
@@ -57,7 +43,6 @@ export const Route = createFileRoute('/_authenticated/orders')({
     component: Orders,
 });
 
-// Export loader data type for use in components
 export interface OrdersLoaderData {
     orders: OrdersResponse;
     error: string | null;

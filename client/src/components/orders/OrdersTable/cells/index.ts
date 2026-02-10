@@ -5,11 +5,6 @@
 // Shared components
 export { CheckboxSpinner } from './CheckboxSpinner';
 
-// Fulfillment action cells (STRIPPED — fulfillment now in Google Sheets)
-// AdminShipCell, AssignStockCell, CancelLineCell, PickPackCell, WorkflowCell removed from UI
-export { ProductionCell } from './ProductionCell';
-export { ProductionDatePopover } from './ProductionDatePopover';
-
 // Order info cells
 export { ChannelCell } from './ChannelCell';
 export { OrderCell } from './OrderCell';
@@ -21,29 +16,27 @@ export { OrderAgeCell } from './OrderAgeCell';
 export { OrderNumberCell } from './OrderNumberCell';
 export { CustomerNameCell } from './CustomerNameCell';
 export { CityCell } from './CityCell';
-export { ShipByDateCell } from './ShipByDateCell';
 
-// Payment & customer cells
+// Payment cells
 export { PaymentInfoCell } from './PaymentInfoCell';
 export { PaymentMethodCell } from './PaymentMethodCell';
 export { RtoHistoryCell } from './RtoHistoryCell';
 export { CustomerLtvCell } from './CustomerLtvCell';
 export { CustomerOrderCountCell } from './CustomerOrderCountCell';
-export { TagsCell } from './TagsCell';
-export { CustomerNotesCell } from './CustomerNotesCell';
-export { CustomerTagsCell } from './CustomerTagsCell';
 
 // Line item cells
-export { CustomizeCell } from './CustomizeCell';
 export { FabricBalanceCell } from './FabricBalanceCell';
 export { ProductNameCell } from './ProductNameCell';
 export { QtyCell } from './QtyCell';
-export { StockCell } from './StockCell';
 export { QtyStockCell } from './QtyStockCell';
 export { NotesCell } from './NotesCell';
-export { ReturnStatusCell } from './ReturnStatusCell';
+
+// New monitoring cells
+export { UnitPriceCell } from './UnitPriceCell';
+export { CostCell } from './CostCell';
+export { MarginCell } from './MarginCell';
+export { FabricColourCell } from './FabricColourCell';
 
 // Tracking cells
 export { TrackingInfoCell } from './TrackingInfoCell';
 export { TrackingStatusCell } from './TrackingStatusCell';
-export { ShopifyTrackingCell } from './ShopifyTrackingCell';

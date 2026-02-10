@@ -2,21 +2,23 @@
  * OrderViewTabs Component
  *
  * Segmented control for switching between order views:
- * - Open: Orders pending fulfillment
- * - Shipped: Recently shipped, not yet delivered (excludes RTO)
+ * - All Orders: All non-archived orders
+ * - In Transit: Shipped, not yet delivered
+ * - Delivered: Tracking shows delivered
  * - RTO: Orders returning to origin
- * - All: All recent non-archived orders
+ * - Cancelled: Cancelled orders
  */
 
 import { memo } from 'react';
 
-export type OrderView = 'open' | 'shipped' | 'rto' | 'all';
+export type OrderView = 'all' | 'in_transit' | 'delivered' | 'rto' | 'cancelled';
 
 export interface ViewCounts {
-    open: number;
-    shipped: number;
-    rto: number;
     all: number;
+    in_transit: number;
+    delivered: number;
+    rto: number;
+    cancelled: number;
 }
 
 interface OrderViewTabsProps {
@@ -27,13 +29,14 @@ interface OrderViewTabsProps {
 }
 
 const VIEW_CONFIG: Record<OrderView, { label: string; color: string; bgColor: string }> = {
-    open: { label: 'Open', color: 'text-emerald-700', bgColor: 'bg-emerald-100' },
-    shipped: { label: 'Shipped', color: 'text-blue-700', bgColor: 'bg-blue-100' },
+    all: { label: 'All Orders', color: 'text-gray-700', bgColor: 'bg-gray-100' },
+    in_transit: { label: 'In Transit', color: 'text-blue-700', bgColor: 'bg-blue-100' },
+    delivered: { label: 'Delivered', color: 'text-green-700', bgColor: 'bg-green-100' },
     rto: { label: 'RTO', color: 'text-orange-700', bgColor: 'bg-orange-100' },
-    all: { label: 'All', color: 'text-gray-700', bgColor: 'bg-gray-100' },
+    cancelled: { label: 'Cancelled', color: 'text-red-700', bgColor: 'bg-red-100' },
 };
 
-const VIEWS: OrderView[] = ['open', 'shipped', 'rto', 'all'];
+const VIEWS: OrderView[] = ['all', 'in_transit', 'delivered', 'rto', 'cancelled'];
 
 function OrderViewTabsComponent({
     currentView,

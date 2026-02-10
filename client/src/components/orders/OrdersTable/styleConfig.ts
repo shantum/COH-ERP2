@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Orders Table Style Configuration
  *

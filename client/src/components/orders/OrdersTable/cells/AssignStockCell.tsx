@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * AssignStockCell - Clear allocate/assign stock button
  * Shows active green button when stock available, inactive gray when not

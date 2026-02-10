@@ -38,7 +38,7 @@ export function buildAllColumns(ctx: OrdersTableContext): ColumnDef<FlattenedOrd
  */
 export function getColumnsForView(
     columns: ColumnDef<FlattenedOrderRow>[],
-    _view: 'open' | 'shipped' | 'rto' | 'all' | 'cancelled'
+    _view: string
 ): ColumnDef<FlattenedOrderRow>[] {
     // All views use the same columns now
     return columns;

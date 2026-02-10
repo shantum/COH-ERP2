@@ -311,7 +311,7 @@ export default function Customers() {
                 try {
                     const response = await getOrdersFn({
                         data: {
-                            view: 'open',
+                            view: 'all',
                             orderId: orders[0].id,
                         },
                     });

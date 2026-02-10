@@ -20,15 +20,15 @@ import { orderTabInvalidationMap, ORDERS_PAGE_SIZE } from '../../constants/query
 export const PAGE_SIZE = ORDERS_PAGE_SIZE;
 
 // All order views
-export const ORDER_VIEWS = ['open', 'shipped', 'rto', 'all', 'cancelled'] as const;
+export const ORDER_VIEWS = ['all', 'in_transit', 'delivered', 'rto', 'cancelled'] as const;
 export type OrderView = (typeof ORDER_VIEWS)[number];
 
 // Map view names to query input
 export const viewToQueryInput: Record<string, { view: string; limit?: number }> = {
-    open: { view: 'open', limit: PAGE_SIZE },
-    shipped: { view: 'shipped', limit: PAGE_SIZE },
-    rto: { view: 'rto', limit: PAGE_SIZE },
     all: { view: 'all', limit: PAGE_SIZE },
+    in_transit: { view: 'in_transit', limit: PAGE_SIZE },
+    delivered: { view: 'delivered', limit: PAGE_SIZE },
+    rto: { view: 'rto', limit: PAGE_SIZE },
     cancelled: { view: 'cancelled', limit: PAGE_SIZE },
 };
 
@@ -85,11 +85,15 @@ export function createInvalidationHelpers(ctx: InvalidationContext) {
 
     return {
         invalidateTab,
-        invalidateOpenOrders: () => invalidateTab('open'),
-        invalidateShippedOrders: () => invalidateTab('shipped'),
+        invalidateAllOrders: () => invalidateTab('all'),
+        invalidateInTransitOrders: () => invalidateTab('in_transit'),
+        invalidateDeliveredOrders: () => invalidateTab('delivered'),
         invalidateRtoOrders: () => invalidateTab('rto'),
-        invalidateCodPendingOrders: () => invalidateTab('cod_pending'),
         invalidateCancelledOrders: () => invalidateTab('cancelled'),
+        // Legacy aliases (Phase 2 cleanup: remove when mutation hooks are updated)
+        invalidateOpenOrders: () => invalidateTab('all'),
+        invalidateShippedOrders: () => invalidateTab('in_transit'),
+        invalidateCodPendingOrders: () => invalidateTab('all'),
         invalidateAll: () => {
             Object.keys(orderTabInvalidationMap).forEach(tab => {
                 invalidateTab(tab as keyof typeof orderTabInvalidationMap);

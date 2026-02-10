@@ -33,7 +33,7 @@ export default function NewOrder() {
     const { createOrder } = useOrderCrudMutations({
         onCreateSuccess: () => {
             showSuccess('Order created');
-            navigate({ to: '/orders', search: { view: 'open', page: 1, limit: 250 } });
+            navigate({ to: '/orders', search: { view: 'all', page: 1, limit: 250 } });
         },
     });
 
@@ -44,7 +44,7 @@ export default function NewOrder() {
                 <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => navigate({ to: '/orders', search: { view: 'open', page: 1, limit: 250 } })}
+                    onClick={() => navigate({ to: '/orders', search: { view: 'all', page: 1, limit: 250 } })}
                     className="h-8 px-2"
                 >
                     <ArrowLeft className="h-4 w-4" />
@@ -64,7 +64,7 @@ export default function NewOrder() {
                     channels={channels || []}
                     onCreate={(data) => createOrder.mutate(data)}
                     isCreating={createOrder.isPending}
-                    onCancel={() => navigate({ to: '/orders', search: { view: 'open', page: 1, limit: 250 } })}
+                    onCancel={() => navigate({ to: '/orders', search: { view: 'all', page: 1, limit: 250 } })}
                     fullPage
                 />
             </div>

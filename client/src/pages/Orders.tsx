@@ -1,8 +1,6 @@
 /**
- * Orders page - Unified order management with dropdown view selector
- * Views: Open, Shipped, Cancelled
- * Shipped view has filter chips for: All, RTO, COD Pending
- * Note: Archived view hidden from UI but auto-archive still runs. Search shows archived orders.
+ * Orders page - Monitoring dashboard
+ * Views: All Orders, In Transit, Delivered, RTO, Cancelled
  */
 
 import { useState, useMemo, useCallback, lazy, Suspense } from 'react';
@@ -16,15 +14,9 @@ import { useUnifiedOrdersData, type OrderView } from '../hooks/useUnifiedOrdersD
 import { useSearchOrders } from '../hooks/useSearchOrders';
 import { useOrdersMutations } from '../hooks/useOrdersMutations';
 import { useOrderSSE } from '../hooks/useOrderSSE';
-import { useAuth } from '../hooks/useAuth';
 import { useDebounce } from '../hooks/useDebounce';
 import { useOrdersUrlModal, type OrderModalType } from '../hooks/useUrlModal';
 import { invalidateAllOrderViewsStale } from '../hooks/orders/orderMutationUtils';
-
-// Utilities
-import {
-    enrichRowsWithInventory,
-} from '../utils/orderHelpers';
 
 // Server functions
 import { getOrderById } from '../server/functions/orders';
@@ -36,84 +28,42 @@ import {
     GlobalOrderSearch,
     OrderViewTabs,
 } from '../components/orders';
-import type { CustomizationType } from '../components/orders';
 
 // Lazy load modals - only loaded when user opens them
 const CreateOrderModal = lazy(() => import('../components/orders/CreateOrderModal'));
-const CustomizationModal = lazy(() => import('../components/orders/CustomizationModal'));
 const UnifiedOrderModal = lazy(() => import('../components/orders/UnifiedOrderModal'));
-import type { Order, OrderLine } from '../types';
+import type { Order } from '../types';
 import type { OrdersSearchParams } from '@coh/shared';
 
 // Type for the derived order objects from useUnifiedOrdersData
-// These are constructed from rows, not full Order objects
 interface DerivedOrder {
     id: string;
     orderNumber: string;
-    orderLines?: OrderLine[];
     status: string;
     isArchived: boolean;
     releasedToShipped: boolean;
     releasedToCancelled: boolean;
 }
 
-// Batch callback data types
-interface CreateBatchData {
-    batchDate?: string;
-    tailorId?: string;
-    skuId?: string;
-    sampleName?: string;
-    sampleColour?: string;
-    sampleSize?: string;
-    qtyPlanned: number;
-    priority?: 'low' | 'normal' | 'high' | 'urgent' | 'order_fulfillment';
-    sourceOrderLineId?: string;
-    notes?: string;
-}
-
-interface UpdateBatchData {
-    batchDate?: string;
-    qtyPlanned?: number;
-    tailorId?: string;
-    priority?: 'low' | 'normal' | 'high' | 'urgent';
-    notes?: string;
-}
-
-// View configuration (4 views: Open, Shipped, RTO, All)
-const VIEW_CONFIG: Record<OrderView, { label: string; color: string }> = {
-    open: { label: 'Open Orders', color: 'primary' },
-    shipped: { label: 'Shipped', color: 'blue' },
-    rto: { label: 'RTO', color: 'orange' },
-    all: { label: 'All Orders', color: 'gray' },
-};
-
 export default function Orders() {
     const queryClient = useQueryClient();
-    const { user } = useAuth();
-
     // Get loader data from route (SSR pre-fetched data)
     const loaderData = Route.useLoaderData();
 
     // View, page, and limit state - persisted in URL via TanStack Router
-    // Using Route.useSearch() for proper SSR support
     const search = Route.useSearch();
     const navigate = useNavigate();
-    const view = (search.view || 'open') as OrderView;
+    const view = (search.view || 'all') as OrderView;
     const page = search.page || 1;
     const limit = search.limit || 250;
 
     const setView = useCallback((newView: OrderView) => {
-        // Clear view-specific filters when changing views
-        // Open view filters: allocatedFilter, productionFilter
         navigate({
             to: '/orders',
             search: {
                 ...search,
                 view: newView,
                 page: 1,
-                // Clear Open view-specific filters when changing views
-                allocatedFilter: undefined,
-                productionFilter: undefined,
             } satisfies OrdersSearchParams,
             replace: true,
         });
@@ -133,29 +83,7 @@ export default function Orders() {
     const isSearchMode = debouncedSearch.length >= 2;
     const [searchPage, setSearchPage] = useState(1);
 
-    // Filter state - now URL-persisted via TanStack Router search params
-    // This enables bookmarking and sharing filtered views
-    const allocatedFilter = search.allocatedFilter || 'all';
-    const productionFilter = search.productionFilter || 'all';
-
-    const setAllocatedFilter = useCallback((value: 'all' | 'allocated' | 'pending') => {
-        navigate({
-            to: '/orders',
-            search: { ...search, allocatedFilter: value === 'all' ? undefined : value, page: 1 } satisfies OrdersSearchParams,
-            replace: true,
-        });
-    }, [navigate, search]);
-
-    const setProductionFilter = useCallback((value: 'all' | 'scheduled' | 'needs' | 'ready') => {
-        navigate({
-            to: '/orders',
-            search: { ...search, productionFilter: value === 'all' ? undefined : value, page: 1 } satisfies OrdersSearchParams,
-            replace: true,
-        });
-    }, [navigate, search]);
-
-    // URL-driven modal state (enables bookmarking/sharing modal links)
-    // Instead of useState, modal state is stored in URL search params
+    // URL-driven modal state
     const {
         modalType,
         selectedId: modalOrderId,
@@ -163,46 +91,20 @@ export default function Orders() {
         closeModal,
     } = useOrdersUrlModal();
 
-    // Derive modal state from URL params
     const showCreateOrder = modalType === 'create';
     const unifiedModalMode = (modalType === 'view' || modalType === 'edit' || modalType === 'ship' || modalType === 'customer') ? modalType : 'view';
 
-    // Track which lines are currently being processed (for loading spinners)
-    const [processingLines] = useState<Set<string>>(new Set());
-
-    // Customization modal state
-    const [customizingLine, setCustomizingLine] = useState<{
-        lineId: string;
-        skuCode: string;
-        productName: string;
-        colorName: string;
-        size: string;
-        qty: number;
-    } | null>(null);
-    const [isEditingCustomization, setIsEditingCustomization] = useState(false);
-    const [customizationInitialData, setCustomizationInitialData] = useState<{
-        type: CustomizationType;
-        value: string;
-        notes?: string;
-    } | null>(null);
-
-    // Real-time updates via SSE (for multi-user collaboration)
-    // When SSE is connected, polling is reduced since SSE handles updates
+    // Real-time updates via SSE
     const { isConnected: isSSEConnected } = useOrderSSE({ currentView: view, page, limit });
 
-    // Data hook - simplified, single view with pagination
-    // Filters are passed to server for server-side filtering (reduces data transfer)
+    // Data hook - simplified
     const {
         rows: serverRows,
         orders,
         pagination: viewPagination,
         viewCounts,
         viewCountsLoading,
-        openViewCounts,
-        inventoryBalance,
-        fabricStock,
         channels,
-        lockedDates,
         isLoading: viewLoading,
         isFetching: viewFetching,
         refetch: viewRefetch,
@@ -211,11 +113,7 @@ export default function Orders() {
         page,
         limit,
         isSSEConnected,
-        // Pass loader data for instant SSR hydration
         initialData: loaderData?.orders ?? null,
-        // Server-side filters for Open view (reduces CPU spikes on filter toggle)
-        allocatedFilter,
-        productionFilter,
     });
 
     // Search data hook - only active when searching
@@ -241,10 +139,7 @@ export default function Orders() {
     const activePage = isSearchMode ? searchPage : page;
     const setActivePage = isSearchMode ? setSearchPage : setPage;
 
-    // Find the order for the modal from the URL orderId param
-    // Must be placed after `orders` is defined from useUnifiedOrdersData
-    // Note: `orders` is DerivedOrder[] but modal expects full Order type
-    // The modal only needs core fields which DerivedOrder provides
+    // Find the order for the modal
     const orderFromList = useMemo(() => {
         if (!modalOrderId || !orders) return null;
         const found = (orders as DerivedOrder[]).find((o) => o.id === modalOrderId);
@@ -252,7 +147,6 @@ export default function Orders() {
     }, [modalOrderId, orders]);
 
     // Fetch order directly when orderId is in URL but not in loaded list
-    // This handles the case when coming from search results
     const { data: fetchedOrder, isLoading: isLoadingModalOrder } = useQuery({
         queryKey: ['order', modalOrderId],
         queryFn: () => getOrderById({ data: { id: modalOrderId! } }),
@@ -260,30 +154,18 @@ export default function Orders() {
         staleTime: 30 * 1000,
     });
 
-    // Use order from list if available, otherwise use fetched order
     const unifiedModalOrder = orderFromList || (fetchedOrder as unknown as Order) || null;
 
-    // Modal handlers - now URL-driven for bookmarking/sharing
-    const openUnifiedModal = useCallback((order: Order, mode: 'view' | 'edit' | 'ship' | 'customer' = 'view') => {
-        openModal(mode as OrderModalType, order.id);
+    // Modal handlers
+    const handleViewCustomer = useCallback((order: Order) => {
+        openModal('customer' as OrderModalType, order.id);
     }, [openModal]);
 
-    // Handler for viewing customer profile from grid
-    const handleViewCustomer = useCallback((order: Order) => {
-        openUnifiedModal(order, 'customer');
-    }, [openUnifiedModal]);
-
     const handleViewOrderById = useCallback((orderId: string) => {
-        // Always open the modal via URL - the fallback query will fetch the order if not in local list
         openModal('view' as OrderModalType, orderId);
     }, [openModal]);
 
-    const handleEditOrderUnified = useCallback((order: Order) => {
-        openUnifiedModal(order, 'edit');
-    }, [openUnifiedModal]);
-
-    // Mutations hook with optimistic update support
-    // Pass currentView and page so mutations can target the correct cache
+    // Mutations hook
     const mutations = useOrdersMutations({
         onCreateSuccess: () => closeModal(),
         onDeleteSuccess: () => closeModal(),
@@ -292,17 +174,10 @@ export default function Orders() {
         page,
     });
 
-    // Enrich server-flattened rows with client-side inventory data
-    // This is O(n) with O(1) Map lookups - much faster than full flatten
-    const currentRows = useMemo(
-        () => enrichRowsWithInventory(activeRows, inventoryBalance, fabricStock),
-        [activeRows, inventoryBalance, fabricStock]
-    );
-
     // Search handlers
     const handleSearchChange = useCallback((query: string) => {
         setSearchInput(query);
-        setSearchPage(1); // Reset to page 1 when search changes
+        setSearchPage(1);
     }, []);
 
     const handleClearSearch = useCallback(() => {
@@ -310,182 +185,15 @@ export default function Orders() {
         setSearchPage(1);
     }, []);
 
-    // Apply row-level display filters (server already filtered orders, this filters rows within orders)
-    // Server-side: Filters orders to include only those with matching lines
-    // Client-side: Filters rows to display only the matching lines within those orders
-    const filteredRows = useMemo(() => {
-        let rows = currentRows;
-
-        // Skip client-side filters in search mode - search returns all matching orders
-        if (isSearchMode) {
-            return rows;
-        }
-
-        // Open view: Row-level display filtering
-        // Server has already filtered to orders with matching lines
-        // Now filter to show only the matching rows (lines) within those orders
-        if (view === 'open') {
-            // Allocated filter - show only lines with allocated/picked/packed status
-            if (allocatedFilter === 'allocated') {
-                rows = rows.filter(row =>
-                    row.lineStatus === 'allocated' ||
-                    row.lineStatus === 'picked' ||
-                    row.lineStatus === 'packed'
-                );
-            } else if (allocatedFilter === 'pending') {
-                // Show only pending lines
-                rows = rows.filter(row => row.lineStatus === 'pending');
-            }
-
-            // Production filter - additional row filtering
-            if (productionFilter === 'scheduled') {
-                // Show only scheduled lines
-                rows = rows.filter(row => row.productionBatchId);
-            } else if (productionFilter === 'needs') {
-                // Show only lines that need production (pending, no batch, insufficient stock OR customized)
-                // Server already filtered to orders with such lines
-                rows = rows.filter(row =>
-                    row.lineStatus === 'pending' &&
-                    !row.productionBatchId &&
-                    (row.skuStock < row.qty || row.isCustomized)
-                );
-            }
-            // Note: 'ready' filter doesn't need row-level filtering
-            // Server already ensures all non-cancelled lines are allocated/picked/packed
-        }
-
-        // Note: Shipped view filters (RTO, COD Pending) are applied server-side
-
-        return rows;
-    }, [currentRows, view, allocatedFilter, productionFilter, isSearchMode]);
-
-    // Pipeline counts from server (Open view only)
-    // Server computes these efficiently via SQL COUNT queries
-    const pipelineCounts = openViewCounts ?? { pending: 0, allocated: 0, ready: 0 };
-
-    // STRIPPED: Fulfillment handlers (allocate, pick, pack, ship, unship, tracking) removed.
-    // Fulfillment now managed in Google Sheets.
-
-    const handleCustomize = useCallback(
-        (_lineId: string, lineData: {
-            lineId: string;
-            skuCode: string;
-            productName: string;
-            colorName: string;
-            size: string;
-            qty: number;
-        }) => {
-            setCustomizingLine(lineData);
-            setIsEditingCustomization(false);
-            setCustomizationInitialData(null);
-        },
-        []
-    );
-
-    const handleEditCustomization = useCallback(
-        (_lineId: string, lineData: {
-            lineId: string;
-            skuCode: string;
-            productName: string;
-            colorName: string;
-            size: string;
-            qty: number;
-            customizationType: string | null;
-            customizationValue: string | null;
-            customizationNotes: string | null;
-        }) => {
-            setCustomizingLine({
-                lineId: lineData.lineId,
-                skuCode: lineData.skuCode,
-                productName: lineData.productName,
-                colorName: lineData.colorName,
-                size: lineData.size,
-                qty: lineData.qty,
-            });
-            setIsEditingCustomization(true);
-            setCustomizationInitialData({
-                type: (lineData.customizationType as CustomizationType) || 'length',
-                value: lineData.customizationValue || '',
-                notes: lineData.customizationNotes || undefined,
-            });
-        },
-        []
-    );
-
-    const handleRemoveCustomization = useCallback(
-        (lineId: string, skuCode: string) => {
-            if (confirm(`Remove customization from ${skuCode}?\n\nThis will revert the line to its original state.`)) {
-                mutations.removeCustomization.mutate({ lineId });
-            }
-        },
-        [mutations.removeCustomization]
-    );
-
-    const handleConfirmCustomization = useCallback(
-        (data: { type: 'length' | 'size' | 'measurements' | 'other'; value: string; notes?: string }) => {
-            if (!customizingLine) return;
-
-            if (isEditingCustomization) {
-                mutations.removeCustomization.mutate({ lineId: customizingLine.lineId }, {
-                    onSuccess: () => {
-                        mutations.customizeLine.mutate(
-                            { lineId: customizingLine.lineId, data },
-                            {
-                                onSuccess: () => {
-                                    setCustomizingLine(null);
-                                    setIsEditingCustomization(false);
-                                    setCustomizationInitialData(null);
-                                },
-                            }
-                        );
-                    },
-                });
-            } else {
-                mutations.customizeLine.mutate(
-                    { lineId: customizingLine.lineId, data },
-                    {
-                        onSuccess: () => {
-                            setCustomizingLine(null);
-                            setIsEditingCustomization(false);
-                            setCustomizationInitialData(null);
-                        },
-                    }
-                );
-            }
-        },
-        [customizingLine, isEditingCustomization, mutations.customizeLine, mutations.removeCustomization]
-    );
-
-    // Common grid props shared between AG-Grid and TanStack Table
+    // Grid props - simplified for monitoring dashboard
     const gridProps = {
-        rows: filteredRows,
-        lockedDates: lockedDates || [],
+        rows: activeRows,
         currentView: view,
-        // Fulfillment handlers stripped — managed in Google Sheets
-        onCreateBatch: (data: CreateBatchData) => mutations.createBatch.mutate(data),
-        onUpdateBatch: (id: string, data: UpdateBatchData) => mutations.updateBatch.mutate({ id, data }),
-        onDeleteBatch: (id: string) => mutations.deleteBatch.mutate(id),
-        // Use mutateAsync for debounced auto-save hook compatibility
-        onUpdateLineNotes: (lineId: string, notes: string) => mutations.updateLineNotes.mutateAsync({ lineId, notes }),
         onViewOrder: handleViewOrderById,
-        onEditOrder: handleEditOrderUnified,
-        onCancelOrder: (id: string, reason?: string) => mutations.cancelOrder.mutate({ id, reason }),
-        onDeleteOrder: (id: string) => mutations.deleteOrder.mutate(id),
         onViewCustomer: handleViewCustomer,
-        onCustomize: handleCustomize,
-        onEditCustomization: handleEditCustomization,
-        onRemoveCustomization: handleRemoveCustomization,
-        onUpdateShipByDate: (orderId: string, date: string | null) => mutations.updateShipByDate.mutate({ orderId, date }),
-        // onForceShipLine removed — fulfillment managed in Google Sheets
-        allocatingLines: processingLines,
-        isCancellingOrder: mutations.cancelOrder.isPending,
-        isCancellingLine: mutations.cancelLine.isPending,
-        isUncancellingLine: mutations.uncancelLine.isPending,
-        isDeletingOrder: mutations.deleteOrder.isPending,
-        isAdmin: user?.role === 'admin',
     };
 
-    // Grid component using TanStack Table
+    // Grid component
     const {
         tableComponent,
         columnVisibilityDropdown,
@@ -493,35 +201,10 @@ export default function Orders() {
 
     return (
         <div className="space-y-1.5">
-            {/* Unified Header Bar */}
+            {/* Header Bar */}
             <div className="flex items-center justify-between gap-2 px-3 py-1.5 bg-white border border-gray-200 rounded-lg">
-                {/* Left: Title */}
                 <h1 className="text-sm font-semibold text-gray-900 whitespace-nowrap">Orders</h1>
 
-                {/* Center: Pipeline counts (Open view only) */}
-                {view === 'open' && (
-                    <div className="hidden sm:flex items-center gap-2 text-[11px]">
-                        <div className="flex items-center gap-1">
-                            <div className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-                            <span className="text-gray-500">Pending</span>
-                            <span className="font-semibold text-gray-800">{pipelineCounts.pending}</span>
-                        </div>
-                        <span className="text-gray-300">→</span>
-                        <div className="flex items-center gap-1">
-                            <div className="w-1.5 h-1.5 rounded-full bg-blue-400" />
-                            <span className="text-gray-500">Allocated</span>
-                            <span className="font-semibold text-gray-800">{pipelineCounts.allocated}</span>
-                        </div>
-                        <span className="text-gray-300">→</span>
-                        <div className="flex items-center gap-1">
-                            <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                            <span className="text-gray-500">Ready</span>
-                            <span className="font-semibold text-gray-800">{pipelineCounts.ready}</span>
-                        </div>
-                    </div>
-                )}
-
-                {/* Right: Search + New Order */}
                 <div className="flex items-center gap-1.5">
                     <GlobalOrderSearch
                         searchQuery={searchInput}
@@ -542,12 +225,10 @@ export default function Orders() {
 
             {/* Main Content Card */}
             <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-                {/* Top Toolbar - Filters, Actions, Grid Controls */}
+                {/* Top Toolbar */}
                 <div className="flex items-center justify-between gap-2 px-2 py-1 border-b border-gray-100 bg-gray-50/50">
-                    {/* Left: View selector + filters OR Search results indicator */}
                     <div className="flex items-center gap-1.5">
                         {isSearchMode ? (
-                            /* Search Mode: Show search results header */
                             <div className="flex items-center gap-2">
                                 <div className="flex items-center gap-1.5 px-2 py-0.5 bg-blue-100 border border-blue-200 rounded">
                                     <Search size={10} className="text-blue-600" />
@@ -569,46 +250,15 @@ export default function Orders() {
                                 </button>
                             </div>
                         ) : (
-                            /* Normal Mode: View tabs + filters */
-                            <>
-                                <OrderViewTabs
-                                    currentView={view}
-                                    onViewChange={setView}
-                                    counts={viewCounts}
-                                    isLoading={viewCountsLoading}
-                                />
-
-                                {view === 'open' && (
-                                    <>
-                                        <div className="w-px h-4 bg-gray-200" />
-                                        <select
-                                            value={allocatedFilter}
-                                            onChange={(e) => setAllocatedFilter(e.target.value as 'all' | 'allocated' | 'pending')}
-                                            className="text-[10px] border border-gray-200 rounded px-1 py-0.5 bg-white"
-                                        >
-                                            <option value="all">All</option>
-                                            <option value="allocated">Allocated</option>
-                                            <option value="pending">Pending</option>
-                                        </select>
-                                        <select
-                                            value={productionFilter}
-                                            onChange={(e) => setProductionFilter(e.target.value as 'all' | 'scheduled' | 'needs' | 'ready')}
-                                            className="text-[10px] border border-gray-200 rounded px-1 py-0.5 bg-white"
-                                        >
-                                            <option value="all">All</option>
-                                            <option value="scheduled">Scheduled</option>
-                                            <option value="needs">Needs prod</option>
-                                            <option value="ready">Ready</option>
-                                        </select>
-                                    </>
-                                )}
-
-                                {/* Release buttons removed — fulfillment managed in Google Sheets */}
-                            </>
+                            <OrderViewTabs
+                                currentView={view}
+                                onViewChange={setView}
+                                counts={viewCounts}
+                                isLoading={viewCountsLoading}
+                            />
                         )}
                     </div>
 
-                    {/* Right: Grid controls */}
                     <div className="flex items-center gap-1">
                         {columnVisibilityDropdown}
                         <button
@@ -622,16 +272,12 @@ export default function Orders() {
                     </div>
                 </div>
 
-                {/* Loading - show skeleton for initial load (no cached data) */}
-                {isLoading && filteredRows.length === 0 && (
-                    <OrdersGridSkeleton />
-                )}
+                {/* Loading */}
+                {isLoading && activeRows.length === 0 && <OrdersGridSkeleton />}
 
-                {/* Table - show even with stale data while refreshing in background */}
-                {filteredRows.length > 0 && (
-                    <div>{tableComponent}</div>
-                )}
-                {!isLoading && filteredRows.length === 0 && (
+                {/* Table */}
+                {activeRows.length > 0 && <div>{tableComponent}</div>}
+                {!isLoading && activeRows.length === 0 && (
                     <div className="text-center text-gray-400 py-12 text-xs">
                         {isSearchMode ? (
                             <div className="space-y-2">
@@ -645,27 +291,23 @@ export default function Orders() {
                                 </button>
                             </div>
                         ) : (
-                            <>No {VIEW_CONFIG[view].label.toLowerCase()}</>
+                            <>No orders</>
                         )}
                     </div>
                 )}
 
                 {/* Bottom Bar - Pagination */}
                 <div className="flex items-center justify-between gap-2 px-2 py-1 border-t border-gray-100 bg-gray-50/50">
-                    {/* Left: Record count */}
                     <div className="text-[10px] text-gray-500">
                         {pagination && pagination.total > 0
                             ? `${((activePage - 1) * ('pageSize' in pagination ? pagination.pageSize : pagination.limit)) + 1}–${Math.min(activePage * ('pageSize' in pagination ? pagination.pageSize : pagination.limit), pagination.total)} of ${pagination.total}`
                             : '0 orders'
                         }
                         {isSearchMode && debouncedSearch && (
-                            <span className="ml-1 text-blue-600">
-                                for "{debouncedSearch}"
-                            </span>
+                            <span className="ml-1 text-blue-600">for "{debouncedSearch}"</span>
                         )}
                     </div>
 
-                    {/* Right: Pagination controls */}
                     <div className="flex items-center gap-1">
                         <button
                             onClick={() => setActivePage(activePage - 1)}
@@ -699,23 +341,6 @@ export default function Orders() {
                     />
                 )}
 
-                {customizingLine && (
-                    <CustomizationModal
-                        isOpen={true}
-                        onClose={() => {
-                            setCustomizingLine(null);
-                            setIsEditingCustomization(false);
-                            setCustomizationInitialData(null);
-                        }}
-                        onConfirm={handleConfirmCustomization}
-                        lineData={customizingLine}
-                        isSubmitting={mutations.customizeLine.isPending || mutations.removeCustomization.isPending}
-                        isEditMode={isEditingCustomization}
-                        initialData={customizationInitialData}
-                    />
-                )}
-
-                {/* Loading state when fetching order from URL */}
                 {isLoadingModalOrder && modalOrderId && !unifiedModalOrder && (
                     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
                         <div className="bg-white rounded-lg p-6 flex items-center gap-3">
@@ -732,7 +357,6 @@ export default function Orders() {
                         onClose={closeModal}
                         onSuccess={() => {
                             closeModal();
-                            // Use smart invalidation - marks all views stale, only active view refetches
                             invalidateAllOrderViewsStale(queryClient);
                         }}
                     />

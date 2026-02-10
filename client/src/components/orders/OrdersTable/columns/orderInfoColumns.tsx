@@ -1,6 +1,6 @@
 /**
  * Order Info Columns - TanStack Table column definitions
- * Columns: orderInfo, customerInfo, paymentInfo, shipByDate
+ * Columns: orderInfo, channel, customerInfo, paymentInfo
  */
 
 import type { ColumnDef } from '@tanstack/react-table';
@@ -12,14 +12,12 @@ import {
     ChannelCell,
     CustomerInfoCell,
     PaymentInfoCell,
-    ShipByDateCell,
 } from '../cells';
 
 export function buildOrderInfoColumns(ctx: OrdersTableContext): ColumnDef<FlattenedOrderRow>[] {
     const { getHeaderName, handlersRef } = ctx;
 
     return [
-        // Order Number + Date/Time
         {
             id: 'orderInfo',
             header: getHeaderName('orderInfo'),
@@ -32,8 +30,6 @@ export function buildOrderInfoColumns(ctx: OrdersTableContext): ColumnDef<Flatte
                 return dateA - dateB;
             },
         },
-
-        // Channel (Shopify, COH, Myntra, etc.)
         {
             id: 'channel',
             header: getHeaderName('channel'),
@@ -46,8 +42,6 @@ export function buildOrderInfoColumns(ctx: OrdersTableContext): ColumnDef<Flatte
                 return chA.localeCompare(chB);
             },
         },
-
-        // Customer Name, City, Orders, LTV
         {
             id: 'customerInfo',
             header: getHeaderName('customerInfo'),
@@ -60,8 +54,6 @@ export function buildOrderInfoColumns(ctx: OrdersTableContext): ColumnDef<Flatte
                 return nameA.localeCompare(nameB);
             },
         },
-
-        // Order Value, Payment Method, Discount Code
         {
             id: 'paymentInfo',
             header: getHeaderName('paymentInfo'),
@@ -69,15 +61,6 @@ export function buildOrderInfoColumns(ctx: OrdersTableContext): ColumnDef<Flatte
             cell: ({ row }) => <PaymentInfoCell row={row.original} />,
             enableSorting: true,
             sortingFn: (a, b) => (a.original.totalAmount || 0) - (b.original.totalAmount || 0),
-        },
-
-        // Ship By Date
-        {
-            id: 'shipByDate',
-            header: getHeaderName('shipByDate'),
-            size: DEFAULT_COLUMN_WIDTHS.shipByDate,
-            cell: ({ row }) => <ShipByDateCell row={row.original} handlersRef={handlersRef} />,
-            enableSorting: true,
         },
     ];
 }

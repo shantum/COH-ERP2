@@ -26,8 +26,8 @@ import { z } from 'zod';
  * /orders?view=shipped&page=2
  */
 export const OrdersSearchParams = z.object({
-    /** Current view: open, shipped, rto, or all */
-    view: z.enum(['open', 'shipped', 'rto', 'all']).catch('open'),
+    /** Current view: all, in_transit, delivered, rto, or cancelled */
+    view: z.enum(['all', 'in_transit', 'delivered', 'rto', 'cancelled']).catch('all'),
     /** Page number for pagination */
     page: z.coerce.number().int().positive().catch(1),
     /** Items per page (defaults to 250) */
@@ -42,11 +42,6 @@ export const OrdersSearchParams = z.object({
     sortOrder: z.enum(['asc', 'desc']).optional().catch(undefined),
     /** Order ID for highlighting/selecting a specific order */
     orderId: z.string().optional().catch(undefined),
-    // Open view filters (URL-persisted for bookmarking/sharing)
-    /** Allocation filter for Open view: all (default), allocated, pending */
-    allocatedFilter: z.enum(['all', 'allocated', 'pending']).optional().catch(undefined),
-    /** Production filter for Open view: all (default), scheduled, needs, ready */
-    productionFilter: z.enum(['all', 'scheduled', 'needs', 'ready']).optional().catch(undefined),
     // URL-driven modal state (enables bookmarkable/shareable modals)
     /** Modal type: view, edit, ship, create, customer */
     modal: z.enum(['view', 'edit', 'ship', 'create', 'customer']).optional().catch(undefined),

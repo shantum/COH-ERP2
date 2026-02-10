@@ -660,6 +660,10 @@ export interface FlattenedOrderRow {
     lineStatus: string | null;
     lineNotes: string;
     unitPrice: number;
+    bomCost: number;
+    margin: number;
+    fabricColourName: string | null;
+    fabricColourId: string | null;
 
     // Inventory (filled client-side for now)
     skuStock: number;
@@ -867,6 +871,10 @@ export function flattenOrdersToRows(orders: EnrichedOrder[]): FlattenedOrderRow[
                 lineStatus: null,
                 lineNotes: '',
                 unitPrice: 0,
+                bomCost: 0,
+                margin: 0,
+                fabricColourName: null,
+                fabricColourId: null,
                 skuStock: 0,
                 fabricBalance: 0,
                 shopifyStatus,
@@ -965,6 +973,10 @@ export function flattenOrdersToRows(orders: EnrichedOrder[]): FlattenedOrderRow[
                 lineStatus: line.lineStatus,
                 lineNotes: line.notes || '',
                 unitPrice: line.unitPrice || 0,
+                bomCost: 0, // Filled client-side
+                margin: 0, // Filled client-side
+                fabricColourName: null, // Filled client-side
+                fabricColourId: null, // Filled client-side
                 skuStock: 0, // Filled client-side
                 fabricBalance: 0, // Filled client-side
                 shopifyStatus,
@@ -1292,6 +1304,12 @@ export function flattenLineForSSE(
         imageUrl,
         skuCode,
         size,
+
+        // Cost & fabric (filled by client or set to 0/null)
+        bomCost: 0,
+        margin: 0,
+        fabricColourName: null,
+        fabricColourId: null,
 
         // Inventory (filled by client or set to 0)
         skuStock: 0,

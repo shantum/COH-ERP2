@@ -278,6 +278,11 @@ export interface FlattenedOrderRow {
     lineId: string | null;
     lineStatus: string | null;
     lineNotes: string;
+    unitPrice?: number;
+    bomCost?: number;
+    margin?: number;
+    fabricColourName?: string | null;
+    fabricColourId?: string | null;
 
     // Inventory (filled client-side)
     skuStock: number;

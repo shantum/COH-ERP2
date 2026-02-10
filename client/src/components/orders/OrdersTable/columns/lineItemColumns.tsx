@@ -1,6 +1,6 @@
 /**
  * Line Item Columns - TanStack Table column definitions
- * Columns: productName, customize, qty, skuStock, fabricBalance
+ * Columns: productName, qty, unitPrice, cost, margin, fabricColour, fabricBalance
  */
 
 import type { ColumnDef } from '@tanstack/react-table';
@@ -10,16 +10,17 @@ import { DEFAULT_COLUMN_WIDTHS } from '../constants';
 import {
     ProductNameCell,
     QtyStockCell,
-    ReturnStatusCell,
-    CustomizeCell,
+    UnitPriceCell,
+    CostCell,
+    MarginCell,
+    FabricColourCell,
     FabricBalanceCell,
 } from '../cells';
 
 export function buildLineItemColumns(ctx: OrdersTableContext): ColumnDef<FlattenedOrderRow>[] {
-    const { getHeaderName, handlersRef } = ctx;
+    const { getHeaderName } = ctx;
 
     return [
-        // Product Name
         {
             id: 'productName',
             header: getHeaderName('productName'),
@@ -27,25 +28,6 @@ export function buildLineItemColumns(ctx: OrdersTableContext): ColumnDef<Flatten
             cell: ({ row }) => <ProductNameCell row={row.original} />,
             enableSorting: true,
         },
-
-        // Return Status
-        {
-            id: 'returnStatus',
-            header: getHeaderName('returnStatus'),
-            size: 90,
-            cell: ({ row }) => <ReturnStatusCell row={row.original} />,
-            enableSorting: false,
-        },
-
-        // Customize
-        {
-            id: 'customize',
-            header: getHeaderName('customize'),
-            size: DEFAULT_COLUMN_WIDTHS.customize,
-            cell: ({ row }) => <CustomizeCell row={row.original} handlersRef={handlersRef} />,
-        },
-
-        // Quantity + Stock (combined)
         {
             id: 'qty',
             header: getHeaderName('qty'),
@@ -54,8 +36,37 @@ export function buildLineItemColumns(ctx: OrdersTableContext): ColumnDef<Flatten
             enableSorting: true,
             sortingFn: (a, b) => (a.original.qty || 0) - (b.original.qty || 0),
         },
-
-        // Fabric Balance
+        {
+            id: 'unitPrice',
+            header: getHeaderName('unitPrice'),
+            size: DEFAULT_COLUMN_WIDTHS.unitPrice,
+            cell: ({ row }) => <UnitPriceCell row={row.original} />,
+            enableSorting: true,
+            sortingFn: (a, b) => (a.original.unitPrice || 0) - (b.original.unitPrice || 0),
+        },
+        {
+            id: 'cost',
+            header: getHeaderName('cost'),
+            size: DEFAULT_COLUMN_WIDTHS.cost,
+            cell: ({ row }) => <CostCell row={row.original} />,
+            enableSorting: true,
+            sortingFn: (a, b) => (a.original.bomCost || 0) - (b.original.bomCost || 0),
+        },
+        {
+            id: 'margin',
+            header: getHeaderName('margin'),
+            size: DEFAULT_COLUMN_WIDTHS.margin,
+            cell: ({ row }) => <MarginCell row={row.original} />,
+            enableSorting: true,
+            sortingFn: (a, b) => (a.original.margin || 0) - (b.original.margin || 0),
+        },
+        {
+            id: 'fabricColour',
+            header: getHeaderName('fabricColour'),
+            size: DEFAULT_COLUMN_WIDTHS.fabricColour,
+            cell: ({ row }) => <FabricColourCell row={row.original} />,
+            enableSorting: true,
+        },
         {
             id: 'fabricBalance',
             header: getHeaderName('fabricBalance'),

@@ -4,19 +4,18 @@
 
 // All column IDs in display order
 export const ALL_COLUMN_IDS = [
-    'orderInfo', 'channel', 'customerInfo', 'paymentInfo', 'shipByDate',
-    'tags', 'customerNotes', 'customerTags', 'productName', 'returnStatus', 'customize', 'qty', 'assignStock', 'fabricBalance',
-    'workflow', 'pickPack', 'production', 'notes', 'cancelLine', 'adminShip',
-    'shopifyTracking', 'trackingInfo', 'trackingStatus',
+    'orderInfo', 'channel', 'customerInfo', 'paymentInfo',
+    'productName', 'qty', 'unitPrice', 'cost', 'margin', 'fabricColour', 'fabricBalance',
+    'trackingInfo', 'trackingStatus', 'notes',
 ] as const;
 
 export type ColumnId = typeof ALL_COLUMN_IDS[number];
 
-// Columns shown by default in Open view
+// Columns shown by default
 export const DEFAULT_VISIBLE_COLUMNS: ColumnId[] = [
-    'orderInfo', 'channel', 'customerInfo', 'paymentInfo', 'shipByDate', 'tags', 'customerNotes', 'customerTags',
-    'productName', 'returnStatus', 'qty', 'assignStock', 'workflow', 'pickPack', 'production', 'notes', 'cancelLine',
-    'shopifyTracking', 'trackingInfo',
+    'orderInfo', 'channel', 'customerInfo', 'paymentInfo',
+    'productName', 'qty', 'unitPrice', 'cost', 'margin', 'fabricColour', 'fabricBalance',
+    'trackingInfo', 'trackingStatus', 'notes',
 ];
 
 // Default column headers
@@ -25,25 +24,16 @@ export const DEFAULT_HEADERS: Record<string, string> = {
     channel: 'Channel',
     customerInfo: 'Customer',
     paymentInfo: 'Payment',
-    shipByDate: 'Ship By',
-    tags: 'Tags',
-    customerNotes: 'Order Notes',
-    customerTags: 'Cust Tags',
     productName: 'Product',
-    returnStatus: 'Return',
-    customize: 'Custom',
-    qty: 'Qty/Stock',
-    assignStock: 'Allocate',
-    fabricBalance: 'Fabric',
-    workflow: 'Workflow',
-    pickPack: 'Fulfillment',
-    production: 'Production',
-    notes: 'Notes',
-    cancelLine: 'Cancel',
-    adminShip: 'Admin',
-    shopifyTracking: 'Shopify',
-    trackingInfo: 'COH AWB',
+    qty: 'Qty',
+    unitPrice: 'Price',
+    cost: 'Cost',
+    margin: 'Margin',
+    fabricColour: 'Fabric',
+    fabricBalance: 'Fab Bal',
+    trackingInfo: 'AWB',
     trackingStatus: 'Tracking',
+    notes: 'Notes',
 };
 
 // Common courier options
@@ -64,25 +54,16 @@ export const DEFAULT_COLUMN_WIDTHS: Partial<Record<ColumnId | string, number>> =
     channel: 65,
     customerInfo: 160,
     paymentInfo: 100,
-    shipByDate: 70,
-    tags: 100,
-    customerNotes: 140,
-    customerTags: 100,
     productName: 240,
-    returnStatus: 90,
-    customize: 50,
-    qty: 75,
-    assignStock: 90,
+    qty: 50,
+    unitPrice: 75,
+    cost: 75,
+    margin: 55,
+    fabricColour: 100,
     fabricBalance: 60,
-    workflow: 120,
-    pickPack: 160,
-    production: 90,
-    notes: 120,
-    cancelLine: 40,
-    adminShip: 55,
-    shopifyTracking: 100,
     trackingInfo: 130,
     trackingStatus: 80,
+    notes: 120,
 };
 
 // Row height for virtualization

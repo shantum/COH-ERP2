@@ -1,6 +1,6 @@
 /**
- * OrdersTable - Main TanStack Table component for orders
- * Features: Virtualization, row selection, column reordering/resizing, row styling
+ * OrdersTable - Main TanStack Table component for orders (monitoring dashboard)
+ * Features: Virtualization, column reordering/resizing
  */
 
 import { useMemo, useRef, useCallback, useState, useEffect } from 'react';
@@ -10,7 +10,6 @@ import {
     getSortedRowModel,
     flexRender,
     type SortingState,
-    type RowSelectionState,
     type Column,
 } from '@tanstack/react-table';
 import { useVirtualizer } from '@tanstack/react-virtual';
@@ -19,52 +18,15 @@ import type { FlattenedOrderRow } from '../../../utils/orderHelpers';
 import type { OrdersTableProps, DynamicColumnHandlers, OrdersTableContext } from './types';
 import { buildAllColumns, getColumnsForView } from './columns';
 import { useOrdersTableState } from './useOrdersTableState';
-import { getRowClassName, resolveLineState, getCellBackground } from './rowStyling';
-import { COLUMN_INDEX } from './styleConfig';
-import { ROW_HEIGHT, DEFAULT_HEADERS, ALL_COLUMN_IDS, type ColumnId } from './constants';
+import { ROW_HEIGHT, DEFAULT_HEADERS, ALL_COLUMN_IDS } from './constants';
 import { ColumnVisibilityDropdown } from './toolbar/ColumnVisibilityDropdown';
-import { StatusLegend } from './toolbar/StatusLegend';
 
 export function OrdersTable({
     rows,
-    lockedDates,
-    currentView = 'open',
-    onAllocate,
-    onUnallocate,
-    onPick,
-    onUnpick,
-    onPack,
-    onUnpack,
-    onMarkShippedLine,
-    onUnmarkShippedLine,
-    onUpdateLineTracking,
-    onCreateBatch,
-    onUpdateBatch,
-    onDeleteBatch,
-    onUpdateLineNotes,
+    currentView = 'all',
     onViewOrder,
-    onEditOrder: _onEditOrder,
-    onCancelOrder: _onCancelOrder,
-    onDeleteOrder: _onDeleteOrder,
-    onCancelLine,
-    onUncancelLine,
     onViewCustomer,
-    onCustomize,
-    onEditCustomization,
-    onRemoveCustomization,
-    onUpdateShipByDate,
-    onForceShipLine,
-    onTrack,
-    onMarkCodRemitted,
-    onSettled,
-    allocatingLines,
-    isCancellingOrder,
-    isCancellingLine,
-    isUncancellingLine,
-    isDeletingOrder,
-    isAdmin,
 }: OrdersTableProps) {
-    // Table state from hook
     const {
         columnVisibility,
         columnOrder,
@@ -82,29 +44,21 @@ export function OrdersTable({
         savePreferencesToServer,
     } = useOrdersTableState();
 
-    // Sorting state
     const [sorting, setSorting] = useState<SortingState>([]);
-
-    // Row selection state
-    const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
-
-    // Scroll position for indicators
     const [scrollPos, setScrollPos] = useState({ x: 0, y: 0, xMax: 1, yMax: 1 });
 
-    // Custom headers state
     const [customHeaders, setCustomHeaders] = useState<Record<string, string>>(() => {
         if (typeof window === 'undefined') return {};
         const saved = localStorage.getItem('ordersTableHeaders');
         return saved ? JSON.parse(saved) : {};
     });
 
-    // Use ref to avoid recreating getHeaderName callback when customHeaders change
     const customHeadersRef = useRef(customHeaders);
     customHeadersRef.current = customHeaders;
 
     const getHeaderName = useCallback(
         (colId: string) => customHeadersRef.current[colId] || DEFAULT_HEADERS[colId] || colId,
-        [] // No dependencies - uses ref for stable callback
+        []
     );
 
     const setCustomHeader = useCallback((colId: string, headerName: string) => {
@@ -117,79 +71,15 @@ export function OrdersTable({
         });
     }, []);
 
-    const isDateLocked = useCallback(
-        (dateStr: string) => lockedDates?.includes(dateStr) || false,
-        [lockedDates]
-    );
-
-    // Dynamic handlers ref - updated every render for latest values
+    // Dynamic handlers ref
     const handlersRef = useRef<DynamicColumnHandlers>({
-        allocatingLines,
-        isCancellingLine,
-        isUncancellingLine,
-        isCancellingOrder,
-        isDeletingOrder,
-        onAllocate,
-        onUnallocate,
-        onPick,
-        onUnpick,
-        onPack,
-        onUnpack,
-        onMarkShippedLine,
-        onUnmarkShippedLine,
-        isAdmin,
-        onForceShipLine,
-        onCreateBatch,
-        onUpdateBatch,
-        onDeleteBatch,
-        onUpdateLineNotes,
-        onCancelLine,
-        onUncancelLine,
-        onUpdateLineTracking,
-        onCustomize,
-        onEditCustomization,
-        onRemoveCustomization,
-        onMarkCodRemitted,
-        onTrack,
         onViewOrder,
         onViewCustomer,
-        onUpdateShipByDate,
-        onSettled,
     });
 
-    // Update ref every render
     handlersRef.current = {
-        allocatingLines,
-        isCancellingLine,
-        isUncancellingLine,
-        isCancellingOrder,
-        isDeletingOrder,
-        onAllocate,
-        onUnallocate,
-        onPick,
-        onUnpick,
-        onPack,
-        onUnpack,
-        onMarkShippedLine,
-        onUnmarkShippedLine,
-        isAdmin,
-        onForceShipLine,
-        onCreateBatch,
-        onUpdateBatch,
-        onDeleteBatch,
-        onUpdateLineNotes,
-        onCancelLine,
-        onUncancelLine,
-        onUpdateLineTracking,
-        onCustomize,
-        onEditCustomization,
-        onRemoveCustomization,
-        onMarkCodRemitted,
-        onTrack,
         onViewOrder,
         onViewCustomer,
-        onUpdateShipByDate,
-        onSettled,
     };
 
     // Build column context
@@ -197,24 +87,18 @@ export function OrdersTable({
         getHeaderName,
         setCustomHeader,
         currentView,
-        isDateLocked,
         handlersRef,
-    }), [getHeaderName, setCustomHeader, currentView, isDateLocked]);
+    }), [getHeaderName, setCustomHeader, currentView]);
 
-    // Build and filter columns
     const allColumns = useMemo(() => buildAllColumns(columnContext), [columnContext]);
     const columns = useMemo(
         () => getColumnsForView(allColumns, currentView),
         [allColumns, currentView]
     );
 
-    // Scroll container ref
     const parentRef = useRef<HTMLDivElement>(null);
-
-    // Container width for auto-sizing columns
     const [containerWidth, setContainerWidth] = useState(0);
 
-    // Update scroll position for indicators
     const handleScroll = useCallback(() => {
         const el = parentRef.current;
         if (!el) return;
@@ -226,82 +110,43 @@ export function OrdersTable({
         });
     }, []);
 
-    // Track container width for auto-sizing
     useEffect(() => {
         const el = parentRef.current;
         if (!el) return;
-
         const resizeObserver = new ResizeObserver((entries) => {
             for (const entry of entries) {
-                // Account for scrollbar width (~8px) and margins
                 setContainerWidth(entry.contentRect.width - 16);
             }
         });
-
         resizeObserver.observe(el);
         return () => resizeObserver.disconnect();
     }, []);
 
-    // Initialize scroll position on mount
     useEffect(() => {
         handleScroll();
     }, [handleScroll]);
 
-    // Create table instance
     const table = useReactTable({
         data: rows,
         columns,
         state: {
             sorting,
-            rowSelection,
             columnVisibility,
             columnOrder,
             columnSizing,
         },
         onSortingChange: setSorting,
-        onRowSelectionChange: setRowSelection,
         onColumnVisibilityChange: setColumnVisibility,
         onColumnOrderChange: setColumnOrder,
         onColumnSizingChange: setColumnSizing,
         getCoreRowModel: getCoreRowModel(),
         getSortedRowModel: getSortedRowModel(),
         getRowId: (row) => row.lineId || `order-${row.orderId}-header`,
-        enableRowSelection: true,
-        enableMultiRowSelection: true,
         columnResizeMode: 'onChange',
     });
 
     const { rows: tableRows } = table.getRowModel();
 
-    // Pre-compute per-order: are ALL non-cancelled lines at least allocated?
-    // Used for order-info column highlighting (don't trust server fulfillmentStage)
-    // Cancelled lines are excluded from the calculation entirely
-    const orderAllAllocated = useMemo(() => {
-        const counts = new Map<string, { total: number; allocated: number }>();
-        for (const row of rows) {
-            const ls = row.lineStatus;
-            // Skip cancelled lines - they shouldn't affect order-level highlighting
-            if (ls === 'cancelled') continue;
-
-            const id = row.orderId;
-            let entry = counts.get(id);
-            if (!entry) {
-                entry = { total: 0, allocated: 0 };
-                counts.set(id, entry);
-            }
-            entry.total++;
-            if (ls === 'allocated' || ls === 'picked' || ls === 'packed' || ls === 'shipped') {
-                entry.allocated++;
-            }
-        }
-        const result = new Map<string, boolean>();
-        for (const [id, { total, allocated }] of counts) {
-            result.set(id, total > 0 && allocated === total);
-        }
-        return result;
-    }, [rows]);
-
-    // Virtualizer for efficient rendering of large lists
     const virtualizer = useVirtualizer({
         count: tableRows.length,
         getScrollElement: () => parentRef.current,
@@ -311,30 +156,35 @@ export function OrdersTable({
 
     const virtualRows = virtualizer.getVirtualItems();
     const totalHeight = virtualizer.getTotalSize();
-
-    // Calculate padding for virtual scroll
     const paddingTop = virtualRows.length > 0 ? virtualRows[0]?.start || 0 : 0;
     const paddingBottom = virtualRows.length > 0
         ? totalHeight - (virtualRows[virtualRows.length - 1]?.end || 0)
         : 0;
 
-    // Calculate total table width based on visible columns
     const baseTableWidth = table.getVisibleLeafColumns().reduce((sum, col) => sum + col.getSize(), 0);
-
-    // Scale columns to fill container width (only scale up, not down)
     const scaleFactor = containerWidth > baseTableWidth ? containerWidth / baseTableWidth : 1;
     const tableWidth = Math.max(baseTableWidth * scaleFactor, 900);
 
-    // Get scaled column width
     const getScaledColumnWidth = useCallback((col: Column<FlattenedOrderRow, unknown>) => {
         return Math.round(col.getSize() * scaleFactor);
     }, [scaleFactor]);
 
-    // Calculate scroll indicator positions
     const verticalThumbHeight = Math.max(20, (1 / Math.max(1, totalHeight / (parentRef.current?.clientHeight || 400))) * 100);
     const verticalThumbTop = (scrollPos.y / scrollPos.yMax) * (100 - verticalThumbHeight);
     const horizontalThumbWidth = Math.max(20, (1 / Math.max(1, tableWidth / (parentRef.current?.clientWidth || 800))) * 100);
     const horizontalThumbLeft = (scrollPos.x / scrollPos.xMax) * (100 - horizontalThumbWidth);
+
+    // Simple row styling for monitoring dashboard
+    const getRowClassName = (row: FlattenedOrderRow): string => {
+        const baseClass = row.isFirstLine ? 'border-t border-gray-400 ' : '';
+        if (row.lineStatus === 'cancelled') {
+            return baseClass + 'text-gray-400 line-through opacity-60';
+        }
+        if (row.rtoStatus || row.lineTrackingStatus?.includes('rto')) {
+            return baseClass + 'bg-orange-50/50';
+        }
+        return baseClass;
+    };
 
     return {
         tableComponent: (
@@ -367,7 +217,6 @@ export function OrdersTable({
                         }}
                     />
                 </div>
-                {/* Single scroll container for both header and body */}
                 <div
                     ref={parentRef}
                     className="overflow-auto scrollbar-hide"
@@ -387,13 +236,11 @@ export function OrdersTable({
                             marginBottom: '8px',
                         }}
                     >
-                        {/* Define column widths once via colgroup - scaled to fill container */}
                         <colgroup>
                             {table.getVisibleLeafColumns().map((column) => (
                                 <col key={column.id} style={{ width: getScaledColumnWidth(column) }} />
                             ))}
                         </colgroup>
-                        {/* Sticky header */}
                         <thead className="sticky top-0 z-10 bg-gray-50">
                             {table.getHeaderGroups().map((headerGroup) => (
                                 <tr key={headerGroup.id} className="border-b border-gray-200">
@@ -409,11 +256,10 @@ export function OrdersTable({
                                             <div className="flex items-center gap-0.5">
                                                 {flexRender(header.column.columnDef.header, header.getContext())}
                                                 {{
-                                                    asc: '↑',
-                                                    desc: '↓',
+                                                    asc: '\u2191',
+                                                    desc: '\u2193',
                                                 }[header.column.getIsSorted() as string] ?? null}
                                             </div>
-                                            {/* Column resize handle */}
                                             <div
                                                 onMouseDown={header.getResizeHandler()}
                                                 onTouchStart={header.getResizeHandler()}
@@ -428,7 +274,6 @@ export function OrdersTable({
                                 </tr>
                             ))}
                         </thead>
-                        {/* Virtualized body */}
                         <tbody>
                             {paddingTop > 0 && (
                                 <tr>
@@ -442,31 +287,20 @@ export function OrdersTable({
                                 const row = tableRows[virtualRow.index];
                                 const rowData = row.original;
                                 const rowClassName = getRowClassName(rowData);
-                                const lineState = resolveLineState(rowData);
-                                const allAllocated = orderAllAllocated.get(rowData.orderId) ?? false;
                                 return (
                                     <tr
                                         key={row.id}
                                         className={cn(rowClassName)}
                                         style={{ height: ROW_HEIGHT }}
                                     >
-                                        {row.getVisibleCells().map((cell) => {
-                                            const colIndex = COLUMN_INDEX[cell.column.id as ColumnId];
-                                            const cellBg = colIndex !== undefined
-                                                ? getCellBackground(colIndex, lineState, allAllocated)
-                                                : '';
-                                            return (
-                                                <td
-                                                    key={cell.id}
-                                                    className={cn(
-                                                        'px-1 py-0.5 text-xs overflow-hidden text-ellipsis',
-                                                        cellBg,
-                                                    )}
-                                                >
-                                                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                                                </td>
-                                            );
-                                        })}
+                                        {row.getVisibleCells().map((cell) => (
+                                            <td
+                                                key={cell.id}
+                                                className="px-1 py-0.5 text-xs overflow-hidden text-ellipsis"
+                                            >
+                                                {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                                            </td>
+                                        ))}
                                     </tr>
                                 );
                             })}
@@ -496,16 +330,10 @@ export function OrdersTable({
                 onSaveAsDefaults={savePreferencesToServer}
             />
         ),
-        statusLegend: <StatusLegend />,
-        // Selection helpers
-        selectedRows: Object.keys(rowSelection).filter(id => rowSelection[id]),
-        clearSelection: () => setRowSelection({}),
-        // User preferences
         hasUserCustomizations,
         differsFromAdminDefaults,
         isSavingPrefs,
         resetToDefaults,
-        // Admin-only
         isManager,
         savePreferencesToServer,
     };

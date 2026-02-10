@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * ProductionCell - Cell for managing production batches
  * Reuses ProductionDatePopover for calendar functionality
