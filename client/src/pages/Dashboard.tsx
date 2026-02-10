@@ -10,6 +10,10 @@ import { OrdersAnalyticsBar } from '../components/orders/OrdersAnalyticsBar';
 import { TopProductsCard } from '../components/dashboard/TopProductsCard';
 import { TopFabricsCard } from '../components/dashboard/TopFabricsCard';
 import { TopCustomersCard } from '../components/dashboard/TopCustomersCard';
+import { ProfitabilityCard } from '../components/dashboard/ProfitabilityCard';
+import { FabricCostCard } from '../components/dashboard/FabricCostCard';
+import { FabricBalanceCard } from '../components/dashboard/FabricBalanceCard';
+import { FabricStockHealthCard } from '../components/dashboard/FabricStockHealthCard';
 
 export default function Dashboard() {
     // Get SSR pre-fetched data from route loader
@@ -55,6 +59,18 @@ export default function Dashboard() {
 
                 {/* Top Customers */}
                 <TopCustomersCard />
+
+                {/* Profitability */}
+                <ProfitabilityCard />
+
+                {/* Fabric Cost Breakdown */}
+                <FabricCostCard />
+
+                {/* Fabric Balances */}
+                <FabricBalanceCard />
+
+                {/* Fabric Stock Health */}
+                <FabricStockHealthCard />
             </div>
         </div>
     );

@@ -1254,6 +1254,291 @@ export const startFabricColourReconciliation = createServerFn({ method: 'POST' }
             };
     });
 
+// ============================================
+// DASHBOARD: FABRIC BALANCE SUMMARY
+// ============================================
+
+/** Colour balance detail for dashboard card */
+export interface FabricBalanceColour {
+    colourName: string;
+    colourHex: string | null;
+    balance: number;
+}
+
+/** Fabric group with colour balances for dashboard card */
+export interface FabricBalanceGroup {
+    fabricId: string;
+    fabricName: string;
+    materialName: string;
+    unit: string;
+    totalBalance: number;
+    colours: FabricBalanceColour[];
+}
+
+export interface FabricBalanceResponse {
+    data: FabricBalanceGroup[];
+    totalBalance: number;
+}
+
+/**
+ * Get current fabric balances grouped by Fabric → Colour
+ *
+ * Uses the materialized `currentBalance` on FabricColour (maintained by DB trigger).
+ * Lightweight query — no transaction aggregation needed.
+ */
+export const getFabricBalances = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
+    .handler(async (): Promise<FabricBalanceResponse> => {
+        const prisma = await getPrisma();
+
+        const colours = await prisma.fabricColour.findMany({
+            where: { isActive: true },
+            select: {
+                colourName: true,
+                colourHex: true,
+                currentBalance: true,
+                fabric: {
+                    select: {
+                        id: true,
+                        name: true,
+                        unit: true,
+                        material: {
+                            select: { name: true },
+                        },
+                    },
+                },
+            },
+            orderBy: [
+                { fabric: { material: { name: 'asc' } } },
+                { fabric: { name: 'asc' } },
+                { colourName: 'asc' },
+            ],
+        });
+
+        // Group by fabric
+        const fabricMap = new Map<string, {
+            fabricId: string;
+            fabricName: string;
+            materialName: string;
+            unit: string;
+            colours: FabricBalanceColour[];
+        }>();
+
+        for (const c of colours) {
+            const key = c.fabric.id;
+            if (!fabricMap.has(key)) {
+                fabricMap.set(key, {
+                    fabricId: c.fabric.id,
+                    fabricName: c.fabric.name,
+                    materialName: c.fabric.material?.name ?? 'Unknown',
+                    unit: c.fabric.unit ?? 'm',
+                    colours: [],
+                });
+            }
+            fabricMap.get(key)!.colours.push({
+                colourName: c.colourName,
+                colourHex: c.colourHex,
+                balance: Math.round(c.currentBalance * 100) / 100,
+            });
+        }
+
+        let totalBalance = 0;
+        const data: FabricBalanceGroup[] = Array.from(fabricMap.values())
+            .map((fg) => {
+                const totalFabricBalance = fg.colours.reduce((sum, c) => sum + c.balance, 0);
+                totalBalance += totalFabricBalance;
+                return {
+                    ...fg,
+                    totalBalance: Math.round(totalFabricBalance * 100) / 100,
+                };
+            })
+            .sort((a, b) => b.totalBalance - a.totalBalance);
+
+        return {
+            data,
+            totalBalance: Math.round(totalBalance * 100) / 100,
+        };
+    });
+
+// ============================================
+// DASHBOARD: FABRIC STOCK HEALTH
+// ============================================
+
+/** Consumption data across multiple time windows */
+export interface FabricConsumption {
+    consumed1d: number;
+    consumed7d: number;
+    consumed14d: number;
+    consumed30d: number;
+    consumed60d: number;
+    consumed90d: number;
+}
+
+/** Colour with balance + consumption for stock health card */
+export interface StockHealthColour {
+    colourName: string;
+    colourHex: string | null;
+    balance: number;
+    consumption: FabricConsumption;
+}
+
+/** Per-fabric stock health row */
+export interface FabricStockHealthRow {
+    fabricId: string;
+    fabricName: string;
+    materialName: string;
+    unit: string;
+    totalBalance: number;
+    consumption: FabricConsumption;
+    colours: StockHealthColour[];
+}
+
+export interface FabricStockHealthResponse {
+    data: FabricStockHealthRow[];
+    totalBalance: number;
+}
+
+/**
+ * Get fabric stock health: balances + consumption across 1d/7d/14d/30d/60d/90d windows
+ *
+ * Single CTE-based SQL query — returns all time windows at once so the client
+ * can toggle burn-rate windows without refetching.
+ */
+export const getFabricStockHealth = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
+    .handler(async (): Promise<FabricStockHealthResponse> => {
+        const prisma = await getPrisma();
+
+        // Consumption = sales-based: OrderLine.qty × BOM fabric quantity per unit
+        // Joins: OrderLine → Sku → Variation → VariationBomLine → FabricColour
+        // Uses Order.orderDate for time windows. float8 casts avoid Prisma numeric→string issue.
+        const rows = await prisma.$queryRaw<Array<{
+            fabricId: string;
+            fabricName: string;
+            materialName: string;
+            unit: string;
+            colourName: string;
+            colourHex: string | null;
+            colourBalance: number;
+            consumed1d: number;
+            consumed7d: number;
+            consumed14d: number;
+            consumed30d: number;
+            consumed60d: number;
+            consumed90d: number;
+        }>>`
+            WITH sales_consumption AS (
+                SELECT
+                    vbl."fabricColourId",
+                    SUM(CASE WHEN o."orderDate" >= NOW() - INTERVAL '1 day'   THEN ol."qty" * COALESCE(vbl."quantity", s."fabricConsumption", 1.5) ELSE 0 END) AS "consumed1d",
+                    SUM(CASE WHEN o."orderDate" >= NOW() - INTERVAL '7 days'  THEN ol."qty" * COALESCE(vbl."quantity", s."fabricConsumption", 1.5) ELSE 0 END) AS "consumed7d",
+                    SUM(CASE WHEN o."orderDate" >= NOW() - INTERVAL '14 days' THEN ol."qty" * COALESCE(vbl."quantity", s."fabricConsumption", 1.5) ELSE 0 END) AS "consumed14d",
+                    SUM(CASE WHEN o."orderDate" >= NOW() - INTERVAL '30 days' THEN ol."qty" * COALESCE(vbl."quantity", s."fabricConsumption", 1.5) ELSE 0 END) AS "consumed30d",
+                    SUM(CASE WHEN o."orderDate" >= NOW() - INTERVAL '60 days' THEN ol."qty" * COALESCE(vbl."quantity", s."fabricConsumption", 1.5) ELSE 0 END) AS "consumed60d",
+                    SUM(ol."qty" * COALESCE(vbl."quantity", s."fabricConsumption", 1.5)) AS "consumed90d"
+                FROM "OrderLine" ol
+                JOIN "Order" o ON o."id" = ol."orderId"
+                JOIN "Sku" s ON s."id" = ol."skuId"
+                JOIN "Variation" v ON v."id" = s."variationId"
+                JOIN "VariationBomLine" vbl ON vbl."variationId" = v."id" AND vbl."fabricColourId" IS NOT NULL
+                WHERE ol."lineStatus" != 'cancelled'
+                  AND o."orderDate" >= NOW() - INTERVAL '90 days'
+                GROUP BY vbl."fabricColourId"
+            )
+            SELECT
+                f."id"              AS "fabricId",
+                f."name"            AS "fabricName",
+                COALESCE(m."name", 'Unknown') AS "materialName",
+                COALESCE(f."unit", 'm') AS "unit",
+                fc."colourName"     AS "colourName",
+                fc."colourHex"      AS "colourHex",
+                fc."currentBalance"::float8 AS "colourBalance",
+                COALESCE(sc."consumed1d", 0)::float8  AS "consumed1d",
+                COALESCE(sc."consumed7d", 0)::float8  AS "consumed7d",
+                COALESCE(sc."consumed14d", 0)::float8 AS "consumed14d",
+                COALESCE(sc."consumed30d", 0)::float8 AS "consumed30d",
+                COALESCE(sc."consumed60d", 0)::float8 AS "consumed60d",
+                COALESCE(sc."consumed90d", 0)::float8 AS "consumed90d"
+            FROM "FabricColour" fc
+            JOIN "Fabric" f ON f."id" = fc."fabricId"
+            LEFT JOIN "Material" m ON m."id" = f."materialId"
+            LEFT JOIN sales_consumption sc ON sc."fabricColourId" = fc."id"
+            WHERE fc."isActive" = true
+            ORDER BY m."name", f."name", fc."colourName"
+        `;
+
+        // Group by fabric
+        const fabricMap = new Map<string, FabricStockHealthRow>();
+
+        for (const row of rows) {
+            const key = row.fabricId;
+            if (!fabricMap.has(key)) {
+                fabricMap.set(key, {
+                    fabricId: row.fabricId,
+                    fabricName: row.fabricName,
+                    materialName: row.materialName,
+                    unit: row.unit,
+                    totalBalance: 0,
+                    consumption: {
+                        consumed1d: 0,
+                        consumed7d: 0,
+                        consumed14d: 0,
+                        consumed30d: 0,
+                        consumed60d: 0,
+                        consumed90d: 0,
+                    },
+                    colours: [],
+                });
+            }
+            const fabric = fabricMap.get(key)!;
+            const balance = Number(row.colourBalance);
+            fabric.totalBalance += balance;
+            fabric.consumption.consumed1d += Number(row.consumed1d);
+            fabric.consumption.consumed7d += Number(row.consumed7d);
+            fabric.consumption.consumed14d += Number(row.consumed14d);
+            fabric.consumption.consumed30d += Number(row.consumed30d);
+            fabric.consumption.consumed60d += Number(row.consumed60d);
+            fabric.consumption.consumed90d += Number(row.consumed90d);
+            fabric.colours.push({
+                colourName: row.colourName,
+                colourHex: row.colourHex,
+                balance,
+                consumption: {
+                    consumed1d: row.consumed1d,
+                    consumed7d: row.consumed7d,
+                    consumed14d: row.consumed14d,
+                    consumed30d: row.consumed30d,
+                    consumed60d: row.consumed60d,
+                    consumed90d: row.consumed90d,
+                },
+            });
+        }
+
+        // Round totals
+        let totalBalance = 0;
+        const data: FabricStockHealthRow[] = [];
+        for (const fabric of fabricMap.values()) {
+            fabric.totalBalance = Math.round(fabric.totalBalance * 100) / 100;
+            fabric.consumption.consumed1d = Math.round(fabric.consumption.consumed1d * 100) / 100;
+            fabric.consumption.consumed7d = Math.round(fabric.consumption.consumed7d * 100) / 100;
+            fabric.consumption.consumed14d = Math.round(fabric.consumption.consumed14d * 100) / 100;
+            fabric.consumption.consumed30d = Math.round(fabric.consumption.consumed30d * 100) / 100;
+            fabric.consumption.consumed60d = Math.round(fabric.consumption.consumed60d * 100) / 100;
+            fabric.consumption.consumed90d = Math.round(fabric.consumption.consumed90d * 100) / 100;
+            fabric.colours.sort((a, b) => b.consumption.consumed30d - a.consumption.consumed30d);
+            totalBalance += fabric.totalBalance;
+            data.push(fabric);
+        }
+
+        // Sort by highest consumption first (top selling fabrics)
+        data.sort((a, b) => b.consumption.consumed30d - a.consumption.consumed30d);
+
+        return {
+            data,
+            totalBalance: Math.round(totalBalance * 100) / 100,
+        };
+    });
+
 /**
  * Helper: Calculate fabric colour balances in batch from FabricColourTransaction
  */

@@ -29,6 +29,12 @@ const getProductContributionInputSchema = z.object({
     limit: z.number().int().positive().default(50),
 });
 
+const getFabricColourCostsInputSchema = z.object({
+    period: z.enum(['7d', '30d', 'mtd']).default('30d'),
+    channel: z.enum(['all', 'shopify_online', 'marketplace']).default('all'),
+    limit: z.number().int().positive().default(10),
+});
+
 const updateCostingConfigInputSchema = z.object({
     monthlyLaborOverhead: z.number().nonnegative().optional(),
     monthlyMarketingBudget: z.number().nonnegative().optional(),
@@ -93,6 +99,33 @@ export interface ProductContributionResponse {
         unitsSold: number;
         revenue: number;
         totalContribution: number;
+    };
+}
+
+export interface FabricColourDetail {
+    colourName: string;
+    colourHex: string | null;
+    units: number;
+    consumption: number;
+    cost: number;
+}
+
+export interface FabricGroup {
+    fabricId: string;
+    fabricName: string;
+    materialName: string;
+    fabricUnit: string;
+    fabricRate: number;
+    totalConsumption: number;
+    totalFabricCost: number;
+    colours: FabricColourDetail[];
+}
+
+export interface FabricCostResponse {
+    period: string;
+    data: FabricGroup[];
+    totals: {
+        totalFabricCost: number;
     };
 }
 
@@ -504,6 +537,176 @@ export const getProductContribution = createServerFn({ method: 'GET' })
                 unitsSold: totalUnits,
                 revenue: Math.round(totalRevenue * 100) / 100,
                 totalContribution: Math.round(totalContributionSum * 100) / 100,
+            },
+        };
+    });
+
+/**
+ * Get fabric cost breakdown grouped by fabric
+ *
+ * Groups by Fabric parent, shows rate per metre/kg, consumption, and cost.
+ * Colours are nested under their parent fabric for a clean drill-down view.
+ */
+export const getFabricColourCosts = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => getFabricColourCostsInputSchema.parse(input))
+    .handler(async ({ data }): Promise<FabricCostResponse> => {
+        const prisma = await getPrisma();
+
+        const { period, channel, limit } = data;
+        const { start, end } = getDateRangeForPeriod(period);
+        const channelFilter = getChannelFilter(channel);
+
+        // Fetch order lines with deep BOM join to fabric colour + fabric parent
+        const orderLines = await prisma.orderLine.findMany({
+            where: {
+                order: {
+                    orderDate: { gte: start, lte: end },
+                    status: { notIn: ['cancelled'] },
+                    ...channelFilter,
+                },
+                lineStatus: { notIn: ['cancelled'] },
+            },
+            include: {
+                sku: {
+                    select: {
+                        id: true,
+                        fabricConsumption: true,
+                        variation: {
+                            select: {
+                                id: true,
+                                bomLines: {
+                                    where: { fabricColourId: { not: null } },
+                                    select: {
+                                        quantity: true,
+                                        fabricColour: {
+                                            select: {
+                                                id: true,
+                                                colourName: true,
+                                                colourHex: true,
+                                                costPerUnit: true,
+                                                fabric: {
+                                                    select: {
+                                                        id: true,
+                                                        name: true,
+                                                        costPerUnit: true,
+                                                        unit: true,
+                                                        material: {
+                                                            select: { name: true },
+                                                        },
+                                                    },
+                                                },
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        });
+
+        // Aggregate by fabric → colour
+        const fabricMap = new Map<string, {
+            fabricId: string;
+            fabricName: string;
+            materialName: string;
+            fabricUnit: string;
+            fabricRate: number;
+            colours: Map<string, {
+                colourName: string;
+                colourHex: string | null;
+                units: number;
+                consumption: number;
+                cost: number;
+            }>;
+        }>();
+
+        for (const line of orderLines) {
+            const bomLines = line.sku.variation.bomLines;
+            if (bomLines.length === 0) continue;
+
+            for (const bom of bomLines) {
+                const fc = bom.fabricColour;
+                if (!fc) continue;
+
+                const fabric = fc.fabric;
+                const fabricKey = fabric.id;
+                const rate = fc.costPerUnit ?? fabric.costPerUnit ?? 0;
+                const consumption = bom.quantity ?? line.sku.fabricConsumption ?? 1.5;
+
+                if (!fabricMap.has(fabricKey)) {
+                    fabricMap.set(fabricKey, {
+                        fabricId: fabric.id,
+                        fabricName: fabric.name,
+                        materialName: fabric.material?.name ?? 'Unknown',
+                        fabricUnit: fabric.unit ?? 'm',
+                        fabricRate: rate,
+                        colours: new Map(),
+                    });
+                }
+
+                const fabricGroup = fabricMap.get(fabricKey)!;
+                const colourKey = fc.id;
+
+                if (!fabricGroup.colours.has(colourKey)) {
+                    fabricGroup.colours.set(colourKey, {
+                        colourName: fc.colourName,
+                        colourHex: fc.colourHex,
+                        units: 0,
+                        consumption: 0,
+                        cost: 0,
+                    });
+                }
+
+                const colourStats = fabricGroup.colours.get(colourKey)!;
+                const lineConsumption = consumption * line.qty;
+                const lineCost = rate * lineConsumption;
+
+                colourStats.units += line.qty;
+                colourStats.consumption += lineConsumption;
+                colourStats.cost += lineCost;
+            }
+        }
+
+        let totalFabricCost = 0;
+
+        const results: FabricGroup[] = Array.from(fabricMap.values())
+            .map((fg) => {
+                const colours: FabricColourDetail[] = Array.from(fg.colours.values())
+                    .map((c) => ({
+                        colourName: c.colourName,
+                        colourHex: c.colourHex,
+                        units: c.units,
+                        consumption: Math.round(c.consumption * 100) / 100,
+                        cost: Math.round(c.cost * 100) / 100,
+                    }))
+                    .sort((a, b) => b.cost - a.cost);
+
+                const totalConsumption = colours.reduce((sum, c) => sum + c.consumption, 0);
+                const totalCost = colours.reduce((sum, c) => sum + c.cost, 0);
+                totalFabricCost += totalCost;
+
+                return {
+                    fabricId: fg.fabricId,
+                    fabricName: fg.fabricName,
+                    materialName: fg.materialName,
+                    fabricUnit: fg.fabricUnit,
+                    fabricRate: Math.round(fg.fabricRate * 100) / 100,
+                    totalConsumption: Math.round(totalConsumption * 100) / 100,
+                    totalFabricCost: Math.round(totalCost * 100) / 100,
+                    colours,
+                };
+            })
+            .sort((a, b) => b.totalFabricCost - a.totalFabricCost)
+            .slice(0, limit);
+
+        return {
+            period,
+            data: results,
+            totals: {
+                totalFabricCost: Math.round(totalFabricCost * 100) / 100,
             },
         };
     });
