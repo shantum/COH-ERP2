@@ -71,6 +71,7 @@ interface FabricFormData {
 
 interface ColourFormData {
     colourName: string;
+    code: string;
     standardColour: string;
     colourHex: string;
     costPerUnit: string;
@@ -270,6 +271,7 @@ export function UnifiedMaterialModal({
                 data: {
                     fabricId: parentId!,
                     colourName: data.colourName,
+                    code: data.code || null,
                     standardColour: data.standardColour || undefined,
                     colourHex: data.colourHex || undefined,
                     costPerUnit: data.useInheritedCost ? undefined : (data.costPerUnit ? parseFloat(data.costPerUnit) : undefined),
@@ -293,6 +295,7 @@ export function UnifiedMaterialModal({
                 data: {
                     id: item!.id,
                     colourName: data.colourName,
+                    code: data.code || null,
                     standardColour: data.standardColour || undefined,
                     colourHex: data.colourHex || undefined,
                     costPerUnit: data.useInheritedCost ? undefined : (data.costPerUnit ? parseFloat(data.costPerUnit) : undefined),
@@ -528,6 +531,7 @@ function getDefaultValues(
 
     return {
         colourName: item?.colourName || item?.name || '',
+        code: item?.code || '',
         standardColour: item?.standardColour || '',
         colourHex: item?.colourHex || '#6B8E9F',
         costPerUnit: item?.costPerUnit?.toString() || '',
@@ -993,6 +997,26 @@ function ColourForm({
                         {errors.colourName && (
                             <p className="mt-1 text-sm text-red-600">{errors.colourName.message}</p>
                         )}
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Code
+                        </label>
+                        <Controller
+                            name="code"
+                            control={control}
+                            render={({ field }) => (
+                                <input
+                                    {...field}
+                                    type="text"
+                                    onChange={(e) => field.onChange(e.target.value.toUpperCase())}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm font-mono"
+                                    placeholder="Auto-generated"
+                                />
+                            )}
+                        />
+                        <p className="text-xs text-gray-500 mt-1">Leave empty to auto-generate</p>
                     </div>
 
                     <div className="grid grid-cols-2 gap-4">

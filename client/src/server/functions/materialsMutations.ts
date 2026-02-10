@@ -185,6 +185,7 @@ const deleteFabricSchema = z.object({
 const createColourSchema = z.object({
     fabricId: z.string().uuid('Invalid fabric ID'),
     colourName: z.string().min(1, 'Colour name is required').trim(),
+    code: z.string().trim().optional().nullable(),
     standardColour: z.string().optional().nullable(),
     colourHex: z.string().optional().nullable(),
     costPerUnit: z.number().nonnegative().optional().nullable(),
@@ -196,6 +197,7 @@ const createColourSchema = z.object({
 const updateColourSchema = z.object({
     id: z.string().uuid('Invalid colour ID'),
     colourName: z.string().min(1, 'Colour name is required').trim().optional(),
+    code: z.string().trim().optional().nullable(),
     standardColour: z.string().optional().nullable(),
     colourHex: z.string().optional().nullable(),
     costPerUnit: z.number().nonnegative().optional().nullable(),
@@ -457,13 +459,36 @@ export const createColour = createServerFn({ method: 'POST' })
     .handler(async ({ data }): Promise<CreateColourResult> => {
         try {
             const prisma = await getPrisma();
-            // Verify fabric exists
+            // Verify fabric exists and get material name for code generation
             const fabric = await prisma.fabric.findUnique({
                 where: { id: data.fabricId },
+                include: { material: true },
             });
 
             if (!fabric) {
                 throw new Error('Fabric not found');
+            }
+
+            // Auto-generate code if not provided
+            let code = data.code || null;
+            if (!code) {
+                const { generateFabricColourCode } = await import('@coh/shared/domain');
+                code = generateFabricColourCode(
+                    fabric.material?.name ?? 'UNK',
+                    fabric.name,
+                    data.colourName,
+                );
+                // Check uniqueness in a single query
+                const existingCodes = await prisma.fabricColour.findMany({
+                    where: { code: { startsWith: code } },
+                    select: { code: true },
+                });
+                const codeSet = new Set(existingCodes.map((c: { code: string | null }) => c.code));
+                if (codeSet.has(code)) {
+                    let suffix = 2;
+                    while (codeSet.has(`${code}-${suffix}`)) suffix++;
+                    code = `${code}-${suffix}`;
+                }
             }
 
             // Create colour
@@ -471,6 +496,7 @@ export const createColour = createServerFn({ method: 'POST' })
                 data: {
                     fabricId: data.fabricId,
                     colourName: data.colourName,
+                    code,
                     standardColour: data.standardColour || null,
                     colourHex: data.colourHex || null,
                     costPerUnit: data.costPerUnit || null,
@@ -513,6 +539,7 @@ export const updateColour = createServerFn({ method: 'POST' })
                 where: { id: data.id },
                 data: {
                     ...(data.colourName !== undefined && { colourName: data.colourName }),
+                    ...(data.code !== undefined && { code: data.code }),
                     ...(data.standardColour !== undefined && { standardColour: data.standardColour }),
                     ...(data.colourHex !== undefined && { colourHex: data.colourHex }),
                     ...(data.costPerUnit !== undefined && { costPerUnit: data.costPerUnit }),

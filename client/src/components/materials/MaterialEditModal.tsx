@@ -104,7 +104,7 @@ export function MaterialEditModal({ type, item, isOpen, onClose, onSuccess }: Ma
         defaultMinOrderQty: '' as string | number, avgShrinkagePct: 0
     });
     const [colourForm, setColourForm] = useState({
-        colourName: '', standardColour: '', colourHex: '#6B8E9F',
+        colourName: '', code: '', standardColour: '', colourHex: '#6B8E9F',
         costPerUnit: '' as string | number, supplierId: '',
         leadTimeDays: '' as string | number, minOrderQty: '' as string | number
     });
@@ -147,6 +147,7 @@ export function MaterialEditModal({ type, item, isOpen, onClose, onSuccess }: Ma
             case 'colour':
                 setColourForm({
                     colourName: item.colourName || '',
+                    code: item.code || '',
                     standardColour: item.standardColour || '',
                     colourHex: item.colourHex || '#6B8E9F',
                     costPerUnit: item.costPerUnit ?? '',
@@ -303,6 +304,7 @@ export function MaterialEditModal({ type, item, isOpen, onClose, onSuccess }: Ma
                     id: item.colourId || item.id,
                     data: {
                         colourName: colourForm.colourName,
+                        code: colourForm.code || null,
                         standardColour: colourForm.standardColour || null,
                         colourHex: colourForm.colourHex,
                         costPerUnit: colourForm.costPerUnit === '' ? null : colourForm.costPerUnit,
@@ -570,7 +572,7 @@ export function MaterialEditModal({ type, item, isOpen, onClose, onSuccess }: Ma
                     {/* Colour Form */}
                     {type === 'colour' && (
                         <>
-                            <div className="grid grid-cols-3 gap-4">
+                            <div className="grid grid-cols-2 gap-4">
                                 <div>
                                     <label className="label">Colour Name</label>
                                     <input
@@ -581,6 +583,18 @@ export function MaterialEditModal({ type, item, isOpen, onClose, onSuccess }: Ma
                                         required
                                     />
                                 </div>
+                                <div>
+                                    <label className="label">Code</label>
+                                    <input
+                                        className="input font-mono"
+                                        value={colourForm.code}
+                                        onChange={(e) => setColourForm(f => ({ ...f, code: e.target.value.toUpperCase() }))}
+                                        placeholder="Auto-generated"
+                                    />
+                                    <p className="text-xs text-gray-500 mt-1">Leave empty to auto-generate</p>
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-3 gap-4">
                                 <div>
                                     <label className="label">Standard Colour</label>
                                     <select

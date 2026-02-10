@@ -148,6 +148,7 @@ export interface SkuDetailData {
 export interface FabricColour {
   id: string;
   name: string;
+  code: string | null;
   hex: string | null;
   fabricId: string;
   fabricName: string;

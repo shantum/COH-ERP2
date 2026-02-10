@@ -66,6 +66,7 @@ function toMaterialNode(row: FabricColourFlatRow): MaterialNode {
         id: row.id,
         type: 'colour',
         name: row.colourName,
+        code: row.code ?? undefined,
         colourName: row.colourName,
         colourHex: row.colourHex ?? undefined,
         fabricId: row.fabricId,
@@ -156,6 +157,21 @@ export function FabricColoursTable({
 
     // Column definitions - simplified layout
     const columns = useMemo<ColumnDef<FabricColourFlatRow>[]>(() => [
+        // Code badge
+        {
+            id: 'code',
+            header: 'Code',
+            size: 130,
+            cell: ({ row }: CellContext<FabricColourFlatRow, unknown>) => {
+                const code = row.original.code;
+                if (!code) return <span className="text-xs text-gray-400">-</span>;
+                return (
+                    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-mono font-medium bg-gray-100 text-gray-700">
+                        {code}
+                    </span>
+                );
+            },
+        },
         // Combined Fabric | Colour name with swatch
         {
             id: 'name',

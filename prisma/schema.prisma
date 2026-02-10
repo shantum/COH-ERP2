@@ -249,6 +249,7 @@ model Material {
 model FabricColour {
   id             String   @id @default(uuid())
   fabricId       String
+  code           String?  @unique // Short reference code e.g. "LIN-60L-NVY"
   colourName     String   // "Navy Blue", "Rust", "Natural"
   standardColour String?  // Normalized: "blue", "red", "beige"
   colourHex      String?

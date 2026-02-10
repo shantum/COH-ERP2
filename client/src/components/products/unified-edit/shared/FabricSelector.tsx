@@ -49,7 +49,8 @@ export function FabricSelector({
       filtered = filtered.filter(fc =>
         fc.name.toLowerCase().includes(query) ||
         fc.fabricName.toLowerCase().includes(query) ||
-        fc.materialName.toLowerCase().includes(query)
+        fc.materialName.toLowerCase().includes(query) ||
+        (fc.code && fc.code.toLowerCase().includes(query))
       );
     }
 
@@ -94,6 +95,11 @@ export function FabricSelector({
                     )}
                     <span className="truncate">
                       {selectedFabricColour.name}
+                      {selectedFabricColour.code && (
+                        <span className="ml-1 px-1 py-0.5 text-[10px] font-mono bg-gray-100 text-gray-500 rounded">
+                          {selectedFabricColour.code}
+                        </span>
+                      )}
                       <span className="text-gray-500 text-xs ml-2">
                         {selectedFabricColour.materialName} → {selectedFabricColour.fabricName}
                       </span>
@@ -161,8 +167,13 @@ export function FabricSelector({
                             />
                           )}
                           <div className="flex-1 min-w-0">
-                            <div className="truncate font-medium">
-                              {fabricColour.name}
+                            <div className="flex items-center gap-1 truncate">
+                              <span className="font-medium truncate">{fabricColour.name}</span>
+                              {fabricColour.code && (
+                                <span className="ml-1 px-1 py-0.5 text-[10px] font-mono bg-gray-100 text-gray-500 rounded flex-shrink-0">
+                                  {fabricColour.code}
+                                </span>
+                              )}
                             </div>
                             <div className="text-xs text-gray-500 truncate">
                               {fabricColour.materialName} → {fabricColour.fabricName}

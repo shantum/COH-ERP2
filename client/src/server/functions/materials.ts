@@ -156,6 +156,7 @@ export const getMaterialsHierarchy = createServerFn({ method: 'GET' })
                     children: fabric.colours.map((colour: typeof fabric.colours[number]) => ({
                         id: colour.id,
                         type: 'colour' as const,
+                        code: colour.code ?? null,
                         fabricId: colour.fabricId,
                         fabricName: fabric.name,
                         materialId: fabric.materialId,
@@ -783,6 +784,7 @@ export const getMaterialsTree = createServerFn({ method: 'GET' })
                         return {
                         id: colour.id,
                         type: 'colour' as const,
+                        code: colour.code ?? null,
                         name: colour.colourName,
                         colourName: colour.colourName,
                         fabricId: colour.fabricId,
@@ -976,6 +978,7 @@ export const getMaterialsTreeChildren = createServerFn({ method: 'GET' })
                     return {
                         id: colour.id,
                         type: 'colour' as const,
+                        code: colour.code ?? null,
                         name: colour.colourName,
                         colourName: colour.colourName,
                         fabricId: colour.fabricId,
@@ -1084,6 +1087,7 @@ export interface LinkedProduct {
 export interface FabricColourFlatRow {
     // Colour fields
     id: string;
+    code: string | null;
     colourName: string;
     standardColour: string | null;
     colourHex: string | null;
@@ -1148,6 +1152,7 @@ export const getFabricColoursFlat = createServerFn({ method: 'GET' })
         if (data.search) {
             where.OR = [
                 { colourName: { contains: data.search, mode: 'insensitive' } },
+                { code: { contains: data.search, mode: 'insensitive' } },
                 { fabric: { name: { contains: data.search, mode: 'insensitive' } } },
                 { fabric: { material: { name: { contains: data.search, mode: 'insensitive' } } } },
             ];
@@ -1252,6 +1257,7 @@ export const getFabricColoursFlat = createServerFn({ method: 'GET' })
             return {
                 // Colour
                 id: colour.id,
+                code: colour.code ?? null,
                 colourName: colour.colourName,
                 standardColour: colour.standardColour,
                 colourHex: colour.colourHex,

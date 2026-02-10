@@ -40,6 +40,7 @@ export interface MaterialNode {
     unit?: 'kg' | 'm' | string;
 
     // === Colour Properties (Colour level only) ===
+    code?: string;
     fabricId?: string;
     fabricName?: string;
     colourName?: string;

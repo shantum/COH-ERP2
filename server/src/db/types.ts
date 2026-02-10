@@ -140,6 +140,7 @@ export type Fabric = {
 export type FabricColour = {
     id: Generated<string>;
     fabricId: string;
+    code: string | null;
     colourName: string;
     standardColour: string | null;
     colourHex: string | null;

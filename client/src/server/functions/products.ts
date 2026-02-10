@@ -999,6 +999,7 @@ export interface CatalogFiltersResponse {
     }[];
     fabricColours: {
         id: string;
+        code: string | null;
         name: string;
         hex: string | null;
         fabricId: string;
@@ -1058,6 +1059,7 @@ export const getCatalogFilters = createServerFn({ method: 'GET' })
             // Transform fabricColours to expected format
             const fabricColours = fabricColoursRaw.map((fc) => ({
                 id: fc.id,
+                code: fc.code ?? null,
                 name: fc.colourName,
                 hex: fc.colourHex,
                 fabricId: fc.fabricId,

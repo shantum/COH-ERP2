@@ -9,5 +9,6 @@ export * from './constants.js';
 export * from './customers/index.js';
 export * from './formatting.js';
 export * from './inventory/index.js';
+export * from './materials/index.js';
 export * from './orders/index.js';
 export * from './returns/index.js';

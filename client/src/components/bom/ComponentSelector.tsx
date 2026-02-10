@@ -20,6 +20,7 @@ interface FabricColourItem {
     id: string;
     colourName: string;
     colourHex?: string;
+    code?: string | null;
     fabricName: string;
     costPerUnit?: number;
 }
@@ -77,7 +78,7 @@ export default function ComponentSelector({
         if (searchTerm) {
             const term = searchTerm.toLowerCase();
             const name = 'name' in item ? item.name : ('colourName' in item ? item.colourName : '');
-            const code = 'code' in item ? item.code : undefined;
+            const code = 'code' in item ? (item.code ?? undefined) : undefined;
             const fabricName = 'fabricName' in item ? item.fabricName : undefined;
 
             return (
@@ -171,7 +172,14 @@ export default function ComponentSelector({
                         style={{ backgroundColor: fabItem.colourHex || '#ccc' }}
                     />
                     <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate">{fabItem.colourName}</p>
+                        <div className="flex items-center gap-1">
+                            <p className="text-sm font-medium truncate">{fabItem.colourName}</p>
+                            {fabItem.code && (
+                                <span className="px-1 py-0.5 text-[10px] font-mono bg-gray-100 text-gray-500 rounded flex-shrink-0">
+                                    {fabItem.code}
+                                </span>
+                            )}
+                        </div>
                         <p className="text-xs text-gray-500 truncate">{fabItem.fabricName}</p>
                     </div>
                     {fabItem.costPerUnit != null && (
@@ -249,6 +257,11 @@ export default function ComponentSelector({
                         style={{ backgroundColor: fabItem.colourHex || '#ccc' }}
                     />
                     <span className="text-sm truncate">{fabItem.colourName}</span>
+                    {fabItem.code && (
+                        <span className="px-1 py-0.5 text-[10px] font-mono bg-gray-100 text-gray-500 rounded flex-shrink-0">
+                            {fabItem.code}
+                        </span>
+                    )}
                     <span className="text-xs text-gray-400 truncate">({fabItem.fabricName})</span>
                 </div>
             );
