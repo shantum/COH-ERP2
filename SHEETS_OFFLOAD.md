@@ -287,7 +287,7 @@ This is elegant: the ERP only needs to provide the **balance** number. Sheets ha
 
 ---
 
-## Phase 0: Historical Offload (BUILT)
+## Phase 0: Historical Offload (DONE)
 
 Move old data from Sheets into ERP so the ERP can compute authoritative balances.
 
@@ -529,11 +529,11 @@ Sheet row deletion (Step 6) only happens after weeks of verified stable operatio
 
 ---
 
-## Schema Changes (NEEDED)
+## Schema Changes (DONE)
 
 ### New Fields on InventoryTransaction
 
-The existing `InventoryTransaction` model needs **6 optional fields** to capture metadata from sheet data that doesn't fit into the current schema:
+6 optional fields added to capture metadata from sheet data:
 
 ```prisma
 model InventoryTransaction {
@@ -644,9 +644,9 @@ This can run hourly, daily, or on-demand. It's always safe because the formula g
 
 ---
 
-## Phase 1: ERP Balance Push (NOT YET BUILT)
+## Phase 1: ERP Balance Push (DONE)
 
-The ERP needs to push its computed balance to the sheet so that app-side transactions are reflected. This is the other direction of the bridge — Phase 0 moves data Sheet→ERP, Phase 1 moves data ERP→Sheet.
+The ERP pushes its computed balance to the sheet so that app-side transactions are reflected. This is the other direction of the bridge — Phase 0 moves data Sheet→ERP, Phase 1 moves data ERP→Sheet. **Implemented as part of the offload worker's balance push step — runs after each ingestion cycle, writes `currentBalance` to both Inventory col R and Balance (Final) col F.**
 
 ### What Gets Written
 
@@ -673,16 +673,18 @@ The Inventory tab's allocation formula stays untouched — it already references
 
 Col F of **Balance (Final)** in the Office Ledger. This is the same column Phase 0 already writes to. The Inventory tab in the Mastersheet already reads from here (via Office Inventory mirror).
 
-### What Needs Building
+### What Was Built
 
-| Component | Description |
-|-----------|-------------|
-| Balance push worker | Queries ERP for per-SKU balance, writes to col F. Could be a new phase in the existing offload worker or a standalone worker. |
-| Trigger on app inward/outward | After `InventoryTransaction.create()`, schedule a balance push (debounced) |
+| Component | Description | Status |
+|-----------|-------------|--------|
+| Balance push in offload worker | After each ingestion cycle, queries ERP for per-SKU `currentBalance`, writes to Inventory col R + Balance (Final) col F | ✅ Done |
+| Live buffer formula | `=R{row} + SUMIF(Inward Live) - SUMIF(Outward Live)` on Inventory tab | ✅ Done |
+| Evidence-based fulfillment | `linkOutwardToOrders()` — auto-ships OrderLines when outward txn matches by orderNumber + skuId | ✅ Done |
+| Shipped → Outward pipeline | `moveShippedToOutward()` copies shipped rows from Orders from COH → Outward (Live), 1:1 layout match | ✅ Done |
 
 ---
 
-## Phase 2: Gradual Inward/Outward Migration (NOT YET BUILT)
+## Phase 2: Gradual Inward/Outward Migration (IN PROGRESS)
 
 Move inward and outward recording from Sheets to the ERP app, at the team's pace.
 
@@ -739,9 +741,9 @@ If there's a discrepancy, the ingestion logs show exactly which rows were proces
 
 ---
 
-## Monitoring Page (`/settings/sheets` or `/sheets-monitor`)
+## Monitoring Page (DONE — `/settings` → Sheet Sync tab)
 
-A dedicated admin page to monitor the hybrid system — useful during migration and as an ongoing health check.
+Integrated into the Settings page as the Sheet Sync tab. Shows offload worker status, recent runs, trigger buttons for each job, and buffer counts.
 
 ### Layout
 
@@ -831,7 +833,7 @@ This page should be built **after the worker revision** (tasks 1-4 in Remaining 
 
 ---
 
-## Phase 3: Webhook Consolidation (FUTURE / LOW PRIORITY)
+## Phase 3: Webhook Consolidation (FUTURE — LOW PRIORITY)
 
 Currently two GCF webhooks write Shopify order data to Sheets:
 1. **Order-level** → ShopifyAllOrderData tab (tracking, payment, etc.)

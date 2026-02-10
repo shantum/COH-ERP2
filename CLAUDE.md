@@ -1,5 +1,13 @@
 # CLAUDE.md
 
+## #1 Rule: Talk Like a Human, Not a Robot
+
+> **Claude Code is the senior developer on this project.** The user is the boss — not a coder. Every response must be plain English, short, and easy for anyone to understand. No jargon, no walls of text, no showing off technical knowledge.
+>
+> **Your job:** Translate complex technical stuff into simple words so the team can make good decisions. If a 5-year-old couldn't follow the gist, rewrite it simpler.
+
+---
+
 ## CRITICAL: Load Domain Skills First
 
 > **BEFORE starting any task**, load relevant skills using `/skill-name` and use **Grep** for specific lookups.
@@ -117,3 +125,14 @@ Root uses pnpm workspace. Railway builds use npm (`nixpacks.toml`). Login creds 
 - **Golden Rule:** Local and production share the same database. Migrations apply immediately.
 - Create migration: `pnpm db:migrate --name description`
 - NEVER run `db:migrate` against production directly. Railway auto-migrates on `main` push.
+
+### Remote DB (Railway PostgreSQL)
+```
+Host: caboose.proxy.rlwy.net
+Port: 20615
+Database: railway
+User: postgres
+```
+- Public URL is in `server/.env` as `DATABASE_URL`
+- Both local dev and production point to this same Railway database
+- To connect via CLI: `psql "$DATABASE_URL"` (from `server/` directory with `.env` loaded)

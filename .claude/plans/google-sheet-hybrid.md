@@ -168,39 +168,21 @@ Google Sheets is the team's daily working surface for order management — it's 
 ## Current Context
 <!-- This section gets REWRITTEN each session. Ephemeral working state. -->
 
-**Active Phase**: Phase 4 (ERP Clean-Up) — Phases 1-3 complete, evidence-based fulfillment operational, Outward layout aligned
-**Working On**: Outward (Live) layout alignment complete
+**Active Phase**: Phase 4 (ERP Clean-Up)
+**Working On**: Remaining UI cleanup tasks
 **Blocked By**: Nothing
 **Next Up**:
-  1. Phase 4 — deprecate fulfillment UI, update dashboard metrics
-  2. OR Phase 6 — Barcode Mastersheet & Fabric Ledger
-  3. OR Phase 7 — Piece-Level Tracking & Returns
+  1. Phase 4 remaining — feature flag, dashboard metrics, hide old fulfillment UI
+  2. Phase 6 — Barcode Mastersheet & Fabric Ledger
+  3. Phase 7 — Piece-Level Tracking & Returns
 
-**Session 2026-02-08 (Outward Live Layout Alignment):**
-- Aligned Outward (Live) layout with Orders from COH — same columns A-AD + AE=Outward Date
-- Updated `OUTWARD_LIVE_COLS` config: SKU=6(G), QTY=8(I), ORDER_NO=1(B), COURIER=25(Z), AWB=26(AA), OUTWARD_DATE=30(AE)
-- Simplified `moveShippedToOutward()`: 1:1 copy of 30 cols + append date at AE (was complex 14-field remapping)
-- Updated `ingestOutwardLive()`: range A:AE, date priority AE→A, destination inferred from order#
-- Updated Apps Script: same 1:1 copy, removed split-write hack
-- Updated all formula scripts: Outward Live refs from $A:$A/$B:$B → $G:$G/$I:$I
-- Updated `LIVE_BALANCE_FORMULA_TEMPLATE` in config
-- Removed col C protection from Outward (Live) (no longer has ARRAYFORMULA)
-- Migration run: 0 data rows, 6,507 Inventory + 6,508 Balance formulas updated
-- Balances verified correct after formula update
-
-**Session 2026-02-08 (Ledgers Redesign & Sheet Field Backfill):**
-- Redesigned Ledgers page: card-list → table layout, 3 tabs (inward/outward/materials)
-- Built `getLedgerTransactions` server function with search (7 fields), pagination, stats, filter dropdowns
-- Backfilled sheet fields from Google Sheets via raw SQL batch updates (95K records in ~1 min)
-- Commit: `e4ea035`
-
-**Session 2026-02-08 (Evidence-Based Fulfillment):**
-- Backfilled `orderNumber` on 37,345 historical ms-outward InventoryTransactions
-- Built `linkOutwardToOrders()` (Phase B2), 237 historical OrderLines corrected
-- Disabled Steps 1 & 4 in manual CSV sync
-- Commits: `92b5591`, `647fba3`
-
-**Session 2026-02-07 (Phase 3 build + test):**
-- Built `moveShippedToOutward()`, tested with 137 shipped rows, batched col AD writes
-- Balance verification: -140 net change correct
-- Enabled `ENABLE_SHEET_OFFLOAD=true` + `ENABLE_SHEET_DELETION=true`
+**Verified 2026-02-09:**
+- Phases 1-3 fully complete and operational in production
+- Evidence-based fulfillment (`linkOutwardToOrders`) wired into outward ingestion worker
+- CSV sync Steps 1 & 4 confirmed disabled (no-op results)
+- Allocation mutations still active (not yet turned off)
+- Dashboard still shows pipeline counts (not yet replaced with inventory metrics)
+- `ENABLE_FULFILLMENT_UI` feature flag does not exist yet
+- Orders page still full-featured (not yet simplified to read-only)
+- OrdersSimple route still registered
+- SHEETS_OFFLOAD.md phase statuses updated to match reality
