@@ -27,6 +27,7 @@ import { broadcastOrderUpdate } from '../routes/sse.js';
 import {
     readRange,
     writeRange,
+    batchWriteRanges,
     appendRows,
     deleteRowsBatch,
     getSheetId,
@@ -466,10 +467,16 @@ async function bulkLookupSkus(skuCodes: string[]): Promise<Map<string, SkuLookup
     return new Map(skus.map(s => [s.skuCode, { id: s.id, variationId: s.variationId, fabricConsumption: s.fabricConsumption }]));
 }
 
+interface OrderMapEntry {
+    id: string;
+    orderNumber: string;  // the actual ERP orderNumber (may differ from the sheet key)
+    orderLines: Array<{ id: string; skuId: string; qty: number; lineStatus: string }>;
+}
+
 interface OutwardValidationResult {
     validRows: ParsedRow[];
     skipReasons: Record<string, number>;
-    orderMap: Map<string, { id: string; orderLines: Array<{ id: string; skuId: string; qty: number; lineStatus: string }> }>;
+    orderMap: Map<string, OrderMapEntry>;
 }
 
 /**
@@ -501,7 +508,7 @@ async function validateOutwardRows(
             .filter(Boolean)
     )];
 
-    const orderMap = new Map<string, { id: string; orderLines: Array<{ id: string; skuId: string; qty: number; lineStatus: string }> }>();
+    const orderMap = new Map<string, OrderMapEntry>();
     if (orderNumbers.length > 0) {
         // Build alternate format lookups for channel orders.
         // Historical imports created inconsistent formats:
@@ -580,7 +587,7 @@ async function validateOutwardRows(
                     'Multiple DB orders match same sheet order number — keeping first'
                 );
             } else {
-                orderMap.set(sheetKey, { id: o.id, orderLines: o.orderLines });
+                orderMap.set(sheetKey, { id: o.id, orderNumber: o.orderNumber, orderLines: o.orderLines });
             }
         }
 
@@ -1050,7 +1057,7 @@ async function ingestInwardLive(result: IngestInwardResult): Promise<Set<string>
 
 async function ingestOutwardLive(
     result: IngestOutwardResult
-): Promise<{ affectedSkuIds: Set<string>; linkableItems: LinkableOutward[]; orderMap: Map<string, { id: string; orderLines: Array<{ id: string; skuId: string; qty: number; lineStatus: string }> }> }> {
+): Promise<{ affectedSkuIds: Set<string>; linkableItems: LinkableOutward[]; orderMap: Map<string, OrderMapEntry> }> {
     const tab = LIVE_TABS.OUTWARD;
     const affectedSkuIds = new Set<string>();
     const linkableItems: LinkableOutward[] = [];
@@ -1184,6 +1191,10 @@ async function ingestOutwardLive(
 
         for (const row of chunk) {
             const skuInfo = skuMap.get(row.skuCode)!;
+            // Use the real ERP orderNumber (from orderMap), not the sheet value
+            // which may be an alternate format (short Myntra UUID, Nykaa without --1, etc.)
+            const matchedOrder = row.extra ? orderMap.get(row.extra) : null;
+            const erpOrderNumber = matchedOrder?.orderNumber ?? row.extra ?? null;
 
             txnData.push({
                 skuId: skuInfo.id,
@@ -1197,14 +1208,14 @@ async function ingestOutwardLive(
                 createdById: adminUserId,
                 createdAt: row.date!,
                 destination: row.source || null,
-                orderNumber: row.extra || null,
+                orderNumber: erpOrderNumber,
             });
 
             affectedSkuIds.add(skuInfo.id);
 
             if (row.extra) {
                 chunkLinkable.push({
-                    orderNumber: row.extra,
+                    orderNumber: row.extra,  // sheet key — for orderMap lookup in linkOutwardToOrders
                     skuId: skuInfo.id,
                     qty: row.qty,
                     date: row.date,
@@ -1250,7 +1261,7 @@ const LINKABLE_STATUSES = ['pending', 'allocated', 'picked', 'packed'];
 async function linkOutwardToOrders(
     items: LinkableOutward[],
     result: IngestOutwardResult,
-    preloadedOrderMap: Map<string, { id: string; orderLines: Array<{ id: string; skuId: string; qty: number; lineStatus: string }> }>
+    preloadedOrderMap: Map<string, OrderMapEntry>
 ): Promise<void> {
     if (items.length === 0) return;
 
@@ -2589,12 +2600,13 @@ async function triggerPushBalances(): Promise<PushBalancesResult | null> {
 
             if (updates.length > 0) {
                 const ranges = groupIntoRanges(updates);
-                for (const range of ranges) {
-                    const rangeStr = `'${INVENTORY_TAB.NAME}'!${INVENTORY_TAB.ERP_BALANCE_COL}${range.startRow}:${INVENTORY_TAB.ERP_BALANCE_COL}${range.startRow + range.values.length - 1}`;
-                    await writeRange(ORDERS_MASTERSHEET_ID, rangeStr, range.values);
-                }
+                const batchData = ranges.map(range => ({
+                    range: `'${INVENTORY_TAB.NAME}'!${INVENTORY_TAB.ERP_BALANCE_COL}${range.startRow}:${INVENTORY_TAB.ERP_BALANCE_COL}${range.startRow + range.values.length - 1}`,
+                    values: range.values,
+                }));
+                await batchWriteRanges(ORDERS_MASTERSHEET_ID, batchData);
                 totalUpdated = updates.length;
-                sheetsLogger.info({ updated: updates.length, ranges: ranges.length }, 'Push balances: Inventory col R updated');
+                sheetsLogger.info({ updated: updates.length, ranges: ranges.length }, 'Push balances: Inventory col R updated (batch)');
             }
         } catch (err: unknown) {
             const message = err instanceof Error ? err.message : 'Unknown error';
@@ -2620,11 +2632,12 @@ async function triggerPushBalances(): Promise<PushBalancesResult | null> {
 
                 if (updates.length > 0) {
                     const ranges = groupIntoRanges(updates);
-                    for (const range of ranges) {
-                        const rangeStr = `'${LEDGER_TABS.BALANCE_FINAL}'!F${range.startRow}:F${range.startRow + range.values.length - 1}`;
-                        await writeRange(OFFICE_LEDGER_ID, rangeStr, range.values);
-                    }
-                    sheetsLogger.info({ updated: updates.length }, 'Push balances: Balance (Final) col F updated');
+                    const batchData = ranges.map(range => ({
+                        range: `'${LEDGER_TABS.BALANCE_FINAL}'!F${range.startRow}:F${range.startRow + range.values.length - 1}`,
+                        values: range.values,
+                    }));
+                    await batchWriteRanges(OFFICE_LEDGER_ID, batchData);
+                    sheetsLogger.info({ updated: updates.length }, 'Push balances: Balance (Final) col F updated (batch)');
                 }
             }
         } catch (err: unknown) {

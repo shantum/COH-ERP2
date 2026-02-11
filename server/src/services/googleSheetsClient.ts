@@ -187,6 +187,33 @@ export async function writeRange(
 }
 
 /**
+ * Write multiple ranges in a single API call using values.batchUpdate.
+ * Much faster than calling writeRange() in a loop.
+ */
+export async function batchWriteRanges(
+    spreadsheetId: string,
+    data: Array<{ range: string; values: (string | number)[][] }>
+): Promise<void> {
+    if (data.length === 0) return;
+
+    const client = getClient();
+
+    await withRetry(
+        () => client.spreadsheets.values.batchUpdate({
+            spreadsheetId,
+            requestBody: {
+                valueInputOption: 'USER_ENTERED',
+                data: data.map(d => ({
+                    range: d.range,
+                    values: d.values,
+                })),
+            },
+        }),
+        `batchWriteRanges(${data.length} ranges)`
+    );
+}
+
+/**
  * Append rows to the end of a range.
  * Returns the 0-based start row index where data was appended.
  */
