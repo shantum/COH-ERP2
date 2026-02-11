@@ -38,6 +38,7 @@ import internalRoutes from './routes/internal.js';
 import returnsRoutes from './routes/returns.js';
 import trackingRoutes from './routes/tracking.js';
 import sheetSyncRoutes from './routes/sheetSync.js';
+import channelsRoutes from './routes/channels.js';
 import returnPrimeWebhooks from './routes/returnPrimeWebhooks.js';
 import returnPrimeSync from './routes/returnPrimeSync.js';
 import returnPrimeAdminRoutes from './routes/returnPrimeAdminRoutes.js';
@@ -149,6 +150,7 @@ export async function createExpressApp() {
   app.use('/api/internal', internalRoutes);
   app.use('/api/returns', returnsRoutes);
   app.use('/api/tracking', trackingRoutes);
+  app.use('/api/channels', channelsRoutes);
   app.use('/api/admin/sheet-sync', sheetSyncRoutes);
 
   // Return Prime integration
