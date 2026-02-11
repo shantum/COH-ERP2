@@ -411,9 +411,9 @@ function PreviewResultCard({ title, preview, type, onClose }: {
                                         <span className={erpDelta > 0 ? 'text-emerald-600' : 'text-blue-600'}>
                                             {' '}({erpDelta > 0 ? '+' : ''}{erpDelta})
                                         </span>
-                                        , pending {b.sheetPending} → {b.afterSheetPending}
-                                        , total {b.colC}
-                                        <span className="text-emerald-600"> (no change)</span>
+                                        <span className="text-gray-400">{' | '}</span>
+                                        Sheet total (C): {b.colC}
+                                        <span className="text-emerald-600"> — no change</span>
                                     </div>
                                 );
                             })}
