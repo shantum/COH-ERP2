@@ -187,7 +187,7 @@ interface PermissionsUpdateBody {
 }
 
 /** Background job trigger params */
-type JobId = 'shopify_sync' | 'tracking_sync' | 'cache_cleanup' | 'ingest_inward' | 'ingest_outward' | 'move_shipped_to_outward' | 'preview_ingest_inward' | 'preview_ingest_outward' | 'cleanup_done_rows' | 'migrate_sheet_formulas' | 'snapshot_compute' | 'snapshot_backfill' | 'push_balances' | 'preview_push_balances' | 'push_fabric_balances' | 'import_fabric_balances';
+type JobId = 'shopify_sync' | 'tracking_sync' | 'cache_cleanup' | 'ingest_inward' | 'ingest_outward' | 'move_shipped_to_outward' | 'preview_ingest_inward' | 'preview_ingest_outward' | 'cleanup_done_rows' | 'migrate_sheet_formulas' | 'snapshot_compute' | 'snapshot_backfill' | 'push_balances' | 'preview_push_balances' | 'push_fabric_balances' | 'import_fabric_balances' | 'preview_fabric_inward' | 'ingest_fabric_inward';
 
 /** Background job update body */
 interface JobUpdateBody {
@@ -1404,6 +1404,28 @@ router.get('/background-jobs', authenticateToken, asyncHandler(async (req: Reque
             },
         },
         {
+            id: 'preview_fabric_inward',
+            name: 'Preview Fabric Inward',
+            description: 'Dry run of fabric inward import: validates fabric codes, quantities, costs, suppliers, dates. Writes status to column K without creating transactions.',
+            enabled: true,
+            isRunning: offloadStatus.fabricInward.isRunning,
+            lastRunAt: null,
+            note: 'Preview only — no data changes',
+        },
+        {
+            id: 'ingest_fabric_inward',
+            name: 'Import Fabric Inward',
+            description: 'Reads Fabric Inward (Live) tab, creates FabricColourTransactions for supplier receipts, finds/creates suppliers, marks rows as DONE.',
+            enabled: true,
+            isRunning: offloadStatus.fabricInward.isRunning,
+            lastRunAt: offloadStatus.fabricInward.lastRunAt,
+            lastResult: offloadStatus.fabricInward.lastResult,
+            note: 'Manual trigger only — Preview first, then Import',
+            stats: {
+                recentRuns: offloadStatus.fabricInward.recentRuns,
+            },
+        },
+        {
             id: 'snapshot_compute',
             name: 'Stock Snapshot (Monthly)',
             description: 'Computes the stock snapshot for the last completed month: Opening + Inward - Outward = Closing, with reason breakdowns.',
@@ -1541,6 +1563,16 @@ router.post('/background-jobs/:jobId/trigger', requireAdmin, asyncHandler(async 
         case 'import_fabric_balances': {
             const result = await sheetOffloadWorker.triggerImportFabricBalances();
             res.json({ message: 'Fabric balances imported from sheet', result });
+            break;
+        }
+        case 'preview_fabric_inward': {
+            const result = await sheetOffloadWorker.previewFabricInward();
+            res.json({ message: 'Preview fabric inward completed', result });
+            break;
+        }
+        case 'ingest_fabric_inward': {
+            const result = await sheetOffloadWorker.triggerFabricInward();
+            res.json({ message: 'Fabric inward import completed', result });
             break;
         }
         default:

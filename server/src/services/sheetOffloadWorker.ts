@@ -43,6 +43,7 @@ import {
     INWARD_LIVE_COLS,
     OUTWARD_LIVE_COLS,
     ORDERS_FROM_COH_COLS,
+    FABRIC_INWARD_LIVE_COLS,
     INWARD_SOURCE_MAP,
     VALID_INWARD_LIVE_SOURCES,
     FABRIC_DEDUCT_SOURCES,
@@ -145,6 +146,45 @@ interface ImportFabricBalancesResult {
     }>;
     durationMs: number;
     error: string | null;
+}
+
+interface FabricInwardResult {
+    startedAt: string;
+    imported: number;
+    skipped: number;
+    rowsMarkedDone: number;
+    suppliersCreated: number;
+    errors: number;
+    durationMs: number;
+    error: string | null;
+    validationErrors: Record<string, number>;
+}
+
+interface FabricInwardPreviewRow {
+    fabricCode: string;
+    material: string;
+    fabric: string;
+    colour: string;
+    qty: number;
+    unit: string;
+    costPerUnit: number;
+    supplier: string;
+    date: string;
+    notes: string;
+    status: 'ready' | 'invalid' | 'duplicate';
+    error?: string;
+}
+
+interface FabricInwardPreviewResult {
+    tab: string;
+    totalRows: number;
+    valid: number;
+    invalid: number;
+    duplicates: number;
+    validationErrors: Record<string, number>;
+    affectedFabricCodes: string[];
+    durationMs: number;
+    previewRows?: FabricInwardPreviewRow[];
 }
 
 interface PushBalancesPreviewResult {
@@ -264,6 +304,7 @@ interface OffloadStatus {
     pushBalances: JobState<PushBalancesResult>;
     pushFabricBalances: JobState<PushFabricBalancesResult>;
     importFabricBalances: JobState<ImportFabricBalancesResult>;
+    fabricInward: JobState<FabricInwardResult>;
     schedulerActive: boolean;
 }
 
@@ -360,6 +401,13 @@ const pushFabricBalancesState: JobState<PushFabricBalancesResult> = {
 };
 
 const importFabricBalancesState: JobState<ImportFabricBalancesResult> = {
+    isRunning: false,
+    lastRunAt: null,
+    lastResult: null,
+    recentRuns: [],
+};
+
+const fabricInwardState: JobState<FabricInwardResult> = {
     isRunning: false,
     lastRunAt: null,
     lastResult: null,
@@ -3204,6 +3252,12 @@ function getStatus(): OffloadStatus {
             lastResult: importFabricBalancesState.lastResult,
             recentRuns: [...importFabricBalancesState.recentRuns],
         },
+        fabricInward: {
+            isRunning: fabricInwardState.isRunning,
+            lastRunAt: fabricInwardState.lastRunAt,
+            lastResult: fabricInwardState.lastResult,
+            recentRuns: [...fabricInwardState.recentRuns],
+        },
         schedulerActive,
     };
 }
@@ -3751,6 +3805,473 @@ async function triggerImportFabricBalances(): Promise<ImportFabricBalancesResult
 }
 
 // ============================================
+// JOB: FABRIC INWARD (LIVE) — PREVIEW & IMPORT
+// ============================================
+
+/**
+ * Builds a content-based reference ID for fabric inward rows.
+ * Format: sheet:fabric-inward-live:{code}:{qty}:{date}:{supplier}
+ */
+function buildFabricInwardRefId(
+    fabricCode: string,
+    qty: number,
+    dateStr: string,
+    supplier: string
+): string {
+    const datePart = dateStr.replace(/[/\-.\s]/g, '').slice(0, 8) || 'nodate';
+    const supplierPart = supplier.slice(0, 20).replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+    return `${REF_PREFIX.FABRIC_INWARD_LIVE}:${fabricCode}:${qty}:${datePart}:${supplierPart}`;
+}
+
+/**
+ * Parse a numeric value that may be a float (fabric quantities can be decimal).
+ */
+function parseFabricQty(value: string | undefined): number {
+    if (!value?.trim()) return 0;
+    const num = Number(value.trim());
+    return isFinite(num) && num > 0 ? num : 0;
+}
+
+/**
+ * Preview Fabric Inward (Live) — dry run.
+ * Reads the tab, validates rows, writes status column, returns preview.
+ */
+async function previewFabricInward(): Promise<FabricInwardPreviewResult | null> {
+    if (fabricInwardState.isRunning) {
+        sheetsLogger.debug('Fabric inward already in progress, skipping preview');
+        return null;
+    }
+
+    fabricInwardState.isRunning = true;
+    const startTime = Date.now();
+
+    try {
+        const tab = LIVE_TABS.FABRIC_INWARD;
+        sheetsLogger.info({ tab }, 'Preview: reading fabric inward live tab');
+
+        const rows = await readRange(ORDERS_MASTERSHEET_ID, `'${tab}'!A:K`);
+        if (rows.length <= 1) {
+            return {
+                tab, totalRows: 0, valid: 0, invalid: 0, duplicates: 0,
+                validationErrors: {}, affectedFabricCodes: [],
+                durationMs: Date.now() - startTime,
+            };
+        }
+
+        // Fetch all active fabric colours for validation
+        const allFabricColours = await prisma.fabricColour.findMany({
+            where: { isActive: true },
+            select: { id: true, code: true, colourName: true, fabric: { select: { name: true, unit: true, material: { select: { name: true } } } } },
+        });
+        const fabricByCode = new Map(allFabricColours.map(fc => [fc.code, fc]));
+
+        // Parse rows
+        interface FabricInwardParsed {
+            rowIndex: number;
+            fabricCode: string;
+            material: string;
+            fabric: string;
+            colour: string;
+            qty: number;
+            unit: string;
+            costPerUnit: number;
+            supplier: string;
+            dateStr: string;
+            date: Date | null;
+            notes: string;
+            referenceId: string;
+        }
+
+        const parsed: FabricInwardParsed[] = [];
+        const seenRefs = new Set<string>();
+
+        for (let i = 1; i < rows.length; i++) {
+            const row = rows[i];
+            const fabricCode = String(row[FABRIC_INWARD_LIVE_COLS.FABRIC_CODE] ?? '').trim();
+            if (!fabricCode) continue;
+
+            // Skip already-ingested rows
+            const status = String(row[FABRIC_INWARD_LIVE_COLS.STATUS] ?? '').trim();
+            if (status.startsWith(INGESTED_PREFIX)) continue;
+
+            const qty = parseFabricQty(String(row[FABRIC_INWARD_LIVE_COLS.QTY] ?? ''));
+            const costPerUnit = parseFabricQty(String(row[FABRIC_INWARD_LIVE_COLS.COST_PER_UNIT] ?? ''));
+            const supplier = String(row[FABRIC_INWARD_LIVE_COLS.SUPPLIER] ?? '').trim();
+            const dateStr = String(row[FABRIC_INWARD_LIVE_COLS.DATE] ?? '').trim();
+            const notes = String(row[FABRIC_INWARD_LIVE_COLS.NOTES] ?? '').trim();
+            const material = String(row[FABRIC_INWARD_LIVE_COLS.MATERIAL] ?? '').trim();
+            const fabric = String(row[FABRIC_INWARD_LIVE_COLS.FABRIC] ?? '').trim();
+            const colour = String(row[FABRIC_INWARD_LIVE_COLS.COLOUR] ?? '').trim();
+            const unit = String(row[FABRIC_INWARD_LIVE_COLS.UNIT] ?? '').trim();
+
+            let refId = buildFabricInwardRefId(fabricCode, qty, dateStr, supplier);
+            if (seenRefs.has(refId)) {
+                let counter = 2;
+                while (seenRefs.has(`${refId}:${counter}`)) counter++;
+                refId = `${refId}:${counter}`;
+            }
+            seenRefs.add(refId);
+
+            parsed.push({
+                rowIndex: i, fabricCode, material, fabric, colour,
+                qty, unit, costPerUnit, supplier, dateStr, date: parseSheetDate(dateStr),
+                notes, referenceId: refId,
+            });
+        }
+
+        if (parsed.length === 0) {
+            return {
+                tab, totalRows: 0, valid: 0, invalid: 0, duplicates: 0,
+                validationErrors: {}, affectedFabricCodes: [],
+                durationMs: Date.now() - startTime,
+            };
+        }
+
+        // Validate
+        const validRows: FabricInwardParsed[] = [];
+        const validationErrors: Record<string, number> = {};
+        const rowErrors = new Map<string, string>();
+
+        for (const p of parsed) {
+            const reasons: string[] = [];
+
+            if (!fabricByCode.has(p.fabricCode)) {
+                reasons.push(`Unknown fabric code: ${p.fabricCode}`);
+            }
+            if (p.qty <= 0) {
+                reasons.push('Qty must be > 0');
+            }
+            if (p.costPerUnit <= 0) {
+                reasons.push('Cost per unit must be > 0');
+            }
+            if (!p.supplier) {
+                reasons.push('Supplier is required');
+            }
+            if (!p.date) {
+                reasons.push('Date is required (DD/MM/YYYY)');
+            }
+
+            if (reasons.length === 0) {
+                validRows.push(p);
+            } else {
+                for (const reason of reasons) {
+                    validationErrors[reason] = (validationErrors[reason] ?? 0) + 1;
+                }
+                rowErrors.set(p.referenceId, reasons.join('; '));
+            }
+        }
+
+        // Dedup against existing FabricColourTransactions
+        const existingRefs = await findExistingFabricReferenceIds(validRows.map(r => r.referenceId));
+        const newRows = validRows.filter(r => !existingRefs.has(r.referenceId));
+        const duplicates = validRows.length - newRows.length;
+
+        // Write status column K
+        const importErrors: Array<{ rowIndex: number; error: string }> = [];
+        for (const p of parsed) {
+            const errorText = rowErrors.get(p.referenceId);
+            if (errorText) {
+                importErrors.push({ rowIndex: p.rowIndex, error: errorText });
+            } else if (existingRefs.has(p.referenceId)) {
+                importErrors.push({ rowIndex: p.rowIndex, error: 'ok (already in ERP)' });
+            } else {
+                importErrors.push({ rowIndex: p.rowIndex, error: 'ok' });
+            }
+        }
+        await writeImportErrors(ORDERS_MASTERSHEET_ID, tab, importErrors, 'K');
+
+        const affectedFabricCodes = [...new Set(newRows.map(r => r.fabricCode))];
+
+        // Build preview rows
+        const previewRows: FabricInwardPreviewRow[] = parsed.map(p => {
+            const errorText = rowErrors.get(p.referenceId);
+            const isDupe = existingRefs.has(p.referenceId);
+            return {
+                fabricCode: p.fabricCode,
+                material: p.material,
+                fabric: p.fabric,
+                colour: p.colour,
+                qty: p.qty,
+                unit: p.unit,
+                costPerUnit: p.costPerUnit,
+                supplier: p.supplier,
+                date: p.dateStr,
+                notes: p.notes,
+                status: errorText ? 'invalid' as const : isDupe ? 'duplicate' as const : 'ready' as const,
+                ...(errorText ? { error: errorText } : {}),
+            };
+        });
+
+        sheetsLogger.info({
+            tab, total: parsed.length, valid: validRows.length,
+            invalid: parsed.length - validRows.length, duplicates, new: newRows.length,
+        }, 'Preview fabric inward complete');
+
+        return {
+            tab,
+            totalRows: parsed.length,
+            valid: newRows.length,
+            invalid: parsed.length - validRows.length,
+            duplicates,
+            validationErrors,
+            affectedFabricCodes,
+            durationMs: Date.now() - startTime,
+            previewRows,
+        };
+    } catch (error: unknown) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        sheetsLogger.error({ error: err.message }, 'Preview fabric inward failed');
+        throw err;
+    } finally {
+        fabricInwardState.isRunning = false;
+    }
+}
+
+/**
+ * Import Fabric Inward (Live) — actual import.
+ * Creates FabricColourTransactions and marks rows as DONE.
+ */
+async function triggerFabricInward(): Promise<FabricInwardResult | null> {
+    if (fabricInwardState.isRunning) {
+        sheetsLogger.debug('Fabric inward already in progress, skipping');
+        return null;
+    }
+
+    fabricInwardState.isRunning = true;
+    const startTime = Date.now();
+
+    const result: FabricInwardResult = {
+        startedAt: new Date().toISOString(),
+        imported: 0,
+        skipped: 0,
+        rowsMarkedDone: 0,
+        suppliersCreated: 0,
+        errors: 0,
+        durationMs: 0,
+        error: null,
+        validationErrors: {},
+    };
+
+    try {
+        const tab = LIVE_TABS.FABRIC_INWARD;
+        sheetsLogger.info({ tab }, 'Starting fabric inward import');
+
+        const rows = await readRange(ORDERS_MASTERSHEET_ID, `'${tab}'!A:K`);
+        if (rows.length <= 1) {
+            result.durationMs = Date.now() - startTime;
+            fabricInwardState.lastRunAt = new Date();
+            fabricInwardState.lastResult = result;
+            pushRecentRun(fabricInwardState, {
+                startedAt: result.startedAt, durationMs: result.durationMs,
+                count: 0, error: null,
+            });
+            return result;
+        }
+
+        // Fetch all active fabric colours
+        const allFabricColours = await prisma.fabricColour.findMany({
+            where: { isActive: true },
+            select: { id: true, code: true, fabric: { select: { unit: true } } },
+        });
+        const fabricByCode = new Map(allFabricColours.map(fc => [fc.code, fc]));
+
+        const adminUserId = await getAdminUserId();
+
+        // Parse and validate
+        interface ParsedFabricRow {
+            rowIndex: number;
+            fabricCode: string;
+            qty: number;
+            costPerUnit: number;
+            supplier: string;
+            dateStr: string;
+            date: Date | null;
+            notes: string;
+            referenceId: string;
+        }
+
+        const parsed: ParsedFabricRow[] = [];
+        const seenRefs = new Set<string>();
+
+        for (let i = 1; i < rows.length; i++) {
+            const row = rows[i];
+            const fabricCode = String(row[FABRIC_INWARD_LIVE_COLS.FABRIC_CODE] ?? '').trim();
+            if (!fabricCode) continue;
+
+            const status = String(row[FABRIC_INWARD_LIVE_COLS.STATUS] ?? '').trim();
+            if (status.startsWith(INGESTED_PREFIX)) continue;
+
+            const qty = parseFabricQty(String(row[FABRIC_INWARD_LIVE_COLS.QTY] ?? ''));
+            const costPerUnit = parseFabricQty(String(row[FABRIC_INWARD_LIVE_COLS.COST_PER_UNIT] ?? ''));
+            const supplier = String(row[FABRIC_INWARD_LIVE_COLS.SUPPLIER] ?? '').trim();
+            const dateStr = String(row[FABRIC_INWARD_LIVE_COLS.DATE] ?? '').trim();
+            const notes = String(row[FABRIC_INWARD_LIVE_COLS.NOTES] ?? '').trim();
+
+            let refId = buildFabricInwardRefId(fabricCode, qty, dateStr, supplier);
+            if (seenRefs.has(refId)) {
+                let counter = 2;
+                while (seenRefs.has(`${refId}:${counter}`)) counter++;
+                refId = `${refId}:${counter}`;
+            }
+            seenRefs.add(refId);
+
+            parsed.push({
+                rowIndex: i, fabricCode, qty, costPerUnit,
+                supplier, dateStr, date: parseSheetDate(dateStr),
+                notes, referenceId: refId,
+            });
+        }
+
+        // Validate
+        const validRows: ParsedFabricRow[] = [];
+        for (const p of parsed) {
+            const reasons: string[] = [];
+
+            if (!fabricByCode.has(p.fabricCode)) reasons.push(`Unknown fabric code: ${p.fabricCode}`);
+            if (p.qty <= 0) reasons.push('Qty must be > 0');
+            if (p.costPerUnit <= 0) reasons.push('Cost per unit must be > 0');
+            if (!p.supplier) reasons.push('Supplier is required');
+            if (!p.date) reasons.push('Date is required (DD/MM/YYYY)');
+
+            if (reasons.length === 0) {
+                validRows.push(p);
+            } else {
+                result.skipped++;
+                for (const reason of reasons) {
+                    result.validationErrors[reason] = (result.validationErrors[reason] ?? 0) + 1;
+                }
+            }
+        }
+
+        // Dedup
+        const existingRefs = await findExistingFabricReferenceIds(validRows.map(r => r.referenceId));
+        const newRows = validRows.filter(r => {
+            if (existingRefs.has(r.referenceId)) {
+                result.skipped++;
+                return false;
+            }
+            return true;
+        });
+
+        if (newRows.length === 0) {
+            result.durationMs = Date.now() - startTime;
+            fabricInwardState.lastRunAt = new Date();
+            fabricInwardState.lastResult = result;
+            pushRecentRun(fabricInwardState, {
+                startedAt: result.startedAt, durationMs: result.durationMs,
+                count: 0, error: null,
+            });
+            return result;
+        }
+
+        // Find or create suppliers (case-insensitive)
+        const supplierNames = [...new Set(newRows.map(r => r.supplier))];
+        const supplierMap = new Map<string, string>(); // name (lowercase) → id
+
+        for (const name of supplierNames) {
+            const nameLower = name.toLowerCase();
+            const existing = await prisma.supplier.findFirst({
+                where: { name: { equals: name, mode: 'insensitive' } },
+                select: { id: true },
+            });
+            if (existing) {
+                supplierMap.set(nameLower, existing.id);
+            } else {
+                const created = await prisma.supplier.create({
+                    data: { name },
+                    select: { id: true },
+                });
+                supplierMap.set(nameLower, created.id);
+                result.suppliersCreated++;
+                sheetsLogger.info({ supplier: name }, 'Created new supplier');
+            }
+        }
+
+        // Create FabricColourTransactions
+        const affectedFabricColourIds = new Set<string>();
+        const importedRows: Array<{ rowIndex: number; referenceId: string }> = [];
+
+        for (const row of newRows) {
+            try {
+                const fc = fabricByCode.get(row.fabricCode)!;
+                const unit = normalizeFabricUnit(fc.fabric?.unit ?? null);
+                const supplierId = supplierMap.get(row.supplier.toLowerCase())!;
+
+                await prisma.fabricColourTransaction.create({
+                    data: {
+                        fabricColourId: fc.id,
+                        txnType: FABRIC_TXN_TYPE.INWARD,
+                        qty: row.qty,
+                        unit,
+                        reason: 'supplier_receipt',
+                        costPerUnit: row.costPerUnit,
+                        supplierId,
+                        referenceId: row.referenceId,
+                        notes: row.notes || `${OFFLOAD_NOTES_PREFIX} ${tab}`,
+                        createdById: adminUserId,
+                        createdAt: row.date ?? new Date(),
+                    },
+                });
+
+                affectedFabricColourIds.add(fc.id);
+                importedRows.push({ rowIndex: row.rowIndex, referenceId: row.referenceId });
+                result.imported++;
+            } catch (txnError: unknown) {
+                const message = txnError instanceof Error ? txnError.message : String(txnError);
+                sheetsLogger.error({ fabricCode: row.fabricCode, error: message }, 'Failed to create fabric inward txn');
+                result.errors++;
+            }
+        }
+
+        // Mark imported rows as DONE in column K
+        if (importedRows.length > 0) {
+            await markRowsIngested(ORDERS_MASTERSHEET_ID, tab, importedRows, 'K', result);
+        }
+
+        // Invalidate fabric balance cache
+        if (affectedFabricColourIds.size > 0) {
+            try {
+                const { fabricColourBalanceCache } = await import('@coh/shared/services/inventory');
+                fabricColourBalanceCache.invalidate([...affectedFabricColourIds]);
+            } catch (cacheErr: unknown) {
+                sheetsLogger.warn({ error: cacheErr instanceof Error ? cacheErr.message : String(cacheErr) }, 'Failed to invalidate fabric balance cache');
+            }
+        }
+
+        result.durationMs = Date.now() - startTime;
+        fabricInwardState.lastRunAt = new Date();
+        fabricInwardState.lastResult = result;
+        pushRecentRun(fabricInwardState, {
+            startedAt: result.startedAt, durationMs: result.durationMs,
+            count: result.imported, error: result.error,
+        });
+
+        sheetsLogger.info({
+            durationMs: result.durationMs,
+            imported: result.imported,
+            skipped: result.skipped,
+            suppliersCreated: result.suppliersCreated,
+            errors: result.errors,
+        }, 'Fabric inward import completed');
+
+        return result;
+    } catch (error: unknown) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        sheetsLogger.error({ error: err.message, stack: err.stack }, 'Fabric inward import failed');
+        result.error = err.message;
+        result.durationMs = Date.now() - startTime;
+        fabricInwardState.lastResult = result;
+        pushRecentRun(fabricInwardState, {
+            startedAt: result.startedAt, durationMs: result.durationMs,
+            count: result.imported, error: result.error,
+        });
+        return result;
+    } finally {
+        fabricInwardState.isRunning = false;
+    }
+}
+
+// ============================================
 // EXPORTS
 // ============================================
 
@@ -3770,6 +4291,8 @@ export default {
     previewIngestInward,
     previewIngestOutward,
     previewPushBalances,
+    previewFabricInward,
+    triggerFabricInward,
 };
 
-export type { IngestInwardResult, IngestOutwardResult, IngestPreviewResult, MoveShippedResult, CleanupDoneResult, MigrateFormulasResult, PushBalancesResult, PushFabricBalancesResult, ImportFabricBalancesResult, PushBalancesPreviewResult, OffloadStatus, RunSummary, BalanceVerificationResult, BalanceSnapshot, InwardPreviewRow, OutwardPreviewRow };
+export type { IngestInwardResult, IngestOutwardResult, IngestPreviewResult, MoveShippedResult, CleanupDoneResult, MigrateFormulasResult, PushBalancesResult, PushFabricBalancesResult, ImportFabricBalancesResult, PushBalancesPreviewResult, OffloadStatus, RunSummary, BalanceVerificationResult, BalanceSnapshot, InwardPreviewRow, OutwardPreviewRow, FabricInwardResult, FabricInwardPreviewResult, FabricInwardPreviewRow };

@@ -102,6 +102,7 @@ export const LEDGER_TABS = {
 export const LIVE_TABS = {
     INWARD: 'Inward (Live)',
     OUTWARD: 'Outward (Live)',
+    FABRIC_INWARD: 'Fabric Inward (Live)',
 } as const;
 
 export const MASTERSHEET_TABS = {
@@ -402,6 +403,48 @@ export const FABRIC_BALANCES_HEADERS = [
 ] as const;
 
 // ============================================
+// COLUMN MAPPINGS — Fabric Inward (Live) (Mastersheet)
+// ============================================
+
+/**
+ * Fabric Inward (Live) — buffer tab in COH Orders Mastersheet.
+ * Team enters fabric receipts from suppliers. ERP validates & imports.
+ * A: Fabric Code, B: Material (auto-fill), C: Fabric (auto-fill),
+ * D: Colour (auto-fill), E: Qty, F: Unit (auto-fill),
+ * G: Cost Per Unit, H: Supplier, I: Date, J: Notes, K: Status
+ */
+export const FABRIC_INWARD_LIVE_COLS = {
+    FABRIC_CODE: 0,   // A — dropdown from Fabric Balances
+    MATERIAL: 1,      // B — auto-fill VLOOKUP
+    FABRIC: 2,        // C — auto-fill VLOOKUP
+    COLOUR: 3,        // D — auto-fill VLOOKUP
+    QTY: 4,           // E — team enters
+    UNIT: 5,          // F — auto-fill VLOOKUP
+    COST_PER_UNIT: 6, // G — team enters (₹)
+    SUPPLIER: 7,      // H — free text
+    DATE: 8,          // I — DD/MM/YYYY
+    NOTES: 9,         // J — optional
+    STATUS: 10,       // K — ERP writes: ok / error / DONE:{refId}
+} as const;
+
+/**
+ * Header row for Fabric Inward (Live) tab
+ */
+export const FABRIC_INWARD_LIVE_HEADERS = [
+    'Fabric Code',
+    'Material',
+    'Fabric',
+    'Colour',
+    'Qty',
+    'Unit',
+    'Cost Per Unit',
+    'Supplier',
+    'Date',
+    'Notes',
+    'Status',
+] as const;
+
+// ============================================
 // COLUMN MAPPINGS — Return & Exchange Pending Pieces (Office Ledger)
 // ============================================
 
@@ -591,6 +634,7 @@ export const REF_PREFIX = {
     MASTERSHEET_OUTWARD: 'sheet:ms-outward',
     INWARD_LIVE: 'sheet:inward-live',
     OUTWARD_LIVE: 'sheet:outward-live',
+    FABRIC_INWARD_LIVE: 'sheet:fabric-inward-live',
 } as const;
 
 /**

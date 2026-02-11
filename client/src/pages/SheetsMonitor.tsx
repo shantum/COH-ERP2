@@ -13,7 +13,7 @@ import { useServerFn } from '@tanstack/react-start';
 import {
     Loader2, Play, ChevronDown, ChevronRight,
     ArrowRightLeft, Database, Package, AlertCircle, Eye, X,
-    RefreshCw, Upload, CheckCircle2,
+    RefreshCw, Upload, CheckCircle2, Layers,
 } from 'lucide-react';
 import {
     getBackgroundJobs,
@@ -102,6 +102,33 @@ interface PreviewResult {
         skuBalances: BalanceSkuSummary[];
         allInSync: boolean;
     };
+}
+
+interface FabricInwardPreviewRow {
+    fabricCode: string;
+    material: string;
+    fabric: string;
+    colour: string;
+    qty: number;
+    unit: string;
+    costPerUnit: number;
+    supplier: string;
+    date: string;
+    notes: string;
+    status: 'ready' | 'invalid' | 'duplicate';
+    error?: string;
+}
+
+interface FabricInwardPreviewResult {
+    tab: string;
+    totalRows: number;
+    valid: number;
+    invalid: number;
+    duplicates: number;
+    validationErrors: Record<string, number>;
+    affectedFabricCodes: string[];
+    durationMs: number;
+    previewRows?: FabricInwardPreviewRow[];
 }
 
 interface SyncCheckResult {
@@ -580,6 +607,40 @@ export default function SheetsMonitor() {
         },
     });
 
+    // Fabric Inward preview + import mutations
+    const [fabricInwardPreview, setFabricInwardPreview] = useState<FabricInwardPreviewResult | null>(null);
+
+    const previewFabricInwardMutation = useMutation({
+        mutationFn: async () => {
+            // First refresh Fabric Balances (so sheet dropdowns are up to date)
+            await triggerFn({ data: { jobId: 'push_fabric_balances' as const } });
+            // Then run preview
+            const result = await triggerFn({
+                data: { jobId: 'preview_fabric_inward' as const },
+            });
+            if (!result.success) throw new Error(result.error?.message);
+            return (result.data?.result ?? null) as FabricInwardPreviewResult | null;
+        },
+        onSuccess: (data) => {
+            if (data) setFabricInwardPreview(data);
+            invalidateAll();
+        },
+    });
+
+    const importFabricInwardMutation = useMutation({
+        mutationFn: async () => {
+            const result = await triggerFn({
+                data: { jobId: 'ingest_fabric_inward' as const },
+            });
+            if (!result.success) throw new Error(result.error?.message);
+            return result.data;
+        },
+        onSuccess: () => {
+            setFabricInwardPreview(null);
+            invalidateAll();
+        },
+    });
+
     // Sync check (ERP vs Sheet R column)
     const [syncCheckResult, setSyncCheckResult] = useState<SyncCheckResult | null>(null);
     const [pushResult, setPushResult] = useState<{ skusUpdated: number; errors: number } | null>(null);
@@ -788,6 +849,175 @@ export default function SheetsMonitor() {
                     onClose={() => setPreviewOutwardResult(null)}
                 />
             )}
+
+            {/* ── Fabric Inward Section ── */}
+            <div className="bg-white rounded-lg border border-gray-200 p-4 shadow-sm">
+                <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                        <Layers size={16} className="text-violet-500" />
+                        <h3 className="text-sm font-medium text-gray-900">Fabric Inward (Live)</h3>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={() => previewFabricInwardMutation.mutate()}
+                            disabled={previewFabricInwardMutation.isPending}
+                            className="inline-flex items-center gap-1 px-2 py-1.5 text-xs font-medium rounded-md border border-violet-300 bg-violet-50 text-violet-700 hover:bg-violet-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            {previewFabricInwardMutation.isPending ? (
+                                <Loader2 size={12} className="animate-spin" />
+                            ) : (
+                                <Eye size={12} />
+                            )}
+                            Preview
+                        </button>
+                        <button
+                            onClick={() => importFabricInwardMutation.mutate()}
+                            disabled={importFabricInwardMutation.isPending || !fabricInwardPreview || fabricInwardPreview.valid === 0}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            {importFabricInwardMutation.isPending ? (
+                                <Loader2 size={14} className="animate-spin" />
+                            ) : (
+                                <Play size={14} />
+                            )}
+                            Import
+                        </button>
+                    </div>
+                </div>
+
+                {/* Mutation errors */}
+                {previewFabricInwardMutation.error && (
+                    <div className="mb-3 text-xs text-red-600 flex items-center gap-1">
+                        <AlertCircle size={12} /> Preview: {previewFabricInwardMutation.error.message}
+                    </div>
+                )}
+                {importFabricInwardMutation.error && (
+                    <div className="mb-3 text-xs text-red-600 flex items-center gap-1">
+                        <AlertCircle size={12} /> Import: {importFabricInwardMutation.error.message}
+                    </div>
+                )}
+
+                {/* Import success */}
+                {importFabricInwardMutation.isSuccess && (
+                    <div className="mb-3 px-3 py-2 bg-emerald-50 border border-emerald-200 rounded flex items-center gap-2">
+                        <CheckCircle2 size={14} className="text-emerald-600" />
+                        <span className="text-xs text-emerald-800">Fabric inward import completed successfully</span>
+                    </div>
+                )}
+
+                {/* Preview result */}
+                {fabricInwardPreview ? (
+                    <div>
+                        {/* Summary grid */}
+                        <div className="flex items-center justify-between mb-3">
+                            <div className="grid grid-cols-4 gap-3 flex-1">
+                                <div className="text-center p-2 bg-gray-50 rounded">
+                                    <div className="text-lg font-semibold text-gray-900">{fabricInwardPreview.totalRows}</div>
+                                    <div className="text-[10px] text-gray-500">Total</div>
+                                </div>
+                                <div className="text-center p-2 bg-emerald-50 rounded">
+                                    <div className="text-lg font-semibold text-emerald-600">{fabricInwardPreview.valid}</div>
+                                    <div className="text-[10px] text-emerald-600">Ready</div>
+                                </div>
+                                <div className="text-center p-2 bg-red-50 rounded">
+                                    <div className="text-lg font-semibold text-red-600">{fabricInwardPreview.invalid}</div>
+                                    <div className="text-[10px] text-red-600">Invalid</div>
+                                </div>
+                                <div className="text-center p-2 bg-amber-50 rounded">
+                                    <div className="text-lg font-semibold text-amber-600">{fabricInwardPreview.duplicates}</div>
+                                    <div className="text-[10px] text-amber-600">Already Done</div>
+                                </div>
+                            </div>
+                            <button onClick={() => setFabricInwardPreview(null)} className="ml-3 p-1 text-gray-400 hover:text-gray-600">
+                                <X size={16} />
+                            </button>
+                        </div>
+
+                        {/* Validation errors */}
+                        {Object.keys(fabricInwardPreview.validationErrors).length > 0 && (
+                            <div className="mb-3 p-2 bg-red-50 border border-red-200 rounded text-xs text-red-700 space-y-0.5">
+                                {Object.entries(fabricInwardPreview.validationErrors).map(([reason, count]) => (
+                                    <div key={reason}>{reason}: {count}</div>
+                                ))}
+                            </div>
+                        )}
+
+                        {/* Preview table */}
+                        {fabricInwardPreview.previewRows && fabricInwardPreview.previewRows.length > 0 && (
+                            <div className="border rounded-lg overflow-hidden">
+                                <table className="w-full text-xs">
+                                    <thead className="bg-gray-50">
+                                        <tr>
+                                            <th className="text-left px-2 py-1.5 font-medium text-gray-600">Fabric Code</th>
+                                            <th className="text-left px-2 py-1.5 font-medium text-gray-600">Colour</th>
+                                            <th className="text-right px-2 py-1.5 font-medium text-gray-600">Qty</th>
+                                            <th className="text-left px-2 py-1.5 font-medium text-gray-600">Unit</th>
+                                            <th className="text-right px-2 py-1.5 font-medium text-gray-600">Cost/Unit</th>
+                                            <th className="text-left px-2 py-1.5 font-medium text-gray-600">Supplier</th>
+                                            <th className="text-left px-2 py-1.5 font-medium text-gray-600">Date</th>
+                                            <th className="text-center px-2 py-1.5 font-medium text-gray-600">Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y">
+                                        {[...fabricInwardPreview.previewRows]
+                                            .sort((a, b) => {
+                                                const order = { ready: 0, invalid: 1, duplicate: 2 };
+                                                return order[a.status] - order[b.status];
+                                            })
+                                            .map((row, i) => (
+                                            <tr
+                                                key={i}
+                                                className={`hover:bg-gray-50 ${
+                                                    row.status === 'invalid' ? 'bg-red-50/50' :
+                                                    row.status === 'duplicate' ? 'bg-amber-50/50' : ''
+                                                }`}
+                                            >
+                                                <td className="px-2 py-1 font-mono text-gray-700">{row.fabricCode}</td>
+                                                <td className="px-2 py-1 text-gray-600">{row.colour}</td>
+                                                <td className="px-2 py-1 text-right font-medium text-gray-900">{row.qty}</td>
+                                                <td className="px-2 py-1 text-gray-500">{row.unit}</td>
+                                                <td className="px-2 py-1 text-right text-gray-600">{row.costPerUnit > 0 ? `₹${row.costPerUnit}` : '—'}</td>
+                                                <td className="px-2 py-1 text-gray-600 truncate max-w-[120px]">{row.supplier}</td>
+                                                <td className="px-2 py-1 text-gray-500">{row.date}</td>
+                                                <td className="px-2 py-1 text-center">
+                                                    {row.status === 'ready' && (
+                                                        <span className="inline-flex items-center gap-1 text-emerald-600">
+                                                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                                                            ok
+                                                        </span>
+                                                    )}
+                                                    {row.status === 'invalid' && (
+                                                        <span className="text-red-600" title={row.error}>
+                                                            <span className="inline-flex items-center gap-1">
+                                                                <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
+                                                                error
+                                                            </span>
+                                                        </span>
+                                                    )}
+                                                    {row.status === 'duplicate' && (
+                                                        <span className="inline-flex items-center gap-1 text-amber-600">
+                                                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                                                            done
+                                                        </span>
+                                                    )}
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
+
+                        <div className="mt-2 text-[10px] text-gray-400 text-right">
+                            {formatDuration(fabricInwardPreview.durationMs)}
+                        </div>
+                    </div>
+                ) : (
+                    <div className="text-xs text-gray-400 text-center py-2">
+                        Click "Preview" to validate rows in the Fabric Inward (Live) tab
+                    </div>
+                )}
+            </div>
 
             {/* ── ERP ↔ Sheet Sync Check ── */}
             <div className="bg-white rounded-lg border border-gray-200 p-4 shadow-sm">

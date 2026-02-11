@@ -96,11 +96,11 @@ const getServerLogsSchema = z.object({
 
 // Background Jobs
 const startBackgroundJobSchema = z.object({
-    jobId: z.enum(['shopify_sync', 'tracking_sync', 'cache_cleanup', 'ingest_inward', 'ingest_outward', 'move_shipped_to_outward', 'preview_ingest_inward', 'preview_ingest_outward', 'cleanup_done_rows', 'migrate_sheet_formulas', 'snapshot_compute', 'snapshot_backfill', 'push_balances', 'preview_push_balances', 'push_fabric_balances', 'import_fabric_balances']),
+    jobId: z.enum(['shopify_sync', 'tracking_sync', 'cache_cleanup', 'ingest_inward', 'ingest_outward', 'move_shipped_to_outward', 'preview_ingest_inward', 'preview_ingest_outward', 'cleanup_done_rows', 'migrate_sheet_formulas', 'snapshot_compute', 'snapshot_backfill', 'push_balances', 'preview_push_balances', 'push_fabric_balances', 'import_fabric_balances', 'preview_fabric_inward', 'ingest_fabric_inward']),
 });
 
 const cancelBackgroundJobSchema = z.object({
-    jobId: z.enum(['shopify_sync', 'tracking_sync', 'cache_cleanup', 'ingest_inward', 'ingest_outward', 'move_shipped_to_outward', 'preview_ingest_inward', 'preview_ingest_outward', 'cleanup_done_rows', 'migrate_sheet_formulas', 'snapshot_compute', 'snapshot_backfill', 'push_balances', 'preview_push_balances', 'push_fabric_balances', 'import_fabric_balances']),
+    jobId: z.enum(['shopify_sync', 'tracking_sync', 'cache_cleanup', 'ingest_inward', 'ingest_outward', 'move_shipped_to_outward', 'preview_ingest_inward', 'preview_ingest_outward', 'cleanup_done_rows', 'migrate_sheet_formulas', 'snapshot_compute', 'snapshot_backfill', 'push_balances', 'preview_push_balances', 'push_fabric_balances', 'import_fabric_balances', 'preview_fabric_inward', 'ingest_fabric_inward']),
 });
 
 const updateBackgroundJobSchema = z.object({
