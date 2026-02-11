@@ -583,6 +583,8 @@ interface OutwardValidationResult {
     validRows: ParsedRow[];
     skipReasons: Record<string, number>;
     orderMap: Map<string, OrderMapEntry>;
+    /** ERP orderNumber|skuId keys that already have OUTWARD txns in DB */
+    existingOrderSkuKeys: Set<string>;
 }
 
 /**
@@ -714,6 +716,28 @@ async function validateOutwardRows(
         }
     }
 
+    // Pre-query: find existing OUTWARD transactions for orders we're about to validate.
+    // An order can only have one line per SKU, so order+SKU is a natural unique key.
+    // This catches duplicates from moveShipped crash-retries and double-triggers.
+    const existingOrderSkuKeys = new Set<string>();
+    const orderBasedRows = afterBasic.filter(r => r.extra && orderMap.has(r.extra));
+    if (orderBasedRows.length > 0) {
+        const erpOrderNumbers = [...new Set(
+            orderBasedRows.map(r => orderMap.get(r.extra)!.orderNumber)
+        )];
+        const existingOutward = await prisma.inventoryTransaction.findMany({
+            where: {
+                txnType: TXN_TYPE.OUTWARD,
+                orderNumber: { in: erpOrderNumbers },
+            },
+            select: { orderNumber: true, skuId: true },
+        });
+        for (const t of existingOutward) {
+            if (t.orderNumber) existingOrderSkuKeys.add(`${t.orderNumber}|${t.skuId}`);
+        }
+    }
+
+    const seenOrderSkus = new Set<string>(); // within-batch tracker
     const validRows: ParsedRow[] = [];
     for (const row of afterBasic) {
         const orderNumber = row.extra;
@@ -735,10 +759,22 @@ async function validateOutwardRows(
             continue;
         }
 
+        // Duplicate check: order+SKU must be unique (one order line per SKU)
+        const orderSkuKey = `${order.orderNumber}|${skuId}`;
+        if (existingOrderSkuKeys.has(orderSkuKey)) {
+            addSkip('duplicate_order_sku');
+            continue;
+        }
+        if (seenOrderSkus.has(orderSkuKey)) {
+            addSkip('duplicate_order_sku_in_batch');
+            continue;
+        }
+        seenOrderSkus.add(orderSkuKey);
+
         validRows.push(row);
     }
 
-    return { validRows, skipReasons, orderMap };
+    return { validRows, skipReasons, orderMap, existingOrderSkuKeys };
 }
 
 const DEDUP_CHUNK_SIZE = 2000;
@@ -1267,7 +1303,7 @@ async function ingestOutwardLive(
 
     const skuMap = await bulkLookupSkus(newRows.map(r => r.skuCode));
 
-    const { validRows, skipReasons, orderMap } = await validateOutwardRows(newRows, skuMap);
+    const { validRows, skipReasons, orderMap, existingOrderSkuKeys } = await validateOutwardRows(newRows, skuMap);
     const skippedCount = newRows.length - validRows.length;
     result.skipped += skippedCount;
     if (Object.keys(skipReasons).length > 0) {
@@ -1278,6 +1314,7 @@ async function ingestOutwardLive(
     // Write Import Errors column only for invalid/skipped rows (not valid or dupe rows)
     const validRefIds = new Set(validRows.map(r => r.referenceId));
     const outwardImportErrors: Array<{ rowIndex: number; error: string }> = [];
+    const seenOrderSkusForErrors = new Set<string>(); // track within-batch dupes for error reporting
     for (const row of parsed) {
         if (existingRefs.has(row.referenceId)) continue;  // dupe — will be marked DONE
         if (validRefIds.has(row.referenceId)) continue;    // valid — will be marked DONE
@@ -1292,6 +1329,12 @@ async function ingestOutwardLive(
             const order = orderMap.get(row.extra);
             if (!order) reason = 'order_not_found';
             else if (!order.orderLines.some(l => l.skuId === skuInfo.id)) reason = 'order_line_not_found';
+            else {
+                const orderSkuKey = `${order.orderNumber}|${skuInfo.id}`;
+                if (existingOrderSkuKeys.has(orderSkuKey)) reason = 'duplicate_order_sku';
+                else if (seenOrderSkusForErrors.has(orderSkuKey)) reason = 'duplicate_order_sku_in_batch';
+                else seenOrderSkusForErrors.add(orderSkuKey);
+            }
         }
         outwardImportErrors.push({ rowIndex: row.rowIndex, error: reason });
     }
@@ -2226,12 +2269,13 @@ async function previewIngestOutward(): Promise<IngestPreviewResult | null> {
 
         // Validate
         const skuMap = await bulkLookupSkus(newRows.map(r => r.skuCode));
-        const { validRows, skipReasons, orderMap } = await validateOutwardRows(newRows, skuMap);
+        const { validRows, skipReasons, orderMap, existingOrderSkuKeys } = await validateOutwardRows(newRows, skuMap);
 
         // Write status column: "ok" for valid, "ok (already in ERP)" for dupes, error text for invalid
         const validRefIds = new Set(validRows.map(r => r.referenceId));
         const rowErrors = new Map<string, string>(); // referenceId → error text
         const outwardImportErrors: Array<{ rowIndex: number; error: string }> = [];
+        const seenOrderSkusForErrors = new Set<string>(); // track within-batch dupes for error reporting
         for (const row of parsed) {
             if (existingRefs.has(row.referenceId)) {
                 outwardImportErrors.push({ rowIndex: row.rowIndex, error: 'ok (already in ERP)' });
@@ -2248,6 +2292,12 @@ async function previewIngestOutward(): Promise<IngestPreviewResult | null> {
                     const order = orderMap.get(row.extra);
                     if (!order) reason = 'order_not_found';
                     else if (!order.orderLines.some(l => l.skuId === skuInfo.id)) reason = 'order_line_not_found';
+                    else {
+                        const orderSkuKey = `${order.orderNumber}|${skuInfo.id}`;
+                        if (existingOrderSkuKeys.has(orderSkuKey)) reason = 'duplicate_order_sku';
+                        else if (seenOrderSkusForErrors.has(orderSkuKey)) reason = 'duplicate_order_sku_in_batch';
+                        else seenOrderSkusForErrors.add(orderSkuKey);
+                    }
                 }
                 outwardImportErrors.push({ rowIndex: row.rowIndex, error: reason });
                 rowErrors.set(row.referenceId, reason);
