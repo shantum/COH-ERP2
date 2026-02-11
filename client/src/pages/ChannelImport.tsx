@@ -46,6 +46,9 @@ interface PreviewOrder {
   orderDate: string;
   orderType: string;
   customerName: string | null;
+  customerPhone: string | null;
+  address1: string | null;
+  address2: string | null;
   city: string | null;
   state: string | null;
   zip: string | null;

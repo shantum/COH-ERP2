@@ -62,6 +62,9 @@ interface BtReportRow {
   'BT Return Date'?: string;
   'Channel Return Date'?: string;
   'Customer Name'?: string;
+  'Phone'?: string;
+  'Address Line 1'?: string;
+  'Address Line 2'?: string;
   'City'?: string;
   'State'?: string;
   'Zip'?: string;
@@ -311,6 +314,9 @@ interface PreviewOrder {
   orderDate: string;
   orderType: string;
   customerName: string | null;
+  customerPhone: string | null;
+  address1: string | null;
+  address2: string | null;
   city: string | null;
   state: string | null;
   zip: string | null;
@@ -572,6 +578,8 @@ router.post('/preview-import', authenticateToken, upload.single('file'), async (
       const totalAmount = lines.reduce((sum, l) => sum + l.unitPrice * l.qty, 0);
 
       const customerName = firstRow['Customer Name']?.trim() || null;
+      const rawPhone = firstRow['Phone']?.trim() || null;
+      const customerPhone = isPlaceholderPhone(rawPhone) ? null : rawPhone;
       const city = firstRow['City']?.trim() || null;
       const warehouse = isWarehouseOrder(channel, customerName, city);
 
@@ -584,6 +592,9 @@ router.post('/preview-import', authenticateToken, upload.single('file'), async (
         orderDate: orderDate?.toISOString() || '',
         orderType: firstRow['Order Type']?.trim() || 'Unknown',
         customerName: warehouse ? null : customerName,
+        customerPhone: warehouse ? null : customerPhone,
+        address1: warehouse ? null : (firstRow['Address Line 1']?.trim() || null),
+        address2: warehouse ? null : (firstRow['Address Line 2']?.trim() || null),
         city: warehouse ? null : city,
         state: warehouse ? null : (firstRow['State']?.trim() || null),
         zip: warehouse ? null : (firstRow['Zip']?.trim() || null),
@@ -665,8 +676,10 @@ router.post('/execute-import', authenticateToken, async (req: Request, res: Resp
 
           // Build shipping address JSON (skip for warehouse orders)
           let shippingAddress: string | null = null;
-          if (previewOrder.city || previewOrder.state || previewOrder.zip) {
+          if (previewOrder.city || previewOrder.state || previewOrder.zip || previewOrder.address1) {
             shippingAddress = JSON.stringify({
+              address1: previewOrder.address1 || '',
+              address2: previewOrder.address2 || '',
               city: previewOrder.city || '',
               state: previewOrder.state || '',
               zip: previewOrder.zip || '',
@@ -679,6 +692,7 @@ router.post('/execute-import', authenticateToken, async (req: Request, res: Resp
               channel: previewOrder.channel,
               channelOrderId: previewOrder.channelOrderId,
               customerName: previewOrder.customerName || 'Channel Customer',
+              customerPhone: previewOrder.customerPhone || null,
               shippingAddress,
               orderDate: new Date(previewOrder.orderDate),
               totalAmount,
