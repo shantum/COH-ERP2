@@ -948,7 +948,8 @@ export default function SheetsMonitor() {
                                 <table className="w-full text-xs">
                                     <thead className="bg-gray-50">
                                         <tr>
-                                            <th className="text-left px-2 py-1.5 font-medium text-gray-600">Fabric Code</th>
+                                            <th className="text-left px-2 py-1.5 font-medium text-gray-600">Material</th>
+                                            <th className="text-left px-2 py-1.5 font-medium text-gray-600">Fabric</th>
                                             <th className="text-left px-2 py-1.5 font-medium text-gray-600">Colour</th>
                                             <th className="text-right px-2 py-1.5 font-medium text-gray-600">Qty</th>
                                             <th className="text-left px-2 py-1.5 font-medium text-gray-600">Unit</th>
@@ -972,7 +973,8 @@ export default function SheetsMonitor() {
                                                     row.status === 'duplicate' ? 'bg-amber-50/50' : ''
                                                 }`}
                                             >
-                                                <td className="px-2 py-1 font-mono text-gray-700">{row.fabricCode}</td>
+                                                <td className="px-2 py-1 text-gray-700">{row.material}</td>
+                                                <td className="px-2 py-1 text-gray-700">{row.fabric}</td>
                                                 <td className="px-2 py-1 text-gray-600">{row.colour}</td>
                                                 <td className="px-2 py-1 text-right font-medium text-gray-900">{row.qty}</td>
                                                 <td className="px-2 py-1 text-gray-500">{row.unit}</td>

@@ -409,17 +409,17 @@ export const FABRIC_BALANCES_HEADERS = [
 /**
  * Fabric Inward (Live) — buffer tab in COH Orders Mastersheet.
  * Team enters fabric receipts from suppliers. ERP validates & imports.
- * A: Fabric Code, B: Material (auto-fill), C: Fabric (auto-fill),
- * D: Colour (auto-fill), E: Qty, F: Unit (auto-fill),
+ * A: Material (dropdown), B: Fabric (dropdown), C: Colour (dropdown),
+ * D: Fabric Code (auto-fill), E: Qty, F: Unit (auto-fill),
  * G: Cost Per Unit, H: Supplier, I: Date, J: Notes, K: Status
  */
 export const FABRIC_INWARD_LIVE_COLS = {
-    FABRIC_CODE: 0,   // A — dropdown from Fabric Balances
-    MATERIAL: 1,      // B — auto-fill VLOOKUP
-    FABRIC: 2,        // C — auto-fill VLOOKUP
-    COLOUR: 3,        // D — auto-fill VLOOKUP
+    MATERIAL: 0,      // A — dropdown (team picks)
+    FABRIC: 1,        // B — dropdown (team picks)
+    COLOUR: 2,        // C — dropdown (team picks)
+    FABRIC_CODE: 3,   // D — auto-fill from Material+Fabric+Colour
     QTY: 4,           // E — team enters
-    UNIT: 5,          // F — auto-fill VLOOKUP
+    UNIT: 5,          // F — auto-fill from Fabric Code
     COST_PER_UNIT: 6, // G — team enters (₹)
     SUPPLIER: 7,      // H — free text
     DATE: 8,          // I — DD/MM/YYYY
@@ -431,10 +431,10 @@ export const FABRIC_INWARD_LIVE_COLS = {
  * Header row for Fabric Inward (Live) tab
  */
 export const FABRIC_INWARD_LIVE_HEADERS = [
-    'Fabric Code',
     'Material',
     'Fabric',
     'Colour',
+    'Fabric Code',
     'Qty',
     'Unit',
     'Cost Per Unit',
