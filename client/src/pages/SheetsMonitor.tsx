@@ -582,6 +582,7 @@ export default function SheetsMonitor() {
 
     // Sync check (ERP vs Sheet R column)
     const [syncCheckResult, setSyncCheckResult] = useState<SyncCheckResult | null>(null);
+    const [pushResult, setPushResult] = useState<{ skusUpdated: number; errors: number } | null>(null);
 
     const checkSyncMutation = useMutation({
         mutationFn: async () => {
@@ -592,7 +593,10 @@ export default function SheetsMonitor() {
             return (result.data?.result ?? null) as SyncCheckResult | null;
         },
         onSuccess: (data) => {
-            if (data) setSyncCheckResult(data);
+            if (data) {
+                setSyncCheckResult(data);
+                setPushResult(null);
+            }
         },
     });
 
@@ -602,10 +606,12 @@ export default function SheetsMonitor() {
                 data: { jobId: 'push_balances' as const },
             });
             if (!result.success) throw new Error(result.error?.message);
-            return result.data;
+            const pushData = result.data?.result as { skusUpdated?: number; errors?: number } | null | undefined;
+            return pushData ?? null;
         },
-        onSuccess: () => {
+        onSuccess: (data) => {
             setSyncCheckResult(null);
+            setPushResult(data ? { skusUpdated: data.skusUpdated ?? 0, errors: data.errors ?? 0 } : null);
             invalidateAll();
         },
     });
@@ -832,12 +838,14 @@ export default function SheetsMonitor() {
                     </div>
                 )}
 
-                {/* Push success */}
-                {pushBalancesMutation.isSuccess && !syncCheckResult && (
-                    <div className="mb-3 px-3 py-2 bg-emerald-50 border border-emerald-200 rounded flex items-center gap-2">
-                        <CheckCircle2 size={14} className="text-emerald-600" />
-                        <span className="text-xs text-emerald-800">
-                            ERP balances pushed to Sheet. Run Check Sync again to verify.
+                {/* Push result */}
+                {pushResult && (
+                    <div className={`mb-3 px-3 py-2 rounded flex items-center gap-2 ${pushResult.errors > 0 ? 'bg-amber-50 border border-amber-200' : 'bg-emerald-50 border border-emerald-200'}`}>
+                        <CheckCircle2 size={14} className={pushResult.errors > 0 ? 'text-amber-600' : 'text-emerald-600'} />
+                        <span className={`text-xs ${pushResult.errors > 0 ? 'text-amber-800' : 'text-emerald-800'}`}>
+                            Pushed ERP balances to Sheet — {pushResult.skusUpdated} SKUs updated
+                            {pushResult.errors > 0 && `, ${pushResult.errors} errors`}
+                            . Click Check Sync to verify.
                         </span>
                     </div>
                 )}
