@@ -39,6 +39,7 @@ interface BtReportRow {
   'Channel Ref'?: string;
   'Item ID'?: string;
   'Order Date(IST)'?: string;
+  'Order Time(IST)'?: string;
   'Order Type'?: string;
   'Financial Status'?: string;
   'Fulfillment Status'?: string;
@@ -130,16 +131,38 @@ function parsePriceToPaise(val: string | undefined): number | null {
  * Parse date string from BT report (handles multiple formats)
  * Format examples: "2024-01-15", "15-01-2024", "2024-01-15 14:30:00"
  */
-function parseDate(val: string | undefined): Date | null {
+const MONTH_MAP: Record<string, string> = {
+  jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
+  jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12',
+};
+
+function parseDate(val: string | undefined, timeVal?: string): Date | null {
   if (!val || val.trim() === '') return null;
 
   const trimmed = val.trim();
+  const time = timeVal?.trim() || '';
 
-  // Try ISO format first (2024-01-15)
+  // BT report format: "11-Feb-2026" (DD-Mon-YYYY) + time "10:52:20" (IST)
+  const ddMonYyyy = trimmed.match(/^(\d{1,2})-([A-Za-z]{3})-(\d{4})/);
+  if (ddMonYyyy) {
+    const [, dd, mon, yyyy] = ddMonYyyy;
+    const mm = MONTH_MAP[mon.toLowerCase()];
+    if (mm) {
+      const timeParts = time.split(':');
+      const hh = (timeParts[0] || '00').padStart(2, '0');
+      const mi = timeParts[1] || '00';
+      const ss = timeParts[2] || '00';
+      // All BT report dates are IST — use +05:30 offset
+      const date = new Date(`${yyyy}-${mm}-${dd.padStart(2, '0')}T${hh}:${mi}:${ss}+05:30`);
+      if (!isNaN(date.getTime())) return date;
+    }
+  }
+
+  // Try ISO format (2024-01-15 or 2024-01-15T14:30:00Z)
   let date = new Date(trimmed);
   if (!isNaN(date.getTime())) return date;
 
-  // Try DD-MM-YYYY format
+  // Try DD-MM-YYYY format (numeric month)
   const ddmmyyyy = trimmed.match(/^(\d{2})-(\d{2})-(\d{4})/);
   if (ddmmyyyy) {
     date = new Date(`${ddmmyyyy[3]}-${ddmmyyyy[2]}-${ddmmyyyy[1]}`);
@@ -232,7 +255,7 @@ async function upsertChannelOrderLine(
     channelOrderId,
     channelRef: row['Channel Ref']?.trim() || null,
     channelItemId,
-    orderDate: parseDate(row['Order Date(IST)'])!,
+    orderDate: parseDate(row['Order Date(IST)'], row['Order Time(IST)'])!,
     orderType: row['Order Type']?.trim() || 'Unknown',
     financialStatus: row['Financial Status']?.trim() || null,
     fulfillmentStatus: row['Fulfillment Status']?.trim() || null,
@@ -388,7 +411,7 @@ router.post('/import', authenticateToken, upload.single('file'), async (req: Req
           continue;
         }
 
-        const orderDate = parseDate(row['Order Date(IST)']);
+        const orderDate = parseDate(row['Order Date(IST)'], row['Order Time(IST)']);
         if (!orderDate) {
           results.errors.push({ row: rowNum, error: `Invalid order date: ${row['Order Date(IST)']}` });
           results.skipped++;
@@ -553,7 +576,7 @@ router.post('/preview-import', authenticateToken, upload.single('file'), async (
       const firstRow = group[0];
       const channelRef = firstRow['Channel Ref']?.trim() || btOrderId;
       const channel = normalizeChannel(firstRow['Channel Name']);
-      const orderDate = parseDate(firstRow['Order Date(IST)']);
+      const orderDate = parseDate(firstRow['Order Date(IST)'], firstRow['Order Time(IST)']);
 
       const existingOrder = existingOrderMap.get(channelRef);
 
@@ -805,7 +828,7 @@ router.post('/execute-import', authenticateToken, async (req: Request, res: Resp
         try {
           const oid = row['Order Id']?.trim();
           const iid = row['Item ID']?.trim();
-          if (!oid || !iid || !parseDate(row['Order Date(IST)'])) {
+          if (!oid || !iid || !parseDate(row['Order Date(IST)'], row['Order Time(IST)'])) {
             analyticsResults.skipped++;
             continue;
           }
