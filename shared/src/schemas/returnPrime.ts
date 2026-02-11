@@ -147,8 +147,8 @@ export type ReturnPrimeWebhookTopic = z.infer<typeof ReturnPrimeWebhookTopicSche
  * Money type used throughout Return Prime API responses
  */
 export const MoneySchema = z.object({
-    amount: z.number().optional(),
-    currency_code: z.string(),
+    amount: z.number().nullable().optional(),
+    currency_code: z.string().nullable(),
 });
 
 export type Money = z.infer<typeof MoneySchema>;
@@ -176,7 +176,7 @@ export const CustomerAddressSchema = z.object({
     country_code: z.string().optional(),
     province_code: z.string().optional(),
     address_line_1: z.string().optional(),
-    address_line_2: z.string().optional(),
+    address_line_2: z.string().nullable().optional(),
     country: z.string().optional(),
 });
 
