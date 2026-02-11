@@ -561,7 +561,7 @@ router.post('/preview-import', authenticateToken, upload.single('file'), async (
     const existingOrders = allChannelRefs.size > 0
       ? await req.prisma.order.findMany({
           where: { orderNumber: { in: Array.from(allChannelRefs) } },
-          include: { orderLines: { select: { id: true, channelItemId: true, channelFulfillmentStatus: true } } },
+          include: { orderLines: { select: { id: true, channelItemId: true, channelFulfillmentStatus: true, courier: true, awbNumber: true } } },
         })
       : [];
     // Map by both exact orderNumber AND resolve alternates back to full CSV ref
@@ -587,6 +587,7 @@ router.post('/preview-import', authenticateToken, upload.single('file'), async (
 
       // Build lines
       const lines: PreviewLine[] = [];
+      let anyLineChanged = false;
       for (const row of group) {
         const skuCode = row['SKU Codes']?.trim() || '';
         const matched = skuMap.get(skuCode);
@@ -597,10 +598,23 @@ router.post('/preview-import', authenticateToken, upload.single('file'), async (
 
         // Check if this line exists on the existing order
         let previousStatus: string | undefined;
+        let lineChanged = false;
+        const csvCourier = row['Courier Name']?.trim() || null;
+        const csvAwb = row['Courier Tracking Number']?.trim() || null;
+
         if (existingOrder) {
           const existingLine = existingOrder.orderLines.find(l => l.channelItemId === channelItemId);
-          if (existingLine?.channelFulfillmentStatus) {
-            previousStatus = existingLine.channelFulfillmentStatus;
+          if (existingLine) {
+            // Check fulfillment status change
+            if (existingLine.channelFulfillmentStatus && existingLine.channelFulfillmentStatus !== fulfillmentStatus) {
+              previousStatus = existingLine.channelFulfillmentStatus;
+              lineChanged = true;
+            }
+            // Check courier or AWB change
+            if ((csvCourier && csvCourier !== existingLine.courier) ||
+                (csvAwb && csvAwb !== existingLine.awbNumber)) {
+              lineChanged = true;
+            }
           }
         }
 
@@ -613,20 +627,21 @@ router.post('/preview-import', authenticateToken, upload.single('file'), async (
           qty: parseIntSafe(row['Quantity'], 1),
           unitPrice: parsePriceToRupees(row["Buyer's Price"]),
           fulfillmentStatus,
-          ...(previousStatus && previousStatus !== fulfillmentStatus ? { previousStatus } : {}),
-          courierName: row['Courier Name']?.trim() || null,
-          awbNumber: row['Courier Tracking Number']?.trim() || null,
+          ...(previousStatus ? { previousStatus } : {}),
+          courierName: csvCourier,
+          awbNumber: csvAwb,
           dispatchDate: parseDate(row['Dispatch Date'])?.toISOString() || null,
           manifestedDate: parseDate(row['Manifested Date'])?.toISOString() || null,
           deliveryDate: parseDate(row['Channel Delivery Date'])?.toISOString() || null,
         });
+
+        if (lineChanged) anyLineChanged = true;
       }
 
       // Determine import status
       let importStatus: PreviewOrder['importStatus'] = 'new';
       if (existingOrder) {
-        const hasChanges = lines.some(l => l.previousStatus !== undefined);
-        importStatus = hasChanges ? 'existing_updated' : 'existing_unchanged';
+        importStatus = anyLineChanged ? 'existing_updated' : 'existing_unchanged';
       }
 
       const totalAmount = lines.reduce((sum, l) => sum + l.unitPrice * l.qty, 0);
@@ -822,26 +837,36 @@ router.post('/execute-import', authenticateToken, async (req: Request, res: Resp
           // Update existing order's lines
           const existingLines = await req.prisma.orderLine.findMany({
             where: { orderId: previewOrder.existingOrderId },
-            select: { id: true, channelItemId: true },
+            select: { id: true, channelItemId: true, lineStatus: true },
           });
-          const existingLineMap = new Map(existingLines.map(l => [l.channelItemId, l.id]));
+          const existingLineMap = new Map(existingLines.map(l => [l.channelItemId, { id: l.id, lineStatus: l.lineStatus }]));
 
           for (const line of previewOrder.lines) {
-            const existingLineId = existingLineMap.get(line.channelItemId);
+            const existing = existingLineMap.get(line.channelItemId);
 
-            if (existingLineId) {
+            if (existing) {
               // Update existing line
               const status = line.fulfillmentStatus?.toLowerCase() || '';
               const isShipped = status === 'shipped' || status === 'delivered' || status === 'manifested';
               const isDelivered = status === 'delivered';
+              const isCancelled = status === 'cancelled';
+
+              // Only update lineStatus from pending — don't overwrite manual changes
+              let newLineStatus: string | undefined;
+              if (existing.lineStatus === 'pending') {
+                if (isShipped) newLineStatus = 'shipped';
+                else if (isCancelled) newLineStatus = 'cancelled';
+              }
+
               await req.prisma.orderLine.update({
-                where: { id: existingLineId },
+                where: { id: existing.id },
                 data: {
                   channelFulfillmentStatus: line.fulfillmentStatus || null,
                   ...(line.courierName ? { courier: line.courierName } : {}),
                   ...(line.awbNumber ? { awbNumber: line.awbNumber } : {}),
                   ...(isShipped && line.dispatchDate ? { shippedAt: new Date(line.dispatchDate) } : {}),
                   ...(isDelivered && line.deliveryDate ? { deliveredAt: new Date(line.deliveryDate) } : {}),
+                  ...(newLineStatus ? { lineStatus: newLineStatus } : {}),
                 },
               });
 
@@ -854,7 +879,7 @@ router.post('/execute-import', authenticateToken, async (req: Request, res: Resp
                 },
                 data: {
                   orderId: previewOrder.existingOrderId,
-                  orderLineId: existingLineId,
+                  orderLineId: existing.id,
                 },
               });
             } else if (line.skuId) {
@@ -862,13 +887,15 @@ router.post('/execute-import', authenticateToken, async (req: Request, res: Resp
               const status = line.fulfillmentStatus?.toLowerCase() || '';
               const isShipped = status === 'shipped' || status === 'delivered' || status === 'manifested';
               const isDelivered = status === 'delivered';
+              const isCancelled = status === 'cancelled';
+              const initialLineStatus = isShipped ? 'shipped' : isCancelled ? 'cancelled' : 'pending';
               const newLine = await req.prisma.orderLine.create({
                 data: {
                   orderId: previewOrder.existingOrderId,
                   skuId: line.skuId,
                   qty: line.qty,
                   unitPrice: line.unitPrice,
-                  lineStatus: 'pending',
+                  lineStatus: initialLineStatus,
                   channelFulfillmentStatus: line.fulfillmentStatus || null,
                   channelItemId: line.channelItemId,
                   courier: line.courierName || null,
