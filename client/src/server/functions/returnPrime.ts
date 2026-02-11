@@ -385,8 +385,8 @@ export const triggerReturnPrimeSync = createServerFn({ method: 'POST' }).handler
 
             const data = await response.json();
             return {
-                success: true,
-                message: `Synced ${data.result?.created ?? 0} new, ${data.result?.updated ?? 0} updated`,
+                success: data.success ?? true,
+                message: `Synced ${data.data?.created ?? 0} new, ${data.data?.updated ?? 0} updated`,
             };
         } catch (error: unknown) {
             const message = error instanceof Error ? error.message : 'Unknown error';
