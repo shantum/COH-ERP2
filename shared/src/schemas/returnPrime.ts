@@ -247,15 +247,15 @@ export type ReturnPrimeApiOrder = z.infer<typeof ReturnPrimeApiOrderSchema>;
  * Product info for line items
  */
 export const ProductInfoSchema = z.object({
-    title: z.string().optional(),
-    variant_title: z.string().optional(),
-    product_id: z.number().optional(),
-    variant_id: z.number().optional(),
-    image: z.object({ src: z.string() }).optional(),
-    price: z.number().optional(),
-    sku: z.string().optional(),
-    variant_deleted: z.boolean().optional(),
-    product_deleted: z.boolean().optional(),
+    title: z.string().nullable().optional(),
+    variant_title: z.string().nullable().optional(),
+    product_id: z.number().nullable().optional(),
+    variant_id: z.number().nullable().optional(),
+    image: z.object({ src: z.string() }).nullable().optional(),
+    price: z.number().nullable().optional(),
+    sku: z.string().nullable().optional(),
+    variant_deleted: z.boolean().nullable().optional(),
+    product_deleted: z.boolean().nullable().optional(),
 });
 
 export type ProductInfo = z.infer<typeof ProductInfoSchema>;
@@ -264,12 +264,12 @@ export type ProductInfo = z.infer<typeof ProductInfoSchema>;
  * Shop price breakdown
  */
 export const ShopPriceSchema = z.object({
-    actual_amount: z.number().optional(),
-    total_tax: z.number().optional(),
-    return_quantity: z.number().optional(),
-    total_discount: z.number().optional(),
-    shipping_amount: z.number().optional(),
-    currency: z.string().optional(),
+    actual_amount: z.number().nullable().optional(),
+    total_tax: z.number().nullable().optional(),
+    return_quantity: z.number().nullable().optional(),
+    total_discount: z.number().nullable().optional(),
+    shipping_amount: z.number().nullable().optional(),
+    currency: z.string().nullable().optional(),
 });
 
 export type ShopPrice = z.infer<typeof ShopPriceSchema>;
@@ -280,12 +280,15 @@ export type ShopPrice = z.infer<typeof ShopPriceSchema>;
 export const LineItemRefundSchema = z.object({
     requested_mode: z.string().nullable().optional(),
     actual_mode: z.string().nullable().optional(),
-    status: z.string().optional(),
+    refund_others_text: z.string().nullable().optional(),
+    meta: z.unknown().nullable().optional(),
+    status: z.string().nullable().optional(),
     refunded_amount: z
         .object({
-            shop_money: MoneySchema.optional(),
-            presentment_money: MoneySchema.optional(),
+            shop_money: MoneySchema.nullable().optional(),
+            presentment_money: MoneySchema.nullable().optional(),
         })
+        .nullable()
         .optional(),
     refunded_at: z.string().nullable().optional(),
     comment: z.string().nullable().optional(),
@@ -299,9 +302,10 @@ export type LineItemRefund = z.infer<typeof LineItemRefundSchema>;
 export const FeeSchema = z.object({
     price_set: z
         .object({
-            shop_money: MoneySchema.optional(),
-            presentment_money: MoneySchema.optional(),
+            shop_money: MoneySchema.nullable().optional(),
+            presentment_money: MoneySchema.nullable().optional(),
         })
+        .nullable()
         .optional(),
 });
 
@@ -311,11 +315,11 @@ export type Fee = z.infer<typeof FeeSchema>;
  * Shipping info for line items
  */
 export const ShippingInfoSchema = z.object({
-    awb: z.string().optional(),
-    shipping_company: z.string().optional(),
-    tracking_url: z.string().optional(),
-    tracking_available: z.boolean().optional(),
-    labels: z.array(z.string()).optional(),
+    awb: z.string().nullable().optional(),
+    shipping_company: z.string().nullable().optional(),
+    tracking_url: z.string().nullable().optional(),
+    tracking_available: z.boolean().nullable().optional(),
+    labels: z.array(z.string()).nullable().optional(),
 });
 
 export type ShippingInfo = z.infer<typeof ShippingInfoSchema>;
@@ -326,14 +330,14 @@ export type ShippingInfo = z.infer<typeof ShippingInfoSchema>;
 export const ReturnPrimeApiLineItemSchema = z.object({
     id: z.number(),
     quantity: z.number(),
-    reason: z.string().optional(),
-    refund: LineItemRefundSchema.optional(),
-    return_fee: FeeSchema.optional(),
-    exchange_fee: FeeSchema.optional(),
-    original_product: ProductInfoSchema.optional(),
-    exchange_product: ProductInfoSchema.optional(),
-    shipping: z.array(ShippingInfoSchema).optional(),
-    shop_price: ShopPriceSchema.optional(),
+    reason: z.string().nullable().optional(),
+    refund: LineItemRefundSchema.nullable().optional(),
+    return_fee: FeeSchema.nullable().optional(),
+    exchange_fee: FeeSchema.nullable().optional(),
+    original_product: ProductInfoSchema.nullable().optional(),
+    exchange_product: ProductInfoSchema.nullable().optional(),
+    shipping: z.array(ShippingInfoSchema).nullable().optional(),
+    shop_price: ShopPriceSchema.nullable().optional(),
 });
 
 export type ReturnPrimeApiLineItem = z.infer<typeof ReturnPrimeApiLineItemSchema>;

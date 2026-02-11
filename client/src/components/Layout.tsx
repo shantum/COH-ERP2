@@ -2,7 +2,7 @@ import { Outlet, Link, useNavigate, useRouterState } from '@tanstack/react-route
 import { useAuth } from '../hooks/useAuth';
 import {
     LayoutDashboard, ShoppingCart,
-    Users, RotateCcw, Factory, LogOut, Menu, X, BookOpen, Settings, ClipboardCheck, PackagePlus, Clipboard, BarChart3, UserCog, ChevronLeft, ChevronRight, Search, Package, PackageX, ChevronDown, Minimize2, Maximize2, Calculator, Truck, Store, RefreshCcw, FileSpreadsheet, FilePlus, ShoppingBag, HeartPulse, Upload
+    Users, RotateCcw, Factory, LogOut, Menu, X, BookOpen, Settings, ClipboardCheck, PackagePlus, Clipboard, BarChart3, UserCog, ChevronLeft, ChevronRight, Search, Package, PackageX, ChevronDown, Minimize2, Maximize2, Calculator, Truck, Store, RefreshCcw, FileSpreadsheet, FilePlus, ShoppingBag, HeartPulse, Upload, FileText
 } from 'lucide-react';
 import { usePermissions } from '../hooks/usePermissions';
 import { useAccess, type AccessFeature } from '../hooks/useAccess';
@@ -73,6 +73,7 @@ const navGroups: NavGroup[] = [
             { to: '/production', icon: Factory, label: 'Production Plan' },
             { to: '/inventory-inward', icon: PackagePlus, label: 'Inventory Inward' },
             { to: '/fabric-receipt', icon: PackagePlus, label: 'Fabric Receipt' },
+            { to: '/fabric-invoices', icon: FileText, label: 'Fabric Invoices' },
         ],
     },
     {

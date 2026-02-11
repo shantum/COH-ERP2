@@ -109,6 +109,13 @@ const envSchema = z.object({
     RETURNPRIME_WEBHOOK_SECRET: z.string().optional(),
 
     // ----------------------------------------
+    // AI / ANTHROPIC
+    // ----------------------------------------
+
+    /** Anthropic API key for invoice AI parsing (Claude Vision) */
+    ANTHROPIC_API_KEY: z.string().optional(),
+
+    // ----------------------------------------
     // VITE (passed through to client build)
     // ----------------------------------------
 
