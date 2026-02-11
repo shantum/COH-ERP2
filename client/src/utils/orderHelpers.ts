@@ -151,7 +151,6 @@ let lastInventoryRef: InventoryBalanceRef[] | undefined = undefined;
 let lastFabricRef: FabricStockRef[] | undefined = undefined;
 
 function getInventoryMap(inventoryBalance: InventoryBalanceRef[] | undefined): Map<string, number> {
-    // Rebuild if reference changed OR map is null (first call)
     if (inventoryMap === null || inventoryBalance !== lastInventoryRef) {
         inventoryMap = new Map();
         if (inventoryBalance) {
@@ -165,7 +164,6 @@ function getInventoryMap(inventoryBalance: InventoryBalanceRef[] | undefined): M
 }
 
 function getFabricMap(fabricStock: FabricStockRef[] | undefined): Map<string, number> {
-    // Rebuild if reference changed OR map is null (first call)
     if (fabricMap === null || fabricStock !== lastFabricRef) {
         fabricMap = new Map();
         if (fabricStock) {
@@ -177,6 +175,7 @@ function getFabricMap(fabricStock: FabricStockRef[] | undefined): Map<string, nu
     }
     return fabricMap;
 }
+
 
 /**
  * Compute customer order counts from orders
@@ -198,52 +197,6 @@ export function computeCustomerStats(
     });
 
     return stats;
-}
-
-/**
- * Enrich server-flattened rows with client-side inventory/fabric data
- * This is O(n) with O(1) Map lookups - much faster than full client-side flatten
- *
- * The server pre-flattens orders into rows (sorting, object creation, field extraction).
- * The client only fills in inventory balances which are queried separately.
- */
-export function enrichRowsWithInventory<T extends { skuId: string | null; skuStock?: number; fabricBalance?: number }>(
-    rows: T[],
-    inventoryBalance: InventoryBalanceRef[] | undefined,
-    fabricStock: FabricStockRef[] | undefined
-): T[] {
-    if (!rows || rows.length === 0) return rows;
-
-    // Build O(1) lookup maps (reuses cached maps if data hasn't changed)
-    const invMap = getInventoryMap(inventoryBalance);
-    const fabMap = getFabricMap(fabricStock);
-
-    // If no inventory data, return rows as-is (server defaults skuStock/fabricBalance to 0)
-    if (invMap.size === 0 && fabMap.size === 0) {
-        return rows;
-    }
-
-    // Single O(n) pass to fill inventory data
-    // Only overwrite skuStock if we have inventory data (otherwise preserve server value)
-    const hasInventoryData = invMap.size > 0;
-
-    return rows.map(row => {
-        // Skip rows without SKU (empty orders, etc.)
-        if (!row.skuId) return row;
-
-        // Only use client inventory data if available; otherwise preserve server's skuStock
-        const skuStock = hasInventoryData ? (invMap.get(row.skuId) ?? 0) : (row.skuStock ?? 0);
-        // Note: fabricBalance requires fabric ID which isn't on the row
-        // For now, keep server default (0). Could enhance later if needed.
-        const fabricBalance = row.fabricBalance ?? 0;
-
-        // Only create new object if values changed
-        if (row.skuStock === skuStock && row.fabricBalance === fabricBalance) {
-            return row;
-        }
-
-        return { ...row, skuStock, fabricBalance };
-    });
 }
 
 export interface FlattenedOrderRow {

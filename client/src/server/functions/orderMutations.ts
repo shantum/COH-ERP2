@@ -6,18 +6,6 @@
  *
  * IMPORTANT: All database imports are dynamic to prevent Node.js code
  * (pg, Buffer) from being bundled into the client.
- *
- * =========================================================================
- * FULFILLMENT FUNCTIONS DISABLED (Part 1 of fulfillment strip)
- * =========================================================================
- * Google Sheets is now the single source of truth for fulfillment.
- * The following functions return a FORBIDDEN error and do no DB work:
- *   markLineDelivered, markLineRto, receiveLineRto, cancelLine,
- *   uncancelLine, releaseToShipped, releaseToCancelled, allocateOrder,
- *   adminShipOrder, unshipOrder, setLineStatus, shipLines,
- *   markShippedLine, unmarkShippedLine, updateLineTracking,
- *   markDelivered, markRto, receiveRto, migrateShopifyFulfilled
- * =========================================================================
  */
 
 import { createServerFn } from '@tanstack/react-start';
@@ -34,30 +22,6 @@ import {
 // INPUT SCHEMAS
 // ============================================
 
-const markLineDeliveredSchema = z.object({
-    lineId: z.string().uuid('Invalid line ID'),
-    deliveredAt: z.string().datetime().optional(),
-});
-
-const markLineRtoSchema = z.object({
-    lineId: z.string().uuid('Invalid line ID'),
-});
-
-const receiveLineRtoSchema = z.object({
-    lineId: z.string().uuid('Invalid line ID'),
-    condition: z.enum(['good', 'damaged', 'missing']).optional().default('good'),
-    notes: z.string().optional(),
-});
-
-const cancelLineSchema = z.object({
-    lineId: z.string().uuid('Invalid line ID'),
-    reason: z.string().optional(),
-});
-
-const uncancelLineSchema = z.object({
-    lineId: z.string().uuid('Invalid line ID'),
-});
-
 const updateLineSchema = z.object({
     lineId: z.string().uuid('Invalid line ID'),
     qty: z.number().int().positive().optional(),
@@ -72,14 +36,6 @@ const addLineSchema = z.object({
     skuId: z.string().uuid('Invalid SKU ID'),
     qty: z.number().int().positive(),
     unitPrice: z.number().nonnegative(),
-});
-
-const releaseToShippedSchema = z.object({
-    orderIds: z.array(z.string().uuid()).optional(),
-});
-
-const releaseToCancelledSchema = z.object({
-    orderIds: z.array(z.string().uuid()).optional(),
 });
 
 const updateOrderSchema = z.object({
@@ -100,10 +56,6 @@ const markPaidSchema = z.object({
 const deleteOrderSchema = z.object({
     orderId: z.string().uuid('Invalid order ID'),
 });
-
-// ============================================
-// PHASE 3 INPUT SCHEMAS - Complex Order Operations
-// ============================================
 
 const createOrderSchema = z.object({
     orderNumber: z.string().optional(),
@@ -128,28 +80,6 @@ const createOrderSchema = z.object({
     })).min(1, 'At least one line is required'),
 });
 
-const allocateOrderSchema = z.object({
-    orderId: z.string().uuid('Invalid order ID'),
-    lineIds: z.array(z.string().uuid()).optional(), // Optional: if not provided, allocate all pending lines
-});
-
-const adminShipOrderSchema = z.object({
-    orderId: z.string().uuid('Invalid order ID'),
-    awbNumber: z.string().trim()
-        .transform((val) => val.toUpperCase() || 'ADMIN-MANUAL')
-        .optional()
-        .default('ADMIN-MANUAL'),
-    courier: z.string().trim()
-        .transform((val) => val || 'Manual')
-        .optional()
-        .default('Manual'),
-});
-
-const unshipOrderSchema = z.object({
-    orderId: z.string().uuid('Invalid order ID'),
-    lineIds: z.array(z.string().uuid()).optional(), // Optional: if not provided, unship all shipped lines
-});
-
 const cancelOrderSchema = z.object({
     orderId: z.string().uuid('Invalid order ID'),
     reason: z.string().optional(),
@@ -157,11 +87,6 @@ const cancelOrderSchema = z.object({
 
 const uncancelOrderSchema = z.object({
     orderId: z.string().uuid('Invalid order ID'),
-});
-
-const setLineStatusSchema = z.object({
-    lineId: z.string().uuid('Invalid line ID'),
-    status: z.enum(['pending', 'allocated', 'picked', 'packed', 'cancelled']),
 });
 
 const customizeLineSchema = z.object({
@@ -174,6 +99,11 @@ const customizeLineSchema = z.object({
 const removeLineCustomizationSchema = z.object({
     lineId: z.string().uuid('Invalid line ID'),
     force: z.boolean().optional().default(false),
+});
+
+const updateLineNotesSchema = z.object({
+    lineId: z.string().uuid('Invalid line ID'),
+    notes: z.string(),
 });
 
 // ============================================
@@ -189,41 +119,6 @@ export interface MutationResult<T> {
     };
 }
 
-export interface MarkLineDeliveredResult {
-    lineId: string;
-    orderId: string;
-    deliveredAt: string;
-    orderTerminal: boolean;
-}
-
-export interface MarkLineRtoResult {
-    lineId: string;
-    orderId: string;
-    rtoInitiatedAt: string;
-}
-
-export interface ReceiveLineRtoResult {
-    lineId: string;
-    orderId: string;
-    rtoReceivedAt: string;
-    rtoCondition: string;
-    orderTerminal: boolean;
-    inventoryRestored: boolean;
-}
-
-export interface CancelLineResult {
-    lineId: string;
-    orderId: string;
-    lineStatus: 'cancelled';
-    inventoryReleased: boolean;
-}
-
-export interface UncancelLineResult {
-    lineId: string;
-    orderId: string;
-    lineStatus: 'pending';
-}
-
 export interface UpdateLineResult {
     lineId: string;
     orderId: string;
@@ -235,11 +130,6 @@ export interface AddLineResult {
     orderId: string;
     skuId: string;
     qty: number;
-}
-
-export interface ReleaseResult {
-    count: number;
-    message: string;
 }
 
 export interface UpdateOrderResult {
@@ -257,38 +147,12 @@ export interface DeleteOrderResult {
     deleted: boolean;
 }
 
-// ============================================
-// PHASE 3 RESULT TYPES - Complex Order Operations
-// ============================================
-
 export interface CreateOrderResult {
     orderId: string;
     orderNumber: string;
     customerId: string | null;
     lineCount: number;
     totalAmount: number;
-}
-
-export interface AllocateOrderResult {
-    orderId: string;
-    allocated: number;
-    lineIds: string[];
-    failed?: Array<{ lineId: string; reason: string }>;
-}
-
-export interface AdminShipOrderResult {
-    orderId: string;
-    shipped: number;
-    lineIds: string[];
-    awbNumber: string;
-    courier: string;
-    orderUpdated: boolean;
-}
-
-export interface UnshipOrderResult {
-    orderId: string;
-    unshipped: number;
-    lineIds: string[];
 }
 
 export interface CancelOrderResult {
@@ -302,14 +166,6 @@ export interface UncancelOrderResult {
     orderId: string;
     status: string;  // Computed from line states - could be 'open', 'partially_shipped', etc.
     linesRestored: number;
-}
-
-export interface SetLineStatusResult {
-    lineId: string;
-    orderId: string;
-    previousStatus: string;
-    newStatus: string;
-    inventoryUpdated: boolean;
 }
 
 export interface CustomizeLineResult {
@@ -326,6 +182,12 @@ export interface RemoveLineCustomizationResult {
     skuCode: string;
     deletedCustomSkuCode: string;
     forcedCleanup: boolean;
+}
+
+export interface UpdateLineNotesResult {
+    lineId: string;
+    orderId: string;
+    notes: string;
 }
 
 // ============================================
@@ -377,80 +239,6 @@ async function broadcastUpdate(event: OrderUpdateEvent, excludeUserId: string): 
 // ============================================
 // SERVER FUNCTIONS
 // ============================================
-
-/**
- * Mark a shipped line as delivered
- */
-export const markLineDelivered = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
-    .inputValidator((input: unknown) => markLineDeliveredSchema.parse(input))
-    .handler(async (): Promise<MutationResult<MarkLineDeliveredResult>> => {
-        // DISABLED: Fulfillment now managed in Google Sheets
-        return {
-            success: false,
-            error: { code: 'FORBIDDEN', message: 'Fulfillment is now managed in Google Sheets. This action is disabled in the ERP.' },
-        };
-    });
-
-/**
- * Initiate RTO for a shipped line
- */
-export const markLineRto = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
-    .inputValidator((input: unknown) => markLineRtoSchema.parse(input))
-    .handler(async (): Promise<MutationResult<MarkLineRtoResult>> => {
-        // DISABLED: Fulfillment now managed in Google Sheets
-        return {
-            success: false,
-            error: { code: 'FORBIDDEN', message: 'Fulfillment is now managed in Google Sheets. This action is disabled in the ERP.' },
-        };
-    });
-
-/**
- * Receive RTO at warehouse
- */
-export const receiveLineRto = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
-    .inputValidator((input: unknown) => receiveLineRtoSchema.parse(input))
-    .handler(async (): Promise<MutationResult<ReceiveLineRtoResult>> => {
-        // DISABLED: Fulfillment now managed in Google Sheets
-        return {
-            success: false,
-            error: { code: 'FORBIDDEN', message: 'Fulfillment is now managed in Google Sheets. This action is disabled in the ERP.' },
-        };
-    });
-
-/**
- * Cancel an order line
- *
- * Uses state machine validation and wraps inventory release + status update
- * in a transaction for atomicity. Production batch link is cleared via
- * productionBatchId = null; batch queries derive linked lines from this field.
- */
-export const cancelLine = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
-    .inputValidator((input: unknown) => cancelLineSchema.parse(input))
-    .handler(async (): Promise<MutationResult<CancelLineResult>> => {
-        // DISABLED: Fulfillment now managed in Google Sheets
-        return {
-            success: false,
-            error: { code: 'FORBIDDEN', message: 'Fulfillment is now managed in Google Sheets. This action is disabled in the ERP.' },
-        };
-    });
-
-/**
- * Uncancel a previously cancelled line
- */
-export const uncancelLine = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
-    .inputValidator((input: unknown) => uncancelLineSchema.parse(input))
-    .handler(async (): Promise<MutationResult<UncancelLineResult>> => {
-        // DISABLED: Fulfillment now managed in Google Sheets
-        return {
-            success: false,
-            error: { code: 'FORBIDDEN', message: 'Fulfillment is now managed in Google Sheets. This action is disabled in the ERP.' },
-        };
-    });
 
 /**
  * Update order line fields (qty, price, notes, tracking)
@@ -610,34 +398,6 @@ export const addLine = createServerFn({ method: 'POST' })
                 skuId,
                 qty,
             },
-        };
-    });
-
-/**
- * Release orders to shipped view
- */
-export const releaseToShipped = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
-    .inputValidator((input: unknown) => releaseToShippedSchema.parse(input))
-    .handler(async (): Promise<MutationResult<ReleaseResult>> => {
-        // DISABLED: Fulfillment now managed in Google Sheets
-        return {
-            success: false,
-            error: { code: 'FORBIDDEN', message: 'Fulfillment is now managed in Google Sheets. This action is disabled in the ERP.' },
-        };
-    });
-
-/**
- * Release orders to cancelled view
- */
-export const releaseToCancelled = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
-    .inputValidator((input: unknown) => releaseToCancelledSchema.parse(input))
-    .handler(async (): Promise<MutationResult<ReleaseResult>> => {
-        // DISABLED: Fulfillment now managed in Google Sheets
-        return {
-            success: false,
-            error: { code: 'FORBIDDEN', message: 'Fulfillment is now managed in Google Sheets. This action is disabled in the ERP.' },
         };
     });
 
@@ -835,10 +595,6 @@ export const deleteOrder = createServerFn({ method: 'POST' })
         };
     });
 
-// ============================================
-// PHASE 3 SERVER FUNCTIONS - Complex Order Operations
-// ============================================
-
 /**
  * Create a new order with lines
  * - Creates or finds customer
@@ -1010,60 +766,6 @@ export const createOrder = createServerFn({ method: 'POST' })
                 lineCount: order.orderLines.length,
                 totalAmount: order.totalAmount,
             },
-        };
-    });
-
-/**
- * Allocate inventory for order lines
- * - Check stock for all lines
- * - Create OUTWARD transactions for each line
- * - Update lineStatus='allocated' using state machine
- * - Invalidate inventoryBalanceCache
- * - SSE broadcast
- */
-export const allocateOrder = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
-    .inputValidator((input: unknown) => allocateOrderSchema.parse(input))
-    .handler(async (): Promise<MutationResult<AllocateOrderResult>> => {
-        // DISABLED: Fulfillment now managed in Google Sheets
-        return {
-            success: false,
-            error: { code: 'FORBIDDEN', message: 'Fulfillment is now managed in Google Sheets. This action is disabled in the ERP.' },
-        };
-    });
-
-/**
- * Admin force ship bypassing status checks (ADMIN ONLY)
- * - Check ENABLE_ADMIN_SHIP env var
- * - Require admin role
- * - Force ship all lines regardless of current status
- * - SSE broadcast
- */
-export const adminShipOrder = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
-    .inputValidator((input: unknown) => adminShipOrderSchema.parse(input))
-    .handler(async (): Promise<MutationResult<AdminShipOrderResult>> => {
-        // DISABLED: Fulfillment now managed in Google Sheets
-        return {
-            success: false,
-            error: { code: 'FORBIDDEN', message: 'Fulfillment is now managed in Google Sheets. This action is disabled in the ERP.' },
-        };
-    });
-
-/**
- * Unship order - reverse ship operation
- * - Clear shippedAt, awbNumber, courier
- * - Set lineStatus='packed' (reverse transition)
- * - SSE broadcast
- */
-export const unshipOrder = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
-    .inputValidator((input: unknown) => unshipOrderSchema.parse(input))
-    .handler(async (): Promise<MutationResult<UnshipOrderResult>> => {
-        // DISABLED: Fulfillment now managed in Google Sheets
-        return {
-            success: false,
-            error: { code: 'FORBIDDEN', message: 'Fulfillment is now managed in Google Sheets. This action is disabled in the ERP.' },
         };
     });
 
@@ -1338,23 +1040,6 @@ export const uncancelOrder = createServerFn({ method: 'POST' })
     });
 
 /**
- * Manual status transition
- * - Use state machine for valid transitions
- * - Handle inventory for allocated transition
- * - SSE broadcast
- */
-export const setLineStatus = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
-    .inputValidator((input: unknown) => setLineStatusSchema.parse(input))
-    .handler(async (): Promise<MutationResult<SetLineStatusResult>> => {
-        // DISABLED: Fulfillment now managed in Google Sheets
-        return {
-            success: false,
-            error: { code: 'FORBIDDEN', message: 'Fulfillment is now managed in Google Sheets. This action is disabled in the ERP.' },
-        };
-    });
-
-/**
  * Create custom SKU for line
  * - Create CustomSKU record linked to line
  * - Update line with custom SKU reference
@@ -1624,136 +1309,9 @@ export const removeLineCustomization = createServerFn({ method: 'POST' })
         };
     });
 
-// ============================================
-// ADDITIONAL SHIPPING MUTATIONS
-// ============================================
-
-/**
- * Ship multiple lines with tracking info
- */
-const shipLinesSchema = z.object({
-    lineIds: z.array(z.string().uuid()).min(1, 'At least one line ID is required'),
-    awbNumber: z.string().min(1, 'AWB number is required').trim().transform((val) => val.toUpperCase()),
-    courier: z.string().min(1, 'Courier is required').trim(),
-});
-
-export interface ShipLinesResult {
-    shipped: Array<{ lineId: string; skuCode?: string; qty: number }>;
-    skipped: Array<{ lineId: string; skuCode?: string; qty: number; reason?: string }>;
-    errors: Array<{ lineId?: string; skuCode?: string; error: string; code: string; currentStatus?: string }>;
-    orderUpdated: boolean;
-    orderId?: string | null;
-}
-
-export const shipLines = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
-    .inputValidator((input: unknown) => shipLinesSchema.parse(input))
-    .handler(async (): Promise<MutationResult<ShipLinesResult>> => {
-        // DISABLED: Fulfillment now managed in Google Sheets
-        return {
-            success: false,
-            error: { code: 'FORBIDDEN', message: 'Fulfillment is now managed in Google Sheets. This action is disabled in the ERP.' },
-        };
-    });
-
-/**
- * Mark a single line as shipped with AWB
- */
-const markShippedLineSchema = z.object({
-    lineId: z.string().uuid('Invalid line ID'),
-    awbNumber: z.string().min(1, 'AWB number is required').trim().transform((val) => val.toUpperCase()),
-    courier: z.string().min(1, 'Courier is required').trim(),
-});
-
-export interface MarkShippedLineResult {
-    lineId: string;
-    orderId: string;
-    shippedAt: string;
-    awbNumber: string;
-    courier: string;
-    orderUpdated: boolean;
-}
-
-export const markShippedLine = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
-    .inputValidator((input: unknown) => markShippedLineSchema.parse(input))
-    .handler(async (): Promise<MutationResult<MarkShippedLineResult>> => {
-        // DISABLED: Fulfillment now managed in Google Sheets
-        return {
-            success: false,
-            error: { code: 'FORBIDDEN', message: 'Fulfillment is now managed in Google Sheets. This action is disabled in the ERP.' },
-        };
-    });
-
-/**
- * Revert shipped line back to packed
- */
-const unmarkShippedLineSchema = z.object({
-    lineId: z.string().uuid('Invalid line ID'),
-});
-
-export interface UnmarkShippedLineResult {
-    lineId: string;
-    orderId: string;
-    lineStatus: string;
-}
-
-export const unmarkShippedLine = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
-    .inputValidator((input: unknown) => unmarkShippedLineSchema.parse(input))
-    .handler(async (): Promise<MutationResult<UnmarkShippedLineResult>> => {
-        // DISABLED: Fulfillment now managed in Google Sheets
-        return {
-            success: false,
-            error: { code: 'FORBIDDEN', message: 'Fulfillment is now managed in Google Sheets. This action is disabled in the ERP.' },
-        };
-    });
-
-/**
- * Update tracking info on a line
- */
-const updateLineTrackingSchema = z.object({
-    lineId: z.string().uuid('Invalid line ID'),
-    awbNumber: z.string().optional(),
-    courier: z.string().optional(),
-    trackingStatus: z.string().optional(),
-});
-
-export interface UpdateLineTrackingResult {
-    lineId: string;
-    orderId: string;
-    updated: {
-        awbNumber?: string | null;
-        courier?: string | null;
-        trackingStatus?: string | null;
-    };
-}
-
-export const updateLineTracking = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
-    .inputValidator((input: unknown) => updateLineTrackingSchema.parse(input))
-    .handler(async (): Promise<MutationResult<UpdateLineTrackingResult>> => {
-        // DISABLED: Fulfillment now managed in Google Sheets
-        return {
-            success: false,
-            error: { code: 'FORBIDDEN', message: 'Fulfillment is now managed in Google Sheets. This action is disabled in the ERP.' },
-        };
-    });
-
 /**
  * Update notes on a line
  */
-const updateLineNotesSchema = z.object({
-    lineId: z.string().uuid('Invalid line ID'),
-    notes: z.string(),
-});
-
-export interface UpdateLineNotesResult {
-    lineId: string;
-    orderId: string;
-    notes: string;
-}
-
 export const updateLineNotes = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => updateLineNotesSchema.parse(input))
@@ -1798,110 +1356,5 @@ export const updateLineNotes = createServerFn({ method: 'POST' })
                 orderId: line.orderId,
                 notes,
             },
-        };
-    });
-
-// ============================================
-// ORDER-LEVEL DELIVERY/RTO MUTATIONS
-// ============================================
-
-/**
- * Mark all shipped lines of an order as delivered
- */
-const markDeliveredSchema = z.object({
-    orderId: z.string().uuid('Invalid order ID'),
-});
-
-export interface MarkDeliveredResult {
-    orderId: string;
-    status: 'delivered';
-    linesDelivered: number;
-}
-
-export const markDelivered = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
-    .inputValidator((input: unknown) => markDeliveredSchema.parse(input))
-    .handler(async (): Promise<MutationResult<MarkDeliveredResult>> => {
-        // DISABLED: Fulfillment now managed in Google Sheets
-        return {
-            success: false,
-            error: { code: 'FORBIDDEN', message: 'Fulfillment is now managed in Google Sheets. This action is disabled in the ERP.' },
-        };
-    });
-
-/**
- * Initiate RTO for all shipped lines of an order
- */
-const markRtoSchema = z.object({
-    orderId: z.string().uuid('Invalid order ID'),
-});
-
-export interface MarkRtoResult {
-    orderId: string;
-    rtoInitiatedAt: string;
-    linesInitiated: number;
-}
-
-export const markRto = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
-    .inputValidator((input: unknown) => markRtoSchema.parse(input))
-    .handler(async (): Promise<MutationResult<MarkRtoResult>> => {
-        // DISABLED: Fulfillment now managed in Google Sheets
-        return {
-            success: false,
-            error: { code: 'FORBIDDEN', message: 'Fulfillment is now managed in Google Sheets. This action is disabled in the ERP.' },
-        };
-    });
-
-/**
- * Receive RTO for all RTO-initiated lines of an order
- */
-const receiveRtoSchema = z.object({
-    orderId: z.string().uuid('Invalid order ID'),
-    condition: z.enum(['good', 'damaged', 'missing']).optional().default('good'),
-    notes: z.string().optional(),
-});
-
-export interface ReceiveRtoResult {
-    orderId: string;
-    rtoReceivedAt: string;
-    linesReceived: number;
-    condition: string;
-}
-
-export const receiveRto = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
-    .inputValidator((input: unknown) => receiveRtoSchema.parse(input))
-    .handler(async (): Promise<MutationResult<ReceiveRtoResult>> => {
-        // DISABLED: Fulfillment now managed in Google Sheets
-        return {
-            success: false,
-            error: { code: 'FORBIDDEN', message: 'Fulfillment is now managed in Google Sheets. This action is disabled in the ERP.' },
-        };
-    });
-
-/**
- * Admin migration helper - migrate Shopify fulfilled orders to shipped status
- */
-const migrateShopifyFulfilledSchema = z.object({
-    limit: z.number().int().positive().max(500).optional().default(50),
-});
-
-export interface MigrateShopifyFulfilledResult {
-    migrated: number;
-    skipped: number;
-    remaining: number;
-    message: string;
-    errors?: Array<{ orderNumber: string; error: string }>;
-}
-
-export const migrateShopifyFulfilled = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
-    .inputValidator((input: unknown) => migrateShopifyFulfilledSchema.parse(input))
-    .handler(async (): Promise<MutationResult<MigrateShopifyFulfilledResult>> => {
-        // DISABLED: Fulfillment now managed in Google Sheets
-        return {
-            success: false,
-            error: { code: 'FORBIDDEN', message: 'Fulfillment is now managed in Google Sheets. This action is disabled in the ERP.' },
         };
     });

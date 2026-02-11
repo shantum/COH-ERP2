@@ -12,8 +12,6 @@ export { OrdersGridSkeleton } from './OrdersGridSkeleton';
 export { UnifiedOrderModal } from './UnifiedOrderModal';
 export { CreateOrderModal } from './CreateOrderModal';
 export { CustomerDetailModal } from './CustomerDetailModal';
-export { CustomizationModal } from './CustomizationModal';
-export type { CustomizationType } from './CustomizationModal';
 export { TrackingModal } from './TrackingModal';
 
 // Panels and Search

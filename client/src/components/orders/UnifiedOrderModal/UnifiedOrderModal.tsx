@@ -134,8 +134,6 @@ export function UnifiedOrderModal({
     setIsAddingProduct,
     handleAddLine,
     handleUpdateLine,
-    handleCancelLine,
-    handleUncancelLine,
     handleToggleLineSelection,
     // Return form
     returnForm,
@@ -342,25 +340,15 @@ export function UnifiedOrderModal({
     }
   }, [mutations, handleUpdateLine, queryClient, order.id]);
 
-  // Handle cancel line
-  const handleCancelLineWithMutation = useCallback(async (lineId: string) => {
-    try {
-      await mutations.cancelLine.mutateAsync(lineId);
-      handleCancelLine(lineId);
-    } catch (error) {
-      console.error('Failed to cancel line:', error);
-    }
-  }, [mutations, handleCancelLine]);
+  // Handle cancel line — DISABLED (fulfillment managed in Google Sheets)
+  const handleCancelLineWithMutation = useCallback(async (_lineId: string) => {
+    alert('Line-level cancel is now managed in Google Sheets.');
+  }, []);
 
-  // Handle uncancel line
-  const handleUncancelLineWithMutation = useCallback(async (lineId: string) => {
-    try {
-      await mutations.uncancelLine.mutateAsync(lineId);
-      handleUncancelLine(lineId);
-    } catch (error) {
-      console.error('Failed to restore line:', error);
-    }
-  }, [mutations, handleUncancelLine]);
+  // Handle uncancel line — DISABLED (fulfillment managed in Google Sheets)
+  const handleUncancelLineWithMutation = useCallback(async (_lineId: string) => {
+    alert('Line-level restore is now managed in Google Sheets.');
+  }, []);
 
   // Handle mark line as delivered — DISABLED (tracking sync handles this automatically)
   const handleMarkLineDeliveredWithMutation = useCallback(async (_lineId: string) => {

@@ -18,27 +18,21 @@ export const Route = createFileRoute('/_authenticated/orders-mobile')({
     component: MobileOrdersPage,
 });
 
-// Mobile-optimized page size (smaller payload, faster render)
 const MOBILE_PAGE_SIZE = 50;
 
 function MobileOrdersPage() {
-    // Fetch orders with reduced page size for mobile performance
     const getOrdersFn = useServerFn(getOrders);
     const { data: ordersData, isLoading } = useQuery({
         queryKey: ['orders', 'list', 'getOrders', { view: 'all', limit: MOBILE_PAGE_SIZE }],
         queryFn: () => getOrdersFn({ data: { view: 'all', limit: MOBILE_PAGE_SIZE } }),
     });
 
-    // Convert to flattened rows (server already provides this)
-    // Cast to local FlattenedOrderRow type - they are structurally compatible
     const rows = useMemo(() => {
         return (ordersData?.rows || []) as FlattenedOrderRow[];
     }, [ordersData]);
 
-    // Use the same mutations as the desktop orders page
     const production = useProductionBatchMutations({ currentView: 'all' });
 
-    // Handlers
     const handleCreateBatch = useCallback((params: {
         skuId: string | null;
         qtyPlanned: number;
@@ -70,10 +64,8 @@ function MobileOrdersPage() {
         console.warn('Cancel lines disabled — fulfillment managed in Google Sheets');
     }, []);
 
-    // Locked dates (none for now - can be fetched from settings)
     const isDateLocked = useCallback((_date: string) => false, []);
 
-    // Navigation back
     const handleBack = useCallback(() => {
         window.history.back();
     }, []);
