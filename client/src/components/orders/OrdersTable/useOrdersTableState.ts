@@ -116,11 +116,6 @@ const COLUMN_MIGRATIONS: Record<string, string> = {
     'shopifyCourier': 'shopifyTracking',
     // v4: skuStock merged into qty
     'skuStock': 'qty',
-    // v5: allocate, pick, pack, ship merged into workflow
-    'allocate': 'workflow',
-    'pick': 'workflow',
-    'pack': 'workflow',
-    'ship': 'workflow',
     // v6: awb + courier merged into trackingInfo
     'awb': 'trackingInfo',
     'courier': 'trackingInfo',

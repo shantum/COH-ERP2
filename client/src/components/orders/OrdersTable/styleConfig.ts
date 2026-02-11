@@ -1,71 +1,11 @@
-// @ts-nocheck
 /**
  * Orders Table Style Configuration
  *
  * All visual styling tokens for the orders table in one place.
  * Change colors here — no need to touch logic files.
  *
- * IMPORTANT: All column references use column IDs (names), not indices.
- * This makes the configuration immune to column reordering.
- *
  * Tailwind classes only. Each value is a space-separated className string.
  */
-
-import { ALL_COLUMN_IDS, type ColumnId } from './constants';
-
-// ─── Column index lookup (O(1) from column ID to position) ──────────────────
-export const COLUMN_INDEX: Record<ColumnId, number> = Object.fromEntries(
-    ALL_COLUMN_IDS.map((id, i) => [id, i])
-) as Record<ColumnId, number>;
-
-// Helper: convert array of column IDs to Set of indices
-const toIndexSet = (columns: readonly ColumnId[]): Set<number> =>
-    new Set(columns.map(id => COLUMN_INDEX[id]));
-
-// ─── Order-info zone (left columns that highlight when ALL lines are allocated+) ───
-// Excludes shipByDate because it shows a future target date, not current fulfillment state
-const ORDER_INFO_COLUMNS: readonly ColumnId[] = [
-    'orderInfo', 'channel', 'customerInfo', 'paymentInfo',
-    'tags', 'customerNotes', 'customerTags'
-];
-export const ORDER_INFO_ZONE = toIndexSet(ORDER_INFO_COLUMNS);
-
-// ─── Columns excluded from waterfall highlighting ───────────────────────────
-// returnStatus: return info is separate from fulfillment flow
-// customize: customization toggle shouldn't highlight with fulfillment
-const EXCLUDED_COLUMNS: readonly ColumnId[] = ['returnStatus', 'customize'];
-const EXCLUDED = toIndexSet(EXCLUDED_COLUMNS);
-
-// Helper: filter out excluded columns
-const excludeColumns = (columns: readonly ColumnId[]): Set<number> => {
-    const indices = toIndexSet(columns);
-    for (const excl of EXCLUDED) indices.delete(excl);
-    return indices;
-};
-
-// ─── Line-level highlight zones (waterfall progression) ─────────────────────
-// Each zone represents how far the highlight "wave" extends for a given state.
-// As orders progress through fulfillment, more columns light up.
-
-const LINE_COLUMN_RANGES = {
-    // Pending states: just product info + stock assignment
-    productToStock: ['productName', 'qty', 'assignStock'] as const,
-    // Has stock: extends to fabric balance
-    productToFabric: ['productName', 'qty', 'assignStock', 'fabricBalance'] as const,
-    // Active fulfillment: extends to pick/pack controls
-    productToPickPack: ['productName', 'qty', 'assignStock', 'fabricBalance', 'workflow', 'pickPack'] as const,
-    // Full line info (not used currently but available)
-    productToNotes: ['productName', 'qty', 'assignStock', 'fabricBalance', 'workflow', 'pickPack', 'production', 'notes'] as const,
-};
-
-export const LINE_ZONES = {
-    productToStock: excludeColumns(LINE_COLUMN_RANGES.productToStock),
-    productToFabric: excludeColumns(LINE_COLUMN_RANGES.productToFabric),
-    productToPickPack: excludeColumns(LINE_COLUMN_RANGES.productToPickPack),
-    productToNotes: excludeColumns(LINE_COLUMN_RANGES.productToNotes),
-    // Terminal states (shipped/cancelled) highlight entire row
-    allColumns: toIndexSet(ALL_COLUMN_IDS),
-} as const;
 
 // ─── Resolved line states ────────────────────────────────────────────────────
 export type ResolvedLineState =
@@ -83,27 +23,6 @@ export const LINE_CELL_BG: Record<ResolvedLineState, string> = {
     packed: 'bg-green-200',
     shipped: 'bg-green-200',
     cancelled: 'bg-gray-100',
-};
-
-// ─── Which zone each state highlights ────────────────────────────────────────
-// This defines the "waterfall" effect: each state highlights a specific set of columns.
-// The gap between highlighted and non-highlighted columns shows the user what action is next.
-export const LINE_HIGHLIGHT_CONFIG: Record<ResolvedLineState, Set<number>> = {
-    // Pending substates: highlight product/stock area only
-    blocked: LINE_ZONES.productToStock,
-    inProduction: new Set([...LINE_ZONES.productToStock, COLUMN_INDEX.production]),
-    customized: LINE_ZONES.productToStock,
-    // Has stock: extend highlight to fabric column
-    withStock: LINE_ZONES.productToFabric,
-    // Allocated: extend to fabric + show production
-    allocated: new Set([...LINE_ZONES.productToFabric, COLUMN_INDEX.production]),
-    // Picked: extend to pick/pack + production + order notes (packer needs to see notes)
-    picked: new Set([...LINE_ZONES.productToPickPack, COLUMN_INDEX.production, COLUMN_INDEX.customerNotes]),
-    // Packed: pick/pack zone + production + order notes
-    packed: new Set([...LINE_ZONES.productToPickPack, COLUMN_INDEX.production, COLUMN_INDEX.customerNotes]),
-    // Terminal states: highlight entire row
-    shipped: LINE_ZONES.allColumns,
-    cancelled: LINE_ZONES.allColumns,
 };
 
 // ─── TR-level styles (borders + text effects only, NO backgrounds) ───────────
@@ -161,8 +80,6 @@ export const FINAL_STATUS_STYLES: Record<string, string> = {
 export const FINAL_STATUS_DEFAULT = 'bg-gray-100 text-gray-600';
 
 // ─── Tracking status badges ─────────────────────────────────────────────────
-// Note: rto_delivered and rto_received both exist because different APIs/webhooks
-// return different strings for the same logical state. Both map to the same UI.
 export const TRACKING_STATUS_STYLES: Record<string, { bg: string; text: string; label: string }> = {
     in_transit: { bg: 'bg-blue-100', text: 'text-blue-700', label: 'In Transit' },
     manifested: { bg: 'bg-gray-100', text: 'text-gray-700', label: 'Manifested' },
@@ -176,7 +93,7 @@ export const TRACKING_STATUS_STYLES: Record<string, { bg: string; text: string; 
     rto_initiated: { bg: 'bg-red-100', text: 'text-red-700', label: 'RTO' },
     rto_in_transit: { bg: 'bg-orange-100', text: 'text-orange-700', label: 'RTO In Transit' },
     rto_delivered: { bg: 'bg-purple-100', text: 'text-purple-700', label: 'RTO Received' },
-    rto_received: { bg: 'bg-purple-100', text: 'text-purple-700', label: 'RTO Received' }, // Alias for rto_delivered
+    rto_received: { bg: 'bg-purple-100', text: 'text-purple-700', label: 'RTO Received' },
     cancelled: { bg: 'bg-gray-100', text: 'text-gray-700', label: 'Cancelled' },
 };
 
@@ -192,13 +109,10 @@ export const CUSTOMIZATION_COLORS = {
     inactive: 'text-gray-400 hover:text-orange-600 hover:bg-orange-50',
 } as const;
 
-// ─── Status legend (matches waterfall highlight colors) ─────────────────────
+// ─── Status legend (matches row highlight colors) ────────────────────────────
 export const STATUS_LEGEND_ITEMS = [
     { color: 'bg-yellow-100', border: 'border-yellow-300', label: 'Pending (no stock)', desc: 'Waiting for inventory' },
     { color: 'bg-yellow-50', border: 'border-yellow-200', label: 'In Production', desc: 'Has production date set' },
     { color: 'bg-green-100', border: 'border-green-300', label: 'Ready to Allocate', desc: 'Has stock available' },
-    { color: 'bg-green-200', border: 'border-green-400', label: 'Allocated', desc: 'Stock reserved' },
-    { color: 'bg-green-200', border: 'border-green-400', label: 'Picked', desc: 'Ready to pack' },
-    { color: 'bg-green-200', border: 'border-green-400', label: 'Packed', desc: 'Ready to ship' },
-    { color: 'bg-green-200', border: 'border-green-400', label: 'Shipped', desc: 'Awaiting tracking' },
+    { color: 'bg-green-200', border: 'border-green-400', label: 'Allocated+', desc: 'Stock reserved or further' },
 ] as const;

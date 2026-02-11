@@ -28,7 +28,6 @@ export const getCatalog = noopAsync;
 export const createOrder = noopAsync;
 export const updateOrder = noopAsync;
 export const deleteOrder = noopAsync;
-export const allocateOrder = noopAsync;
 
 // Auth
 export const login = noopAsync;
