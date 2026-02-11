@@ -12,7 +12,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import {
     Loader2, Play, ChevronDown, ChevronRight,
-    ArrowRightLeft, Database, Package, AlertCircle,
+    ArrowRightLeft, Database, Package, AlertCircle, Eye, X,
 } from 'lucide-react';
 import {
     getBackgroundJobs,
@@ -48,6 +48,22 @@ interface BalanceVerification {
         after: { c: number; d: number; e: number };
         cDelta: number;
     }>;
+}
+
+interface PreviewResult {
+    tab: string;
+    totalRows: number;
+    valid: number;
+    invalid: number;
+    duplicates: number;
+    validationErrors: Record<string, number>;
+    skipReasons?: Record<string, number>;
+    affectedSkuCodes: string[];
+    durationMs: number;
+    balanceSnapshot?: {
+        skuBalances: Array<{ skuCode: string; colC: number; colD: number; colE: number; pendingQty: number }>;
+        timestamp: string;
+    };
 }
 
 interface OffloadStatusResponse {
@@ -155,6 +171,109 @@ function BalanceVerificationBadge({ verification }: { verification?: BalanceVeri
                             {d.skuCode}: C {d.before.c}→{d.after.c} (delta: {d.cDelta})
                         </div>
                     ))}
+                </div>
+            )}
+        </div>
+    );
+}
+
+function PreviewResultCard({ title, preview, color, onClose }: {
+    title: string;
+    preview: PreviewResult;
+    color: 'emerald' | 'blue';
+    onClose: () => void;
+}) {
+    const borderColor = color === 'emerald' ? 'border-emerald-200' : 'border-blue-200';
+    const bgColor = color === 'emerald' ? 'bg-emerald-50' : 'bg-blue-50';
+    const textColor = color === 'emerald' ? 'text-emerald-700' : 'text-blue-700';
+
+    const errors = Object.entries(preview.validationErrors ?? {});
+    const skipReasons = Object.entries(preview.skipReasons ?? {});
+    const balances = preview.balanceSnapshot?.skuBalances ?? [];
+
+    return (
+        <div className={`bg-white rounded-lg border ${borderColor} p-4 shadow-sm`}>
+            <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                    <Eye size={16} className={textColor} />
+                    <h3 className={`text-sm font-medium ${textColor}`}>{title}</h3>
+                    <span className="text-xs text-gray-400">{formatDuration(preview.durationMs)}</span>
+                </div>
+                <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+                    <X size={16} />
+                </button>
+            </div>
+
+            {/* Summary row */}
+            <div className="grid grid-cols-4 gap-2 mb-3">
+                <div className={`rounded p-2 text-center ${bgColor}`}>
+                    <div className="text-xs text-gray-500">Total Rows</div>
+                    <div className={`text-sm font-semibold ${textColor}`}>{preview.totalRows}</div>
+                </div>
+                <div className="rounded p-2 text-center bg-green-50">
+                    <div className="text-xs text-gray-500">Valid</div>
+                    <div className="text-sm font-semibold text-green-700">{preview.valid}</div>
+                </div>
+                <div className={`rounded p-2 text-center ${preview.invalid > 0 ? 'bg-red-50' : 'bg-gray-50'}`}>
+                    <div className="text-xs text-gray-500">Invalid</div>
+                    <div className={`text-sm font-semibold ${preview.invalid > 0 ? 'text-red-600' : 'text-gray-400'}`}>{preview.invalid}</div>
+                </div>
+                <div className={`rounded p-2 text-center ${preview.duplicates > 0 ? 'bg-amber-50' : 'bg-gray-50'}`}>
+                    <div className="text-xs text-gray-500">Duplicates</div>
+                    <div className={`text-sm font-semibold ${preview.duplicates > 0 ? 'text-amber-600' : 'text-gray-400'}`}>{preview.duplicates}</div>
+                </div>
+            </div>
+
+            {/* Validation errors */}
+            {errors.length > 0 && (
+                <div className="mb-3 p-2 bg-red-50 border border-red-200 rounded text-xs text-red-700">
+                    <div className="font-medium mb-1">Validation errors:</div>
+                    {errors.map(([reason, count]) => (
+                        <div key={reason}>{reason}: {count}</div>
+                    ))}
+                </div>
+            )}
+
+            {/* Skip reasons (outward) */}
+            {skipReasons.length > 0 && (
+                <div className="mb-3 p-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-700">
+                    <div className="font-medium mb-1">Skip reasons:</div>
+                    {skipReasons.map(([reason, count]) => (
+                        <div key={reason}>{reason}: {count}</div>
+                    ))}
+                </div>
+            )}
+
+            {/* Balance snapshot table */}
+            {balances.length > 0 && (
+                <div>
+                    <div className="text-xs font-medium text-gray-600 mb-1">
+                        Balance Snapshot ({balances.length} SKUs)
+                    </div>
+                    <div className="border rounded-lg overflow-hidden max-h-60 overflow-y-auto">
+                        <table className="w-full text-xs">
+                            <thead className="bg-gray-50 sticky top-0">
+                                <tr>
+                                    <th className="text-left px-2 py-1.5 font-medium text-gray-600">SKU</th>
+                                    <th className="text-right px-2 py-1.5 font-medium text-gray-600">Total (C)</th>
+                                    <th className="text-right px-2 py-1.5 font-medium text-gray-600">Allocated (D)</th>
+                                    <th className="text-right px-2 py-1.5 font-medium text-gray-600">Available (E)</th>
+                                    <th className="text-right px-2 py-1.5 font-medium text-gray-600">Pending Qty</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y">
+                                {balances.map((b) => (
+                                    <tr key={b.skuCode} className="hover:bg-gray-50">
+                                        <td className="px-2 py-1 font-mono text-gray-700">{b.skuCode}</td>
+                                        <td className="px-2 py-1 text-right text-gray-900">{b.colC}</td>
+                                        <td className="px-2 py-1 text-right text-gray-600">{b.colD}</td>
+                                        <td className="px-2 py-1 text-right text-gray-900">{b.colE}</td>
+                                        <td className={`px-2 py-1 text-right font-medium ${textColor}`}>{b.pendingQty}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             )}
         </div>
@@ -271,6 +390,38 @@ export default function SheetsMonitor() {
         onSuccess: invalidateAll,
     });
 
+    // Preview mutations
+    const [previewInwardResult, setPreviewInwardResult] = useState<PreviewResult | null>(null);
+    const [previewOutwardResult, setPreviewOutwardResult] = useState<PreviewResult | null>(null);
+
+    const previewInwardMutation = useMutation({
+        mutationFn: async () => {
+            const result = await triggerFn({
+                data: { jobId: 'preview_ingest_inward' as const },
+            });
+            if (!result.success) throw new Error(result.error?.message);
+            return (result.data?.result ?? null) as PreviewResult | null;
+        },
+        onSuccess: (data) => {
+            if (data) setPreviewInwardResult(data);
+            invalidateAll();
+        },
+    });
+
+    const previewOutwardMutation = useMutation({
+        mutationFn: async () => {
+            const result = await triggerFn({
+                data: { jobId: 'preview_ingest_outward' as const },
+            });
+            if (!result.success) throw new Error(result.error?.message);
+            return (result.data?.result ?? null) as PreviewResult | null;
+        },
+        onSuccess: (data) => {
+            if (data) setPreviewOutwardResult(data);
+            invalidateAll();
+        },
+    });
+
     // Derived data
     const bufferCounts = offloadStatus?.bufferCounts ?? { inward: 0, outward: 0 };
     const inwardState = offloadStatus?.ingestInward;
@@ -343,30 +494,58 @@ export default function SheetsMonitor() {
                             )}
                             Move Shipped
                         </button>
-                        <button
-                            onClick={() => triggerInwardMutation.mutate()}
-                            disabled={triggerInwardMutation.isPending || inwardState?.isRunning}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                            {triggerInwardMutation.isPending ? (
-                                <Loader2 size={14} className="animate-spin" />
-                            ) : (
-                                <Play size={14} />
-                            )}
-                            Ingest Inward
-                        </button>
-                        <button
-                            onClick={() => triggerOutwardMutation.mutate()}
-                            disabled={triggerOutwardMutation.isPending || outwardState?.isRunning}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                            {triggerOutwardMutation.isPending ? (
-                                <Loader2 size={14} className="animate-spin" />
-                            ) : (
-                                <Play size={14} />
-                            )}
-                            Ingest Outward
-                        </button>
+                        <div className="flex items-center border-l border-gray-200 pl-2 gap-1">
+                            <button
+                                onClick={() => previewInwardMutation.mutate()}
+                                disabled={previewInwardMutation.isPending || inwardState?.isRunning}
+                                className="inline-flex items-center gap-1 px-2 py-1.5 text-xs font-medium rounded-md border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                {previewInwardMutation.isPending ? (
+                                    <Loader2 size={12} className="animate-spin" />
+                                ) : (
+                                    <Eye size={12} />
+                                )}
+                                Preview
+                            </button>
+                            <button
+                                onClick={() => triggerInwardMutation.mutate()}
+                                disabled={triggerInwardMutation.isPending || inwardState?.isRunning}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                {triggerInwardMutation.isPending ? (
+                                    <Loader2 size={14} className="animate-spin" />
+                                ) : (
+                                    <Play size={14} />
+                                )}
+                                Inward
+                            </button>
+                        </div>
+                        <div className="flex items-center border-l border-gray-200 pl-2 gap-1">
+                            <button
+                                onClick={() => previewOutwardMutation.mutate()}
+                                disabled={previewOutwardMutation.isPending || outwardState?.isRunning}
+                                className="inline-flex items-center gap-1 px-2 py-1.5 text-xs font-medium rounded-md border border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                {previewOutwardMutation.isPending ? (
+                                    <Loader2 size={12} className="animate-spin" />
+                                ) : (
+                                    <Eye size={12} />
+                                )}
+                                Preview
+                            </button>
+                            <button
+                                onClick={() => triggerOutwardMutation.mutate()}
+                                disabled={triggerOutwardMutation.isPending || outwardState?.isRunning}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                {triggerOutwardMutation.isPending ? (
+                                    <Loader2 size={14} className="animate-spin" />
+                                ) : (
+                                    <Play size={14} />
+                                )}
+                                Outward
+                            </button>
+                        </div>
                     </div>
                 </div>
 
@@ -386,7 +565,35 @@ export default function SheetsMonitor() {
                         <AlertCircle size={12} /> Move Shipped: {triggerMoveMutation.error.message}
                     </div>
                 )}
+                {previewInwardMutation.error && (
+                    <div className="mt-2 text-xs text-red-600 flex items-center gap-1">
+                        <AlertCircle size={12} /> Preview Inward: {previewInwardMutation.error.message}
+                    </div>
+                )}
+                {previewOutwardMutation.error && (
+                    <div className="mt-2 text-xs text-red-600 flex items-center gap-1">
+                        <AlertCircle size={12} /> Preview Outward: {previewOutwardMutation.error.message}
+                    </div>
+                )}
             </div>
+
+            {/* ── Preview Results ── */}
+            {previewInwardResult && (
+                <PreviewResultCard
+                    title="Inward Preview"
+                    preview={previewInwardResult}
+                    color="emerald"
+                    onClose={() => setPreviewInwardResult(null)}
+                />
+            )}
+            {previewOutwardResult && (
+                <PreviewResultCard
+                    title="Outward Preview"
+                    preview={previewOutwardResult}
+                    color="blue"
+                    onClose={() => setPreviewOutwardResult(null)}
+                />
+            )}
 
             {/* ── Section 2: Last Sync Results (3 columns) ── */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
