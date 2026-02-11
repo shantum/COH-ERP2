@@ -83,6 +83,18 @@ export interface PushBalancesResult {
     error: string | null;
 }
 
+export interface PushBalancesPreviewResult {
+    totalSkusInDb: number;
+    mastersheetMatched: number;
+    mastersheetWouldChange: number;
+    ledgerMatched: number;
+    ledgerWouldChange: number;
+    alreadyCorrect: number;
+    wouldChange: number;
+    sampleChanges: Array<{ skuCode: string; sheet: string; sheetValue: number; dbValue: number }>;
+    durationMs: number;
+}
+
 export interface MoveShippedResult {
     shippedRowsFound: number;
     skippedRows: number;

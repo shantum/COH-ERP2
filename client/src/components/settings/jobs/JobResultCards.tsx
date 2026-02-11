@@ -19,6 +19,7 @@ import type {
     CacheCleanupResult,
     CacheStats,
     ErrorReasonsMap,
+    PushBalancesPreviewResult,
 } from './sheetJobTypes';
 
 // ============================================
@@ -260,6 +261,65 @@ export const MigrateFormulasResultCard = React.memo(function MigrateFormulasResu
                     ))}
                 </div>
             )}
+        </div>
+    );
+});
+
+// ============================================
+// PUSH BALANCES PREVIEW CARD
+// ============================================
+
+export const PushBalancesPreviewCard = React.memo(function PushBalancesPreviewCard({
+    preview,
+}: {
+    preview: PushBalancesPreviewResult;
+}) {
+    const [showChanges, setShowChanges] = React.useState(false);
+
+    return (
+        <div className="space-y-1.5 text-xs">
+            {/* Summary line */}
+            <div className="flex items-center gap-2 flex-wrap">
+                {preview.wouldChange > 0 && (
+                    <span className="text-amber-700 font-medium">{preview.wouldChange} would change</span>
+                )}
+                {preview.alreadyCorrect > 0 && (
+                    <span className="text-emerald-600 font-medium">{preview.alreadyCorrect} already correct</span>
+                )}
+                <span className="text-gray-400">{preview.totalSkusInDb} SKUs in DB</span>
+            </div>
+
+            {/* Per-sheet breakdown */}
+            <div className="flex gap-3 text-gray-500">
+                <span>Mastersheet: {preview.mastersheetWouldChange} diff / {preview.mastersheetMatched} ok</span>
+                <span>Ledger: {preview.ledgerWouldChange} diff / {preview.ledgerMatched} ok</span>
+            </div>
+
+            {/* Sample changes (collapsed) */}
+            {preview.sampleChanges.length > 0 && (
+                <div>
+                    <button
+                        onClick={() => setShowChanges(!showChanges)}
+                        className="text-gray-500 hover:text-gray-700 text-xs"
+                    >
+                        {showChanges ? 'Hide' : 'Show'} sample changes ({preview.sampleChanges.length})
+                    </button>
+                    {showChanges && (
+                        <div className="mt-1 space-y-0.5">
+                            {preview.sampleChanges.map((c, i) => (
+                                <p key={i} className="text-gray-600">
+                                    <span className="font-medium">{c.skuCode}</span>
+                                    <span className="text-gray-400"> ({c.sheet})</span>
+                                    : {c.sheetValue} → {c.dbValue}
+                                </p>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {/* Duration */}
+            <p className="text-gray-400">{(preview.durationMs / 1000).toFixed(1)}s</p>
         </div>
     );
 });

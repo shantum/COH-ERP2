@@ -187,7 +187,7 @@ interface PermissionsUpdateBody {
 }
 
 /** Background job trigger params */
-type JobId = 'shopify_sync' | 'tracking_sync' | 'cache_cleanup' | 'ingest_inward' | 'ingest_outward' | 'move_shipped_to_outward' | 'preview_ingest_inward' | 'preview_ingest_outward' | 'cleanup_done_rows' | 'migrate_sheet_formulas' | 'snapshot_compute' | 'snapshot_backfill' | 'push_balances';
+type JobId = 'shopify_sync' | 'tracking_sync' | 'cache_cleanup' | 'ingest_inward' | 'ingest_outward' | 'move_shipped_to_outward' | 'preview_ingest_inward' | 'preview_ingest_outward' | 'cleanup_done_rows' | 'migrate_sheet_formulas' | 'snapshot_compute' | 'snapshot_backfill' | 'push_balances' | 'preview_push_balances';
 
 /** Background job update body */
 interface JobUpdateBody {
@@ -1526,6 +1526,11 @@ router.post('/background-jobs/:jobId/trigger', requireAdmin, asyncHandler(async 
         case 'push_balances': {
             const result = await sheetOffloadWorker.triggerPushBalances();
             res.json({ message: 'Push balances to sheets completed', result });
+            break;
+        }
+        case 'preview_push_balances': {
+            const result = await sheetOffloadWorker.previewPushBalances();
+            res.json({ message: 'Push balances preview completed', result });
             break;
         }
         default:

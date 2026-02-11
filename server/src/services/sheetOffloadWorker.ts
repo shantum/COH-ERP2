@@ -110,6 +110,18 @@ interface PushBalancesResult {
     error: string | null;
 }
 
+interface PushBalancesPreviewResult {
+    totalSkusInDb: number;
+    mastersheetMatched: number;
+    mastersheetWouldChange: number;
+    ledgerMatched: number;
+    ledgerWouldChange: number;
+    alreadyCorrect: number;
+    wouldChange: number;
+    sampleChanges: Array<{ skuCode: string; sheet: string; sheetValue: number; dbValue: number }>;
+    durationMs: number;
+}
+
 interface MoveShippedResult {
     shippedRowsFound: number;
     skippedRows: number;
@@ -1990,6 +2002,106 @@ async function triggerMoveShipped(): Promise<MoveShippedResult | null> {
 // PUSH BALANCES (standalone)
 // ============================================
 
+/**
+ * Preview push balances — read-only comparison of DB vs sheet values.
+ * No concurrency guard needed since it doesn't mutate anything.
+ */
+async function previewPushBalances(): Promise<PushBalancesPreviewResult> {
+    const start = Date.now();
+
+    // 1. Fetch all SKU balances from DB
+    const allSkus = await prisma.sku.findMany({
+        select: { skuCode: true, currentBalance: true },
+    });
+
+    const balanceByCode = new Map<string, number>();
+    for (const sku of allSkus) {
+        balanceByCode.set(sku.skuCode, sku.currentBalance);
+    }
+
+    const sampleChanges: PushBalancesPreviewResult['sampleChanges'] = [];
+    let mastersheetMatched = 0;
+    let mastersheetWouldChange = 0;
+    let ledgerMatched = 0;
+    let ledgerWouldChange = 0;
+
+    // 2. Read Mastersheet Inventory col A (SKU) + col R (ERP balance)
+    try {
+        const inventoryRows = await readRange(
+            ORDERS_MASTERSHEET_ID,
+            `'${INVENTORY_TAB.NAME}'!${INVENTORY_TAB.SKU_COL}:${INVENTORY_TAB.ERP_BALANCE_COL}`
+        );
+
+        const dataStart = INVENTORY_TAB.DATA_START_ROW - 1;
+        for (let i = dataStart; i < inventoryRows.length; i++) {
+            const skuCode = String(inventoryRows[i]?.[0] ?? '').trim();
+            if (!skuCode || !balanceByCode.has(skuCode)) continue;
+
+            const dbValue = balanceByCode.get(skuCode)!;
+            // Col R is index 17 (A=0 ... R=17)
+            const sheetRaw = inventoryRows[i]?.[17];
+            const sheetValue = sheetRaw != null ? Number(sheetRaw) : 0;
+
+            if (sheetValue === dbValue) {
+                mastersheetMatched++;
+            } else {
+                mastersheetWouldChange++;
+                if (sampleChanges.length < 10) {
+                    sampleChanges.push({ skuCode, sheet: 'Mastersheet Inventory', sheetValue, dbValue });
+                }
+            }
+        }
+    } catch (err: unknown) {
+        sheetsLogger.error({ error: err instanceof Error ? err.message : 'Unknown' }, 'previewPushBalances: failed to read Inventory');
+    }
+
+    // 3. Read Office Ledger Balance (Final) col A (SKU) + col F (ERP balance)
+    try {
+        const balanceRows = await readRange(
+            OFFICE_LEDGER_ID,
+            `'${LEDGER_TABS.BALANCE_FINAL}'!A:F`
+        );
+
+        if (balanceRows.length > 2) {
+            for (let i = 2; i < balanceRows.length; i++) {
+                const skuCode = String(balanceRows[i]?.[0] ?? '').trim();
+                if (!skuCode || !balanceByCode.has(skuCode)) continue;
+
+                const dbValue = balanceByCode.get(skuCode)!;
+                // Col F is index 5
+                const sheetRaw = balanceRows[i]?.[5];
+                const sheetValue = sheetRaw != null ? Number(sheetRaw) : 0;
+
+                if (sheetValue === dbValue) {
+                    ledgerMatched++;
+                } else {
+                    ledgerWouldChange++;
+                    if (sampleChanges.length < 10) {
+                        sampleChanges.push({ skuCode, sheet: 'Office Ledger Balance', sheetValue, dbValue });
+                    }
+                }
+            }
+        }
+    } catch (err: unknown) {
+        sheetsLogger.error({ error: err instanceof Error ? err.message : 'Unknown' }, 'previewPushBalances: failed to read Balance (Final)');
+    }
+
+    const wouldChange = mastersheetWouldChange + ledgerWouldChange;
+    const alreadyCorrect = mastersheetMatched + ledgerMatched;
+
+    return {
+        totalSkusInDb: allSkus.length,
+        mastersheetMatched,
+        mastersheetWouldChange,
+        ledgerMatched,
+        ledgerWouldChange,
+        alreadyCorrect,
+        wouldChange,
+        sampleChanges,
+        durationMs: Date.now() - start,
+    };
+}
+
 async function triggerPushBalances(): Promise<PushBalancesResult | null> {
     if (pushBalancesState.isRunning) {
         sheetsLogger.warn('triggerPushBalances skipped — already running');
@@ -2472,6 +2584,7 @@ export default {
     getBufferCounts,
     previewIngestInward,
     previewIngestOutward,
+    previewPushBalances,
 };
 
-export type { IngestInwardResult, IngestOutwardResult, IngestPreviewResult, MoveShippedResult, CleanupDoneResult, MigrateFormulasResult, PushBalancesResult, OffloadStatus, RunSummary };
+export type { IngestInwardResult, IngestOutwardResult, IngestPreviewResult, MoveShippedResult, CleanupDoneResult, MigrateFormulasResult, PushBalancesResult, PushBalancesPreviewResult, OffloadStatus, RunSummary };

@@ -20,8 +20,8 @@ import {
     startBackgroundJob,
     getSheetOffloadStatus,
 } from '../../../server/functions/admin';
-import type { OffloadStatusResponse, IngestInwardResult, IngestOutwardResult, IngestPreviewResult, MoveShippedResult, CleanupDoneResult, MigrateFormulasResult } from '../jobs/sheetJobTypes';
-import { IngestInwardResultCard, IngestOutwardResultCard, IngestPreviewCard, MoveShippedResultCard, CleanupDoneResultCard, MigrateFormulasResultCard } from '../jobs/JobResultCards';
+import type { OffloadStatusResponse, IngestInwardResult, IngestOutwardResult, IngestPreviewResult, MoveShippedResult, CleanupDoneResult, MigrateFormulasResult, PushBalancesPreviewResult } from '../jobs/sheetJobTypes';
+import { IngestInwardResultCard, IngestOutwardResultCard, IngestPreviewCard, MoveShippedResultCard, CleanupDoneResultCard, MigrateFormulasResultCard, PushBalancesPreviewCard } from '../jobs/JobResultCards';
 import ConfirmModal from '../../common/ConfirmModal';
 
 // ============================================
@@ -205,8 +205,17 @@ const OffloadMonitor = React.memo(function OffloadMonitor() {
         },
     });
 
+    const pushBalancesPreviewMutation = useMutation({
+        mutationFn: async (): Promise<PushBalancesPreviewResult | null> => {
+            const result = await triggerFn({ data: { jobId: 'preview_push_balances' } });
+            if (!result.success) return null;
+            return (result.data?.result as unknown as PushBalancesPreviewResult) ?? null;
+        },
+    });
+
     const inwardPreview = inwardPreviewMutation.data ?? null;
     const outwardPreview = outwardPreviewMutation.data ?? null;
+    const pushBalancesPreview = pushBalancesPreviewMutation.data ?? null;
 
     // Single generic trigger mutation
     const triggerMutation = useMutation({
@@ -222,6 +231,7 @@ const OffloadMonitor = React.memo(function OffloadMonitor() {
             // Clear stale preview data after running a job
             inwardPreviewMutation.reset();
             outwardPreviewMutation.reset();
+            pushBalancesPreviewMutation.reset();
         },
     });
 
@@ -257,6 +267,11 @@ const OffloadMonitor = React.memo(function OffloadMonitor() {
             return `This will ingest ${valid} valid row${valid !== 1 ? 's' : ''} into inventory` +
                 (invalid > 0 ? ` (${invalid} invalid will be skipped)` : '') +
                 '. Create inventory transactions and link orders?';
+        }
+        if (jobId === 'push_balances' && pushBalancesPreview) {
+            const { wouldChange, alreadyCorrect } = pushBalancesPreview;
+            return `${wouldChange} cell${wouldChange !== 1 ? 's' : ''} will be updated across both sheets` +
+                ` (${alreadyCorrect} already correct). Push balances now?`;
         }
         return base;
     };
@@ -512,11 +527,19 @@ const OffloadMonitor = React.memo(function OffloadMonitor() {
                         {offloadStatus.migrateFormulas?.isRunning ? 'Migrating...' : 'Migrate Formulas'}
                     </button>
                     <button
+                        onClick={() => pushBalancesPreviewMutation.mutate()}
+                        disabled={pushBalancesPreviewMutation.isPending || offloadStatus.pushBalances?.isRunning}
+                        className="px-2.5 py-1.5 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 rounded border disabled:opacity-50 flex items-center gap-1"
+                    >
+                        {pushBalancesPreviewMutation.isPending ? <Loader2 size={10} className="animate-spin" /> : <FileSpreadsheet size={10} />}
+                        Preview Balances
+                    </button>
+                    <button
                         onClick={() => handleRunClick('push_balances', 'Push Balances to Sheets')}
                         disabled={triggerMutation.isPending || offloadStatus.pushBalances?.isRunning}
                         className="px-2.5 py-1.5 text-xs bg-emerald-100 hover:bg-emerald-200 text-emerald-700 rounded border disabled:opacity-50"
                     >
-                        {offloadStatus.pushBalances?.isRunning ? 'Pushing...' : 'Push Balances to Sheets'}
+                        {offloadStatus.pushBalances?.isRunning ? 'Pushing...' : 'Push Balances'}
                     </button>
                 </div>
                 {offloadStatus.cleanupDone?.lastResult && (
@@ -545,6 +568,13 @@ const OffloadMonitor = React.memo(function OffloadMonitor() {
                         {expandedJob === 'migrate_formulas' && (
                             <MigrateFormulasResultCard result={offloadStatus.migrateFormulas.lastResult as unknown as MigrateFormulasResult} />
                         )}
+                    </div>
+                )}
+                {/* Push Balances Preview */}
+                {pushBalancesPreview && (
+                    <div className="mt-2 p-2 bg-emerald-50 rounded border border-emerald-200">
+                        <p className="text-xs font-medium text-emerald-700 mb-1">Push Balances Preview</p>
+                        <PushBalancesPreviewCard preview={pushBalancesPreview} />
                     </div>
                 )}
             </div>
