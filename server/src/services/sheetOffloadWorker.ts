@@ -239,8 +239,12 @@ interface ParsedRow {
     source: string;         // inward: source, outward: destination
     extra: string;          // inward: doneBy, outward: orderNumber
     tailor: string;         // inward only
-    courier: string;        // outward only — from sheet col J
-    awb: string;            // outward only — from sheet col K
+    barcode: string;        // inward only — unique piece barcode from col G
+    userNotes: string;      // inward only — user-entered notes from col I
+    orderNotes: string;     // outward only — Order Note from col K
+    cohNotes: string;       // outward only — COH Note from col L
+    courier: string;        // outward only — from sheet col Z
+    awb: string;            // outward only — from sheet col AA
     referenceId: string;
     notes: string;
 }
@@ -886,6 +890,8 @@ async function ingestInwardLive(result: IngestInwardResult): Promise<Set<string>
         const source = String(row[INWARD_LIVE_COLS.SOURCE] ?? '').trim();
         const doneBy = String(row[INWARD_LIVE_COLS.DONE_BY] ?? '').trim();
         const tailor = String(row[INWARD_LIVE_COLS.TAILOR] ?? '').trim();
+        const barcode = String(row[INWARD_LIVE_COLS.BARCODE] ?? '').trim();
+        const userNotes = String(row[INWARD_LIVE_COLS.NOTES] ?? '').trim();
 
         let refId = buildReferenceId(REF_PREFIX.INWARD_LIVE, skuCode, qty, dateStr, source);
         if (seenRefs.has(refId)) {
@@ -903,6 +909,10 @@ async function ingestInwardLive(result: IngestInwardResult): Promise<Set<string>
             source,
             extra: doneBy,
             tailor,
+            barcode,
+            userNotes,
+            orderNotes: '',
+            cohNotes: '',
             courier: '',
             awb: '',
             referenceId: refId,
@@ -992,11 +1002,13 @@ async function ingestInwardLive(result: IngestInwardResult): Promise<Set<string>
             reason: string;
             referenceId: string;
             notes: string;
+            userNotes: string | null;
             createdById: string;
             createdAt: Date;
             source: string | null;
             performedBy: string | null;
             tailorNumber: string | null;
+            repackingBarcode: string | null;
         }> = [];
 
         for (const row of chunk) {
@@ -1009,11 +1021,13 @@ async function ingestInwardLive(result: IngestInwardResult): Promise<Set<string>
                 reason: mapSourceToReason(row.source),
                 referenceId: row.referenceId,
                 notes: row.notes,
+                userNotes: row.userNotes || null,
                 createdById: adminUserId,
                 createdAt: row.date ?? new Date(),
                 source: row.source || null,
                 performedBy: row.extra || null,
                 tailorNumber: row.tailor || null,
+                repackingBarcode: row.barcode || null,
             });
 
             affectedSkuIds.add(skuInfo.id);
@@ -1092,6 +1106,8 @@ async function ingestOutwardLive(
         const outwardDateStr = String(row[OUTWARD_LIVE_COLS.OUTWARD_DATE] ?? '');
         const orderDateStr = String(row[OUTWARD_LIVE_COLS.ORDER_DATE] ?? '');
         const dateStr = outwardDateStr.trim() || orderDateStr;
+        const orderNotes = String(row[OUTWARD_LIVE_COLS.ORDER_NOTE] ?? '').trim();
+        const cohNotes = String(row[OUTWARD_LIVE_COLS.COH_NOTE] ?? '').trim();
 
         const dest = orderNo ? 'Customer' : '';
 
@@ -1117,6 +1133,10 @@ async function ingestOutwardLive(
             source: dest,
             extra: orderNo,
             tailor: '',
+            barcode: '',
+            userNotes: '',
+            orderNotes,
+            cohNotes,
             courier,
             awb,
             referenceId: refId,
@@ -1193,6 +1213,8 @@ async function ingestOutwardLive(
             createdAt: Date;
             destination: string | null;
             orderNumber: string | null;
+            orderNotes: string | null;
+            cohNotes: string | null;
         }> = [];
 
         const chunkLinkable: LinkableOutward[] = [];
@@ -1217,6 +1239,8 @@ async function ingestOutwardLive(
                 createdAt: row.date!,
                 destination: row.source || null,
                 orderNumber: erpOrderNumber,
+                orderNotes: row.orderNotes || null,
+                cohNotes: row.cohNotes || null,
             });
 
             affectedSkuIds.add(skuInfo.id);
@@ -1768,9 +1792,13 @@ async function previewIngestInward(): Promise<IngestPreviewResult | null> {
             }
             seenRefs.add(refId);
 
+            const barcode = String(row[INWARD_LIVE_COLS.BARCODE] ?? '').trim();
+            const userNotes = String(row[INWARD_LIVE_COLS.NOTES] ?? '').trim();
+
             parsed.push({
                 rowIndex: i, skuCode, qty, date: parseSheetDate(dateStr),
-                source, extra: doneBy, tailor, courier: '', awb: '',
+                source, extra: doneBy, tailor, barcode, userNotes, orderNotes: '', cohNotes: '',
+                courier: '', awb: '',
                 referenceId: refId, notes: `${OFFLOAD_NOTES_PREFIX} ${tab}`,
             });
         }
@@ -2069,10 +2097,14 @@ async function previewIngestOutward(): Promise<IngestPreviewResult | null> {
             }
             seenRefs.add(refId);
 
+            const orderNotes = String(row[OUTWARD_LIVE_COLS.ORDER_NOTE] ?? '').trim();
+            const cohNotes = String(row[OUTWARD_LIVE_COLS.COH_NOTE] ?? '').trim();
+
             parsed.push({
                 rowIndex: i, skuCode, qty,
                 date: parseSheetDate(outwardDateStr) ?? parseSheetDate(orderDateStr),
-                source: dest, extra: orderNo, tailor: '', courier, awb,
+                source: dest, extra: orderNo, tailor: '', barcode: '', userNotes: '',
+                orderNotes, cohNotes, courier, awb,
                 referenceId: refId, notes: `${OFFLOAD_NOTES_PREFIX} ${tab}`,
             });
         }
@@ -2173,7 +2205,7 @@ async function previewIngestOutward(): Promise<IngestPreviewResult | null> {
                     erpBalance,
                     afterErpBalance: erpBalance - pending,
                     sheetPending,
-                    afterSheetPending: sheetPending + pending,
+                    afterSheetPending: sheetPending - pending,
                     colC,
                     inSync,
                 };
@@ -2564,23 +2596,14 @@ async function triggerPushBalances(): Promise<PushBalancesResult | null> {
     const start = Date.now();
 
     try {
-        // Fetch ALL SKU IDs from DB
-        const allSkus = await prisma.sku.findMany({
-            select: { id: true },
-        });
-
-        const allSkuIds = new Set(allSkus.map(s => s.id));
-        sheetsLogger.info({ skuCount: allSkuIds.size }, 'Push balances: fetched all SKU IDs');
-
-        const tracker = { errors: 0, skusUpdated: 0 };
-
-        // No 5-second wait needed — balances are already up to date in DB
-        // We call updateSheetBalances but pass the full set directly
-        // The function has a 5s wait we need to skip, so we replicate the logic inline
+        // Fetch all SKUs with balances in a single query
         const skus = await prisma.sku.findMany({
-            where: { id: { in: [...allSkuIds] } },
             select: { id: true, skuCode: true, currentBalance: true },
         });
+
+        sheetsLogger.info({ skuCount: skus.length }, 'Push balances: fetched all SKUs');
+
+        const tracker = { errors: 0, skusUpdated: 0 };
 
         const balanceByCode = new Map<string, number>();
         for (const sku of skus) {
@@ -2613,7 +2636,7 @@ async function triggerPushBalances(): Promise<PushBalancesResult | null> {
                     values: range.values,
                 }));
                 await batchWriteRanges(ORDERS_MASTERSHEET_ID, batchData);
-                totalUpdated = updates.length;
+                totalUpdated += updates.length;
                 sheetsLogger.info({ updated: updates.length, ranges: ranges.length }, 'Push balances: Inventory col R updated (batch)');
             }
         } catch (err: unknown) {
@@ -2645,6 +2668,7 @@ async function triggerPushBalances(): Promise<PushBalancesResult | null> {
                         values: range.values,
                     }));
                     await batchWriteRanges(OFFICE_LEDGER_ID, batchData);
+                    totalUpdated += updates.length;
                     sheetsLogger.info({ updated: updates.length }, 'Push balances: Balance (Final) col F updated (batch)');
                 }
             }
@@ -2719,15 +2743,15 @@ async function getBufferCounts(): Promise<{ inward: number; outward: number }> {
         ]);
 
         // Only count rows where SKU exists AND status is not DONE
-        const countActive = (rows: unknown[][], statusIdx: number) =>
+        const countActive = (rows: unknown[][], skuIdx: number, statusIdx: number) =>
             rows.length <= 1 ? 0 : rows.slice(1).filter(r =>
-                String((r as string[])[0] ?? '').trim() &&
+                String((r as string[])[skuIdx] ?? '').trim() &&
                 !String((r as string[])[statusIdx] ?? '').trim().startsWith(INGESTED_PREFIX)
             ).length;
 
         return {
-            inward: countActive(inwardRows, INWARD_LIVE_COLS.IMPORT_ERRORS),
-            outward: countActive(outwardRows, OUTWARD_LIVE_COLS.IMPORT_ERRORS),
+            inward: countActive(inwardRows, INWARD_LIVE_COLS.SKU, INWARD_LIVE_COLS.IMPORT_ERRORS),
+            outward: countActive(outwardRows, OUTWARD_LIVE_COLS.SKU, OUTWARD_LIVE_COLS.IMPORT_ERRORS),
         };
     } catch (error: unknown) {
         const message = error instanceof Error ? error.message : 'Unknown error';

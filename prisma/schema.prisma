@@ -378,6 +378,9 @@ model InventoryTransaction {
   tailorNumber      String?
   performedBy       String?
   repackingBarcode  String?
+  userNotes         String?
+  orderNotes        String?
+  cohNotes          String?
   orderNumber       String?
   createdById       String
   createdAt         DateTime @default(now())

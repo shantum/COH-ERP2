@@ -319,6 +319,9 @@ export type InventoryTransaction = {
     tailorNumber: string | null;
     performedBy: string | null;
     repackingBarcode: string | null;
+    userNotes: string | null;
+    orderNotes: string | null;
+    cohNotes: string | null;
     orderNumber: string | null;
     createdById: string;
     createdAt: Generated<Timestamp>;
