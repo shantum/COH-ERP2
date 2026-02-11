@@ -112,7 +112,7 @@ interface SyncCheckResult {
     ledgerWouldChange: number;
     alreadyCorrect: number;
     wouldChange: number;
-    sampleChanges: Array<{ skuCode: string; sheet: string; sheetValue: number; dbValue: number }>;
+    sampleChanges: Array<{ skuCode: string; productName: string; colorName: string; size: string; sheet: string; sheetValue: number; dbValue: number }>;
     durationMs: number;
 }
 
@@ -878,40 +878,55 @@ export default function SheetsMonitor() {
                                     )}
                                 </div>
 
-                                {/* Sample mismatches */}
-                                {syncCheckResult.sampleChanges.length > 0 && (
-                                    <div className="border rounded-lg overflow-hidden">
-                                        <table className="w-full text-xs">
-                                            <thead className="bg-gray-50">
-                                                <tr>
-                                                    <th className="text-left px-2 py-1.5 font-medium text-gray-600">SKU</th>
-                                                    <th className="text-left px-2 py-1.5 font-medium text-gray-600">Sheet</th>
-                                                    <th className="text-right px-2 py-1.5 font-medium text-gray-600">Sheet (R)</th>
-                                                    <th className="text-right px-2 py-1.5 font-medium text-gray-600">ERP</th>
-                                                    <th className="text-right px-2 py-1.5 font-medium text-gray-600">Diff</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody className="divide-y">
-                                                {syncCheckResult.sampleChanges.map((c, i) => (
-                                                    <tr key={i} className="hover:bg-gray-50">
-                                                        <td className="px-2 py-1 font-mono text-gray-700">{c.skuCode}</td>
-                                                        <td className="px-2 py-1 text-gray-500 text-[10px]">{c.sheet === 'Mastersheet Inventory' ? 'Mastersheet' : 'Ledger'}</td>
-                                                        <td className="px-2 py-1 text-right text-gray-500">{c.sheetValue}</td>
-                                                        <td className="px-2 py-1 text-right font-medium text-gray-900">{c.dbValue}</td>
-                                                        <td className={`px-2 py-1 text-right font-medium ${c.dbValue > c.sheetValue ? 'text-emerald-600' : 'text-red-600'}`}>
-                                                            {c.dbValue - c.sheetValue > 0 ? '+' : ''}{c.dbValue - c.sheetValue}
-                                                        </td>
-                                                    </tr>
-                                                ))}
-                                            </tbody>
-                                        </table>
-                                        {syncCheckResult.wouldChange > syncCheckResult.sampleChanges.length && (
-                                            <div className="px-2 py-1 bg-gray-50 text-[10px] text-gray-400 text-center">
-                                                Showing {syncCheckResult.sampleChanges.length} of {syncCheckResult.wouldChange}
+                                {/* Mismatches by sheet */}
+                                {(() => {
+                                    const mastersheet = syncCheckResult.sampleChanges.filter(c => c.sheet === 'Mastersheet Inventory');
+                                    const ledger = syncCheckResult.sampleChanges.filter(c => c.sheet !== 'Mastersheet Inventory');
+                                    const renderTable = (items: typeof mastersheet, label: string, total: number) => items.length > 0 && (
+                                        <div>
+                                            <div className="text-[11px] font-medium text-gray-500 mb-1">{label} — {total} differ</div>
+                                            <div className="border rounded-lg overflow-hidden mb-3">
+                                                <table className="w-full text-xs">
+                                                    <thead className="bg-gray-50">
+                                                        <tr>
+                                                            <th className="text-left px-2 py-1.5 font-medium text-gray-600">SKU</th>
+                                                            <th className="text-left px-2 py-1.5 font-medium text-gray-600">Product</th>
+                                                            <th className="text-right px-2 py-1.5 font-medium text-gray-600">Sheet (R)</th>
+                                                            <th className="text-right px-2 py-1.5 font-medium text-gray-600">ERP</th>
+                                                            <th className="text-right px-2 py-1.5 font-medium text-gray-600">Diff</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody className="divide-y">
+                                                        {items.map((c, i) => (
+                                                            <tr key={i} className="hover:bg-gray-50">
+                                                                <td className="px-2 py-1 font-mono text-gray-700">{c.skuCode}</td>
+                                                                <td className="px-2 py-1 text-gray-600 truncate max-w-[180px]" title={`${c.productName} / ${c.colorName} / ${c.size}`}>
+                                                                    {c.productName}{c.colorName ? ` / ${c.colorName}` : ''}{c.size ? ` / ${c.size}` : ''}
+                                                                </td>
+                                                                <td className="px-2 py-1 text-right text-gray-500">{c.sheetValue}</td>
+                                                                <td className="px-2 py-1 text-right font-medium text-gray-900">{c.dbValue}</td>
+                                                                <td className={`px-2 py-1 text-right font-medium ${c.dbValue > c.sheetValue ? 'text-emerald-600' : 'text-red-600'}`}>
+                                                                    {c.dbValue - c.sheetValue > 0 ? '+' : ''}{c.dbValue - c.sheetValue}
+                                                                </td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                                {total > items.length && (
+                                                    <div className="px-2 py-1 bg-gray-50 text-[10px] text-gray-400 text-center">
+                                                        Showing {items.length} of {total}
+                                                    </div>
+                                                )}
                                             </div>
-                                        )}
-                                    </div>
-                                )}
+                                        </div>
+                                    );
+                                    return (
+                                        <>
+                                            {renderTable(mastersheet, 'Mastersheet Inventory', syncCheckResult.mastersheetWouldChange)}
+                                            {renderTable(ledger, 'Office Ledger Balance', syncCheckResult.ledgerWouldChange)}
+                                        </>
+                                    );
+                                })()}
                             </div>
                         )}
                     </div>

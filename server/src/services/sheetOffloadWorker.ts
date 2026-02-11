@@ -120,7 +120,7 @@ interface PushBalancesPreviewResult {
     ledgerWouldChange: number;
     alreadyCorrect: number;
     wouldChange: number;
-    sampleChanges: Array<{ skuCode: string; sheet: string; sheetValue: number; dbValue: number }>;
+    sampleChanges: Array<{ skuCode: string; productName: string; colorName: string; size: string; sheet: string; sheetValue: number; dbValue: number }>;
     durationMs: number;
 }
 
@@ -503,16 +503,91 @@ async function validateOutwardRows(
 
     const orderMap = new Map<string, { id: string; orderLines: Array<{ id: string; skuId: string; qty: number; lineStatus: string }> }>();
     if (orderNumbers.length > 0) {
+        // Build alternate format lookups for channel orders:
+        // - Myntra: full UUID "abc12345-xxxx-..." vs short "abc12345"
+        // - Nykaa: "NYK-xxx--1" vs "NYK-xxx" (with/without --1 suffix)
+        const allLookups = new Set<string>(orderNumbers);
+        const alternateToOriginal = new Map<string, string>(); // DB format → sheet format
+
+        for (const num of orderNumbers) {
+            // Myntra full UUID → also try short 8-char form
+            if (num.includes('-') && num.length > 20) {
+                const short = num.split('-')[0];
+                allLookups.add(short);
+                alternateToOriginal.set(short, num);
+            }
+            // Myntra short form → also try as UUID prefix (handled via startsWith below)
+            if (/^[0-9a-f]{8}$/i.test(num)) {
+                alternateToOriginal.set(num, num); // mark for startsWith lookup
+            }
+            // Nykaa with --1 suffix → also try without
+            if (num.endsWith('--1')) {
+                const trimmed = num.slice(0, -3);
+                allLookups.add(trimmed);
+                alternateToOriginal.set(trimmed, num);
+            }
+            // Nykaa without --1 suffix → also try with
+            if (num.startsWith('NYK-') && !num.endsWith('--1')) {
+                const withSuffix = num + '--1';
+                allLookups.add(withSuffix);
+                alternateToOriginal.set(withSuffix, num);
+            }
+        }
+
+        // Query with all formats (exact + alternates)
         const orders = await prisma.order.findMany({
-            where: { orderNumber: { in: orderNumbers } },
+            where: { orderNumber: { in: Array.from(allLookups) } },
             select: {
                 id: true,
                 orderNumber: true,
                 orderLines: { select: { id: true, skuId: true, qty: true, lineStatus: true } },
             },
         });
+
+        // Also try startsWith for short Myntra IDs that weren't found
+        const foundNumbers = new Set(orders.map(o => o.orderNumber));
+        const shortMyntraUnmatched = orderNumbers.filter(
+            num => /^[0-9a-f]{8}$/i.test(num) && !foundNumbers.has(num)
+        );
+        if (shortMyntraUnmatched.length > 0) {
+            const startsWithOrders = await prisma.order.findMany({
+                where: {
+                    OR: shortMyntraUnmatched.map(short => ({
+                        orderNumber: { startsWith: short },
+                    })),
+                },
+                select: {
+                    id: true,
+                    orderNumber: true,
+                    orderLines: { select: { id: true, skuId: true, qty: true, lineStatus: true } },
+                },
+            });
+            orders.push(...startsWithOrders);
+            for (const o of startsWithOrders) {
+                // Map the found full UUID back to the short form from the sheet
+                const short = o.orderNumber.split('-')[0];
+                if (shortMyntraUnmatched.includes(short)) {
+                    alternateToOriginal.set(o.orderNumber, short);
+                }
+            }
+        }
+
         for (const o of orders) {
-            orderMap.set(o.orderNumber, { id: o.id, orderLines: o.orderLines });
+            // Key by the ORIGINAL sheet order number so downstream lookup works
+            const sheetKey = alternateToOriginal.get(o.orderNumber) ?? o.orderNumber;
+            if (!orderMap.has(sheetKey)) {
+                orderMap.set(sheetKey, { id: o.id, orderLines: o.orderLines });
+            }
+        }
+
+        if (alternateToOriginal.size > 0) {
+            const matchedAlternates = orders.filter(o => alternateToOriginal.has(o.orderNumber));
+            if (matchedAlternates.length > 0) {
+                sheetsLogger.info(
+                    { matchedViaAlternate: matchedAlternates.length },
+                    'Channel orders matched via alternate format'
+                );
+            }
         }
     }
 
@@ -2350,17 +2425,29 @@ async function triggerMoveShipped(): Promise<MoveShippedResult | null> {
 async function previewPushBalances(): Promise<PushBalancesPreviewResult> {
     const start = Date.now();
 
-    // 1. Fetch all SKU balances from DB
+    // 1. Fetch all SKU balances + product info from DB
     const allSkus = await prisma.sku.findMany({
-        select: { skuCode: true, currentBalance: true },
+        select: {
+            skuCode: true,
+            currentBalance: true,
+            size: true,
+            variation: { select: { colorName: true, product: { select: { name: true } } } },
+        },
     });
 
     const balanceByCode = new Map<string, number>();
+    const infoByCode = new Map<string, { productName: string; colorName: string; size: string }>();
     for (const sku of allSkus) {
         balanceByCode.set(sku.skuCode, sku.currentBalance);
+        infoByCode.set(sku.skuCode, {
+            productName: sku.variation.product.name,
+            colorName: sku.variation.colorName,
+            size: sku.size,
+        });
     }
 
-    const sampleChanges: PushBalancesPreviewResult['sampleChanges'] = [];
+    const mastersheetSamples: PushBalancesPreviewResult['sampleChanges'] = [];
+    const ledgerSamples: PushBalancesPreviewResult['sampleChanges'] = [];
     let mastersheetMatched = 0;
     let mastersheetWouldChange = 0;
     let ledgerMatched = 0;
@@ -2387,8 +2474,9 @@ async function previewPushBalances(): Promise<PushBalancesPreviewResult> {
                 mastersheetMatched++;
             } else {
                 mastersheetWouldChange++;
-                if (sampleChanges.length < 10) {
-                    sampleChanges.push({ skuCode, sheet: 'Mastersheet Inventory', sheetValue, dbValue });
+                if (mastersheetSamples.length < 10) {
+                    const info = infoByCode.get(skuCode);
+                    mastersheetSamples.push({ skuCode, productName: info?.productName ?? '', colorName: info?.colorName ?? '', size: info?.size ?? '', sheet: 'Mastersheet Inventory', sheetValue, dbValue });
                 }
             }
         }
@@ -2417,8 +2505,9 @@ async function previewPushBalances(): Promise<PushBalancesPreviewResult> {
                     ledgerMatched++;
                 } else {
                     ledgerWouldChange++;
-                    if (sampleChanges.length < 10) {
-                        sampleChanges.push({ skuCode, sheet: 'Office Ledger Balance', sheetValue, dbValue });
+                    if (ledgerSamples.length < 10) {
+                        const info = infoByCode.get(skuCode);
+                        ledgerSamples.push({ skuCode, productName: info?.productName ?? '', colorName: info?.colorName ?? '', size: info?.size ?? '', sheet: 'Office Ledger Balance', sheetValue, dbValue });
                     }
                 }
             }
@@ -2438,7 +2527,7 @@ async function previewPushBalances(): Promise<PushBalancesPreviewResult> {
         ledgerWouldChange,
         alreadyCorrect,
         wouldChange,
-        sampleChanges,
+        sampleChanges: [...mastersheetSamples, ...ledgerSamples],
         durationMs: Date.now() - start,
     };
 }
