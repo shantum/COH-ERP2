@@ -35,6 +35,9 @@ interface PreviewLine {
   previousStatus?: string;
   courierName: string | null;
   awbNumber: string | null;
+  dispatchDate: string | null;
+  manifestedDate: string | null;
+  deliveryDate: string | null;
 }
 
 interface PreviewOrder {

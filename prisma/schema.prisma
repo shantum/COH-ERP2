@@ -470,6 +470,7 @@ model Order {
   exchangeOrders       Order[]            @relation("ExchangeOriginalOrder")
   exchangeSourceLines  OrderLine[]        @relation("ExchangeOrderLine") // Lines that created this exchange order
   returnPrimeRequests  ReturnPrimeRequest[] // Return Prime requests linked to this order
+  channelOrderLines    ChannelOrderLine[] // BT report analytics lines linked to this order
 
   @@index([customerId])
   @@index([status])
@@ -643,6 +644,7 @@ model OrderLine {
   returnReceivedBy     User?               @relation("ReturnReceivedBy", fields: [returnReceivedById], references: [id])
   returnClosedManuallyBy User?             @relation("ReturnClosedManuallyBy", fields: [returnClosedManuallyById], references: [id])
   returnExchangeOrder  Order?              @relation("ExchangeOrderLine", fields: [returnExchangeOrderId], references: [id])
+  channelOrderLines    ChannelOrderLine[] // BT report analytics lines linked to this order line
 
   @@index([orderId])
   @@index([skuId])
@@ -1592,6 +1594,12 @@ model ChannelOrderLine {
   batchNo             String?
   hsnCode             String?
 
+  // ERP linkage
+  orderId             String?                   // FK to ERP Order
+  orderLineId         String?                   // FK to ERP OrderLine
+  order               Order?    @relation(fields: [orderId], references: [id])
+  orderLine           OrderLine? @relation(fields: [orderLineId], references: [id])
+
   // Import tracking
   importedAt          DateTime  @default(now())
   importBatchId       String?                   // Track which upload batch
@@ -1607,6 +1615,8 @@ model ChannelOrderLine {
   @@index([skuCode])
   @@index([customerState])
   @@index([importBatchId])
+  @@index([orderId])
+  @@index([orderLineId])
 }
 
 /// Track import history for BT report uploads

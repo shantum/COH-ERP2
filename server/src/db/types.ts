@@ -59,6 +59,8 @@ export type ChannelOrderLine = {
     invoiceNumber: string | null;
     batchNo: string | null;
     hsnCode: string | null;
+    orderId: string | null;
+    orderLineId: string | null;
     importedAt: Generated<Timestamp>;
     importBatchId: string | null;
 };

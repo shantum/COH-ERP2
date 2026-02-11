@@ -328,6 +328,9 @@ interface PreviewLine {
   previousStatus?: string;
   courierName: string | null;
   awbNumber: string | null;
+  dispatchDate: string | null;
+  manifestedDate: string | null;
+  deliveryDate: string | null;
 }
 
 interface PreviewOrder {
@@ -613,6 +616,9 @@ router.post('/preview-import', authenticateToken, upload.single('file'), async (
           ...(previousStatus && previousStatus !== fulfillmentStatus ? { previousStatus } : {}),
           courierName: row['Courier Name']?.trim() || null,
           awbNumber: row['Courier Tracking Number']?.trim() || null,
+          dispatchDate: parseDate(row['Dispatch Date'])?.toISOString() || null,
+          manifestedDate: parseDate(row['Manifested Date'])?.toISOString() || null,
+          deliveryDate: parseDate(row['Channel Delivery Date'])?.toISOString() || null,
         });
       }
 
@@ -755,6 +761,8 @@ router.post('/execute-import', authenticateToken, async (req: Request, res: Resp
               orderLines: {
                 create: matchedLines.map(line => {
                   const status = line.fulfillmentStatus?.toLowerCase() || '';
+                  const isShipped = status === 'shipped' || status === 'delivered' || status === 'manifested';
+                  const isDelivered = status === 'delivered';
                   return {
                     skuId: line.skuId!,
                     qty: Math.max(line.qty, 1),
@@ -764,8 +772,8 @@ router.post('/execute-import', authenticateToken, async (req: Request, res: Resp
                     channelItemId: line.channelItemId,
                     courier: line.courierName || null,
                     awbNumber: line.awbNumber || null,
-                    ...(status === 'shipped' || status === 'delivered' ? { shippedAt: new Date() } : {}),
-                    ...(status === 'delivered' ? { deliveredAt: new Date() } : {}),
+                    ...(isShipped ? { shippedAt: line.dispatchDate ? new Date(line.dispatchDate) : new Date() } : {}),
+                    ...(isDelivered ? { deliveredAt: line.deliveryDate ? new Date(line.deliveryDate) : new Date() } : {}),
                   };
                 }),
               },
@@ -774,12 +782,43 @@ router.post('/execute-import', authenticateToken, async (req: Request, res: Resp
 
           ordersCreated++;
 
+          // Link ChannelOrderLines to this Order + OrderLines
+          const createdLines = await req.prisma.orderLine.findMany({
+            where: { orderId: order.id },
+            select: { id: true, channelItemId: true },
+          });
+          const lineIdMap = new Map(createdLines.filter(l => l.channelItemId).map(l => [l.channelItemId!, l.id]));
+
+          for (const line of matchedLines) {
+            const orderLineId = lineIdMap.get(line.channelItemId) || null;
+            await req.prisma.channelOrderLine.updateMany({
+              where: {
+                channel: previewOrder.channel,
+                channelOrderId: previewOrder.channelOrderId,
+                channelItemId: line.channelItemId,
+              },
+              data: {
+                orderId: order.id,
+                ...(orderLineId ? { orderLineId } : {}),
+              },
+            });
+          }
+
           // Track processing orders for sheet push
           const hasProcessing = matchedLines.some(l => l.fulfillmentStatus?.toLowerCase() === 'processing');
           if (hasProcessing) {
             processingOrders.push({ id: order.id, orderNumber: previewOrder.channelRef });
           }
         } else if (previewOrder.importStatus === 'existing_updated' && previewOrder.existingOrderId) {
+          // Update order-level shipByDate if present
+          const shipByDate = previewOrder.dispatchByDate ? new Date(previewOrder.dispatchByDate) : null;
+          if (shipByDate && !isNaN(shipByDate.getTime())) {
+            await req.prisma.order.update({
+              where: { id: previewOrder.existingOrderId },
+              data: { shipByDate },
+            });
+          }
+
           // Update existing order's lines
           const existingLines = await req.prisma.orderLine.findMany({
             where: { orderId: previewOrder.existingOrderId },
@@ -792,18 +831,38 @@ router.post('/execute-import', authenticateToken, async (req: Request, res: Resp
 
             if (existingLineId) {
               // Update existing line
+              const status = line.fulfillmentStatus?.toLowerCase() || '';
+              const isShipped = status === 'shipped' || status === 'delivered' || status === 'manifested';
+              const isDelivered = status === 'delivered';
               await req.prisma.orderLine.update({
                 where: { id: existingLineId },
                 data: {
                   channelFulfillmentStatus: line.fulfillmentStatus || null,
                   ...(line.courierName ? { courier: line.courierName } : {}),
                   ...(line.awbNumber ? { awbNumber: line.awbNumber } : {}),
+                  ...(isShipped && line.dispatchDate ? { shippedAt: new Date(line.dispatchDate) } : {}),
+                  ...(isDelivered && line.deliveryDate ? { deliveredAt: new Date(line.deliveryDate) } : {}),
+                },
+              });
+
+              // Link ChannelOrderLine to this OrderLine
+              await req.prisma.channelOrderLine.updateMany({
+                where: {
+                  channel: previewOrder.channel,
+                  channelOrderId: previewOrder.channelOrderId,
+                  channelItemId: line.channelItemId,
+                },
+                data: {
+                  orderId: previewOrder.existingOrderId,
+                  orderLineId: existingLineId,
                 },
               });
             } else if (line.skuId) {
               // New line on marketplace — create it
               const status = line.fulfillmentStatus?.toLowerCase() || '';
-              await req.prisma.orderLine.create({
+              const isShipped = status === 'shipped' || status === 'delivered' || status === 'manifested';
+              const isDelivered = status === 'delivered';
+              const newLine = await req.prisma.orderLine.create({
                 data: {
                   orderId: previewOrder.existingOrderId,
                   skuId: line.skuId,
@@ -814,8 +873,21 @@ router.post('/execute-import', authenticateToken, async (req: Request, res: Resp
                   channelItemId: line.channelItemId,
                   courier: line.courierName || null,
                   awbNumber: line.awbNumber || null,
-                  ...(status === 'shipped' || status === 'delivered' ? { shippedAt: new Date() } : {}),
-                  ...(status === 'delivered' ? { deliveredAt: new Date() } : {}),
+                  ...(isShipped ? { shippedAt: line.dispatchDate ? new Date(line.dispatchDate) : new Date() } : {}),
+                  ...(isDelivered ? { deliveredAt: line.deliveryDate ? new Date(line.deliveryDate) : new Date() } : {}),
+                },
+              });
+
+              // Link ChannelOrderLine to new OrderLine
+              await req.prisma.channelOrderLine.updateMany({
+                where: {
+                  channel: previewOrder.channel,
+                  channelOrderId: previewOrder.channelOrderId,
+                  channelItemId: line.channelItemId,
+                },
+                data: {
+                  orderId: previewOrder.existingOrderId,
+                  orderLineId: newLine.id,
                 },
               });
             }
