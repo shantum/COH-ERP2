@@ -21,6 +21,8 @@ import { parse } from 'fast-csv';
 import multer from 'multer';
 import { Readable } from 'stream';
 import { pushERPOrderToSheet } from '../services/sheetOrderPush.js';
+import { readRange } from '../services/googleSheetsClient.js';
+import { ORDERS_MASTERSHEET_ID, MASTERSHEET_TABS } from '../config/sync/sheets.js';
 
 const router: Router = Router();
 
@@ -680,7 +682,7 @@ router.post('/execute-import', authenticateToken, async (req: Request, res: Resp
     let ordersCreated = 0;
     let ordersUpdated = 0;
     const errors: Array<{ order: string; error: string }> = [];
-    const createdOrderIds: string[] = [];
+    const processingOrders: Array<{ id: string; orderNumber: string }> = [];
 
     for (const previewOrder of selectedOrders) {
       try {
@@ -725,7 +727,7 @@ router.post('/execute-import', authenticateToken, async (req: Request, res: Resp
                   const status = line.fulfillmentStatus?.toLowerCase() || '';
                   return {
                     skuId: line.skuId!,
-                    qty: line.qty,
+                    qty: Math.max(line.qty, 1),
                     unitPrice: line.unitPrice,
                     lineStatus: 'pending',
                     channelFulfillmentStatus: line.fulfillmentStatus || null,
@@ -742,10 +744,10 @@ router.post('/execute-import', authenticateToken, async (req: Request, res: Resp
 
           ordersCreated++;
 
-          // Push to sheet if any line is "processing"
+          // Track processing orders for sheet push
           const hasProcessing = matchedLines.some(l => l.fulfillmentStatus?.toLowerCase() === 'processing');
           if (hasProcessing) {
-            createdOrderIds.push(order.id);
+            processingOrders.push({ id: order.id, orderNumber: previewOrder.channelRef });
           }
         } else if (previewOrder.importStatus === 'existing_updated' && previewOrder.existingOrderId) {
           // Update existing order's lines
@@ -827,9 +829,50 @@ router.post('/execute-import', authenticateToken, async (req: Request, res: Resp
       });
     }
 
-    // Push processing orders to Google Sheet (fire-and-forget)
-    for (const orderId of createdOrderIds) {
-      pushERPOrderToSheet(orderId).catch(() => {});
+    // Push processing orders to Google Sheet (skip those already in sheet)
+    let sheetPushed = 0;
+    let sheetSkipped = 0;
+    let sheetError: string | null = null;
+
+    if (processingOrders.length > 0) {
+      try {
+        // Read existing order numbers from Google Sheet column B
+        const sheetRange = `'${MASTERSHEET_TABS.ORDERS_FROM_COH}'!B:B`;
+        const sheetRows = await readRange(ORDERS_MASTERSHEET_ID, sheetRange);
+        const sheetOrderNums = new Set<string>();
+        for (const row of sheetRows) {
+          const val = String(row[0] ?? '').trim();
+          if (val) sheetOrderNums.add(val);
+        }
+
+        // Filter out orders already in sheet (with format matching)
+        const toPush = processingOrders.filter(o => {
+          const ref = o.orderNumber;
+          // Exact match
+          if (sheetOrderNums.has(ref)) return false;
+          // Myntra: sheet may have first 8 chars of UUID
+          if (ref.includes('-') && ref.length > 20) {
+            const short = ref.split('-')[0];
+            if (sheetOrderNums.has(short)) return false;
+          }
+          // Nykaa: sheet may have ref without "--1" suffix
+          if (ref.endsWith('--1')) {
+            const trimmed = ref.slice(0, -3);
+            if (sheetOrderNums.has(trimmed)) return false;
+          }
+          return true;
+        });
+
+        sheetPushed = toPush.length;
+        sheetSkipped = processingOrders.length - toPush.length;
+
+        for (const order of toPush) {
+          pushERPOrderToSheet(order.id).catch(() => {});
+        }
+      } catch {
+        // If sheet read fails, skip pushing — don't risk duplicates
+        sheetError = 'Could not read Google Sheet — sheet push was skipped';
+      }
     }
 
     res.json({
@@ -837,6 +880,9 @@ router.post('/execute-import', authenticateToken, async (req: Request, res: Resp
       batchId: importBatch.id,
       ordersCreated,
       ordersUpdated,
+      sheetPushed,
+      sheetSkipped,
+      ...(sheetError ? { sheetError } : {}),
       errors: errors.slice(0, 20),
     });
   } catch (error) {

@@ -71,6 +71,9 @@ interface PreviewResponse {
 interface ExecuteResult {
   ordersCreated: number;
   ordersUpdated: number;
+  sheetPushed?: number;
+  sheetSkipped?: number;
+  sheetError?: string;
   errors: Array<{ order: string; error: string }>;
 }
 
@@ -681,6 +684,16 @@ export default function ChannelImport() {
                 <p className="text-xl font-semibold text-blue-700">{executeResult.ordersUpdated}</p>
               </div>
             </div>
+            {(executeResult.sheetPushed != null || executeResult.sheetSkipped != null) && (
+              <div className="mt-4 text-sm text-muted-foreground">
+                Google Sheet: {executeResult.sheetPushed ?? 0} pushed, {executeResult.sheetSkipped ?? 0} already there
+              </div>
+            )}
+            {executeResult.sheetError && (
+              <div className="mt-2 p-3 bg-red-50 border border-red-200 rounded-lg">
+                <p className="text-sm font-medium text-red-700">{executeResult.sheetError}</p>
+              </div>
+            )}
             {executeResult.errors.length > 0 && (
               <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
                 <p className="text-sm font-medium text-amber-700">
