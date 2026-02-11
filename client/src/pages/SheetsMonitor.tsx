@@ -50,6 +50,42 @@ interface BalanceVerification {
     }>;
 }
 
+interface InwardPreviewRow {
+    skuCode: string;
+    product: string;
+    qty: number;
+    source: string;
+    date: string;
+    doneBy: string;
+    tailor: string;
+    status: 'ready' | 'invalid' | 'duplicate';
+    error?: string;
+}
+
+interface OutwardPreviewRow {
+    skuCode: string;
+    product: string;
+    qty: number;
+    orderNo: string;
+    orderDate: string;
+    customerName: string;
+    courier: string;
+    awb: string;
+    status: 'ready' | 'invalid' | 'duplicate';
+    error?: string;
+}
+
+interface BalanceSkuSummary {
+    skuCode: string;
+    qty: number;
+    erpBalance: number;
+    afterErpBalance: number;
+    sheetPending: number;
+    afterSheetPending: number;
+    colC: number;
+    inSync: boolean;
+}
+
 interface PreviewResult {
     tab: string;
     totalRows: number;
@@ -60,22 +96,10 @@ interface PreviewResult {
     skipReasons?: Record<string, number>;
     affectedSkuCodes: string[];
     durationMs: number;
+    previewRows?: InwardPreviewRow[] | OutwardPreviewRow[];
     balanceSnapshot?: {
-        skuBalances: Array<{
-            skuCode: string;
-            pendingQty: number;
-            erpBalance: number;
-            afterErpBalance: number;
-            sheetPending: number;
-            afterSheetPending: number;
-            colC: number;
-            match: boolean;
-            colR: number;
-            colD: number;
-            colE: number;
-        }>;
-        timestamp: string;
-        mismatches: number;
+        skuBalances: BalanceSkuSummary[];
+        allInSync: boolean;
     };
 }
 
@@ -190,20 +214,39 @@ function BalanceVerificationBadge({ verification }: { verification?: BalanceVeri
     );
 }
 
-function PreviewResultCard({ title, preview, color, onClose }: {
+function StatusDot({ status }: { status: 'ready' | 'invalid' | 'duplicate' }) {
+    if (status === 'ready') return <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0 inline-block" />;
+    if (status === 'invalid') return <span className="w-2 h-2 rounded-full bg-red-500 shrink-0 inline-block" />;
+    return <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0 inline-block" />;
+}
+
+function PreviewResultCard({ title, preview, type, onClose }: {
     title: string;
     preview: PreviewResult;
-    color: 'emerald' | 'blue';
+    type: 'inward' | 'outward';
     onClose: () => void;
 }) {
-    const borderColor = color === 'emerald' ? 'border-emerald-200' : 'border-blue-200';
-    const bgColor = color === 'emerald' ? 'bg-emerald-50' : 'bg-blue-50';
-    const textColor = color === 'emerald' ? 'text-emerald-700' : 'text-blue-700';
+    const [showBalanceProof, setShowBalanceProof] = useState(false);
+    const isInward = type === 'inward';
+    const borderColor = isInward ? 'border-emerald-200' : 'border-blue-200';
+    const bgColor = isInward ? 'bg-emerald-50' : 'bg-blue-50';
+    const textColor = isInward ? 'text-emerald-700' : 'text-blue-700';
 
     const errors = Object.entries(preview.validationErrors ?? {});
     const skipReasons = Object.entries(preview.skipReasons ?? {});
     const balances = preview.balanceSnapshot?.skuBalances ?? [];
-    const mismatches = preview.balanceSnapshot?.mismatches ?? 0;
+    const allInSync = preview.balanceSnapshot?.allInSync ?? true;
+    const rawRows = preview.previewRows ?? [];
+
+    // Sort: ready first, then invalid, then duplicate
+    const statusOrder = { ready: 0, invalid: 1, duplicate: 2 };
+    const inwardRows = isInward
+        ? ([...rawRows] as InwardPreviewRow[]).sort((a, b) => statusOrder[a.status] - statusOrder[b.status])
+        : [];
+    const outwardRows = !isInward
+        ? ([...rawRows] as OutwardPreviewRow[]).sort((a, b) => statusOrder[a.status] - statusOrder[b.status])
+        : [];
+    const rowCount = isInward ? inwardRows.length : outwardRows.length;
 
     return (
         <div className={`bg-white rounded-lg border ${borderColor} p-4 shadow-sm`}>
@@ -238,9 +281,9 @@ function PreviewResultCard({ title, preview, color, onClose }: {
                 </div>
             </div>
 
-            {/* Sync check — the key question */}
+            {/* Sync check */}
             {balances.length > 0 && (
-                mismatches === 0 ? (
+                allInSync ? (
                     <div className="mb-3 px-3 py-2 bg-emerald-50 border border-emerald-200 rounded flex items-center gap-2">
                         <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
                         <span className="text-xs text-emerald-800">
@@ -252,15 +295,8 @@ function PreviewResultCard({ title, preview, color, onClose }: {
                         <div className="flex items-center gap-2">
                             <AlertCircle size={14} className="text-red-500 shrink-0" />
                             <span className="text-xs font-medium text-red-800">
-                                {mismatches} SKU{mismatches !== 1 ? 's' : ''} out of sync between ERP and Sheet
+                                Some SKUs are out of sync between ERP and Sheet
                             </span>
-                        </div>
-                        <div className="mt-1.5 text-[10px] text-red-600 space-y-0.5">
-                            {balances.filter(b => !b.match).slice(0, 5).map(b => (
-                                <div key={b.skuCode}>
-                                    {b.skuCode}: ERP says {b.erpBalance}, Sheet says {b.colR}
-                                </div>
-                            ))}
                         </div>
                     </div>
                 )
@@ -286,56 +322,103 @@ function PreviewResultCard({ title, preview, color, onClose }: {
                 </div>
             )}
 
-            {/* What changes — shows both sides of the equation so net = 0 */}
-            {balances.length > 0 && (
-                <div>
+            {/* Import data table */}
+            {rowCount > 0 && (
+                <div className="mb-3">
                     <div className="text-xs font-medium text-gray-600 mb-1">
-                        What happens per SKU ({balances.length} affected)
+                        Rows being imported ({rowCount})
                     </div>
-                    <div className="border rounded-lg overflow-hidden max-h-72 overflow-y-auto">
+                    <div className="border rounded-lg overflow-hidden max-h-80 overflow-y-auto">
                         <table className="w-full text-xs">
                             <thead className="bg-gray-50 sticky top-0">
-                                <tr>
-                                    <th className="text-left px-2 py-1.5 font-medium text-gray-600">SKU</th>
-                                    <th className="text-right px-2 py-1.5 font-medium text-gray-600">Qty</th>
-                                    <th className="text-center px-2 py-1.5 font-medium text-gray-600" colSpan={2}>ERP Balance (R)</th>
-                                    <th className="text-center px-2 py-1.5 font-medium text-gray-600 border-l border-gray-200" colSpan={2}>Pending on Sheet</th>
-                                    <th className="text-center px-2 py-1.5 font-medium text-gray-600 border-l border-gray-200">Total (C)</th>
-                                </tr>
+                                {isInward ? (
+                                    <tr>
+                                        <th className="text-left px-2 py-1.5 font-medium text-gray-600 w-6"></th>
+                                        <th className="text-left px-2 py-1.5 font-medium text-gray-600">SKU</th>
+                                        <th className="text-left px-2 py-1.5 font-medium text-gray-600">Product</th>
+                                        <th className="text-right px-2 py-1.5 font-medium text-gray-600">Qty</th>
+                                        <th className="text-left px-2 py-1.5 font-medium text-gray-600">Source</th>
+                                        <th className="text-left px-2 py-1.5 font-medium text-gray-600">Date</th>
+                                        <th className="text-left px-2 py-1.5 font-medium text-gray-600">Done By</th>
+                                    </tr>
+                                ) : (
+                                    <tr>
+                                        <th className="text-left px-2 py-1.5 font-medium text-gray-600 w-6"></th>
+                                        <th className="text-left px-2 py-1.5 font-medium text-gray-600">Order#</th>
+                                        <th className="text-left px-2 py-1.5 font-medium text-gray-600">Date</th>
+                                        <th className="text-left px-2 py-1.5 font-medium text-gray-600">Customer</th>
+                                        <th className="text-left px-2 py-1.5 font-medium text-gray-600">SKU</th>
+                                        <th className="text-left px-2 py-1.5 font-medium text-gray-600">Product</th>
+                                        <th className="text-right px-2 py-1.5 font-medium text-gray-600">Qty</th>
+                                    </tr>
+                                )}
                             </thead>
                             <tbody className="divide-y">
-                                {balances.map((b) => {
-                                    const erpDelta = b.afterErpBalance - b.erpBalance;
-                                    const pendingDelta = b.afterSheetPending - b.sheetPending;
-                                    return (
-                                        <tr key={b.skuCode} className={b.match ? 'hover:bg-gray-50' : 'bg-red-50 hover:bg-red-100'}>
-                                            <td className="px-2 py-1 font-mono text-gray-700">{b.skuCode}</td>
-                                            <td className={`px-2 py-1 text-right font-medium ${textColor}`}>{b.pendingQty}</td>
-                                            <td className="px-2 py-1 text-right text-gray-500">{b.erpBalance}</td>
-                                            <td className="px-2 py-1 text-right">
-                                                <span className="text-gray-400">&#8594;&nbsp;</span>
-                                                <span className="font-medium text-gray-900">{b.afterErpBalance}</span>
-                                                <span className={`ml-1 text-[10px] ${erpDelta > 0 ? 'text-emerald-600' : 'text-blue-600'}`}>
-                                                    ({erpDelta > 0 ? '+' : ''}{erpDelta})
-                                                </span>
+                                {isInward ? (
+                                    inwardRows.map((row, i) => (
+                                        <tr key={i} className={row.status === 'invalid' ? 'bg-red-50' : row.status === 'duplicate' ? 'bg-amber-50/50' : 'hover:bg-gray-50'}>
+                                            <td className="px-2 py-1" title={row.error ?? row.status}>
+                                                <StatusDot status={row.status} />
                                             </td>
-                                            <td className="px-2 py-1 text-right text-gray-500 border-l border-gray-100">{b.sheetPending}</td>
-                                            <td className="px-2 py-1 text-right">
-                                                <span className="text-gray-400">&#8594;&nbsp;</span>
-                                                <span className="font-medium text-gray-900">{b.afterSheetPending}</span>
-                                                <span className={`ml-1 text-[10px] ${pendingDelta > 0 ? 'text-emerald-600' : 'text-blue-600'}`}>
-                                                    ({pendingDelta > 0 ? '+' : ''}{pendingDelta})
-                                                </span>
-                                            </td>
-                                            <td className="px-2 py-1 text-center font-medium border-l border-gray-100 text-gray-900">
-                                                {b.colC} <span className="text-emerald-600 text-[10px]">(no change)</span>
-                                            </td>
+                                            <td className="px-2 py-1 font-mono text-gray-700">{row.skuCode}</td>
+                                            <td className="px-2 py-1 text-gray-600 truncate max-w-[140px]" title={row.product}>{row.product}</td>
+                                            <td className={`px-2 py-1 text-right font-medium ${textColor}`}>{row.qty}</td>
+                                            <td className="px-2 py-1 text-gray-600">{row.source}</td>
+                                            <td className="px-2 py-1 text-gray-500">{row.date}</td>
+                                            <td className="px-2 py-1 text-gray-500">{row.doneBy}</td>
                                         </tr>
-                                    );
-                                })}
+                                    ))
+                                ) : (
+                                    outwardRows.map((row, i) => (
+                                        <tr key={i} className={row.status === 'invalid' ? 'bg-red-50' : row.status === 'duplicate' ? 'bg-amber-50/50' : 'hover:bg-gray-50'}>
+                                            <td className="px-2 py-1" title={row.error ?? row.status}>
+                                                <StatusDot status={row.status} />
+                                            </td>
+                                            <td className="px-2 py-1 font-mono text-gray-700">{row.orderNo}</td>
+                                            <td className="px-2 py-1 text-gray-500">{row.orderDate}</td>
+                                            <td className="px-2 py-1 text-gray-600 truncate max-w-[100px]" title={row.customerName}>{row.customerName}</td>
+                                            <td className="px-2 py-1 font-mono text-gray-700">{row.skuCode}</td>
+                                            <td className="px-2 py-1 text-gray-600 truncate max-w-[140px]" title={row.product}>{row.product}</td>
+                                            <td className={`px-2 py-1 text-right font-medium ${textColor}`}>{row.qty}</td>
+                                        </tr>
+                                    ))
+                                )}
                             </tbody>
                         </table>
                     </div>
+                </div>
+            )}
+
+            {/* Balance proof — collapsible */}
+            {balances.length > 0 && (
+                <div>
+                    <button
+                        onClick={() => setShowBalanceProof(!showBalanceProof)}
+                        className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700"
+                    >
+                        {showBalanceProof ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                        Balance proof ({balances.length} SKUs)
+                    </button>
+                    {showBalanceProof && (
+                        <div className="mt-1.5 space-y-0.5 text-xs text-gray-600 pl-5">
+                            {balances.map(b => {
+                                const erpDelta = b.afterErpBalance - b.erpBalance;
+                                return (
+                                    <div key={b.skuCode} className={!b.inSync ? 'text-red-600' : ''}>
+                                        <span className="font-mono">{b.skuCode}</span>
+                                        <span className="text-gray-400"> (qty {b.qty}): </span>
+                                        ERP {b.erpBalance} → {b.afterErpBalance}
+                                        <span className={erpDelta > 0 ? 'text-emerald-600' : 'text-blue-600'}>
+                                            {' '}({erpDelta > 0 ? '+' : ''}{erpDelta})
+                                        </span>
+                                        , pending {b.sheetPending} → {b.afterSheetPending}
+                                        , total {b.colC}
+                                        <span className="text-emerald-600"> (no change)</span>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
                 </div>
             )}
         </div>
@@ -644,7 +727,7 @@ export default function SheetsMonitor() {
                 <PreviewResultCard
                     title="Inward Preview"
                     preview={previewInwardResult}
-                    color="emerald"
+                    type="inward"
                     onClose={() => setPreviewInwardResult(null)}
                 />
             )}
@@ -652,7 +735,7 @@ export default function SheetsMonitor() {
                 <PreviewResultCard
                     title="Outward Preview"
                     preview={previewOutwardResult}
-                    color="blue"
+                    type="outward"
                     onClose={() => setPreviewOutwardResult(null)}
                 />
             )}

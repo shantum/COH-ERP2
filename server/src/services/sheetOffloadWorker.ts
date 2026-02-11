@@ -135,6 +135,31 @@ interface MoveShippedResult {
     durationMs: number;
 }
 
+interface InwardPreviewRow {
+    skuCode: string;
+    product: string;
+    qty: number;
+    source: string;
+    date: string;
+    doneBy: string;
+    tailor: string;
+    status: 'ready' | 'invalid' | 'duplicate';
+    error?: string;
+}
+
+interface OutwardPreviewRow {
+    skuCode: string;
+    product: string;
+    qty: number;
+    orderNo: string;
+    orderDate: string;
+    customerName: string;
+    courier: string;
+    awb: string;
+    status: 'ready' | 'invalid' | 'duplicate';
+    error?: string;
+}
+
 interface IngestPreviewResult {
     tab: string;
     totalRows: number;
@@ -145,22 +170,19 @@ interface IngestPreviewResult {
     skipReasons?: Record<string, number>;
     affectedSkuCodes: string[];
     durationMs: number;
+    previewRows?: InwardPreviewRow[] | OutwardPreviewRow[];
     balanceSnapshot?: {
         skuBalances: Array<{
             skuCode: string;
-            pendingQty: number;           // qty being ingested
-            erpBalance: number;           // ERP balance now
-            afterErpBalance: number;      // ERP balance after ingestion
-            sheetPending: number;         // net pending on sheet now (C - R)
-            afterSheetPending: number;    // net pending on sheet after
-            colC: number;                 // sheet total balance (C) — should NOT change
-            match: boolean;               // erpBalance === colR (pre-check)
-            colR: number;                 // raw sheet col R (for details)
-            colD: number;                 // raw sheet col D (for details)
-            colE: number;                 // raw sheet col E (for details)
+            qty: number;
+            erpBalance: number;
+            afterErpBalance: number;
+            sheetPending: number;
+            afterSheetPending: number;
+            colC: number;
+            inSync: boolean;
         }>;
-        timestamp: string;
-        mismatches: number;
+        allInSync: boolean;
     };
 }
 
@@ -1665,6 +1687,7 @@ async function previewIngestInward(): Promise<IngestPreviewResult | null> {
         const skuMap = await bulkLookupSkus(parsed.map(r => r.skuCode));
         const validRows: ParsedRow[] = [];
         const validationErrors: Record<string, number> = {};
+        const rowErrors = new Map<string, string>(); // referenceId → error text
 
         for (const p of parsed) {
             const reasons = validateInwardRow(p, rows[p.rowIndex], skuMap);
@@ -1674,6 +1697,7 @@ async function previewIngestInward(): Promise<IngestPreviewResult | null> {
                 for (const reason of reasons) {
                     validationErrors[reason] = (validationErrors[reason] ?? 0) + 1;
                 }
+                rowErrors.set(p.referenceId, reasons.join('; '));
             }
         }
 
@@ -1698,6 +1722,24 @@ async function previewIngestInward(): Promise<IngestPreviewResult | null> {
 
         const affectedSkuCodes = [...new Set(newRows.map(r => r.skuCode))];
 
+        // Build preview rows — actual import data from the sheet
+        const previewRows: InwardPreviewRow[] = parsed.map(p => {
+            const row = rows[p.rowIndex];
+            const errorText = rowErrors.get(p.referenceId);
+            const isDupe = existingRefs.has(p.referenceId);
+            return {
+                skuCode: p.skuCode,
+                product: String(row[INWARD_LIVE_COLS.PRODUCT] ?? '').trim(),
+                qty: p.qty,
+                source: p.source,
+                date: String(row[INWARD_LIVE_COLS.DATE] ?? '').trim(),
+                doneBy: p.extra,
+                tailor: p.tailor,
+                status: errorText ? 'invalid' as const : isDupe ? 'duplicate' as const : 'ready' as const,
+                ...(errorText ? { error: errorText } : {}),
+            };
+        });
+
         // Balance snapshot for affected SKUs (non-fatal)
         let balanceSnapshot: IngestPreviewResult['balanceSnapshot'];
         try {
@@ -1713,32 +1755,28 @@ async function previewIngestInward(): Promise<IngestPreviewResult | null> {
             for (const row of newRows) {
                 pendingByCode.set(row.skuCode, (pendingByCode.get(row.skuCode) ?? 0) + row.qty);
             }
-            let mismatches = 0;
+            let allInSync = true;
             const skuBalances = affectedSkuCodes.map(code => {
                 const bal = snapshot.balances.get(code);
                 const erpBalance = erpByCode.get(code) ?? 0;
                 const colR = bal?.r ?? 0;
                 const colC = bal?.c ?? 0;
                 const pending = pendingByCode.get(code) ?? 0;
-                const match = Math.abs(erpBalance - colR) < 0.01;
-                if (!match) mismatches++;
-                // Inward: ERP goes UP, pending on sheet goes DOWN, total (C) unchanged
+                const inSync = Math.abs(erpBalance - colR) < 0.01;
+                if (!inSync) allInSync = false;
                 const sheetPending = colC - colR;
                 return {
                     skuCode: code,
-                    pendingQty: pending,
+                    qty: pending,
                     erpBalance,
                     afterErpBalance: erpBalance + pending,
                     sheetPending,
                     afterSheetPending: sheetPending - pending,
                     colC,
-                    match,
-                    colR,
-                    colD: bal?.d ?? 0,
-                    colE: bal?.e ?? 0,
+                    inSync,
                 };
             });
-            balanceSnapshot = { skuBalances, timestamp: snapshot.timestamp, mismatches };
+            balanceSnapshot = { skuBalances, allInSync };
         } catch (snapErr: unknown) {
             sheetsLogger.warn({ error: snapErr instanceof Error ? snapErr.message : String(snapErr) }, 'Preview balance snapshot failed (non-fatal)');
         }
@@ -1757,6 +1795,7 @@ async function previewIngestInward(): Promise<IngestPreviewResult | null> {
             validationErrors,
             affectedSkuCodes,
             durationMs: Date.now() - startTime,
+            previewRows,
             balanceSnapshot,
         };
     } catch (error: unknown) {
@@ -1961,6 +2000,7 @@ async function previewIngestOutward(): Promise<IngestPreviewResult | null> {
 
         // Write status column: "ok" for valid, "ok (already in ERP)" for dupes, error text for invalid
         const validRefIds = new Set(validRows.map(r => r.referenceId));
+        const rowErrors = new Map<string, string>(); // referenceId → error text
         const outwardImportErrors: Array<{ rowIndex: number; error: string }> = [];
         for (const row of parsed) {
             if (existingRefs.has(row.referenceId)) {
@@ -1980,11 +2020,31 @@ async function previewIngestOutward(): Promise<IngestPreviewResult | null> {
                     else if (!order.orderLines.some(l => l.skuId === skuInfo.id)) reason = 'order_line_not_found';
                 }
                 outwardImportErrors.push({ rowIndex: row.rowIndex, error: reason });
+                rowErrors.set(row.referenceId, reason);
             }
         }
         await writeImportErrors(ORDERS_MASTERSHEET_ID, tab, outwardImportErrors, 'AG');
 
         const affectedSkuCodes = [...new Set(validRows.map(r => r.skuCode))];
+
+        // Build preview rows — actual import data from the sheet
+        const previewRows: OutwardPreviewRow[] = parsed.map(p => {
+            const row = rows[p.rowIndex];
+            const isDupe = existingRefs.has(p.referenceId);
+            const errorText = rowErrors.get(p.referenceId);
+            return {
+                skuCode: p.skuCode,
+                product: String(row[OUTWARD_LIVE_COLS.PRODUCT] ?? '').trim(),
+                qty: p.qty,
+                orderNo: p.extra,
+                orderDate: String(row[OUTWARD_LIVE_COLS.ORDER_DATE] ?? '').trim(),
+                customerName: String(row[OUTWARD_LIVE_COLS.NAME] ?? '').trim(),
+                courier: p.courier,
+                awb: p.awb,
+                status: isDupe ? 'duplicate' as const : errorText ? 'invalid' as const : 'ready' as const,
+                ...(errorText ? { error: errorText } : {}),
+            };
+        });
 
         // Balance snapshot for affected SKUs (non-fatal)
         let balanceSnapshot: IngestPreviewResult['balanceSnapshot'];
@@ -2001,32 +2061,28 @@ async function previewIngestOutward(): Promise<IngestPreviewResult | null> {
             for (const row of validRows) {
                 pendingByCode.set(row.skuCode, (pendingByCode.get(row.skuCode) ?? 0) + row.qty);
             }
-            let mismatches = 0;
+            let allInSync = true;
             const skuBalances = affectedSkuCodes.map(code => {
                 const bal = snapshot.balances.get(code);
                 const erpBalance = erpByCode.get(code) ?? 0;
                 const colR = bal?.r ?? 0;
                 const colC = bal?.c ?? 0;
                 const pending = pendingByCode.get(code) ?? 0;
-                const match = Math.abs(erpBalance - colR) < 0.01;
-                if (!match) mismatches++;
-                // Outward: ERP goes DOWN, pending on sheet goes UP (removing outward = less negative), total (C) unchanged
+                const inSync = Math.abs(erpBalance - colR) < 0.01;
+                if (!inSync) allInSync = false;
                 const sheetPending = colC - colR;
                 return {
                     skuCode: code,
-                    pendingQty: pending,
+                    qty: pending,
                     erpBalance,
                     afterErpBalance: erpBalance - pending,
                     sheetPending,
                     afterSheetPending: sheetPending + pending,
                     colC,
-                    match,
-                    colR,
-                    colD: bal?.d ?? 0,
-                    colE: bal?.e ?? 0,
+                    inSync,
                 };
             });
-            balanceSnapshot = { skuBalances, timestamp: snapshot.timestamp, mismatches };
+            balanceSnapshot = { skuBalances, allInSync };
         } catch (snapErr: unknown) {
             sheetsLogger.warn({ error: snapErr instanceof Error ? snapErr.message : String(snapErr) }, 'Preview balance snapshot failed (non-fatal)');
         }
@@ -2046,6 +2102,7 @@ async function previewIngestOutward(): Promise<IngestPreviewResult | null> {
             skipReasons,
             affectedSkuCodes,
             durationMs: Date.now() - startTime,
+            previewRows,
             balanceSnapshot,
         };
     } catch (error: unknown) {
@@ -2871,4 +2928,4 @@ export default {
     previewPushBalances,
 };
 
-export type { IngestInwardResult, IngestOutwardResult, IngestPreviewResult, MoveShippedResult, CleanupDoneResult, MigrateFormulasResult, PushBalancesResult, PushBalancesPreviewResult, OffloadStatus, RunSummary, BalanceVerificationResult, BalanceSnapshot };
+export type { IngestInwardResult, IngestOutwardResult, IngestPreviewResult, MoveShippedResult, CleanupDoneResult, MigrateFormulasResult, PushBalancesResult, PushBalancesPreviewResult, OffloadStatus, RunSummary, BalanceVerificationResult, BalanceSnapshot, InwardPreviewRow, OutwardPreviewRow };
