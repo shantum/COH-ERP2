@@ -507,11 +507,26 @@ router.post('/preview-import', authenticateToken, upload.single('file'), async (
       }
     }
 
-    // Collect all channelRefs for batch lookup of existing orders
+    // Collect all channelRefs + alternate formats for batch lookup of existing orders
+    // Myntra: CSV has full UUID "abc12345-xxxx-...", old imports stored first 8 chars "abc12345"
+    // Nykaa: CSV has "NYK-xxx-xxx-x-x--1", old imports stored "NYK-xxx-xxx-x-x"
     const allChannelRefs = new Set<string>();
+    const alternateRefs = new Map<string, string>(); // alternate → full CSV ref
     for (const group of orderGroups.values()) {
       const ref = group[0]['Channel Ref']?.trim();
-      if (ref) allChannelRefs.add(ref);
+      if (!ref) continue;
+      allChannelRefs.add(ref);
+      const channel = normalizeChannel(group[0]['Channel Name']);
+      if (channel === 'myntra' && ref.includes('-')) {
+        const short = ref.split('-')[0];
+        allChannelRefs.add(short);
+        alternateRefs.set(short, ref);
+      }
+      if (channel === 'nykaa' && ref.endsWith('--1')) {
+        const trimmed = ref.slice(0, -3); // strip "--1"
+        allChannelRefs.add(trimmed);
+        alternateRefs.set(trimmed, ref);
+      }
     }
 
     const existingOrders = allChannelRefs.size > 0
@@ -520,7 +535,13 @@ router.post('/preview-import', authenticateToken, upload.single('file'), async (
           include: { orderLines: { select: { id: true, channelItemId: true, channelFulfillmentStatus: true } } },
         })
       : [];
-    const existingOrderMap = new Map(existingOrders.map(o => [o.orderNumber, o]));
+    // Map by both exact orderNumber AND resolve alternates back to full CSV ref
+    const existingOrderMap = new Map<string, typeof existingOrders[0]>();
+    for (const o of existingOrders) {
+      existingOrderMap.set(o.orderNumber, o);
+      const fullRef = alternateRefs.get(o.orderNumber);
+      if (fullRef) existingOrderMap.set(fullRef, o);
+    }
 
     // Build preview orders
     const previewOrders: PreviewOrder[] = [];
