@@ -7,7 +7,8 @@
  */
 
 import { useState, useCallback } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation } from '@tanstack/react-query';
+import { useServerFn } from '@tanstack/react-start';
 import { Route } from '../routes/_authenticated/return-prime';
 import { useNavigate } from '@tanstack/react-router';
 import {
@@ -16,6 +17,7 @@ import {
     Filter,
     RefreshCw,
     AlertCircle,
+    Download,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -27,7 +29,8 @@ import {
     SelectValue,
 } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { getReturnPrimeDashboard } from '../server/functions/returnPrime';
+import { toast } from 'sonner';
+import { getReturnPrimeDashboard, triggerReturnPrimeSync } from '../server/functions/returnPrime';
 import { returnPrimeQueryKeys } from '../constants/queryKeys';
 import {
     ReturnPrimeStatsCards,
@@ -116,6 +119,21 @@ export default function ReturnPrimePage() {
         retry: 2,
     });
 
+    // Sync mutation
+    const triggerSyncFn = useServerFn(triggerReturnPrimeSync);
+    const syncMutation = useMutation({
+        mutationFn: () => triggerSyncFn(),
+        onSuccess: (res) => {
+            if (res.success) {
+                toast.success(res.message);
+                refetch();
+            } else {
+                toast.error(res.message);
+            }
+        },
+        onError: () => toast.error('Sync failed'),
+    });
+
     // Handlers
     const handleSearch = useCallback(() => {
         navigate({
@@ -184,15 +202,26 @@ export default function ReturnPrimePage() {
                         Customer returns and exchanges from Return Prime
                     </p>
                 </div>
-                <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => refetch()}
-                    disabled={isLoading}
-                >
-                    <RefreshCw className={`w-4 h-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
-                    Refresh
-                </Button>
+                <div className="flex gap-2">
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => syncMutation.mutate()}
+                        disabled={syncMutation.isPending}
+                    >
+                        <Download className={`w-4 h-4 mr-2 ${syncMutation.isPending ? 'animate-pulse' : ''}`} />
+                        {syncMutation.isPending ? 'Syncing...' : 'Sync from Return Prime'}
+                    </Button>
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => refetch()}
+                        disabled={isLoading}
+                    >
+                        <RefreshCw className={`w-4 h-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
+                        Refresh
+                    </Button>
+                </div>
             </div>
 
             {/* Stats Cards */}

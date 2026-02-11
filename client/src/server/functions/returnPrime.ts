@@ -11,6 +11,7 @@
  */
 
 import { createServerFn } from '@tanstack/react-start';
+import { getCookie } from '@tanstack/react-start/server';
 import { z } from 'zod';
 import type { Prisma } from '@prisma/client';
 import { getPrisma } from '@coh/shared/services/db';
@@ -353,3 +354,43 @@ export const getReturnPrimeSyncStatus = createServerFn({ method: 'POST' }).handl
         throw error;
     }
 });
+
+/**
+ * Trigger a manual Return Prime inbound sync via the Express admin route.
+ */
+export const triggerReturnPrimeSync = createServerFn({ method: 'POST' }).handler(
+    async (): Promise<{ success: boolean; message: string }> => {
+        const port = process.env.PORT || '3001';
+        const apiUrl =
+            process.env.NODE_ENV === 'production'
+                ? `http://127.0.0.1:${port}`
+                : 'http://localhost:3001';
+
+        const authToken = getCookie('auth_token');
+
+        try {
+            const response = await fetch(`${apiUrl}/api/returnprime/admin/sync`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(authToken ? { Cookie: `auth_token=${authToken}` } : {}),
+                },
+                body: JSON.stringify({}),
+            });
+
+            if (!response.ok) {
+                const text = await response.text();
+                return { success: false, message: `Sync failed: ${text}` };
+            }
+
+            const data = await response.json();
+            return {
+                success: true,
+                message: `Synced ${data.result?.created ?? 0} new, ${data.result?.updated ?? 0} updated`,
+            };
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : 'Unknown error';
+            return { success: false, message };
+        }
+    }
+);
