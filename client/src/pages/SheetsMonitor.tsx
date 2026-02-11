@@ -70,6 +70,8 @@ interface PreviewResult {
             colE: number;
             pendingQty: number;
             match: boolean;
+            afterErpBalance: number;
+            afterColC: number;
         }>;
         timestamp: string;
         mismatches: number;
@@ -274,38 +276,53 @@ function PreviewResultCard({ title, preview, color, onClose }: {
                             </span>
                         )}
                     </div>
-                    <div className="border rounded-lg overflow-hidden max-h-72 overflow-y-auto">
+                    <div className="border rounded-lg overflow-hidden max-h-80 overflow-y-auto">
                         <table className="w-full text-xs">
                             <thead className="bg-gray-50 sticky top-0">
                                 <tr>
-                                    <th className="text-left px-2 py-1.5 font-medium text-gray-600">SKU</th>
-                                    <th className="text-right px-2 py-1.5 font-medium text-gray-600">ERP Bal</th>
-                                    <th className="text-right px-2 py-1.5 font-medium text-gray-600">Sheet R</th>
-                                    <th className="text-center px-2 py-1.5 font-medium text-gray-600">Match</th>
-                                    <th className="text-right px-2 py-1.5 font-medium text-gray-600">Col C</th>
-                                    <th className="text-right px-2 py-1.5 font-medium text-gray-600">Alloc (D)</th>
-                                    <th className="text-right px-2 py-1.5 font-medium text-gray-600">Avail (E)</th>
-                                    <th className="text-right px-2 py-1.5 font-medium text-gray-600">Pending</th>
+                                    <th className="text-left px-2 py-1.5 font-medium text-gray-600" rowSpan={2}>SKU</th>
+                                    <th className="text-center px-2 py-1 font-medium text-gray-500 border-b border-gray-200" colSpan={4}>Current</th>
+                                    <th className="text-center px-2 py-1 font-medium text-gray-400 border-b border-l border-gray-200" colSpan={1}>Pending</th>
+                                    <th className="text-center px-2 py-1 font-medium text-indigo-600 border-b border-l border-gray-200" colSpan={3}>After Ingestion</th>
+                                </tr>
+                                <tr>
+                                    <th className="text-right px-2 py-1 font-medium text-gray-600">ERP</th>
+                                    <th className="text-right px-2 py-1 font-medium text-gray-600">Sheet R</th>
+                                    <th className="text-center px-2 py-1 font-medium text-gray-600">Sync</th>
+                                    <th className="text-right px-2 py-1 font-medium text-gray-600">Col C</th>
+                                    <th className="text-right px-2 py-1 font-medium text-gray-400 border-l border-gray-200">Qty</th>
+                                    <th className="text-right px-2 py-1 font-medium text-indigo-600 border-l border-gray-200">ERP</th>
+                                    <th className="text-right px-2 py-1 font-medium text-indigo-600">Col C</th>
+                                    <th className="text-center px-2 py-1 font-medium text-indigo-600">C Delta</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y">
-                                {balances.map((b) => (
-                                    <tr key={b.skuCode} className={b.match ? 'hover:bg-gray-50' : 'bg-red-50 hover:bg-red-100'}>
-                                        <td className="px-2 py-1 font-mono text-gray-700">{b.skuCode}</td>
-                                        <td className="px-2 py-1 text-right font-medium text-gray-900">{b.erpBalance}</td>
-                                        <td className={`px-2 py-1 text-right font-medium ${b.match ? 'text-gray-900' : 'text-red-600'}`}>{b.colR}</td>
-                                        <td className="px-2 py-1 text-center">
-                                            {b.match
-                                                ? <span className="text-emerald-600">&#10003;</span>
-                                                : <span className="text-red-600 font-bold">&#10007;</span>
-                                            }
-                                        </td>
-                                        <td className="px-2 py-1 text-right text-gray-700">{b.colC}</td>
-                                        <td className="px-2 py-1 text-right text-gray-500">{b.colD}</td>
-                                        <td className="px-2 py-1 text-right text-gray-700">{b.colE}</td>
-                                        <td className={`px-2 py-1 text-right font-medium ${textColor}`}>{b.pendingQty}</td>
-                                    </tr>
-                                ))}
+                                {balances.map((b) => {
+                                    const cDelta = Math.round((b.afterColC - b.colC) * 100) / 100;
+                                    return (
+                                        <tr key={b.skuCode} className={b.match ? 'hover:bg-gray-50' : 'bg-red-50 hover:bg-red-100'}>
+                                            <td className="px-2 py-1 font-mono text-gray-700">{b.skuCode}</td>
+                                            <td className="px-2 py-1 text-right font-medium text-gray-900">{b.erpBalance}</td>
+                                            <td className={`px-2 py-1 text-right font-medium ${b.match ? 'text-gray-900' : 'text-red-600'}`}>{b.colR}</td>
+                                            <td className="px-2 py-1 text-center">
+                                                {b.match
+                                                    ? <span className="text-emerald-600">&#10003;</span>
+                                                    : <span className="text-red-600 font-bold">&#10007;</span>
+                                                }
+                                            </td>
+                                            <td className="px-2 py-1 text-right text-gray-700">{b.colC}</td>
+                                            <td className={`px-2 py-1 text-right font-medium border-l border-gray-100 ${textColor}`}>{b.pendingQty}</td>
+                                            <td className="px-2 py-1 text-right font-medium text-indigo-700 border-l border-gray-100">{b.afterErpBalance}</td>
+                                            <td className="px-2 py-1 text-right font-medium text-indigo-700">{b.afterColC}</td>
+                                            <td className="px-2 py-1 text-center">
+                                                {cDelta === 0
+                                                    ? <span className="text-emerald-600 font-medium">0</span>
+                                                    : <span className="text-red-600 font-bold">{cDelta > 0 ? '+' : ''}{cDelta}</span>
+                                                }
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
                             </tbody>
                         </table>
                     </div>

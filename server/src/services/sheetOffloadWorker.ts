@@ -148,16 +148,18 @@ interface IngestPreviewResult {
     balanceSnapshot?: {
         skuBalances: Array<{
             skuCode: string;
-            erpBalance: number;   // DB currentBalance
-            colR: number;         // sheet col R (what we last wrote)
-            colC: number;         // sheet col C (formula: R + pending in - pending out)
-            colD: number;         // sheet col D (allocated)
-            colE: number;         // sheet col E (available = C - D)
-            pendingQty: number;   // qty about to be ingested
-            match: boolean;       // erpBalance === colR
+            erpBalance: number;       // DB currentBalance (now)
+            colR: number;             // sheet col R (what we last wrote)
+            colC: number;             // sheet col C (formula: R + pending in - pending out)
+            colD: number;             // sheet col D (allocated)
+            colE: number;             // sheet col E (available = C - D)
+            pendingQty: number;       // qty about to be ingested
+            match: boolean;           // erpBalance === colR
+            afterErpBalance: number;  // simulated: erpBalance ± pendingQty
+            afterColC: number;        // simulated: should equal colC (net zero)
         }>;
         timestamp: string;
-        mismatches: number;       // count of SKUs where erpBalance !== colR
+        mismatches: number;           // count of SKUs where erpBalance !== colR
     };
 }
 
@@ -1715,17 +1717,24 @@ async function previewIngestInward(): Promise<IngestPreviewResult | null> {
                 const bal = snapshot.balances.get(code);
                 const erpBalance = erpByCode.get(code) ?? 0;
                 const colR = bal?.r ?? 0;
+                const colC = bal?.c ?? 0;
+                const pending = pendingByCode.get(code) ?? 0;
                 const match = Math.abs(erpBalance - colR) < 0.01;
                 if (!match) mismatches++;
+                // Inward: ERP goes UP by pending, col C stays same (pending drops, R rises = net zero)
+                const afterErpBalance = erpBalance + pending;
+                const afterColC = colC; // formula recalc: (R+pending) + (pendingInward-pending) - pendingOutward = same
                 return {
                     skuCode: code,
                     erpBalance,
                     colR,
-                    colC: bal?.c ?? 0,
+                    colC,
                     colD: bal?.d ?? 0,
                     colE: bal?.e ?? 0,
-                    pendingQty: pendingByCode.get(code) ?? 0,
+                    pendingQty: pending,
                     match,
+                    afterErpBalance,
+                    afterColC,
                 };
             });
             balanceSnapshot = { skuBalances, timestamp: snapshot.timestamp, mismatches };
@@ -1996,17 +2005,24 @@ async function previewIngestOutward(): Promise<IngestPreviewResult | null> {
                 const bal = snapshot.balances.get(code);
                 const erpBalance = erpByCode.get(code) ?? 0;
                 const colR = bal?.r ?? 0;
+                const colC = bal?.c ?? 0;
+                const pending = pendingByCode.get(code) ?? 0;
                 const match = Math.abs(erpBalance - colR) < 0.01;
                 if (!match) mismatches++;
+                // Outward: ERP goes DOWN by pending, col C stays same (pending drops, R drops = net zero)
+                const afterErpBalance = erpBalance - pending;
+                const afterColC = colC;
                 return {
                     skuCode: code,
                     erpBalance,
                     colR,
-                    colC: bal?.c ?? 0,
+                    colC,
                     colD: bal?.d ?? 0,
                     colE: bal?.e ?? 0,
-                    pendingQty: pendingByCode.get(code) ?? 0,
+                    pendingQty: pending,
                     match,
+                    afterErpBalance,
+                    afterColC,
                 };
             });
             balanceSnapshot = { skuBalances, timestamp: snapshot.timestamp, mismatches };
