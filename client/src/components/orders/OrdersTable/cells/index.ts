@@ -33,6 +33,8 @@ export { NotesCell } from './NotesCell';
 
 // New monitoring cells
 export { UnitPriceCell } from './UnitPriceCell';
+export { MrpCell } from './MrpCell';
+export { DiscountCell } from './DiscountCell';
 export { CostCell } from './CostCell';
 export { MarginCell } from './MarginCell';
 export { FabricColourCell } from './FabricColourCell';

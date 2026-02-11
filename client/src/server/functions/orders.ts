@@ -94,6 +94,8 @@ export interface FlattenedOrderRow {
     lineStatus: string | null;
     lineNotes: string;
     unitPrice: number;
+    mrp: number;
+    discountPercent: number;
     bomCost: number;
     margin: number;
     fabricColourName: string | null;
@@ -191,6 +193,7 @@ interface PrismaOrderLine {
         id: string;
         skuCode: string;
         size: string;
+        mrp: number;
         isCustomSku: boolean;
         customizationType: string | null;
         customizationValue: string | null;
@@ -504,6 +507,8 @@ function flattenOrdersToRows(orders: PrismaOrder[]): FlattenedOrderRow[] {
                 lineStatus: null,
                 lineNotes: '',
                 unitPrice: 0,
+                mrp: 0,
+                discountPercent: 0,
                 bomCost: 0,
                 margin: 0,
                 fabricColourName: null,
@@ -591,6 +596,13 @@ function flattenOrdersToRows(orders: PrismaOrder[]): FlattenedOrderRow[] {
                 lineStatus: line.lineStatus,
                 lineNotes: line.notes || '',
                 unitPrice: line.unitPrice,
+                mrp: line.sku.mrp || 0,
+                discountPercent: (() => {
+                    const mrp = line.sku.mrp || 0;
+                    const price = line.unitPrice || 0;
+                    if (mrp <= 0 || price >= mrp) return 0;
+                    return Math.round(((mrp - price) / mrp) * 100);
+                })(),
                 bomCost: line.sku.bomCost ?? 0,
                 margin: line.unitPrice > 0 && line.sku.bomCost
                     ? Math.round(((line.unitPrice - line.sku.bomCost) / line.unitPrice) * 100)

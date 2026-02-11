@@ -232,6 +232,8 @@ export interface FlattenedOrderRow {
     lineStatus: string | null;
     lineNotes: string;
     unitPrice?: number;
+    mrp?: number;
+    discountPercent?: number;
     bomCost?: number;
     margin?: number;
     fabricColourName?: string | null;

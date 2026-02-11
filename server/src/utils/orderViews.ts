@@ -540,6 +540,7 @@ export const ORDER_UNIFIED_SELECT = {
                     id: true,
                     skuCode: true,
                     size: true,
+                    mrp: true,
                     isCustomSku: true,
                     customizationType: true,
                     customizationValue: true,
@@ -660,6 +661,8 @@ export interface FlattenedOrderRow {
     lineStatus: string | null;
     lineNotes: string;
     unitPrice: number;
+    mrp: number;
+    discountPercent: number;
     bomCost: number;
     margin: number;
     fabricColourName: string | null;
@@ -775,6 +778,7 @@ export function flattenOrdersToRows(orders: EnrichedOrder[]): FlattenedOrderRow[
                 id: string;
                 skuCode: string;
                 size: string;
+                mrp: number;
                 isCustomSku: boolean;
                 customizationType: string | null;
                 customizationValue: string | null;
@@ -871,6 +875,8 @@ export function flattenOrdersToRows(orders: EnrichedOrder[]): FlattenedOrderRow[
                 lineStatus: null,
                 lineNotes: '',
                 unitPrice: 0,
+                mrp: 0,
+                discountPercent: 0,
                 bomCost: 0,
                 margin: 0,
                 fabricColourName: null,
@@ -973,6 +979,13 @@ export function flattenOrdersToRows(orders: EnrichedOrder[]): FlattenedOrderRow[
                 lineStatus: line.lineStatus,
                 lineNotes: line.notes || '',
                 unitPrice: line.unitPrice || 0,
+                mrp: sku?.mrp || 0,
+                discountPercent: (() => {
+                    const mrp = sku?.mrp || 0;
+                    const price = line.unitPrice || 0;
+                    if (mrp <= 0 || price >= mrp) return 0;
+                    return Math.round(((mrp - price) / mrp) * 100);
+                })(),
                 bomCost: 0, // Filled client-side
                 margin: 0, // Filled client-side
                 fabricColourName: null, // Filled client-side
@@ -1051,6 +1064,7 @@ export const LINE_SSE_SELECT = {
             id: true,
             skuCode: true,
             size: true,
+            mrp: true,
             isCustomSku: true,
             customizationType: true,
             customizationValue: true,
@@ -1166,6 +1180,7 @@ interface LineSsePayload {
         id: string;
         skuCode: string;
         size: string;
+        mrp: number;
         isCustomSku: boolean;
         customizationType: string | null;
         customizationValue: string | null;
@@ -1297,6 +1312,13 @@ export function flattenLineForSSE(
         lineStatus: line.lineStatus,
         qty: line.qty,
         unitPrice: line.unitPrice || 0,
+        mrp: sku?.mrp || 0,
+        discountPercent: (() => {
+            const mrpVal = sku?.mrp || 0;
+            const priceVal = line.unitPrice || 0;
+            if (mrpVal <= 0 || priceVal >= mrpVal) return 0;
+            return Math.round(((mrpVal - priceVal) / mrpVal) * 100);
+        })(),
         lineNotes: line.notes || '',
         productName,
         colorName,

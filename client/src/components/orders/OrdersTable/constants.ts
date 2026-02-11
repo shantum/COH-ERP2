@@ -5,7 +5,7 @@
 // All column IDs in display order
 export const ALL_COLUMN_IDS = [
     'orderInfo', 'channel', 'customerInfo', 'paymentInfo',
-    'productName', 'qty', 'unitPrice', 'cost', 'margin', 'fabricColour', 'fabricBalance',
+    'productName', 'qty', 'unitPrice', 'mrp', 'discount', 'cost', 'margin', 'fabricColour', 'fabricBalance',
     'trackingInfo', 'trackingStatus', 'notes',
 ] as const;
 
@@ -14,7 +14,7 @@ export type ColumnId = typeof ALL_COLUMN_IDS[number];
 // Columns shown by default
 export const DEFAULT_VISIBLE_COLUMNS: ColumnId[] = [
     'orderInfo', 'channel', 'customerInfo', 'paymentInfo',
-    'productName', 'qty', 'unitPrice', 'cost', 'margin', 'fabricColour', 'fabricBalance',
+    'productName', 'qty', 'unitPrice', 'mrp', 'discount', 'cost', 'margin', 'fabricColour', 'fabricBalance',
     'trackingInfo', 'trackingStatus', 'notes',
 ];
 
@@ -27,6 +27,8 @@ export const DEFAULT_HEADERS: Record<string, string> = {
     productName: 'Product',
     qty: 'Qty',
     unitPrice: 'Price',
+    mrp: 'MRP',
+    discount: 'Disc %',
     cost: 'Cost',
     margin: 'Margin',
     fabricColour: 'Fabric',
@@ -57,6 +59,8 @@ export const DEFAULT_COLUMN_WIDTHS: Partial<Record<ColumnId | string, number>> =
     productName: 240,
     qty: 50,
     unitPrice: 75,
+    mrp: 75,
+    discount: 55,
     cost: 75,
     margin: 55,
     fabricColour: 100,
