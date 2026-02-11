@@ -503,11 +503,14 @@ async function validateOutwardRows(
 
     const orderMap = new Map<string, { id: string; orderLines: Array<{ id: string; skuId: string; qty: number; lineStatus: string }> }>();
     if (orderNumbers.length > 0) {
-        // Build alternate format lookups for channel orders:
-        // - Myntra: full UUID "abc12345-xxxx-..." vs short "abc12345"
-        // - Nykaa: "NYK-xxx--1" vs "NYK-xxx" (with/without --1 suffix)
+        // Build alternate format lookups for channel orders.
+        // Historical imports created inconsistent formats:
+        // - Myntra: full UUID "abc12345-xxxx-..." vs short "abc12345" (first 8 chars)
+        // - Nykaa: "NYK-xxx--1" (with suffix) vs "NYK-xxx" (without)
+        // This mirrors the matching logic in channels.ts (channel import preview).
         const allLookups = new Set<string>(orderNumbers);
         const alternateToOriginal = new Map<string, string>(); // DB format → sheet format
+        const shortMyntraIds = new Set<string>();
 
         for (const num of orderNumbers) {
             // Myntra full UUID → also try short 8-char form
@@ -516,17 +519,16 @@ async function validateOutwardRows(
                 allLookups.add(short);
                 alternateToOriginal.set(short, num);
             }
-            // Myntra short form → also try as UUID prefix (handled via startsWith below)
+            // Myntra short form → flag for startsWith fallback (can't predict full UUID)
             if (/^[0-9a-f]{8}$/i.test(num)) {
-                alternateToOriginal.set(num, num); // mark for startsWith lookup
+                shortMyntraIds.add(num);
             }
-            // Nykaa with --1 suffix → also try without
+            // Nykaa: bidirectional --1 suffix handling
             if (num.endsWith('--1')) {
                 const trimmed = num.slice(0, -3);
                 allLookups.add(trimmed);
                 alternateToOriginal.set(trimmed, num);
             }
-            // Nykaa without --1 suffix → also try with
             if (num.startsWith('NYK-') && !num.endsWith('--1')) {
                 const withSuffix = num + '--1';
                 allLookups.add(withSuffix);
@@ -544,11 +546,9 @@ async function validateOutwardRows(
             },
         });
 
-        // Also try startsWith for short Myntra IDs that weren't found
+        // startsWith fallback for short Myntra IDs not found by exact match
         const foundNumbers = new Set(orders.map(o => o.orderNumber));
-        const shortMyntraUnmatched = orderNumbers.filter(
-            num => /^[0-9a-f]{8}$/i.test(num) && !foundNumbers.has(num)
-        );
+        const shortMyntraUnmatched = [...shortMyntraIds].filter(num => !foundNumbers.has(num));
         if (shortMyntraUnmatched.length > 0) {
             const startsWithOrders = await prisma.order.findMany({
                 where: {
@@ -562,12 +562,11 @@ async function validateOutwardRows(
                     orderLines: { select: { id: true, skuId: true, qty: true, lineStatus: true } },
                 },
             });
-            orders.push(...startsWithOrders);
             for (const o of startsWithOrders) {
-                // Map the found full UUID back to the short form from the sheet
                 const short = o.orderNumber.split('-')[0];
-                if (shortMyntraUnmatched.includes(short)) {
+                if (shortMyntraIds.has(short)) {
                     alternateToOriginal.set(o.orderNumber, short);
+                    orders.push(o);
                 }
             }
         }
@@ -575,19 +574,22 @@ async function validateOutwardRows(
         for (const o of orders) {
             // Key by the ORIGINAL sheet order number so downstream lookup works
             const sheetKey = alternateToOriginal.get(o.orderNumber) ?? o.orderNumber;
-            if (!orderMap.has(sheetKey)) {
+            if (orderMap.has(sheetKey)) {
+                sheetsLogger.warn(
+                    { sheetKey, newOrderId: o.id, existingOrderId: orderMap.get(sheetKey)!.id },
+                    'Multiple DB orders match same sheet order number — keeping first'
+                );
+            } else {
                 orderMap.set(sheetKey, { id: o.id, orderLines: o.orderLines });
             }
         }
 
-        if (alternateToOriginal.size > 0) {
-            const matchedAlternates = orders.filter(o => alternateToOriginal.has(o.orderNumber));
-            if (matchedAlternates.length > 0) {
-                sheetsLogger.info(
-                    { matchedViaAlternate: matchedAlternates.length },
-                    'Channel orders matched via alternate format'
-                );
-            }
+        const alternateMatches = orders.filter(o => alternateToOriginal.has(o.orderNumber)).length;
+        if (alternateMatches > 0) {
+            sheetsLogger.info(
+                { matchedViaAlternate: alternateMatches },
+                'Channel orders matched via alternate format'
+            );
         }
     }
 
