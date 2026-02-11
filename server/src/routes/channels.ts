@@ -345,6 +345,7 @@ interface PreviewOrder {
   city: string | null;
   state: string | null;
   zip: string | null;
+  dispatchByDate: string | null;
   lines: PreviewLine[];
   totalAmount: number;
 }
@@ -577,6 +578,7 @@ router.post('/preview-import', authenticateToken, upload.single('file'), async (
       const channelRef = firstRow['Channel Ref']?.trim() || btOrderId;
       const channel = normalizeChannel(firstRow['Channel Name']);
       const orderDate = parseDate(firstRow['Order Date(IST)'], firstRow['Order Time(IST)']);
+      const dispatchByDate = parseDate(firstRow['Dispatch By Date']);
 
       const existingOrder = existingOrderMap.get(channelRef);
 
@@ -644,6 +646,7 @@ router.post('/preview-import', authenticateToken, upload.single('file'), async (
         city: warehouse ? null : city,
         state: warehouse ? null : (firstRow['State']?.trim() || null),
         zip: warehouse ? null : (firstRow['Zip']?.trim() || null),
+        dispatchByDate: dispatchByDate?.toISOString() || null,
         lines,
         totalAmount,
       });
@@ -732,6 +735,9 @@ router.post('/execute-import', authenticateToken, async (req: Request, res: Resp
             });
           }
 
+          // Parse dispatch by date as shipByDate
+          const shipByDate = previewOrder.dispatchByDate ? new Date(previewOrder.dispatchByDate) : null;
+
           const order = await req.prisma.order.create({
             data: {
               orderNumber: previewOrder.channelRef,
@@ -745,6 +751,7 @@ router.post('/execute-import', authenticateToken, async (req: Request, res: Resp
               paymentMethod: isCOD ? 'COD' : 'Prepaid',
               paymentStatus: isCOD ? 'pending' : 'paid',
               status: 'open',
+              ...(shipByDate && !isNaN(shipByDate.getTime()) ? { shipByDate } : {}),
               orderLines: {
                 create: matchedLines.map(line => {
                   const status = line.fulfillmentStatus?.toLowerCase() || '';

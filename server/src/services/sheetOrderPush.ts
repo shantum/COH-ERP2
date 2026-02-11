@@ -195,6 +195,10 @@ export async function pushERPOrderToSheet(orderId: string): Promise<void> {
         // row[7] left empty                  // H: Product Name (VLOOKUP)
         row[8] = line.qty;                    // I: Qty
         row[10] = order.internalNotes ?? '';   // K: Order Note
+        // L: COH Notes — write "SHIP BY <date>" if shipByDate is set
+        if (order.shipByDate) {
+            row[11] = `SHIP BY ${order.shipByDate.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' })}`;
+        }
         return row;
     });
 

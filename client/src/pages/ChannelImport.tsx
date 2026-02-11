@@ -52,6 +52,7 @@ interface PreviewOrder {
   city: string | null;
   state: string | null;
   zip: string | null;
+  dispatchByDate: string | null;
   lines: PreviewLine[];
   totalAmount: number;
 }
