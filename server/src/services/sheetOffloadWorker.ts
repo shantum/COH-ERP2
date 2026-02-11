@@ -148,18 +148,19 @@ interface IngestPreviewResult {
     balanceSnapshot?: {
         skuBalances: Array<{
             skuCode: string;
-            erpBalance: number;       // DB currentBalance (now)
-            colR: number;             // sheet col R (what we last wrote)
-            colC: number;             // sheet col C (formula: R + pending in - pending out)
-            colD: number;             // sheet col D (allocated)
-            colE: number;             // sheet col E (available = C - D)
-            pendingQty: number;       // qty about to be ingested
-            match: boolean;           // erpBalance === colR
-            afterErpBalance: number;  // simulated: erpBalance ± pendingQty
-            afterColC: number;        // simulated: should equal colC (net zero)
+            pendingQty: number;           // qty being ingested
+            erpBalance: number;           // ERP balance now
+            afterErpBalance: number;      // ERP balance after ingestion
+            sheetPending: number;         // net pending on sheet now (C - R)
+            afterSheetPending: number;    // net pending on sheet after
+            colC: number;                 // sheet total balance (C) — should NOT change
+            match: boolean;               // erpBalance === colR (pre-check)
+            colR: number;                 // raw sheet col R (for details)
+            colD: number;                 // raw sheet col D (for details)
+            colE: number;                 // raw sheet col E (for details)
         }>;
         timestamp: string;
-        mismatches: number;           // count of SKUs where erpBalance !== colR
+        mismatches: number;
     };
 }
 
@@ -1721,20 +1722,20 @@ async function previewIngestInward(): Promise<IngestPreviewResult | null> {
                 const pending = pendingByCode.get(code) ?? 0;
                 const match = Math.abs(erpBalance - colR) < 0.01;
                 if (!match) mismatches++;
-                // Inward: ERP goes UP by pending, col C stays same (pending drops, R rises = net zero)
-                const afterErpBalance = erpBalance + pending;
-                const afterColC = colC; // formula recalc: (R+pending) + (pendingInward-pending) - pendingOutward = same
+                // Inward: ERP goes UP, pending on sheet goes DOWN, total (C) unchanged
+                const sheetPending = colC - colR;
                 return {
                     skuCode: code,
+                    pendingQty: pending,
                     erpBalance,
-                    colR,
+                    afterErpBalance: erpBalance + pending,
+                    sheetPending,
+                    afterSheetPending: sheetPending - pending,
                     colC,
+                    match,
+                    colR,
                     colD: bal?.d ?? 0,
                     colE: bal?.e ?? 0,
-                    pendingQty: pending,
-                    match,
-                    afterErpBalance,
-                    afterColC,
                 };
             });
             balanceSnapshot = { skuBalances, timestamp: snapshot.timestamp, mismatches };
@@ -2009,20 +2010,20 @@ async function previewIngestOutward(): Promise<IngestPreviewResult | null> {
                 const pending = pendingByCode.get(code) ?? 0;
                 const match = Math.abs(erpBalance - colR) < 0.01;
                 if (!match) mismatches++;
-                // Outward: ERP goes DOWN by pending, col C stays same (pending drops, R drops = net zero)
-                const afterErpBalance = erpBalance - pending;
-                const afterColC = colC;
+                // Outward: ERP goes DOWN, pending on sheet goes UP (removing outward = less negative), total (C) unchanged
+                const sheetPending = colC - colR;
                 return {
                     skuCode: code,
+                    pendingQty: pending,
                     erpBalance,
-                    colR,
+                    afterErpBalance: erpBalance - pending,
+                    sheetPending,
+                    afterSheetPending: sheetPending + pending,
                     colC,
+                    match,
+                    colR,
                     colD: bal?.d ?? 0,
                     colE: bal?.e ?? 0,
-                    pendingQty: pending,
-                    match,
-                    afterErpBalance,
-                    afterColC,
                 };
             });
             balanceSnapshot = { skuBalances, timestamp: snapshot.timestamp, mismatches };

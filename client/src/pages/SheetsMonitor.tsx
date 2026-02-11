@@ -63,15 +63,16 @@ interface PreviewResult {
     balanceSnapshot?: {
         skuBalances: Array<{
             skuCode: string;
+            pendingQty: number;
             erpBalance: number;
-            colR: number;
+            afterErpBalance: number;
+            sheetPending: number;
+            afterSheetPending: number;
             colC: number;
+            match: boolean;
+            colR: number;
             colD: number;
             colE: number;
-            pendingQty: number;
-            match: boolean;
-            afterErpBalance: number;
-            afterColC: number;
         }>;
         timestamp: string;
         mismatches: number;
@@ -195,11 +196,9 @@ function PreviewResultCard({ title, preview, color, onClose }: {
     color: 'emerald' | 'blue';
     onClose: () => void;
 }) {
-    const [showDetails, setShowDetails] = useState(false);
     const borderColor = color === 'emerald' ? 'border-emerald-200' : 'border-blue-200';
     const bgColor = color === 'emerald' ? 'bg-emerald-50' : 'bg-blue-50';
     const textColor = color === 'emerald' ? 'text-emerald-700' : 'text-blue-700';
-    const changePrefix = color === 'emerald' ? '+' : '-';
 
     const errors = Object.entries(preview.validationErrors ?? {});
     const skipReasons = Object.entries(preview.skipReasons ?? {});
@@ -287,55 +286,53 @@ function PreviewResultCard({ title, preview, color, onClose }: {
                 </div>
             )}
 
-            {/* Balance changes table — simple: SKU, Now, Change, After */}
+            {/* What changes — shows both sides of the equation so net = 0 */}
             {balances.length > 0 && (
                 <div>
-                    <div className="flex items-center justify-between mb-1">
-                        <span className="text-xs font-medium text-gray-600">
-                            Balance Changes ({balances.length} SKUs)
-                        </span>
-                        <button
-                            onClick={() => setShowDetails(!showDetails)}
-                            className="text-[10px] text-gray-400 hover:text-gray-600"
-                        >
-                            {showDetails ? 'Hide sheet details' : 'Show sheet details'}
-                        </button>
+                    <div className="text-xs font-medium text-gray-600 mb-1">
+                        What happens per SKU ({balances.length} affected)
                     </div>
                     <div className="border rounded-lg overflow-hidden max-h-72 overflow-y-auto">
                         <table className="w-full text-xs">
                             <thead className="bg-gray-50 sticky top-0">
                                 <tr>
                                     <th className="text-left px-2 py-1.5 font-medium text-gray-600">SKU</th>
-                                    <th className="text-right px-2 py-1.5 font-medium text-gray-600">Now</th>
-                                    <th className="text-right px-2 py-1.5 font-medium text-gray-600">Change</th>
-                                    <th className="text-right px-2 py-1.5 font-medium text-gray-600">After</th>
-                                    {showDetails && (
-                                        <>
-                                            <th className="text-right px-2 py-1.5 font-medium text-gray-400 border-l border-gray-200">Sheet R</th>
-                                            <th className="text-right px-2 py-1.5 font-medium text-gray-400">Col C</th>
-                                            <th className="text-right px-2 py-1.5 font-medium text-gray-400">Col D</th>
-                                            <th className="text-right px-2 py-1.5 font-medium text-gray-400">Col E</th>
-                                        </>
-                                    )}
+                                    <th className="text-right px-2 py-1.5 font-medium text-gray-600">Qty</th>
+                                    <th className="text-center px-2 py-1.5 font-medium text-gray-600" colSpan={2}>ERP Balance (R)</th>
+                                    <th className="text-center px-2 py-1.5 font-medium text-gray-600 border-l border-gray-200" colSpan={2}>Pending on Sheet</th>
+                                    <th className="text-center px-2 py-1.5 font-medium text-gray-600 border-l border-gray-200">Total (C)</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y">
-                                {balances.map((b) => (
-                                    <tr key={b.skuCode} className={b.match ? 'hover:bg-gray-50' : 'bg-red-50 hover:bg-red-100'}>
-                                        <td className="px-2 py-1 font-mono text-gray-700">{b.skuCode}</td>
-                                        <td className="px-2 py-1 text-right text-gray-900">{b.erpBalance}</td>
-                                        <td className={`px-2 py-1 text-right font-medium ${textColor}`}>{changePrefix}{b.pendingQty}</td>
-                                        <td className="px-2 py-1 text-right font-semibold text-gray-900">{b.afterErpBalance}</td>
-                                        {showDetails && (
-                                            <>
-                                                <td className={`px-2 py-1 text-right border-l border-gray-100 ${b.match ? 'text-gray-400' : 'text-red-500'}`}>{b.colR}</td>
-                                                <td className="px-2 py-1 text-right text-gray-400">{b.colC}</td>
-                                                <td className="px-2 py-1 text-right text-gray-400">{b.colD}</td>
-                                                <td className="px-2 py-1 text-right text-gray-400">{b.colE}</td>
-                                            </>
-                                        )}
-                                    </tr>
-                                ))}
+                                {balances.map((b) => {
+                                    const erpDelta = b.afterErpBalance - b.erpBalance;
+                                    const pendingDelta = b.afterSheetPending - b.sheetPending;
+                                    return (
+                                        <tr key={b.skuCode} className={b.match ? 'hover:bg-gray-50' : 'bg-red-50 hover:bg-red-100'}>
+                                            <td className="px-2 py-1 font-mono text-gray-700">{b.skuCode}</td>
+                                            <td className={`px-2 py-1 text-right font-medium ${textColor}`}>{b.pendingQty}</td>
+                                            <td className="px-2 py-1 text-right text-gray-500">{b.erpBalance}</td>
+                                            <td className="px-2 py-1 text-right">
+                                                <span className="text-gray-400">&#8594;&nbsp;</span>
+                                                <span className="font-medium text-gray-900">{b.afterErpBalance}</span>
+                                                <span className={`ml-1 text-[10px] ${erpDelta > 0 ? 'text-emerald-600' : 'text-blue-600'}`}>
+                                                    ({erpDelta > 0 ? '+' : ''}{erpDelta})
+                                                </span>
+                                            </td>
+                                            <td className="px-2 py-1 text-right text-gray-500 border-l border-gray-100">{b.sheetPending}</td>
+                                            <td className="px-2 py-1 text-right">
+                                                <span className="text-gray-400">&#8594;&nbsp;</span>
+                                                <span className="font-medium text-gray-900">{b.afterSheetPending}</span>
+                                                <span className={`ml-1 text-[10px] ${pendingDelta > 0 ? 'text-emerald-600' : 'text-blue-600'}`}>
+                                                    ({pendingDelta > 0 ? '+' : ''}{pendingDelta})
+                                                </span>
+                                            </td>
+                                            <td className="px-2 py-1 text-center font-medium border-l border-gray-100 text-gray-900">
+                                                {b.colC} <span className="text-emerald-600 text-[10px]">(no change)</span>
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
                             </tbody>
                         </table>
                     </div>
