@@ -17,6 +17,9 @@ export type ChannelImportBatch = {
     dateRangeEnd: Timestamp | null;
     importedAt: Generated<Timestamp>;
     importedBy: string | null;
+    importType: Generated<string>;
+    ordersCreated: Generated<number>;
+    ordersUpdated: Generated<number>;
 };
 export type ChannelOrderLine = {
     id: Generated<string>;
@@ -374,6 +377,7 @@ export type Order = {
     paymentConfirmedAt: Timestamp | null;
     paymentConfirmedBy: string | null;
     paymentStatus: Generated<string | null>;
+    channelOrderId: string | null;
 };
 export type OrderLine = {
     id: Generated<string>;
@@ -417,6 +421,8 @@ export type OrderLine = {
     refundReason: string | null;
     refundedAt: Timestamp | null;
     shippingAddress: string | null;
+    channelFulfillmentStatus: string | null;
+    channelItemId: string | null;
     returnBatchNumber: string | null;
     returnStatus: string | null;
     returnQty: number | null;

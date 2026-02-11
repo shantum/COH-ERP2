@@ -46,6 +46,7 @@ import { Route as AuthenticatedFabricReceiptRouteImport } from './routes/_authen
 import { Route as AuthenticatedCustomersRouteImport } from './routes/_authenticated/customers'
 import { Route as AuthenticatedCostingRouteImport } from './routes/_authenticated/costing'
 import { Route as AuthenticatedChannelsRouteImport } from './routes/_authenticated/channels'
+import { Route as AuthenticatedChannelImportRouteImport } from './routes/_authenticated/channel-import'
 import { Route as AuthenticatedAnalyticsRouteImport } from './routes/_authenticated/analytics'
 
 const ShipmentsRoute = ShipmentsRouteImport.update({
@@ -245,6 +246,12 @@ const AuthenticatedChannelsRoute = AuthenticatedChannelsRouteImport.update({
   path: '/channels',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
+const AuthenticatedChannelImportRoute =
+  AuthenticatedChannelImportRouteImport.update({
+    id: '/channel-import',
+    path: '/channel-import',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
 const AuthenticatedAnalyticsRoute = AuthenticatedAnalyticsRouteImport.update({
   id: '/analytics',
   path: '/analytics',
@@ -261,6 +268,7 @@ export interface FileRoutesByFullPath {
   '/return-inward': typeof ReturnInwardRoute
   '/shipments': typeof ShipmentsRoute
   '/analytics': typeof AuthenticatedAnalyticsRoute
+  '/channel-import': typeof AuthenticatedChannelImportRoute
   '/channels': typeof AuthenticatedChannelsRoute
   '/costing': typeof AuthenticatedCostingRoute
   '/customers': typeof AuthenticatedCustomersRoute
@@ -299,6 +307,7 @@ export interface FileRoutesByTo {
   '/return-inward': typeof ReturnInwardRoute
   '/shipments': typeof ShipmentsRoute
   '/analytics': typeof AuthenticatedAnalyticsRoute
+  '/channel-import': typeof AuthenticatedChannelImportRoute
   '/channels': typeof AuthenticatedChannelsRoute
   '/costing': typeof AuthenticatedCostingRoute
   '/customers': typeof AuthenticatedCustomersRoute
@@ -340,6 +349,7 @@ export interface FileRoutesById {
   '/return-inward': typeof ReturnInwardRoute
   '/shipments': typeof ShipmentsRoute
   '/_authenticated/analytics': typeof AuthenticatedAnalyticsRoute
+  '/_authenticated/channel-import': typeof AuthenticatedChannelImportRoute
   '/_authenticated/channels': typeof AuthenticatedChannelsRoute
   '/_authenticated/costing': typeof AuthenticatedCostingRoute
   '/_authenticated/customers': typeof AuthenticatedCustomersRoute
@@ -382,6 +392,7 @@ export interface FileRouteTypes {
     | '/return-inward'
     | '/shipments'
     | '/analytics'
+    | '/channel-import'
     | '/channels'
     | '/costing'
     | '/customers'
@@ -420,6 +431,7 @@ export interface FileRouteTypes {
     | '/return-inward'
     | '/shipments'
     | '/analytics'
+    | '/channel-import'
     | '/channels'
     | '/costing'
     | '/customers'
@@ -460,6 +472,7 @@ export interface FileRouteTypes {
     | '/return-inward'
     | '/shipments'
     | '/_authenticated/analytics'
+    | '/_authenticated/channel-import'
     | '/_authenticated/channels'
     | '/_authenticated/costing'
     | '/_authenticated/customers'
@@ -763,6 +776,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedChannelsRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/channel-import': {
+      id: '/_authenticated/channel-import'
+      path: '/channel-import'
+      fullPath: '/channel-import'
+      preLoaderRoute: typeof AuthenticatedChannelImportRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/analytics': {
       id: '/_authenticated/analytics'
       path: '/analytics'
@@ -775,6 +795,7 @@ declare module '@tanstack/react-router' {
 
 interface AuthenticatedRouteChildren {
   AuthenticatedAnalyticsRoute: typeof AuthenticatedAnalyticsRoute
+  AuthenticatedChannelImportRoute: typeof AuthenticatedChannelImportRoute
   AuthenticatedChannelsRoute: typeof AuthenticatedChannelsRoute
   AuthenticatedCostingRoute: typeof AuthenticatedCostingRoute
   AuthenticatedCustomersRoute: typeof AuthenticatedCustomersRoute
@@ -808,6 +829,7 @@ interface AuthenticatedRouteChildren {
 
 const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedAnalyticsRoute: AuthenticatedAnalyticsRoute,
+  AuthenticatedChannelImportRoute: AuthenticatedChannelImportRoute,
   AuthenticatedChannelsRoute: AuthenticatedChannelsRoute,
   AuthenticatedCostingRoute: AuthenticatedCostingRoute,
   AuthenticatedCustomersRoute: AuthenticatedCustomersRoute,
@@ -857,12 +879,3 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { createStart } from '@tanstack/react-start'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-  }
-}

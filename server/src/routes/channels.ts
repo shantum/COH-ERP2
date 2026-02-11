@@ -6,11 +6,12 @@
  * - Additive import: uploading Jan + Feb data combines them
  * - Deduplication on channel + channelOrderId + channelItemId
  * - Import batch tracking for audit trail
+ * - Channel Order Import: creates real ERP Orders from BT CSV data
  *
  * Key Patterns:
  * - Multer memory storage for file uploads (10MB limit for large reports)
  * - Row-by-row upsert with error collection
- * - Price stored in paise for precision
+ * - Price stored in paise for precision (analytics), rupees for ERP Orders
  */
 
 import { Router } from 'express';
@@ -19,6 +20,7 @@ import { authenticateToken } from '../middleware/auth.js';
 import { parse } from 'fast-csv';
 import multer from 'multer';
 import { Readable } from 'stream';
+import { pushERPOrderToSheet } from '../services/sheetOrderPush.js';
 
 const router: Router = Router();
 
@@ -160,8 +162,176 @@ function parseFloatSafe(val: string | undefined): number | null {
   return isNaN(num) ? null : num;
 }
 
+/**
+ * Parse price string to rupees (float). For ERP Orders where unitPrice is stored as Float.
+ */
+function parsePriceToRupees(val: string | undefined): number {
+  if (!val || val.trim() === '') return 0;
+  const cleaned = val.replace(/,/g, '').trim();
+  const num = parseFloat(cleaned);
+  return isNaN(num) ? 0 : num;
+}
+
+/**
+ * Check if phone number is a marketplace placeholder (all same digits, etc.)
+ */
+function isPlaceholderPhone(phone: string | null): boolean {
+  if (!phone) return true;
+  const cleaned = phone.replace(/\D/g, '');
+  if (!cleaned) return true;
+  if (/^(\d)\1+$/.test(cleaned)) return true; // 9999999999, 0000000000
+  if (cleaned === '1234567890') return true;
+  return false;
+}
+
+/**
+ * Check if this is an AJIO warehouse order (not a real customer)
+ */
+function isWarehouseOrder(channel: string, customerName: string | null, city: string | null): boolean {
+  if (channel !== 'ajio') return false;
+  const combined = `${customerName ?? ''} ${city ?? ''}`.toLowerCase();
+  return combined.includes('ajio') || combined.includes('unit 106') || combined.includes('sangram complex');
+}
+
+/**
+ * Parse CSV buffer into BtReportRow array
+ */
+async function parseCSVBuffer(buffer: Buffer): Promise<BtReportRow[]> {
+  const rows: BtReportRow[] = [];
+  await new Promise<void>((resolve, reject) => {
+    const stream = Readable.from(buffer.toString());
+    stream
+      .pipe(parse({ headers: true, trim: true }))
+      .on('data', (row: BtReportRow) => rows.push(row))
+      .on('end', resolve)
+      .on('error', reject);
+  });
+  return rows;
+}
+
+/**
+ * Upsert a single row into ChannelOrderLine (analytics table).
+ * Extracted from the /import endpoint so both analytics + order import can use it.
+ */
+async function upsertChannelOrderLine(
+  prisma: import('@prisma/client').PrismaClient,
+  row: BtReportRow,
+  importBatchId: string,
+): Promise<'created' | 'updated'> {
+  const channelOrderId = row['Order Id']!.trim();
+  const channelItemId = row['Item ID']!.trim();
+  const channel = normalizeChannel(row['Channel Name']);
+
+  const lineData = {
+    channel,
+    channelOrderId,
+    channelRef: row['Channel Ref']?.trim() || null,
+    channelItemId,
+    orderDate: parseDate(row['Order Date(IST)'])!,
+    orderType: row['Order Type']?.trim() || 'Unknown',
+    financialStatus: row['Financial Status']?.trim() || null,
+    fulfillmentStatus: row['Fulfillment Status']?.trim() || null,
+    skuCode: row['SKU Codes']?.trim() || 'UNKNOWN',
+    channelSkuCode: row['Channel SKU Code']?.trim() || null,
+    skuTitle: row['SKU Titles']?.trim() || null,
+    quantity: parseIntSafe(row['Quantity'], 1),
+    mrp: parsePriceToPaise(row['MRP']),
+    sellerPrice: parsePriceToPaise(row["Seller's Price"]),
+    buyerPrice: parsePriceToPaise(row["Buyer's Price"]),
+    itemTotal: parsePriceToPaise(row['Item Total']),
+    itemDiscount: parsePriceToPaise(row['Item Total Discount Value']),
+    orderTotal: parsePriceToPaise(row['Order Total Amount']),
+    taxPercent: parseFloatSafe(row['TAX %']),
+    taxType: row['TAX type']?.trim() || null,
+    taxAmount: parsePriceToPaise(row['TAX Amount']),
+    courierName: row['Courier Name']?.trim() || null,
+    trackingNumber: row['Courier Tracking Number']?.trim() || null,
+    dispatchByDate: parseDate(row['Dispatch By Date']),
+    dispatchDate: parseDate(row['Dispatch Date']),
+    manifestedDate: parseDate(row['Manifested Date']),
+    deliveryDate: parseDate(row['Channel Delivery Date']),
+    returnDate: parseDate(row['BT Return Date']),
+    channelReturnDate: parseDate(row['Channel Return Date']),
+    customerName: row['Customer Name']?.trim() || null,
+    customerCity: row['City']?.trim() || null,
+    customerState: row['State']?.trim() || null,
+    customerZip: row['Zip']?.trim() || null,
+    invoiceNumber: row['Invoice Number']?.trim() || null,
+    batchNo: row['Batch No.']?.trim() || null,
+    hsnCode: row['HSN Code']?.trim() || null,
+    importBatchId,
+  };
+
+  const existing = await prisma.channelOrderLine.findUnique({
+    where: {
+      channel_channelOrderId_channelItemId: {
+        channel,
+        channelOrderId,
+        channelItemId,
+      },
+    },
+  });
+
+  if (existing) {
+    await prisma.channelOrderLine.update({
+      where: { id: existing.id },
+      data: { ...lineData, importedAt: new Date() },
+    });
+    return 'updated';
+  } else {
+    await prisma.channelOrderLine.create({ data: lineData });
+    return 'created';
+  }
+}
+
 // ============================================
-// IMPORT CHANNEL DATA
+// PREVIEW + EXECUTE ORDER IMPORT TYPES
+// ============================================
+
+interface PreviewLine {
+  channelItemId: string;
+  skuCode: string;
+  skuId: string | null;
+  skuMatched: boolean;
+  skuTitle: string | null;
+  qty: number;
+  unitPrice: number;
+  fulfillmentStatus: string;
+  previousStatus?: string;
+  courierName: string | null;
+  awbNumber: string | null;
+}
+
+interface PreviewOrder {
+  channelOrderId: string;
+  channelRef: string;
+  channel: string;
+  importStatus: 'new' | 'existing_unchanged' | 'existing_updated';
+  existingOrderId?: string;
+  orderDate: string;
+  orderType: string;
+  customerName: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+  lines: PreviewLine[];
+  totalAmount: number;
+}
+
+interface PreviewResponse {
+  orders: PreviewOrder[];
+  summary: {
+    totalOrders: number;
+    newOrders: number;
+    existingUnchanged: number;
+    existingUpdated: number;
+    unmatchedSkus: string[];
+  };
+  rawRows: BtReportRow[];
+}
+
+// ============================================
+// IMPORT CHANNEL DATA (analytics-only)
 // ============================================
 
 router.post('/import', authenticateToken, upload.single('file'), async (req: Request, res: Response) => {
@@ -172,41 +342,22 @@ router.post('/import', authenticateToken, upload.single('file'), async (req: Req
       return;
     }
 
-    const results: ChannelImportResults = {
-      created: 0,
-      updated: 0,
-      skipped: 0,
-      errors: [],
-    };
-
-    // Parse CSV from buffer
-    const rows: BtReportRow[] = [];
-    await new Promise<void>((resolve, reject) => {
-      const stream = Readable.from(file.buffer.toString());
-      stream
-        .pipe(parse({ headers: true, trim: true }))
-        .on('data', (row: BtReportRow) => rows.push(row))
-        .on('end', resolve)
-        .on('error', reject);
-    });
+    const results: ChannelImportResults = { created: 0, updated: 0, skipped: 0, errors: [] };
+    const rows = await parseCSVBuffer(file.buffer);
 
     if (rows.length === 0) {
       res.status(400).json({ error: 'CSV file is empty or has no valid rows' });
       return;
     }
 
-    // Create import batch record
     const userId = (req as unknown as { user?: { userId?: string } }).user?.userId;
-
-    // Track date range for the batch
     let minDate: Date | null = null;
     let maxDate: Date | null = null;
     const channelsFound = new Set<string>();
 
-    // Create batch record first
     const importBatch = await req.prisma.channelImportBatch.create({
       data: {
-        channel: 'pending', // Will update after processing
+        channel: 'pending',
         filename: file.originalname,
         rowsTotal: rows.length,
         rowsImported: 0,
@@ -216,105 +367,33 @@ router.post('/import', authenticateToken, upload.single('file'), async (req: Req
       },
     });
 
-    // Process each row
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
-      const rowNum = i + 2; // Account for header row
+      const rowNum = i + 2;
 
       try {
-        // Validate required fields
         const channelOrderId = row['Order Id']?.trim();
         const channelItemId = row['Item ID']?.trim();
-        const orderDateStr = row['Order Date(IST)'];
-        const skuCode = row['SKU Codes']?.trim();
-
         if (!channelOrderId || !channelItemId) {
           results.errors.push({ row: rowNum, error: 'Missing Order Id or Item ID' });
           results.skipped++;
           continue;
         }
 
-        const orderDate = parseDate(orderDateStr);
+        const orderDate = parseDate(row['Order Date(IST)']);
         if (!orderDate) {
-          results.errors.push({ row: rowNum, error: `Invalid order date: ${orderDateStr}` });
+          results.errors.push({ row: rowNum, error: `Invalid order date: ${row['Order Date(IST)']}` });
           results.skipped++;
           continue;
         }
 
-        // Track date range
         if (!minDate || orderDate < minDate) minDate = orderDate;
         if (!maxDate || orderDate > maxDate) maxDate = orderDate;
+        channelsFound.add(normalizeChannel(row['Channel Name']));
 
-        const channel = normalizeChannel(row['Channel Name']);
-        channelsFound.add(channel);
-
-        // Build line data
-        const lineData = {
-          channel,
-          channelOrderId,
-          channelRef: row['Channel Ref']?.trim() || null,
-          channelItemId,
-          orderDate,
-          orderType: row['Order Type']?.trim() || 'Unknown',
-          financialStatus: row['Financial Status']?.trim() || null,
-          fulfillmentStatus: row['Fulfillment Status']?.trim() || null,
-          skuCode: skuCode || 'UNKNOWN',
-          channelSkuCode: row['Channel SKU Code']?.trim() || null,
-          skuTitle: row['SKU Titles']?.trim() || null,
-          quantity: parseIntSafe(row['Quantity'], 1),
-          mrp: parsePriceToPaise(row['MRP']),
-          sellerPrice: parsePriceToPaise(row["Seller's Price"]),
-          buyerPrice: parsePriceToPaise(row["Buyer's Price"]),
-          itemTotal: parsePriceToPaise(row['Item Total']),
-          itemDiscount: parsePriceToPaise(row['Item Total Discount Value']),
-          orderTotal: parsePriceToPaise(row['Order Total Amount']),
-          taxPercent: parseFloatSafe(row['TAX %']),
-          taxType: row['TAX type']?.trim() || null,
-          taxAmount: parsePriceToPaise(row['TAX Amount']),
-          courierName: row['Courier Name']?.trim() || null,
-          trackingNumber: row['Courier Tracking Number']?.trim() || null,
-          dispatchByDate: parseDate(row['Dispatch By Date']),
-          dispatchDate: parseDate(row['Dispatch Date']),
-          manifestedDate: parseDate(row['Manifested Date']),
-          deliveryDate: parseDate(row['Channel Delivery Date']),
-          returnDate: parseDate(row['BT Return Date']),
-          channelReturnDate: parseDate(row['Channel Return Date']),
-          customerName: row['Customer Name']?.trim() || null,
-          customerCity: row['City']?.trim() || null,
-          customerState: row['State']?.trim() || null,
-          customerZip: row['Zip']?.trim() || null,
-          invoiceNumber: row['Invoice Number']?.trim() || null,
-          batchNo: row['Batch No.']?.trim() || null,
-          hsnCode: row['HSN Code']?.trim() || null,
-          importBatchId: importBatch.id,
-        };
-
-        // Upsert: update if exists (by unique key), create if new
-        const existing = await req.prisma.channelOrderLine.findUnique({
-          where: {
-            channel_channelOrderId_channelItemId: {
-              channel,
-              channelOrderId,
-              channelItemId,
-            },
-          },
-        });
-
-        if (existing) {
-          await req.prisma.channelOrderLine.update({
-            where: { id: existing.id },
-            data: {
-              ...lineData,
-              importedAt: new Date(), // Update import timestamp
-            },
-          });
-          results.updated++;
-        } else {
-          await req.prisma.channelOrderLine.create({
-            data: lineData,
-          });
-          results.created++;
-        }
+        const action = await upsertChannelOrderLine(req.prisma, row, importBatch.id);
+        if (action === 'created') results.created++;
+        else results.updated++;
       } catch (rowError) {
         const errorMessage = rowError instanceof Error ? rowError.message : 'Unknown error';
         results.errors.push({ row: rowNum, error: errorMessage });
@@ -322,12 +401,9 @@ router.post('/import', authenticateToken, upload.single('file'), async (req: Req
       }
     }
 
-    // Update batch record with final stats
     const channelSummary = channelsFound.size === 1
       ? Array.from(channelsFound)[0]
-      : channelsFound.size > 0
-        ? 'multiple'
-        : 'unknown';
+      : channelsFound.size > 0 ? 'multiple' : 'unknown';
 
     await req.prisma.channelImportBatch.update({
       where: { id: importBatch.id },
@@ -356,12 +432,381 @@ router.post('/import', authenticateToken, upload.single('file'), async (req: Req
         updated: results.updated,
         skipped: results.skipped,
         errorCount: results.errors.length,
-        errors: results.errors.slice(0, 10), // Return first 10 errors
+        errors: results.errors.slice(0, 10),
       },
     });
   } catch (error) {
     console.error('Channel import error:', error);
     res.status(500).json({ error: 'Failed to import channel data' });
+  }
+});
+
+// ============================================
+// PREVIEW ORDER IMPORT
+// ============================================
+
+router.post('/preview-import', authenticateToken, upload.single('file'), async (req: Request, res: Response) => {
+  try {
+    const file = req.file as Express.Multer.File | undefined;
+    if (!file) {
+      res.status(400).json({ error: 'No file uploaded' });
+      return;
+    }
+
+    const rows = await parseCSVBuffer(file.buffer);
+    if (rows.length === 0) {
+      res.status(400).json({ error: 'CSV file is empty or has no valid rows' });
+      return;
+    }
+
+    // Group rows by Order Id
+    const orderGroups = new Map<string, BtReportRow[]>();
+    for (const row of rows) {
+      const orderId = row['Order Id']?.trim();
+      if (!orderId) continue;
+      const group = orderGroups.get(orderId) || [];
+      group.push(row);
+      orderGroups.set(orderId, group);
+    }
+
+    // Collect all unique SKU codes for batch lookup
+    const allSkuCodes = new Set<string>();
+    for (const group of orderGroups.values()) {
+      for (const row of group) {
+        const code = row['SKU Codes']?.trim();
+        if (code) allSkuCodes.add(code);
+      }
+    }
+
+    // Batch lookup: SKUs by skuCode or shopifyVariantId
+    const skuCodesArray = Array.from(allSkuCodes);
+    const matchedSkus = skuCodesArray.length > 0
+      ? await req.prisma.sku.findMany({
+          where: {
+            OR: [
+              { skuCode: { in: skuCodesArray } },
+              { shopifyVariantId: { in: skuCodesArray } },
+            ],
+          },
+          select: { id: true, skuCode: true, shopifyVariantId: true },
+        })
+      : [];
+
+    // Build SKU lookup map (code → sku)
+    const skuMap = new Map<string, { id: string; skuCode: string }>();
+    for (const sku of matchedSkus) {
+      skuMap.set(sku.skuCode, sku);
+      if (sku.shopifyVariantId) {
+        skuMap.set(sku.shopifyVariantId, sku);
+      }
+    }
+
+    // Collect all channelRefs for batch lookup of existing orders
+    const allChannelRefs = new Set<string>();
+    for (const group of orderGroups.values()) {
+      const ref = group[0]['Channel Ref']?.trim();
+      if (ref) allChannelRefs.add(ref);
+    }
+
+    const existingOrders = allChannelRefs.size > 0
+      ? await req.prisma.order.findMany({
+          where: { orderNumber: { in: Array.from(allChannelRefs) } },
+          include: { orderLines: { select: { id: true, channelItemId: true, channelFulfillmentStatus: true } } },
+        })
+      : [];
+    const existingOrderMap = new Map(existingOrders.map(o => [o.orderNumber, o]));
+
+    // Build preview orders
+    const previewOrders: PreviewOrder[] = [];
+    const unmatchedSkus = new Set<string>();
+
+    for (const [btOrderId, group] of orderGroups) {
+      const firstRow = group[0];
+      const channelRef = firstRow['Channel Ref']?.trim() || btOrderId;
+      const channel = normalizeChannel(firstRow['Channel Name']);
+      const orderDate = parseDate(firstRow['Order Date(IST)']);
+
+      const existingOrder = existingOrderMap.get(channelRef);
+
+      // Build lines
+      const lines: PreviewLine[] = [];
+      for (const row of group) {
+        const skuCode = row['SKU Codes']?.trim() || '';
+        const matched = skuMap.get(skuCode);
+        if (!matched) unmatchedSkus.add(skuCode);
+
+        const fulfillmentStatus = row['Fulfillment Status']?.trim() || '';
+        const channelItemId = row['Item ID']?.trim() || '';
+
+        // Check if this line exists on the existing order
+        let previousStatus: string | undefined;
+        if (existingOrder) {
+          const existingLine = existingOrder.orderLines.find(l => l.channelItemId === channelItemId);
+          if (existingLine?.channelFulfillmentStatus) {
+            previousStatus = existingLine.channelFulfillmentStatus;
+          }
+        }
+
+        lines.push({
+          channelItemId,
+          skuCode,
+          skuId: matched?.id ?? null,
+          skuMatched: !!matched,
+          skuTitle: row['SKU Titles']?.trim() || null,
+          qty: parseIntSafe(row['Quantity'], 1),
+          unitPrice: parsePriceToRupees(row["Buyer's Price"]),
+          fulfillmentStatus,
+          ...(previousStatus && previousStatus !== fulfillmentStatus ? { previousStatus } : {}),
+          courierName: row['Courier Name']?.trim() || null,
+          awbNumber: row['Courier Tracking Number']?.trim() || null,
+        });
+      }
+
+      // Determine import status
+      let importStatus: PreviewOrder['importStatus'] = 'new';
+      if (existingOrder) {
+        const hasChanges = lines.some(l => l.previousStatus !== undefined);
+        importStatus = hasChanges ? 'existing_updated' : 'existing_unchanged';
+      }
+
+      const totalAmount = lines.reduce((sum, l) => sum + l.unitPrice * l.qty, 0);
+
+      const customerName = firstRow['Customer Name']?.trim() || null;
+      const city = firstRow['City']?.trim() || null;
+      const warehouse = isWarehouseOrder(channel, customerName, city);
+
+      previewOrders.push({
+        channelOrderId: btOrderId,
+        channelRef,
+        channel,
+        importStatus,
+        ...(existingOrder ? { existingOrderId: existingOrder.id } : {}),
+        orderDate: orderDate?.toISOString() || '',
+        orderType: firstRow['Order Type']?.trim() || 'Unknown',
+        customerName: warehouse ? null : customerName,
+        city: warehouse ? null : city,
+        state: warehouse ? null : (firstRow['State']?.trim() || null),
+        zip: warehouse ? null : (firstRow['Zip']?.trim() || null),
+        lines,
+        totalAmount,
+      });
+    }
+
+    // Sort: new first, then updated, then unchanged
+    const statusOrder = { new: 0, existing_updated: 1, existing_unchanged: 2 };
+    previewOrders.sort((a, b) => statusOrder[a.importStatus] - statusOrder[b.importStatus]);
+
+    const summary = {
+      totalOrders: previewOrders.length,
+      newOrders: previewOrders.filter(o => o.importStatus === 'new').length,
+      existingUnchanged: previewOrders.filter(o => o.importStatus === 'existing_unchanged').length,
+      existingUpdated: previewOrders.filter(o => o.importStatus === 'existing_updated').length,
+      unmatchedSkus: Array.from(unmatchedSkus).filter(Boolean),
+    };
+
+    const response: PreviewResponse = { orders: previewOrders, summary, rawRows: rows };
+    res.json(response);
+  } catch (error) {
+    console.error('Preview import error:', error);
+    res.status(500).json({ error: 'Failed to preview import' });
+  }
+});
+
+// ============================================
+// EXECUTE ORDER IMPORT
+// ============================================
+
+router.post('/execute-import', authenticateToken, async (req: Request, res: Response) => {
+  try {
+    const { selectedOrders, rawRows, filename } = req.body as {
+      selectedOrders: PreviewOrder[];
+      rawRows: BtReportRow[];
+      filename: string;
+    };
+
+    if (!selectedOrders || selectedOrders.length === 0) {
+      res.status(400).json({ error: 'No orders selected' });
+      return;
+    }
+
+    const userId = (req as unknown as { user?: { userId?: string } }).user?.userId;
+
+    // Create import batch
+    const importBatch = await req.prisma.channelImportBatch.create({
+      data: {
+        channel: 'multiple',
+        filename: filename || 'channel-import.csv',
+        rowsTotal: rawRows?.length || 0,
+        rowsImported: 0,
+        rowsSkipped: 0,
+        rowsUpdated: 0,
+        importedBy: userId,
+        importType: 'order_import',
+      },
+    });
+
+    let ordersCreated = 0;
+    let ordersUpdated = 0;
+    const errors: Array<{ order: string; error: string }> = [];
+    const createdOrderIds: string[] = [];
+
+    for (const previewOrder of selectedOrders) {
+      try {
+        if (previewOrder.importStatus === 'new') {
+          // Only import lines with matched SKUs
+          const matchedLines = previewOrder.lines.filter(l => l.skuMatched && l.skuId);
+          if (matchedLines.length === 0) {
+            errors.push({ order: previewOrder.channelRef, error: 'No matched SKUs' });
+            continue;
+          }
+
+          const isCOD = previewOrder.orderType?.toUpperCase() === 'COD';
+          const totalAmount = matchedLines.reduce((sum, l) => sum + l.unitPrice * l.qty, 0);
+
+          // Build shipping address JSON (skip for warehouse orders)
+          let shippingAddress: string | null = null;
+          if (previewOrder.city || previewOrder.state || previewOrder.zip) {
+            shippingAddress = JSON.stringify({
+              city: previewOrder.city || '',
+              state: previewOrder.state || '',
+              zip: previewOrder.zip || '',
+            });
+          }
+
+          const order = await req.prisma.order.create({
+            data: {
+              orderNumber: previewOrder.channelRef,
+              channel: previewOrder.channel,
+              channelOrderId: previewOrder.channelOrderId,
+              customerName: previewOrder.customerName || 'Channel Customer',
+              shippingAddress,
+              orderDate: new Date(previewOrder.orderDate),
+              totalAmount,
+              paymentMethod: isCOD ? 'COD' : 'Prepaid',
+              paymentStatus: isCOD ? 'pending' : 'paid',
+              status: 'open',
+              orderLines: {
+                create: matchedLines.map(line => {
+                  const status = line.fulfillmentStatus?.toLowerCase() || '';
+                  return {
+                    skuId: line.skuId!,
+                    qty: line.qty,
+                    unitPrice: line.unitPrice,
+                    lineStatus: 'pending',
+                    channelFulfillmentStatus: line.fulfillmentStatus || null,
+                    channelItemId: line.channelItemId,
+                    courier: line.courierName || null,
+                    awbNumber: line.awbNumber || null,
+                    ...(status === 'shipped' || status === 'delivered' ? { shippedAt: new Date() } : {}),
+                    ...(status === 'delivered' ? { deliveredAt: new Date() } : {}),
+                  };
+                }),
+              },
+            },
+          });
+
+          ordersCreated++;
+
+          // Push to sheet if any line is "processing"
+          const hasProcessing = matchedLines.some(l => l.fulfillmentStatus?.toLowerCase() === 'processing');
+          if (hasProcessing) {
+            createdOrderIds.push(order.id);
+          }
+        } else if (previewOrder.importStatus === 'existing_updated' && previewOrder.existingOrderId) {
+          // Update existing order's lines
+          const existingLines = await req.prisma.orderLine.findMany({
+            where: { orderId: previewOrder.existingOrderId },
+            select: { id: true, channelItemId: true },
+          });
+          const existingLineMap = new Map(existingLines.map(l => [l.channelItemId, l.id]));
+
+          for (const line of previewOrder.lines) {
+            const existingLineId = existingLineMap.get(line.channelItemId);
+
+            if (existingLineId) {
+              // Update existing line
+              await req.prisma.orderLine.update({
+                where: { id: existingLineId },
+                data: {
+                  channelFulfillmentStatus: line.fulfillmentStatus || null,
+                  ...(line.courierName ? { courier: line.courierName } : {}),
+                  ...(line.awbNumber ? { awbNumber: line.awbNumber } : {}),
+                },
+              });
+            } else if (line.skuId) {
+              // New line on marketplace — create it
+              const status = line.fulfillmentStatus?.toLowerCase() || '';
+              await req.prisma.orderLine.create({
+                data: {
+                  orderId: previewOrder.existingOrderId,
+                  skuId: line.skuId,
+                  qty: line.qty,
+                  unitPrice: line.unitPrice,
+                  lineStatus: 'pending',
+                  channelFulfillmentStatus: line.fulfillmentStatus || null,
+                  channelItemId: line.channelItemId,
+                  courier: line.courierName || null,
+                  awbNumber: line.awbNumber || null,
+                  ...(status === 'shipped' || status === 'delivered' ? { shippedAt: new Date() } : {}),
+                  ...(status === 'delivered' ? { deliveredAt: new Date() } : {}),
+                },
+              });
+            }
+          }
+          ordersUpdated++;
+        }
+      } catch (orderError) {
+        const msg = orderError instanceof Error ? orderError.message : 'Unknown error';
+        errors.push({ order: previewOrder.channelRef, error: msg });
+      }
+    }
+
+    // Upsert all rawRows into ChannelOrderLine analytics (fire-and-forget for speed)
+    if (rawRows && rawRows.length > 0) {
+      const analyticsResults = { created: 0, updated: 0, skipped: 0 };
+      for (const row of rawRows) {
+        try {
+          const oid = row['Order Id']?.trim();
+          const iid = row['Item ID']?.trim();
+          if (!oid || !iid || !parseDate(row['Order Date(IST)'])) {
+            analyticsResults.skipped++;
+            continue;
+          }
+          const action = await upsertChannelOrderLine(req.prisma, row, importBatch.id);
+          if (action === 'created') analyticsResults.created++;
+          else analyticsResults.updated++;
+        } catch {
+          analyticsResults.skipped++;
+        }
+      }
+
+      await req.prisma.channelImportBatch.update({
+        where: { id: importBatch.id },
+        data: {
+          rowsImported: analyticsResults.created,
+          rowsUpdated: analyticsResults.updated,
+          rowsSkipped: analyticsResults.skipped,
+          ordersCreated,
+          ordersUpdated,
+        },
+      });
+    }
+
+    // Push processing orders to Google Sheet (fire-and-forget)
+    for (const orderId of createdOrderIds) {
+      pushERPOrderToSheet(orderId).catch(() => {});
+    }
+
+    res.json({
+      message: 'Import completed',
+      batchId: importBatch.id,
+      ordersCreated,
+      ordersUpdated,
+      errors: errors.slice(0, 20),
+    });
+  } catch (error) {
+    console.error('Execute import error:', error);
+    res.status(500).json({ error: 'Failed to execute import' });
   }
 });
 

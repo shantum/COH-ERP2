@@ -456,6 +456,7 @@ model Order {
   paymentConfirmedAt   DateTime?
   paymentConfirmedBy   String?
   paymentStatus        String?            @default("pending")
+  channelOrderId       String?            // BT Order Id for channel imports (e.g., "16557031119098")
   customer             Customer?          @relation(fields: [customerId], references: [id])
   shopifyCache         ShopifyOrderCache? @relation(fields: [shopifyOrderId], references: [id])
   orderLines           OrderLine[]
@@ -485,6 +486,7 @@ model Order {
   @@index([isArchived, releasedToShipped, orderDate])
   @@index([customerId, paymentStatus])
   @@index([paymentMethod, codRemittedAt])
+  @@index([channelOrderId])
 }
 
 // ============================================
@@ -558,6 +560,9 @@ model OrderLine {
   refundedAt           DateTime?
   // Custom shipping address (for multi-destination orders)
   shippingAddress      String?
+  // Channel import fields
+  channelFulfillmentStatus  String?    // Raw CSV status: processing, shipped, delivered, manifested, packed, cancelled
+  channelItemId             String?    // BT Item ID for line-level matching on re-upload
 
   // === RETURN LIFECYCLE ===
   returnBatchNumber         String?       // Groups lines returned together, e.g., "64168/1", "64168/2"
@@ -1615,6 +1620,9 @@ model ChannelImportBatch {
   dateRangeEnd   DateTime?
   importedAt    DateTime  @default(now())
   importedBy    String?                       // User ID
+  importType    String    @default("analytics")  // "analytics" | "order_import"
+  ordersCreated Int       @default(0)
+  ordersUpdated Int       @default(0)
 
   @@index([channel])
   @@index([importedAt])
