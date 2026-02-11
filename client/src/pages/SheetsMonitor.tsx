@@ -195,9 +195,11 @@ function PreviewResultCard({ title, preview, color, onClose }: {
     color: 'emerald' | 'blue';
     onClose: () => void;
 }) {
+    const [showDetails, setShowDetails] = useState(false);
     const borderColor = color === 'emerald' ? 'border-emerald-200' : 'border-blue-200';
     const bgColor = color === 'emerald' ? 'bg-emerald-50' : 'bg-blue-50';
     const textColor = color === 'emerald' ? 'text-emerald-700' : 'text-blue-700';
+    const changePrefix = color === 'emerald' ? '+' : '-';
 
     const errors = Object.entries(preview.validationErrors ?? {});
     const skipReasons = Object.entries(preview.skipReasons ?? {});
@@ -224,7 +226,7 @@ function PreviewResultCard({ title, preview, color, onClose }: {
                     <div className={`text-sm font-semibold ${textColor}`}>{preview.totalRows}</div>
                 </div>
                 <div className="rounded p-2 text-center bg-green-50">
-                    <div className="text-xs text-gray-500">Valid</div>
+                    <div className="text-xs text-gray-500">Ready</div>
                     <div className="text-sm font-semibold text-green-700">{preview.valid}</div>
                 </div>
                 <div className={`rounded p-2 text-center ${preview.invalid > 0 ? 'bg-red-50' : 'bg-gray-50'}`}>
@@ -232,10 +234,38 @@ function PreviewResultCard({ title, preview, color, onClose }: {
                     <div className={`text-sm font-semibold ${preview.invalid > 0 ? 'text-red-600' : 'text-gray-400'}`}>{preview.invalid}</div>
                 </div>
                 <div className={`rounded p-2 text-center ${preview.duplicates > 0 ? 'bg-amber-50' : 'bg-gray-50'}`}>
-                    <div className="text-xs text-gray-500">Duplicates</div>
+                    <div className="text-xs text-gray-500">Already Done</div>
                     <div className={`text-sm font-semibold ${preview.duplicates > 0 ? 'text-amber-600' : 'text-gray-400'}`}>{preview.duplicates}</div>
                 </div>
             </div>
+
+            {/* Sync check — the key question */}
+            {balances.length > 0 && (
+                mismatches === 0 ? (
+                    <div className="mb-3 px-3 py-2 bg-emerald-50 border border-emerald-200 rounded flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+                        <span className="text-xs text-emerald-800">
+                            ERP and Sheet balances are in sync — safe to ingest
+                        </span>
+                    </div>
+                ) : (
+                    <div className="mb-3 px-3 py-2 bg-red-50 border border-red-200 rounded">
+                        <div className="flex items-center gap-2">
+                            <AlertCircle size={14} className="text-red-500 shrink-0" />
+                            <span className="text-xs font-medium text-red-800">
+                                {mismatches} SKU{mismatches !== 1 ? 's' : ''} out of sync between ERP and Sheet
+                            </span>
+                        </div>
+                        <div className="mt-1.5 text-[10px] text-red-600 space-y-0.5">
+                            {balances.filter(b => !b.match).slice(0, 5).map(b => (
+                                <div key={b.skuCode}>
+                                    {b.skuCode}: ERP says {b.erpBalance}, Sheet says {b.colR}
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )
+            )}
 
             {/* Validation errors */}
             {errors.length > 0 && (
@@ -257,72 +287,55 @@ function PreviewResultCard({ title, preview, color, onClose }: {
                 </div>
             )}
 
-            {/* ERP vs Sheet balance comparison */}
+            {/* Balance changes table — simple: SKU, Now, Change, After */}
             {balances.length > 0 && (
                 <div>
-                    <div className="flex items-center gap-2 mb-1">
+                    <div className="flex items-center justify-between mb-1">
                         <span className="text-xs font-medium text-gray-600">
-                            ERP vs Sheet ({balances.length} SKUs)
+                            Balance Changes ({balances.length} SKUs)
                         </span>
-                        {mismatches === 0 ? (
-                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-emerald-100 text-emerald-700">
-                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                                All match
-                            </span>
-                        ) : (
-                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-red-100 text-red-700">
-                                <AlertCircle size={10} />
-                                {mismatches} mismatch{mismatches !== 1 ? 'es' : ''}
-                            </span>
-                        )}
+                        <button
+                            onClick={() => setShowDetails(!showDetails)}
+                            className="text-[10px] text-gray-400 hover:text-gray-600"
+                        >
+                            {showDetails ? 'Hide sheet details' : 'Show sheet details'}
+                        </button>
                     </div>
-                    <div className="border rounded-lg overflow-hidden max-h-80 overflow-y-auto">
+                    <div className="border rounded-lg overflow-hidden max-h-72 overflow-y-auto">
                         <table className="w-full text-xs">
                             <thead className="bg-gray-50 sticky top-0">
                                 <tr>
-                                    <th className="text-left px-2 py-1.5 font-medium text-gray-600" rowSpan={2}>SKU</th>
-                                    <th className="text-center px-2 py-1 font-medium text-gray-500 border-b border-gray-200" colSpan={4}>Current</th>
-                                    <th className="text-center px-2 py-1 font-medium text-gray-400 border-b border-l border-gray-200" colSpan={1}>Pending</th>
-                                    <th className="text-center px-2 py-1 font-medium text-indigo-600 border-b border-l border-gray-200" colSpan={3}>After Ingestion</th>
-                                </tr>
-                                <tr>
-                                    <th className="text-right px-2 py-1 font-medium text-gray-600">ERP</th>
-                                    <th className="text-right px-2 py-1 font-medium text-gray-600">Sheet R</th>
-                                    <th className="text-center px-2 py-1 font-medium text-gray-600">Sync</th>
-                                    <th className="text-right px-2 py-1 font-medium text-gray-600">Col C</th>
-                                    <th className="text-right px-2 py-1 font-medium text-gray-400 border-l border-gray-200">Qty</th>
-                                    <th className="text-right px-2 py-1 font-medium text-indigo-600 border-l border-gray-200">ERP</th>
-                                    <th className="text-right px-2 py-1 font-medium text-indigo-600">Col C</th>
-                                    <th className="text-center px-2 py-1 font-medium text-indigo-600">C Delta</th>
+                                    <th className="text-left px-2 py-1.5 font-medium text-gray-600">SKU</th>
+                                    <th className="text-right px-2 py-1.5 font-medium text-gray-600">Now</th>
+                                    <th className="text-right px-2 py-1.5 font-medium text-gray-600">Change</th>
+                                    <th className="text-right px-2 py-1.5 font-medium text-gray-600">After</th>
+                                    {showDetails && (
+                                        <>
+                                            <th className="text-right px-2 py-1.5 font-medium text-gray-400 border-l border-gray-200">Sheet R</th>
+                                            <th className="text-right px-2 py-1.5 font-medium text-gray-400">Col C</th>
+                                            <th className="text-right px-2 py-1.5 font-medium text-gray-400">Col D</th>
+                                            <th className="text-right px-2 py-1.5 font-medium text-gray-400">Col E</th>
+                                        </>
+                                    )}
                                 </tr>
                             </thead>
                             <tbody className="divide-y">
-                                {balances.map((b) => {
-                                    const cDelta = Math.round((b.afterColC - b.colC) * 100) / 100;
-                                    return (
-                                        <tr key={b.skuCode} className={b.match ? 'hover:bg-gray-50' : 'bg-red-50 hover:bg-red-100'}>
-                                            <td className="px-2 py-1 font-mono text-gray-700">{b.skuCode}</td>
-                                            <td className="px-2 py-1 text-right font-medium text-gray-900">{b.erpBalance}</td>
-                                            <td className={`px-2 py-1 text-right font-medium ${b.match ? 'text-gray-900' : 'text-red-600'}`}>{b.colR}</td>
-                                            <td className="px-2 py-1 text-center">
-                                                {b.match
-                                                    ? <span className="text-emerald-600">&#10003;</span>
-                                                    : <span className="text-red-600 font-bold">&#10007;</span>
-                                                }
-                                            </td>
-                                            <td className="px-2 py-1 text-right text-gray-700">{b.colC}</td>
-                                            <td className={`px-2 py-1 text-right font-medium border-l border-gray-100 ${textColor}`}>{b.pendingQty}</td>
-                                            <td className="px-2 py-1 text-right font-medium text-indigo-700 border-l border-gray-100">{b.afterErpBalance}</td>
-                                            <td className="px-2 py-1 text-right font-medium text-indigo-700">{b.afterColC}</td>
-                                            <td className="px-2 py-1 text-center">
-                                                {cDelta === 0
-                                                    ? <span className="text-emerald-600 font-medium">0</span>
-                                                    : <span className="text-red-600 font-bold">{cDelta > 0 ? '+' : ''}{cDelta}</span>
-                                                }
-                                            </td>
-                                        </tr>
-                                    );
-                                })}
+                                {balances.map((b) => (
+                                    <tr key={b.skuCode} className={b.match ? 'hover:bg-gray-50' : 'bg-red-50 hover:bg-red-100'}>
+                                        <td className="px-2 py-1 font-mono text-gray-700">{b.skuCode}</td>
+                                        <td className="px-2 py-1 text-right text-gray-900">{b.erpBalance}</td>
+                                        <td className={`px-2 py-1 text-right font-medium ${textColor}`}>{changePrefix}{b.pendingQty}</td>
+                                        <td className="px-2 py-1 text-right font-semibold text-gray-900">{b.afterErpBalance}</td>
+                                        {showDetails && (
+                                            <>
+                                                <td className={`px-2 py-1 text-right border-l border-gray-100 ${b.match ? 'text-gray-400' : 'text-red-500'}`}>{b.colR}</td>
+                                                <td className="px-2 py-1 text-right text-gray-400">{b.colC}</td>
+                                                <td className="px-2 py-1 text-right text-gray-400">{b.colD}</td>
+                                                <td className="px-2 py-1 text-right text-gray-400">{b.colE}</td>
+                                            </>
+                                        )}
+                                    </tr>
+                                ))}
                             </tbody>
                         </table>
                     </div>
