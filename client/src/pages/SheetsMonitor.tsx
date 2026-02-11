@@ -804,11 +804,16 @@ export default function SheetsMonitor() {
                                 className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                                 {pushBalancesMutation.isPending ? (
-                                    <Loader2 size={14} className="animate-spin" />
+                                    <>
+                                        <Loader2 size={14} className="animate-spin" />
+                                        Pushing to Sheet...
+                                    </>
                                 ) : (
-                                    <Upload size={14} />
+                                    <>
+                                        <Upload size={14} />
+                                        Push ERP → Sheet
+                                    </>
                                 )}
-                                Push ERP → Sheet
                             </button>
                         )}
                         <button
@@ -817,11 +822,16 @@ export default function SheetsMonitor() {
                             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             {checkSyncMutation.isPending ? (
-                                <Loader2 size={14} className="animate-spin" />
+                                <>
+                                    <Loader2 size={14} className="animate-spin" />
+                                    Checking...
+                                </>
                             ) : (
-                                <RefreshCw size={14} />
+                                <>
+                                    <RefreshCw size={14} />
+                                    Check Sync
+                                </>
                             )}
-                            Check Sync
                         </button>
                     </div>
                 </div>
