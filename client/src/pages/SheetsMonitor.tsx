@@ -13,6 +13,7 @@ import { useServerFn } from '@tanstack/react-start';
 import {
     Loader2, Play, ChevronDown, ChevronRight,
     ArrowRightLeft, Database, Package, AlertCircle, Eye, X,
+    RefreshCw, Upload, CheckCircle2,
 } from 'lucide-react';
 import {
     getBackgroundJobs,
@@ -101,6 +102,18 @@ interface PreviewResult {
         skuBalances: BalanceSkuSummary[];
         allInSync: boolean;
     };
+}
+
+interface SyncCheckResult {
+    totalSkusInDb: number;
+    mastersheetMatched: number;
+    mastersheetWouldChange: number;
+    ledgerMatched: number;
+    ledgerWouldChange: number;
+    alreadyCorrect: number;
+    wouldChange: number;
+    sampleChanges: Array<{ skuCode: string; sheet: string; sheetValue: number; dbValue: number }>;
+    durationMs: number;
 }
 
 interface OffloadStatusResponse {
@@ -567,6 +580,36 @@ export default function SheetsMonitor() {
         },
     });
 
+    // Sync check (ERP vs Sheet R column)
+    const [syncCheckResult, setSyncCheckResult] = useState<SyncCheckResult | null>(null);
+
+    const checkSyncMutation = useMutation({
+        mutationFn: async () => {
+            const result = await triggerFn({
+                data: { jobId: 'preview_push_balances' as const },
+            });
+            if (!result.success) throw new Error(result.error?.message);
+            return (result.data?.result ?? null) as SyncCheckResult | null;
+        },
+        onSuccess: (data) => {
+            if (data) setSyncCheckResult(data);
+        },
+    });
+
+    const pushBalancesMutation = useMutation({
+        mutationFn: async () => {
+            const result = await triggerFn({
+                data: { jobId: 'push_balances' as const },
+            });
+            if (!result.success) throw new Error(result.error?.message);
+            return result.data;
+        },
+        onSuccess: () => {
+            setSyncCheckResult(null);
+            invalidateAll();
+        },
+    });
+
     // Derived data
     const bufferCounts = offloadStatus?.bufferCounts ?? { inward: 0, outward: 0 };
     const inwardState = offloadStatus?.ingestInward;
@@ -739,6 +782,145 @@ export default function SheetsMonitor() {
                     onClose={() => setPreviewOutwardResult(null)}
                 />
             )}
+
+            {/* ── ERP ↔ Sheet Sync Check ── */}
+            <div className="bg-white rounded-lg border border-gray-200 p-4 shadow-sm">
+                <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                        <RefreshCw size={16} className="text-gray-500" />
+                        <h3 className="text-sm font-medium text-gray-900">ERP ↔ Sheet Balance Sync</h3>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        {syncCheckResult && syncCheckResult.wouldChange > 0 && (
+                            <button
+                                onClick={() => pushBalancesMutation.mutate()}
+                                disabled={pushBalancesMutation.isPending}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                {pushBalancesMutation.isPending ? (
+                                    <Loader2 size={14} className="animate-spin" />
+                                ) : (
+                                    <Upload size={14} />
+                                )}
+                                Push ERP → Sheet
+                            </button>
+                        )}
+                        <button
+                            onClick={() => checkSyncMutation.mutate()}
+                            disabled={checkSyncMutation.isPending}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            {checkSyncMutation.isPending ? (
+                                <Loader2 size={14} className="animate-spin" />
+                            ) : (
+                                <RefreshCw size={14} />
+                            )}
+                            Check Sync
+                        </button>
+                    </div>
+                </div>
+
+                {/* Mutation errors */}
+                {checkSyncMutation.error && (
+                    <div className="mb-3 text-xs text-red-600 flex items-center gap-1">
+                        <AlertCircle size={12} /> {checkSyncMutation.error.message}
+                    </div>
+                )}
+                {pushBalancesMutation.error && (
+                    <div className="mb-3 text-xs text-red-600 flex items-center gap-1">
+                        <AlertCircle size={12} /> Push failed: {pushBalancesMutation.error.message}
+                    </div>
+                )}
+
+                {/* Push success */}
+                {pushBalancesMutation.isSuccess && !syncCheckResult && (
+                    <div className="mb-3 px-3 py-2 bg-emerald-50 border border-emerald-200 rounded flex items-center gap-2">
+                        <CheckCircle2 size={14} className="text-emerald-600" />
+                        <span className="text-xs text-emerald-800">
+                            ERP balances pushed to Sheet. Run Check Sync again to verify.
+                        </span>
+                    </div>
+                )}
+
+                {/* Results */}
+                {syncCheckResult ? (
+                    <div>
+                        {syncCheckResult.wouldChange === 0 ? (
+                            <div className="px-3 py-2 bg-emerald-50 border border-emerald-200 rounded flex items-center gap-2">
+                                <CheckCircle2 size={14} className="text-emerald-600" />
+                                <span className="text-xs text-emerald-800">
+                                    All in sync — {syncCheckResult.alreadyCorrect} SKUs match between ERP and Sheet
+                                </span>
+                                <span className="text-[10px] text-gray-400 ml-auto">{formatDuration(syncCheckResult.durationMs)}</span>
+                            </div>
+                        ) : (
+                            <div>
+                                <div className="px-3 py-2 bg-amber-50 border border-amber-200 rounded mb-3">
+                                    <div className="flex items-center gap-2">
+                                        <AlertCircle size={14} className="text-amber-600 shrink-0" />
+                                        <span className="text-xs text-amber-800">
+                                            <strong>{syncCheckResult.wouldChange}</strong> SKU{syncCheckResult.wouldChange !== 1 ? 's' : ''} out of sync
+                                            {syncCheckResult.alreadyCorrect > 0 && (
+                                                <span className="text-gray-500"> ({syncCheckResult.alreadyCorrect} already correct)</span>
+                                            )}
+                                        </span>
+                                        <span className="text-[10px] text-gray-400 ml-auto">{formatDuration(syncCheckResult.durationMs)}</span>
+                                    </div>
+                                    {(syncCheckResult.mastersheetWouldChange > 0 || syncCheckResult.ledgerWouldChange > 0) && (
+                                        <div className="mt-1.5 text-[10px] text-amber-700 pl-6">
+                                            {syncCheckResult.mastersheetWouldChange > 0 && (
+                                                <div>Mastersheet Inventory: {syncCheckResult.mastersheetWouldChange} differ</div>
+                                            )}
+                                            {syncCheckResult.ledgerWouldChange > 0 && (
+                                                <div>Office Ledger Balance: {syncCheckResult.ledgerWouldChange} differ</div>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Sample mismatches */}
+                                {syncCheckResult.sampleChanges.length > 0 && (
+                                    <div className="border rounded-lg overflow-hidden">
+                                        <table className="w-full text-xs">
+                                            <thead className="bg-gray-50">
+                                                <tr>
+                                                    <th className="text-left px-2 py-1.5 font-medium text-gray-600">SKU</th>
+                                                    <th className="text-left px-2 py-1.5 font-medium text-gray-600">Sheet</th>
+                                                    <th className="text-right px-2 py-1.5 font-medium text-gray-600">Sheet (R)</th>
+                                                    <th className="text-right px-2 py-1.5 font-medium text-gray-600">ERP</th>
+                                                    <th className="text-right px-2 py-1.5 font-medium text-gray-600">Diff</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y">
+                                                {syncCheckResult.sampleChanges.map((c, i) => (
+                                                    <tr key={i} className="hover:bg-gray-50">
+                                                        <td className="px-2 py-1 font-mono text-gray-700">{c.skuCode}</td>
+                                                        <td className="px-2 py-1 text-gray-500 text-[10px]">{c.sheet === 'Mastersheet Inventory' ? 'Mastersheet' : 'Ledger'}</td>
+                                                        <td className="px-2 py-1 text-right text-gray-500">{c.sheetValue}</td>
+                                                        <td className="px-2 py-1 text-right font-medium text-gray-900">{c.dbValue}</td>
+                                                        <td className={`px-2 py-1 text-right font-medium ${c.dbValue > c.sheetValue ? 'text-emerald-600' : 'text-red-600'}`}>
+                                                            {c.dbValue - c.sheetValue > 0 ? '+' : ''}{c.dbValue - c.sheetValue}
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                        {syncCheckResult.wouldChange > syncCheckResult.sampleChanges.length && (
+                                            <div className="px-2 py-1 bg-gray-50 text-[10px] text-gray-400 text-center">
+                                                Showing {syncCheckResult.sampleChanges.length} of {syncCheckResult.wouldChange}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                ) : (
+                    <div className="text-xs text-gray-400 text-center py-2">
+                        Click "Check Sync" to compare ERP balances against the Sheet R column
+                    </div>
+                )}
+            </div>
 
             {/* ── Section 2: Last Sync Results (3 columns) ── */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
