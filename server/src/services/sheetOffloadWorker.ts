@@ -56,7 +56,11 @@ import {
     CLEANUP_RETENTION_DAYS,
     INVENTORY_BALANCE_FORMULA_TEMPLATE,
     LIVE_BALANCE_FORMULA_V2_TEMPLATE,
+    FABRIC_BALANCES_HEADERS,
+    FABRIC_BALANCES_COLS,
+    FABRIC_BALANCES_COUNT_DATETIME,
 } from '../config/sync/sheets.js';
+import { generateFabricColourCode } from '../config/fabric/codes.js';
 
 // ============================================
 // TYPES
@@ -109,6 +113,36 @@ interface PushBalancesResult {
     startedAt: string;
     skusUpdated: number;
     errors: number;
+    durationMs: number;
+    error: string | null;
+}
+
+interface PushFabricBalancesResult {
+    startedAt: string;
+    totalColours: number;
+    newColoursAdded: number;
+    balancesUpdated: number;
+    errors: number;
+    durationMs: number;
+    error: string | null;
+}
+
+interface ImportFabricBalancesResult {
+    startedAt: string;
+    rowsWithCounts: number;
+    adjustmentsCreated: number;
+    alreadyMatching: number;
+    skipped: number;
+    skipReasons: Record<string, number>;
+    adjustments: Array<{
+        fabricCode: string;
+        colour: string;
+        fabric: string;
+        systemBalance: number;
+        physicalCount: number;
+        delta: number;
+        type: 'inward' | 'outward';
+    }>;
     durationMs: number;
     error: string | null;
 }
@@ -228,6 +262,8 @@ interface OffloadStatus {
     cleanupDone: JobState<CleanupDoneResult>;
     migrateFormulas: JobState<MigrateFormulasResult>;
     pushBalances: JobState<PushBalancesResult>;
+    pushFabricBalances: JobState<PushFabricBalancesResult>;
+    importFabricBalances: JobState<ImportFabricBalancesResult>;
     schedulerActive: boolean;
 }
 
@@ -316,6 +352,20 @@ const pushBalancesState: JobState<PushBalancesResult> = {
     recentRuns: [],
 };
 
+const pushFabricBalancesState: JobState<PushFabricBalancesResult> = {
+    isRunning: false,
+    lastRunAt: null,
+    lastResult: null,
+    recentRuns: [],
+};
+
+const importFabricBalancesState: JobState<ImportFabricBalancesResult> = {
+    isRunning: false,
+    lastRunAt: null,
+    lastResult: null,
+    recentRuns: [],
+};
+
 // ============================================
 // HELPERS
 // ============================================
@@ -379,6 +429,58 @@ function parseSheetDate(value: string | undefined): Date | null {
     }
 
     const d = new Date(year, month - 1, day);
+    if (!isNaN(d.getTime())) return d;
+    return null;
+}
+
+/**
+ * Parses a date+time string from the sheet. Handles:
+ *   "10/02/2026 7:00 PM"  → DD/MM/YYYY h:mm AM/PM
+ *   "10/02/2026 19:00"    → DD/MM/YYYY HH:mm
+ *   "2026-02-10 19:00"    → ISO-ish
+ *   "10/02/2026"          → date only (midnight)
+ *
+ * Returns IST-interpreted Date (no timezone conversion — the entered time IS the local time).
+ */
+function parseSheetDateTime(value: string | undefined): Date | null {
+    if (!value?.trim()) return null;
+    const trimmed = value.trim();
+
+    // Try ISO-ish first: "2026-02-10 19:00" or "2026-02-10T19:00"
+    if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) {
+        const parsed = new Date(trimmed);
+        if (!isNaN(parsed.getTime()) && parsed.getFullYear() > 1900) return parsed;
+    }
+
+    // DD/MM/YYYY with optional time
+    const match = trimmed.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})(?:\s+(.+))?$/);
+    if (!match) return null;
+
+    const a = Number(match[1]);
+    const b = Number(match[2]);
+    const year = Number(match[3]);
+    const timeStr = match[4]?.trim();
+
+    // DD/MM default (Indian locale)
+    let day: number, month: number;
+    if (a > 12) { day = a; month = b; }
+    else if (b > 12) { month = a; day = b; }
+    else { day = a; month = b; }
+
+    let hours = 0, minutes = 0;
+    if (timeStr) {
+        // "7:00 PM", "19:00", "7 PM", "7:30pm"
+        const timeMatch = timeStr.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/i);
+        if (timeMatch) {
+            hours = Number(timeMatch[1]);
+            minutes = Number(timeMatch[2] || 0);
+            const ampm = timeMatch[3]?.toLowerCase();
+            if (ampm === 'pm' && hours < 12) hours += 12;
+            if (ampm === 'am' && hours === 12) hours = 0;
+        }
+    }
+
+    const d = new Date(year, month - 1, day, hours, minutes);
     if (!isNaN(d.getTime())) return d;
     return null;
 }
@@ -3040,8 +3142,562 @@ function getStatus(): OffloadStatus {
             lastResult: pushBalancesState.lastResult,
             recentRuns: [...pushBalancesState.recentRuns],
         },
+        pushFabricBalances: {
+            isRunning: pushFabricBalancesState.isRunning,
+            lastRunAt: pushFabricBalancesState.lastRunAt,
+            lastResult: pushFabricBalancesState.lastResult,
+            recentRuns: [...pushFabricBalancesState.recentRuns],
+        },
+        importFabricBalances: {
+            isRunning: importFabricBalancesState.isRunning,
+            lastRunAt: importFabricBalancesState.lastRunAt,
+            lastResult: importFabricBalancesState.lastResult,
+            recentRuns: [...importFabricBalancesState.recentRuns],
+        },
         schedulerActive,
     };
+}
+
+// ============================================
+// JOB: PUSH FABRIC BALANCES TO SHEET
+// ============================================
+
+/**
+ * Syncs all active fabric colours to the "Fabric Balances" tab in the Mastersheet.
+ *
+ * - Adds any new colours that don't exist in the sheet yet
+ * - Updates System Balance (col F) for all rows
+ * - Preserves user-entered Physical Count (col G), Notes (col I), and Status (col J)
+ * - Recalculates Variance formulas (col H)
+ */
+async function triggerPushFabricBalances(): Promise<PushFabricBalancesResult | null> {
+    if (pushFabricBalancesState.isRunning) {
+        sheetsLogger.warn('triggerPushFabricBalances skipped — already running');
+        return null;
+    }
+
+    pushFabricBalancesState.isRunning = true;
+    const startedAt = new Date().toISOString();
+    const start = Date.now();
+
+    try {
+        // 1. Fetch all active fabric colours from DB
+        const colours = await prisma.fabricColour.findMany({
+            where: { isActive: true },
+            include: {
+                fabric: { include: { material: true } },
+            },
+        });
+
+        // Sort: Material → Fabric → Colour
+        colours.sort((a, b) => {
+            const matA = a.fabric?.material?.name ?? '';
+            const matB = b.fabric?.material?.name ?? '';
+            if (matA !== matB) return matA.localeCompare(matB);
+            const fabA = a.fabric?.name ?? '';
+            const fabB = b.fabric?.name ?? '';
+            if (fabA !== fabB) return fabA.localeCompare(fabB);
+            return a.colourName.localeCompare(b.colourName);
+        });
+
+        sheetsLogger.info({ count: colours.length }, 'pushFabricBalances: fetched fabric colours');
+
+        // 2. Read existing sheet to preserve user-entered data
+        const tabName = MASTERSHEET_TABS.FABRIC_BALANCES;
+        let existingRows: string[][] = [];
+        try {
+            existingRows = await readRange(ORDERS_MASTERSHEET_ID, `'${tabName}'!A:J`);
+        } catch {
+            sheetsLogger.warn('pushFabricBalances: Fabric Balances tab not found — will write fresh');
+        }
+
+        // Build map of existing data keyed by fabric code
+        const preservedData = new Map<string, { physicalCount: string; notes: string; status: string }>();
+        for (let i = 1; i < existingRows.length; i++) {
+            const row = existingRows[i];
+            const code = String(row?.[FABRIC_BALANCES_COLS.FABRIC_CODE] ?? '').trim();
+            if (code) {
+                preservedData.set(code, {
+                    physicalCount: String(row?.[FABRIC_BALANCES_COLS.PHYSICAL_COUNT] ?? ''),
+                    notes: String(row?.[FABRIC_BALANCES_COLS.NOTES] ?? ''),
+                    status: String(row?.[FABRIC_BALANCES_COLS.STATUS] ?? ''),
+                });
+            }
+        }
+
+        const existingCodes = new Set(preservedData.keys());
+        let newColoursAdded = 0;
+
+        // 3. Build data rows
+        const formatUnit = (unit: string | null) => {
+            if (!unit) return '';
+            if (unit === 'meters' || unit === 'm') return 'm';
+            return unit;
+        };
+
+        const dataRows: (string | number)[][] = colours.map((fc, i) => {
+            const materialName = fc.fabric?.material?.name ?? 'Unknown';
+            const fabricName = fc.fabric?.name ?? 'Unknown';
+            const code = fc.code || generateFabricColourCode(materialName, fabricName, fc.colourName);
+            const rowNum = i + 2;
+
+            // Preserve user data — but clear Physical Count & Status for DONE rows (fresh slate)
+            const preserved = preservedData.get(code);
+            if (!existingCodes.has(code)) newColoursAdded++;
+            const isDone = preserved?.status?.startsWith('DONE:') ?? false;
+
+            return [
+                code,
+                materialName,
+                fabricName,
+                fc.colourName,
+                formatUnit(fc.fabric?.unit ?? ''),
+                fc.currentBalance,
+                isDone ? '' : (preserved?.physicalCount ?? ''),
+                `=IF(G${rowNum}="","",G${rowNum}-F${rowNum})`,
+                isDone ? '' : (preserved?.notes ?? ''),
+                isDone ? '' : (preserved?.status ?? ''),
+            ];
+        });
+
+        // 4. Write headers + data
+        const allRows: (string | number)[][] = [[...FABRIC_BALANCES_HEADERS], ...dataRows];
+
+        await writeRange(
+            ORDERS_MASTERSHEET_ID,
+            `'${tabName}'!A1:J${allRows.length}`,
+            allRows,
+        );
+
+        // 5. Clear the Count Date + Time cells (fresh slate for next count)
+        await batchWriteRanges(ORDERS_MASTERSHEET_ID, [
+            { range: `'${tabName}'!${FABRIC_BALANCES_COUNT_DATETIME.DATE_CELL}`, values: [['']] },
+            { range: `'${tabName}'!${FABRIC_BALANCES_COUNT_DATETIME.TIME_CELL}`, values: [['']] },
+        ]);
+
+        sheetsLogger.info({
+            totalColours: colours.length,
+            newColoursAdded,
+            existingPreserved: preservedData.size,
+        }, 'pushFabricBalances: sheet updated');
+
+        const result: PushFabricBalancesResult = {
+            startedAt,
+            totalColours: colours.length,
+            newColoursAdded,
+            balancesUpdated: colours.length,
+            errors: 0,
+            durationMs: Date.now() - start,
+            error: null,
+        };
+
+        pushFabricBalancesState.lastRunAt = new Date();
+        pushFabricBalancesState.lastResult = result;
+        pushRecentRun(pushFabricBalancesState, {
+            startedAt,
+            durationMs: result.durationMs,
+            count: result.totalColours,
+            error: null,
+        });
+
+        return result;
+    } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : 'Unknown error';
+        sheetsLogger.error({ error: message }, 'triggerPushFabricBalances failed');
+
+        const result: PushFabricBalancesResult = {
+            startedAt,
+            totalColours: 0,
+            newColoursAdded: 0,
+            balancesUpdated: 0,
+            errors: 1,
+            durationMs: Date.now() - start,
+            error: message,
+        };
+
+        pushFabricBalancesState.lastRunAt = new Date();
+        pushFabricBalancesState.lastResult = result;
+        pushRecentRun(pushFabricBalancesState, {
+            startedAt,
+            durationMs: result.durationMs,
+            count: 0,
+            error: message,
+        });
+
+        return result;
+    } finally {
+        pushFabricBalancesState.isRunning = false;
+    }
+}
+
+// ============================================
+// JOB: IMPORT FABRIC BALANCES FROM SHEET
+// ============================================
+
+/**
+ * Reads Physical Count values from the "Fabric Balances" sheet tab,
+ * compares with DB balances **at the count time**, and creates backdated
+ * adjustment FabricColourTransactions to reconcile.
+ *
+ * The team enters a "Count Date/Time" (cell M1) — when they physically
+ * counted the stock. The import calculates what the DB balance was at
+ * that exact time, so transactions after the count (e.g., today's sampling)
+ * don't affect the adjustment.
+ *
+ * Only processes rows where:
+ *   - Physical Count (col G) is filled
+ *   - Status (col J) does NOT start with "DONE:"
+ *
+ * After creating transactions:
+ *   - Pushes fresh current balances to System Balance column
+ *   - Clears Physical Count, Notes, Status (clean for next count)
+ *   - Clears the Count Date/Time field
+ */
+async function triggerImportFabricBalances(): Promise<ImportFabricBalancesResult | null> {
+    if (importFabricBalancesState.isRunning) {
+        sheetsLogger.warn('triggerImportFabricBalances skipped — already running');
+        return null;
+    }
+
+    importFabricBalancesState.isRunning = true;
+    const startedAt = new Date().toISOString();
+    const start = Date.now();
+
+    try {
+        const tabName = MASTERSHEET_TABS.FABRIC_BALANCES;
+
+        // 1. Read the sheet + Count Date + Time cells
+        const [rows, countDateRows, countTimeRows] = await Promise.all([
+            readRange(ORDERS_MASTERSHEET_ID, `'${tabName}'!A:J`),
+            readRange(ORDERS_MASTERSHEET_ID, `'${tabName}'!${FABRIC_BALANCES_COUNT_DATETIME.DATE_CELL}`),
+            readRange(ORDERS_MASTERSHEET_ID, `'${tabName}'!${FABRIC_BALANCES_COUNT_DATETIME.TIME_CELL}`),
+        ]);
+
+        if (rows.length <= 1) {
+            const result: ImportFabricBalancesResult = {
+                startedAt, rowsWithCounts: 0, adjustmentsCreated: 0,
+                alreadyMatching: 0, skipped: 0, skipReasons: {},
+                adjustments: [], durationMs: Date.now() - start, error: 'No data rows in sheet',
+            };
+            importFabricBalancesState.lastRunAt = new Date();
+            importFabricBalancesState.lastResult = result;
+            pushRecentRun(importFabricBalancesState, { startedAt, durationMs: result.durationMs, count: 0, error: result.error });
+            return result;
+        }
+
+        // Parse Count Date + Time — REQUIRED for accurate reconciliation
+        const countDateStr = String(countDateRows?.[0]?.[0] ?? '').trim();
+        const countTimeStr = String(countTimeRows?.[0]?.[0] ?? '').trim();
+
+        // Combine date + time into a single string for parsing (e.g., "10/02/2026 7:00 PM")
+        const combinedDateTimeStr = countTimeStr ? `${countDateStr} ${countTimeStr}` : countDateStr;
+        const countDateTime = parseSheetDateTime(combinedDateTimeStr);
+
+        if (!countDateTime) {
+            const errorMsg = !countDateStr
+                ? 'Count Date (cell M1) is empty. Pick the date when the physical count was taken.'
+                : `Could not parse count date/time: "${combinedDateTimeStr}". Pick a date in M1 and time in O1.`;
+            const result: ImportFabricBalancesResult = {
+                startedAt, rowsWithCounts: 0, adjustmentsCreated: 0,
+                alreadyMatching: 0, skipped: 0, skipReasons: {},
+                adjustments: [], durationMs: Date.now() - start, error: errorMsg,
+            };
+            importFabricBalancesState.lastRunAt = new Date();
+            importFabricBalancesState.lastResult = result;
+            pushRecentRun(importFabricBalancesState, { startedAt, durationMs: result.durationMs, count: 0, error: errorMsg });
+            return result;
+        }
+
+        const countDateTimeStr = combinedDateTimeStr;
+
+        sheetsLogger.info({ totalRows: rows.length - 1, countDateTime: countDateTime.toISOString() }, 'importFabricBalances: reading sheet');
+
+        // 2. Look up all fabric colours by code
+        const fabricColours = await prisma.fabricColour.findMany({
+            where: { isActive: true },
+            include: { fabric: { include: { material: true } } },
+        });
+
+        const codeToColour = new Map<string, typeof fabricColours[0]>();
+        for (const fc of fabricColours) {
+            if (fc.code) codeToColour.set(fc.code, fc);
+        }
+
+        // 2b. Calculate balance AT COUNT TIME for all fabric colours
+        // balance_at_time = SUM(inward where createdAt <= time) - SUM(outward where createdAt <= time)
+        const allFabricColourIds = fabricColours.map(fc => fc.id);
+        const txnAggregations = await prisma.fabricColourTransaction.groupBy({
+            by: ['fabricColourId', 'txnType'],
+            where: {
+                fabricColourId: { in: allFabricColourIds },
+                createdAt: { lte: countDateTime },
+            },
+            _sum: { qty: true },
+        });
+
+        const historicalBalanceMap = new Map<string, number>();
+        for (const agg of txnAggregations) {
+            const prev = historicalBalanceMap.get(agg.fabricColourId) ?? 0;
+            const qty = Number(agg._sum.qty) || 0;
+            if (agg.txnType === 'inward') {
+                historicalBalanceMap.set(agg.fabricColourId, prev + qty);
+            } else {
+                historicalBalanceMap.set(agg.fabricColourId, prev - qty);
+            }
+        }
+
+        sheetsLogger.info({ coloursWithHistory: historicalBalanceMap.size }, 'importFabricBalances: calculated historical balances');
+
+        // 3. Get admin user
+        const adminUserId = await getAdminUserId();
+
+        // 4. Parse rows
+        const skipReasons: Record<string, number> = {};
+        const addSkip = (reason: string) => { skipReasons[reason] = (skipReasons[reason] || 0) + 1; };
+
+        interface PendingAdjustment {
+            sheetRow: number;
+            fabricColourId: string;
+            fabricCode: string;
+            colour: string;
+            fabric: string;
+            unit: string;
+            systemBalance: number;
+            physicalCount: number;
+            delta: number;
+        }
+
+        const pendingAdjustments: PendingAdjustment[] = [];
+        const matchingRows: number[] = [];  // sheetRows where physical = system
+        let rowsWithCounts = 0;
+        let alreadyDone = 0;
+
+        for (let i = 1; i < rows.length; i++) {
+            const row = rows[i];
+            const sheetRow = i + 1;
+            const fabricCode = String(row?.[FABRIC_BALANCES_COLS.FABRIC_CODE] ?? '').trim();
+            const physicalStr = String(row?.[FABRIC_BALANCES_COLS.PHYSICAL_COUNT] ?? '').trim();
+            const status = String(row?.[FABRIC_BALANCES_COLS.STATUS] ?? '').trim();
+
+            // Skip already-imported
+            if (status.startsWith('DONE:')) {
+                alreadyDone++;
+                continue;
+            }
+
+            // Skip empty physical count
+            if (physicalStr === '') continue;
+
+            rowsWithCounts++;
+
+            // Parse physical count
+            const physicalCount = parseFloat(physicalStr.replace(/,/g, ''));
+            if (isNaN(physicalCount)) {
+                addSkip(`invalid_number: ${physicalStr}`);
+                continue;
+            }
+            if (physicalCount < 0) {
+                addSkip('negative_value');
+                continue;
+            }
+
+            // Look up fabric colour
+            const fc = codeToColour.get(fabricCode);
+            if (!fc) {
+                addSkip('unknown_fabric_code');
+                continue;
+            }
+
+            // Compare with DB balance AT COUNT TIME (not current)
+            const systemBalance = historicalBalanceMap.get(fc.id) ?? 0;
+            const delta = physicalCount - systemBalance;
+
+            if (Math.abs(delta) < 0.01) {
+                matchingRows.push(sheetRow);
+                continue;
+            }
+
+            pendingAdjustments.push({
+                sheetRow, fabricColourId: fc.id, fabricCode,
+                colour: fc.colourName, fabric: fc.fabric?.name ?? 'Unknown',
+                unit: normalizeFabricUnit(fc.fabric?.unit ?? null),
+                systemBalance, physicalCount, delta,
+            });
+        }
+
+        sheetsLogger.info({
+            rowsWithCounts,
+            adjustmentsNeeded: pendingAdjustments.length,
+            alreadyMatching: matchingRows.length,
+            alreadyDone,
+            skipped: Object.values(skipReasons).reduce((a, b) => a + b, 0),
+        }, 'importFabricBalances: parsed rows');
+
+        // 5. Create adjustment transactions — backdated to count time
+        const timestamp = countDateTime.toISOString();
+        const adjustmentResults: ImportFabricBalancesResult['adjustments'] = [];
+
+        for (const adj of pendingAdjustments) {
+            const txnType = adj.delta > 0 ? FABRIC_TXN_TYPE.INWARD : FABRIC_TXN_TYPE.OUTWARD;
+            const qty = Math.abs(adj.delta);
+            const referenceId = `fabric-recon:${adj.fabricCode}:${timestamp}`;
+
+            await prisma.fabricColourTransaction.create({
+                data: {
+                    fabricColourId: adj.fabricColourId,
+                    txnType,
+                    qty,
+                    unit: adj.unit,
+                    reason: 'reconciliation',
+                    referenceId,
+                    notes: `[fabric-reconciliation] Count at ${countDateTimeStr}. Physical: ${adj.physicalCount}, System@time: ${adj.systemBalance}, Adj: ${adj.delta > 0 ? '+' : ''}${adj.delta.toFixed(2)}`,
+                    createdById: adminUserId,
+                    createdAt: countDateTime,  // Backdate to count time
+                },
+            });
+
+            adjustmentResults.push({
+                fabricCode: adj.fabricCode,
+                colour: adj.colour,
+                fabric: adj.fabric,
+                systemBalance: adj.systemBalance,
+                physicalCount: adj.physicalCount,
+                delta: adj.delta,
+                type: adj.delta > 0 ? 'inward' : 'outward',
+            });
+
+            sheetsLogger.debug({
+                fabricCode: adj.fabricCode,
+                txnType,
+                qty,
+                delta: adj.delta,
+            }, 'importFabricBalances: created adjustment');
+        }
+
+        // 6. Wait for DB triggers, then refresh balances
+        if (pendingAdjustments.length > 0) {
+            await new Promise(r => setTimeout(r, 2000));
+        }
+
+        // Build a sheetRow→fabricColour map for all processed rows
+        const sheetRowToFc = new Map<number, { fabricColourId: string; physicalCount: number }>();
+        for (const adj of pendingAdjustments) {
+            sheetRowToFc.set(adj.sheetRow, { fabricColourId: adj.fabricColourId, physicalCount: adj.physicalCount });
+        }
+        // For matching rows, re-parse to get their fabricColourId
+        for (const sheetRow of matchingRows) {
+            const row = rows[sheetRow - 1];
+            const code = String(row?.[FABRIC_BALANCES_COLS.FABRIC_CODE] ?? '').trim();
+            const fc = codeToColour.get(code);
+            const physicalStr = String(row?.[FABRIC_BALANCES_COLS.PHYSICAL_COUNT] ?? '').trim();
+            if (fc) {
+                sheetRowToFc.set(sheetRow, { fabricColourId: fc.id, physicalCount: parseFloat(physicalStr.replace(/,/g, '')) || 0 });
+            }
+        }
+
+        // Fetch fresh balances from DB
+        const allFcIds = [...new Set([...sheetRowToFc.values()].map(v => v.fabricColourId))];
+        const updatedColours = allFcIds.length > 0
+            ? await prisma.fabricColour.findMany({ where: { id: { in: allFcIds } }, select: { id: true, currentBalance: true } })
+            : [];
+        const balanceMap = new Map(updatedColours.map(c => [c.id, c.currentBalance]));
+
+        // 7. Update sheet: refresh System Balance, verify, then clear entry columns
+        const now = new Date().toISOString().slice(0, 19);
+        const sheetUpdates: Array<{ range: string; values: (string | number)[][] }> = [];
+
+        // All processed rows (adjustments + matching): update balance, clear Physical Count & Status
+        const allSheetRows = [...pendingAdjustments.map(a => a.sheetRow), ...matchingRows];
+        for (const sheetRow of allSheetRows) {
+            const info = sheetRowToFc.get(sheetRow);
+            if (!info) continue;
+            const newBalance = balanceMap.get(info.fabricColourId) ?? info.physicalCount;
+
+            // Push fresh System Balance
+            sheetUpdates.push({
+                range: `'${tabName}'!F${sheetRow}`,
+                values: [[newBalance]],
+            });
+            // Clear Physical Count (col G) — sheet is clean for next stock count
+            sheetUpdates.push({
+                range: `'${tabName}'!G${sheetRow}`,
+                values: [['']],
+            });
+            // Clear Notes (col I)
+            sheetUpdates.push({
+                range: `'${tabName}'!I${sheetRow}`,
+                values: [['']],
+            });
+            // Clear Status (col J)
+            sheetUpdates.push({
+                range: `'${tabName}'!J${sheetRow}`,
+                values: [['']],
+            });
+        }
+
+        // Also clear the Count Date + Time fields (clean for next round)
+        sheetUpdates.push({
+            range: `'${tabName}'!${FABRIC_BALANCES_COUNT_DATETIME.DATE_CELL}`,
+            values: [['']],
+        });
+        sheetUpdates.push({
+            range: `'${tabName}'!${FABRIC_BALANCES_COUNT_DATETIME.TIME_CELL}`,
+            values: [['']],
+        });
+
+        if (sheetUpdates.length > 0) {
+            await batchWriteRanges(ORDERS_MASTERSHEET_ID, sheetUpdates);
+            sheetsLogger.info({ sheetUpdates: sheetUpdates.length }, 'importFabricBalances: pushed balances & cleared entry columns');
+        }
+
+        const skippedCount = Object.values(skipReasons).reduce((a, b) => a + b, 0);
+
+        const result: ImportFabricBalancesResult = {
+            startedAt,
+            rowsWithCounts,
+            adjustmentsCreated: pendingAdjustments.length,
+            alreadyMatching: matchingRows.length,
+            skipped: skippedCount,
+            skipReasons,
+            adjustments: adjustmentResults,
+            durationMs: Date.now() - start,
+            error: null,
+        };
+
+        importFabricBalancesState.lastRunAt = new Date();
+        importFabricBalancesState.lastResult = result;
+        pushRecentRun(importFabricBalancesState, {
+            startedAt, durationMs: result.durationMs, count: result.adjustmentsCreated, error: null,
+        });
+
+        sheetsLogger.info({
+            adjustmentsCreated: result.adjustmentsCreated,
+            alreadyMatching: result.alreadyMatching,
+            skipped: result.skipped,
+            durationMs: result.durationMs,
+        }, 'triggerImportFabricBalances completed');
+
+        return result;
+    } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : 'Unknown error';
+        sheetsLogger.error({ error: message }, 'triggerImportFabricBalances failed');
+
+        const result: ImportFabricBalancesResult = {
+            startedAt, rowsWithCounts: 0, adjustmentsCreated: 0,
+            alreadyMatching: 0, skipped: 0, skipReasons: {},
+            adjustments: [], durationMs: Date.now() - start, error: message,
+        };
+
+        importFabricBalancesState.lastRunAt = new Date();
+        importFabricBalancesState.lastResult = result;
+        pushRecentRun(importFabricBalancesState, {
+            startedAt, durationMs: result.durationMs, count: 0, error: message,
+        });
+
+        return result;
+    } finally {
+        importFabricBalancesState.isRunning = false;
+    }
 }
 
 // ============================================
@@ -3058,10 +3714,12 @@ export default {
     triggerCleanupDoneRows,
     triggerMigrateFormulas,
     triggerPushBalances,
+    triggerPushFabricBalances,
+    triggerImportFabricBalances,
     getBufferCounts,
     previewIngestInward,
     previewIngestOutward,
     previewPushBalances,
 };
 
-export type { IngestInwardResult, IngestOutwardResult, IngestPreviewResult, MoveShippedResult, CleanupDoneResult, MigrateFormulasResult, PushBalancesResult, PushBalancesPreviewResult, OffloadStatus, RunSummary, BalanceVerificationResult, BalanceSnapshot, InwardPreviewRow, OutwardPreviewRow };
+export type { IngestInwardResult, IngestOutwardResult, IngestPreviewResult, MoveShippedResult, CleanupDoneResult, MigrateFormulasResult, PushBalancesResult, PushFabricBalancesResult, ImportFabricBalancesResult, PushBalancesPreviewResult, OffloadStatus, RunSummary, BalanceVerificationResult, BalanceSnapshot, InwardPreviewRow, OutwardPreviewRow };

@@ -159,7 +159,7 @@ const ExecutionProgress = React.memo(function ExecutionProgress({
 // OFFLOAD WORKER MONITOR
 // ============================================
 
-type OffloadJobId = 'ingest_inward' | 'ingest_outward' | 'move_shipped_to_outward' | 'cleanup_done_rows' | 'migrate_sheet_formulas' | 'push_balances';
+type OffloadJobId = 'ingest_inward' | 'ingest_outward' | 'move_shipped_to_outward' | 'cleanup_done_rows' | 'migrate_sheet_formulas' | 'push_balances' | 'push_fabric_balances' | 'import_fabric_balances';
 
 const OFFLOAD_JOB_CONFIRM_MESSAGES: Record<OffloadJobId, string> = {
     ingest_inward: 'This will create inventory transactions from Inward (Live) buffer rows and mark them as DONE.',
@@ -168,6 +168,8 @@ const OFFLOAD_JOB_CONFIRM_MESSAGES: Record<OffloadJobId, string> = {
     cleanup_done_rows: 'This will delete DONE rows older than 7 days from both live tabs. Safe — only removes already-ingested rows.',
     migrate_sheet_formulas: 'This will rewrite Inventory col C and Balance (Final) col E formulas to exclude DONE rows. Safe to re-run.',
     push_balances: 'This will push all current ERP balances to Mastersheet Inventory col R and Office Ledger Balance (Final) col F. No ingestion — just a balance sync.',
+    push_fabric_balances: 'This will refresh the Fabric Balances sheet with latest system balances and any new fabric colours. Preserves physical counts already entered.',
+    import_fabric_balances: 'This will read Physical Count values from the Fabric Balances sheet and create adjustment transactions to match. Only rows with counts filled (not already DONE) will be processed.',
 };
 
 const OffloadMonitor = React.memo(function OffloadMonitor() {
@@ -540,6 +542,20 @@ const OffloadMonitor = React.memo(function OffloadMonitor() {
                         className="px-2.5 py-1.5 text-xs bg-emerald-100 hover:bg-emerald-200 text-emerald-700 rounded border disabled:opacity-50"
                     >
                         {offloadStatus.pushBalances?.isRunning ? 'Pushing...' : 'Push Balances'}
+                    </button>
+                    <button
+                        onClick={() => handleRunClick('push_fabric_balances', 'Push Fabric Balances to Sheet')}
+                        disabled={triggerMutation.isPending || offloadStatus.pushFabricBalances?.isRunning}
+                        className="px-2.5 py-1.5 text-xs bg-violet-100 hover:bg-violet-200 text-violet-700 rounded border disabled:opacity-50"
+                    >
+                        {offloadStatus.pushFabricBalances?.isRunning ? 'Pushing...' : 'Push Fabric Balances'}
+                    </button>
+                    <button
+                        onClick={() => handleRunClick('import_fabric_balances', 'Import Fabric Balances from Sheet')}
+                        disabled={triggerMutation.isPending || offloadStatus.importFabricBalances?.isRunning}
+                        className="px-2.5 py-1.5 text-xs bg-amber-100 hover:bg-amber-200 text-amber-700 rounded border disabled:opacity-50"
+                    >
+                        {offloadStatus.importFabricBalances?.isRunning ? 'Importing...' : 'Import Fabric Counts'}
                     </button>
                 </div>
                 {offloadStatus.cleanupDone?.lastResult && (

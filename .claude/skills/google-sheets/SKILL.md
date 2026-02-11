@@ -113,6 +113,83 @@ After appending rows, adds a bottom border on the last row of the order (visual 
 
 ---
 
+## 1c. "Orders from COH" Tab — Complete Column Reference
+
+The main orders tab in the COH Orders Mastersheet (~270 active rows). Each row = one order line item. This is where the ops team manages order fulfillment day-to-day.
+
+### All Columns (A through AG)
+
+**Data columns (pushed by ERP or filled by ops):**
+
+| Col | Index | Header | Filled by | Description |
+|-----|-------|--------|-----------|-------------|
+| A | 0 | Order | ERP push | Order date (`YYYY-MM-DD HH:MM:SS` IST) |
+| B | 1 | Order # | ERP push | Shopify order name or marketplace order ID (e.g. `64739`, `NYK-36324645...`) |
+| C | 2 | Name | ERP push | Customer name |
+| D | 3 | City | ERP push | Shipping city |
+| E | 4 | Mob | ERP push | Customer phone |
+| F | 5 | Channel | ERP push | Payment gateway or marketplace (`shopflo`, `Cash on Delivery (COD)`, `nykaa`, `ajio`) |
+| G | 6 | SKU | ERP push | SKU code |
+| I | 8 | Qty | ERP push | Line item quantity |
+| J | 9 | Status | Ops manual | Order status (free-text) |
+| K | 10 | Order Note | ERP push | Customer's note from Shopify |
+| L | 11 | COH Note | Ops manual | Internal team notes (e.g. "Wants PURPLE ONLY", "Ready to WAIT") |
+| N | 13 | Assigned | Ops manual | Whether item is assigned (TRUE/FALSE) |
+| O | 14 | Picked | Ops manual | Whether picked (TRUE/FALSE) |
+| Q | 16 | source_ | Ops manual | Internal status like "Fabric Over" |
+| R | 17 | samplingDate | Ops manual | Date when sampling was completed |
+| T | 19 | *(empty)* | — | Not used |
+| U | 20 | Packed | Ops manual | Whether packed (TRUE/FALSE) |
+| V | 21 | *(empty)* | — | Not used |
+| W | 22 | *(empty)* | — | Not used |
+| X | 23 | Shipped | Ops manual | Whether shipped (TRUE/FALSE) |
+| AC | 28 | AWB Scan | Ops manual | Scan confirmation |
+
+**Formula columns (all use ARRAYFORMULA in row 1, auto-fill every row):**
+
+| Col | Index | Header | Formula | What it does |
+|-----|-------|--------|---------|-------------|
+| H | 7 | Product Name | `VLOOKUP(SKU, Barcodes!A:E, 5)` | Looks up product name from SKU via Barcodes tab |
+| M | 12 | Qty Balance | `VLOOKUP(SKU, Inventory!A:G, 5)` | Current stock balance for this SKU. Shows "N/A" if not found |
+| P | 15 | Order Age | `TODAY() - DATEVALUE(order_date)` | How old the order is — "Today", "2d ago", "103d ago" |
+| S | 18 | Fabric Stock | `VLOOKUP(channel, #REF!, 17)` | **BROKEN** — references a deleted sheet. Currently shows nothing |
+| Y | 24 | Shopify Status | `VLOOKUP(order_date, ShopifyAllOrderData!A:H, 4)` | Fulfillment status from ShopifyAllOrderData tab |
+| Z | 25 | Courier | `VLOOKUP(order_date, ShopifyAllOrderData!A:G, 5)` | Courier name from ShopifyAllOrderData tab |
+| AA | 26 | AWB | `VLOOKUP(order_date, ShopifyAllOrderData!A:G, 6)` | Airway bill / tracking number from ShopifyAllOrderData tab |
+| AB | 27 | Ready To Ship | `COUNTIFS(order#, assigned=TRUE) = COUNTIFS(order#)` | TRUE only when ALL lines of the order are assigned |
+| AD | 29 | Outward Done | `VLOOKUP(UniqueID, Outward!AE:AE, 1)` | Checks if row already exists in Outward tab. Returns 0 if not moved |
+| AE | 30 | Unique ID | `Order# & SKU & Qty` | Fingerprint for dedup: order number + SKU + qty concatenated |
+| AF | 31 | *(no header)* | `VLOOKUP(SKU, Barcodes!A:G, 7)` | Fabric code for this SKU (helper column) |
+| AG | 32 | *(no header)* | `VLOOKUP(SKU, Barcodes!A:P, 16) * Qty` | Total fabric consumption needed (fabric per unit * qty) |
+
+### Order Lifecycle on This Tab
+
+```
+New order lands (ERP push) → Ops assigns (N=TRUE) → Picks (O=TRUE) → Packs (U=TRUE) → Ships (X=TRUE)
+    → Worker moves to Outward (Live) → Row deleted from this tab
+```
+
+### Move-to-Outward Eligibility
+
+A row is eligible for `move_shipped_to_outward` when ALL of:
+- Picked (O) = TRUE
+- Packed (U) = TRUE
+- Shipped (X) = TRUE
+- Courier (Z) is filled
+- AWB (AA) is filled
+- AWB Scan (AC) is filled
+- Outward Done (AD) != 1
+- SKU (G) is non-empty
+
+### Referenced Tabs
+
+- **Barcodes** — SKU master (product names, fabric codes, fabric consumption)
+- **Inventory** — Current stock balances per SKU
+- **ShopifyAllOrderData** — Shopify fulfillment status, courier, AWB
+- **Outward** — Historical outward data (used by Outward Done formula to check if already moved)
+
+---
+
 ## 2. The Combined View Formula
 
 The key insight that makes the hybrid system safe: **a single formula bridges both systems, and ingestion never changes the displayed balance.**

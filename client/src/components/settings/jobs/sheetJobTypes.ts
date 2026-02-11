@@ -83,6 +83,36 @@ export interface PushBalancesResult {
     error: string | null;
 }
 
+export interface PushFabricBalancesResult {
+    startedAt: string;
+    totalColours: number;
+    newColoursAdded: number;
+    balancesUpdated: number;
+    errors: number;
+    durationMs: number;
+    error: string | null;
+}
+
+export interface ImportFabricBalancesResult {
+    startedAt: string;
+    rowsWithCounts: number;
+    adjustmentsCreated: number;
+    alreadyMatching: number;
+    skipped: number;
+    skipReasons: ErrorReasonsMap;
+    adjustments: Array<{
+        fabricCode: string;
+        colour: string;
+        fabric: string;
+        systemBalance: number;
+        physicalCount: number;
+        delta: number;
+        type: 'inward' | 'outward';
+    }>;
+    durationMs: number;
+    error: string | null;
+}
+
 export interface PushBalancesPreviewResult {
     totalSkusInDb: number;
     mastersheetMatched: number;
@@ -168,6 +198,8 @@ export interface OffloadStatusResponse {
     cleanupDone: JobStateResponse;
     migrateFormulas: JobStateResponse;
     pushBalances: JobStateResponse;
+    pushFabricBalances: JobStateResponse;
+    importFabricBalances: JobStateResponse;
     schedulerActive: boolean;
     bufferCounts: BufferCounts;
 }

@@ -109,6 +109,7 @@ export const MASTERSHEET_TABS = {
     INVENTORY: 'Inventory',
     OFFICE_INVENTORY: 'Office Inventory',
     OUTWARD: 'Outward',
+    FABRIC_BALANCES: 'Fabric Balances',
 } as const;
 
 export const BARCODE_TABS = {
@@ -350,27 +351,38 @@ export const BARCODE_MAIN_COLS = {
 } as const;
 
 // ============================================
-// COLUMN MAPPINGS — Fabric Balances (new tab in Barcode Mastersheet)
+// COLUMN MAPPINGS — Fabric Balances (COH Orders Mastersheet)
 // ============================================
 
 /**
- * Fabric Balances tab — ERP pushes fabric data here.
- * Other sheets can VLOOKUP/IMPORTRANGE from this tab.
+ * Fabric Balances tab — lives in COH Orders Mastersheet.
+ * Lists all active fabric colours with system balances.
+ * Users enter physical counts in col G for reconciliation.
  */
 export const FABRIC_BALANCES_COLS = {
-    FABRIC_CODE: 0,         // A — unique fabric code (e.g., Pima-SJ-Black)
-    FABRIC_NAME: 1,         // B — full name
-    MATERIAL: 2,            // C
-    CURRENT_BALANCE: 3,     // D
+    FABRIC_CODE: 0,         // A — unique fabric code (e.g., LIN-60L-NVY)
+    MATERIAL: 1,            // B — material name
+    FABRIC: 2,              // C — fabric name
+    COLOUR: 3,              // D — colour name
     UNIT: 4,                // E — meters or kg
-    COST_PER_UNIT: 5,       // F
-    SUPPLIER: 6,            // G
-    LEAD_TIME_DAYS: 7,      // H
-    PENDING_ORDERS_QTY: 8,  // I — fabric allocated to unfulfilled orders
-    AVAILABLE_BALANCE: 9,   // J — formula: =D-I
-    CONSUMPTION_30D: 10,    // K — 30-day usage
-    REORDER_POINT: 11,      // L — formula: =K*H/30
-    LAST_UPDATED: 12,       // M — ISO timestamp
+    SYSTEM_BALANCE: 5,      // F — ERP currentBalance (auto-updated)
+    PHYSICAL_COUNT: 6,      // G — **USER ENTERS** physical stock count
+    VARIANCE: 7,            // H — formula: =IF(G="","",G-F)
+    NOTES: 8,               // I — **USER ENTERS** notes
+    STATUS: 9,              // J — import status (DONE:timestamp after import)
+} as const;
+
+/**
+ * Cells where the team enters when the physical count was taken.
+ * Import calculates balance AS OF this date+time, so entries
+ * after the count don't affect the adjustment.
+ *
+ * L1 = "Count Date:" label,  M1 = date (calendar picker)
+ * N1 = "Time:" label,        O1 = time (dropdown: 6:00 AM – 11:30 PM)
+ */
+export const FABRIC_BALANCES_COUNT_DATETIME = {
+    DATE_CELL: 'M1',
+    TIME_CELL: 'O1',
 } as const;
 
 /**
@@ -378,18 +390,15 @@ export const FABRIC_BALANCES_COLS = {
  */
 export const FABRIC_BALANCES_HEADERS = [
     'Fabric Code',
-    'Fabric Name',
     'Material',
-    'Current Balance',
+    'Fabric',
+    'Colour',
     'Unit',
-    'Cost per Unit',
-    'Supplier',
-    'Lead Time (days)',
-    'Pending Orders Qty',
-    'Available Balance',
-    '30-Day Consumption',
-    'Reorder Point',
-    'Last Updated',
+    'System Balance',
+    'Physical Count',
+    'Variance',
+    'Notes',
+    'Status',
 ] as const;
 
 // ============================================

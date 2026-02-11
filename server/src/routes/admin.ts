@@ -187,7 +187,7 @@ interface PermissionsUpdateBody {
 }
 
 /** Background job trigger params */
-type JobId = 'shopify_sync' | 'tracking_sync' | 'cache_cleanup' | 'ingest_inward' | 'ingest_outward' | 'move_shipped_to_outward' | 'preview_ingest_inward' | 'preview_ingest_outward' | 'cleanup_done_rows' | 'migrate_sheet_formulas' | 'snapshot_compute' | 'snapshot_backfill' | 'push_balances' | 'preview_push_balances';
+type JobId = 'shopify_sync' | 'tracking_sync' | 'cache_cleanup' | 'ingest_inward' | 'ingest_outward' | 'move_shipped_to_outward' | 'preview_ingest_inward' | 'preview_ingest_outward' | 'cleanup_done_rows' | 'migrate_sheet_formulas' | 'snapshot_compute' | 'snapshot_backfill' | 'push_balances' | 'preview_push_balances' | 'push_fabric_balances' | 'import_fabric_balances';
 
 /** Background job update body */
 interface JobUpdateBody {
@@ -1531,6 +1531,16 @@ router.post('/background-jobs/:jobId/trigger', requireAdmin, asyncHandler(async 
         case 'preview_push_balances': {
             const result = await sheetOffloadWorker.previewPushBalances();
             res.json({ message: 'Push balances preview completed', result });
+            break;
+        }
+        case 'push_fabric_balances': {
+            const result = await sheetOffloadWorker.triggerPushFabricBalances();
+            res.json({ message: 'Fabric balances pushed to sheet', result });
+            break;
+        }
+        case 'import_fabric_balances': {
+            const result = await sheetOffloadWorker.triggerImportFabricBalances();
+            res.json({ message: 'Fabric balances imported from sheet', result });
             break;
         }
         default:
