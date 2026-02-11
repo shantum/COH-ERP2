@@ -15,6 +15,7 @@ import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import { Breadcrumbs } from './ui/Breadcrumbs';
 import { LiveIndicator } from './ui/LiveIndicator';
 import { useCompactMode } from '../hooks/useCompactMode';
+import { ChatButton } from './ChatAgent';
 
 // Navigation structure with groups
 interface NavItem {
@@ -400,6 +401,9 @@ export default function Layout() {
                     <Outlet />
                 </div>
             </main>
+
+            {/* AI Chat Assistant */}
+            <ChatButton />
 
             {/* Overlay for mobile */}
             {sidebarOpen && (
