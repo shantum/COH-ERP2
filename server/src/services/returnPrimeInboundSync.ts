@@ -285,8 +285,30 @@ export async function syncReturnPrimeRequests(options: SyncOptions = {}): Promis
         while (hasMore && page <= MAX_PAGES) {
             const { requests, hasNextPage } = await fetchPage(token, page, dateFrom, dateTo);
 
+            // Batch-lookup ERP Orders for this page so we can link orderId
+            const shopifyIds = requests
+                .map((r) => r.shopifyOrderId)
+                .filter((id): id is string => id !== null);
+            const orderMap = new Map<string, string>();
+            if (shopifyIds.length > 0) {
+                const orders = await prisma.order.findMany({
+                    where: { shopifyOrderId: { in: shopifyIds } },
+                    select: { id: true, shopifyOrderId: true },
+                });
+                for (const o of orders) {
+                    if (o.shopifyOrderId) orderMap.set(o.shopifyOrderId, o.id);
+                }
+            }
+
             for (const data of requests) {
                 try {
+                    // Link to ERP Order if we found a match
+                    const matchedOrderId = data.shopifyOrderId ? orderMap.get(data.shopifyOrderId) : undefined;
+                    const dataWithOrder = {
+                        ...data,
+                        ...(matchedOrderId ? { orderId: matchedOrderId } : {}),
+                    };
+
                     // Check if exists for created/updated tracking
                     const existing = await prisma.returnPrimeRequest.findUnique({
                         where: { rpRequestId: data.rpRequestId },
@@ -296,8 +318,8 @@ export async function syncReturnPrimeRequests(options: SyncOptions = {}): Promis
                     // Upsert for atomicity
                     await prisma.returnPrimeRequest.upsert({
                         where: { rpRequestId: data.rpRequestId },
-                        create: data as Prisma.ReturnPrimeRequestCreateInput,
-                        update: { ...data, syncedAt: new Date() } as Prisma.ReturnPrimeRequestUpdateInput,
+                        create: dataWithOrder as Prisma.ReturnPrimeRequestCreateInput,
+                        update: { ...dataWithOrder, syncedAt: new Date() } as Prisma.ReturnPrimeRequestUpdateInput,
                     });
 
                     if (existing) {
@@ -322,6 +344,20 @@ export async function syncReturnPrimeRequests(options: SyncOptions = {}): Promis
             if (hasMore) {
                 await new Promise((resolve) => setTimeout(resolve, 100));
             }
+        }
+
+        // Backfill: link any ReturnPrimeRequests that still have orderId=NULL
+        try {
+            await prisma.$executeRawUnsafe(`
+                UPDATE "ReturnPrimeRequest" rpr
+                SET "orderId" = o.id
+                FROM "Order" o
+                WHERE rpr."shopifyOrderId" = o."shopifyOrderId"
+                  AND rpr."orderId" IS NULL
+            `);
+        } catch (backfillError: unknown) {
+            const msg = backfillError instanceof Error ? backfillError.message : 'Unknown';
+            console.error('[ReturnPrimeSync] Backfill error (non-fatal):', msg);
         }
 
         // Full success only when all records synced without errors; partial if some succeeded
