@@ -71,6 +71,7 @@ interface IngestInwardResult {
     durationMs: number;
     error: string | null;
     inwardValidationErrors: Record<string, number>;
+    balanceVerification?: BalanceVerificationResult;
 }
 
 interface IngestOutwardResult {
@@ -84,6 +85,7 @@ interface IngestOutwardResult {
     durationMs: number;
     error: string | null;
     outwardSkipReasons?: Record<string, number>;
+    balanceVerification?: BalanceVerificationResult;
 }
 
 interface CleanupDoneResult {
@@ -143,6 +145,30 @@ interface IngestPreviewResult {
     skipReasons?: Record<string, number>;
     affectedSkuCodes: string[];
     durationMs: number;
+    balanceSnapshot?: {
+        skuBalances: Array<{ skuCode: string; colC: number; colD: number; colE: number; pendingQty: number }>;
+        timestamp: string;
+    };
+}
+
+interface BalanceSnapshot {
+    balances: Map<string, { c: number; d: number; e: number }>;
+    rowCount: number;
+    timestamp: string;
+}
+
+interface BalanceVerificationResult {
+    passed: boolean;
+    totalSkusChecked: number;
+    drifted: number;
+    sampleDrifts: Array<{
+        skuCode: string;
+        before: { c: number; d: number; e: number };
+        after: { c: number; d: number; e: number };
+        cDelta: number;
+    }>;
+    snapshotBeforeMs: number;
+    snapshotAfterMs: number;
 }
 
 interface RunSummary {
@@ -1258,6 +1284,87 @@ function groupIntoRanges(
     return ranges;
 }
 
+// ============================================
+// BALANCE VERIFICATION — snapshot + compare
+// ============================================
+
+/**
+ * Read a snapshot of ALL SKU balances from the Inventory tab (cols A–E).
+ * Returns a Map of skuCode → { c, d, e } for every row with a non-empty SKU.
+ */
+async function readInventorySnapshot(): Promise<BalanceSnapshot> {
+    const startMs = Date.now();
+    const rows = await readRange(
+        ORDERS_MASTERSHEET_ID,
+        `'${INVENTORY_TAB.NAME}'!A:E`
+    );
+
+    const dataStart = INVENTORY_TAB.DATA_START_ROW - 1; // skip header rows
+    const balances = new Map<string, { c: number; d: number; e: number }>();
+
+    for (let i = dataStart; i < rows.length; i++) {
+        const row = rows[i];
+        const skuCode = String(row?.[0] ?? '').trim();
+        if (!skuCode) continue;
+
+        const c = Number(row?.[2] ?? 0) || 0;
+        const d = Number(row?.[3] ?? 0) || 0;
+        const e = Number(row?.[4] ?? 0) || 0;
+        balances.set(skuCode, { c, d, e });
+    }
+
+    sheetsLogger.info({ skus: balances.size, durationMs: Date.now() - startMs }, 'Inventory snapshot read');
+
+    return {
+        balances,
+        rowCount: balances.size,
+        timestamp: new Date().toISOString(),
+    };
+}
+
+/**
+ * Compare two inventory snapshots. Returns pass if every SKU's C/D/E values
+ * are within tolerance (0.01) of each other.
+ */
+function compareSnapshots(
+    before: BalanceSnapshot,
+    after: BalanceSnapshot
+): BalanceVerificationResult {
+    const TOLERANCE = 0.01;
+    const drifts: BalanceVerificationResult['sampleDrifts'] = [];
+    let totalChecked = 0;
+
+    for (const [skuCode, bVals] of before.balances) {
+        const aVals = after.balances.get(skuCode);
+        if (!aVals) continue; // SKU removed — skip
+
+        totalChecked++;
+        const cDelta = Math.abs(aVals.c - bVals.c);
+        const dDelta = Math.abs(aVals.d - bVals.d);
+        const eDelta = Math.abs(aVals.e - bVals.e);
+
+        if (cDelta > TOLERANCE || dDelta > TOLERANCE || eDelta > TOLERANCE) {
+            if (drifts.length < 10) {
+                drifts.push({
+                    skuCode,
+                    before: bVals,
+                    after: aVals,
+                    cDelta: Math.round((aVals.c - bVals.c) * 100) / 100,
+                });
+            }
+        }
+    }
+
+    return {
+        passed: drifts.length === 0,
+        totalSkusChecked: totalChecked,
+        drifted: drifts.length,
+        sampleDrifts: drifts,
+        snapshotBeforeMs: 0, // filled by caller
+        snapshotAfterMs: 0,
+    };
+}
+
 async function updateSheetBalances(
     affectedSkuIds: Set<string>,
     errorTracker: { errors: number; skusUpdated: number }
@@ -1399,6 +1506,16 @@ async function triggerIngestInward(): Promise<IngestInwardResult | null> {
     try {
         sheetsLogger.info('Starting ingest inward');
 
+        // Before-snapshot for balance verification (non-fatal)
+        let beforeSnapshot: BalanceSnapshot | null = null;
+        try {
+            const snapStart = Date.now();
+            beforeSnapshot = await readInventorySnapshot();
+            beforeSnapshot.timestamp = String(Date.now() - snapStart); // reuse as ms duration
+        } catch (snapErr: unknown) {
+            sheetsLogger.warn({ error: snapErr instanceof Error ? snapErr.message : String(snapErr) }, 'Before-snapshot failed (non-fatal)');
+        }
+
         const affectedSkuIds = await ingestInwardLive(result);
 
         // Balance update + cache invalidation if anything was ingested
@@ -1407,6 +1524,31 @@ async function triggerIngestInward(): Promise<IngestInwardResult | null> {
         }
         if (result.inwardIngested > 0) {
             invalidateCaches();
+        }
+
+        // After-snapshot + comparison (non-fatal)
+        if (beforeSnapshot && result.inwardIngested > 0) {
+            try {
+                sheetsLogger.info('Waiting 8s for sheet formulas to recalculate...');
+                await new Promise(resolve => setTimeout(resolve, 8000));
+
+                const afterStart = Date.now();
+                const afterSnapshot = await readInventorySnapshot();
+                const afterMs = Date.now() - afterStart;
+
+                const verification = compareSnapshots(beforeSnapshot, afterSnapshot);
+                verification.snapshotBeforeMs = Number(beforeSnapshot.timestamp);
+                verification.snapshotAfterMs = afterMs;
+                result.balanceVerification = verification;
+
+                sheetsLogger.info({
+                    passed: verification.passed,
+                    totalSkusChecked: verification.totalSkusChecked,
+                    drifted: verification.drifted,
+                }, verification.passed ? 'Balance verification PASSED' : 'Balance verification FAILED — drift detected');
+            } catch (snapErr: unknown) {
+                sheetsLogger.warn({ error: snapErr instanceof Error ? snapErr.message : String(snapErr) }, 'After-snapshot failed (non-fatal)');
+            }
         }
 
         result.durationMs = Date.now() - startTime;
@@ -1541,6 +1683,32 @@ async function previewIngestInward(): Promise<IngestPreviewResult | null> {
 
         const affectedSkuCodes = [...new Set(newRows.map(r => r.skuCode))];
 
+        // Balance snapshot for affected SKUs (non-fatal)
+        let balanceSnapshot: IngestPreviewResult['balanceSnapshot'];
+        try {
+            const snapshot = await readInventorySnapshot();
+            // Compute pending qty per SKU from newRows
+            const pendingByCode = new Map<string, number>();
+            for (const row of newRows) {
+                pendingByCode.set(row.skuCode, (pendingByCode.get(row.skuCode) ?? 0) + row.qty);
+            }
+            balanceSnapshot = {
+                skuBalances: affectedSkuCodes.map(code => {
+                    const bal = snapshot.balances.get(code);
+                    return {
+                        skuCode: code,
+                        colC: bal?.c ?? 0,
+                        colD: bal?.d ?? 0,
+                        colE: bal?.e ?? 0,
+                        pendingQty: pendingByCode.get(code) ?? 0,
+                    };
+                }),
+                timestamp: snapshot.timestamp,
+            };
+        } catch (snapErr: unknown) {
+            sheetsLogger.warn({ error: snapErr instanceof Error ? snapErr.message : String(snapErr) }, 'Preview balance snapshot failed (non-fatal)');
+        }
+
         sheetsLogger.info({
             tab, total: parsed.length, valid: validRows.length,
             invalid: parsed.length - validRows.length, duplicates, new: newRows.length,
@@ -1555,6 +1723,7 @@ async function previewIngestInward(): Promise<IngestPreviewResult | null> {
             validationErrors,
             affectedSkuCodes,
             durationMs: Date.now() - startTime,
+            balanceSnapshot,
         };
     } catch (error: unknown) {
         const err = error instanceof Error ? error : new Error(String(error));
@@ -1593,6 +1762,16 @@ async function triggerIngestOutward(): Promise<IngestOutwardResult | null> {
     try {
         sheetsLogger.info('Starting ingest outward');
 
+        // Before-snapshot for balance verification (non-fatal)
+        let beforeSnapshot: BalanceSnapshot | null = null;
+        try {
+            const snapStart = Date.now();
+            beforeSnapshot = await readInventorySnapshot();
+            beforeSnapshot.timestamp = String(Date.now() - snapStart);
+        } catch (snapErr: unknown) {
+            sheetsLogger.warn({ error: snapErr instanceof Error ? snapErr.message : String(snapErr) }, 'Before-snapshot failed (non-fatal)');
+        }
+
         const { affectedSkuIds, linkableItems, orderMap } = await ingestOutwardLive(result);
 
         // Link outward to order lines
@@ -1606,6 +1785,31 @@ async function triggerIngestOutward(): Promise<IngestOutwardResult | null> {
         }
         if (result.outwardIngested > 0) {
             invalidateCaches();
+        }
+
+        // After-snapshot + comparison (non-fatal)
+        if (beforeSnapshot && result.outwardIngested > 0) {
+            try {
+                sheetsLogger.info('Waiting 8s for sheet formulas to recalculate...');
+                await new Promise(resolve => setTimeout(resolve, 8000));
+
+                const afterStart = Date.now();
+                const afterSnapshot = await readInventorySnapshot();
+                const afterMs = Date.now() - afterStart;
+
+                const verification = compareSnapshots(beforeSnapshot, afterSnapshot);
+                verification.snapshotBeforeMs = Number(beforeSnapshot.timestamp);
+                verification.snapshotAfterMs = afterMs;
+                result.balanceVerification = verification;
+
+                sheetsLogger.info({
+                    passed: verification.passed,
+                    totalSkusChecked: verification.totalSkusChecked,
+                    drifted: verification.drifted,
+                }, verification.passed ? 'Balance verification PASSED' : 'Balance verification FAILED — drift detected');
+            } catch (snapErr: unknown) {
+                sheetsLogger.warn({ error: snapErr instanceof Error ? snapErr.message : String(snapErr) }, 'After-snapshot failed (non-fatal)');
+            }
         }
 
         result.durationMs = Date.now() - startTime;
@@ -1748,6 +1952,31 @@ async function previewIngestOutward(): Promise<IngestPreviewResult | null> {
 
         const affectedSkuCodes = [...new Set(validRows.map(r => r.skuCode))];
 
+        // Balance snapshot for affected SKUs (non-fatal)
+        let balanceSnapshot: IngestPreviewResult['balanceSnapshot'];
+        try {
+            const snapshot = await readInventorySnapshot();
+            const pendingByCode = new Map<string, number>();
+            for (const row of validRows) {
+                pendingByCode.set(row.skuCode, (pendingByCode.get(row.skuCode) ?? 0) + row.qty);
+            }
+            balanceSnapshot = {
+                skuBalances: affectedSkuCodes.map(code => {
+                    const bal = snapshot.balances.get(code);
+                    return {
+                        skuCode: code,
+                        colC: bal?.c ?? 0,
+                        colD: bal?.d ?? 0,
+                        colE: bal?.e ?? 0,
+                        pendingQty: pendingByCode.get(code) ?? 0,
+                    };
+                }),
+                timestamp: snapshot.timestamp,
+            };
+        } catch (snapErr: unknown) {
+            sheetsLogger.warn({ error: snapErr instanceof Error ? snapErr.message : String(snapErr) }, 'Preview balance snapshot failed (non-fatal)');
+        }
+
         sheetsLogger.info({
             tab, total: parsed.length, valid: validRows.length,
             invalid: newRows.length - validRows.length, duplicates: duplicateCount,
@@ -1763,6 +1992,7 @@ async function previewIngestOutward(): Promise<IngestPreviewResult | null> {
             skipReasons,
             affectedSkuCodes,
             durationMs: Date.now() - startTime,
+            balanceSnapshot,
         };
     } catch (error: unknown) {
         const err = error instanceof Error ? error : new Error(String(error));
@@ -2587,4 +2817,4 @@ export default {
     previewPushBalances,
 };
 
-export type { IngestInwardResult, IngestOutwardResult, IngestPreviewResult, MoveShippedResult, CleanupDoneResult, MigrateFormulasResult, PushBalancesResult, PushBalancesPreviewResult, OffloadStatus, RunSummary };
+export type { IngestInwardResult, IngestOutwardResult, IngestPreviewResult, MoveShippedResult, CleanupDoneResult, MigrateFormulasResult, PushBalancesResult, PushBalancesPreviewResult, OffloadStatus, RunSummary, BalanceVerificationResult, BalanceSnapshot };

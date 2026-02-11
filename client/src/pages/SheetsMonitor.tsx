@@ -38,6 +38,18 @@ interface BufferCounts {
     outward: number;
 }
 
+interface BalanceVerification {
+    passed: boolean;
+    totalSkusChecked: number;
+    drifted: number;
+    sampleDrifts: Array<{
+        skuCode: string;
+        before: { c: number; d: number; e: number };
+        after: { c: number; d: number; e: number };
+        cDelta: number;
+    }>;
+}
+
 interface OffloadStatusResponse {
     ingestInward: JobStateResponse;
     ingestOutward: JobStateResponse;
@@ -114,6 +126,37 @@ function MetricCard({ label, value, sub, color }: {
             <div className="text-xs text-gray-500 mb-1">{label}</div>
             <div className={`text-lg font-semibold ${vc}`}>{value}</div>
             {sub && <div className="text-xs text-gray-400 mt-0.5">{sub}</div>}
+        </div>
+    );
+}
+
+function BalanceVerificationBadge({ verification }: { verification?: BalanceVerification }) {
+    if (!verification) return null;
+
+    if (verification.passed) {
+        return (
+            <div className="mt-2 px-2 py-1.5 bg-emerald-50 border border-emerald-200 rounded text-xs text-emerald-700 flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+                Balance verified — {verification.totalSkusChecked} SKUs checked, no drift
+            </div>
+        );
+    }
+
+    return (
+        <div className="mt-2 px-2 py-1.5 bg-red-50 border border-red-200 rounded text-xs text-red-700">
+            <div className="flex items-center gap-1.5 font-medium">
+                <AlertCircle size={12} />
+                BALANCE DRIFT — {verification.drifted} SKU{verification.drifted !== 1 ? 's' : ''} changed
+            </div>
+            {verification.sampleDrifts.length > 0 && (
+                <div className="mt-1 space-y-0.5 text-[10px]">
+                    {verification.sampleDrifts.slice(0, 5).map((d, i) => (
+                        <div key={i} className="text-red-600">
+                            {d.skuCode}: C {d.before.c}→{d.after.c} (delta: {d.cDelta})
+                        </div>
+                    ))}
+                </div>
+            )}
         </div>
     );
 }
@@ -373,6 +416,7 @@ export default function SheetsMonitor() {
                                     {String(inwardState.lastResult.error)}
                                 </div>
                             )}
+                            <BalanceVerificationBadge verification={inwardState.lastResult.balanceVerification as BalanceVerification | undefined} />
                         </>
                     ) : (
                         <div className="text-sm text-gray-400">No results yet</div>
@@ -443,6 +487,7 @@ export default function SheetsMonitor() {
                                     {String(outwardState.lastResult.error)}
                                 </div>
                             )}
+                            <BalanceVerificationBadge verification={outwardState.lastResult.balanceVerification as BalanceVerification | undefined} />
                         </>
                     ) : (
                         <div className="text-sm text-gray-400">No results yet</div>
