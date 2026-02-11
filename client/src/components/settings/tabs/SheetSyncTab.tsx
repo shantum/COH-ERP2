@@ -159,7 +159,7 @@ const ExecutionProgress = React.memo(function ExecutionProgress({
 // OFFLOAD WORKER MONITOR
 // ============================================
 
-type OffloadJobId = 'ingest_inward' | 'ingest_outward' | 'move_shipped_to_outward' | 'cleanup_done_rows' | 'migrate_sheet_formulas';
+type OffloadJobId = 'ingest_inward' | 'ingest_outward' | 'move_shipped_to_outward' | 'cleanup_done_rows' | 'migrate_sheet_formulas' | 'push_balances';
 
 const OFFLOAD_JOB_CONFIRM_MESSAGES: Record<OffloadJobId, string> = {
     ingest_inward: 'This will create inventory transactions from Inward (Live) buffer rows and mark them as DONE.',
@@ -167,6 +167,7 @@ const OFFLOAD_JOB_CONFIRM_MESSAGES: Record<OffloadJobId, string> = {
     ingest_outward: 'This will create inventory transactions from Outward (Live) buffer rows and mark them as DONE.',
     cleanup_done_rows: 'This will delete DONE rows older than 7 days from both live tabs. Safe — only removes already-ingested rows.',
     migrate_sheet_formulas: 'This will rewrite Inventory col C and Balance (Final) col E formulas to exclude DONE rows. Safe to re-run.',
+    push_balances: 'This will push all current ERP balances to Mastersheet Inventory col R and Office Ledger Balance (Final) col F. No ingestion — just a balance sync.',
 };
 
 const OffloadMonitor = React.memo(function OffloadMonitor() {
@@ -495,7 +496,7 @@ const OffloadMonitor = React.memo(function OffloadMonitor() {
             {/* --- Maintenance Jobs --- */}
             <div className="border-t pt-3 mt-3">
                 <p className="text-xs font-medium text-gray-500 mb-2">Maintenance</p>
-                <div className="flex gap-2">
+                <div className="flex gap-2 flex-wrap">
                     <button
                         onClick={() => handleRunClick('cleanup_done_rows', 'Cleanup DONE Rows')}
                         disabled={triggerMutation.isPending || offloadStatus.cleanupDone?.isRunning}
@@ -509,6 +510,13 @@ const OffloadMonitor = React.memo(function OffloadMonitor() {
                         className="px-2.5 py-1.5 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 rounded border disabled:opacity-50"
                     >
                         {offloadStatus.migrateFormulas?.isRunning ? 'Migrating...' : 'Migrate Formulas'}
+                    </button>
+                    <button
+                        onClick={() => handleRunClick('push_balances', 'Push Balances to Sheets')}
+                        disabled={triggerMutation.isPending || offloadStatus.pushBalances?.isRunning}
+                        className="px-2.5 py-1.5 text-xs bg-emerald-100 hover:bg-emerald-200 text-emerald-700 rounded border disabled:opacity-50"
+                    >
+                        {offloadStatus.pushBalances?.isRunning ? 'Pushing...' : 'Push Balances to Sheets'}
                     </button>
                 </div>
                 {offloadStatus.cleanupDone?.lastResult && (

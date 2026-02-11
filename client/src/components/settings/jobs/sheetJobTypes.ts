@@ -75,6 +75,14 @@ export interface MigrateFormulasResult {
     durationMs: number;
 }
 
+export interface PushBalancesResult {
+    startedAt: string;
+    skusUpdated: number;
+    errors: number;
+    durationMs: number;
+    error: string | null;
+}
+
 export interface MoveShippedResult {
     shippedRowsFound: number;
     skippedRows: number;
@@ -147,6 +155,7 @@ export interface OffloadStatusResponse {
     moveShipped: JobStateResponse;
     cleanupDone: JobStateResponse;
     migrateFormulas: JobStateResponse;
+    pushBalances: JobStateResponse;
     schedulerActive: boolean;
     bufferCounts: BufferCounts;
 }

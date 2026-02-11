@@ -187,7 +187,7 @@ interface PermissionsUpdateBody {
 }
 
 /** Background job trigger params */
-type JobId = 'shopify_sync' | 'tracking_sync' | 'cache_cleanup' | 'ingest_inward' | 'ingest_outward' | 'move_shipped_to_outward' | 'preview_ingest_inward' | 'preview_ingest_outward' | 'cleanup_done_rows' | 'migrate_sheet_formulas' | 'snapshot_compute' | 'snapshot_backfill';
+type JobId = 'shopify_sync' | 'tracking_sync' | 'cache_cleanup' | 'ingest_inward' | 'ingest_outward' | 'move_shipped_to_outward' | 'preview_ingest_inward' | 'preview_ingest_outward' | 'cleanup_done_rows' | 'migrate_sheet_formulas' | 'snapshot_compute' | 'snapshot_backfill' | 'push_balances';
 
 /** Background job update body */
 interface JobUpdateBody {
@@ -1523,6 +1523,11 @@ router.post('/background-jobs/:jobId/trigger', requireAdmin, asyncHandler(async 
             res.json({ message: 'Stock snapshot backfill completed', result });
             break;
         }
+        case 'push_balances': {
+            const result = await sheetOffloadWorker.triggerPushBalances();
+            res.json({ message: 'Push balances to sheets completed', result });
+            break;
+        }
         default:
             throw new ValidationError(`Unknown job: ${jobId}`);
     }
@@ -1753,6 +1758,7 @@ router.get('/sheet-offload/status', requireAdmin, asyncHandler(async (_req: Requ
         moveShipped: status.moveShipped,
         cleanupDone: status.cleanupDone,
         migrateFormulas: status.migrateFormulas,
+        pushBalances: status.pushBalances,
         schedulerActive: status.schedulerActive,
         bufferCounts,
     });

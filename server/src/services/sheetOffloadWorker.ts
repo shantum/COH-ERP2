@@ -102,6 +102,14 @@ interface MigrateFormulasResult {
     durationMs: number;
 }
 
+interface PushBalancesResult {
+    startedAt: string;
+    skusUpdated: number;
+    errors: number;
+    durationMs: number;
+    error: string | null;
+}
+
 interface MoveShippedResult {
     shippedRowsFound: number;
     skippedRows: number;
@@ -145,6 +153,7 @@ interface OffloadStatus {
     moveShipped: JobState<MoveShippedResult>;
     cleanupDone: JobState<CleanupDoneResult>;
     migrateFormulas: JobState<MigrateFormulasResult>;
+    pushBalances: JobState<PushBalancesResult>;
     schedulerActive: boolean;
 }
 
@@ -216,6 +225,13 @@ const cleanupDoneState: JobState<CleanupDoneResult> = {
 };
 
 const migrateFormulasState: JobState<MigrateFormulasResult> = {
+    isRunning: false,
+    lastRunAt: null,
+    lastResult: null,
+    recentRuns: [],
+};
+
+const pushBalancesState: JobState<PushBalancesResult> = {
     isRunning: false,
     lastRunAt: null,
     lastResult: null,
@@ -1971,6 +1987,162 @@ async function triggerMoveShipped(): Promise<MoveShippedResult | null> {
 }
 
 // ============================================
+// PUSH BALANCES (standalone)
+// ============================================
+
+async function triggerPushBalances(): Promise<PushBalancesResult | null> {
+    if (pushBalancesState.isRunning) {
+        sheetsLogger.warn('triggerPushBalances skipped — already running');
+        return null;
+    }
+
+    pushBalancesState.isRunning = true;
+    const startedAt = new Date().toISOString();
+    const start = Date.now();
+
+    try {
+        // Fetch ALL SKU IDs from DB
+        const allSkus = await prisma.sku.findMany({
+            select: { id: true },
+        });
+
+        const allSkuIds = new Set(allSkus.map(s => s.id));
+        sheetsLogger.info({ skuCount: allSkuIds.size }, 'Push balances: fetched all SKU IDs');
+
+        const tracker = { errors: 0, skusUpdated: 0 };
+
+        // No 5-second wait needed — balances are already up to date in DB
+        // We call updateSheetBalances but pass the full set directly
+        // The function has a 5s wait we need to skip, so we replicate the logic inline
+        const skus = await prisma.sku.findMany({
+            where: { id: { in: [...allSkuIds] } },
+            select: { id: true, skuCode: true, currentBalance: true },
+        });
+
+        const balanceByCode = new Map<string, number>();
+        for (const sku of skus) {
+            balanceByCode.set(sku.skuCode, sku.currentBalance);
+        }
+
+        let totalUpdated = 0;
+
+        // --- Target 1: Inventory tab col R (Mastersheet) ---
+        try {
+            const inventoryRows = await readRange(
+                ORDERS_MASTERSHEET_ID,
+                `'${INVENTORY_TAB.NAME}'!${INVENTORY_TAB.SKU_COL}:${INVENTORY_TAB.SKU_COL}`
+            );
+
+            const dataStart = INVENTORY_TAB.DATA_START_ROW - 1;
+            const updates: Array<{ row: number; value: number }> = [];
+
+            for (let i = dataStart; i < inventoryRows.length; i++) {
+                const skuCode = String(inventoryRows[i]?.[0] ?? '').trim();
+                if (skuCode && balanceByCode.has(skuCode)) {
+                    updates.push({ row: i + 1, value: balanceByCode.get(skuCode)! });
+                }
+            }
+
+            if (updates.length > 0) {
+                const ranges = groupIntoRanges(updates);
+                for (const range of ranges) {
+                    const rangeStr = `'${INVENTORY_TAB.NAME}'!${INVENTORY_TAB.ERP_BALANCE_COL}${range.startRow}:${INVENTORY_TAB.ERP_BALANCE_COL}${range.startRow + range.values.length - 1}`;
+                    await writeRange(ORDERS_MASTERSHEET_ID, rangeStr, range.values);
+                }
+                totalUpdated = updates.length;
+                sheetsLogger.info({ updated: updates.length, ranges: ranges.length }, 'Push balances: Inventory col R updated');
+            }
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : 'Unknown error';
+            sheetsLogger.error({ error: message }, 'Push balances: Failed to update Inventory col R');
+            tracker.errors++;
+        }
+
+        // --- Target 2: Balance (Final) col F (Office Ledger) ---
+        try {
+            const balanceRows = await readRange(
+                OFFICE_LEDGER_ID,
+                `'${LEDGER_TABS.BALANCE_FINAL}'!A:A`
+            );
+
+            if (balanceRows.length > 2) {
+                const updates: Array<{ row: number; value: number }> = [];
+                for (let i = 2; i < balanceRows.length; i++) {
+                    const skuCode = String(balanceRows[i]?.[0] ?? '').trim();
+                    if (skuCode && balanceByCode.has(skuCode)) {
+                        updates.push({ row: i + 1, value: balanceByCode.get(skuCode)! });
+                    }
+                }
+
+                if (updates.length > 0) {
+                    const ranges = groupIntoRanges(updates);
+                    for (const range of ranges) {
+                        const rangeStr = `'${LEDGER_TABS.BALANCE_FINAL}'!F${range.startRow}:F${range.startRow + range.values.length - 1}`;
+                        await writeRange(OFFICE_LEDGER_ID, rangeStr, range.values);
+                    }
+                    sheetsLogger.info({ updated: updates.length }, 'Push balances: Balance (Final) col F updated');
+                }
+            }
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : 'Unknown error';
+            sheetsLogger.error({ error: message }, 'Push balances: Failed to update Balance (Final) col F');
+            tracker.errors++;
+        }
+
+        tracker.skusUpdated = totalUpdated;
+
+        const result: PushBalancesResult = {
+            startedAt,
+            skusUpdated: tracker.skusUpdated,
+            errors: tracker.errors,
+            durationMs: Date.now() - start,
+            error: null,
+        };
+
+        pushBalancesState.lastRunAt = new Date();
+        pushBalancesState.lastResult = result;
+        pushRecentRun(pushBalancesState, {
+            startedAt,
+            durationMs: result.durationMs,
+            count: result.skusUpdated,
+            error: null,
+        });
+
+        sheetsLogger.info({
+            skusUpdated: result.skusUpdated,
+            errors: result.errors,
+            durationMs: result.durationMs,
+        }, 'triggerPushBalances completed');
+
+        return result;
+    } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : 'Unknown error';
+        sheetsLogger.error({ error: message }, 'triggerPushBalances failed');
+
+        const result: PushBalancesResult = {
+            startedAt,
+            skusUpdated: 0,
+            errors: 1,
+            durationMs: Date.now() - start,
+            error: message,
+        };
+
+        pushBalancesState.lastRunAt = new Date();
+        pushBalancesState.lastResult = result;
+        pushRecentRun(pushBalancesState, {
+            startedAt,
+            durationMs: result.durationMs,
+            count: 0,
+            error: message,
+        });
+
+        return result;
+    } finally {
+        pushBalancesState.isRunning = false;
+    }
+}
+
+// ============================================
 // BUFFER ROW COUNTS (for admin UI)
 // ============================================
 
@@ -2273,6 +2445,12 @@ function getStatus(): OffloadStatus {
             lastResult: migrateFormulasState.lastResult,
             recentRuns: [...migrateFormulasState.recentRuns],
         },
+        pushBalances: {
+            isRunning: pushBalancesState.isRunning,
+            lastRunAt: pushBalancesState.lastRunAt,
+            lastResult: pushBalancesState.lastResult,
+            recentRuns: [...pushBalancesState.recentRuns],
+        },
         schedulerActive,
     };
 }
@@ -2290,9 +2468,10 @@ export default {
     triggerMoveShipped,
     triggerCleanupDoneRows,
     triggerMigrateFormulas,
+    triggerPushBalances,
     getBufferCounts,
     previewIngestInward,
     previewIngestOutward,
 };
 
-export type { IngestInwardResult, IngestOutwardResult, IngestPreviewResult, MoveShippedResult, CleanupDoneResult, MigrateFormulasResult, OffloadStatus, RunSummary };
+export type { IngestInwardResult, IngestOutwardResult, IngestPreviewResult, MoveShippedResult, CleanupDoneResult, MigrateFormulasResult, PushBalancesResult, OffloadStatus, RunSummary };
