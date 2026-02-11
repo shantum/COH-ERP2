@@ -530,6 +530,14 @@ async function validateOutwardRows(
             if (/^[0-9a-f]{8}$/i.test(num)) {
                 shortMyntraIds.add(num);
             }
+            // Myntra combo "shortId - btOrderId" (e.g., "35d4288c - 9659143096")
+            // Old sheet format that concatenated both IDs. Extract the short UUID part.
+            const comboMatch = num.match(/^([0-9a-f]{8})\s*-\s*\d+$/i);
+            if (comboMatch) {
+                const short = comboMatch[1];
+                shortMyntraIds.add(short);
+                alternateToOriginal.set(short, num);
+            }
             // Nykaa: bidirectional --1 suffix handling
             if (num.endsWith('--1')) {
                 const trimmed = num.slice(0, -3);
