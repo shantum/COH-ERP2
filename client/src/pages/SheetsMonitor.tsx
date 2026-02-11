@@ -44,8 +44,8 @@ interface BalanceVerification {
     drifted: number;
     sampleDrifts: Array<{
         skuCode: string;
-        before: { c: number; d: number; e: number };
-        after: { c: number; d: number; e: number };
+        before: { c: number; d: number; e: number; r: number };
+        after: { c: number; d: number; e: number; r: number };
         cDelta: number;
     }>;
 }
@@ -61,8 +61,18 @@ interface PreviewResult {
     affectedSkuCodes: string[];
     durationMs: number;
     balanceSnapshot?: {
-        skuBalances: Array<{ skuCode: string; colC: number; colD: number; colE: number; pendingQty: number }>;
+        skuBalances: Array<{
+            skuCode: string;
+            erpBalance: number;
+            colR: number;
+            colC: number;
+            colD: number;
+            colE: number;
+            pendingQty: number;
+            match: boolean;
+        }>;
         timestamp: string;
+        mismatches: number;
     };
 }
 
@@ -190,6 +200,7 @@ function PreviewResultCard({ title, preview, color, onClose }: {
     const errors = Object.entries(preview.validationErrors ?? {});
     const skipReasons = Object.entries(preview.skipReasons ?? {});
     const balances = preview.balanceSnapshot?.skuBalances ?? [];
+    const mismatches = preview.balanceSnapshot?.mismatches ?? 0;
 
     return (
         <div className={`bg-white rounded-lg border ${borderColor} p-4 shadow-sm`}>
@@ -244,30 +255,54 @@ function PreviewResultCard({ title, preview, color, onClose }: {
                 </div>
             )}
 
-            {/* Balance snapshot table */}
+            {/* ERP vs Sheet balance comparison */}
             {balances.length > 0 && (
                 <div>
-                    <div className="text-xs font-medium text-gray-600 mb-1">
-                        Balance Snapshot ({balances.length} SKUs)
+                    <div className="flex items-center gap-2 mb-1">
+                        <span className="text-xs font-medium text-gray-600">
+                            ERP vs Sheet ({balances.length} SKUs)
+                        </span>
+                        {mismatches === 0 ? (
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-emerald-100 text-emerald-700">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                                All match
+                            </span>
+                        ) : (
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-red-100 text-red-700">
+                                <AlertCircle size={10} />
+                                {mismatches} mismatch{mismatches !== 1 ? 'es' : ''}
+                            </span>
+                        )}
                     </div>
-                    <div className="border rounded-lg overflow-hidden max-h-60 overflow-y-auto">
+                    <div className="border rounded-lg overflow-hidden max-h-72 overflow-y-auto">
                         <table className="w-full text-xs">
                             <thead className="bg-gray-50 sticky top-0">
                                 <tr>
                                     <th className="text-left px-2 py-1.5 font-medium text-gray-600">SKU</th>
-                                    <th className="text-right px-2 py-1.5 font-medium text-gray-600">Total (C)</th>
-                                    <th className="text-right px-2 py-1.5 font-medium text-gray-600">Allocated (D)</th>
-                                    <th className="text-right px-2 py-1.5 font-medium text-gray-600">Available (E)</th>
-                                    <th className="text-right px-2 py-1.5 font-medium text-gray-600">Pending Qty</th>
+                                    <th className="text-right px-2 py-1.5 font-medium text-gray-600">ERP Bal</th>
+                                    <th className="text-right px-2 py-1.5 font-medium text-gray-600">Sheet R</th>
+                                    <th className="text-center px-2 py-1.5 font-medium text-gray-600">Match</th>
+                                    <th className="text-right px-2 py-1.5 font-medium text-gray-600">Col C</th>
+                                    <th className="text-right px-2 py-1.5 font-medium text-gray-600">Alloc (D)</th>
+                                    <th className="text-right px-2 py-1.5 font-medium text-gray-600">Avail (E)</th>
+                                    <th className="text-right px-2 py-1.5 font-medium text-gray-600">Pending</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y">
                                 {balances.map((b) => (
-                                    <tr key={b.skuCode} className="hover:bg-gray-50">
+                                    <tr key={b.skuCode} className={b.match ? 'hover:bg-gray-50' : 'bg-red-50 hover:bg-red-100'}>
                                         <td className="px-2 py-1 font-mono text-gray-700">{b.skuCode}</td>
-                                        <td className="px-2 py-1 text-right text-gray-900">{b.colC}</td>
-                                        <td className="px-2 py-1 text-right text-gray-600">{b.colD}</td>
-                                        <td className="px-2 py-1 text-right text-gray-900">{b.colE}</td>
+                                        <td className="px-2 py-1 text-right font-medium text-gray-900">{b.erpBalance}</td>
+                                        <td className={`px-2 py-1 text-right font-medium ${b.match ? 'text-gray-900' : 'text-red-600'}`}>{b.colR}</td>
+                                        <td className="px-2 py-1 text-center">
+                                            {b.match
+                                                ? <span className="text-emerald-600">&#10003;</span>
+                                                : <span className="text-red-600 font-bold">&#10007;</span>
+                                            }
+                                        </td>
+                                        <td className="px-2 py-1 text-right text-gray-700">{b.colC}</td>
+                                        <td className="px-2 py-1 text-right text-gray-500">{b.colD}</td>
+                                        <td className="px-2 py-1 text-right text-gray-700">{b.colE}</td>
                                         <td className={`px-2 py-1 text-right font-medium ${textColor}`}>{b.pendingQty}</td>
                                     </tr>
                                 ))}

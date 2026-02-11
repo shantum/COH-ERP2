@@ -146,13 +146,23 @@ interface IngestPreviewResult {
     affectedSkuCodes: string[];
     durationMs: number;
     balanceSnapshot?: {
-        skuBalances: Array<{ skuCode: string; colC: number; colD: number; colE: number; pendingQty: number }>;
+        skuBalances: Array<{
+            skuCode: string;
+            erpBalance: number;   // DB currentBalance
+            colR: number;         // sheet col R (what we last wrote)
+            colC: number;         // sheet col C (formula: R + pending in - pending out)
+            colD: number;         // sheet col D (allocated)
+            colE: number;         // sheet col E (available = C - D)
+            pendingQty: number;   // qty about to be ingested
+            match: boolean;       // erpBalance === colR
+        }>;
         timestamp: string;
+        mismatches: number;       // count of SKUs where erpBalance !== colR
     };
 }
 
 interface BalanceSnapshot {
-    balances: Map<string, { c: number; d: number; e: number }>;
+    balances: Map<string, { c: number; d: number; e: number; r: number }>;
     rowCount: number;
     timestamp: string;
 }
@@ -163,8 +173,8 @@ interface BalanceVerificationResult {
     drifted: number;
     sampleDrifts: Array<{
         skuCode: string;
-        before: { c: number; d: number; e: number };
-        after: { c: number; d: number; e: number };
+        before: { c: number; d: number; e: number; r: number };
+        after: { c: number; d: number; e: number; r: number };
         cDelta: number;
     }>;
     snapshotBeforeMs: number;
@@ -1289,18 +1299,19 @@ function groupIntoRanges(
 // ============================================
 
 /**
- * Read a snapshot of ALL SKU balances from the Inventory tab (cols A–E).
- * Returns a Map of skuCode → { c, d, e } for every row with a non-empty SKU.
+ * Read a snapshot of ALL SKU balances from the Inventory tab (cols A–R).
+ * Returns a Map of skuCode → { c, d, e, r } for every row with a non-empty SKU.
+ * Col R (index 17) = ERP currentBalance as written by the worker.
  */
 async function readInventorySnapshot(): Promise<BalanceSnapshot> {
     const startMs = Date.now();
     const rows = await readRange(
         ORDERS_MASTERSHEET_ID,
-        `'${INVENTORY_TAB.NAME}'!A:E`
+        `'${INVENTORY_TAB.NAME}'!A:R`
     );
 
     const dataStart = INVENTORY_TAB.DATA_START_ROW - 1; // skip header rows
-    const balances = new Map<string, { c: number; d: number; e: number }>();
+    const balances = new Map<string, { c: number; d: number; e: number; r: number }>();
 
     for (let i = dataStart; i < rows.length; i++) {
         const row = rows[i];
@@ -1310,7 +1321,8 @@ async function readInventorySnapshot(): Promise<BalanceSnapshot> {
         const c = Number(row?.[2] ?? 0) || 0;
         const d = Number(row?.[3] ?? 0) || 0;
         const e = Number(row?.[4] ?? 0) || 0;
-        balances.set(skuCode, { c, d, e });
+        const r = Number(row?.[17] ?? 0) || 0; // col R = index 17
+        balances.set(skuCode, { c, d, e, r });
     }
 
     sheetsLogger.info({ skus: balances.size, durationMs: Date.now() - startMs }, 'Inventory snapshot read');
@@ -1686,25 +1698,37 @@ async function previewIngestInward(): Promise<IngestPreviewResult | null> {
         // Balance snapshot for affected SKUs (non-fatal)
         let balanceSnapshot: IngestPreviewResult['balanceSnapshot'];
         try {
-            const snapshot = await readInventorySnapshot();
-            // Compute pending qty per SKU from newRows
+            const [snapshot, erpSkus] = await Promise.all([
+                readInventorySnapshot(),
+                prisma.sku.findMany({
+                    where: { skuCode: { in: affectedSkuCodes } },
+                    select: { skuCode: true, currentBalance: true },
+                }),
+            ]);
+            const erpByCode = new Map(erpSkus.map(s => [s.skuCode, s.currentBalance]));
             const pendingByCode = new Map<string, number>();
             for (const row of newRows) {
                 pendingByCode.set(row.skuCode, (pendingByCode.get(row.skuCode) ?? 0) + row.qty);
             }
-            balanceSnapshot = {
-                skuBalances: affectedSkuCodes.map(code => {
-                    const bal = snapshot.balances.get(code);
-                    return {
-                        skuCode: code,
-                        colC: bal?.c ?? 0,
-                        colD: bal?.d ?? 0,
-                        colE: bal?.e ?? 0,
-                        pendingQty: pendingByCode.get(code) ?? 0,
-                    };
-                }),
-                timestamp: snapshot.timestamp,
-            };
+            let mismatches = 0;
+            const skuBalances = affectedSkuCodes.map(code => {
+                const bal = snapshot.balances.get(code);
+                const erpBalance = erpByCode.get(code) ?? 0;
+                const colR = bal?.r ?? 0;
+                const match = Math.abs(erpBalance - colR) < 0.01;
+                if (!match) mismatches++;
+                return {
+                    skuCode: code,
+                    erpBalance,
+                    colR,
+                    colC: bal?.c ?? 0,
+                    colD: bal?.d ?? 0,
+                    colE: bal?.e ?? 0,
+                    pendingQty: pendingByCode.get(code) ?? 0,
+                    match,
+                };
+            });
+            balanceSnapshot = { skuBalances, timestamp: snapshot.timestamp, mismatches };
         } catch (snapErr: unknown) {
             sheetsLogger.warn({ error: snapErr instanceof Error ? snapErr.message : String(snapErr) }, 'Preview balance snapshot failed (non-fatal)');
         }
@@ -1955,24 +1979,37 @@ async function previewIngestOutward(): Promise<IngestPreviewResult | null> {
         // Balance snapshot for affected SKUs (non-fatal)
         let balanceSnapshot: IngestPreviewResult['balanceSnapshot'];
         try {
-            const snapshot = await readInventorySnapshot();
+            const [snapshot, erpSkus] = await Promise.all([
+                readInventorySnapshot(),
+                prisma.sku.findMany({
+                    where: { skuCode: { in: affectedSkuCodes } },
+                    select: { skuCode: true, currentBalance: true },
+                }),
+            ]);
+            const erpByCode = new Map(erpSkus.map(s => [s.skuCode, s.currentBalance]));
             const pendingByCode = new Map<string, number>();
             for (const row of validRows) {
                 pendingByCode.set(row.skuCode, (pendingByCode.get(row.skuCode) ?? 0) + row.qty);
             }
-            balanceSnapshot = {
-                skuBalances: affectedSkuCodes.map(code => {
-                    const bal = snapshot.balances.get(code);
-                    return {
-                        skuCode: code,
-                        colC: bal?.c ?? 0,
-                        colD: bal?.d ?? 0,
-                        colE: bal?.e ?? 0,
-                        pendingQty: pendingByCode.get(code) ?? 0,
-                    };
-                }),
-                timestamp: snapshot.timestamp,
-            };
+            let mismatches = 0;
+            const skuBalances = affectedSkuCodes.map(code => {
+                const bal = snapshot.balances.get(code);
+                const erpBalance = erpByCode.get(code) ?? 0;
+                const colR = bal?.r ?? 0;
+                const match = Math.abs(erpBalance - colR) < 0.01;
+                if (!match) mismatches++;
+                return {
+                    skuCode: code,
+                    erpBalance,
+                    colR,
+                    colC: bal?.c ?? 0,
+                    colD: bal?.d ?? 0,
+                    colE: bal?.e ?? 0,
+                    pendingQty: pendingByCode.get(code) ?? 0,
+                    match,
+                };
+            });
+            balanceSnapshot = { skuBalances, timestamp: snapshot.timestamp, mismatches };
         } catch (snapErr: unknown) {
             sheetsLogger.warn({ error: snapErr instanceof Error ? snapErr.message : String(snapErr) }, 'Preview balance snapshot failed (non-fatal)');
         }
