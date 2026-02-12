@@ -33,14 +33,14 @@ import {
   IndianRupee, Plus, ArrowUpRight, ArrowDownLeft,
   Check, X, BookOpen, ChevronLeft, ChevronRight, Loader2, AlertCircle,
 } from 'lucide-react';
-import type { FinanceSearchParams } from '@coh/shared';
 import {
+  type FinanceSearchParams,
   INVOICE_CATEGORIES,
   INVOICE_STATUSES,
   PAYMENT_METHODS,
   CHART_OF_ACCOUNTS,
   getCategoryLabel,
-} from '../../../server/src/config/finance/index';
+} from '@coh/shared';
 
 // ============================================
 // MAIN PAGE

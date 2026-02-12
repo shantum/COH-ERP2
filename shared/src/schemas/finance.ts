@@ -170,3 +170,59 @@ export const ListLedgerEntriesInput = z.object({
   page: z.coerce.number().int().positive().default(1),
   limit: z.coerce.number().int().positive().max(200).default(50),
 }).optional();
+
+// ============================================
+// DISPLAY CONSTANTS (shared between client + server)
+// ============================================
+
+export const INVOICE_CATEGORIES = [
+  'fabric', 'trims', 'service', 'logistics', 'rent', 'salary',
+  'marketing', 'packaging', 'equipment', 'marketplace', 'customer_order', 'other',
+] as const;
+
+export type InvoiceCategory = (typeof INVOICE_CATEGORIES)[number];
+
+const CATEGORY_LABELS: Record<string, string> = {
+  fabric: 'Fabric',
+  trims: 'Trims & Accessories',
+  service: 'Service (Print, Wash, etc.)',
+  logistics: 'Logistics & Shipping',
+  rent: 'Rent',
+  salary: 'Salary & Wages',
+  marketing: 'Marketing & Ads',
+  packaging: 'Packaging',
+  equipment: 'Equipment & Tools',
+  marketplace: 'Marketplace Fees',
+  customer_order: 'Customer Order',
+  other: 'Other',
+};
+
+export function getCategoryLabel(category: string): string {
+  return CATEGORY_LABELS[category] ?? category;
+}
+
+export const INVOICE_STATUSES = ['draft', 'confirmed', 'partially_paid', 'paid', 'cancelled'] as const;
+
+export const PAYMENT_METHODS = [
+  'bank_transfer', 'upi', 'cash', 'cheque', 'card', 'razorpay',
+  'shopflo', 'cod_remittance', 'marketplace_payout', 'adjustment', 'other',
+] as const;
+
+export const CHART_OF_ACCOUNTS = [
+  { code: 'BANK', name: 'Bank', type: 'asset' },
+  { code: 'CASH', name: 'Cash', type: 'asset' },
+  { code: 'ACCOUNTS_RECEIVABLE', name: 'Money Customers Owe Us', type: 'asset' },
+  { code: 'FABRIC_INVENTORY', name: 'Fabric Inventory', type: 'asset' },
+  { code: 'FINISHED_GOODS', name: 'Finished Goods Inventory', type: 'asset' },
+  { code: 'GST_INPUT', name: 'GST We Can Claim', type: 'asset' },
+  { code: 'ADVANCES_GIVEN', name: 'Advances We Gave', type: 'asset' },
+  { code: 'ACCOUNTS_PAYABLE', name: 'Money We Owe Vendors', type: 'liability' },
+  { code: 'GST_OUTPUT', name: 'GST We Owe Government', type: 'liability' },
+  { code: 'CUSTOMER_ADVANCES', name: 'Customer Advances', type: 'liability' },
+  { code: 'SALES_REVENUE', name: 'Sales Revenue', type: 'income' },
+  { code: 'COGS', name: 'Cost of Goods Sold', type: 'direct_cost' },
+  { code: 'OPERATING_EXPENSES', name: 'Operating Expenses', type: 'expense' },
+  { code: 'MARKETPLACE_FEES', name: 'Marketplace & Payment Fees', type: 'expense' },
+  { code: 'OWNER_CAPITAL', name: 'Owner Capital', type: 'equity' },
+  { code: 'RETAINED_EARNINGS', name: 'Retained Earnings', type: 'equity' },
+] as const;
