@@ -7,8 +7,10 @@ The Google Sheets hybrid system bridges operations between Google Sheets (used b
 3. **Push Balances**: Pushes ERP `currentBalance` to Sheets (Inventory col R, Balance Final col F) via batch API
 4. **Fabric Flows**: Push/import fabric balances, ingest fabric inward transactions
 5. **Push Orders to Sheet**: Auto-pushes new Shopify and ERP-created orders to "Orders from COH"
-6. **Cleanup DONE Rows**: Deletes ingested (DONE-marked) rows older than 7 days
+6. **Cleanup DONE Rows**: Deletes ingested (DONE-marked) rows immediately (retention = 0 days)
 7. **Migrate Formulas**: Rewrites sheet formulas from SUMIF to V2 SUMIFS (excludes DONE rows)
+
+Additionally, the system includes **Google Drive finance sync** -- auto-uploading invoice/payment files to Drive organized by party and financial year for CA access.
 
 The system is designed so that **ingestion never causes double-counting** -- the combined view formula automatically adjusts as rows are marked DONE and balances update.
 
@@ -22,13 +24,13 @@ The system is designed so that **ingestion never causes double-counting** -- the
 |------|----------|----|----------|
 | **COH Orders Mastersheet** | `ORDERS_MASTERSHEET_ID` | `1OlEDXXQpKmjicTHn35EMJ2qj3f0BVNAUK3M8kyeergo` | Orders from COH, Inventory, Inward (Live), Outward (Live), Outward, Fabric Inward (Live) |
 | **Office Ledger** | `OFFICE_LEDGER_ID` | `1ZZgzu4xPXhP9ba3-liXHxj5tY0HihoEnVC9-wLijD5E` | Inward (Final), Inward (Archive), Balance (Final), Returns/Exchange |
-| **Barcode Mastersheet** | `BARCODE_MASTERSHEET_ID` | `1xlK4gO2Gxu8-8-WS4jFnR0uxYO35fEBPZiSbJobGVy8` | Main (SKU master), Fabric Balances |
+| **Barcode Mastersheet** | `BARCODE_MASTERSHEET_ID` | `1xlK4gO2Gxu8-8-WS4jFnR0uxYO35fEBPZiSbJobGVy8` | Main (SKU master), Fabric Balances, Product Weights |
 
 ### Three Buffer Tabs (in Mastersheet)
 
 - **Inward (Live)**: Ops team enters new inward transactions (columns A-J: SKU, Qty, Product, Date, Source, Done By, Barcode, Tailor Number, Notes, Import Errors)
 - **Outward (Live)**: Ops team enters outward transactions OR shipped orders are auto-moved here (columns A-AG: matches Orders from COH layout + Outward Date, Unique ID, Import Errors)
-- **Fabric Inward (Live)**: Ops team enters fabric inward transactions (columns A-G: Fabric Code, Qty, Date, Source, Done By, Notes, Import Errors)
+- **Fabric Inward (Live)**: Ops team enters fabric inward transactions (columns A-K: Material, Fabric, Colour, Fabric Code, Qty, Unit, Cost Per Unit, Supplier, Date, Notes, Status)
 
 Buffer tabs are in the Mastersheet so the Inventory tab formula can reference them via same-sheet SUMIFS (no IMPORTRANGE needed).
 
@@ -38,7 +40,7 @@ Instead of deleting ingested rows immediately, rows are marked with `DONE:{refer
 
 ```
 INGESTED_PREFIX = 'DONE:'   (from config/sync/sheets.ts)
-CLEANUP_RETENTION_DAYS = 7  (DONE rows deleted after 7 days by cleanup job)
+CLEANUP_RETENTION_DAYS = 0  (DONE rows deleted immediately by cleanup job)
 ```
 
 ### Data Flow
@@ -89,7 +91,7 @@ Nine independent jobs managed by `sheetOffloadWorker.ts`:
 - **`push_fabric_balances`** -- Pushes `FabricColour.currentBalance` to Fabric Balances tab in Barcode Mastersheet.
 - **`import_fabric_balances`** -- Reads Fabric Balances tab from sheet, reconciles against ERP using time-aware historical balance calculation.
 - **`ingest_fabric_inward`** -- Reads Fabric Inward (Live), creates `FabricColourTransaction` records, marks DONE.
-- **`cleanup_done_rows`** -- Deletes rows marked `DONE:*` that are older than 7 days from Inward (Live) and Outward (Live).
+- **`cleanup_done_rows`** -- Deletes rows marked `DONE:*` immediately (retention = 0 days) from Inward (Live) and Outward (Live).
 - **`migrate_sheet_formulas`** -- Rewrites Inventory col C and Balance Final col E formulas from SUMIF to V2 SUMIFS (excludes DONE rows).
 
 ---
@@ -152,6 +154,21 @@ After appending rows, adds a bottom border on the last row of the order (visual 
 ### Stamping
 
 After a successful push, `stampSheetPushed(orderId)` sets `order.sheetPushedAt = new Date()`. This prevents re-pushing and enables the reconciler to detect missed orders.
+
+### Channel Detail Updates
+
+`updateSheetChannelDetails(updates)` writes channel status, courier, and AWB data back to the "Orders from COH" sheet after a channel CSV import. Matches rows by order number + SKU, handling Myntra UUID and Nykaa `--1` suffix formats.
+
+- Writes to cols Y (channel status), Z (courier), AA (AWB) via `batchWriteRanges()`
+- Called after channel CSV import to backfill shipping details from marketplaces
+
+### Scheduled Order Status Sync
+
+`syncSheetOrderStatus()` is a scheduled job that keeps the sheet in sync with ERP order data. Reads all "Orders from COH" rows, looks up each order+SKU in the DB, and updates cols Y/Z/AA where the ERP has newer status/courier/AWB values. Only writes rows where at least one value has actually changed.
+
+- Has its own concurrency guard (`statusSyncRunning`)
+- Batch-queries all matching orders from DB in one call
+- Uses `batchWriteRanges()` for efficient multi-row updates
 
 ### Design Decisions
 
@@ -521,7 +538,7 @@ Column config: `FABRIC_INWARD_LIVE_COLS` and `FABRIC_INWARD_LIVE_HEADERS` in she
 
 ### Job 7: Cleanup DONE Rows (`triggerCleanupDoneRows`)
 
-Deletes rows from Inward (Live) and Outward (Live) where the Import Errors column starts with `DONE:` and the row is older than `CLEANUP_RETENTION_DAYS` (7 days). Processes each tab independently. Returns `CleanupDoneResult` with counts per tab.
+Deletes rows from Inward (Live) and Outward (Live) where the Import Errors column starts with `DONE:`. With `CLEANUP_RETENTION_DAYS = 0`, DONE rows are deleted immediately on the next cleanup run. Processes each tab independently. Returns `CleanupDoneResult` with counts per tab.
 
 ### Job 8: Migrate Sheet Formulas (`triggerMigrateFormulas`)
 
@@ -651,7 +668,7 @@ All configuration in `server/src/config/sync/sheets.ts` (~700 lines). Re-exporte
 | Config | Value | Purpose |
 |--------|-------|---------|
 | `INGESTED_PREFIX` | `'DONE:'` | Prefix written to Import Errors column on ingested rows |
-| `CLEANUP_RETENTION_DAYS` | `7` | Days before DONE rows are deleted by cleanup job |
+| `CLEANUP_RETENTION_DAYS` | `0` | Days before DONE rows are deleted by cleanup job (immediate) |
 | `FABRIC_DEDUCT_SOURCES` | `['sampling']` | Inward sources that trigger automatic fabric deduction |
 
 ### Timing
@@ -667,14 +684,14 @@ All configuration in `server/src/config/sync/sheets.ts` (~700 lines). Re-exporte
 ### Column Mappings
 
 Extensive per-tab column definitions:
-- `ORDERS_FROM_COH_COLS` -- 13 columns (A-AD) including SHIPPED, OUTWARD_DONE
+- `ORDERS_FROM_COH_COLS` -- 14 columns (A-AD) including CHANNEL_STATUS (Y), SHIPPED, OUTWARD_DONE
 - `INVENTORY_TAB` -- tab name, data start row, ERP balance col (R), SKU col (A)
 - `INWARD_LIVE_COLS` -- 10 columns (A-J, including Import Errors)
 - `OUTWARD_LIVE_COLS` -- 14 columns (A-N, includes Order Date for reversibility)
 - `BALANCE_COLS` -- 6 columns for Balance (Final) tab
 - `FABRIC_BALANCES_COLS` -- Fabric colour code, balance, count value, count datetime columns
 - `FABRIC_BALANCES_HEADERS` -- Header names for fabric balances tab
-- `FABRIC_INWARD_LIVE_COLS` -- 7 columns for Fabric Inward (Live) tab
+- `FABRIC_INWARD_LIVE_COLS` -- 11 columns (A-K): Material, Fabric, Colour, Fabric Code, Qty, Unit, Cost Per Unit, Supplier, Date, Notes, Status
 - `FABRIC_INWARD_LIVE_HEADERS` -- Header names for fabric inward tab
 
 ### Formula Templates
@@ -711,10 +728,10 @@ FABRIC_DEDUCT_SOURCES = ['sampling']
 
 ```typescript
 MASTERSHEET_TABS = {
-    ORDERS_FROM_COH, INVENTORY, INWARD_LIVE, OUTWARD_LIVE, OUTWARD,
-    FABRIC_BALANCES, FABRIC_INWARD  // New tabs
+    ORDERS_FROM_COH, INVENTORY, OFFICE_INVENTORY, OUTWARD, FABRIC_BALANCES
 }
 LIVE_TABS = { INWARD, OUTWARD, FABRIC_INWARD }
+BARCODE_TABS = { MAIN: 'Sheet1', FABRIC_BALANCES, PRODUCT_WEIGHTS }
 ```
 
 ---
@@ -843,9 +860,12 @@ Lists all background jobs including sheet jobs. Each job card shows:
 |------|---------|
 | `server/src/services/sheetOffloadWorker.ts` | Main worker: 9 independent jobs, per-job state, start/stop/getStatus/getBufferCounts, balance verification, fabric deduction |
 | `server/src/services/googleSheetsClient.ts` | Authenticated Sheets API client: JWT auth, rate limiter, retry, CRUD ops, border formatting, `batchWriteRanges()` |
-| `server/src/services/sheetOrderPush.ts` | Push Shopify + ERP orders to "Orders from COH" tab, self-healing reconciler |
-| `server/src/config/sync/sheets.ts` | All config: spreadsheet IDs, tab names, column mappings, timing, formulas, V2 templates (~700 lines) |
-| `server/src/config/sync/index.ts` | Re-exports all sheets config |
+| `server/src/services/googleDriveClient.ts` | Google Drive API v3 client (OAuth2): upload files, ensure folders, rate limiter, retry. Module-level singleton |
+| `server/src/services/sheetOrderPush.ts` | Push Shopify + ERP orders to "Orders from COH" tab, self-healing reconciler, channel detail updates, order status sync |
+| `server/src/services/driveFinanceSync.ts` | Auto-push invoice/payment files to Drive organized by party/FY. On-demand sync, no scheduled interval |
+| `server/src/config/sync/sheets.ts` | All sheet config: spreadsheet IDs, tab names, column mappings, timing, formulas, V2 templates (~700 lines) |
+| `server/src/config/sync/drive.ts` | Drive config: folder ID, API settings, batch size, FY helper function |
+| `server/src/config/sync/index.ts` | Re-exports all sheets + drive config |
 
 ### Routes & Server Functions
 
@@ -873,7 +893,7 @@ Lists all background jobs including sheet jobs. Each job card shows:
 | `server/src/services/sheetSyncService.ts` | CSV-based sync orchestrator: 6-step plan/execute (Steps 1 & 4 disabled) |
 | `server/src/utils/workerRunTracker.ts` | Tracks worker runs to `WorkerRun` table for operational visibility |
 | `server/src/index.js` | Worker registration + shutdown handler |
-| `server/src/utils/logger.ts` | `sheetsLogger` child logger |
+| `server/src/utils/logger.ts` | `sheetsLogger` + `driveLogger` child loggers |
 
 ### Scripts
 
@@ -906,7 +926,9 @@ Lists all background jobs including sheet jobs. Each job card shows:
 - **Sheet data types are mixed** -- `values.get()` returns mixed types. Always coerce with `String(cell ?? '')`.
 - **API quota: 300 requests/min** -- Rate limiter in `googleSheetsClient.ts` enforces 200ms between calls. Use `batchWriteRanges()` for bulk writes (single API call).
 - **IMPORTRANGE vs same-sheet** -- Live tabs in Mastersheet enable same-sheet SUMIFS (fast). Balance (Final) in Office Ledger needs IMPORTRANGE (slower, must wrap in IFERROR).
-- **Credentials**: Loaded from env var `GOOGLE_SERVICE_ACCOUNT_JSON` first (Railway), then falls back to key file `server/config/google-service-account.json` (local dev). The env var contains the full JSON string.
+- **Credentials (Sheets)**: Loaded from env var `GOOGLE_SERVICE_ACCOUNT_JSON` first (Railway), then falls back to key file `server/config/google-service-account.json` (local dev). The env var contains the full JSON string.
+- **Credentials (Drive)**: Uses OAuth2, NOT the service account. Service accounts have zero storage quota so uploads would silently fail. Drive needs `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_OAUTH_REFRESH_TOKEN`.
+- **Two separate Google auth methods**: Sheets uses service account JWT (read/write sheets). Drive uses OAuth2 refresh token (upload files as real user). Don't mix them.
 
 ### Data Handling
 
@@ -934,7 +956,60 @@ Lists all background jobs including sheet jobs. Each job card shows:
 
 ---
 
-## 12. Operational Runbook
+## 12. Google Drive Finance Sync
+
+### Overview
+
+Auto-pushes finance document files (invoice PDFs, payment receipts) from the ERP database to Google Drive. This gives the CA a browsable folder of all finance docs without needing ERP access. One-way sync: ERP is source of truth; Drive is a read-only copy.
+
+### Folder Structure
+
+```
+COH Finance/                         (root — DRIVE_FINANCE_FOLDER_ID env var)
+  Party Name/
+    FY 2025-26/
+      PartyName_INV-1801_2025-06-15.pdf
+      PartyName_PAY-UTR123_2025-06-15.pdf
+  _Unlinked/                         (no party linked)
+    FY 2025-26/
+      Unknown_INV-abc123_2025-04-01.png
+```
+
+### How It Works
+
+1. `uploadInvoiceFile(invoiceId)` / `uploadPaymentFile(paymentId)` -- Fetches file from DB (`fileData` column), resolves Drive folder (party + FY), uploads, saves `driveFileId`/`driveUrl`/`driveUploadedAt` on the record
+2. `syncAllPendingFiles()` -- Batch mode: finds all invoices/payments with `fileData` but no `driveFileId`, uploads them sequentially
+3. Folder caching: `ensureFolder()` results are cached in memory (`folderCache` Map) to avoid repeated Drive lookups
+
+### Auth: OAuth2 (Not Service Account)
+
+The Drive client uses **OAuth2 with a refresh token** instead of the service account. This is because service accounts have zero storage quota -- uploaded files would count against nobody's storage and eventually fail. With OAuth2, files are owned by the real Google user.
+
+**Required env vars:**
+- `GOOGLE_OAUTH_CLIENT_ID`
+- `GOOGLE_OAUTH_CLIENT_SECRET`
+- `GOOGLE_OAUTH_REFRESH_TOKEN`
+- `DRIVE_FINANCE_FOLDER_ID` -- root folder ID in Google Drive
+
+### Config (`config/sync/drive.ts`)
+
+| Config | Value | Purpose |
+|--------|-------|---------|
+| `DRIVE_FINANCE_FOLDER_ID` | env var | Root Google Drive folder for finance docs |
+| `DRIVE_API_SCOPE` | `drive` | Full Drive access (needed for Shared Drives) |
+| `DRIVE_API_CALL_DELAY_MS` | 200ms | Rate limiter between API calls |
+| `DRIVE_API_MAX_RETRIES` | 3 | Retries on 429/500/503 |
+| `DRIVE_SYNC_BATCH_SIZE` | 10 | Files per sync batch |
+| `DRIVE_UNLINKED_FOLDER_NAME` | `_Unlinked` | Folder for docs without a party |
+| `getFinancialYear(date)` | helper | Returns FY string like "FY 2025-26" (Indian April-March FY) |
+
+### Worker Pattern
+
+`driveFinanceSync.ts` follows the standard worker pattern: `start()`, `stop()`, `getStatus()`, `triggerSync()`. On-demand only (no scheduled interval). Registered in `server/src/index.js`.
+
+---
+
+## 13. Operational Runbook
 
 ### Running the Full Shipped -> Outward -> Ingest Flow
 
@@ -972,7 +1047,7 @@ Lists all background jobs including sheet jobs. Each job card shows:
 
 ### Cleanup Flow
 
-1. **Trigger cleanup** -- Run `cleanup_done_rows` to delete DONE rows older than 7 days.
+1. **Trigger cleanup** -- Run `cleanup_done_rows` to delete DONE rows (immediate, retention = 0 days).
 2. **Check result** -- `CleanupDoneResult` shows `inwardDeleted` and `outwardDeleted` counts.
 
 ### Emergency Stop

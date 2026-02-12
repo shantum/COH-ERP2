@@ -42,7 +42,8 @@ export interface AccountConfig {
 
 export const CHART_OF_ACCOUNTS: AccountConfig[] = [
   // --- Assets ---
-  { code: 'BANK', name: 'Bank', type: 'asset', description: 'Bank accounts' },
+  { code: 'BANK_HDFC', name: 'HDFC Bank Account', type: 'asset', description: 'Main business account' },
+  { code: 'BANK_RAZORPAYX', name: 'RazorpayX Account', type: 'asset', description: 'Payout account for vendor payments' },
   { code: 'CASH', name: 'Cash', type: 'asset', description: 'Cash on hand' },
   { code: 'ACCOUNTS_RECEIVABLE', name: 'Money Customers Owe Us', type: 'asset', description: 'Outstanding customer payments' },
   { code: 'FABRIC_INVENTORY', name: 'Fabric Inventory', type: 'asset', description: 'Value of fabric in stock' },
@@ -73,7 +74,8 @@ export const CHART_OF_ACCOUNTS: AccountConfig[] = [
 ];
 
 export type AccountCode =
-  | 'BANK'
+  | 'BANK_HDFC'
+  | 'BANK_RAZORPAYX'
   | 'CASH'
   | 'ACCOUNTS_RECEIVABLE'
   | 'FABRIC_INVENTORY'
@@ -246,6 +248,9 @@ export const LEDGER_SOURCE_TYPES = [
   'invoice_confirmed',
   'invoice_payment_linked',
   'payment_outgoing',
+  'hdfc_statement',
+  'bank_payout',
+  'bank_charge',
   'manual',
   'adjustment',
 ] as const;

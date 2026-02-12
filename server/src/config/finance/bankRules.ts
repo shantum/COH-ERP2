@@ -156,9 +156,9 @@ export const TAILOR_NAMES = new Set([
  * For non-vendor-bill payouts, the purpose field tells us what it is.
  */
 export const PURPOSE_RULES: Record<string, { debitAccount: string; creditAccount: string }> = {
-  refund:   { debitAccount: 'SALES_REVENUE',     creditAccount: 'BANK' },
-  salary:   { debitAccount: 'OPERATING_EXPENSES', creditAccount: 'BANK' },
-  rzp_fees: { debitAccount: 'MARKETPLACE_FEES',   creditAccount: 'BANK' },
+  refund:   { debitAccount: 'SALES_REVENUE',     creditAccount: 'BANK_RAZORPAYX' },
+  salary:   { debitAccount: 'OPERATING_EXPENSES', creditAccount: 'BANK_RAZORPAYX' },
+  rzp_fees: { debitAccount: 'MARKETPLACE_FEES',   creditAccount: 'BANK_RAZORPAYX' },
 };
 
 // ============================================
@@ -242,44 +242,44 @@ export const HDFC_NARRATION_RULES: NarrationRule[] = [
   { match: '054105001906-CANOE DESIGN',  direction: 'both', skip: true, description: 'Transfer from ICICI account' },
 
   // ---- Incoming: Gateway & Marketplace settlements ----
-  { match: 'RAZORPAY SOFTWARE', matchAlso: 'ESCROW', direction: 'in', debitAccount: 'BANK', creditAccount: 'SALES_REVENUE', description: 'Razorpay settlement' },
-  { match: 'PAYU PAYMENTS',              direction: 'in', debitAccount: 'BANK', creditAccount: 'SALES_REVENUE', description: 'PayU settlement' },
-  { match: 'RAZORPAY SOFTWARE', matchAlso: 'NODAL', direction: 'in', debitAccount: 'BANK', creditAccount: 'SALES_REVENUE', description: 'Razorpay Nodal settlement' },
-  { match: 'RAZORPAY PAYMENTS',          direction: 'in', debitAccount: 'BANK', creditAccount: 'SALES_REVENUE', description: 'Razorpay Payments settlement' },
-  { match: 'MYNTRA',                     direction: 'in', debitAccount: 'BANK', creditAccount: 'SALES_REVENUE', description: 'Myntra settlement' },
-  { match: 'NYKAA FASHION',              direction: 'in', debitAccount: 'BANK', creditAccount: 'SALES_REVENUE', description: 'Nykaa settlement' },
-  { match: 'ITHINK LOGISTIC',            direction: 'in', debitAccount: 'BANK', creditAccount: 'SALES_REVENUE', description: 'iThink COD remittance' },
-  { match: 'SHOPFLO',                    direction: 'in', debitAccount: 'BANK', creditAccount: 'SALES_REVENUE', description: 'Shopflo settlement' },
+  { match: 'RAZORPAY SOFTWARE', matchAlso: 'ESCROW', direction: 'in', debitAccount: 'BANK_HDFC', creditAccount: 'SALES_REVENUE', description: 'Razorpay settlement' },
+  { match: 'PAYU PAYMENTS',              direction: 'in', debitAccount: 'BANK_HDFC', creditAccount: 'SALES_REVENUE', description: 'PayU settlement' },
+  { match: 'RAZORPAY SOFTWARE', matchAlso: 'NODAL', direction: 'in', debitAccount: 'BANK_HDFC', creditAccount: 'SALES_REVENUE', description: 'Razorpay Nodal settlement' },
+  { match: 'RAZORPAY PAYMENTS',          direction: 'in', debitAccount: 'BANK_HDFC', creditAccount: 'SALES_REVENUE', description: 'Razorpay Payments settlement' },
+  { match: 'MYNTRA',                     direction: 'in', debitAccount: 'BANK_HDFC', creditAccount: 'SALES_REVENUE', description: 'Myntra settlement' },
+  { match: 'NYKAA FASHION',              direction: 'in', debitAccount: 'BANK_HDFC', creditAccount: 'SALES_REVENUE', description: 'Nykaa settlement' },
+  { match: 'ITHINK LOGISTIC',            direction: 'in', debitAccount: 'BANK_HDFC', creditAccount: 'SALES_REVENUE', description: 'iThink COD remittance' },
+  { match: 'SHOPFLO',                    direction: 'in', debitAccount: 'BANK_HDFC', creditAccount: 'SALES_REVENUE', description: 'Shopflo settlement' },
 
   // ---- Incoming: Owner capital ----
-  { match: 'ANIL GUPTA',                 direction: 'in', debitAccount: 'BANK', creditAccount: 'OWNER_CAPITAL', description: 'Owner capital — Anil Gupta' },
-  { match: 'SANTOSH DESAI',              direction: 'in', debitAccount: 'BANK', creditAccount: 'OWNER_CAPITAL', description: 'Owner capital (loan) — Santosh Desai' },
-  { match: 'SHANTUM  GUPTA',             direction: 'in', debitAccount: 'BANK', creditAccount: 'OWNER_CAPITAL', description: 'Owner capital — Shantum Gupta' },
-  { match: 'SHANTUM GUPTA',              direction: 'in', debitAccount: 'BANK', creditAccount: 'OWNER_CAPITAL', description: 'Owner capital — Shantum Gupta' },
-  { match: 'KAAVNI MULTIMELTS',          direction: 'in', debitAccount: 'BANK', creditAccount: 'OWNER_CAPITAL', description: 'Owner capital (loan) — Kaavni Multimelts' },
+  { match: 'ANIL GUPTA',                 direction: 'in', debitAccount: 'BANK_HDFC', creditAccount: 'OWNER_CAPITAL', description: 'Owner capital — Anil Gupta' },
+  { match: 'SANTOSH DESAI',              direction: 'in', debitAccount: 'BANK_HDFC', creditAccount: 'OWNER_CAPITAL', description: 'Owner capital (loan) — Santosh Desai' },
+  { match: 'SHANTUM  GUPTA',             direction: 'in', debitAccount: 'BANK_HDFC', creditAccount: 'OWNER_CAPITAL', description: 'Owner capital — Shantum Gupta' },
+  { match: 'SHANTUM GUPTA',              direction: 'in', debitAccount: 'BANK_HDFC', creditAccount: 'OWNER_CAPITAL', description: 'Owner capital — Shantum Gupta' },
+  { match: 'KAAVNI MULTIMELTS',          direction: 'in', debitAccount: 'BANK_HDFC', creditAccount: 'OWNER_CAPITAL', description: 'Owner capital (loan) — Kaavni Multimelts' },
 
   // ---- Incoming: B2B / Retail partners ----
-  { match: 'AMALA EARTH',                direction: 'in', debitAccount: 'BANK', creditAccount: 'SALES_REVENUE', description: 'Amala Earth (retail partner)' },
-  { match: 'OGAAN RETAIL',               direction: 'in', debitAccount: 'BANK', creditAccount: 'SALES_REVENUE', description: 'Ogaan Retail (retail partner)' },
-  { match: 'PAYPAL PAYMENTS',            direction: 'in', debitAccount: 'BANK', creditAccount: 'SALES_REVENUE', description: 'PayPal settlement' },
+  { match: 'AMALA EARTH',                direction: 'in', debitAccount: 'BANK_HDFC', creditAccount: 'SALES_REVENUE', description: 'Amala Earth (retail partner)' },
+  { match: 'OGAAN RETAIL',               direction: 'in', debitAccount: 'BANK_HDFC', creditAccount: 'SALES_REVENUE', description: 'Ogaan Retail (retail partner)' },
+  { match: 'PAYPAL PAYMENTS',            direction: 'in', debitAccount: 'BANK_HDFC', creditAccount: 'SALES_REVENUE', description: 'PayPal settlement' },
 
   // ---- Outgoing: Known categories ----
-  { match: 'RAZORPAY PAYROLL',           direction: 'out', debitAccount: 'OPERATING_EXPENSES', creditAccount: 'BANK', description: 'Salary: Payroll', category: 'salary' },
-  { match: 'FACEBOOK INDIA',             direction: 'out', debitAccount: 'OPERATING_EXPENSES', creditAccount: 'BANK', description: 'Facebook/Meta Ads', category: 'marketing' },
-  { match: 'BILLDKPLAYSTOREGOOGL',       direction: 'out', debitAccount: 'OPERATING_EXPENSES', creditAccount: 'BANK', description: 'Google Play Store', category: 'marketing' },
-  { match: 'BILLDKGOOGLECLOUD',          direction: 'out', debitAccount: 'OPERATING_EXPENSES', creditAccount: 'BANK', description: 'Google Cloud', category: 'service' },
-  { match: 'BROWNTAPE',                  direction: 'out', debitAccount: 'OPERATING_EXPENSES', creditAccount: 'BANK', description: 'BrownTape (software)', category: 'service' },
-  { match: 'CBDT',                       direction: 'out', debitAccount: 'OPERATING_EXPENSES', creditAccount: 'BANK', description: 'TDS deposit (CBDT)', category: 'other' },
-  { match: 'COSME MATIAS MENEZES',       direction: 'out', debitAccount: 'ADVANCES_GIVEN', creditAccount: 'BANK', description: 'Security deposit — retail store' },
-  { match: 'ACTARTLYTEQA',               direction: 'out', debitAccount: 'OPERATING_EXPENSES', creditAccount: 'BANK', description: 'Razorpay ACH (GetVantage loan repayment)' },
-  { match: 'PAYUCUSTOMEREXPL',           direction: 'out', debitAccount: 'OPERATING_EXPENSES', creditAccount: 'BANK', description: 'PayU fees/refund (review needed)' },
+  { match: 'RAZORPAY PAYROLL',           direction: 'out', debitAccount: 'OPERATING_EXPENSES', creditAccount: 'BANK_HDFC', description: 'Salary: Payroll', category: 'salary' },
+  { match: 'FACEBOOK INDIA',             direction: 'out', debitAccount: 'OPERATING_EXPENSES', creditAccount: 'BANK_HDFC', description: 'Facebook/Meta Ads', category: 'marketing' },
+  { match: 'BILLDKPLAYSTOREGOOGL',       direction: 'out', debitAccount: 'OPERATING_EXPENSES', creditAccount: 'BANK_HDFC', description: 'Google Play Store', category: 'marketing' },
+  { match: 'BILLDKGOOGLECLOUD',          direction: 'out', debitAccount: 'OPERATING_EXPENSES', creditAccount: 'BANK_HDFC', description: 'Google Cloud', category: 'service' },
+  { match: 'BROWNTAPE',                  direction: 'out', debitAccount: 'OPERATING_EXPENSES', creditAccount: 'BANK_HDFC', description: 'BrownTape (software)', category: 'service' },
+  { match: 'CBDT',                       direction: 'out', debitAccount: 'OPERATING_EXPENSES', creditAccount: 'BANK_HDFC', description: 'TDS deposit (CBDT)', category: 'other' },
+  { match: 'COSME MATIAS MENEZES',       direction: 'out', debitAccount: 'ADVANCES_GIVEN', creditAccount: 'BANK_HDFC', description: 'Security deposit — retail store' },
+  { match: 'ACTARTLYTEQA',               direction: 'out', debitAccount: 'OPERATING_EXPENSES', creditAccount: 'BANK_HDFC', description: 'Razorpay ACH (GetVantage loan repayment)' },
+  { match: 'PAYUCUSTOMEREXPL',           direction: 'out', debitAccount: 'OPERATING_EXPENSES', creditAccount: 'BANK_HDFC', description: 'PayU fees/refund (review needed)' },
 
   // ---- Outgoing: Cash ----
-  { match: 'ATW-',                       direction: 'out', debitAccount: 'CASH', creditAccount: 'BANK', description: 'ATM withdrawal' },
-  { match: 'NWD-',                       direction: 'out', debitAccount: 'CASH', creditAccount: 'BANK', description: 'Cash withdrawal' },
+  { match: 'ATW-',                       direction: 'out', debitAccount: 'CASH', creditAccount: 'BANK_HDFC', description: 'ATM withdrawal' },
+  { match: 'NWD-',                       direction: 'out', debitAccount: 'CASH', creditAccount: 'BANK_HDFC', description: 'Cash withdrawal' },
 
   // ---- Outgoing: Bank charges ----
-  { match: 'SI ',                        direction: 'out', debitAccount: 'OPERATING_EXPENSES', creditAccount: 'BANK', description: 'Bank standing instruction' },
+  { match: 'SI ',                        direction: 'out', debitAccount: 'OPERATING_EXPENSES', creditAccount: 'BANK_HDFC', description: 'Bank standing instruction' },
 ];
 
 // ============================================
@@ -293,11 +293,6 @@ export function getVendorRule(contactName: string, purpose: string): VendorRule 
     return { category: 'service', debitAccount: 'OPERATING_EXPENSES', description: 'Production piecework' };
   }
   return { category: 'other', debitAccount: 'UNMATCHED_PAYMENTS' };
-}
-
-/** Resolve the debit account from a rule (passthrough). */
-export function resolveDebitAccount(rule: { debitAccount: string }): string {
-  return rule.debitAccount;
 }
 
 /** Look up a UPI payee rule by partial name match. Returns null if no match. */

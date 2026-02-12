@@ -53,11 +53,28 @@ async function inlineCreateLedgerEntry(
 ) {
   const { entryDate, description, sourceType, sourceId, lines, createdById, notes } = input;
 
+  // Validate minimum 2 lines (debit + credit)
+  if (lines.length < 2) {
+    throw new Error('A journal entry needs at least 2 lines (debit + credit)');
+  }
+
   // Validate debits = credits
   const totalDebit = lines.reduce((sum, l) => sum + (l.debit ?? 0), 0);
   const totalCredit = lines.reduce((sum, l) => sum + (l.credit ?? 0), 0);
   if (Math.abs(totalDebit - totalCredit) > 0.01) {
     throw new Error(`Debits (${totalDebit.toFixed(2)}) must equal credits (${totalCredit.toFixed(2)})`);
+  }
+
+  // Validate each line has exactly one of debit or credit
+  for (const line of lines) {
+    const d = line.debit ?? 0;
+    const c = line.credit ?? 0;
+    if (d > 0 && c > 0) {
+      throw new Error(`Line "${line.accountCode}" has both debit and credit`);
+    }
+    if (d === 0 && c === 0) {
+      throw new Error(`Line "${line.accountCode}" has zero debit and credit`);
+    }
   }
 
   // Resolve account codes to IDs
@@ -407,25 +424,27 @@ export const confirmInvoice = createServerFn({ method: 'POST' })
     // ---- NORMAL AP PATH (invoice first, pay later) ----
     const lines = buildInvoiceLedgerLines(invoice, tdsAmount);
 
-    const entry = await inlineCreateLedgerEntry(prisma, {
-      entryDate: new Date(),
-      description: `Invoice ${invoice.invoiceNumber ?? invoice.id} confirmed (${invoice.type})`,
-      sourceType: 'invoice_confirmed',
-      sourceId: invoice.id,
-      lines,
-      createdById: userId,
-    });
+    return prisma.$transaction(async (tx) => {
+      const entry = await inlineCreateLedgerEntry(tx as typeof prisma, {
+        entryDate: new Date(),
+        description: `Invoice ${invoice.invoiceNumber ?? invoice.id} confirmed (${invoice.type})`,
+        sourceType: 'invoice_confirmed',
+        sourceId: invoice.id,
+        lines,
+        createdById: userId,
+      });
 
-    await prisma.invoice.update({
-      where: { id: invoice.id },
-      data: {
-        status: 'confirmed',
-        ledgerEntryId: entry.id,
-        ...(tdsAmount > 0 ? { tdsAmount, balanceDue: invoice.totalAmount - tdsAmount } : {}),
-      },
-    });
+      await tx.invoice.update({
+        where: { id: invoice.id },
+        data: {
+          status: 'confirmed',
+          ledgerEntryId: entry.id,
+          ...(tdsAmount > 0 ? { tdsAmount, balanceDue: invoice.totalAmount - tdsAmount } : {}),
+        },
+      });
 
-    return { success: true as const };
+      return { success: true as const };
+    });
   });
 
 /**
@@ -459,8 +478,9 @@ async function confirmInvoiceWithLinkedPayment(
   if (!payment.ledgerEntry) throw new Error('Payment has no ledger entry — cannot determine original account');
   if (payment.unmatchedAmount < matchAmount - 0.01) throw new Error('Payment unmatched amount is less than invoice net payable');
 
-  // Find what account the bank import originally debited
-  const originalDebitLine = payment.ledgerEntry.lines.find(l => l.debit > 0 && l.account.code !== 'BANK' && l.account.code !== 'CASH');
+  // Find what account the bank import originally debited (skip bank/cash accounts)
+  const bankCodes = new Set(['BANK_HDFC', 'BANK_RAZORPAYX', 'CASH']);
+  const originalDebitLine = payment.ledgerEntry.lines.find(l => l.debit > 0 && !bankCodes.has(l.account.code));
   const originalAccount = originalDebitLine?.account.code ?? 'OPERATING_EXPENSES';
 
   // Figure out the correct expense account from the invoice category
@@ -494,7 +514,7 @@ async function confirmInvoiceWithLinkedPayment(
         adjustmentLines.push({ accountCode: 'TDS_PAYABLE', credit: tdsAmount, description: 'TDS deducted at source' });
       }
 
-      const adjEntry = await inlineCreateLedgerEntry(tx as any, {
+      const adjEntry = await inlineCreateLedgerEntry(tx as typeof prisma, {
         entryDate: new Date(),
         description: `Invoice ${invoice.invoiceNumber ?? invoice.id} linked to payment — reclassification`,
         sourceType: 'invoice_payment_linked',
@@ -630,17 +650,37 @@ export const cancelInvoice = createServerFn({ method: 'POST' })
     if (invoice.status === 'cancelled') return { success: false as const, error: 'Already cancelled' };
     if (invoice.status === 'paid') return { success: false as const, error: 'Cannot cancel a paid invoice' };
 
-    // Reverse ledger entry if one exists
-    if (invoice.ledgerEntryId) {
-      await inlineReverseLedgerEntry(prisma, invoice.ledgerEntryId, userId);
-    }
+    return prisma.$transaction(async (tx) => {
+      // 1. Clean up payment matches (restore unmatched amounts on linked payments)
+      const matches = await tx.paymentInvoice.findMany({
+        where: { invoiceId: data.id },
+      });
+      if (matches.length > 0) {
+        for (const match of matches) {
+          await tx.payment.update({
+            where: { id: match.paymentId },
+            data: {
+              matchedAmount: { decrement: match.amount },
+              unmatchedAmount: { increment: match.amount },
+            },
+          });
+        }
+        await tx.paymentInvoice.deleteMany({ where: { invoiceId: data.id } });
+      }
 
-    await prisma.invoice.update({
-      where: { id: data.id },
-      data: { status: 'cancelled' },
+      // 2. Reverse ledger entry if one exists
+      if (invoice.ledgerEntryId) {
+        await inlineReverseLedgerEntry(tx as typeof prisma, invoice.ledgerEntryId, userId);
+      }
+
+      // 3. Cancel the invoice and reset paid amounts
+      await tx.invoice.update({
+        where: { id: data.id },
+        data: { status: 'cancelled', paidAmount: 0, balanceDue: 0 },
+      });
+
+      return { success: true as const };
     });
-
-    return { success: true as const };
   });
 
 // ============================================
@@ -707,39 +747,40 @@ export const createFinancePayment = createServerFn({ method: 'POST' })
   .handler(async ({ data, context }) => {
     const prisma = await getPrisma();
     const userId = context.user.id;
-    // Build ledger lines
     const lines = buildPaymentLedgerLines(data);
+    const sourceType = data.direction === 'outgoing' ? 'payment_outgoing' : 'payment_received';
 
-    // Create ledger entry first
-    const entry = await inlineCreateLedgerEntry(prisma, {
-      entryDate: new Date(data.paymentDate),
-      description: `Payment ${data.direction}: ${data.counterpartyName ?? data.method} — ${data.amount}`,
-      sourceType: data.direction === 'outgoing' ? 'payment_outgoing' : 'payment_received',
-      lines,
-      createdById: userId,
-    });
-
-    // Create payment record
-    const payment = await prisma.payment.create({
-      data: {
-        referenceNumber: data.referenceNumber ?? null,
-        direction: data.direction,
-        method: data.method,
-        status: 'confirmed',
-        amount: data.amount,
-        unmatchedAmount: data.amount, // Starts fully unmatched
-        paymentDate: new Date(data.paymentDate),
-        ...(data.partyId ? { partyId: data.partyId } : {}),
-        ...(data.customerId ? { customerId: data.customerId } : {}),
-        counterpartyName: data.counterpartyName ?? null,
-        ledgerEntryId: entry.id,
-        notes: data.notes ?? null,
+    return prisma.$transaction(async (tx) => {
+      const entry = await inlineCreateLedgerEntry(tx as typeof prisma, {
+        entryDate: new Date(data.paymentDate),
+        description: `Payment ${data.direction}: ${data.counterpartyName ?? data.method} — ${data.amount}`,
+        sourceType,
+        sourceId: `payment_${data.referenceNumber ?? data.paymentDate}_${data.counterpartyName ?? 'unknown'}_${data.amount}`,
+        lines,
         createdById: userId,
-      },
-      select: { id: true, referenceNumber: true, amount: true, direction: true },
-    });
+      });
 
-    return { success: true as const, payment };
+      const payment = await tx.payment.create({
+        data: {
+          referenceNumber: data.referenceNumber ?? null,
+          direction: data.direction,
+          method: data.method,
+          status: 'confirmed',
+          amount: data.amount,
+          unmatchedAmount: data.amount,
+          paymentDate: new Date(data.paymentDate),
+          ...(data.partyId ? { partyId: data.partyId } : {}),
+          ...(data.customerId ? { customerId: data.customerId } : {}),
+          counterpartyName: data.counterpartyName ?? null,
+          ledgerEntryId: entry.id,
+          notes: data.notes ?? null,
+          createdById: userId,
+        },
+        select: { id: true, referenceNumber: true, amount: true, direction: true },
+      });
+
+      return { success: true as const, payment };
+    });
   });
 
 /**
@@ -752,7 +793,11 @@ function buildPaymentLedgerLines(data: {
   method: string;
   amount: number;
 }) {
-  const cashAccount = data.method === 'cash' ? 'CASH' : 'BANK';
+  // Route to the correct bank account:
+  // Cash → CASH, outgoing (vendor payouts) → BANK_RAZORPAYX, incoming → BANK_HDFC
+  const cashAccount = data.method === 'cash' ? 'CASH'
+    : data.direction === 'outgoing' ? 'BANK_RAZORPAYX'
+    : 'BANK_HDFC';
 
   if (data.direction === 'outgoing') {
     return [
@@ -790,34 +835,34 @@ export const matchPaymentToInvoice = createServerFn({ method: 'POST' })
     if (data.amount > payment.unmatchedAmount + 0.01) return { success: false as const, error: 'Amount exceeds unmatched payment balance' };
     if (data.amount > invoice.balanceDue + 0.01) return { success: false as const, error: 'Amount exceeds invoice balance due' };
 
-    // Create the match
-    await prisma.paymentInvoice.create({
-      data: {
-        paymentId: data.paymentId,
-        invoiceId: data.invoiceId,
-        amount: data.amount,
-        notes: data.notes ?? null,
-        matchedById: userId,
-      },
-    });
+    return prisma.$transaction(async (tx) => {
+      await tx.paymentInvoice.create({
+        data: {
+          paymentId: data.paymentId,
+          invoiceId: data.invoiceId,
+          amount: data.amount,
+          notes: data.notes ?? null,
+          matchedById: userId,
+        },
+      });
 
-    // Update denormalized amounts
-    const newPaymentMatched = payment.matchedAmount + data.amount;
-    const newPaymentUnmatched = payment.unmatchedAmount - data.amount;
-    await prisma.payment.update({
-      where: { id: data.paymentId },
-      data: { matchedAmount: newPaymentMatched, unmatchedAmount: Math.max(0, newPaymentUnmatched) },
-    });
+      const newPaymentMatched = payment.matchedAmount + data.amount;
+      const newPaymentUnmatched = payment.unmatchedAmount - data.amount;
+      await tx.payment.update({
+        where: { id: data.paymentId },
+        data: { matchedAmount: newPaymentMatched, unmatchedAmount: Math.max(0, newPaymentUnmatched) },
+      });
 
-    const newInvoicePaid = invoice.paidAmount + data.amount;
-    const newInvoiceBalance = invoice.balanceDue - data.amount;
-    const newStatus = newInvoiceBalance <= 0.01 ? 'paid' : 'partially_paid';
-    await prisma.invoice.update({
-      where: { id: data.invoiceId },
-      data: { paidAmount: newInvoicePaid, balanceDue: Math.max(0, newInvoiceBalance), status: newStatus },
-    });
+      const newInvoicePaid = invoice.paidAmount + data.amount;
+      const newInvoiceBalance = invoice.balanceDue - data.amount;
+      const newStatus = newInvoiceBalance <= 0.01 ? 'paid' : 'partially_paid';
+      await tx.invoice.update({
+        where: { id: data.invoiceId },
+        data: { paidAmount: newInvoicePaid, balanceDue: Math.max(0, newInvoiceBalance), status: newStatus },
+      });
 
-    return { success: true as const };
+      return { success: true as const };
+    });
   });
 
 // ============================================
@@ -841,36 +886,36 @@ export const unmatchPayment = createServerFn({ method: 'POST' })
 
     if (!match) return { success: false as const, error: 'Match not found' };
 
-    // Remove the match
-    await prisma.paymentInvoice.delete({
-      where: { paymentId_invoiceId: { paymentId: data.paymentId, invoiceId: data.invoiceId } },
-    });
-
-    // Update denormalized amounts
-    await prisma.payment.update({
-      where: { id: data.paymentId },
-      data: {
-        matchedAmount: { decrement: match.amount },
-        unmatchedAmount: { increment: match.amount },
-      },
-    });
-
-    const invoice = await prisma.invoice.findUnique({
-      where: { id: data.invoiceId },
-      select: { paidAmount: true, balanceDue: true, status: true },
-    });
-
-    if (invoice) {
-      const newPaid = invoice.paidAmount - match.amount;
-      const newBalance = invoice.balanceDue + match.amount;
-      const newStatus = newPaid <= 0.01 ? 'confirmed' : 'partially_paid';
-      await prisma.invoice.update({
-        where: { id: data.invoiceId },
-        data: { paidAmount: Math.max(0, newPaid), balanceDue: newBalance, status: newStatus },
+    return prisma.$transaction(async (tx) => {
+      await tx.paymentInvoice.delete({
+        where: { paymentId_invoiceId: { paymentId: data.paymentId, invoiceId: data.invoiceId } },
       });
-    }
 
-    return { success: true as const };
+      await tx.payment.update({
+        where: { id: data.paymentId },
+        data: {
+          matchedAmount: { decrement: match.amount },
+          unmatchedAmount: { increment: match.amount },
+        },
+      });
+
+      const invoice = await tx.invoice.findUnique({
+        where: { id: data.invoiceId },
+        select: { paidAmount: true, balanceDue: true, status: true },
+      });
+
+      if (invoice) {
+        const newPaid = invoice.paidAmount - match.amount;
+        const newBalance = invoice.balanceDue + match.amount;
+        const newStatus = newPaid <= 0.01 ? 'confirmed' : 'partially_paid';
+        await tx.invoice.update({
+          where: { id: data.invoiceId },
+          data: { paidAmount: Math.max(0, newPaid), balanceDue: newBalance, status: newStatus },
+        });
+      }
+
+      return { success: true as const };
+    });
   });
 
 // ============================================

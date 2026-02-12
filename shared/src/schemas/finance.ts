@@ -213,7 +213,8 @@ export const PAYMENT_METHODS = [
 ] as const;
 
 export const CHART_OF_ACCOUNTS = [
-  { code: 'BANK', name: 'Bank', type: 'asset' },
+  { code: 'BANK_HDFC', name: 'HDFC Bank Account', type: 'asset' },
+  { code: 'BANK_RAZORPAYX', name: 'RazorpayX Account', type: 'asset' },
   { code: 'CASH', name: 'Cash', type: 'asset' },
   { code: 'ACCOUNTS_RECEIVABLE', name: 'Money Customers Owe Us', type: 'asset' },
   { code: 'FABRIC_INVENTORY', name: 'Fabric Inventory', type: 'asset' },

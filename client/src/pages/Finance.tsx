@@ -150,9 +150,14 @@ function DashboardTab() {
           color="text-red-700"
         />
         <SummaryCard
-          label="Bank"
-          value={accounts.find((a) => a.code === 'BANK')?.balance ?? 0}
+          label="HDFC Bank"
+          value={accounts.find((a) => a.code === 'BANK_HDFC')?.balance ?? 0}
           color="text-blue-700"
+        />
+        <SummaryCard
+          label="RazorpayX"
+          value={accounts.find((a) => a.code === 'BANK_RAZORPAYX')?.balance ?? 0}
+          color="text-blue-600"
         />
         <SummaryCard
           label="Cash"
