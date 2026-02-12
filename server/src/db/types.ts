@@ -120,6 +120,49 @@ export type Customer = {
     tier: Generated<string>;
     ltv: Generated<number>;
 };
+export type Employee = {
+    id: Generated<string>;
+    name: string;
+    employeeCode: string | null;
+    phone: string | null;
+    email: string | null;
+    dateOfJoining: Timestamp | null;
+    dateOfExit: Timestamp | null;
+    department: string;
+    designation: string | null;
+    /**
+     * Basic salary — HRA (40%), Other (60%), Gross (2x basic) are always computed
+     */
+    basicSalary: number;
+    /**
+     * Statutory deduction flags
+     */
+    pfApplicable: Generated<boolean>;
+    esicApplicable: Generated<boolean>;
+    ptApplicable: Generated<boolean>;
+    /**
+     * Bank details
+     */
+    bankAccountName: string | null;
+    bankAccountNumber: string | null;
+    bankIfsc: string | null;
+    bankName: string | null;
+    /**
+     * Statutory IDs
+     */
+    pan: string | null;
+    aadhaar: string | null;
+    uan: string | null;
+    esicNumber: string | null;
+    /**
+     * Links to other models
+     */
+    partyId: string | null;
+    tailorId: string | null;
+    isActive: Generated<boolean>;
+    createdAt: Generated<Timestamp>;
+    updatedAt: Timestamp;
+};
 export type Fabric = {
     id: Generated<string>;
     name: string;
@@ -390,6 +433,9 @@ export type Invoice = {
     aiRawResponse: unknown | null;
     aiModel: string | null;
     aiConfidence: number | null;
+    driveFileId: string | null;
+    driveUrl: string | null;
+    driveUploadedAt: Timestamp | null;
     ledgerEntryId: string | null;
     notes: string | null;
     createdById: string;
@@ -613,6 +659,7 @@ export type Party = {
     bankIfsc: string | null;
     bankName: string | null;
     paymentTermsDays: number | null;
+    aliases: Generated<string[]>;
     isActive: Generated<boolean>;
     createdAt: Generated<Timestamp>;
     updatedAt: Timestamp;
@@ -634,6 +681,9 @@ export type Payment = {
     fileName: string | null;
     fileMimeType: string | null;
     fileSizeBytes: number | null;
+    driveFileId: string | null;
+    driveUrl: string | null;
+    driveUploadedAt: Timestamp | null;
     ledgerEntryId: string | null;
     notes: string | null;
     createdById: string;
@@ -648,6 +698,78 @@ export type PaymentInvoice = {
     notes: string | null;
     matchedAt: Generated<Timestamp>;
     matchedById: string;
+};
+export type PayrollRun = {
+    id: Generated<string>;
+    month: number;
+    year: number;
+    status: Generated<string>;
+    /**
+     * Totals (computed from slips)
+     */
+    totalGross: Generated<number>;
+    totalDeductions: Generated<number>;
+    totalNetPay: Generated<number>;
+    totalEmployerCost: Generated<number>;
+    employeeCount: Generated<number>;
+    confirmedAt: Timestamp | null;
+    confirmedById: string | null;
+    notes: string | null;
+    createdById: string;
+    createdAt: Generated<Timestamp>;
+    updatedAt: Timestamp;
+};
+export type PayrollSlip = {
+    id: Generated<string>;
+    payrollRunId: string;
+    employeeId: string;
+    /**
+     * Days
+     */
+    daysInMonth: number;
+    payableDays: number;
+    isManualDays: Generated<boolean>;
+    /**
+     * Fixed components (from salary structure at time of run)
+     */
+    basicFixed: number;
+    hraFixed: number;
+    otherAllowanceFixed: number;
+    grossFixed: number;
+    /**
+     * Earned (pro-rated by payable days)
+     */
+    basicEarned: number;
+    hraEarned: number;
+    otherAllowanceEarned: number;
+    grossEarned: number;
+    /**
+     * Employee deductions
+     */
+    pfEmployee: Generated<number>;
+    esicEmployee: Generated<number>;
+    professionalTax: Generated<number>;
+    advances: Generated<number>;
+    otherDeductions: Generated<number>;
+    totalDeductions: Generated<number>;
+    /**
+     * Net pay
+     */
+    netPay: Generated<number>;
+    /**
+     * Employer contributions
+     */
+    pfEmployer: Generated<number>;
+    pfAdmin: Generated<number>;
+    esicEmployer: Generated<number>;
+    totalEmployerCost: Generated<number>;
+    costToCompany: Generated<number>;
+    /**
+     * Finance link
+     */
+    invoiceId: string | null;
+    createdAt: Generated<Timestamp>;
+    updatedAt: Timestamp;
 };
 export type Pincode = {
     id: Generated<string>;
@@ -1205,6 +1327,7 @@ export type DB = {
     ComponentType: ComponentType;
     CostConfig: CostConfig;
     Customer: Customer;
+    Employee: Employee;
     Fabric: Fabric;
     FabricColour: FabricColour;
     FabricColourReconciliation: FabricColourReconciliation;
@@ -1238,6 +1361,8 @@ export type DB = {
     Party: Party;
     Payment: Payment;
     PaymentInvoice: PaymentInvoice;
+    PayrollRun: PayrollRun;
+    PayrollSlip: PayrollSlip;
     Pincode: Pincode;
     Product: Product;
     ProductBomTemplate: ProductBomTemplate;

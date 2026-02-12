@@ -30,6 +30,7 @@ import { Route as AuthenticatedReturnPrimeRouteImport } from './routes/_authenti
 import { Route as AuthenticatedQuickOrderRouteImport } from './routes/_authenticated/quick-order'
 import { Route as AuthenticatedProductsRouteImport } from './routes/_authenticated/products'
 import { Route as AuthenticatedProductionRouteImport } from './routes/_authenticated/production'
+import { Route as AuthenticatedPayrollRouteImport } from './routes/_authenticated/payroll'
 import { Route as AuthenticatedOrdersSimpleRouteImport } from './routes/_authenticated/orders-simple'
 import { Route as AuthenticatedOrdersMobileRouteImport } from './routes/_authenticated/orders-mobile'
 import { Route as AuthenticatedOrdersRouteImport } from './routes/_authenticated/orders'
@@ -157,6 +158,11 @@ const AuthenticatedProductsRoute = AuthenticatedProductsRouteImport.update({
 const AuthenticatedProductionRoute = AuthenticatedProductionRouteImport.update({
   id: '/production',
   path: '/production',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
+const AuthenticatedPayrollRoute = AuthenticatedPayrollRouteImport.update({
+  id: '/payroll',
+  path: '/payroll',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
 const AuthenticatedOrdersSimpleRoute =
@@ -300,6 +306,7 @@ export interface FileRoutesByFullPath {
   '/orders': typeof AuthenticatedOrdersRoute
   '/orders-mobile': typeof AuthenticatedOrdersMobileRoute
   '/orders-simple': typeof AuthenticatedOrdersSimpleRoute
+  '/payroll': typeof AuthenticatedPayrollRoute
   '/production': typeof AuthenticatedProductionRoute
   '/products': typeof AuthenticatedProductsRoute
   '/quick-order': typeof AuthenticatedQuickOrderRoute
@@ -341,6 +348,7 @@ export interface FileRoutesByTo {
   '/orders': typeof AuthenticatedOrdersRoute
   '/orders-mobile': typeof AuthenticatedOrdersMobileRoute
   '/orders-simple': typeof AuthenticatedOrdersSimpleRoute
+  '/payroll': typeof AuthenticatedPayrollRoute
   '/production': typeof AuthenticatedProductionRoute
   '/products': typeof AuthenticatedProductsRoute
   '/quick-order': typeof AuthenticatedQuickOrderRoute
@@ -385,6 +393,7 @@ export interface FileRoutesById {
   '/_authenticated/orders': typeof AuthenticatedOrdersRoute
   '/_authenticated/orders-mobile': typeof AuthenticatedOrdersMobileRoute
   '/_authenticated/orders-simple': typeof AuthenticatedOrdersSimpleRoute
+  '/_authenticated/payroll': typeof AuthenticatedPayrollRoute
   '/_authenticated/production': typeof AuthenticatedProductionRoute
   '/_authenticated/products': typeof AuthenticatedProductsRoute
   '/_authenticated/quick-order': typeof AuthenticatedQuickOrderRoute
@@ -430,6 +439,7 @@ export interface FileRouteTypes {
     | '/orders'
     | '/orders-mobile'
     | '/orders-simple'
+    | '/payroll'
     | '/production'
     | '/products'
     | '/quick-order'
@@ -471,6 +481,7 @@ export interface FileRouteTypes {
     | '/orders'
     | '/orders-mobile'
     | '/orders-simple'
+    | '/payroll'
     | '/production'
     | '/products'
     | '/quick-order'
@@ -514,6 +525,7 @@ export interface FileRouteTypes {
     | '/_authenticated/orders'
     | '/_authenticated/orders-mobile'
     | '/_authenticated/orders-simple'
+    | '/_authenticated/payroll'
     | '/_authenticated/production'
     | '/_authenticated/products'
     | '/_authenticated/quick-order'
@@ -689,6 +701,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedProductionRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/payroll': {
+      id: '/_authenticated/payroll'
+      path: '/payroll'
+      fullPath: '/payroll'
+      preLoaderRoute: typeof AuthenticatedPayrollRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/orders-simple': {
       id: '/_authenticated/orders-simple'
       path: '/orders-simple'
@@ -853,6 +872,7 @@ interface AuthenticatedRouteChildren {
   AuthenticatedOrdersRoute: typeof AuthenticatedOrdersRoute
   AuthenticatedOrdersMobileRoute: typeof AuthenticatedOrdersMobileRoute
   AuthenticatedOrdersSimpleRoute: typeof AuthenticatedOrdersSimpleRoute
+  AuthenticatedPayrollRoute: typeof AuthenticatedPayrollRoute
   AuthenticatedProductionRoute: typeof AuthenticatedProductionRoute
   AuthenticatedProductsRoute: typeof AuthenticatedProductsRoute
   AuthenticatedQuickOrderRoute: typeof AuthenticatedQuickOrderRoute
@@ -890,6 +910,7 @@ const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedOrdersRoute: AuthenticatedOrdersRoute,
   AuthenticatedOrdersMobileRoute: AuthenticatedOrdersMobileRoute,
   AuthenticatedOrdersSimpleRoute: AuthenticatedOrdersSimpleRoute,
+  AuthenticatedPayrollRoute: AuthenticatedPayrollRoute,
   AuthenticatedProductionRoute: AuthenticatedProductionRoute,
   AuthenticatedProductsRoute: AuthenticatedProductsRoute,
   AuthenticatedQuickOrderRoute: AuthenticatedQuickOrderRoute,

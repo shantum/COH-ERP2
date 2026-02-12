@@ -64,6 +64,8 @@ model User {
   financePayments       Payment[]        @relation("PaymentCreator")
   paymentInvoiceMatches PaymentInvoice[] @relation("PaymentInvoiceMatcher")
   ledgerEntries         LedgerEntry[]    @relation("LedgerEntryCreator")
+  payrollRunsCreated    PayrollRun[]     @relation("PayrollRunCreator")
+  payrollRunsConfirmed  PayrollRun[]     @relation("PayrollRunConfirmer")
 
   @@index([roleId])
 }
@@ -350,6 +352,7 @@ model Party {
   bankIfsc          String?
   bankName          String?
   paymentTermsDays  Int?
+  aliases           String[] @default([])
   isActive          Boolean  @default(true)
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
@@ -363,6 +366,7 @@ model Party {
   fabricInvoices             FabricInvoice[]     @relation("FabricInvoiceParty")
   financeInvoices            Invoice[]           @relation("InvoiceParty")
   financePayments            Payment[]           @relation("PaymentParty")
+  employee                   Employee?
 
   @@index([category])
 }
@@ -907,6 +911,7 @@ model Tailor {
   isActive          Boolean           @default(true)
   createdAt         DateTime          @default(now())
   productionBatches ProductionBatch[]
+  employee          Employee?
 }
 
 model ProductionBatch {
@@ -1935,6 +1940,11 @@ model Invoice {
   aiModel          String?
   aiConfidence     Float?
 
+  // Google Drive sync
+  driveFileId      String?
+  driveUrl         String?
+  driveUploadedAt  DateTime?
+
   // Ledger link
   ledgerEntryId    String?   @unique
 
@@ -1953,6 +1963,7 @@ model Invoice {
   createdBy     User           @relation("InvoiceCreator", fields: [createdById], references: [id])
   lines         InvoiceLine[]
   matchedPayments PaymentInvoice[]
+  payrollSlip   PayrollSlip?     @relation("PayrollSlipInvoice")
 
   @@index([type])
   @@index([status])
@@ -2006,6 +2017,11 @@ model Payment {
   fileName      String?
   fileMimeType  String?
   fileSizeBytes Int?
+
+  // Google Drive sync
+  driveFileId      String?
+  driveUrl         String?
+  driveUploadedAt  DateTime?
 
   // Ledger link
   ledgerEntryId String? @unique
@@ -2070,4 +2086,143 @@ model WorkerRun {
 
   @@index([workerName, startedAt])
   @@index([createdAt])
+}
+
+// ============================================
+// PAYROLL & EMPLOYEE MANAGEMENT
+// ============================================
+
+/// Employee record with salary structure and statutory details
+model Employee {
+  id               String    @id @default(uuid())
+  name             String    @unique
+  employeeCode     String?
+  phone            String?
+  email            String?
+
+  dateOfJoining    DateTime?
+  dateOfExit       DateTime?
+
+  department       String    // production, office
+  designation      String?
+
+  /// Basic salary — HRA (40%), Other (60%), Gross (2x basic) are always computed
+  basicSalary      Float
+
+  /// Statutory deduction flags
+  pfApplicable     Boolean   @default(false)
+  esicApplicable   Boolean   @default(false)
+  ptApplicable     Boolean   @default(false)
+
+  /// Bank details
+  bankAccountName   String?
+  bankAccountNumber String?
+  bankIfsc          String?
+  bankName          String?
+
+  /// Statutory IDs
+  pan              String?
+  aadhaar          String?
+  uan              String?
+  esicNumber       String?
+
+  /// Links to other models
+  partyId          String?   @unique
+  tailorId         String?   @unique
+
+  isActive         Boolean   @default(true)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  party            Party?    @relation(fields: [partyId], references: [id])
+  tailor           Tailor?   @relation(fields: [tailorId], references: [id])
+  payrollSlips     PayrollSlip[]
+
+  @@index([department])
+  @@index([isActive])
+}
+
+/// Monthly payroll batch header
+model PayrollRun {
+  id                String    @id @default(uuid())
+  month             Int       // 1-12
+  year              Int       // e.g. 2026
+  status            String    @default("draft") // draft, confirmed, cancelled
+
+  /// Totals (computed from slips)
+  totalGross        Float     @default(0)
+  totalDeductions   Float     @default(0)
+  totalNetPay       Float     @default(0)
+  totalEmployerCost Float     @default(0)
+  employeeCount     Int       @default(0)
+
+  confirmedAt       DateTime?
+  confirmedById     String?
+  notes             String?
+  createdById       String
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  confirmedBy       User?     @relation("PayrollRunConfirmer", fields: [confirmedById], references: [id])
+  createdBy         User      @relation("PayrollRunCreator", fields: [createdById], references: [id])
+  slips             PayrollSlip[]
+
+  @@unique([month, year])
+  @@index([status])
+}
+
+/// Per-employee payroll calculation within a run
+model PayrollSlip {
+  id                    String   @id @default(uuid())
+  payrollRunId          String
+  employeeId            String
+
+  /// Days
+  daysInMonth           Int
+  payableDays           Float    // Can be fractional (e.g. 26.5)
+  isManualDays          Boolean  @default(false)
+
+  /// Fixed components (from salary structure at time of run)
+  basicFixed            Float
+  hraFixed              Float
+  otherAllowanceFixed   Float
+  grossFixed            Float
+
+  /// Earned (pro-rated by payable days)
+  basicEarned           Float
+  hraEarned             Float
+  otherAllowanceEarned  Float
+  grossEarned           Float
+
+  /// Employee deductions
+  pfEmployee            Float    @default(0)
+  esicEmployee          Float    @default(0)
+  professionalTax       Float    @default(0)
+  advances              Float    @default(0)
+  otherDeductions       Float    @default(0)
+  totalDeductions       Float    @default(0)
+
+  /// Net pay
+  netPay                Float    @default(0)
+
+  /// Employer contributions
+  pfEmployer            Float    @default(0)
+  pfAdmin               Float    @default(0)
+  esicEmployer          Float    @default(0)
+  totalEmployerCost     Float    @default(0)
+  costToCompany         Float    @default(0)
+
+  /// Finance link
+  invoiceId             String?  @unique
+
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  payrollRun            PayrollRun @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
+  employee              Employee   @relation(fields: [employeeId], references: [id])
+  invoice               Invoice?   @relation("PayrollSlipInvoice", fields: [invoiceId], references: [id])
+
+  @@unique([payrollRunId, employeeId])
+  @@index([payrollRunId])
+  @@index([employeeId])
 }

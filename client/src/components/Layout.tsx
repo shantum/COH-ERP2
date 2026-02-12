@@ -82,6 +82,7 @@ const navGroups: NavGroup[] = [
         collapsible: true,
         items: [
             { to: '/finance', icon: IndianRupee, label: 'Finance' },
+            { to: '/payroll', icon: Calculator, label: 'Payroll' },
         ],
     },
     {
