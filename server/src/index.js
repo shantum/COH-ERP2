@@ -56,7 +56,7 @@ import cacheProcessor from './services/cacheProcessor.js';
 import cacheDumpWorker from './services/cacheDumpWorker.js';
 import sheetOffloadWorker from './services/sheetOffloadWorker.js';
 import stockSnapshotWorker from './services/stockSnapshotWorker.js';
-import { reconcileSheetOrders } from './services/sheetOrderPush.js';
+import { reconcileSheetOrders, syncSheetOrderStatus } from './services/sheetOrderPush.js';
 import { runAllCleanup } from './utils/cacheCleanup.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import shutdownCoordinator from './utils/shutdownCoordinator.js';
@@ -323,6 +323,13 @@ app.listen(PORT, '0.0.0.0', async () => {
       reconcileSheetOrders().catch(() => {}); // errors logged internally
     }, RECONCILE_INTERVAL_MS);
 
+    // Sheet order status sync — updates status/courier/AWB in sheet from ERP
+    // Runs every 5 min
+    const STATUS_SYNC_INTERVAL_MS = 5 * 60 * 1000;
+    const statusSyncInterval = setInterval(() => {
+      syncSheetOrderStatus().catch(() => {});
+    }, STATUS_SYNC_INTERVAL_MS);
+
     // Register shutdown handlers for graceful shutdown
     shutdownCoordinator.register('scheduledSync', () => {
       scheduledSync.stop();
@@ -350,6 +357,10 @@ app.listen(PORT, '0.0.0.0', async () => {
 
     shutdownCoordinator.register('sheetReconciler', () => {
       clearInterval(reconcileInterval);
+    }, 1000);
+
+    shutdownCoordinator.register('sheetStatusSync', () => {
+      clearInterval(statusSyncInterval);
     }, 1000);
   }
 

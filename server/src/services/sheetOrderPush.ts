@@ -430,3 +430,119 @@ export async function updateSheetChannelDetails(updates: ChannelDetailUpdate[]):
 
     return result;
 }
+
+// ============================================
+// SYNC ORDER STATUS TO SHEET (scheduled)
+// ============================================
+
+let statusSyncRunning = false;
+
+/**
+ * Sync order status, courier, and AWB from ERP database to the Google Sheet.
+ * Reads "Orders from COH", looks up each order in the DB, and updates
+ * columns Y (status), Z (courier), AA (AWB) where the ERP has newer data.
+ *
+ * Only updates rows where at least one value has changed (avoids unnecessary writes).
+ */
+export async function syncSheetOrderStatus(): Promise<{ checked: number; updated: number }> {
+    if (statusSyncRunning) {
+        log.debug('Sheet status sync already running, skipping');
+        return { checked: 0, updated: 0 };
+    }
+
+    statusSyncRunning = true;
+    const result = { checked: 0, updated: 0 };
+
+    try {
+        const tab = MASTERSHEET_TABS.ORDERS_FROM_COH;
+
+        // Read columns B (order#), G (SKU), Y (status), Z (courier), AA (AWB)
+        const rows = await readRange(ORDERS_MASTERSHEET_ID, `'${tab}'!B:AA`);
+        if (rows.length <= 1) return result;
+
+        // Collect order numbers to look up (column B = index 0 in B:AA range)
+        const orderNumbers = new Set<string>();
+        for (let i = 1; i < rows.length; i++) {
+            const orderNo = String(rows[i][0] ?? '').trim();
+            if (orderNo) orderNumbers.add(orderNo);
+        }
+
+        if (orderNumbers.size === 0) return result;
+
+        // Batch query all matching orders with their lines from DB
+        const orders = await prisma.order.findMany({
+            where: { orderNumber: { in: [...orderNumbers] } },
+            select: {
+                orderNumber: true,
+                orderLines: {
+                    select: {
+                        lineStatus: true,
+                        courier: true,
+                        awbNumber: true,
+                        sku: { select: { skuCode: true } },
+                    },
+                },
+            },
+        });
+
+        // Build lookup: "orderNumber|skuCode" → { status, courier, awb }
+        const erpData = new Map<string, { status: string; courier: string | null; awb: string | null }>();
+        for (const order of orders) {
+            for (const line of order.orderLines) {
+                const key = `${order.orderNumber}|${line.sku.skuCode}`;
+                erpData.set(key, {
+                    status: line.lineStatus,
+                    courier: line.courier,
+                    awb: line.awbNumber,
+                });
+            }
+        }
+
+        // Compare sheet values with ERP data and build updates
+        const writeData: Array<{ range: string; values: (string | number)[][] }> = [];
+
+        for (let i = 1; i < rows.length; i++) {
+            const row = rows[i];
+            const orderNo = String(row[0] ?? '').trim();   // B = index 0 in B:AA
+            const sku = String(row[5] ?? '').trim();        // G = index 5 in B:AA
+            if (!orderNo || !sku) continue;
+
+            const erp = erpData.get(`${orderNo}|${sku}`);
+            if (!erp) continue;
+
+            result.checked++;
+
+            // Current sheet values: Y = index 23 in B:AA (col 24 - col 1 = 23), Z = 24, AA = 25
+            const sheetStatus = String(row[23] ?? '').trim();
+            const sheetCourier = String(row[24] ?? '').trim();
+            const sheetAwb = String(row[25] ?? '').trim();
+
+            const newStatus = erp.status || '';
+            const newCourier = erp.courier || '';
+            const newAwb = erp.awb || '';
+
+            // Only update if something actually changed
+            if (newStatus === sheetStatus && newCourier === sheetCourier && newAwb === sheetAwb) continue;
+
+            const rowNum = i + 1; // 1-based sheet row
+            writeData.push({
+                range: `'${tab}'!Y${rowNum}:AA${rowNum}`,
+                values: [[newStatus, newCourier, newAwb]],
+            });
+        }
+
+        if (writeData.length > 0) {
+            await batchWriteRanges(ORDERS_MASTERSHEET_ID, writeData);
+            result.updated = writeData.length;
+        }
+
+        log.info({ checked: result.checked, updated: result.updated }, 'Sheet order status sync completed');
+    } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        log.error({ error: message }, 'Sheet order status sync failed');
+    } finally {
+        statusSyncRunning = false;
+    }
+
+    return result;
+}

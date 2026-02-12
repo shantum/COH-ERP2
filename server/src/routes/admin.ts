@@ -38,7 +38,7 @@ import { asyncHandler } from '../middleware/asyncHandler.js';
 import { ValidationError, NotFoundError, ConflictError, BusinessLogicError } from '../utils/errors.js';
 import sheetOffloadWorker from '../services/sheetOffloadWorker.js';
 import stockSnapshotWorker from '../services/stockSnapshotWorker.js';
-import { reconcileSheetOrders } from '../services/sheetOrderPush.js';
+import { reconcileSheetOrders, syncSheetOrderStatus } from '../services/sheetOrderPush.js';
 import { trackWorkerRun } from '../utils/workerRunTracker.js';
 import prismaClient from '../lib/prisma.js';
 // ENABLE_SHEET_DELETION deprecated — ingestion now marks rows as DONE
@@ -190,7 +190,7 @@ interface PermissionsUpdateBody {
 }
 
 /** Background job trigger params */
-type JobId = 'shopify_sync' | 'tracking_sync' | 'cache_cleanup' | 'ingest_inward' | 'ingest_outward' | 'move_shipped_to_outward' | 'preview_ingest_inward' | 'preview_ingest_outward' | 'cleanup_done_rows' | 'migrate_sheet_formulas' | 'snapshot_compute' | 'snapshot_backfill' | 'push_balances' | 'preview_push_balances' | 'push_fabric_balances' | 'import_fabric_balances' | 'preview_fabric_inward' | 'ingest_fabric_inward' | 'reconcile_sheet_orders';
+type JobId = 'shopify_sync' | 'tracking_sync' | 'cache_cleanup' | 'ingest_inward' | 'ingest_outward' | 'move_shipped_to_outward' | 'preview_ingest_inward' | 'preview_ingest_outward' | 'cleanup_done_rows' | 'migrate_sheet_formulas' | 'snapshot_compute' | 'snapshot_backfill' | 'push_balances' | 'preview_push_balances' | 'push_fabric_balances' | 'import_fabric_balances' | 'preview_fabric_inward' | 'ingest_fabric_inward' | 'reconcile_sheet_orders' | 'sync_sheet_status';
 
 /** Background job update body */
 interface JobUpdateBody {
@@ -1591,6 +1591,11 @@ router.post('/background-jobs/:jobId/trigger', requireAdmin, asyncHandler(async 
         case 'reconcile_sheet_orders': {
             const result = await reconcileSheetOrders();
             res.json({ message: 'Sheet order reconciliation completed', result });
+            break;
+        }
+        case 'sync_sheet_status': {
+            const result = await syncSheetOrderStatus();
+            res.json({ message: 'Sheet order status sync completed', result });
             break;
         }
         default:
