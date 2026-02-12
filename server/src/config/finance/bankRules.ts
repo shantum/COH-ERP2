@@ -57,6 +57,8 @@ export const VENDOR_RULES: Record<string, VendorRule> = {
   'Rhyzome Consulting Private Limited':     { category: 'service', debitAccount: 'OPERATING_EXPENSES', description: 'Website management' },
   'Bharat Pandurang More':                  { category: 'service', debitAccount: 'OPERATING_EXPENSES', description: 'Pattern master' },
   'Wash N Wear Apparels Processor':         { category: 'service', debitAccount: 'OPERATING_EXPENSES', description: 'Wash processing' },
+  'Suman Dalal':                            { category: 'service', debitAccount: 'OPERATING_EXPENSES', description: 'Merchandising consultant' },
+  'Shefali Ann Cordeiro':                   { category: 'service', debitAccount: 'OPERATING_EXPENSES', description: 'Retail store architect' },
 
   // ---- Packaging ----
   'Basant Envelopes':         { category: 'packaging', debitAccount: 'OPERATING_EXPENSES' },
