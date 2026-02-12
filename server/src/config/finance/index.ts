@@ -65,6 +65,7 @@ export const CHART_OF_ACCOUNTS: AccountConfig[] = [
   // --- Expenses ---
   { code: 'OPERATING_EXPENSES', name: 'Operating Expenses', type: 'expense', description: 'Rent, salary, marketing, etc.' },
   { code: 'MARKETPLACE_FEES', name: 'Marketplace & Payment Fees', type: 'expense', description: 'Platform commissions, payment gateway fees' },
+  { code: 'UNMATCHED_PAYMENTS', name: 'Unmatched Payments (Suspense)', type: 'expense', description: 'Bank payments not yet matched to an invoice' },
 
   // --- Equity ---
   { code: 'OWNER_CAPITAL', name: 'Owner Capital', type: 'equity', description: 'Capital invested by owners' },
@@ -87,6 +88,7 @@ export type AccountCode =
   | 'COGS'
   | 'OPERATING_EXPENSES'
   | 'MARKETPLACE_FEES'
+  | 'UNMATCHED_PAYMENTS'
   | 'OWNER_CAPITAL'
   | 'RETAINED_EARNINGS';
 
@@ -242,6 +244,7 @@ export const LEDGER_SOURCE_TYPES = [
   'order_shipment',
   'payment_received',
   'invoice_confirmed',
+  'invoice_payment_linked',
   'payment_outgoing',
   'manual',
   'adjustment',

@@ -228,6 +228,7 @@ export const CHART_OF_ACCOUNTS = [
   { code: 'COGS', name: 'Cost of Goods Sold', type: 'direct_cost' },
   { code: 'OPERATING_EXPENSES', name: 'Operating Expenses', type: 'expense' },
   { code: 'MARKETPLACE_FEES', name: 'Marketplace & Payment Fees', type: 'expense' },
+  { code: 'UNMATCHED_PAYMENTS', name: 'Unmatched Payments (Suspense)', type: 'expense' },
   { code: 'OWNER_CAPITAL', name: 'Owner Capital', type: 'equity' },
   { code: 'RETAINED_EARNINGS', name: 'Retained Earnings', type: 'equity' },
 ] as const;

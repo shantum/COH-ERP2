@@ -211,6 +211,7 @@ export const listInvoices = createServerFn({ method: 'POST' })
           paidAmount: true,
           balanceDue: true,
           notes: true,
+          driveUrl: true,
           createdAt: true,
           party: { select: { id: true, name: true } },
           customer: { select: { id: true, email: true, firstName: true, lastName: true } },
@@ -365,7 +366,10 @@ export const updateInvoice = createServerFn({ method: 'POST' })
 // INVOICE — CONFIRM (draft → confirmed + ledger entry)
 // ============================================
 
-const confirmInvoiceInput = z.object({ id: z.string().uuid() });
+const confirmInvoiceInput = z.object({
+  id: z.string().uuid(),
+  linkedPaymentId: z.string().uuid().optional(),
+});
 
 export const confirmInvoice = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
@@ -376,7 +380,7 @@ export const confirmInvoice = createServerFn({ method: 'POST' })
 
     const invoice = await prisma.invoice.findUnique({
       where: { id: data.id },
-      select: { id: true, type: true, category: true, status: true, totalAmount: true, gstAmount: true, counterpartyName: true, invoiceNumber: true, partyId: true },
+      select: { id: true, type: true, category: true, status: true, totalAmount: true, gstAmount: true, subtotal: true, counterpartyName: true, invoiceNumber: true, partyId: true },
     });
 
     if (!invoice) return { success: false as const, error: 'Invoice not found' };
@@ -395,10 +399,14 @@ export const confirmInvoice = createServerFn({ method: 'POST' })
       }
     }
 
-    // Build ledger entry lines based on invoice type
+    // ---- LINKED PAYMENT PATH (already-paid bill) ----
+    if (data.linkedPaymentId && invoice.type === 'payable') {
+      return confirmInvoiceWithLinkedPayment(prisma, invoice, data.linkedPaymentId, tdsAmount, userId);
+    }
+
+    // ---- NORMAL AP PATH (invoice first, pay later) ----
     const lines = buildInvoiceLedgerLines(invoice, tdsAmount);
 
-    // Create ledger entry
     const entry = await inlineCreateLedgerEntry(prisma, {
       entryDate: new Date(),
       description: `Invoice ${invoice.invoiceNumber ?? invoice.id} confirmed (${invoice.type})`,
@@ -408,9 +416,8 @@ export const confirmInvoice = createServerFn({ method: 'POST' })
       createdById: userId,
     });
 
-    // Update invoice status + link ledger entry + TDS amount + adjusted balanceDue
     await prisma.invoice.update({
-      where: { id: data.id },
+      where: { id: invoice.id },
       data: {
         status: 'confirmed',
         ledgerEntryId: entry.id,
@@ -420,6 +427,120 @@ export const confirmInvoice = createServerFn({ method: 'POST' })
 
     return { success: true as const };
   });
+
+/**
+ * Confirm an invoice and link it to an existing payment.
+ * Instead of creating AP, posts an adjustment entry to fix expense category / split GST / book TDS.
+ *
+ * The match amount uses the net payable (totalAmount - tdsAmount) because TDS is withheld
+ * and never paid to the vendor. So payment.amount should roughly equal matchAmount.
+ */
+async function confirmInvoiceWithLinkedPayment(
+  prisma: Awaited<ReturnType<typeof getPrisma>>,
+  invoice: { id: string; category: string; totalAmount: number; gstAmount: number | null; subtotal: number | null; invoiceNumber: string | null },
+  paymentId: string,
+  tdsAmount: number,
+  userId: string,
+) {
+  // The amount the vendor was actually paid (total minus TDS withheld)
+  const matchAmount = invoice.totalAmount - tdsAmount;
+
+  // Look up the payment and its ledger entry lines
+  const payment = await prisma.payment.findUnique({
+    where: { id: paymentId },
+    select: {
+      id: true, amount: true, unmatchedAmount: true, matchedAmount: true, status: true,
+      ledgerEntryId: true,
+      ledgerEntry: { include: { lines: { include: { account: { select: { code: true } } } } } },
+    },
+  });
+  if (!payment) throw new Error('Payment not found');
+  if (payment.status === 'cancelled') throw new Error('Payment is cancelled');
+  if (!payment.ledgerEntry) throw new Error('Payment has no ledger entry — cannot determine original account');
+  if (payment.unmatchedAmount < matchAmount - 0.01) throw new Error('Payment unmatched amount is less than invoice net payable');
+
+  // Find what account the bank import originally debited
+  const originalDebitLine = payment.ledgerEntry.lines.find(l => l.debit > 0 && l.account.code !== 'BANK' && l.account.code !== 'CASH');
+  const originalAccount = originalDebitLine?.account.code ?? 'OPERATING_EXPENSES';
+
+  // Figure out the correct expense account from the invoice category
+  const correctExpense = categoryToExpenseAccount(invoice.category);
+  const gstAmount = invoice.gstAmount ?? 0;
+  const netAmount = invoice.totalAmount - gstAmount;
+
+  // Build adjustment lines (only if something needs fixing)
+  const needsAdjustment = originalAccount !== correctExpense || gstAmount > 0 || tdsAmount > 0;
+
+  // Use a transaction to keep all writes atomic
+  return prisma.$transaction(async (tx) => {
+    let adjustmentEntryId: string | null = null;
+
+    if (needsAdjustment) {
+      const adjustmentLines: LedgerLineInput[] = [];
+
+      // Debit the correct expense account for the net amount
+      adjustmentLines.push({ accountCode: correctExpense, debit: netAmount, description: `${invoice.category} expense (invoice ${invoice.invoiceNumber ?? invoice.id})` });
+
+      // Debit GST if the invoice has it
+      if (gstAmount > 0) {
+        adjustmentLines.push({ accountCode: 'GST_INPUT', debit: gstAmount, description: 'GST input credit (from invoice)' });
+      }
+
+      // Credit the original account (reverse what the bank import debited)
+      adjustmentLines.push({ accountCode: originalAccount, credit: matchAmount, description: `Reclassify from ${originalAccount}` });
+
+      // Credit TDS if applicable
+      if (tdsAmount > 0) {
+        adjustmentLines.push({ accountCode: 'TDS_PAYABLE', credit: tdsAmount, description: 'TDS deducted at source' });
+      }
+
+      const adjEntry = await inlineCreateLedgerEntry(tx as any, {
+        entryDate: new Date(),
+        description: `Invoice ${invoice.invoiceNumber ?? invoice.id} linked to payment — reclassification`,
+        sourceType: 'invoice_payment_linked',
+        sourceId: invoice.id,
+        lines: adjustmentLines,
+        createdById: userId,
+      });
+      adjustmentEntryId = adjEntry.id;
+    }
+
+    // Create PaymentInvoice match record
+    await tx.paymentInvoice.create({
+      data: {
+        paymentId,
+        invoiceId: invoice.id,
+        amount: matchAmount,
+        notes: 'Auto-linked on invoice confirm',
+        matchedById: userId,
+      },
+    });
+
+    // Update Payment: matched/unmatched amounts
+    await tx.payment.update({
+      where: { id: paymentId },
+      data: {
+        matchedAmount: payment.matchedAmount + matchAmount,
+        unmatchedAmount: Math.max(0, payment.unmatchedAmount - matchAmount),
+      },
+    });
+
+    // Update Invoice: mark as paid, link adjustment entry if one was created
+    // Note: ledgerEntryId has a @unique constraint, so only set it if we made a new entry
+    await tx.invoice.update({
+      where: { id: invoice.id },
+      data: {
+        status: 'paid',
+        paidAmount: matchAmount,
+        balanceDue: 0,
+        ...(adjustmentEntryId ? { ledgerEntryId: adjustmentEntryId } : {}),
+        ...(tdsAmount > 0 ? { tdsAmount } : {}),
+      },
+    });
+
+    return { success: true as const, linked: true as const };
+  });
+}
 
 /**
  * Build ledger lines for an invoice confirmation.
@@ -836,6 +957,69 @@ export const reverseEntry = createServerFn({ method: 'POST' })
     const userId = context.user.id;
     const reversal = await inlineReverseLedgerEntry(prisma, data.id, userId);
     return { success: true as const, reversal: { id: reversal.id } };
+  });
+
+// ============================================
+// FIND UNMATCHED PAYMENTS (for invoice linking)
+// ============================================
+
+const findUnmatchedPaymentsInput = z.object({
+  counterpartyName: z.string().optional(),
+  amountMin: z.number().optional(),
+  amountMax: z.number().optional(),
+}).optional();
+
+export const findUnmatchedPayments = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
+  .inputValidator((input: unknown) => findUnmatchedPaymentsInput.parse(input))
+  .handler(async ({ data }) => {
+    const prisma = await getPrisma();
+    const { counterpartyName, amountMin, amountMax } = data ?? {};
+
+    const where: Record<string, unknown> = {
+      direction: 'outgoing',
+      status: 'confirmed',
+      unmatchedAmount: { gt: 0.01 },
+    };
+
+    if (counterpartyName) {
+      where.counterpartyName = { contains: counterpartyName, mode: 'insensitive' };
+    }
+    if (amountMin !== undefined || amountMax !== undefined) {
+      where.amount = {
+        ...(amountMin !== undefined ? { gte: amountMin } : {}),
+        ...(amountMax !== undefined ? { lte: amountMax } : {}),
+      };
+    }
+
+    const payments = await prisma.payment.findMany({
+      where,
+      select: {
+        id: true,
+        amount: true,
+        unmatchedAmount: true,
+        paymentDate: true,
+        referenceNumber: true,
+        counterpartyName: true,
+        method: true,
+        notes: true,
+        ledgerEntry: {
+          select: {
+            lines: {
+              select: {
+                account: { select: { code: true, name: true } },
+                debit: true,
+              },
+              where: { debit: { gt: 0 } },
+            },
+          },
+        },
+      },
+      orderBy: { paymentDate: 'desc' },
+      take: 20,
+    });
+
+    return { success: true as const, payments };
   });
 
 // ============================================

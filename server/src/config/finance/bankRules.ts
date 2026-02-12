@@ -292,7 +292,12 @@ export function getVendorRule(contactName: string, purpose: string): VendorRule 
   if (purpose === 'vendor bill' && TAILOR_NAMES.has(contactName)) {
     return { category: 'service', debitAccount: 'OPERATING_EXPENSES', description: 'Production piecework' };
   }
-  return { category: 'other', debitAccount: 'OPERATING_EXPENSES' };
+  return { category: 'other', debitAccount: 'UNMATCHED_PAYMENTS' };
+}
+
+/** Resolve the debit account from a rule (passthrough). */
+export function resolveDebitAccount(rule: { debitAccount: string }): string {
+  return rule.debitAccount;
 }
 
 /** Look up a UPI payee rule by partial name match. Returns null if no match. */

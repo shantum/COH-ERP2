@@ -19,6 +19,7 @@ import {
   cancelInvoice,
   createFinancePayment,
   createManualEntry,
+  findUnmatchedPayments,
 } from '../server/functions/finance';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
@@ -32,6 +33,7 @@ import { Textarea } from '@/components/ui/textarea';
 import {
   IndianRupee, Plus, ArrowUpRight, ArrowDownLeft,
   Check, X, BookOpen, ChevronLeft, ChevronRight, Loader2, AlertCircle,
+  ExternalLink, CloudUpload, Link2,
 } from 'lucide-react';
 import {
   type FinanceSearchParams,
@@ -206,6 +208,22 @@ function InvoicesTab({ search }: { search: FinanceSearchParams }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [showCreateModal, setShowCreateModal] = useState(false);
+  // For the confirm dialog — stores the invoice being confirmed
+  const [confirmingInvoice, setConfirmingInvoice] = useState<{
+    id: string; type: string; counterpartyName: string | null; totalAmount: number;
+    party?: { id: string; name: string } | null;
+  } | null>(null);
+
+  const driveSyncMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch('/api/finance/drive/sync', { method: 'POST', credentials: 'include' });
+      if (!res.ok) throw new Error('Drive sync failed');
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['finance'] });
+    },
+  });
 
   const listFn = useServerFn(listInvoices);
   const { data, isLoading } = useQuery({
@@ -227,9 +245,10 @@ function InvoicesTab({ search }: { search: FinanceSearchParams }) {
   const cancelFn = useServerFn(cancelInvoice);
 
   const confirmMutation = useMutation({
-    mutationFn: (id: string) => confirmFn({ data: { id } }),
+    mutationFn: (params: { id: string; linkedPaymentId?: string }) => confirmFn({ data: params }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['finance'] });
+      setConfirmingInvoice(null);
     },
   });
 
@@ -246,6 +265,22 @@ function InvoicesTab({ search }: { search: FinanceSearchParams }) {
     },
     [navigate, search]
   );
+
+  // When user clicks confirm on a payable draft, show the linking dialog
+  // For receivable drafts, confirm directly
+  const handleConfirmClick = useCallback((inv: NonNullable<typeof data>['invoices'][number]) => {
+    if (inv.type === 'payable') {
+      setConfirmingInvoice({
+        id: inv.id,
+        type: inv.type,
+        counterpartyName: inv.party?.name ?? inv.counterpartyName,
+        totalAmount: inv.totalAmount,
+        party: inv.party,
+      });
+    } else {
+      confirmMutation.mutate({ id: inv.id });
+    }
+  }, [confirmMutation]);
 
   return (
     <div className="space-y-4">
@@ -287,7 +322,16 @@ function InvoicesTab({ search }: { search: FinanceSearchParams }) {
           className="w-[200px]"
         />
 
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={() => driveSyncMutation.mutate()}
+            disabled={driveSyncMutation.isPending}
+            title="Upload pending files to Google Drive"
+          >
+            {driveSyncMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <CloudUpload className="h-4 w-4 mr-1" />}
+            Sync to Drive
+          </Button>
           <Button onClick={() => setShowCreateModal(true)}>
             <Plus className="h-4 w-4 mr-1" /> New Invoice
           </Button>
@@ -341,12 +385,23 @@ function InvoicesTab({ search }: { search: FinanceSearchParams }) {
                     <td className="p-3 text-xs text-muted-foreground">{inv.invoiceDate ? new Date(inv.invoiceDate).toLocaleDateString('en-IN') : '—'}</td>
                     <td className="p-3 text-right">
                       <div className="flex items-center justify-end gap-1">
+                        {inv.driveUrl && (
+                          <a
+                            href={inv.driveUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title="Open in Google Drive"
+                            className="inline-flex items-center justify-center h-8 w-8 rounded-md hover:bg-muted"
+                          >
+                            <ExternalLink className="h-3.5 w-3.5 text-blue-600" />
+                          </a>
+                        )}
                         {inv.status === 'draft' && (
                           <>
                             <Button
                               size="sm"
                               variant="ghost"
-                              onClick={() => confirmMutation.mutate(inv.id)}
+                              onClick={() => handleConfirmClick(inv)}
                               disabled={confirmMutation.isPending}
                               title="Confirm"
                             >
@@ -380,6 +435,16 @@ function InvoicesTab({ search }: { search: FinanceSearchParams }) {
 
       {/* Create Invoice Modal */}
       <CreateInvoiceModal open={showCreateModal} onClose={() => setShowCreateModal(false)} />
+
+      {/* Confirm + Link Payment Dialog (payable drafts only) */}
+      {confirmingInvoice && (
+        <ConfirmPayableDialog
+          invoice={confirmingInvoice}
+          isPending={confirmMutation.isPending}
+          onConfirm={(linkedPaymentId) => confirmMutation.mutate({ id: confirmingInvoice.id, linkedPaymentId })}
+          onClose={() => setConfirmingInvoice(null)}
+        />
+      )}
     </div>
   );
 }
@@ -616,6 +681,117 @@ function LedgerTab({ search }: { search: FinanceSearchParams }) {
 
       <ManualEntryModal open={showManualEntry} onClose={() => setShowManualEntry(false)} />
     </div>
+  );
+}
+
+// ============================================
+// CONFIRM PAYABLE DIALOG (link to payment)
+// ============================================
+
+function ConfirmPayableDialog({ invoice, isPending, onConfirm, onClose }: {
+  invoice: { id: string; counterpartyName: string | null; totalAmount: number };
+  isPending: boolean;
+  onConfirm: (linkedPaymentId?: string) => void;
+  onClose: () => void;
+}) {
+  const [selectedPaymentId, setSelectedPaymentId] = useState<string | null>(null);
+  const findPaymentsFn = useServerFn(findUnmatchedPayments);
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['finance', 'unmatched-payments', invoice.counterpartyName],
+    queryFn: () => findPaymentsFn({
+      data: {
+        ...(invoice.counterpartyName ? { counterpartyName: invoice.counterpartyName } : {}),
+      },
+    }),
+  });
+
+  const payments = data?.success ? data.payments : [];
+
+  return (
+    <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Confirm Invoice</DialogTitle>
+          <DialogDescription>
+            {formatCurrency(invoice.totalAmount)} to {invoice.counterpartyName ?? 'vendor'}. Was this already paid?
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-3">
+          {isLoading ? (
+            <div className="flex items-center justify-center py-4 text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin mr-2" /> Finding matching payments...
+            </div>
+          ) : payments.length > 0 ? (
+            <div className="space-y-2">
+              <p className="text-sm text-muted-foreground">Found {payments.length} unmatched payment{payments.length !== 1 ? 's' : ''}:</p>
+              <div className="max-h-[240px] overflow-y-auto space-y-1.5">
+                {payments.map((pmt) => {
+                  const debitAccount = pmt.ledgerEntry?.lines?.[0]?.account;
+                  return (
+                    <button
+                      key={pmt.id}
+                      type="button"
+                      className={`w-full text-left p-3 rounded-lg border text-sm transition-colors ${
+                        selectedPaymentId === pmt.id
+                          ? 'border-blue-500 bg-blue-50 dark:bg-blue-950'
+                          : 'hover:bg-muted/50'
+                      }`}
+                      onClick={() => setSelectedPaymentId(selectedPaymentId === pmt.id ? null : pmt.id)}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-medium">{formatCurrency(pmt.amount)}</span>
+                        <span className="text-xs text-muted-foreground">
+                          {new Date(pmt.paymentDate).toLocaleDateString('en-IN')}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between mt-1 text-xs text-muted-foreground">
+                        <span>{pmt.counterpartyName ?? '—'}</span>
+                        <span>{pmt.referenceNumber ?? pmt.method.replace(/_/g, ' ')}</span>
+                      </div>
+                      {debitAccount && debitAccount.code === 'UNMATCHED_PAYMENTS' && (
+                        <span className="inline-flex items-center mt-1 text-[10px] text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded">
+                          suspense — will be reclassified
+                        </span>
+                      )}
+                      {pmt.unmatchedAmount < pmt.amount && (
+                        <span className="text-[10px] text-muted-foreground mt-0.5 block">
+                          Unmatched: {formatCurrency(pmt.unmatchedAmount)}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground py-2">No unmatched payments found for this vendor.</p>
+          )}
+        </div>
+
+        <DialogFooter className="flex-col sm:flex-row gap-2">
+          <Button variant="outline" onClick={onClose} disabled={isPending}>Cancel</Button>
+          <Button
+            variant="outline"
+            onClick={() => onConfirm(undefined)}
+            disabled={isPending}
+          >
+            {isPending && !selectedPaymentId ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
+            Confirm (no link)
+          </Button>
+          {selectedPaymentId && (
+            <Button
+              onClick={() => onConfirm(selectedPaymentId)}
+              disabled={isPending}
+            >
+              {isPending ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Link2 className="h-4 w-4 mr-1" />}
+              Confirm + Link Payment
+            </Button>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
