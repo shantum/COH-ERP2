@@ -99,6 +99,15 @@ export default function Finance() {
 // DASHBOARD TAB
 // ============================================
 
+const TYPE_LABELS: Record<string, string> = {
+  asset: 'Assets',
+  liability: 'Liabilities',
+  income: 'Income',
+  direct_cost: 'Direct Costs',
+  expense: 'Expenses',
+  equity: 'Equity',
+};
+
 function DashboardTab() {
   const summaryFn = useServerFn(getFinanceSummary);
   const { data, isLoading } = useQuery({
@@ -106,30 +115,21 @@ function DashboardTab() {
     queryFn: () => summaryFn(),
   });
 
-  if (isLoading) return <LoadingState />;
-  if (!data?.success) return <div className="text-muted-foreground">Failed to load summary</div>;
+  const accounts = data?.success ? data.accounts : [];
+  const summary = data?.success ? data.summary : null;
 
-  const { accounts, summary } = data;
-
-  // Group accounts by type
+  // Group accounts by type — must be called every render (hooks rule)
   const grouped = useMemo(() => {
     const groups: Record<string, typeof accounts> = {};
     for (const acct of accounts) {
-      const group = acct.type;
-      if (!groups[group]) groups[group] = [];
-      groups[group].push(acct);
+      if (!groups[acct.type]) groups[acct.type] = [];
+      groups[acct.type].push(acct);
     }
     return groups;
   }, [accounts]);
 
-  const typeLabels: Record<string, string> = {
-    asset: 'Assets',
-    liability: 'Liabilities',
-    income: 'Income',
-    direct_cost: 'Direct Costs',
-    expense: 'Expenses',
-    equity: 'Equity',
-  };
+  if (isLoading) return <LoadingState />;
+  if (!data?.success || !summary) return <div className="text-muted-foreground">Failed to load summary</div>;
 
   return (
     <div className="space-y-6">
@@ -164,7 +164,7 @@ function DashboardTab() {
         {Object.entries(grouped).map(([type, accts]) => (
           <div key={type} className="border rounded-lg p-4">
             <h3 className="font-semibold text-sm text-muted-foreground uppercase mb-3">
-              {typeLabels[type] ?? type}
+              {TYPE_LABELS[type] ?? type}
             </h3>
             <div className="space-y-2">
               {accts.map((acct) => (
