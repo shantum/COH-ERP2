@@ -28,8 +28,8 @@ interface Trim {
     description?: string | null;
     costPerUnit?: number | null;
     unit: string;
-    supplierId?: string | null;
-    supplierName?: string | null;
+    partyId?: string | null;
+    partyName?: string | null;
     leadTimeDays?: number | null;
     minOrderQty?: number | null;
     usageCount?: number;
@@ -98,11 +98,11 @@ export function TrimsTable({ onEdit, onViewDetails, onAdd }: TrimsTableProps) {
             ),
         },
         {
-            accessorKey: 'supplierName',
+            accessorKey: 'partyName',
             header: 'Supplier',
             cell: ({ row }) => (
                 <span className="text-xs text-muted-foreground">
-                    {row.original.supplierName || '-'}
+                    {row.original.partyName || '-'}
                 </span>
             ),
         },

@@ -68,9 +68,9 @@ export interface MaterialNode {
     leadTimeInherited?: boolean;
     minOrderInherited?: boolean;
 
-    // === Supplier (Fabric/Colour) ===
-    supplierId?: string | null;
-    supplierName?: string | null;
+    // === Party / Supplier (Fabric/Colour) ===
+    partyId?: string | null;
+    partyName?: string | null;
 
     // === Inventory (Colour level only) ===
     currentBalance?: number;

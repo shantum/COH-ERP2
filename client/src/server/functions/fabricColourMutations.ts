@@ -70,11 +70,11 @@ interface TransactionWithRelations {
     costPerUnit: number | null;
     referenceId: string | null;
     notes: string | null;
-    supplierId: string | null;
+    partyId: string | null;
     createdById: string;
     createdAt: Date;
     createdBy: { id: string; name: string };
-    supplier: { id: string; name: string } | null;
+    party: { id: string; name: string } | null;
 }
 
 /**
@@ -199,7 +199,7 @@ const createTransactionSchema = z.object({
     referenceId: z.string().optional().nullable(),
     notes: z.string().optional().nullable(),
     costPerUnit: z.number().positive().optional().nullable(),
-    supplierId: z.string().uuid().optional().nullable(),
+    partyId: z.string().uuid().optional().nullable(),
 });
 
 const deleteTransactionSchema = z.object({
@@ -210,7 +210,7 @@ const updateTransactionSchema = z.object({
     id: z.string().uuid('Invalid transaction ID'),
     qty: z.number().positive('Quantity must be positive').optional(),
     costPerUnit: z.number().positive('Cost must be positive').optional().nullable(),
-    supplierId: z.string().uuid().optional().nullable(),
+    partyId: z.string().uuid().optional().nullable(),
     notes: z.string().max(500).optional().nullable(),
 });
 
@@ -262,12 +262,12 @@ export const createFabricColourTransaction = createServerFn({ method: 'POST' })
                     referenceId: data.referenceId || null,
                     notes: data.notes || null,
                     costPerUnit: data.costPerUnit ?? null,
-                    supplierId: data.supplierId || null,
+                    partyId: data.partyId || null,
                     createdById: context.user.id,
                 },
                 include: {
                     createdBy: { select: { id: true, name: true } },
-                    supplier: { select: { id: true, name: true } },
+                    party: { select: { id: true, name: true } },
                 },
             });
 
@@ -343,7 +343,7 @@ export const deleteFabricColourTransaction = createServerFn({ method: 'POST' })
 /**
  * Update a fabric colour transaction
  *
- * Allows editing qty, costPerUnit, supplierId, and notes.
+ * Allows editing qty, costPerUnit, partyId, and notes.
  * Cannot change fabricColourId or txnType after creation.
  */
 export const updateFabricColourTransaction = createServerFn({ method: 'POST' })
@@ -371,7 +371,7 @@ export const updateFabricColourTransaction = createServerFn({ method: 'POST' })
             const updateData: Record<string, unknown> = {};
             if (data.qty !== undefined) updateData.qty = data.qty;
             if (data.costPerUnit !== undefined) updateData.costPerUnit = data.costPerUnit;
-            if (data.supplierId !== undefined) updateData.supplierId = data.supplierId;
+            if (data.partyId !== undefined) updateData.partyId = data.partyId;
             if (data.notes !== undefined) updateData.notes = data.notes;
 
             const transaction = await prisma.fabricColourTransaction.update({
@@ -379,7 +379,7 @@ export const updateFabricColourTransaction = createServerFn({ method: 'POST' })
                 data: updateData,
                 include: {
                     createdBy: { select: { id: true, name: true } },
-                    supplier: { select: { id: true, name: true } },
+                    party: { select: { id: true, name: true } },
                 },
             });
 

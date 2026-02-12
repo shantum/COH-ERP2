@@ -147,15 +147,15 @@ export interface Fabric {
   standardColor: string | null;
   colorHex: string | null;
   costPerUnit: number;
-  supplierId: string | null;
+  partyId: string | null;
   leadTimeDays: number;
   minOrderQty: number;
   isActive: boolean;
   fabricType?: FabricType;
-  supplier?: Supplier;
+  party?: Party;
 }
 
-export interface Supplier {
+export interface Party {
   id: string;
   name: string;
   contactName: string | null;
@@ -561,7 +561,7 @@ export interface CreateFabricData {
   standardColor?: string;
   colorHex?: string;
   costPerUnit: number;
-  supplierId?: string;
+  partyId?: string;
   leadTimeDays?: number;
   minOrderQty?: number;
 }
@@ -573,7 +573,7 @@ export interface CreateFabricTypeData {
   avgShrinkagePct?: number;
 }
 
-export interface CreateSupplierData {
+export interface CreatePartyData {
   name: string;
   contactName?: string;
   email?: string;
@@ -589,7 +589,7 @@ export interface CreateFabricTransactionData {
   referenceId?: string;
   notes?: string;
   costPerUnit?: number;
-  supplierId?: string;
+  partyId?: string;
 }
 
 // Inventory

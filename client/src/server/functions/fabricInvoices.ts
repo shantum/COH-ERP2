@@ -16,7 +16,7 @@ import { getPrisma } from '@coh/shared/services/db';
 
 const listInvoicesInput = z.object({
     status: z.enum(['draft', 'confirmed', 'cancelled']).optional(),
-    supplierId: z.string().uuid().optional(),
+    partyId: z.string().uuid().optional(),
     page: z.coerce.number().int().positive().default(1),
     limit: z.coerce.number().int().positive().max(100).default(20),
 }).optional();
@@ -26,12 +26,12 @@ export const listFabricInvoices = createServerFn({ method: 'GET' })
     .inputValidator((input: unknown) => listInvoicesInput.parse(input))
     .handler(async ({ data }) => {
         const prisma = await getPrisma();
-        const { status, supplierId, page = 1, limit = 20 } = data ?? {};
+        const { status, partyId, page = 1, limit = 20 } = data ?? {};
         const skip = (page - 1) * limit;
 
         const where = {
             ...(status ? { status } : {}),
-            ...(supplierId ? { supplierId } : {}),
+            ...(partyId ? { partyId } : {}),
         };
 
         const [invoices, total] = await Promise.all([
@@ -48,7 +48,7 @@ export const listFabricInvoices = createServerFn({ method: 'GET' })
                     fileSizeBytes: true,
                     aiConfidence: true,
                     createdAt: true,
-                    supplier: { select: { id: true, name: true } },
+                    party: { select: { id: true, name: true } },
                     _count: { select: { lines: true } },
                 },
                 orderBy: { createdAt: 'desc' },
@@ -81,7 +81,7 @@ export const getFabricInvoice = createServerFn({ method: 'GET' })
                 id: true,
                 invoiceNumber: true,
                 invoiceDate: true,
-                supplierId: true,
+                partyId: true,
                 supplierName: true,
                 subtotal: true,
                 gstAmount: true,
@@ -120,7 +120,7 @@ export const getFabricInvoice = createServerFn({ method: 'GET' })
                         },
                     },
                 },
-                supplier: { select: { id: true, name: true } },
+                party: { select: { id: true, name: true } },
                 createdBy: { select: { id: true, name: true } },
             },
         });

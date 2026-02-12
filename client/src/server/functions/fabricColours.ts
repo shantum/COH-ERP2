@@ -40,7 +40,7 @@ interface FabricColourWithRelations {
     standardColour: string | null;
     colourHex: string | null;
     costPerUnit: number | null;
-    supplierId: string | null;
+    partyId: string | null;
     leadTimeDays: number | null;
     minOrderQty: number | null;
     isActive: boolean;
@@ -57,7 +57,7 @@ interface FabricColourWithRelations {
             name: string;
         } | null;
     };
-    supplier?: {
+    party?: {
         id: string;
         name: string;
     } | null;
@@ -76,11 +76,11 @@ interface FabricColourTransactionRecord {
     costPerUnit: number | null;
     referenceId: string | null;
     notes: string | null;
-    supplierId: string | null;
+    partyId: string | null;
     createdById: string;
     createdAt: Date;
     createdBy: { id: string; name: string } | null;
-    supplier: { id: string; name: string } | null;
+    party: { id: string; name: string } | null;
 }
 
 /**
@@ -187,7 +187,7 @@ interface StockAnalysisItem {
     suggestedOrderQty: number;
     leadTimeDays: number | null;
     costPerUnit: number | null;
-    supplier: string;
+    party: string;
 }
 
 /** Response type for getFabricColourStockAnalysis */
@@ -301,7 +301,7 @@ const getAllTransactionsInputSchema = z.object({
 const getRecentFabricReceiptsInputSchema = z.object({
     limit: z.number().int().positive().default(100),
     days: z.number().int().positive().default(7),
-    supplierId: z.string().uuid().optional().nullable(),
+    partyId: z.string().uuid().optional().nullable(),
     fabricColourId: z.string().uuid().optional().nullable(),
 }).optional();
 
@@ -432,7 +432,7 @@ export const getFabricColourTransactions = createServerFn({ method: 'GET' })
             where: { fabricColourId: data.fabricColourId },
             include: {
                 createdBy: { select: { id: true, name: true } },
-                supplier: { select: { id: true, name: true } },
+                party: { select: { id: true, name: true } },
             },
             orderBy: { createdAt: 'desc' },
             take: data.limit,
@@ -514,7 +514,7 @@ export const getAllFabricColourTransactions = createServerFn({ method: 'POST' })
                             },
                         },
                         createdBy: { select: { id: true, name: true } },
-                        supplier: { select: { id: true, name: true } },
+                        party: { select: { id: true, name: true } },
                     },
                     orderBy: { createdAt: 'desc' },
                     take: limit,
@@ -536,7 +536,7 @@ export const getAllFabricColourTransactions = createServerFn({ method: 'POST' })
  * Get recent fabric receipts (inward transactions only)
  *
  * Optimized query for the Fabric Receipt Entry page.
- * Returns only inward transactions from suppliers.
+ * Returns only inward transactions from parties.
  */
 export const getRecentFabricReceipts = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
@@ -559,8 +559,8 @@ export const getRecentFabricReceipts = createServerFn({ method: 'POST' })
             };
 
             // Optional filters
-            if (data?.supplierId) {
-                where.supplierId = data.supplierId;
+            if (data?.partyId) {
+                where.partyId = data.partyId;
             }
             if (data?.fabricColourId) {
                 where.fabricColourId = data.fabricColourId;
@@ -590,7 +590,7 @@ export const getRecentFabricReceipts = createServerFn({ method: 'POST' })
                             },
                         },
                         createdBy: { select: { id: true, name: true } },
-                        supplier: { select: { id: true, name: true } },
+                        party: { select: { id: true, name: true } },
                     },
                     orderBy: { createdAt: 'desc' },
                     take: limit,
@@ -636,7 +636,7 @@ export const getFabricColourStockAnalysis = createServerFn({ method: 'GET' })
                             material: true,
                         },
                     },
-                    supplier: true,
+                    party: true,
                 },
             });
 
@@ -697,7 +697,7 @@ export const getFabricColourStockAnalysis = createServerFn({ method: 'GET' })
                         suggestedOrderQty: suggestedOrderQty > 0 ? suggestedOrderQty : 0,
                         leadTimeDays: effectiveLeadTime,
                         costPerUnit: effectiveCost,
-                        supplier: colour.supplier?.name || 'No supplier',
+                        party: colour.party?.name || 'No party',
                     };
                 },
                 5

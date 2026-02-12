@@ -106,13 +106,13 @@ export const getMaterialsHierarchy = createServerFn({ method: 'GET' })
                         include: {
                             colours: {
                                 include: {
-                                    supplier: true,
+                                    party: true,
                                 },
                                 orderBy: {
                                     colourName: 'asc',
                                 },
                             },
-                            supplier: true,
+                            party: true,
                         },
                         orderBy: {
                             name: 'asc',
@@ -149,8 +149,8 @@ export const getMaterialsHierarchy = createServerFn({ method: 'GET' })
                     costPerUnit: fabric.costPerUnit,
                     defaultLeadTimeDays: fabric.defaultLeadTimeDays,
                     defaultMinOrderQty: fabric.defaultMinOrderQty,
-                    supplierId: fabric.supplierId,
-                    supplierName: fabric.supplier?.name,
+                    partyId: fabric.partyId,
+                    partyName: fabric.party?.name,
                     isActive: fabric.isActive,
                     colourCount: fabric.colours.length,
                     children: fabric.colours.map((colour: typeof fabric.colours[number]) => ({
@@ -176,8 +176,8 @@ export const getMaterialsHierarchy = createServerFn({ method: 'GET' })
                         minOrderQty: colour.minOrderQty,
                         effectiveMinOrderQty: colour.minOrderQty ?? fabric.defaultMinOrderQty,
                         minOrderInherited: colour.minOrderQty === null,
-                        supplierId: colour.supplierId,
-                        supplierName: colour.supplier?.name,
+                        partyId: colour.partyId,
+                        partyName: colour.party?.name,
                         isActive: colour.isActive,
                         createdAt: colour.createdAt.toISOString(),
                         updatedAt: colour.updatedAt.toISOString(),
@@ -388,7 +388,7 @@ const getTrimsSchema = z.object({
 /**
  * Get trims catalog
  *
- * Returns flat list of trim items with supplier info.
+ * Returns flat list of trim items with party info.
  * Supports filtering by category and search term.
  */
 export const getTrims = createServerFn({ method: 'GET' })
@@ -407,7 +407,7 @@ export const getTrims = createServerFn({ method: 'GET' })
                     }),
                 },
                 include: {
-                    supplier: { select: { id: true, name: true } },
+                    party: { select: { id: true, name: true } },
                     _count: {
                         select: {
                             productBomTemplates: true,
@@ -425,8 +425,8 @@ export const getTrims = createServerFn({ method: 'GET' })
                 description: t.description,
                 costPerUnit: t.costPerUnit,
                 unit: t.unit,
-                supplierId: t.supplierId,
-                supplierName: t.supplier?.name || null,
+                partyId: t.partyId,
+                partyName: t.party?.name || null,
                 leadTimeDays: t.leadTimeDays,
                 minOrderQty: t.minOrderQty,
                 usageCount: t._count.productBomTemplates,
@@ -453,7 +453,7 @@ const getServicesSchema = z.object({
 /**
  * Get services catalog
  *
- * Returns flat list of service items with vendor info.
+ * Returns flat list of service items with party info.
  * Supports filtering by category and search term.
  */
 export const getServices = createServerFn({ method: 'GET' })
@@ -472,7 +472,7 @@ export const getServices = createServerFn({ method: 'GET' })
                     }),
                 },
                 include: {
-                    vendor: { select: { id: true, name: true } },
+                    party: { select: { id: true, name: true } },
                     _count: {
                         select: {
                             productBomTemplates: true,
@@ -490,8 +490,8 @@ export const getServices = createServerFn({ method: 'GET' })
                 description: s.description,
                 costPerJob: s.costPerJob,
                 costUnit: s.costUnit,
-                vendorId: s.vendorId,
-                vendorName: s.vendor?.name || null,
+                partyId: s.partyId,
+                partyName: s.party?.name || null,
                 leadTimeDays: s.leadTimeDays,
                 usageCount: s._count.productBomTemplates,
                 isActive: s.isActive,
@@ -516,7 +516,7 @@ export interface MaterialsFiltersResponse {
         materials: Array<{ id: string; name: string }>;
         constructionTypes: string[];
         patterns: string[];
-        suppliers: Array<{ id: string; name: string }>;
+        parties: Array<{ id: string; name: string }>;
     };
 }
 
@@ -530,7 +530,7 @@ export const getMaterialsFilters = createServerFn({ method: 'GET' })
     .handler(async (): Promise<MaterialsFiltersResponse> => {
         const prisma = await getPrisma();
             // Get unique values for filters
-            const [materials, constructionTypes, patterns, suppliers] = await Promise.all([
+            const [materials, constructionTypes, patterns, parties] = await Promise.all([
                 prisma.material.findMany({
                     where: { isActive: true },
                     select: {
@@ -561,7 +561,7 @@ export const getMaterialsFilters = createServerFn({ method: 'GET' })
                     },
                     distinct: ['pattern'],
                 }),
-                prisma.supplier.findMany({
+                prisma.party.findMany({
                     where: { isActive: true },
                     select: {
                         id: true,
@@ -585,7 +585,7 @@ export const getMaterialsFilters = createServerFn({ method: 'GET' })
                         .map((p: typeof patterns[number]) => p.pattern)
                         .filter((p: string | null): p is string => p !== null)
                         .sort(),
-                    suppliers: suppliers.map((s: typeof suppliers[number]) => ({ id: s.id, name: s.name })),
+                    parties: parties.map((s: typeof parties[number]) => ({ id: s.id, name: s.name })),
                 },
             };
     });
@@ -655,7 +655,7 @@ export const getMaterialsTree = createServerFn({ method: 'GET' })
                             colours: {
                                 where: { isActive: true },
                                 include: {
-                                    supplier: { select: { id: true, name: true } },
+                                    party: { select: { id: true, name: true } },
                                     variationBomLines: {
                                         include: {
                                             variation: {
@@ -670,7 +670,7 @@ export const getMaterialsTree = createServerFn({ method: 'GET' })
                                 },
                                 orderBy: { colourName: 'asc' },
                             },
-                            supplier: { select: { id: true, name: true } },
+                            party: { select: { id: true, name: true } },
                         },
                         orderBy: { name: 'asc' },
                     },
@@ -769,8 +769,8 @@ export const getMaterialsTree = createServerFn({ method: 'GET' })
                     costPerUnit: fabric.costPerUnit,
                     leadTimeDays: fabric.defaultLeadTimeDays,
                     minOrderQty: fabric.defaultMinOrderQty,
-                    supplierId: fabric.supplierId,
-                    supplierName: fabric.supplier?.name,
+                    partyId: fabric.partyId,
+                    partyName: fabric.party?.name,
                     isActive: fabric.isActive,
                     colourCount: fabric.colours.length,
                     totalStock: fabricTotalStock,
@@ -804,8 +804,8 @@ export const getMaterialsTree = createServerFn({ method: 'GET' })
                         minOrderQty: colour.minOrderQty,
                         effectiveMinOrderQty: colour.minOrderQty ?? fabric.defaultMinOrderQty,
                         minOrderInherited: colour.minOrderQty === null,
-                        supplierId: colour.supplierId,
-                        supplierName: colour.supplier?.name,
+                        partyId: colour.partyId,
+                        partyName: colour.party?.name,
                         isActive: colour.isActive,
                         isOutOfStock: colour.isOutOfStock,
                         // Inventory balance from FabricColourTransaction
@@ -876,7 +876,7 @@ export const getMaterialsTreeChildren = createServerFn({ method: 'GET' })
                     where: { materialId: data.parentId, isActive: true },
                     include: {
                         material: { select: { name: true } },
-                        supplier: { select: { id: true, name: true } },
+                        party: { select: { id: true, name: true } },
                         _count: { select: { colours: { where: { isActive: true } } } },
                     },
                     orderBy: { name: 'asc' },
@@ -898,8 +898,8 @@ export const getMaterialsTreeChildren = createServerFn({ method: 'GET' })
                     costPerUnit: fabric.costPerUnit,
                     leadTimeDays: fabric.defaultLeadTimeDays,
                     minOrderQty: fabric.defaultMinOrderQty,
-                    supplierId: fabric.supplierId,
-                    supplierName: fabric.supplier?.name,
+                    partyId: fabric.partyId,
+                    partyName: fabric.party?.name,
                     isActive: fabric.isActive,
                     colourCount: fabric._count.colours,
                     hasChildren: fabric._count.colours > 0,
@@ -916,7 +916,7 @@ export const getMaterialsTreeChildren = createServerFn({ method: 'GET' })
                                 material: { select: { name: true } },
                             },
                         },
-                        supplier: { select: { id: true, name: true } },
+                        party: { select: { id: true, name: true } },
                         variationBomLines: {
                             include: {
                                 variation: {
@@ -998,8 +998,8 @@ export const getMaterialsTreeChildren = createServerFn({ method: 'GET' })
                         minOrderQty: colour.minOrderQty,
                         effectiveMinOrderQty: colour.minOrderQty ?? colour.fabric.defaultMinOrderQty,
                         minOrderInherited: colour.minOrderQty === null,
-                        supplierId: colour.supplierId,
-                        supplierName: colour.supplier?.name,
+                        partyId: colour.partyId,
+                        partyName: colour.party?.name,
                         isActive: colour.isActive,
                         isOutOfStock: colour.isOutOfStock,
                         // Inventory balance from FabricColourTransaction
@@ -1115,9 +1115,9 @@ export interface FabricColourFlatRow {
     minOrderQty: number | null;
     effectiveMinOrderQty: number | null;
     minOrderInherited: boolean;
-    // Supplier
-    supplierId: string | null;
-    supplierName: string | null;
+    // Party
+    partyId: string | null;
+    partyName: string | null;
     // Stock
     currentBalance: number;
     // 30-day metrics
@@ -1167,7 +1167,7 @@ export const getFabricColoursFlat = createServerFn({ method: 'GET' })
                         material: { select: { id: true, name: true } },
                     },
                 },
-                supplier: { select: { id: true, name: true } },
+                party: { select: { id: true, name: true } },
                 variationBomLines: {
                     select: {
                         variation: {
@@ -1285,9 +1285,9 @@ export const getFabricColoursFlat = createServerFn({ method: 'GET' })
                 minOrderQty: colour.minOrderQty ? Number(colour.minOrderQty) : null,
                 effectiveMinOrderQty: colour.minOrderQty ? Number(colour.minOrderQty) : (fabric.defaultMinOrderQty ? Number(fabric.defaultMinOrderQty) : null),
                 minOrderInherited: colour.minOrderQty === null,
-                // Supplier
-                supplierId: colour.supplierId,
-                supplierName: colour.supplier?.name ?? null,
+                // Party
+                partyId: colour.partyId,
+                partyName: colour.party?.name ?? null,
                 // Stock
                 currentBalance: balanceMap.get(colour.id) ?? 0,
                 // 30-day metrics

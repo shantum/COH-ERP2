@@ -326,7 +326,7 @@ function InvoicesTab({ search }: { search: FinanceSearchParams }) {
                     </td>
                     <td className="p-3 text-xs">{getCategoryLabel(inv.category as any)}</td>
                     <td className="p-3">
-                      {inv.supplier?.name ?? inv.vendor?.name ??
+                      {inv.party?.name ??
                         (inv.customer ? [inv.customer.firstName, inv.customer.lastName].filter(Boolean).join(' ') || inv.customer.email : null) ??
                         inv.counterpartyName ?? '—'}
                     </td>
@@ -477,7 +477,7 @@ function PaymentsTab({ search }: { search: FinanceSearchParams }) {
                     </td>
                     <td className="p-3 text-xs">{pmt.method.replace(/_/g, ' ')}</td>
                     <td className="p-3">
-                      {pmt.supplier?.name ?? pmt.vendor?.name ??
+                      {pmt.party?.name ??
                         (pmt.customer ? [pmt.customer.firstName, pmt.customer.lastName].filter(Boolean).join(' ') || pmt.customer.email : null) ??
                         pmt.counterpartyName ?? '—'}
                     </td>

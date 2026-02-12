@@ -239,8 +239,8 @@ export function MaterialsTreeView({
             minOrderQty: row.minOrderQty,
             effectiveMinOrderQty: row.effectiveMinOrderQty,
             minOrderInherited: row.minOrderInherited,
-            supplierId: row.supplierId,
-            supplierName: row.supplierName,
+            partyId: row.partyId,
+            partyName: row.partyName,
             isOutOfStock: row.isOutOfStock,
             isActive: row.isActive,
         };

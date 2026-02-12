@@ -84,7 +84,7 @@ interface InvoiceSummary {
     fileSizeBytes: number;
     aiConfidence: number | null;
     createdAt: string | Date;
-    supplier: { id: string; name: string } | null;
+    party: { id: string; name: string } | null;
     _count: { lines: number };
 }
 
@@ -92,7 +92,7 @@ interface InvoiceDetail {
     id: string;
     invoiceNumber: string | null;
     invoiceDate: string | Date | null;
-    supplierId: string | null;
+    partyId: string | null;
     supplierName: string | null;
     subtotal: number | null;
     gstAmount: number | null;
@@ -105,7 +105,7 @@ interface InvoiceDetail {
     createdAt: string | Date;
     updatedAt: string | Date;
     lines: InvoiceLine[];
-    supplier: { id: string; name: string } | null;
+    party: { id: string; name: string } | null;
     createdBy: { id: string; name: string } | null;
 }
 
@@ -436,7 +436,7 @@ function InvoiceHistory({
                                 <div className="font-medium">{inv.invoiceNumber || '(no number)'}</div>
                                 <div className="text-xs text-muted-foreground">{inv.fileName}</div>
                             </td>
-                            <td className="p-3">{inv.supplier?.name ?? inv.supplierName ?? '—'}</td>
+                            <td className="p-3">{inv.party?.name ?? inv.supplierName ?? '—'}</td>
                             <td className="p-3">{formatDate(inv.invoiceDate)}</td>
                             <td className="p-3 text-right font-mono">{formatCurrency(inv.totalAmount)}</td>
                             <td className="p-3 text-center">{inv._count.lines}</td>
@@ -620,7 +620,7 @@ function InvoiceReview({
                         )}
                     </div>
                     <p className="text-sm text-muted-foreground">
-                        {invoice.supplier?.name ?? invoice.supplierName ?? 'Unknown supplier'} · {formatDate(invoice.invoiceDate)} · {invoice.fileName}
+                        {invoice.party?.name ?? invoice.supplierName ?? 'Unknown supplier'} · {formatDate(invoice.invoiceDate)} · {invoice.fileName}
                     </p>
                 </div>
                 <a

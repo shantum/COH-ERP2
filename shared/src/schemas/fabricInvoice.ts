@@ -12,7 +12,7 @@ import { z } from 'zod';
 
 export const FabricInvoiceSearchParams = z.object({
     status: z.enum(['draft', 'confirmed', 'cancelled']).optional().catch(undefined),
-    supplierId: z.string().uuid().optional().catch(undefined),
+    partyId: z.string().uuid().optional().catch(undefined),
     page: z.coerce.number().int().positive().default(1).catch(1),
     view: z.enum(['upload', 'history']).default('history').catch('history'),
     invoiceId: z.string().uuid().optional().catch(undefined),
@@ -49,7 +49,7 @@ export const UpdateInvoiceLinesBodySchema = z.object({
     lines: z.array(UpdateInvoiceLineSchema).min(1),
     invoiceNumber: z.string().nullable().optional(),
     invoiceDate: z.string().nullable().optional(),
-    supplierId: z.string().uuid().nullable().optional(),
+    partyId: z.string().uuid().nullable().optional(),
     subtotal: z.number().nullable().optional(),
     gstAmount: z.number().nullable().optional(),
     totalAmount: z.number().nullable().optional(),

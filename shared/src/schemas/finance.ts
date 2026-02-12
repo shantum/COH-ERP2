@@ -61,8 +61,7 @@ export const CreateInvoiceSchema = z.object({
   category: z.string(),
   invoiceDate: z.string().optional(),
   dueDate: z.string().optional(),
-  supplierId: z.string().uuid().optional(),
-  vendorId: z.string().uuid().optional(),
+  partyId: z.string().uuid().optional(),
   customerId: z.string().uuid().optional(),
   counterpartyName: z.string().optional(),
   subtotal: z.number().optional(),
@@ -81,8 +80,7 @@ export const UpdateInvoiceSchema = z.object({
   category: z.string().optional(),
   invoiceDate: z.string().optional(),
   dueDate: z.string().optional(),
-  supplierId: z.string().uuid().nullable().optional(),
-  vendorId: z.string().uuid().nullable().optional(),
+  partyId: z.string().uuid().nullable().optional(),
   customerId: z.string().uuid().nullable().optional(),
   counterpartyName: z.string().nullable().optional(),
   subtotal: z.number().nullable().optional(),
@@ -102,8 +100,7 @@ export const CreateFinancePaymentSchema = z.object({
   method: z.string(),
   amount: z.number().positive(),
   paymentDate: z.string(),
-  supplierId: z.string().uuid().optional(),
-  vendorId: z.string().uuid().optional(),
+  partyId: z.string().uuid().optional(),
   customerId: z.string().uuid().optional(),
   counterpartyName: z.string().optional(),
   notes: z.string().optional(),
@@ -174,6 +171,13 @@ export const ListLedgerEntriesInput = z.object({
 // ============================================
 // DISPLAY CONSTANTS (shared between client + server)
 // ============================================
+
+export const PARTY_CATEGORIES = [
+  'fabric', 'trims', 'service', 'rent', 'marketing',
+  'logistics', 'packaging', 'statutory', 'other',
+] as const;
+
+export type PartyCategory = (typeof PARTY_CATEGORIES)[number];
 
 export const INVOICE_CATEGORIES = [
   'fabric', 'trims', 'service', 'logistics', 'rent', 'salary',

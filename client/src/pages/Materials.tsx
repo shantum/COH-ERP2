@@ -18,7 +18,7 @@ import { useSearch, useNavigate } from '@tanstack/react-router';
 import { useServerFn } from '@tanstack/react-start';
 import { Layers, Scissors, Package, X } from 'lucide-react';
 
-import { getFabricSuppliers } from '@/server/functions/fabrics';
+import { getParties } from '@/server/functions/fabrics';
 import {
     createTrim,
     updateTrim,
@@ -35,8 +35,8 @@ import type { MaterialNode } from '../components/materials/types';
 // Tab types
 type TabType = 'materials' | 'trims' | 'services';
 
-// Supplier type from getFabricSuppliers response
-interface Supplier {
+// Party type from getParties response
+interface Party {
     id: string;
     name: string;
     email?: string | null;
@@ -56,8 +56,8 @@ interface TrimItem {
     description?: string | null;
     costPerUnit?: number | null;
     unit: string;
-    supplierId?: string | null;
-    supplierName?: string | null;
+    partyId?: string | null;
+    partyName?: string | null;
     leadTimeDays?: number | null;
     minOrderQty?: number | null;
     usageCount?: number;
@@ -73,8 +73,8 @@ interface ServiceItem {
     description?: string | null;
     costPerJob?: number | null;
     costUnit: string;
-    vendorId?: string | null;
-    vendorName?: string | null;
+    partyId?: string | null;
+    partyName?: string | null;
     leadTimeDays?: number | null;
     usageCount?: number;
     isActive: boolean;
@@ -167,30 +167,30 @@ export default function Materials() {
     // Form states
     const [trimForm, setTrimForm] = useState({
         code: '', name: '', category: 'button', description: '',
-        costPerUnit: '', unit: 'piece', supplierId: '', leadTimeDays: '', minOrderQty: ''
+        costPerUnit: '', unit: 'piece', partyId: '', leadTimeDays: '', minOrderQty: ''
     });
     const [serviceForm, setServiceForm] = useState({
         code: '', name: '', category: 'printing', description: '',
-        costPerJob: '', costUnit: 'per_piece', vendorId: '', leadTimeDays: ''
+        costPerJob: '', costUnit: 'per_piece', partyId: '', leadTimeDays: ''
     });
     const [inwardForm, setInwardForm] = useState({
-        qty: '', notes: '', costPerUnit: '', supplierId: ''
+        qty: '', notes: '', costPerUnit: '', partyId: ''
     });
 
     // Server function hooks
-    const getSuppliersFn = useServerFn(getFabricSuppliers);
+    const getPartiesFn = useServerFn(getParties);
     const createTrimFn = useServerFn(createTrim);
     const updateTrimFn = useServerFn(updateTrim);
     const createServiceFn = useServerFn(createService);
     const updateServiceFn = useServerFn(updateService);
     const createColourTxnFn = useServerFn(createColourTransaction);
 
-    // Fetch suppliers
-    const { data: suppliersData } = useQuery({
-        queryKey: ['suppliers'],
-        queryFn: () => getSuppliersFn({ data: {} }),
+    // Fetch parties
+    const { data: partiesData } = useQuery({
+        queryKey: ['parties'],
+        queryFn: () => getPartiesFn({ data: {} }),
     });
-    const suppliers: Supplier[] | undefined = suppliersData?.suppliers;
+    const parties: Party[] | undefined = partiesData?.parties;
 
     // Mutation types - defined inline based on Zod schema shapes
     type CreateTrimInput = {
@@ -200,7 +200,7 @@ export default function Materials() {
         description?: string | null;
         costPerUnit?: number | null;
         unit?: string;
-        supplierId?: string | null;
+        partyId?: string | null;
         leadTimeDays?: number | null;
         minOrderQty?: number | null;
     };
@@ -217,7 +217,7 @@ export default function Materials() {
         description?: string | null;
         costPerJob?: number | null;
         costUnit?: string;
-        vendorId?: string | null;
+        partyId?: string | null;
         leadTimeDays?: number | null;
     };
 
@@ -232,7 +232,7 @@ export default function Materials() {
         reason: string;
         notes?: string | null;
         costPerUnit?: number | null;
-        supplierId?: string | null;
+        partyId?: string | null;
     };
 
     // Mutations
@@ -243,7 +243,7 @@ export default function Materials() {
             setShowAddTrim(false);
             setTrimForm({
                 code: '', name: '', category: 'button', description: '',
-                costPerUnit: '', unit: 'piece', supplierId: '', leadTimeDays: '', minOrderQty: ''
+                costPerUnit: '', unit: 'piece', partyId: '', leadTimeDays: '', minOrderQty: ''
             });
         },
         onError: (err: Error) => alert(err.message || 'Failed to create trim'),
@@ -265,7 +265,7 @@ export default function Materials() {
             setShowAddService(false);
             setServiceForm({
                 code: '', name: '', category: 'printing', description: '',
-                costPerJob: '', costUnit: 'per_piece', vendorId: '', leadTimeDays: ''
+                costPerJob: '', costUnit: 'per_piece', partyId: '', leadTimeDays: ''
             });
         },
         onError: (err: Error) => alert(err.message || 'Failed to create service'),
@@ -285,7 +285,7 @@ export default function Materials() {
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['materialsTree'] });
             setShowInward(null);
-            setInwardForm({ qty: '', notes: '', costPerUnit: '', supplierId: '' });
+            setInwardForm({ qty: '', notes: '', costPerUnit: '', partyId: '' });
         },
         onError: (err: Error) => alert(err.message || 'Failed to create inward'),
     });
@@ -300,7 +300,7 @@ export default function Materials() {
             description: trimForm.description || null,
             costPerUnit: trimForm.costPerUnit ? parseFloat(trimForm.costPerUnit) : null,
             unit: trimForm.unit,
-            supplierId: trimForm.supplierId || null,
+            partyId: trimForm.partyId || null,
             leadTimeDays: trimForm.leadTimeDays ? parseInt(trimForm.leadTimeDays) : null,
             minOrderQty: trimForm.minOrderQty ? parseFloat(trimForm.minOrderQty) : null,
         });
@@ -317,7 +317,7 @@ export default function Materials() {
             description: showEditTrim.description || null,
             costPerUnit: showEditTrim.costPerUnit ? parseFloat(showEditTrim.costPerUnit) : null,
             unit: showEditTrim.unit,
-            supplierId: showEditTrim.supplierId || null,
+            partyId: showEditTrim.partyId || null,
             leadTimeDays: showEditTrim.leadTimeDays ? parseInt(showEditTrim.leadTimeDays) : null,
             minOrderQty: showEditTrim.minOrderQty ? parseFloat(showEditTrim.minOrderQty) : null,
             isActive: showEditTrim.isActive,
@@ -333,7 +333,7 @@ export default function Materials() {
             description: serviceForm.description || null,
             costPerJob: serviceForm.costPerJob ? parseFloat(serviceForm.costPerJob) : null,
             costUnit: serviceForm.costUnit,
-            vendorId: serviceForm.vendorId || null,
+            partyId: serviceForm.partyId || null,
             leadTimeDays: serviceForm.leadTimeDays ? parseInt(serviceForm.leadTimeDays) : null,
         });
     };
@@ -349,7 +349,7 @@ export default function Materials() {
             description: showEditService.description || null,
             costPerJob: showEditService.costPerJob ? parseFloat(showEditService.costPerJob) : null,
             costUnit: showEditService.costUnit,
-            vendorId: showEditService.vendorId || null,
+            partyId: showEditService.partyId || null,
             leadTimeDays: showEditService.leadTimeDays ? parseInt(showEditService.leadTimeDays) : null,
             isActive: showEditService.isActive,
         });
@@ -364,7 +364,7 @@ export default function Materials() {
             reason: 'supplier_receipt',
             notes: inwardForm.notes,
             costPerUnit: inwardForm.costPerUnit ? parseFloat(inwardForm.costPerUnit) : null,
-            supplierId: inwardForm.supplierId || null,
+            partyId: inwardForm.partyId || null,
         });
     };
 
@@ -575,11 +575,11 @@ export default function Materials() {
                                 <label className="label">Supplier</label>
                                 <select
                                     className="input"
-                                    value={trimForm.supplierId}
-                                    onChange={(e) => setTrimForm(f => ({ ...f, supplierId: e.target.value }))}
+                                    value={trimForm.partyId}
+                                    onChange={(e) => setTrimForm(f => ({ ...f, partyId: e.target.value }))}
                                 >
                                     <option value="">Select supplier...</option>
-                                    {suppliers?.map((s) => (
+                                    {parties?.map((s) => (
                                         <option key={s.id} value={s.id}>{s.name}</option>
                                     ))}
                                 </select>
@@ -698,11 +698,11 @@ export default function Materials() {
                                 <label className="label">Supplier</label>
                                 <select
                                     className="input"
-                                    value={showEditTrim.supplierId || ''}
-                                    onChange={(e) => setShowEditTrim((t) => t ? ({ ...t, supplierId: e.target.value }) : null)}
+                                    value={showEditTrim.partyId || ''}
+                                    onChange={(e) => setShowEditTrim((t) => t ? ({ ...t, partyId: e.target.value }) : null)}
                                 >
                                     <option value="">Select supplier...</option>
-                                    {suppliers?.map((s) => (
+                                    {parties?.map((s) => (
                                         <option key={s.id} value={s.id}>{s.name}</option>
                                     ))}
                                 </select>
@@ -822,11 +822,11 @@ export default function Materials() {
                                 <label className="label">Vendor</label>
                                 <select
                                     className="input"
-                                    value={serviceForm.vendorId}
-                                    onChange={(e) => setServiceForm(f => ({ ...f, vendorId: e.target.value }))}
+                                    value={serviceForm.partyId}
+                                    onChange={(e) => setServiceForm(f => ({ ...f, partyId: e.target.value }))}
                                 >
                                     <option value="">Select vendor...</option>
-                                    {suppliers?.map((s) => (
+                                    {parties?.map((s) => (
                                         <option key={s.id} value={s.id}>{s.name}</option>
                                     ))}
                                 </select>
@@ -933,11 +933,11 @@ export default function Materials() {
                                 <label className="label">Vendor</label>
                                 <select
                                     className="input"
-                                    value={showEditService.vendorId || ''}
-                                    onChange={(e) => setShowEditService((s) => s ? ({ ...s, vendorId: e.target.value }) : null)}
+                                    value={showEditService.partyId || ''}
+                                    onChange={(e) => setShowEditService((s) => s ? ({ ...s, partyId: e.target.value }) : null)}
                                 >
                                     <option value="">Select vendor...</option>
-                                    {suppliers?.map((s) => (
+                                    {parties?.map((s) => (
                                         <option key={s.id} value={s.id}>{s.name}</option>
                                     ))}
                                 </select>
@@ -1020,11 +1020,11 @@ export default function Materials() {
                                 <label className="label">Supplier</label>
                                 <select
                                     className="input"
-                                    value={inwardForm.supplierId}
-                                    onChange={(e) => setInwardForm(f => ({ ...f, supplierId: e.target.value }))}
+                                    value={inwardForm.partyId}
+                                    onChange={(e) => setInwardForm(f => ({ ...f, partyId: e.target.value }))}
                                 >
                                     <option value="">Select supplier...</option>
-                                    {suppliers?.map((s) => (
+                                    {parties?.map((s) => (
                                         <option key={s.id} value={s.id}>{s.name}</option>
                                     ))}
                                 </select>

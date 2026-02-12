@@ -65,7 +65,7 @@ interface FabricFormData {
     costPerUnit: string;
     leadTimeDays: string;
     minOrderQty: string;
-    supplierId: string;
+    partyId: string;
     isActive: boolean;
 }
 
@@ -77,7 +77,7 @@ interface ColourFormData {
     costPerUnit: string;
     leadTimeDays: string;
     minOrderQty: string;
-    supplierId: string;
+    partyId: string;
     useInheritedCost: boolean;
     useInheritedLeadTime: boolean;
     useInheritedMinOrder: boolean;
@@ -142,7 +142,7 @@ export function UnifiedMaterialModal({
         enabled: isOpen && (type === 'fabric' || type === 'colour'),
     });
 
-    const suppliers = (filtersData?.success && 'filters' in filtersData ? filtersData.filters?.suppliers : []) || [];
+    const suppliers = (filtersData?.success && 'filters' in filtersData ? filtersData.filters?.parties : []) || [];
 
     // Form setup with defaults
     const {
@@ -253,7 +253,7 @@ export function UnifiedMaterialModal({
                     defaultLeadTimeDays: data.leadTimeDays ? parseInt(data.leadTimeDays) : undefined,
                     defaultMinOrderQty: data.minOrderQty ? parseFloat(data.minOrderQty) : undefined,
                     avgShrinkagePct: data.avgShrinkagePct ? parseFloat(data.avgShrinkagePct) : undefined,
-                    supplierId: data.supplierId || undefined,
+                    partyId: data.partyId || undefined,
                 }
             });
             if (!result.success) {
@@ -277,7 +277,7 @@ export function UnifiedMaterialModal({
                     costPerUnit: data.useInheritedCost ? undefined : (data.costPerUnit ? parseFloat(data.costPerUnit) : undefined),
                     leadTimeDays: data.useInheritedLeadTime ? undefined : (data.leadTimeDays ? parseInt(data.leadTimeDays) : undefined),
                     minOrderQty: data.useInheritedMinOrder ? undefined : (data.minOrderQty ? parseFloat(data.minOrderQty) : undefined),
-                    supplierId: data.supplierId || undefined,
+                    partyId: data.partyId || undefined,
                 }
             });
             if (!result.success) {
@@ -301,7 +301,7 @@ export function UnifiedMaterialModal({
                     costPerUnit: data.useInheritedCost ? undefined : (data.costPerUnit ? parseFloat(data.costPerUnit) : undefined),
                     leadTimeDays: data.useInheritedLeadTime ? undefined : (data.leadTimeDays ? parseInt(data.leadTimeDays) : undefined),
                     minOrderQty: data.useInheritedMinOrder ? undefined : (data.minOrderQty ? parseFloat(data.minOrderQty) : undefined),
-                    supplierId: data.supplierId || undefined,
+                    partyId: data.partyId || undefined,
                 }
             });
             if (!result.success) {
@@ -519,7 +519,7 @@ function getDefaultValues(
             costPerUnit: item?.costPerUnit?.toString() || '',
             leadTimeDays: item?.leadTimeDays?.toString() || '',
             minOrderQty: item?.minOrderQty?.toString() || '',
-            supplierId: item?.supplierId || '',
+            partyId: item?.partyId || '',
             isActive: item?.isActive ?? true,
         };
     }
@@ -537,7 +537,7 @@ function getDefaultValues(
         costPerUnit: item?.costPerUnit?.toString() || '',
         leadTimeDays: item?.leadTimeDays?.toString() || '',
         minOrderQty: item?.minOrderQty?.toString() || '',
-        supplierId: item?.supplierId || '',
+        partyId: item?.partyId || '',
         useInheritedCost: !hasOwnCost && parentNode?.costPerUnit != null,
         useInheritedLeadTime: !hasOwnLeadTime && parentNode?.leadTimeDays != null,
         useInheritedMinOrder: !hasOwnMinOrder && parentNode?.minOrderQty != null,
@@ -853,7 +853,7 @@ function FabricForm({
                                 Supplier
                             </label>
                             <Controller
-                                name="supplierId"
+                                name="partyId"
                                 control={control}
                                 render={({ field }) => (
                                     <select
@@ -1215,7 +1215,7 @@ function ColourForm({
                             Supplier
                         </label>
                         <Controller
-                            name="supplierId"
+                            name="partyId"
                             control={control}
                             render={({ field }) => (
                                 <select

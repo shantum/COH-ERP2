@@ -2,7 +2,7 @@
  * Fabric Receipt Schemas
  *
  * Zod schemas for fabric receipt entry page.
- * Used for recording inward fabric transactions from suppliers.
+ * Used for recording inward fabric transactions from parties.
  */
 
 import { z } from 'zod';
@@ -23,7 +23,7 @@ export const CreateFabricReceiptSchema = z.object({
         .positive('Cost must be positive')
         .optional()
         .nullable(),
-    supplierId: z.string().uuid().optional().nullable(),
+    partyId: z.string().uuid().optional().nullable(),
     notes: z.string().max(500, 'Notes cannot exceed 500 characters').optional().nullable(),
 });
 
@@ -44,7 +44,7 @@ export const UpdateFabricReceiptSchema = z.object({
         .positive('Cost must be positive')
         .optional()
         .nullable(),
-    supplierId: z.string().uuid().optional().nullable(),
+    partyId: z.string().uuid().optional().nullable(),
     notes: z.string().max(500, 'Notes cannot exceed 500 characters').optional().nullable(),
 });
 
@@ -58,7 +58,7 @@ export type UpdateFabricReceiptInput = z.infer<typeof UpdateFabricReceiptSchema>
  * URL search params for fabric receipt page
  */
 export const FabricReceiptSearchParams = z.object({
-    supplierId: z.string().uuid().optional().catch(undefined),
+    partyId: z.string().uuid().optional().catch(undefined),
     fabricColourId: z.string().uuid().optional().catch(undefined),
     days: z.coerce.number().default(7).catch(7),
 });
@@ -75,7 +75,7 @@ export type FabricReceiptSearchParamsType = z.infer<typeof FabricReceiptSearchPa
 export const GetRecentFabricReceiptsSchema = z.object({
     limit: z.number().int().positive().default(100),
     days: z.number().int().positive().default(7),
-    supplierId: z.string().uuid().optional().nullable(),
+    partyId: z.string().uuid().optional().nullable(),
     fabricColourId: z.string().uuid().optional().nullable(),
 });
 

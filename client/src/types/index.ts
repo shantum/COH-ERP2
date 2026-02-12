@@ -21,10 +21,10 @@ export type {
   // Fabrics
   FabricType,
   Fabric,
-  Supplier,
+  Party,
   CreateFabricData,
   CreateFabricTypeData,
-  CreateSupplierData,
+  CreatePartyData,
   CreateFabricTransactionData,
 
   // Customers

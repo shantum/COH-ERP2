@@ -39,12 +39,12 @@ export interface MatchedLine {
  * Match parsed invoice lines to existing fabric colours and transactions.
  *
  * @param lines - Parsed invoice lines from AI
- * @param supplierId - Supplier ID (if identified)
+ * @param partyId - Party ID (if identified)
  * @param prisma - Prisma client
  */
 export async function matchInvoiceLines(
     lines: ParsedLine[],
-    supplierId: string | null,
+    partyId: string | null,
     prisma: PrismaClient,
 ): Promise<MatchedLine[]> {
     if (lines.length === 0) return [];
@@ -57,7 +57,7 @@ export async function matchInvoiceLines(
                 select: {
                     name: true,
                     composition: true,
-                    supplierId: true,
+                    partyId: true,
                 },
             },
         },
@@ -80,7 +80,7 @@ export async function matchInvoiceLines(
         let bestMatch: { id: string; score: number } | null = null;
 
         for (const fc of fabricColours) {
-            const score = computeMatchScore(desc, fc, supplierId);
+            const score = computeMatchScore(desc, fc, partyId);
             if (score > (bestMatch?.score ?? 0) && score >= 0.3) {
                 bestMatch = { id: fc.id, score };
             }
@@ -90,7 +90,7 @@ export async function matchInvoiceLines(
             lineIndex: i,
             fabricColourId: bestMatch?.id ?? null,
             matchedTxnId: null,
-            matchType: bestMatch ? 'new_entry' : null,
+            matchType: bestMatch ? 'auto_matched' : null,
             fabricMatchScore: bestMatch?.score ?? 0,
         });
     }
@@ -107,16 +107,16 @@ export async function matchInvoiceLines(
 
 /**
  * Compute a match score (0-1) between a parsed description and a FabricColour.
- * Uses simple keyword overlap. Boosts score if supplier matches.
+ * Uses simple keyword overlap. Boosts score if party matches.
  */
 function computeMatchScore(
     desc: string,
     fc: {
         colourName: string;
         code: string | null;
-        fabric: { name: string; composition: string | null; supplierId: string | null };
+        fabric: { name: string; composition: string | null; partyId: string | null };
     },
-    supplierId: string | null,
+    partyId: string | null,
 ): number {
     const targets = [
         fc.colourName.toLowerCase(),
@@ -153,8 +153,8 @@ function computeMatchScore(
         score = Math.min(1, score + 0.15);
     }
 
-    // Boost if supplier matches
-    if (supplierId && fc.fabric.supplierId === supplierId) {
+    // Boost if party matches
+    if (partyId && fc.fabric.partyId === partyId) {
         score = Math.min(1, score + 0.1);
     }
 

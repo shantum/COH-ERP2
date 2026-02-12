@@ -16,8 +16,8 @@ import {
     updateColour as updateColourFn,
     updateTrim as updateTrimFn,
     updateService as updateServiceFn,
-    getSuppliers,
-    type Supplier,
+    getParties,
+    type Party,
 } from '../../server/functions/materialsMutations';
 
 // Types
@@ -44,7 +44,7 @@ interface MaterialEditItem {
     standardColour?: string;
     colourHex?: string;
     costPerUnit?: number | null;
-    supplierId?: string | null;
+    partyId?: string | null;
     leadTimeDays?: number | null;
     minOrderQty?: number | null;
     inheritedCostPerUnit?: number | null;
@@ -56,7 +56,6 @@ interface MaterialEditItem {
     unit?: string;
     costPerJob?: number | null;
     costUnit?: string;
-    vendorId?: string | null;
 }
 
 interface MaterialEditModalProps {
@@ -86,11 +85,11 @@ export function MaterialEditModal({ type, item, isOpen, onClose, onSuccess }: Ma
     const queryClient = useQueryClient();
 
     // Fetch suppliers
-    const { data: suppliers } = useQuery<Supplier[]>({
-        queryKey: ['suppliers'],
+    const { data: suppliers } = useQuery<Party[]>({
+        queryKey: ['parties'],
         queryFn: async () => {
-            const response = await getSuppliers();
-            return response.suppliers;
+            const response = await getParties();
+            return response.parties;
         },
         enabled: isOpen && (type === 'colour' || type === 'trim'),
     });
@@ -105,18 +104,18 @@ export function MaterialEditModal({ type, item, isOpen, onClose, onSuccess }: Ma
     });
     const [colourForm, setColourForm] = useState({
         colourName: '', code: '', standardColour: '', colourHex: '#6B8E9F',
-        costPerUnit: '' as string | number, supplierId: '',
+        costPerUnit: '' as string | number, partyId: '',
         leadTimeDays: '' as string | number, minOrderQty: '' as string | number
     });
     const [trimForm, setTrimForm] = useState({
         code: '', name: '', category: 'button', description: '',
         costPerUnit: '' as string | number, unit: 'piece',
-        supplierId: '', leadTimeDays: '' as string | number, minOrderQty: '' as string | number
+        partyId: '', leadTimeDays: '' as string | number, minOrderQty: '' as string | number
     });
     const [serviceForm, setServiceForm] = useState({
         code: '', name: '', category: 'printing', description: '',
         costPerJob: '' as string | number, costUnit: 'per_piece',
-        vendorId: '', leadTimeDays: '' as string | number
+        partyId: '', leadTimeDays: '' as string | number
     });
 
     // Initialize form data when item changes
@@ -151,7 +150,7 @@ export function MaterialEditModal({ type, item, isOpen, onClose, onSuccess }: Ma
                     standardColour: item.standardColour || '',
                     colourHex: item.colourHex || '#6B8E9F',
                     costPerUnit: item.costPerUnit ?? '',
-                    supplierId: item.supplierId || '',
+                    partyId: item.partyId || '',
                     leadTimeDays: item.leadTimeDays ?? '',
                     minOrderQty: item.minOrderQty ?? '',
                 });
@@ -164,7 +163,7 @@ export function MaterialEditModal({ type, item, isOpen, onClose, onSuccess }: Ma
                     description: item.description || '',
                     costPerUnit: item.costPerUnit ?? '',
                     unit: item.unit || 'piece',
-                    supplierId: item.supplierId || '',
+                    partyId: item.partyId || '',
                     leadTimeDays: item.leadTimeDays ?? '',
                     minOrderQty: item.minOrderQty ?? '',
                 });
@@ -177,7 +176,7 @@ export function MaterialEditModal({ type, item, isOpen, onClose, onSuccess }: Ma
                     description: item.description || '',
                     costPerJob: item.costPerJob ?? '',
                     costUnit: item.costUnit || 'per_piece',
-                    vendorId: item.vendorId || '',
+                    partyId: item.partyId || '',
                     leadTimeDays: item.leadTimeDays ?? '',
                 });
                 break;
@@ -308,7 +307,7 @@ export function MaterialEditModal({ type, item, isOpen, onClose, onSuccess }: Ma
                         standardColour: colourForm.standardColour || null,
                         colourHex: colourForm.colourHex,
                         costPerUnit: colourForm.costPerUnit === '' ? null : colourForm.costPerUnit,
-                        supplierId: colourForm.supplierId || null,
+                        partyId: colourForm.partyId || null,
                         leadTimeDays: colourForm.leadTimeDays === '' ? null : colourForm.leadTimeDays,
                         minOrderQty: colourForm.minOrderQty === '' ? null : colourForm.minOrderQty,
                     },
@@ -324,7 +323,7 @@ export function MaterialEditModal({ type, item, isOpen, onClose, onSuccess }: Ma
                         description: trimForm.description || null,
                         costPerUnit: trimForm.costPerUnit !== '' ? Number(trimForm.costPerUnit) : 0,
                         unit: trimForm.unit,
-                        supplierId: trimForm.supplierId || null,
+                        partyId: trimForm.partyId || null,
                         leadTimeDays: trimForm.leadTimeDays !== '' ? Number(trimForm.leadTimeDays) : null,
                         minOrderQty: trimForm.minOrderQty !== '' ? Number(trimForm.minOrderQty) : null,
                     },
@@ -340,7 +339,7 @@ export function MaterialEditModal({ type, item, isOpen, onClose, onSuccess }: Ma
                         description: serviceForm.description || null,
                         costPerJob: serviceForm.costPerJob !== '' ? Number(serviceForm.costPerJob) : 0,
                         costUnit: serviceForm.costUnit,
-                        vendorId: serviceForm.vendorId || null,
+                        partyId: serviceForm.partyId || null,
                         leadTimeDays: serviceForm.leadTimeDays !== '' ? Number(serviceForm.leadTimeDays) : null,
                     },
                 });
@@ -627,8 +626,8 @@ export function MaterialEditModal({ type, item, isOpen, onClose, onSuccess }: Ma
                                 <label className="label">Supplier (optional)</label>
                                 <select
                                     className="input"
-                                    value={colourForm.supplierId}
-                                    onChange={(e) => setColourForm(f => ({ ...f, supplierId: e.target.value }))}
+                                    value={colourForm.partyId}
+                                    onChange={(e) => setColourForm(f => ({ ...f, partyId: e.target.value }))}
                                 >
                                     <option value="">No supplier</option>
                                     {suppliers?.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
@@ -756,8 +755,8 @@ export function MaterialEditModal({ type, item, isOpen, onClose, onSuccess }: Ma
                                     <label className="label">Supplier (optional)</label>
                                     <select
                                         className="input"
-                                        value={trimForm.supplierId}
-                                        onChange={(e) => setTrimForm(f => ({ ...f, supplierId: e.target.value }))}
+                                        value={trimForm.partyId}
+                                        onChange={(e) => setTrimForm(f => ({ ...f, partyId: e.target.value }))}
                                     >
                                         <option value="">No supplier</option>
                                         {suppliers?.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}

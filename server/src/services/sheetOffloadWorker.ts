@@ -4169,26 +4169,26 @@ async function triggerFabricInward(): Promise<FabricInwardResult | null> {
             return result;
         }
 
-        // Find or create suppliers (case-insensitive)
+        // Find or create parties (case-insensitive)
         const supplierNames = [...new Set(newRows.map(r => r.supplier))];
         const supplierMap = new Map<string, string>(); // name (lowercase) → id
 
         for (const name of supplierNames) {
             const nameLower = name.toLowerCase();
-            const existing = await prisma.supplier.findFirst({
+            const existing = await prisma.party.findFirst({
                 where: { name: { equals: name, mode: 'insensitive' } },
                 select: { id: true },
             });
             if (existing) {
                 supplierMap.set(nameLower, existing.id);
             } else {
-                const created = await prisma.supplier.create({
-                    data: { name },
+                const created = await prisma.party.create({
+                    data: { name, category: 'fabric' },
                     select: { id: true },
                 });
                 supplierMap.set(nameLower, created.id);
                 result.suppliersCreated++;
-                sheetsLogger.info({ supplier: name }, 'Created new supplier');
+                sheetsLogger.info({ supplier: name }, 'Created new party');
             }
         }
 
@@ -4200,7 +4200,7 @@ async function triggerFabricInward(): Promise<FabricInwardResult | null> {
             try {
                 const fc = fabricByCode.get(row.fabricCode)!;
                 const unit = normalizeFabricUnit(fc.fabric?.unit ?? null);
-                const supplierId = supplierMap.get(row.supplier.toLowerCase())!;
+                const partyId = supplierMap.get(row.supplier.toLowerCase())!;
 
                 await prisma.fabricColourTransaction.create({
                     data: {
@@ -4210,7 +4210,7 @@ async function triggerFabricInward(): Promise<FabricInwardResult | null> {
                         unit,
                         reason: 'supplier_receipt',
                         costPerUnit: row.costPerUnit,
-                        supplierId,
+                        partyId,
                         referenceId: row.referenceId,
                         notes: row.notes || `${OFFLOAD_NOTES_PREFIX} ${tab}`,
                         createdById: adminUserId,

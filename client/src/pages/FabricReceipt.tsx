@@ -33,8 +33,8 @@ import {
     updateFabricColourTransaction,
     deleteFabricColourTransaction,
 } from '../server/functions/fabricColourMutations';
-import { getSuppliers } from '../server/functions/materialsMutations';
-import { createSupplier } from '../server/functions/fabricMutations';
+import { getParties } from '../server/functions/materialsMutations';
+import { createParty } from '../server/functions/fabricMutations';
 import type { FabricColour } from '../components/products/unified-edit/types';
 import { ColorSwatch } from '../components/products/unified-edit/shared/FabricSelector';
 import { useAuth } from '../hooks/useAuth';
@@ -51,7 +51,7 @@ interface FabricReceiptTransaction {
     qty: number;
     unit: string;
     costPerUnit: number | null;
-    supplierId: string | null;
+    partyId: string | null;
     notes: string | null;
     createdAt: string | Date;
     fabricColour: {
@@ -64,11 +64,11 @@ interface FabricReceiptTransaction {
             material: { id: string; name: string } | null;
         };
     };
-    supplier: { id: string; name: string } | null;
+    party: { id: string; name: string } | null;
     createdBy: { id: string; name: string } | null;
 }
 
-interface Supplier {
+interface Party {
     id: string;
     name: string;
     email: string | null;
@@ -126,7 +126,7 @@ export default function FabricReceipt() {
     // Server function hooks
     const getCatalogFiltersFn = useServerFn(getCatalogFilters);
     const getRecentFabricReceiptsFn = useServerFn(getRecentFabricReceipts);
-    const getSuppliersFn = useServerFn(getSuppliers);
+    const getPartiesFn = useServerFn(getParties);
 
     // Query: Catalog filters (fabric colours)
     const { data: catalogData } = useQuery({
@@ -134,21 +134,21 @@ export default function FabricReceipt() {
         queryFn: () => getCatalogFiltersFn({ data: undefined }),
     });
 
-    // Query: Suppliers
+    // Query: Parties
     const { data: suppliersData } = useQuery({
-        queryKey: ['suppliers'],
-        queryFn: () => getSuppliersFn({ data: undefined }),
+        queryKey: ['parties'],
+        queryFn: () => getPartiesFn({ data: undefined }),
     });
 
     // Query: Recent receipts
     const { data: receiptsData, isLoading: receiptsLoading } = useQuery({
-        queryKey: ['fabricReceipts', daysFilter, searchParams.supplierId, searchParams.fabricColourId],
+        queryKey: ['fabricReceipts', daysFilter, searchParams.partyId, searchParams.fabricColourId],
         queryFn: () =>
             getRecentFabricReceiptsFn({
                 data: {
                     days: daysFilter,
                     limit: 100,
-                    ...(searchParams.supplierId ? { supplierId: searchParams.supplierId } : {}),
+                    ...(searchParams.partyId ? { partyId: searchParams.partyId } : {}),
                     ...(searchParams.fabricColourId ? { fabricColourId: searchParams.fabricColourId } : {}),
                 },
             }),
@@ -156,7 +156,7 @@ export default function FabricReceipt() {
     });
 
     const fabricColours = catalogData?.fabricColours ?? [];
-    const suppliers = suppliersData?.suppliers ?? [];
+    const suppliers = suppliersData?.parties ?? [];
     const receipts = (receiptsData?.receipts ?? []) as FabricReceiptTransaction[];
 
     // Form setup
@@ -172,7 +172,7 @@ export default function FabricReceipt() {
             qty: undefined,
             unit: 'meter',
             costPerUnit: undefined,
-            supplierId: undefined,
+            partyId: undefined,
             notes: '',
         },
     });
@@ -670,7 +670,7 @@ function FabricColourField({ control, fabricColours, error }: FabricColourFieldP
 
 interface SupplierFieldProps {
     control: ReturnType<typeof useForm<CreateFabricReceiptInput>>['control'];
-    suppliers: Supplier[];
+    suppliers: Party[];
     queryClient: ReturnType<typeof useQueryClient>;
 }
 
@@ -681,10 +681,10 @@ function SupplierField({ control, suppliers, queryClient }: SupplierFieldProps) 
     const [newSupplierName, setNewSupplierName] = useState('');
 
     const createSupplierMutation = useMutation({
-        mutationFn: (name: string) => createSupplier({ data: { name } }),
+        mutationFn: (name: string) => createParty({ data: { name } }),
         onSuccess: (result: { success: boolean }) => {
             if (result.success) {
-                queryClient.invalidateQueries({ queryKey: ['suppliers'] });
+                queryClient.invalidateQueries({ queryKey: ['parties'] });
                 setIsCreating(false);
                 setNewSupplierName('');
             }
@@ -699,7 +699,7 @@ function SupplierField({ control, suppliers, queryClient }: SupplierFieldProps) 
 
     return (
         <Controller
-            name="supplierId"
+            name="partyId"
             control={control}
             render={({ field }) => {
                 const selected = suppliers.find((s) => s.id === field.value);
@@ -950,10 +950,10 @@ function ReceiptRow({
                     {/* Meta info */}
                     <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-500">
                         <span>{dateStr}</span>
-                        {receipt.supplier && (
+                        {receipt.party && (
                             <>
                                 <span>•</span>
-                                <span>{receipt.supplier.name}</span>
+                                <span>{receipt.party.name}</span>
                             </>
                         )}
                         {receipt.createdBy && (

@@ -127,7 +127,7 @@ export type Fabric = {
     standardColor: string | null;
     colorHex: string | null;
     costPerUnit: number | null;
-    supplierId: string | null;
+    partyId: string | null;
     leadTimeDays: number | null;
     minOrderQty: number | null;
     isActive: Generated<boolean>;
@@ -150,7 +150,7 @@ export type FabricColour = {
     standardColour: string | null;
     colourHex: string | null;
     costPerUnit: number | null;
-    supplierId: string | null;
+    partyId: string | null;
     leadTimeDays: number | null;
     minOrderQty: number | null;
     currentBalance: Generated<number>;
@@ -187,7 +187,7 @@ export type FabricColourTransaction = {
     unit: string;
     reason: string;
     costPerUnit: number | null;
-    supplierId: string | null;
+    partyId: string | null;
     referenceId: string | null;
     notes: string | null;
     createdById: string;
@@ -197,7 +197,7 @@ export type FabricInvoice = {
     id: Generated<string>;
     invoiceNumber: string | null;
     invoiceDate: Timestamp | null;
-    supplierId: string | null;
+    partyId: string | null;
     supplierName: string | null;
     subtotal: number | null;
     gstAmount: number | null;
@@ -232,7 +232,7 @@ export type FabricInvoiceLine = {
 export type FabricOrder = {
     id: Generated<string>;
     fabricId: string;
-    supplierId: string;
+    partyId: string;
     qtyOrdered: number;
     unit: string;
     costPerUnit: number;
@@ -372,8 +372,7 @@ export type Invoice = {
     status: Generated<string>;
     invoiceDate: Timestamp | null;
     dueDate: Timestamp | null;
-    supplierId: string | null;
-    vendorId: string | null;
+    partyId: string | null;
     customerId: string | null;
     counterpartyName: string | null;
     subtotal: number | null;
@@ -594,6 +593,29 @@ export type OrderPayment = {
     recordedAt: Generated<Timestamp>;
     createdAt: Generated<Timestamp>;
 };
+export type Party = {
+    id: Generated<string>;
+    name: string;
+    category: string;
+    contactName: string | null;
+    email: string | null;
+    phone: string | null;
+    address: string | null;
+    gstin: string | null;
+    pan: string | null;
+    stateCode: string | null;
+    tdsApplicable: Generated<boolean>;
+    tdsSection: string | null;
+    tdsRate: number | null;
+    bankAccountName: string | null;
+    bankAccountNumber: string | null;
+    bankIfsc: string | null;
+    bankName: string | null;
+    paymentTermsDays: number | null;
+    isActive: Generated<boolean>;
+    createdAt: Generated<Timestamp>;
+    updatedAt: Timestamp;
+};
 export type Payment = {
     id: Generated<string>;
     referenceNumber: string | null;
@@ -604,8 +626,7 @@ export type Payment = {
     matchedAmount: Generated<number>;
     unmatchedAmount: Generated<number>;
     paymentDate: Timestamp;
-    supplierId: string | null;
-    vendorId: string | null;
+    partyId: string | null;
     customerId: string | null;
     counterpartyName: string | null;
     fileData: Buffer | null;
@@ -859,7 +880,7 @@ export type ServiceItem = {
     description: string | null;
     costPerJob: number;
     costUnit: Generated<string>;
-    vendorId: string | null;
+    partyId: string | null;
     leadTimeDays: number | null;
     isActive: Generated<boolean>;
     createdAt: Generated<Timestamp>;
@@ -1016,16 +1037,6 @@ export type SkuCosting = {
     totalCogs: number;
     lastUpdated: Generated<Timestamp>;
 };
-export type Supplier = {
-    id: Generated<string>;
-    name: string;
-    contactName: string | null;
-    email: string | null;
-    phone: string | null;
-    address: string | null;
-    isActive: Generated<boolean>;
-    createdAt: Generated<Timestamp>;
-};
 export type SyncJob = {
     id: Generated<string>;
     jobType: string;
@@ -1078,7 +1089,7 @@ export type TrimItem = {
     description: string | null;
     costPerUnit: number;
     unit: Generated<string>;
-    supplierId: string | null;
+    partyId: string | null;
     minOrderQty: number | null;
     leadTimeDays: number | null;
     isActive: Generated<boolean>;
@@ -1144,17 +1155,6 @@ export type VariationBomLine = {
     quantity: number | null;
     wastagePercent: number | null;
     notes: string | null;
-    createdAt: Generated<Timestamp>;
-    updatedAt: Timestamp;
-};
-export type Vendor = {
-    id: Generated<string>;
-    name: string;
-    contactName: string | null;
-    email: string | null;
-    phone: string | null;
-    address: string | null;
-    isActive: Generated<boolean>;
     createdAt: Generated<Timestamp>;
     updatedAt: Timestamp;
 };
@@ -1234,6 +1234,7 @@ export type DB = {
     Order: Order;
     OrderLine: OrderLine;
     OrderPayment: OrderPayment;
+    Party: Party;
     Payment: Payment;
     PaymentInvoice: PaymentInvoice;
     Pincode: Pincode;
@@ -1256,7 +1257,6 @@ export type DB = {
     Sku: Sku;
     SkuBomLine: SkuBomLine;
     SkuCosting: SkuCosting;
-    Supplier: Supplier;
     SyncJob: SyncJob;
     SystemSetting: SystemSetting;
     Tailor: Tailor;
@@ -1267,7 +1267,6 @@ export type DB = {
     UserPermissionOverride: UserPermissionOverride;
     Variation: Variation;
     VariationBomLine: VariationBomLine;
-    Vendor: Vendor;
     WebhookLog: WebhookLog;
     WorkerRun: WorkerRun;
     WriteOffLog: WriteOffLog;

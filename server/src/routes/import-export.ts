@@ -310,7 +310,7 @@ router.get('/export/fabrics', authenticateToken, async (req: Request, res: Respo
                         material: true,
                     },
                 },
-                supplier: true,
+                party: true,
             },
             orderBy: { colourName: 'asc' },
         });
@@ -323,7 +323,7 @@ router.get('/export/fabrics', authenticateToken, async (req: Request, res: Respo
             standardColour: fc.standardColour || '',
             colourHex: fc.colourHex || '',
             costPerUnit: fc.costPerUnit ?? fc.fabric?.costPerUnit ?? 0,
-            supplierName: fc.supplier?.name || '',
+            supplierName: fc.party?.name || '',
             leadTimeDays: fc.leadTimeDays ?? fc.fabric?.defaultLeadTimeDays ?? 14,
             minOrderQty: fc.minOrderQty ?? fc.fabric?.defaultMinOrderQty ?? 10,
             isActive: fc.isActive ? 'true' : 'false',
@@ -424,20 +424,20 @@ router.post('/import/fabrics', authenticateToken, upload.single('file'), async (
                     results.created.fabrics++;
                 }
 
-                // Find or create supplier
-                let supplierId: string | null = null;
+                // Find or create party (fabric supplier)
+                let partyId: string | null = null;
                 if (row.supplierName) {
-                    let supplier = await req.prisma.supplier.findFirst({
+                    let party = await req.prisma.party.findFirst({
                         where: { name: row.supplierName },
                     });
 
-                    if (!supplier) {
-                        supplier = await req.prisma.supplier.create({
-                            data: { name: row.supplierName },
+                    if (!party) {
+                        party = await req.prisma.party.create({
+                            data: { name: row.supplierName, category: 'fabric' },
                         });
                         results.created.suppliers++;
                     }
-                    supplierId = supplier.id;
+                    partyId = party.id;
                 }
 
                 // Find or create fabric colour
@@ -455,7 +455,7 @@ router.post('/import/fabrics', authenticateToken, upload.single('file'), async (
                             standardColour: row.standardColour || row.standardColor || fabricColour.standardColour,
                             colourHex: row.colourHex || row.colorHex || fabricColour.colourHex,
                             costPerUnit: parseFloat(row.costPerUnit || '0') || fabricColour.costPerUnit,
-                            supplierId: supplierId || fabricColour.supplierId,
+                            partyId: partyId || fabricColour.partyId,
                             leadTimeDays: parseInt(row.leadTimeDays || '0') || fabricColour.leadTimeDays,
                             minOrderQty: parseFloat(row.minOrderQty || '0') || fabricColour.minOrderQty,
                             isActive: row.isActive === 'false' ? false : true,
@@ -470,7 +470,7 @@ router.post('/import/fabrics', authenticateToken, upload.single('file'), async (
                             standardColour: row.standardColour || row.standardColor || null,
                             colourHex: row.colourHex || row.colorHex || null,
                             costPerUnit: parseFloat(row.costPerUnit || '0') || null,
-                            supplierId,
+                            partyId,
                             leadTimeDays: parseInt(row.leadTimeDays || '14') || null,
                             minOrderQty: parseFloat(row.minOrderQty || '10') || null,
                             isActive: row.isActive === 'false' ? false : true,

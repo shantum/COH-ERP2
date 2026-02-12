@@ -27,8 +27,8 @@ import { getPrisma } from '@coh/shared/services/db';
 // RESPONSE TYPES
 // ============================================
 
-/** Supplier record for getFabricSuppliers response */
-interface SupplierRecord {
+/** Party record for getParties response */
+interface PartyRecord {
     id: string;
     name: string;
     isActive: boolean;
@@ -39,10 +39,10 @@ interface SupplierRecord {
     createdAt: Date;
 }
 
-/** Response type for getFabricSuppliers */
-interface GetFabricSuppliersResponse {
+/** Response type for getParties */
+interface GetPartiesResponse {
     success: true;
-    suppliers: SupplierRecord[];
+    parties: PartyRecord[];
 }
 
 /** Response type for getFabricsFilters */
@@ -50,7 +50,7 @@ interface GetFabricsFiltersResponse {
     success: true;
     filters: {
         fabricTypes: Array<{ id: string; name: string }>;
-        suppliers: Array<{ id: string; name: string }>;
+        parties: Array<{ id: string; name: string }>;
     };
 }
 
@@ -58,7 +58,7 @@ interface GetFabricsFiltersResponse {
 // INPUT SCHEMAS
 // ============================================
 
-const getFabricSuppliersInputSchema = z.object({
+const getPartiesInputSchema = z.object({
     activeOnly: z.boolean().optional().default(true),
 }).optional();
 
@@ -67,7 +67,7 @@ const getFabricSuppliersInputSchema = z.object({
 // ============================================
 
 /**
- * Get fabric filters (suppliers only)
+ * Get fabric filters (parties only)
  *
  * NOTE: fabricTypes removed in fabric consolidation.
  * Returns empty fabricTypes array for backward compatibility.
@@ -76,8 +76,8 @@ export const getFabricsFilters = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .handler(async (): Promise<GetFabricsFiltersResponse> => {
         const prisma = await getPrisma();
-        const suppliers = await prisma.supplier.findMany({
-            where: { isActive: true },
+        const parties = await prisma.party.findMany({
+            where: { isActive: true, category: { in: ['fabric', 'trims'] } },
             select: { id: true, name: true },
             orderBy: { name: 'asc' },
         });
@@ -86,27 +86,27 @@ export const getFabricsFilters = createServerFn({ method: 'GET' })
             success: true,
             filters: {
                 fabricTypes: [], // REMOVED in fabric consolidation
-                suppliers,
+                parties,
             },
         };
     });
 
 /**
- * Get all suppliers
+ * Get all parties
  */
-export const getFabricSuppliers = createServerFn({ method: 'GET' })
+export const getParties = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
-    .inputValidator((input: unknown) => getFabricSuppliersInputSchema.parse(input))
-    .handler(async ({ data }): Promise<GetFabricSuppliersResponse> => {
+    .inputValidator((input: unknown) => getPartiesInputSchema.parse(input))
+    .handler(async ({ data }): Promise<GetPartiesResponse> => {
         const prisma = await getPrisma();
-        const suppliers = await prisma.supplier.findMany({
+        const parties = await prisma.party.findMany({
             where: data?.activeOnly ? { isActive: true } : {},
             orderBy: { name: 'asc' },
         });
 
         return {
             success: true,
-            suppliers,
+            parties,
         };
     });
 

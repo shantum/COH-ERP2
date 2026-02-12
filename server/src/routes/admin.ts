@@ -307,7 +307,7 @@ router.post('/clear', requireAdmin, asyncHandler(async (req: Request, res: Respo
             // Other
             { name: 'costConfigs', model: prisma.costConfig },
             { name: 'tailors', model: prisma.tailor },
-            { name: 'suppliers', model: prisma.supplier },
+            { name: 'parties', model: prisma.party },
         ];
 
         for (const { name, model } of deleteOperations) {

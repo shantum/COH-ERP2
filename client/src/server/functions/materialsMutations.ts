@@ -18,7 +18,7 @@ import type {
     FabricColour,
     TrimItem,
     ServiceItem,
-    Supplier as PrismaSupplier,
+    Party as PrismaParty,
 } from '@prisma/client';
 
 // ============================================
@@ -42,12 +42,12 @@ function isPrismaError(error: unknown): error is { code: string; message: string
 
 // Material return types
 type FabricWithMaterial = Fabric & { material: Material };
-type ColourWithFabricAndSupplier = FabricColour & {
+type ColourWithFabricAndParty = FabricColour & {
     fabric: Fabric & { material: Material };
-    supplier: PrismaSupplier | null;
+    party: PrismaParty | null;
 };
-type TrimWithSupplier = TrimItem & { supplier: PrismaSupplier | null };
-type ServiceWithVendor = ServiceItem & { vendor: PrismaSupplier | null };
+type TrimWithParty = TrimItem & { party: PrismaParty | null };
+type ServiceWithParty = ServiceItem & { party: PrismaParty | null };
 
 interface CreateMaterialResult {
     success: true;
@@ -81,12 +81,12 @@ interface DeleteFabricResult {
 
 interface CreateColourResult {
     success: true;
-    colour: ColourWithFabricAndSupplier;
+    colour: ColourWithFabricAndParty;
 }
 
 interface UpdateColourResult {
     success: true;
-    colour: ColourWithFabricAndSupplier;
+    colour: ColourWithFabricAndParty;
 }
 
 interface DeleteColourResult {
@@ -96,12 +96,12 @@ interface DeleteColourResult {
 
 interface CreateTrimResult {
     success: true;
-    trim: TrimWithSupplier;
+    trim: TrimWithParty;
 }
 
 interface UpdateTrimResult {
     success: true;
-    trim: TrimWithSupplier;
+    trim: TrimWithParty;
 }
 
 interface DeleteTrimResult {
@@ -111,12 +111,12 @@ interface DeleteTrimResult {
 
 interface CreateServiceResult {
     success: true;
-    service: ServiceWithVendor;
+    service: ServiceWithParty;
 }
 
 interface UpdateServiceResult {
     success: true;
-    service: ServiceWithVendor;
+    service: ServiceWithParty;
 }
 
 interface DeleteServiceResult {
@@ -189,7 +189,7 @@ const createColourSchema = z.object({
     standardColour: z.string().optional().nullable(),
     colourHex: z.string().optional().nullable(),
     costPerUnit: z.number().nonnegative().optional().nullable(),
-    supplierId: z.string().uuid().optional().nullable(),
+    partyId: z.string().uuid().optional().nullable(),
     leadTimeDays: z.number().int().positive().optional().nullable(),
     minOrderQty: z.number().positive().optional().nullable(),
 });
@@ -201,7 +201,7 @@ const updateColourSchema = z.object({
     standardColour: z.string().optional().nullable(),
     colourHex: z.string().optional().nullable(),
     costPerUnit: z.number().nonnegative().optional().nullable(),
-    supplierId: z.string().uuid().optional().nullable(),
+    partyId: z.string().uuid().optional().nullable(),
     leadTimeDays: z.number().int().positive().optional().nullable(),
     minOrderQty: z.number().positive().optional().nullable(),
     isActive: z.boolean().optional(),
@@ -500,7 +500,7 @@ export const createColour = createServerFn({ method: 'POST' })
                     standardColour: data.standardColour || null,
                     colourHex: data.colourHex || null,
                     costPerUnit: data.costPerUnit || null,
-                    supplierId: data.supplierId || null,
+                    partyId: data.partyId || null,
                     leadTimeDays: data.leadTimeDays || null,
                     minOrderQty: data.minOrderQty || null,
                 },
@@ -510,13 +510,13 @@ export const createColour = createServerFn({ method: 'POST' })
                             material: true,
                         },
                     },
-                    supplier: true,
+                    party: true,
                 },
             });
 
             return {
                 success: true,
-                colour: colour as ColourWithFabricAndSupplier,
+                colour: colour as ColourWithFabricAndParty,
             };
         } catch (error: unknown) {
             if (isPrismaError(error) && error.code === 'P2002') {
@@ -543,7 +543,7 @@ export const updateColour = createServerFn({ method: 'POST' })
                     ...(data.standardColour !== undefined && { standardColour: data.standardColour }),
                     ...(data.colourHex !== undefined && { colourHex: data.colourHex }),
                     ...(data.costPerUnit !== undefined && { costPerUnit: data.costPerUnit }),
-                    ...(data.supplierId !== undefined && { supplierId: data.supplierId }),
+                    ...(data.partyId !== undefined && { partyId: data.partyId }),
                     ...(data.leadTimeDays !== undefined && { leadTimeDays: data.leadTimeDays }),
                     ...(data.minOrderQty !== undefined && { minOrderQty: data.minOrderQty }),
                     ...(data.isActive !== undefined && { isActive: data.isActive }),
@@ -555,13 +555,13 @@ export const updateColour = createServerFn({ method: 'POST' })
                             material: true,
                         },
                     },
-                    supplier: true,
+                    party: true,
                 },
             });
 
             return {
                 success: true,
-                colour: colour as ColourWithFabricAndSupplier,
+                colour: colour as ColourWithFabricAndParty,
             };
         } catch (error: unknown) {
             if (isPrismaError(error)) {
@@ -618,7 +618,7 @@ const createTrimSchema = z.object({
     description: z.string().optional().nullable(),
     costPerUnit: z.number().nonnegative().default(0),
     unit: z.string().default('piece'),
-    supplierId: z.string().uuid().optional().nullable(),
+    partyId: z.string().uuid().optional().nullable(),
     leadTimeDays: z.number().int().positive().optional().nullable(),
     minOrderQty: z.number().positive().optional().nullable(),
 });
@@ -631,7 +631,7 @@ const updateTrimSchema = z.object({
     description: z.string().optional().nullable(),
     costPerUnit: z.number().nonnegative().optional().nullable(),
     unit: z.string().optional(),
-    supplierId: z.string().uuid().optional().nullable(),
+    partyId: z.string().uuid().optional().nullable(),
     leadTimeDays: z.number().int().positive().optional().nullable(),
     minOrderQty: z.number().positive().optional().nullable(),
     isActive: z.boolean().optional(),
@@ -658,12 +658,12 @@ export const createTrim = createServerFn({ method: 'POST' })
                     description: data.description || null,
                     costPerUnit: data.costPerUnit,
                     unit: data.unit,
-                    supplierId: data.supplierId || null,
+                    partyId: data.partyId || null,
                     leadTimeDays: data.leadTimeDays || null,
                     minOrderQty: data.minOrderQty || null,
                 },
                 include: {
-                    supplier: true,
+                    party: true,
                 },
             });
 
@@ -696,7 +696,7 @@ export const updateTrim = createServerFn({ method: 'POST' })
             if (data.description !== undefined) updateData.description = data.description;
             if (data.costPerUnit !== undefined) updateData.costPerUnit = data.costPerUnit;
             if (data.unit !== undefined) updateData.unit = data.unit;
-            if (data.supplierId !== undefined) updateData.supplierId = data.supplierId;
+            if (data.partyId !== undefined) updateData.partyId = data.partyId;
             if (data.leadTimeDays !== undefined) updateData.leadTimeDays = data.leadTimeDays;
             if (data.minOrderQty !== undefined) updateData.minOrderQty = data.minOrderQty;
             if (data.isActive !== undefined) updateData.isActive = data.isActive;
@@ -705,7 +705,7 @@ export const updateTrim = createServerFn({ method: 'POST' })
                 where: { id: data.id },
                 data: updateData,
                 include: {
-                    supplier: true,
+                    party: true,
                 },
             });
 
@@ -767,7 +767,7 @@ const createServiceSchema = z.object({
     description: z.string().optional().nullable(),
     costPerJob: z.number().nonnegative().default(0),
     costUnit: z.string().default('per_piece'),
-    vendorId: z.string().uuid().optional().nullable(),
+    partyId: z.string().uuid().optional().nullable(),
     leadTimeDays: z.number().int().positive().optional().nullable(),
 });
 
@@ -779,7 +779,7 @@ const updateServiceSchema = z.object({
     description: z.string().optional().nullable(),
     costPerJob: z.number().nonnegative().optional().nullable(),
     costUnit: z.string().optional(),
-    vendorId: z.string().uuid().optional().nullable(),
+    partyId: z.string().uuid().optional().nullable(),
     leadTimeDays: z.number().int().positive().optional().nullable(),
     isActive: z.boolean().optional(),
 });
@@ -805,11 +805,11 @@ export const createService = createServerFn({ method: 'POST' })
                     description: data.description || null,
                     costPerJob: data.costPerJob,
                     costUnit: data.costUnit,
-                    vendorId: data.vendorId || null,
+                    partyId: data.partyId || null,
                     leadTimeDays: data.leadTimeDays || null,
                 },
                 include: {
-                    vendor: true,
+                    party: true,
                 },
             });
 
@@ -842,7 +842,7 @@ export const updateService = createServerFn({ method: 'POST' })
             if (data.description !== undefined) updateData.description = data.description;
             if (data.costPerJob !== undefined) updateData.costPerJob = data.costPerJob;
             if (data.costUnit !== undefined) updateData.costUnit = data.costUnit;
-            if (data.vendorId !== undefined) updateData.vendorId = data.vendorId;
+            if (data.partyId !== undefined) updateData.partyId = data.partyId;
             if (data.leadTimeDays !== undefined) updateData.leadTimeDays = data.leadTimeDays;
             if (data.isActive !== undefined) updateData.isActive = data.isActive;
 
@@ -850,7 +850,7 @@ export const updateService = createServerFn({ method: 'POST' })
                 where: { id: data.id },
                 data: updateData,
                 include: {
-                    vendor: true,
+                    party: true,
                 },
             });
 
@@ -911,7 +911,7 @@ const createColourTransactionSchema = z.object({
     reason: z.string().min(1, 'Reason is required'),
     notes: z.string().optional().nullable(),
     costPerUnit: z.number().nonnegative().optional().nullable(),
-    supplierId: z.string().uuid().optional().nullable(),
+    partyId: z.string().uuid().optional().nullable(),
 });
 
 /**
@@ -931,35 +931,37 @@ export const createColourTransaction = createServerFn({ method: 'POST' })
     });
 
 // ============================================
-// SUPPLIERS SERVER FUNCTION
+// PARTIES SERVER FUNCTION
 // ============================================
 
-export interface Supplier {
+export interface Party {
     id: string;
     name: string;
+    category: string;
     email: string | null;
     phone: string | null;
     isActive: boolean;
 }
 
-interface GetSuppliersResult {
+interface GetPartiesResult {
     success: true;
-    suppliers: Supplier[];
+    parties: Party[];
 }
 
 /**
- * Get all suppliers
- * Returns a list of all active suppliers for dropdowns
+ * Get all parties
+ * Returns a list of all active parties for dropdowns
  */
-export const getSuppliers = createServerFn({ method: 'GET' })
+export const getParties = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
-    .handler(async (): Promise<GetSuppliersResult> => {
+    .handler(async (): Promise<GetPartiesResult> => {
         const prisma = await getPrisma();
-        const suppliers = await prisma.supplier.findMany({
+        const parties = await prisma.party.findMany({
             where: { isActive: true },
             select: {
                 id: true,
                 name: true,
+                category: true,
                 email: true,
                 phone: true,
                 isActive: true,
@@ -969,6 +971,6 @@ export const getSuppliers = createServerFn({ method: 'GET' })
 
         return {
             success: true,
-            suppliers,
+            parties,
         };
     });

@@ -31,20 +31,20 @@ async function main() {
     });
     console.log('✅ Created fabric types');
 
-    // Create supplier
-    const supplier = await prisma.supplier.create({
-        data: { name: 'Premium Fabrics Co', contactName: 'Rahul Sharma', email: 'rahul@premiumfabrics.com', phone: '+91-9876543210' },
+    // Create party
+    const party = await prisma.party.create({
+        data: { name: 'Premium Fabrics Co', category: 'fabric', contactName: 'Rahul Sharma', email: 'rahul@premiumfabrics.com', phone: '+91-9876543210' },
     });
 
     // Create fabrics
     const blueLinenFabric = await prisma.fabric.create({
-        data: { fabricTypeId: linenType.id, name: 'Linen Wildflower Blue 60 Lea', colorName: 'Wildflower Blue', colorHex: '#6B8E9F', costPerUnit: 450, supplierId: supplier.id, leadTimeDays: 14, minOrderQty: 20 },
+        data: { fabricTypeId: linenType.id, name: 'Linen Wildflower Blue 60 Lea', colorName: 'Wildflower Blue', colorHex: '#6B8E9F', costPerUnit: 450, partyId: party.id, leadTimeDays: 14, minOrderQty: 20 },
     });
     const beigeLinenFabric = await prisma.fabric.create({
-        data: { fabricTypeId: linenType.id, name: 'Linen Natural Beige 60 Lea', colorName: 'Natural Beige', colorHex: '#D4C4B0', costPerUnit: 420, supplierId: supplier.id, leadTimeDays: 14, minOrderQty: 20 },
+        data: { fabricTypeId: linenType.id, name: 'Linen Natural Beige 60 Lea', colorName: 'Natural Beige', colorHex: '#D4C4B0', costPerUnit: 420, partyId: party.id, leadTimeDays: 14, minOrderQty: 20 },
     });
     const whiteCottonFabric = await prisma.fabric.create({
-        data: { fabricTypeId: cottonType.id, name: 'Organic Cotton White', colorName: 'Pure White', colorHex: '#FFFFFF', costPerUnit: 350, supplierId: supplier.id, leadTimeDays: 10, minOrderQty: 25 },
+        data: { fabricTypeId: cottonType.id, name: 'Organic Cotton White', colorName: 'Pure White', colorHex: '#FFFFFF', costPerUnit: 350, partyId: party.id, leadTimeDays: 10, minOrderQty: 25 },
     });
     console.log('✅ Created fabrics');
 

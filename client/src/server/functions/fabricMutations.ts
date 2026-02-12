@@ -16,7 +16,7 @@ import { authMiddleware } from '../middleware/auth';
 import { getPrisma } from '@coh/shared/services/db';
 import type {
     Fabric,
-    Supplier,
+    Party,
 } from '@prisma/client';
 
 // ============================================
@@ -33,7 +33,7 @@ type DeprecatedResult = {
 };
 
 type FabricWithRelations = Fabric & {
-    supplier: Supplier | null;
+    party: Party | null;
 };
 
 type FabricSuccessResult = {
@@ -51,12 +51,12 @@ type FabricErrorResult = {
 
 // FabricDeleteResult and TransactionResult types removed - no longer used after fabric consolidation
 
-type SupplierSuccessResult = {
+type PartySuccessResult = {
     success: true;
-    supplier: Supplier;
+    party: Party;
 };
 
-type SupplierErrorResult = {
+type PartyErrorResult = {
     success: false;
     error: {
         code: 'NOT_FOUND' | 'CONFLICT';
@@ -102,7 +102,7 @@ const createFabricSchema = z.object({
     costPerUnit: z.number().optional().nullable(),
     leadTimeDays: z.number().int().optional().nullable(),
     minOrderQty: z.number().optional().nullable(),
-    supplierId: z.string().uuid().optional().nullable(),
+    partyId: z.string().uuid().optional().nullable(),
 });
 
 const updateFabricSchema = z.object({
@@ -116,7 +116,7 @@ const updateFabricSchema = z.object({
     costPerUnit: z.number().optional().nullable(),
     leadTimeDays: z.number().int().optional().nullable(),
     minOrderQty: z.number().optional().nullable(),
-    supplierId: z.string().uuid().optional().nullable(),
+    partyId: z.string().uuid().optional().nullable(),
     isActive: z.boolean().optional(),
 });
 
@@ -132,7 +132,7 @@ const createFabricTransactionSchema = z.object({
     unit: z.string().min(1),
     reason: z.string().min(1),
     costPerUnit: z.number().optional().nullable(),
-    supplierId: z.string().uuid().optional().nullable(),
+    partyId: z.string().uuid().optional().nullable(),
     referenceId: z.string().optional().nullable(),
     notes: z.string().optional().nullable(),
 });
@@ -141,9 +141,10 @@ const deleteFabricTransactionSchema = z.object({
     id: z.string().uuid(),
 });
 
-// Supplier schema
-const createSupplierSchema = z.object({
+// Party schema
+const createPartySchema = z.object({
     name: z.string().min(1),
+    category: z.string().min(1),
     contactName: z.string().optional().nullable(),
     email: z.string().email().optional().nullable(),
     phone: z.string().optional().nullable(),
@@ -229,10 +230,10 @@ export const createFabric = createServerFn({ method: 'POST' })
                 costPerUnit: data.costPerUnit ?? null,
                 leadTimeDays: data.leadTimeDays ?? null,
                 minOrderQty: data.minOrderQty ?? null,
-                supplierId: data.supplierId ?? null,
+                partyId: data.partyId ?? null,
             },
             include: {
-                supplier: true,
+                party: true,
             },
         });
 
@@ -271,7 +272,7 @@ export const updateFabric = createServerFn({ method: 'POST' })
             where: { id },
             data: updateData,
             include: {
-                supplier: true,
+                party: true,
             },
         });
 
@@ -357,20 +358,20 @@ export const deleteFabricTransaction = createServerFn({ method: 'POST' })
     });
 
 // ============================================
-// SUPPLIER MUTATIONS
+// PARTY MUTATIONS
 // ============================================
 
 /**
- * Create a new supplier
+ * Create a new party
  */
-export const createSupplier = createServerFn({ method: 'POST' })
+export const createParty = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
-    .inputValidator((input: unknown) => createSupplierSchema.parse(input))
-    .handler(async ({ data }): Promise<SupplierSuccessResult | SupplierErrorResult> => {
+    .inputValidator((input: unknown) => createPartySchema.parse(input))
+    .handler(async ({ data }): Promise<PartySuccessResult | PartyErrorResult> => {
         const prisma = await getPrisma();
 
         // Check for duplicate name
-        const existing = await prisma.supplier.findFirst({
+        const existing = await prisma.party.findFirst({
             where: { name: data.name },
         });
 
@@ -379,14 +380,15 @@ export const createSupplier = createServerFn({ method: 'POST' })
                 success: false,
                 error: {
                     code: 'CONFLICT',
-                    message: 'A supplier with this name already exists',
+                    message: 'A party with this name already exists',
                 },
             };
         }
 
-        const supplier = await prisma.supplier.create({
+        const party = await prisma.party.create({
             data: {
                 name: data.name,
+                category: data.category,
                 contactName: data.contactName ?? null,
                 email: data.email ?? null,
                 phone: data.phone ?? null,
@@ -396,6 +398,6 @@ export const createSupplier = createServerFn({ method: 'POST' })
 
         return {
             success: true,
-            supplier,
+            party,
         };
     });

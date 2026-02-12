@@ -61,27 +61,27 @@ router.post('/upload', requireAdmin, upload.single('file'), asyncHandler(async (
     // Step 1: AI parse
     const { parsed, rawResponse, model } = await parseInvoice(buffer, mimetype);
 
-    // Step 2: Try to match supplier
-    let supplierId: string | null = null;
+    // Step 2: Try to match party (supplier)
+    let partyId: string | null = null;
     if (parsed.supplierName) {
-        const supplier = await req.prisma.supplier.findFirst({
+        const party = await req.prisma.party.findFirst({
             where: {
                 name: { contains: parsed.supplierName, mode: 'insensitive' },
                 isActive: true,
             },
         });
-        if (supplier) supplierId = supplier.id;
+        if (party) partyId = party.id;
     }
 
     // Step 3: Try to match lines to fabric colours + existing transactions
-    const matches = await matchInvoiceLines(parsed.lines, supplierId, req.prisma);
+    const matches = await matchInvoiceLines(parsed.lines, partyId, req.prisma);
 
     // Step 4: Save draft invoice
     const invoice = await req.prisma.fabricInvoice.create({
         data: {
             invoiceNumber: parsed.invoiceNumber ?? null,
             invoiceDate: parseIndianDate(parsed.invoiceDate),
-            supplierId,
+            partyId,
             supplierName: parsed.supplierName ?? null,
             subtotal: parsed.subtotal ?? null,
             gstAmount: parsed.gstAmount ?? null,
@@ -125,7 +125,7 @@ router.post('/upload', requireAdmin, upload.single('file'), asyncHandler(async (
                     },
                 },
             },
-            supplier: { select: { id: true, name: true } },
+            party: { select: { id: true, name: true } },
         },
     });
 
@@ -140,7 +140,7 @@ router.post('/upload', requireAdmin, upload.single('file'), asyncHandler(async (
 
 const ListQuerySchema = z.object({
     status: z.enum(['draft', 'confirmed', 'cancelled']).optional(),
-    supplierId: z.string().uuid().optional(),
+    partyId: z.string().uuid().optional(),
     page: z.coerce.number().int().positive().default(1),
     limit: z.coerce.number().int().positive().max(100).default(20),
 });
@@ -152,12 +152,12 @@ router.get('/', requireAdmin, asyncHandler(async (req: Request, res: Response) =
         return;
     }
 
-    const { status, supplierId, page, limit } = query.data;
+    const { status, partyId, page, limit } = query.data;
     const skip = (page - 1) * limit;
 
     const where = {
         ...(status ? { status } : {}),
-        ...(supplierId ? { supplierId } : {}),
+        ...(partyId ? { partyId } : {}),
     };
 
     const [invoices, total] = await Promise.all([
@@ -174,7 +174,7 @@ router.get('/', requireAdmin, asyncHandler(async (req: Request, res: Response) =
                 fileSizeBytes: true,
                 aiConfidence: true,
                 createdAt: true,
-                supplier: { select: { id: true, name: true } },
+                party: { select: { id: true, name: true } },
                 _count: { select: { lines: true } },
             },
             orderBy: { createdAt: 'desc' },
@@ -210,7 +210,7 @@ router.get('/:id', requireAdmin, asyncHandler(async (req: Request, res: Response
                     },
                 },
             },
-            supplier: { select: { id: true, name: true } },
+            party: { select: { id: true, name: true } },
             createdBy: { select: { id: true, name: true } },
         },
     });
@@ -270,7 +270,7 @@ const UpdateLinesBodySchema = z.object({
     // Also allow updating invoice-level fields
     invoiceNumber: z.string().nullable().optional(),
     invoiceDate: z.string().nullable().optional(),
-    supplierId: z.string().uuid().nullable().optional(),
+    partyId: z.string().uuid().nullable().optional(),
     subtotal: z.number().nullable().optional(),
     gstAmount: z.number().nullable().optional(),
     totalAmount: z.number().nullable().optional(),
@@ -298,7 +298,7 @@ router.put('/:id/lines', requireAdmin, asyncHandler(async (req: Request, res: Re
         return;
     }
 
-    const { lines, invoiceNumber, invoiceDate, supplierId, subtotal, gstAmount: gstAmt, totalAmount } = body.data;
+    const { lines, invoiceNumber, invoiceDate, partyId, subtotal, gstAmount: gstAmt, totalAmount } = body.data;
 
     // Update invoice-level fields if provided
     await req.prisma.fabricInvoice.update({
@@ -306,7 +306,7 @@ router.put('/:id/lines', requireAdmin, asyncHandler(async (req: Request, res: Re
         data: {
             ...(invoiceNumber !== undefined ? { invoiceNumber } : {}),
             ...(invoiceDate !== undefined ? { invoiceDate: parseIndianDate(invoiceDate) } : {}),
-            ...(supplierId !== undefined ? { supplierId } : {}),
+            ...(partyId !== undefined ? { partyId } : {}),
             ...(subtotal !== undefined ? { subtotal } : {}),
             ...(gstAmt !== undefined ? { gstAmount: gstAmt } : {}),
             ...(totalAmount !== undefined ? { totalAmount } : {}),
@@ -348,7 +348,7 @@ router.put('/:id/lines', requireAdmin, asyncHandler(async (req: Request, res: Re
                     },
                 },
             },
-            supplier: { select: { id: true, name: true } },
+            party: { select: { id: true, name: true } },
         },
     });
 
@@ -393,7 +393,7 @@ router.post('/:id/confirm', requireAdmin, asyncHandler(async (req: Request, res:
                     unit: line.unit ?? 'meter',
                     reason: 'supplier_receipt',
                     costPerUnit: line.rate ?? undefined,
-                    supplierId: invoice.supplierId ?? undefined,
+                    partyId: invoice.partyId ?? undefined,
                     referenceId: `invoice:${invoice.id}`,
                     notes: `From invoice ${invoice.invoiceNumber ?? invoice.id}${line.description ? ` — ${line.description}` : ''}`,
                     createdById: userId,
@@ -424,7 +424,7 @@ router.post('/:id/confirm', requireAdmin, asyncHandler(async (req: Request, res:
                     },
                 },
             },
-            supplier: { select: { id: true, name: true } },
+            party: { select: { id: true, name: true } },
         },
     });
 
@@ -464,7 +464,7 @@ router.post('/:id/confirm', requireAdmin, asyncHandler(async (req: Request, res:
                     status: 'confirmed',
                     invoiceNumber: invoice.invoiceNumber ?? null,
                     invoiceDate: invoice.invoiceDate ?? null,
-                    ...(invoice.supplierId ? { supplierId: invoice.supplierId } : {}),
+                    ...(invoice.partyId ? { partyId: invoice.partyId } : {}),
                     counterpartyName: invoice.supplierName ?? null,
                     subtotal: invoice.subtotal ?? null,
                     gstAmount: invoice.gstAmount ?? null,

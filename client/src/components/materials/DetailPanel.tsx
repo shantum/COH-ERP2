@@ -26,8 +26,8 @@ type DetailPanelItemData = Partial<MaterialNode> & {
     category?: string;
     costPerJob?: number | null;
     costUnit?: string;
-    vendorId?: string | null;
-    vendorName?: string | null;
+    partyId?: string | null;
+    partyName?: string | null;
     usageCount?: number;
 };
 
@@ -141,7 +141,7 @@ export function DetailPanel({ item, type, isOpen, onClose, onEdit }: DetailPanel
                                         value={item.effectiveMinOrderQty != null ? `${item.effectiveMinOrderQty}m` : '-'}
                                         inherited={item.minOrderInherited}
                                     />
-                                    <InfoRow label="Supplier" value={item.supplierName || '-'} />
+                                    <InfoRow label="Supplier" value={item.partyName || '-'} />
                                 </div>
                             </section>
 
@@ -329,7 +329,7 @@ export function DetailPanel({ item, type, isOpen, onClose, onEdit }: DetailPanel
                                     <InfoRow label="Description" value={item.description || '-'} />
                                     <InfoRow label="Cost/Unit" value={`₹${item.costPerUnit}`} />
                                     <InfoRow label="Unit" value={item.unit} />
-                                    <InfoRow label="Supplier" value={item.supplierName || '-'} />
+                                    <InfoRow label="Supplier" value={item.partyName || '-'} />
                                     <InfoRow label="Lead Time" value={item.leadTimeDays ? `${item.leadTimeDays} days` : '-'} />
                                     <InfoRow label="Min Order" value={item.minOrderQty || '-'} />
                                     <InfoRow label="Used In" value={`${item.usageCount || 0} BOMs`} />
@@ -352,7 +352,7 @@ export function DetailPanel({ item, type, isOpen, onClose, onEdit }: DetailPanel
                                     <InfoRow label="Category" value={item.category} />
                                     <InfoRow label="Description" value={item.description || '-'} />
                                     <InfoRow label="Cost/Job" value={`₹${item.costPerJob}`} />
-                                    <InfoRow label="Vendor" value={item.vendorName || '-'} />
+                                    <InfoRow label="Vendor" value={item.partyName || '-'} />
                                     <InfoRow label="Lead Time" value={item.leadTimeDays ? `${item.leadTimeDays} days` : '-'} />
                                     <InfoRow label="Used In" value={`${item.usageCount || 0} BOMs`} />
                                     <InfoRow label="Status" value={item.isActive ? 'Active' : 'Inactive'} />

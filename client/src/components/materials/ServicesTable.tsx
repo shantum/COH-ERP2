@@ -28,8 +28,8 @@ interface Service {
     description?: string | null;
     costPerJob?: number | null;
     costUnit: string;
-    vendorId?: string | null;
-    vendorName?: string | null;
+    partyId?: string | null;
+    partyName?: string | null;
     leadTimeDays?: number | null;
     usageCount?: number;
     isActive: boolean;
@@ -104,11 +104,11 @@ export function ServicesTable({ onEdit, onViewDetails, onAdd }: ServicesTablePro
             ),
         },
         {
-            accessorKey: 'vendorName',
+            accessorKey: 'partyName',
             header: 'Vendor',
             cell: ({ row }) => (
                 <span className="text-xs text-muted-foreground">
-                    {row.original.vendorName || '-'}
+                    {row.original.partyName || '-'}
                 </span>
             ),
         },

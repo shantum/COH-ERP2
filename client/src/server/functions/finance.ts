@@ -211,8 +211,7 @@ export const listInvoices = createServerFn({ method: 'POST' })
           balanceDue: true,
           notes: true,
           createdAt: true,
-          supplier: { select: { id: true, name: true } },
-          vendor: { select: { id: true, name: true } },
+          party: { select: { id: true, name: true } },
           customer: { select: { id: true, email: true, firstName: true, lastName: true } },
           _count: { select: { lines: true, matchedPayments: true } },
         },
@@ -255,8 +254,7 @@ export const getInvoice = createServerFn({ method: 'GET' })
             lines: { include: { account: { select: { code: true, name: true } } } },
           },
         },
-        supplier: { select: { id: true, name: true } },
-        vendor: { select: { id: true, name: true } },
+        party: { select: { id: true, name: true } },
         customer: { select: { id: true, email: true, firstName: true, lastName: true } },
         createdBy: { select: { id: true, name: true } },
       },
@@ -288,8 +286,7 @@ export const createInvoice = createServerFn({ method: 'POST' })
         status: 'draft',
         invoiceDate: data.invoiceDate ? new Date(data.invoiceDate) : null,
         dueDate: data.dueDate ? new Date(data.dueDate) : null,
-        ...(data.supplierId ? { supplierId: data.supplierId } : {}),
-        ...(data.vendorId ? { vendorId: data.vendorId } : {}),
+        ...(data.partyId ? { partyId: data.partyId } : {}),
         ...(data.customerId ? { customerId: data.customerId } : {}),
         counterpartyName: data.counterpartyName ?? null,
         subtotal: data.subtotal ?? null,
@@ -347,8 +344,7 @@ export const updateInvoice = createServerFn({ method: 'POST' })
     if (updateData.category !== undefined) updates.category = updateData.category;
     if (updateData.invoiceDate !== undefined) updates.invoiceDate = updateData.invoiceDate ? new Date(updateData.invoiceDate) : null;
     if (updateData.dueDate !== undefined) updates.dueDate = updateData.dueDate ? new Date(updateData.dueDate) : null;
-    if (updateData.supplierId !== undefined) updates.supplierId = updateData.supplierId;
-    if (updateData.vendorId !== undefined) updates.vendorId = updateData.vendorId;
+    if (updateData.partyId !== undefined) updates.partyId = updateData.partyId;
     if (updateData.customerId !== undefined) updates.customerId = updateData.customerId;
     if (updateData.counterpartyName !== undefined) updates.counterpartyName = updateData.counterpartyName;
     if (updateData.subtotal !== undefined) updates.subtotal = updateData.subtotal;
@@ -549,8 +545,7 @@ export const listPayments = createServerFn({ method: 'POST' })
           counterpartyName: true,
           notes: true,
           createdAt: true,
-          supplier: { select: { id: true, name: true } },
-          vendor: { select: { id: true, name: true } },
+          party: { select: { id: true, name: true } },
           customer: { select: { id: true, email: true, firstName: true, lastName: true } },
           _count: { select: { matchedInvoices: true } },
         },
@@ -596,8 +591,7 @@ export const createFinancePayment = createServerFn({ method: 'POST' })
         amount: data.amount,
         unmatchedAmount: data.amount, // Starts fully unmatched
         paymentDate: new Date(data.paymentDate),
-        ...(data.supplierId ? { supplierId: data.supplierId } : {}),
-        ...(data.vendorId ? { vendorId: data.vendorId } : {}),
+        ...(data.partyId ? { partyId: data.partyId } : {}),
         ...(data.customerId ? { customerId: data.customerId } : {}),
         counterpartyName: data.counterpartyName ?? null,
         ledgerEntryId: entry.id,
@@ -833,7 +827,7 @@ export const reverseEntry = createServerFn({ method: 'POST' })
 
 const searchCounterpartiesInput = z.object({
   query: z.string().min(1),
-  type: z.enum(['supplier', 'vendor', 'customer']).optional(),
+  type: z.enum(['party', 'customer']).optional(),
 });
 
 export const searchCounterparties = createServerFn({ method: 'GET' })
@@ -843,22 +837,13 @@ export const searchCounterparties = createServerFn({ method: 'GET' })
     const prisma = await getPrisma();
     const results: Array<{ id: string; name: string; type: string }> = [];
 
-    if (!data.type || data.type === 'supplier') {
-      const suppliers = await prisma.supplier.findMany({
+    if (!data.type || data.type === 'party') {
+      const parties = await prisma.party.findMany({
         where: { name: { contains: data.query, mode: 'insensitive' }, isActive: true },
         select: { id: true, name: true },
         take: 10,
       });
-      results.push(...suppliers.map((s) => ({ id: s.id, name: s.name, type: 'supplier' as const })));
-    }
-
-    if (!data.type || data.type === 'vendor') {
-      const vendors = await prisma.vendor.findMany({
-        where: { name: { contains: data.query, mode: 'insensitive' }, isActive: true },
-        select: { id: true, name: true },
-        take: 10,
-      });
-      results.push(...vendors.map((v) => ({ id: v.id, name: v.name, type: 'vendor' as const })));
+      results.push(...parties.map((p) => ({ id: p.id, name: p.name, type: 'party' as const })));
     }
 
     if (!data.type || data.type === 'customer') {

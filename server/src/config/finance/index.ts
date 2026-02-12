@@ -89,6 +89,54 @@ export type AccountCode =
   | 'RETAINED_EARNINGS';
 
 // ============================================
+// PARTY CATEGORIES
+// ============================================
+
+export const PARTY_CATEGORIES = [
+  'fabric',
+  'trims',
+  'service',
+  'rent',
+  'marketing',
+  'logistics',
+  'packaging',
+  'statutory',
+  'other',
+] as const;
+
+export type PartyCategory = (typeof PARTY_CATEGORIES)[number];
+
+const PARTY_CATEGORY_LABELS: Record<PartyCategory, string> = {
+  fabric: 'Fabric Supplier',
+  trims: 'Trims & Accessories',
+  service: 'Service Provider',
+  rent: 'Rent / Landlord',
+  marketing: 'Marketing & Ads',
+  logistics: 'Logistics & Shipping',
+  packaging: 'Packaging',
+  statutory: 'Government / Statutory',
+  other: 'Other',
+};
+
+/** Get display label for a party category */
+export function getPartyCategoryLabel(category: PartyCategory): string {
+  return PARTY_CATEGORY_LABELS[category] ?? category;
+}
+
+// ============================================
+// TDS SECTIONS
+// ============================================
+
+export const TDS_SECTIONS = [
+  '194C', // Contractor payments
+  '194J', // Professional/technical fees
+  '194I', // Rent
+  '194H', // Commission/brokerage
+] as const;
+
+export type TdsSection = (typeof TDS_SECTIONS)[number];
+
+// ============================================
 // INVOICE CATEGORIES
 // ============================================
 

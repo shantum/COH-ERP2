@@ -338,12 +338,12 @@ export function MaterialsTreeTable({
         },
         // Supplier
         {
-            id: 'supplierName',
+            id: 'partyName',
             header: 'Supplier',
             size: 100,
             cell: ({ row }: CellContext<MaterialNode, unknown>) => (
                 <span className="text-xs text-gray-600 truncate">
-                    {row.original.supplierName || '-'}
+                    {row.original.partyName || '-'}
                 </span>
             ),
         },

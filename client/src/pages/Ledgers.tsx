@@ -151,7 +151,7 @@ export default function Ledgers() {
         unit: string;
         notes?: string | null;
         costPerUnit?: number | null;
-        supplier?: { name: string } | null;
+        party?: { name: string } | null;
         createdBy?: { name: string } | null;
     }
 
@@ -169,7 +169,7 @@ export default function Ledgers() {
                 notes: t.notes,
                 costPerUnit: t.costPerUnit ? Number(t.costPerUnit) : null,
                 fabricColour: t.fabricColour,
-                supplier: t.supplier,
+                party: t.party,
                 createdBy: t.createdBy
             }));
         },
@@ -576,7 +576,7 @@ interface MaterialsTabProps {
         unit: string;
         notes?: string | null;
         costPerUnit?: number | null;
-        supplier?: { name: string } | null;
+        party?: { name: string } | null;
         createdBy?: { name: string } | null;
     }> | undefined;
     isLoading: boolean;
@@ -678,7 +678,7 @@ function MaterialsTab({ data, isLoading, searchInput, setSearchInput, isAdmin, o
                                             {txn.costPerUnit ? `\u20B9${txn.costPerUnit}` : '-'}
                                         </td>
                                         <td className="px-3 py-2 text-gray-600 text-xs">
-                                            {txn.supplier?.name || '-'}
+                                            {txn.party?.name || '-'}
                                         </td>
                                         <td className="px-3 py-2 text-gray-500 text-xs">
                                             {txn.createdBy?.name || 'System'}
