@@ -768,6 +768,10 @@ export type PayrollSlip = {
      * Finance link
      */
     invoiceId: string | null;
+    /**
+     * External payroll system data (full register row from RazorpayPayroll etc.)
+     */
+    registerData: unknown | null;
     createdAt: Generated<Timestamp>;
     updatedAt: Timestamp;
 };

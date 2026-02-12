@@ -2215,6 +2215,9 @@ model PayrollSlip {
   /// Finance link
   invoiceId             String?  @unique
 
+  /// External payroll system data (full register row from RazorpayPayroll etc.)
+  registerData          Json?
+
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
 

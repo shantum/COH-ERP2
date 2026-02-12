@@ -56,6 +56,7 @@ export const CHART_OF_ACCOUNTS: AccountConfig[] = [
   { code: 'GST_OUTPUT', name: 'GST We Owe Government', type: 'liability', description: 'Output GST liability' },
   { code: 'CUSTOMER_ADVANCES', name: 'Customer Advances', type: 'liability', description: 'Prepayments received from customers' },
   { code: 'TDS_PAYABLE', name: 'TDS Payable', type: 'liability', description: 'TDS deducted at source, owed to government' },
+  { code: 'LOAN_GETVANTAGE', name: 'GetVantage Loan', type: 'liability', description: 'Revenue-based financing loan from GetVantage' },
 
   // --- Income ---
   { code: 'SALES_REVENUE', name: 'Sales Revenue', type: 'income', description: 'Revenue from product sales' },
@@ -86,6 +87,7 @@ export type AccountCode =
   | 'GST_OUTPUT'
   | 'CUSTOMER_ADVANCES'
   | 'TDS_PAYABLE'
+  | 'LOAN_GETVANTAGE'
   | 'SALES_REVENUE'
   | 'COGS'
   | 'OPERATING_EXPENSES'

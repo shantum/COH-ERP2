@@ -19,6 +19,10 @@ export interface VendorRule {
   debitAccount: string;
   /** Human-readable description override */
   description?: string;
+  /** If set, debitAccount only applies when payout notes contain this keyword (case-insensitive). Otherwise uses defaultDebitAccount. */
+  noteKeyword?: string;
+  /** Fallback debit account when noteKeyword doesn't match */
+  defaultDebitAccount?: string;
 }
 
 /**
@@ -84,7 +88,7 @@ export const VENDOR_RULES: Record<string, VendorRule> = {
   'Pranay Das':               { category: 'salary',    debitAccount: 'OPERATING_EXPENSES', description: 'Salary' },
 
   // ---- Statutory payments ----
-  'Mohammed Zubear Shaikh':   { category: 'other',     debitAccount: 'OPERATING_EXPENSES', description: 'TDS deposit (statutory)' },
+  'Mohammed Zubear Shaikh':   { category: 'statutory',  debitAccount: 'TDS_PAYABLE', description: 'TDS deposit (statutory)', noteKeyword: 'TDS', defaultDebitAccount: 'OPERATING_EXPENSES' },
   'Swapnil Suresh Gite':      { category: 'salary',    debitAccount: 'OPERATING_EXPENSES', description: 'PF deposit (statutory)' },
 
   // ---- Unit/misc expenses ----
@@ -236,9 +240,9 @@ export interface NarrationRule {
 }
 
 export const HDFC_NARRATION_RULES: NarrationRule[] = [
-  // ---- Inter-account transfers (SKIP) ----
-  { match: 'CANOE DESIGN RAZORPAY RBL', direction: 'both', skip: true, description: 'Transfer to RazorpayX' },
-  { match: 'XXXXXXXX5105',              direction: 'both', skip: true, description: 'Transfer to RazorpayX' },
+  // ---- Inter-account transfers ----
+  { match: 'CANOE DESIGN RAZORPAY RBL', direction: 'out', debitAccount: 'BANK_RAZORPAYX', creditAccount: 'BANK_HDFC', description: 'Transfer to RazorpayX' },
+  { match: 'XXXXXXXX5105',              direction: 'out', debitAccount: 'BANK_RAZORPAYX', creditAccount: 'BANK_HDFC', description: 'Transfer to RazorpayX' },
   { match: '054105001906-CANOE DESIGN',  direction: 'both', skip: true, description: 'Transfer from ICICI account' },
 
   // ---- Incoming: Gateway & Marketplace settlements ----
@@ -269,9 +273,9 @@ export const HDFC_NARRATION_RULES: NarrationRule[] = [
   { match: 'BILLDKPLAYSTOREGOOGL',       direction: 'out', debitAccount: 'OPERATING_EXPENSES', creditAccount: 'BANK_HDFC', description: 'Google Play Store', category: 'marketing' },
   { match: 'BILLDKGOOGLECLOUD',          direction: 'out', debitAccount: 'OPERATING_EXPENSES', creditAccount: 'BANK_HDFC', description: 'Google Cloud', category: 'service' },
   { match: 'BROWNTAPE',                  direction: 'out', debitAccount: 'OPERATING_EXPENSES', creditAccount: 'BANK_HDFC', description: 'BrownTape (software)', category: 'service' },
-  { match: 'CBDT',                       direction: 'out', debitAccount: 'OPERATING_EXPENSES', creditAccount: 'BANK_HDFC', description: 'TDS deposit (CBDT)', category: 'other' },
+  { match: 'CBDT',                       direction: 'out', debitAccount: 'TDS_PAYABLE', creditAccount: 'BANK_HDFC', description: 'TDS deposit (CBDT)', category: 'statutory' },
   { match: 'COSME MATIAS MENEZES',       direction: 'out', debitAccount: 'ADVANCES_GIVEN', creditAccount: 'BANK_HDFC', description: 'Security deposit — retail store' },
-  { match: 'ACTARTLYTEQA',               direction: 'out', debitAccount: 'OPERATING_EXPENSES', creditAccount: 'BANK_HDFC', description: 'Razorpay ACH (GetVantage loan repayment)' },
+  { match: 'ACTARTLYTEQA',               direction: 'out', debitAccount: 'LOAN_GETVANTAGE', creditAccount: 'BANK_HDFC', description: 'Razorpay ACH (GetVantage loan repayment)' },
   { match: 'PAYUCUSTOMEREXPL',           direction: 'out', debitAccount: 'OPERATING_EXPENSES', creditAccount: 'BANK_HDFC', description: 'PayU fees/refund (review needed)' },
 
   // ---- Outgoing: Cash ----
@@ -287,8 +291,18 @@ export const HDFC_NARRATION_RULES: NarrationRule[] = [
 // ============================================
 
 /** Look up a vendor rule by RazorpayX contact name. Falls back to tailor piecework or default. */
-export function getVendorRule(contactName: string, purpose: string): VendorRule {
-  if (VENDOR_RULES[contactName]) return VENDOR_RULES[contactName];
+export function getVendorRule(contactName: string, purpose: string, noteDesc?: string | null): VendorRule {
+  const rule = VENDOR_RULES[contactName];
+  if (rule) {
+    // If rule has a noteKeyword filter, check the payout notes
+    if (rule.noteKeyword && rule.defaultDebitAccount) {
+      const matches = noteDesc && noteDesc.toUpperCase().includes(rule.noteKeyword.toUpperCase());
+      if (!matches) {
+        return { ...rule, debitAccount: rule.defaultDebitAccount };
+      }
+    }
+    return rule;
+  }
   if (purpose === 'vendor bill' && TAILOR_NAMES.has(contactName)) {
     return { category: 'service', debitAccount: 'OPERATING_EXPENSES', description: 'Production piecework' };
   }
