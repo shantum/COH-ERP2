@@ -207,6 +207,7 @@ export const listInvoices = createServerFn({ method: 'POST' })
           dueDate: true,
           counterpartyName: true,
           totalAmount: true,
+          tdsAmount: true,
           paidAmount: true,
           balanceDue: true,
           notes: true,
@@ -254,7 +255,7 @@ export const getInvoice = createServerFn({ method: 'GET' })
             lines: { include: { account: { select: { code: true, name: true } } } },
           },
         },
-        party: { select: { id: true, name: true } },
+        party: { select: { id: true, name: true, tdsApplicable: true, tdsSection: true, tdsRate: true } },
         customer: { select: { id: true, email: true, firstName: true, lastName: true } },
         createdBy: { select: { id: true, name: true } },
       },
@@ -375,15 +376,27 @@ export const confirmInvoice = createServerFn({ method: 'POST' })
 
     const invoice = await prisma.invoice.findUnique({
       where: { id: data.id },
-      select: { id: true, type: true, category: true, status: true, totalAmount: true, gstAmount: true, counterpartyName: true, invoiceNumber: true },
+      select: { id: true, type: true, category: true, status: true, totalAmount: true, gstAmount: true, counterpartyName: true, invoiceNumber: true, partyId: true },
     });
 
     if (!invoice) return { success: false as const, error: 'Invoice not found' };
     if (invoice.status !== 'draft') return { success: false as const, error: 'Can only confirm draft invoices' };
 
-    // Import ledger service dynamically to avoid circular deps
+    // Calculate TDS for payable invoices with a TDS-enabled party
+    let tdsAmount = 0;
+    if (invoice.type === 'payable' && invoice.partyId) {
+      const party = await prisma.party.findUnique({
+        where: { id: invoice.partyId },
+        select: { tdsApplicable: true, tdsRate: true },
+      });
+      if (party?.tdsApplicable && party.tdsRate && party.tdsRate > 0) {
+        const subtotal = invoice.totalAmount - (invoice.gstAmount ?? 0);
+        tdsAmount = Math.round(subtotal * (party.tdsRate / 100) * 100) / 100;
+      }
+    }
+
     // Build ledger entry lines based on invoice type
-    const lines = buildInvoiceLedgerLines(invoice);
+    const lines = buildInvoiceLedgerLines(invoice, tdsAmount);
 
     // Create ledger entry
     const entry = await inlineCreateLedgerEntry(prisma, {
@@ -395,12 +408,13 @@ export const confirmInvoice = createServerFn({ method: 'POST' })
       createdById: userId,
     });
 
-    // Update invoice status + link ledger entry
+    // Update invoice status + link ledger entry + TDS amount + adjusted balanceDue
     await prisma.invoice.update({
       where: { id: data.id },
       data: {
         status: 'confirmed',
         ledgerEntryId: entry.id,
+        ...(tdsAmount > 0 ? { tdsAmount, balanceDue: invoice.totalAmount - tdsAmount } : {}),
       },
     });
 
@@ -409,7 +423,7 @@ export const confirmInvoice = createServerFn({ method: 'POST' })
 
 /**
  * Build ledger lines for an invoice confirmation.
- * Payable: Dr expense account, Cr ACCOUNTS_PAYABLE
+ * Payable: Dr expense account, Cr ACCOUNTS_PAYABLE (less TDS), Cr TDS_PAYABLE
  * Receivable: Dr ACCOUNTS_RECEIVABLE, Cr SALES_REVENUE
  */
 function buildInvoiceLedgerLines(invoice: {
@@ -417,7 +431,7 @@ function buildInvoiceLedgerLines(invoice: {
   category: string;
   totalAmount: number;
   gstAmount: number | null;
-}) {
+}, tdsAmount = 0) {
   const { type, category, totalAmount, gstAmount } = invoice;
   const netAmount = totalAmount - (gstAmount ?? 0);
 
@@ -426,10 +440,13 @@ function buildInvoiceLedgerLines(invoice: {
     const expenseAccount = categoryToExpenseAccount(category);
     const lines = [
       { accountCode: expenseAccount, debit: netAmount, description: `${category} expense` },
-      { accountCode: 'ACCOUNTS_PAYABLE', credit: totalAmount, description: 'Amount owed' },
+      { accountCode: 'ACCOUNTS_PAYABLE', credit: totalAmount - tdsAmount, description: 'Amount owed to vendor' },
     ];
     if (gstAmount && gstAmount > 0) {
       lines.push({ accountCode: 'GST_INPUT', debit: gstAmount, description: 'GST input credit' });
+    }
+    if (tdsAmount > 0) {
+      lines.push({ accountCode: 'TDS_PAYABLE', credit: tdsAmount, description: 'TDS deducted at source' });
     }
     return lines;
   }

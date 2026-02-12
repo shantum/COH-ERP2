@@ -223,6 +223,7 @@ export const CHART_OF_ACCOUNTS = [
   { code: 'ACCOUNTS_PAYABLE', name: 'Money We Owe Vendors', type: 'liability' },
   { code: 'GST_OUTPUT', name: 'GST We Owe Government', type: 'liability' },
   { code: 'CUSTOMER_ADVANCES', name: 'Customer Advances', type: 'liability' },
+  { code: 'TDS_PAYABLE', name: 'TDS Payable', type: 'liability' },
   { code: 'SALES_REVENUE', name: 'Sales Revenue', type: 'income' },
   { code: 'COGS', name: 'Cost of Goods Sold', type: 'direct_cost' },
   { code: 'OPERATING_EXPENSES', name: 'Operating Expenses', type: 'expense' },

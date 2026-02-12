@@ -1915,6 +1915,7 @@ model Invoice {
   // Amounts
   subtotal         Float?
   gstAmount        Float?
+  tdsAmount        Float?    @default(0)
   totalAmount      Float
   paidAmount       Float     @default(0)
   balanceDue       Float     @default(0)

@@ -331,7 +331,12 @@ function InvoicesTab({ search }: { search: FinanceSearchParams }) {
                         inv.counterpartyName ?? '—'}
                     </td>
                     <td className="p-3 text-right font-mono">{formatCurrency(inv.totalAmount)}</td>
-                    <td className="p-3 text-right font-mono">{formatCurrency(inv.balanceDue)}</td>
+                    <td className="p-3 text-right">
+                      <span className="font-mono">{formatCurrency(inv.balanceDue)}</span>
+                      {inv.tdsAmount != null && inv.tdsAmount > 0 && (
+                        <span className="block text-[10px] text-muted-foreground">TDS: {formatCurrency(inv.tdsAmount)}</span>
+                      )}
+                    </td>
                     <td className="p-3"><StatusBadge status={inv.status} /></td>
                     <td className="p-3 text-xs text-muted-foreground">{inv.invoiceDate ? new Date(inv.invoiceDate).toLocaleDateString('en-IN') : '—'}</td>
                     <td className="p-3 text-right">

@@ -377,6 +377,7 @@ export type Invoice = {
     counterpartyName: string | null;
     subtotal: number | null;
     gstAmount: number | null;
+    tdsAmount: Generated<number | null>;
     totalAmount: number;
     paidAmount: Generated<number>;
     balanceDue: Generated<number>;
