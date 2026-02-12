@@ -17,6 +17,7 @@ import { trackingLogger } from '../utils/logger.js';
 import { type TrackingStatus, type PaymentMethod } from '../config/types.js';
 import type { IThinkRawTrackingResponse } from '../types/ithinkApi.js';
 import { storeTrackingResponsesBatch } from './trackingResponseStorage.js';
+import { trackWorkerRun } from '../utils/workerRunTracker.js';
 
 // ============================================
 // TYPES
@@ -521,11 +522,13 @@ function start(): void {
 
     // Run 2 minutes after startup (let server stabilize)
     setTimeout(() => {
-        runTrackingSync();
+        trackWorkerRun('tracking_sync', runTrackingSync, 'startup').catch(() => {});
     }, 2 * 60 * 1000);
 
     // Then run every 30 minutes
-    syncInterval = setInterval(runTrackingSync, SYNC_INTERVAL_MS);
+    syncInterval = setInterval(() => {
+        trackWorkerRun('tracking_sync', runTrackingSync, 'scheduled').catch(() => {});
+    }, SYNC_INTERVAL_MS);
 }
 
 /**
@@ -556,7 +559,7 @@ function getStatus(): SyncStatus {
  * Manually trigger a sync
  */
 async function triggerSync(): Promise<SyncResult | null> {
-    return runTrackingSync();
+    return trackWorkerRun('tracking_sync', runTrackingSync, 'manual');
 }
 
 // ============================================

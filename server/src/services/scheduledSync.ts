@@ -12,6 +12,7 @@ import shopifyClient from './shopify.js';
 import { cacheShopifyOrders, processCacheBatch } from './shopifyOrderProcessor.js';
 import prisma from '../lib/prisma.js';
 import { syncLogger } from '../utils/logger.js';
+import { trackWorkerRun } from '../utils/workerRunTracker.js';
 
 // ============================================
 // TYPES & INTERFACES
@@ -230,10 +231,12 @@ function start(): void {
     syncLogger.info({ intervalMinutes: SYNC_INTERVAL_MS / 1000 / 60 }, 'Starting scheduler');
 
     // Run immediately on start
-    runHourlySync();
+    trackWorkerRun('shopify_sync', runHourlySync, 'startup').catch(() => {});
 
     // Then run every hour
-    syncInterval = setInterval(runHourlySync, SYNC_INTERVAL_MS);
+    syncInterval = setInterval(() => {
+        trackWorkerRun('shopify_sync', runHourlySync, 'scheduled').catch(() => {});
+    }, SYNC_INTERVAL_MS);
 }
 
 /**
@@ -265,7 +268,7 @@ function getStatus(): SyncStatus {
  * Manually trigger a sync
  */
 async function triggerSync(): Promise<SyncResult | null> {
-    return runHourlySync();
+    return trackWorkerRun('shopify_sync', runHourlySync, 'manual');
 }
 
 // ============================================

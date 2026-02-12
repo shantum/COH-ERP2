@@ -173,6 +173,31 @@ export async function cleanupSyncJobs(retentionDays = 30) {
 }
 
 /**
+ * Clean up old WorkerRun entries
+ *
+ * @param {number} retentionDays - How many days to keep run records
+ * @returns {Object} - { deletedCount, errors }
+ */
+export async function cleanupWorkerRuns(retentionDays = 30) {
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - retentionDays);
+
+    console.log(`[CacheCleanup] Cleaning WorkerRun older than ${retentionDays} days`);
+
+    try {
+        const result = await prisma.workerRun.deleteMany({
+            where: { createdAt: { lt: cutoffDate } }
+        });
+
+        console.log(`[CacheCleanup] Deleted ${result.count} old WorkerRun entries`);
+        return { deletedCount: result.count, errors: [] };
+    } catch (error) {
+        console.error('[CacheCleanup] Error cleaning worker runs:', error.message);
+        return { deletedCount: 0, errors: [error.message] };
+    }
+}
+
+/**
  * Run all cache cleanup tasks
  *
  * @param {Object} options - Custom retention periods
@@ -188,6 +213,7 @@ export async function runAllCleanup(options = {}) {
         webhookLogs: await cleanupWebhookLogs(options.webhookLogRetentionDays),
         failedSyncItems: await cleanupFailedSyncItems(options.failedSyncRetentionDays),
         syncJobs: await cleanupSyncJobs(options.syncJobRetentionDays),
+        workerRuns: await cleanupWorkerRuns(options.workerRunRetentionDays),
     };
 
     const totalDeleted = Object.values(results).reduce((sum, r) => sum + r.deletedCount, 0);

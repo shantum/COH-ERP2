@@ -20,6 +20,7 @@
 
 import prisma from '../lib/prisma.js';
 import { sheetsLogger } from '../utils/logger.js';
+import { trackWorkerRun } from '../utils/workerRunTracker.js';
 import { TXN_TYPE, FABRIC_TXN_TYPE } from '../utils/patterns/types.js';
 import type { TxnReason } from '../utils/patterns/types.js';
 import { inventoryBalanceCache } from './inventoryBalanceCache.js';

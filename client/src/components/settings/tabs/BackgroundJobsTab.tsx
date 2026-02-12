@@ -12,7 +12,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import {
     RefreshCw, Play, Clock, CheckCircle, XCircle, Info,
-    Store, Truck, Trash2, Archive, AlertTriangle,
+    Store, Truck, Trash2, Archive, AlertTriangle, History, X,
 } from 'lucide-react';
 
 // Server Functions
@@ -20,7 +20,11 @@ import {
     getBackgroundJobs,
     startBackgroundJob,
     updateBackgroundJob,
+    getWorkerRunHistory,
+    getWorkerRunSummary,
     type BackgroundJob,
+    type WorkerRunEntry,
+    type WorkerRunSummaryEntry,
 } from '../../../server/functions/admin';
 
 // Result card components
@@ -49,19 +53,202 @@ const SHEET_JOB_IDS = new Set([
     'migrate_sheet_formulas',
 ]);
 
+// Map admin job IDs → worker names used in WorkerRun table
+const JOB_TO_WORKER: Record<string, string> = {
+    shopify_sync: 'shopify_sync',
+    tracking_sync: 'tracking_sync',
+    cache_cleanup: 'cache_cleanup',
+    snapshot_compute: 'stock_snapshot',
+    snapshot_backfill: 'stock_snapshot_backfill',
+};
+
 interface JobsResponse {
     jobs: BackgroundJob[];
 }
+
+// ============================================
+// HISTORY DIALOG
+// ============================================
+
+function WorkerHistoryDialog({ workerName, jobName, onClose }: { workerName: string; jobName: string; onClose: () => void }) {
+    const getWorkerRunHistoryFn = useServerFn(getWorkerRunHistory);
+
+    const { data, isLoading } = useQuery({
+        queryKey: ['workerRunHistory', workerName],
+        queryFn: async () => {
+            const result = await getWorkerRunHistoryFn({ data: { workerName, limit: 30 } });
+            if (!result.success) throw new Error(result.error?.message);
+            return result.data!;
+        },
+    });
+
+    const formatRelativeTime = (timestamp: string) => {
+        const diffMs = Date.now() - new Date(timestamp).getTime();
+        const mins = Math.floor(diffMs / 60000);
+        const hours = Math.floor(mins / 60);
+        const days = Math.floor(hours / 24);
+
+        if (mins < 1) return 'Just now';
+        if (mins < 60) return `${mins}m ago`;
+        if (hours < 24) return `${hours}h ago`;
+        if (days < 7) return `${days}d ago`;
+        return new Date(timestamp).toLocaleDateString();
+    };
+
+    const formatDuration = (ms: number | null) => {
+        if (ms == null) return '—';
+        if (ms < 1000) return `${ms}ms`;
+        if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+        return `${(ms / 60000).toFixed(1)}m`;
+    };
+
+    return (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
+            <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
+                {/* Header */}
+                <div className="flex items-center justify-between px-5 py-4 border-b">
+                    <div className="flex items-center gap-2">
+                        <History size={18} className="text-gray-500" />
+                        <h3 className="text-lg font-semibold text-gray-900">{jobName} — Run History</h3>
+                    </div>
+                    <button onClick={onClose} className="p-1 rounded hover:bg-gray-100">
+                        <X size={18} className="text-gray-500" />
+                    </button>
+                </div>
+
+                {/* Content */}
+                <div className="flex-1 overflow-auto p-5">
+                    {isLoading && (
+                        <div className="flex justify-center py-8">
+                            <RefreshCw size={24} className="animate-spin text-gray-400" />
+                        </div>
+                    )}
+
+                    {!isLoading && (!data || data.runs.length === 0) && (
+                        <p className="text-center text-gray-500 py-8">No run history yet.</p>
+                    )}
+
+                    {!isLoading && data && data.runs.length > 0 && (
+                        <table className="w-full text-sm">
+                            <thead>
+                                <tr className="text-left text-xs text-gray-500 border-b">
+                                    <th className="pb-2 font-medium">Time</th>
+                                    <th className="pb-2 font-medium">Duration</th>
+                                    <th className="pb-2 font-medium">Status</th>
+                                    <th className="pb-2 font-medium">Trigger</th>
+                                    <th className="pb-2 font-medium">Details</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {data.runs.map((run: WorkerRunEntry) => (
+                                    <RunRow key={run.id} run={run} formatRelativeTime={formatRelativeTime} formatDuration={formatDuration} />
+                                ))}
+                            </tbody>
+                        </table>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function RunRow({ run, formatRelativeTime, formatDuration }: {
+    run: WorkerRunEntry;
+    formatRelativeTime: (t: string) => string;
+    formatDuration: (ms: number | null) => string;
+}) {
+    const [expanded, setExpanded] = useState(false);
+
+    return (
+        <>
+            <tr
+                className="border-b border-gray-100 hover:bg-gray-50 cursor-pointer"
+                onClick={() => setExpanded(!expanded)}
+            >
+                <td className="py-2 text-gray-700">{formatRelativeTime(run.startedAt)}</td>
+                <td className="py-2 text-gray-600 tabular-nums">{formatDuration(run.durationMs)}</td>
+                <td className="py-2">
+                    <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium ${
+                        run.status === 'completed' ? 'bg-green-100 text-green-700' :
+                        run.status === 'failed' ? 'bg-red-100 text-red-700' :
+                        'bg-blue-100 text-blue-700'
+                    }`}>
+                        {run.status === 'completed' ? <CheckCircle size={10} /> :
+                         run.status === 'failed' ? <XCircle size={10} /> :
+                         <RefreshCw size={10} className="animate-spin" />}
+                        {run.status}
+                    </span>
+                </td>
+                <td className="py-2">
+                    <span className={`text-xs px-1.5 py-0.5 rounded ${
+                        run.triggeredBy === 'manual' ? 'bg-purple-100 text-purple-700' :
+                        run.triggeredBy === 'startup' ? 'bg-amber-100 text-amber-700' :
+                        'bg-gray-100 text-gray-600'
+                    }`}>
+                        {run.triggeredBy}
+                    </span>
+                </td>
+                <td className="py-2 text-gray-400 text-xs">
+                    {(run.result || run.error) ? '▸' : '—'}
+                </td>
+            </tr>
+            {expanded && (run.result || run.error) && (
+                <tr>
+                    <td colSpan={5} className="bg-gray-50 px-3 py-2">
+                        {run.error && (
+                            <div className="text-xs text-red-600 mb-1">
+                                <span className="font-medium">Error:</span> {run.error}
+                            </div>
+                        )}
+                        {run.result && (
+                            <pre className="text-xs text-gray-600 whitespace-pre-wrap overflow-auto max-h-40">
+                                {JSON.stringify(run.result, null, 2)}
+                            </pre>
+                        )}
+                    </td>
+                </tr>
+            )}
+        </>
+    );
+}
+
+// ============================================
+// SUCCESS RATE BADGE
+// ============================================
+
+function SuccessRateBadge({ summary }: { summary: WorkerRunSummaryEntry | undefined }) {
+    if (!summary || summary.last24h.total === 0) return null;
+
+    const { succeeded, failed, total } = summary.last24h;
+    const allGood = failed === 0;
+    const someFailed = failed > 0 && succeeded > 0;
+
+    return (
+        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
+            allGood ? 'bg-green-100 text-green-700' :
+            someFailed ? 'bg-amber-100 text-amber-700' :
+            'bg-red-100 text-red-700'
+        }`}>
+            24h: {succeeded}/{total}
+        </span>
+    );
+}
+
+// ============================================
+// MAIN COMPONENT
+// ============================================
 
 export function BackgroundJobsTab() {
     const queryClient = useQueryClient();
     const [expandedJob, setExpandedJob] = useState<string | null>(null);
     const [confirmJob, setConfirmJob] = useState<{ id: string; name: string } | null>(null);
+    const [historyJob, setHistoryJob] = useState<{ workerName: string; jobName: string } | null>(null);
 
     // Server Function wrappers
     const getBackgroundJobsFn = useServerFn(getBackgroundJobs);
     const startBackgroundJobFn = useServerFn(startBackgroundJob);
     const updateBackgroundJobFn = useServerFn(updateBackgroundJob);
+    const getWorkerRunSummaryFn = useServerFn(getWorkerRunSummary);
 
     // Fetch jobs status
     const { data, isLoading, refetch } = useQuery({
@@ -72,6 +259,17 @@ export function BackgroundJobsTab() {
             return { jobs: result.data || [] };
         },
         refetchInterval: 10000,
+    });
+
+    // Fetch worker run summary
+    const { data: summaryData } = useQuery({
+        queryKey: ['workerRunSummary'],
+        queryFn: async () => {
+            const result = await getWorkerRunSummaryFn();
+            if (!result.success) return {};
+            return result.data || {};
+        },
+        refetchInterval: 30000,
     });
 
     // Filter out sheet jobs
@@ -88,6 +286,7 @@ export function BackgroundJobsTab() {
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['backgroundJobs'] });
+            queryClient.invalidateQueries({ queryKey: ['workerRunSummary'] });
         },
     });
 
@@ -176,6 +375,10 @@ export function BackgroundJobsTab() {
         }
     };
 
+    const getWorkerName = (jobId: string): string | null => {
+        return JOB_TO_WORKER[jobId] ?? null;
+    };
+
     return (
         <div className="space-y-6">
             {/* Header */}
@@ -211,6 +414,8 @@ export function BackgroundJobsTab() {
                 const nextRun = getNextRun(job);
                 const canTrigger = !job.isRunning && job.id !== 'auto_archive';
                 const canToggle = job.id === 'cache_cleanup';
+                const workerName = getWorkerName(job.id);
+                const summary = workerName && summaryData ? (summaryData as Record<string, WorkerRunSummaryEntry>)[workerName] : undefined;
 
                 return (
                     <div key={job.id} className="card">
@@ -245,6 +450,9 @@ export function BackgroundJobsTab() {
                                             Disabled
                                         </span>
                                     )}
+
+                                    {/* Success rate badge */}
+                                    <SuccessRateBadge summary={summary} />
                                 </div>
 
                                 <p className="mt-1 text-sm text-gray-600">{job.description}</p>
@@ -293,6 +501,15 @@ export function BackgroundJobsTab() {
                                     >
                                         <Play size={14} />
                                         Run Now
+                                    </button>
+                                )}
+                                {workerName && (
+                                    <button
+                                        onClick={() => setHistoryJob({ workerName, jobName: job.name })}
+                                        className="btn btn-secondary flex items-center gap-1 text-sm"
+                                    >
+                                        <History size={14} />
+                                        History
                                     </button>
                                 )}
                                 <button
@@ -357,6 +574,15 @@ export function BackgroundJobsTab() {
                 confirmVariant="warning"
                 isLoading={triggerMutation.isPending}
             />
+
+            {/* History Dialog */}
+            {historyJob && (
+                <WorkerHistoryDialog
+                    workerName={historyJob.workerName}
+                    jobName={historyJob.jobName}
+                    onClose={() => setHistoryJob(null)}
+                />
+            )}
         </div>
     );
 }

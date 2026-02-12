@@ -60,6 +60,7 @@ import { reconcileSheetOrders } from './services/sheetOrderPush.js';
 import { runAllCleanup } from './utils/cacheCleanup.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import shutdownCoordinator from './utils/shutdownCoordinator.js';
+import { cleanupStaleRuns, trackWorkerRun } from './utils/workerRunTracker.js';
 
 const app = express();
 
@@ -287,6 +288,9 @@ app.listen(PORT, '0.0.0.0', async () => {
   // Backfill customer LTVs if needed (runs in background)
   await backfillLtvsIfNeeded(prisma);
 
+  // Mark any worker runs left in "running" state from before this boot as failed
+  await cleanupStaleRuns();
+
   // Background workers can be disabled via environment variable
   // Useful when running locally while production is also running
   const disableWorkers = process.env.DISABLE_BACKGROUND_WORKERS === 'true';
@@ -365,14 +369,14 @@ app.listen(PORT, '0.0.0.0', async () => {
     const hour = new Date().getHours();
     if (hour === 2) {
       console.log('[CacheCleanup] Running scheduled daily cleanup...');
-      await runAllCleanup();
+      await trackWorkerRun('cache_cleanup', runAllCleanup, 'scheduled');
     }
   }, 60 * 60 * 1000); // Check every hour
 
   // Run initial cleanup on startup (in background, don't block)
   setTimeout(() => {
     console.log('[CacheCleanup] Running startup cleanup...');
-    runAllCleanup().catch(err => console.error('[CacheCleanup] Startup cleanup error:', err));
+    trackWorkerRun('cache_cleanup', runAllCleanup, 'startup').catch(err => console.error('[CacheCleanup] Startup cleanup error:', err));
   }, 30000); // 30 seconds after startup
 
   // Register cache cleanup shutdown handler

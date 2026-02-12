@@ -10,6 +10,7 @@
 import { computeAndSaveMonth, backfillAll, type ComputeResult, type BackfillResult } from './stockSnapshotCompute.js';
 import { snapshotLogger } from '../utils/logger.js';
 import { nowIST } from '../utils/dateHelpers.js';
+import { trackWorkerRun } from '../utils/workerRunTracker.js';
 
 // ============================================
 // MODULE STATE
@@ -110,14 +111,14 @@ function getStatus() {
  * Manually trigger snapshot for last completed month
  */
 async function triggerSnapshot(): Promise<ComputeResult | null> {
-    return runSnapshot();
+    return trackWorkerRun('stock_snapshot', runSnapshot, 'manual');
 }
 
 /**
  * Manually trigger full backfill
  */
 async function triggerBackfill(): Promise<BackfillResult | null> {
-    return runBackfill();
+    return trackWorkerRun('stock_snapshot_backfill', runBackfill, 'manual');
 }
 
 // ============================================

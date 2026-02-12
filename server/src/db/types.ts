@@ -1173,6 +1173,18 @@ export type WebhookLog = {
     receivedAt: Generated<Timestamp>;
     processedAt: Timestamp | null;
 };
+export type WorkerRun = {
+    id: Generated<string>;
+    workerName: string;
+    status: Generated<string>;
+    startedAt: Timestamp;
+    completedAt: Timestamp | null;
+    durationMs: number | null;
+    result: unknown | null;
+    error: string | null;
+    triggeredBy: Generated<string>;
+    createdAt: Generated<Timestamp>;
+};
 export type WriteOffLog = {
     id: Generated<string>;
     skuId: string;
@@ -1257,5 +1269,6 @@ export type DB = {
     VariationBomLine: VariationBomLine;
     Vendor: Vendor;
     WebhookLog: WebhookLog;
+    WorkerRun: WorkerRun;
     WriteOffLog: WriteOffLog;
 };

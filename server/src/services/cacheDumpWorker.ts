@@ -26,6 +26,7 @@ import type { ShopifyOrder } from './shopify.js';
 import { cacheShopifyOrders } from './shopifyOrderProcessor.js';
 import { syncLogger } from '../utils/logger.js';
 import shutdownCoordinator from '../utils/shutdownCoordinator.js';
+import { trackWorkerRun } from '../utils/workerRunTracker.js';
 
 // ============================================
 // CONFIGURATION
@@ -291,7 +292,7 @@ async function checkForIncompleteJobs(): Promise<void> {
                 totalRecords: incompleteJob.totalRecords,
             }, 'Cache dump: found incomplete job, resuming');
 
-            await runJob(incompleteJob.id);
+            await trackWorkerRun('cache_dump', () => runJob(incompleteJob.id), 'startup');
         }
     } catch (err) {
         syncLogger.error({ error: (err as Error).message }, 'Cache dump: error checking for incomplete jobs');
@@ -397,7 +398,7 @@ async function startJob(options: { daysBack?: number } = {}): Promise<SyncJob> {
 
     // Start processing if worker is running
     if (isRunning && !activeJobId) {
-        runJob(job.id);
+        trackWorkerRun('cache_dump', () => runJob(job.id), 'manual').catch(() => {});
     }
 
     return job;
@@ -541,7 +542,7 @@ async function resumeJob(jobId: string): Promise<SyncJob> {
 
     // Start processing if worker is running
     if (isRunning && !activeJobId) {
-        runJob(jobId);
+        trackWorkerRun('cache_dump', () => runJob(jobId), 'manual').catch(() => {});
     }
 
     return (await prisma.syncJob.findUnique({ where: { id: jobId } }))!;

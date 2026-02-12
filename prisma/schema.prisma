@@ -2059,3 +2059,24 @@ model PaymentInvoice {
   @@index([paymentId])
   @@index([invoiceId])
 }
+
+// ============================================
+// WORKER RUN HISTORY
+// ============================================
+
+/// Persists every background worker run for visibility into "did anything break overnight?"
+model WorkerRun {
+  id           String    @id @default(uuid())
+  workerName   String    // "tracking_sync", "shopify_sync", etc.
+  status       String    @default("running") // "running" | "completed" | "failed"
+  startedAt    DateTime
+  completedAt  DateTime?
+  durationMs   Int?
+  result       Json?     // The worker's SyncResult object
+  error        String?   // Error message if failed
+  triggeredBy  String    @default("scheduled") // "scheduled" | "manual" | "startup"
+  createdAt    DateTime  @default(now())
+
+  @@index([workerName, startedAt])
+  @@index([createdAt])
+}
