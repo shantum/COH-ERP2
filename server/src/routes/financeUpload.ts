@@ -3,6 +3,7 @@
  *
  * File upload for invoices/receipts and file download.
  * Same pattern as fabricInvoices.ts but for the general finance system.
+ * Auto-pushes uploaded files to Google Drive for CA access.
  */
 
 import { Router } from 'express';
@@ -11,6 +12,9 @@ import multer from 'multer';
 import { requireAdmin } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import logger from '../utils/logger.js';
+import { deferredExecutor } from '../services/deferredExecutor.js';
+import { uploadInvoiceFile } from '../services/driveFinanceSync.js';
+import driveFinanceSync from '../services/driveFinanceSync.js';
 
 const log = logger.child({ module: 'financeUpload' });
 const router = Router();
@@ -71,6 +75,12 @@ router.post('/upload', requireAdmin, upload.single('file'), asyncHandler(async (
     select: { id: true, fileName: true, fileSizeBytes: true },
   });
 
+  // Fire-and-forget: push to Google Drive in background
+  deferredExecutor.enqueue(
+    async () => { await uploadInvoiceFile(invoiceId); },
+    { action: 'driveUploadInvoice' }
+  );
+
   res.json({ success: true, invoice });
 }));
 
@@ -112,6 +122,24 @@ router.get('/payment/:id/file', requireAdmin, asyncHandler(async (req: Request, 
   res.setHeader('Content-Type', payment.fileMimeType!);
   res.setHeader('Content-Disposition', `inline; filename="${payment.fileName}"`);
   res.send(Buffer.from(payment.fileData));
+}));
+
+// ============================================
+// POST /drive/sync — Trigger manual sync of all pending files
+// ============================================
+
+router.post('/drive/sync', requireAdmin, asyncHandler(async (_req: Request, res: Response) => {
+  log.info('Manual Drive sync triggered');
+  const result = await driveFinanceSync.triggerSync();
+  res.json({ success: true, ...result });
+}));
+
+// ============================================
+// GET /drive/status — Drive sync status
+// ============================================
+
+router.get('/drive/status', requireAdmin, asyncHandler(async (_req: Request, res: Response) => {
+  res.json(driveFinanceSync.getStatus());
 }));
 
 export default router;

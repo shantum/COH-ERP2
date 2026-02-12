@@ -49,6 +49,7 @@ import chatRoutes from './routes/chat.js';
 import returnPrimeWebhooks from './routes/returnPrimeWebhooks.js';
 import returnPrimeSync from './routes/returnPrimeSync.js';
 import returnPrimeAdminRoutes from './routes/returnPrimeAdminRoutes.js';
+import driveFinanceSync from './services/driveFinanceSync.js';
 import { pulseBroadcaster } from './services/pulseBroadcaster.js';
 import scheduledSync from './services/scheduledSync.js';
 import trackingSync from './services/trackingSync.js';
@@ -316,6 +317,9 @@ app.listen(PORT, '0.0.0.0', async () => {
     // Start stock snapshot worker (manual trigger only)
     stockSnapshotWorker.start();
 
+    // Start Drive finance sync (on-demand only, no scheduled interval)
+    driveFinanceSync.start();
+
     // Sheet order reconciler — catches orders missed due to crashes/downtime
     // Runs every 15 min, looks back 3 days for unpushed orders
     const RECONCILE_INTERVAL_MS = 15 * 60 * 1000;
@@ -353,6 +357,10 @@ app.listen(PORT, '0.0.0.0', async () => {
 
     shutdownCoordinator.register('stockSnapshotWorker', () => {
       stockSnapshotWorker.stop();
+    }, 5000);
+
+    shutdownCoordinator.register('driveFinanceSync', () => {
+      driveFinanceSync.stop();
     }, 5000);
 
     shutdownCoordinator.register('sheetReconciler', () => {

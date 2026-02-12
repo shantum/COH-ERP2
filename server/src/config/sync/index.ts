@@ -86,6 +86,17 @@ export {
     DEFAULT_RETURN_SOURCE,
 } from './sheets.js';
 
+// Google Drive Finance Sync
+export {
+    DRIVE_FINANCE_FOLDER_ID,
+    DRIVE_API_SCOPE,
+    DRIVE_API_CALL_DELAY_MS,
+    DRIVE_API_MAX_RETRIES,
+    DRIVE_SYNC_BATCH_SIZE,
+    DRIVE_UNLINKED_FOLDER_NAME,
+    getFinancialYear,
+} from './drive.js';
+
 // Facebook Feed Health
 export {
     FACEBOOK_FEED_URL,

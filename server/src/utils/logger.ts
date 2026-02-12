@@ -123,6 +123,7 @@ export const customerLogger: Logger = logger.child({ module: 'customers' });
 export const remittanceLogger: Logger = logger.child({ module: 'remittance' });
 export const sheetsLogger: Logger = logger.child({ module: 'sheets' });
 export const snapshotLogger: Logger = logger.child({ module: 'snapshot' });
+export const driveLogger: Logger = logger.child({ module: 'drive' });
 
 // Export the base logger as default
 export default logger;
