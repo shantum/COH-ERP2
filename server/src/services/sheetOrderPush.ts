@@ -12,10 +12,11 @@
  */
 
 import { sheetsLogger } from '../utils/logger.js';
-import { appendRows, addBottomBorders, getSheetId } from './googleSheetsClient.js';
+import { appendRows, addBottomBorders, getSheetId, readRange, batchWriteRanges } from './googleSheetsClient.js';
 import {
     ORDERS_MASTERSHEET_ID,
     MASTERSHEET_TABS,
+    ORDERS_FROM_COH_COLS,
 } from '../config/sync/sheets.js';
 import prisma from '../lib/prisma.js';
 
@@ -329,5 +330,103 @@ export async function reconcileSheetOrders(): Promise<ReconcileResult> {
     }
 
     result.durationMs = Date.now() - start;
+    return result;
+}
+
+// ============================================
+// UPDATE CHANNEL DETAILS IN SHEET
+// ============================================
+
+interface ChannelDetailUpdate {
+    orderNumber: string;
+    skuCode: string;
+    channelStatus: string | null;
+    courier: string | null;
+    awb: string | null;
+}
+
+/**
+ * Update channel status, courier, and AWB columns in "Orders from COH" sheet
+ * for orders that already exist there. Matches by order number + SKU.
+ *
+ * Called after channel CSV import to backfill shipping details.
+ */
+export async function updateSheetChannelDetails(updates: ChannelDetailUpdate[]): Promise<{ matched: number; updated: number }> {
+    const result = { matched: 0, updated: 0 };
+    if (updates.length === 0) return result;
+
+    // Filter to only updates that have at least one value to write
+    const meaningful = updates.filter(u => u.channelStatus || u.courier || u.awb);
+    if (meaningful.length === 0) return result;
+
+    const tab = MASTERSHEET_TABS.ORDERS_FROM_COH;
+
+    // Read order# (B) and SKU (G) columns to find matching rows
+    const rows = await readRange(ORDERS_MASTERSHEET_ID, `'${tab}'!B:G`);
+    if (rows.length <= 1) return result;
+
+    // Build lookup: "orderNumber|skuCode" → sheet row numbers (1-based)
+    // Handle format differences: Myntra short UUIDs, Nykaa --1 suffix
+    const sheetRowMap = new Map<string, number[]>();
+    const addToMap = (key: string, rowNum: number) => {
+        const existing = sheetRowMap.get(key);
+        if (existing) existing.push(rowNum);
+        else sheetRowMap.set(key, [rowNum]);
+    };
+
+    for (let i = 1; i < rows.length; i++) {
+        const orderNo = String(rows[i][0] ?? '').trim();  // B is index 0 in B:G range
+        const sku = String(rows[i][5] ?? '').trim();       // G is index 5 in B:G range
+        if (!orderNo || !sku) continue;
+
+        addToMap(`${orderNo}|${sku}`, i + 1); // +1 for 1-based sheet row
+    }
+
+    // Match updates to sheet rows
+    const writeData: Array<{ range: string; values: (string | number)[][] }> = [];
+
+    for (const update of meaningful) {
+        const ref = update.orderNumber;
+        const sku = update.skuCode;
+
+        // Try exact match first, then alternate formats
+        let matchRows = sheetRowMap.get(`${ref}|${sku}`);
+        if (!matchRows) {
+            // Myntra: sheet may have first 8 chars of UUID
+            if (ref.includes('-') && ref.length > 20) {
+                const short = ref.split('-')[0];
+                matchRows = sheetRowMap.get(`${short}|${sku}`);
+            }
+        }
+        if (!matchRows) {
+            // Nykaa: sheet may have ref without "--1" suffix
+            if (ref.endsWith('--1')) {
+                matchRows = sheetRowMap.get(`${ref.slice(0, -3)}|${sku}`);
+            }
+        }
+
+        if (!matchRows || matchRows.length === 0) continue;
+        result.matched += matchRows.length;
+
+        for (const rowNum of matchRows) {
+            // Build row: Y (24) = channel status, Z (25) = courier, AA (26) = AWB
+            const values: (string | number)[] = [
+                update.channelStatus || '',
+                update.courier || '',
+                update.awb || '',
+            ];
+            writeData.push({
+                range: `'${tab}'!Y${rowNum}:AA${rowNum}`,
+                values: [values],
+            });
+        }
+    }
+
+    if (writeData.length > 0) {
+        await batchWriteRanges(ORDERS_MASTERSHEET_ID, writeData);
+        result.updated = writeData.length;
+        log.info({ matched: result.matched, updated: result.updated }, 'Updated channel details in sheet');
+    }
+
     return result;
 }

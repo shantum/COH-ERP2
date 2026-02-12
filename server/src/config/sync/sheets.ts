@@ -146,6 +146,7 @@ export const ORDERS_FROM_COH_COLS = {
     SAMPLING_DATE: 17,  // R
     PACKED: 20,         // U
     SHIPPED: 23,        // X
+    CHANNEL_STATUS: 24, // Y — channel fulfillment status (e.g. "shipped", "delivered")
     COURIER: 25,        // Z
     AWB: 26,            // AA
     AWB_SCAN: 28,       // AC

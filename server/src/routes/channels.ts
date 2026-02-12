@@ -20,7 +20,7 @@ import { authenticateToken } from '../middleware/auth.js';
 import { parse } from 'fast-csv';
 import multer from 'multer';
 import { Readable } from 'stream';
-import { pushERPOrderToSheet } from '../services/sheetOrderPush.js';
+import { pushERPOrderToSheet, updateSheetChannelDetails } from '../services/sheetOrderPush.js';
 import { readRange } from '../services/googleSheetsClient.js';
 import { ORDERS_MASTERSHEET_ID, MASTERSHEET_TABS } from '../config/sync/sheets.js';
 
@@ -1004,6 +1004,29 @@ router.post('/execute-import', authenticateToken, async (req: Request, res: Resp
       }
     }
 
+    // Update channel details (status, courier, AWB) in sheet for all imported orders
+    let sheetDetailsUpdated = 0;
+    const channelDetailUpdates = selectedOrders.flatMap(order =>
+      order.lines
+        .filter(l => l.skuMatched && (l.fulfillmentStatus || l.courierName || l.awbNumber))
+        .map(l => ({
+          orderNumber: order.channelRef,
+          skuCode: l.skuCode,
+          channelStatus: l.fulfillmentStatus || null,
+          courier: l.courierName || null,
+          awb: l.awbNumber || null,
+        }))
+    );
+
+    if (channelDetailUpdates.length > 0) {
+      try {
+        const detailResult = await updateSheetChannelDetails(channelDetailUpdates);
+        sheetDetailsUpdated = detailResult.updated;
+      } catch (err) {
+        console.error('Failed to update sheet channel details:', err);
+      }
+    }
+
     res.json({
       message: 'Import completed',
       batchId: importBatch.id,
@@ -1011,6 +1034,7 @@ router.post('/execute-import', authenticateToken, async (req: Request, res: Resp
       ordersUpdated,
       sheetPushed,
       sheetSkipped,
+      sheetDetailsUpdated,
       ...(sheetError ? { sheetError } : {}),
       errors: errors.slice(0, 20),
     });
