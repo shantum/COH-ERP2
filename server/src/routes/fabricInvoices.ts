@@ -13,6 +13,7 @@ import { requireAdmin } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { parseInvoice, parseIndianDate } from '../services/invoiceParser.js';
 import { matchInvoiceLines } from '../services/invoiceMatcher.js';
+import { createLedgerEntry } from '../services/ledgerService.js';
 import logger from '../utils/logger.js';
 
 const log = logger.child({ module: 'fabricInvoices' });
@@ -429,6 +430,70 @@ router.post('/:id/confirm', requireAdmin, asyncHandler(async (req: Request, res:
 
     const newTxnCount = invoice.lines.filter(l => l.matchType === 'new_entry' && !l.matchedTxnId).length;
     log.info({ invoiceId: invoice.id, newTransactions: newTxnCount }, 'Invoice confirmed');
+
+    // --- Create Finance Invoice + Ledger Entry ---
+    try {
+        const totalAmount = invoice.totalAmount ?? 0;
+        const gstAmount = invoice.gstAmount ?? 0;
+        const netAmount = totalAmount - gstAmount;
+
+        if (totalAmount > 0) {
+            // Build ledger lines: Dr FABRIC_INVENTORY (net), Dr GST_INPUT (gst), Cr ACCOUNTS_PAYABLE (total)
+            const ledgerLines = [
+                { accountCode: 'FABRIC_INVENTORY', debit: netAmount, description: `Fabric: ${invoice.invoiceNumber ?? ''}` },
+                { accountCode: 'ACCOUNTS_PAYABLE', credit: totalAmount, description: `Payable: ${invoice.supplierName ?? ''}` },
+            ];
+            if (gstAmount > 0) {
+                ledgerLines.push({ accountCode: 'GST_INPUT', debit: gstAmount, description: 'GST input credit' });
+            }
+
+            const entry = await createLedgerEntry(req.prisma, {
+                entryDate: invoice.invoiceDate ?? new Date(),
+                description: `Fabric invoice ${invoice.invoiceNumber ?? invoice.id} — ${invoice.supplierName ?? 'Unknown'}`,
+                sourceType: 'fabric_inward',
+                sourceId: invoice.id,
+                lines: ledgerLines,
+                createdById: userId,
+            });
+
+            // Create finance Invoice record linked to fabric invoice + ledger entry
+            await req.prisma.invoice.create({
+                data: {
+                    type: 'payable',
+                    category: 'fabric',
+                    status: 'confirmed',
+                    invoiceNumber: invoice.invoiceNumber ?? null,
+                    invoiceDate: invoice.invoiceDate ?? null,
+                    ...(invoice.supplierId ? { supplierId: invoice.supplierId } : {}),
+                    counterpartyName: invoice.supplierName ?? null,
+                    subtotal: invoice.subtotal ?? null,
+                    gstAmount: invoice.gstAmount ?? null,
+                    totalAmount,
+                    balanceDue: totalAmount,
+                    fabricInvoiceId: invoice.id,
+                    ledgerEntryId: entry.id,
+                    createdById: userId,
+                    lines: {
+                        create: invoice.lines.map(l => ({
+                            description: l.description ?? null,
+                            hsnCode: l.hsnCode ?? null,
+                            qty: l.qty ?? null,
+                            unit: l.unit ?? null,
+                            rate: l.rate ?? null,
+                            amount: l.amount ?? null,
+                            gstPercent: l.gstPercent ?? null,
+                            gstAmount: l.gstAmount ?? null,
+                        })),
+                    },
+                },
+            });
+
+            log.info({ invoiceId: invoice.id, ledgerEntryId: entry.id }, 'Finance invoice + ledger entry created');
+        }
+    } catch (financeError) {
+        // Don't fail the fabric confirm if finance creation fails — log and continue
+        log.error({ err: financeError, invoiceId: invoice.id }, 'Failed to create finance invoice (fabric confirm still succeeded)');
+    }
 
     res.json({ success: true, invoice: confirmed });
 }));
