@@ -101,7 +101,7 @@ export const VENDOR_RULES: Record<string, VendorRule> = {
 
   // ---- Fabric processing ----
   'MOHD. IMRAN DYEING':       { category: 'service',   debitAccount: 'OPERATING_EXPENSES', description: 'Fabric dyeing' },
-  'D. K. Prints':             { category: 'service',   debitAccount: 'OPERATING_EXPENSES', description: 'Fabric printing' },
+  'D. K. Prints':             { category: 'packaging',  debitAccount: 'OPERATING_EXPENSES', description: 'Stickers/labels' },
   'S M Exports':              { category: 'service',   debitAccount: 'OPERATING_EXPENSES', description: 'Production service' },
   'ZED Creation':             { category: 'service',   debitAccount: 'OPERATING_EXPENSES', description: 'Fabric wash processing' },
   'Dev Process':              { category: 'service',   debitAccount: 'OPERATING_EXPENSES', description: 'Fabric processing' },
