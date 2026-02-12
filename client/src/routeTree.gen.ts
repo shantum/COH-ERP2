@@ -40,6 +40,7 @@ import { Route as AuthenticatedInventoryMobileRouteImport } from './routes/_auth
 import { Route as AuthenticatedInventoryInwardRouteImport } from './routes/_authenticated/inventory-inward'
 import { Route as AuthenticatedInventoryCountRouteImport } from './routes/_authenticated/inventory-count'
 import { Route as AuthenticatedInventoryRouteImport } from './routes/_authenticated/inventory'
+import { Route as AuthenticatedFinanceRouteImport } from './routes/_authenticated/finance'
 import { Route as AuthenticatedFacebookFeedHealthRouteImport } from './routes/_authenticated/facebook-feed-health'
 import { Route as AuthenticatedFabricReconciliationRouteImport } from './routes/_authenticated/fabric-reconciliation'
 import { Route as AuthenticatedFabricReceiptRouteImport } from './routes/_authenticated/fabric-receipt'
@@ -214,6 +215,11 @@ const AuthenticatedInventoryRoute = AuthenticatedInventoryRouteImport.update({
   path: '/inventory',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
+const AuthenticatedFinanceRoute = AuthenticatedFinanceRouteImport.update({
+  id: '/finance',
+  path: '/finance',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
 const AuthenticatedFacebookFeedHealthRoute =
   AuthenticatedFacebookFeedHealthRouteImport.update({
     id: '/facebook-feed-health',
@@ -283,6 +289,7 @@ export interface FileRoutesByFullPath {
   '/fabric-receipt': typeof AuthenticatedFabricReceiptRoute
   '/fabric-reconciliation': typeof AuthenticatedFabricReconciliationRoute
   '/facebook-feed-health': typeof AuthenticatedFacebookFeedHealthRoute
+  '/finance': typeof AuthenticatedFinanceRoute
   '/inventory': typeof AuthenticatedInventoryRoute
   '/inventory-count': typeof AuthenticatedInventoryCountRoute
   '/inventory-inward': typeof AuthenticatedInventoryInwardRoute
@@ -323,6 +330,7 @@ export interface FileRoutesByTo {
   '/fabric-receipt': typeof AuthenticatedFabricReceiptRoute
   '/fabric-reconciliation': typeof AuthenticatedFabricReconciliationRoute
   '/facebook-feed-health': typeof AuthenticatedFacebookFeedHealthRoute
+  '/finance': typeof AuthenticatedFinanceRoute
   '/inventory': typeof AuthenticatedInventoryRoute
   '/inventory-count': typeof AuthenticatedInventoryCountRoute
   '/inventory-inward': typeof AuthenticatedInventoryInwardRoute
@@ -366,6 +374,7 @@ export interface FileRoutesById {
   '/_authenticated/fabric-receipt': typeof AuthenticatedFabricReceiptRoute
   '/_authenticated/fabric-reconciliation': typeof AuthenticatedFabricReconciliationRoute
   '/_authenticated/facebook-feed-health': typeof AuthenticatedFacebookFeedHealthRoute
+  '/_authenticated/finance': typeof AuthenticatedFinanceRoute
   '/_authenticated/inventory': typeof AuthenticatedInventoryRoute
   '/_authenticated/inventory-count': typeof AuthenticatedInventoryCountRoute
   '/_authenticated/inventory-inward': typeof AuthenticatedInventoryInwardRoute
@@ -410,6 +419,7 @@ export interface FileRouteTypes {
     | '/fabric-receipt'
     | '/fabric-reconciliation'
     | '/facebook-feed-health'
+    | '/finance'
     | '/inventory'
     | '/inventory-count'
     | '/inventory-inward'
@@ -450,6 +460,7 @@ export interface FileRouteTypes {
     | '/fabric-receipt'
     | '/fabric-reconciliation'
     | '/facebook-feed-health'
+    | '/finance'
     | '/inventory'
     | '/inventory-count'
     | '/inventory-inward'
@@ -492,6 +503,7 @@ export interface FileRouteTypes {
     | '/_authenticated/fabric-receipt'
     | '/_authenticated/fabric-reconciliation'
     | '/_authenticated/facebook-feed-health'
+    | '/_authenticated/finance'
     | '/_authenticated/inventory'
     | '/_authenticated/inventory-count'
     | '/_authenticated/inventory-inward'
@@ -747,6 +759,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedInventoryRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/finance': {
+      id: '/_authenticated/finance'
+      path: '/finance'
+      fullPath: '/finance'
+      preLoaderRoute: typeof AuthenticatedFinanceRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/facebook-feed-health': {
       id: '/_authenticated/facebook-feed-health'
       path: '/facebook-feed-health'
@@ -823,6 +842,7 @@ interface AuthenticatedRouteChildren {
   AuthenticatedFabricReceiptRoute: typeof AuthenticatedFabricReceiptRoute
   AuthenticatedFabricReconciliationRoute: typeof AuthenticatedFabricReconciliationRoute
   AuthenticatedFacebookFeedHealthRoute: typeof AuthenticatedFacebookFeedHealthRoute
+  AuthenticatedFinanceRoute: typeof AuthenticatedFinanceRoute
   AuthenticatedInventoryRoute: typeof AuthenticatedInventoryRoute
   AuthenticatedInventoryCountRoute: typeof AuthenticatedInventoryCountRoute
   AuthenticatedInventoryInwardRoute: typeof AuthenticatedInventoryInwardRoute
@@ -859,6 +879,7 @@ const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedFabricReconciliationRoute:
     AuthenticatedFabricReconciliationRoute,
   AuthenticatedFacebookFeedHealthRoute: AuthenticatedFacebookFeedHealthRoute,
+  AuthenticatedFinanceRoute: AuthenticatedFinanceRoute,
   AuthenticatedInventoryRoute: AuthenticatedInventoryRoute,
   AuthenticatedInventoryCountRoute: AuthenticatedInventoryCountRoute,
   AuthenticatedInventoryInwardRoute: AuthenticatedInventoryInwardRoute,
@@ -901,12 +922,3 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { createStart } from '@tanstack/react-start'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-  }
-}

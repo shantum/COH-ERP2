@@ -19,3 +19,4 @@ export * from './products.js';
 export * from './fabricReceipt.js';
 export * from './fabricInvoice.js';
 export * from './returnPrime.js';
+export * from './finance.js';

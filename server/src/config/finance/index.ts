@@ -1,0 +1,222 @@
+/**
+ * Finance Configuration
+ *
+ * Chart of accounts, invoice categories, payment methods, and helpers.
+ * All financial constants live here — no magic strings in business logic.
+ *
+ * TO ADD A NEW ACCOUNT:
+ * 1. Add entry to CHART_OF_ACCOUNTS
+ * 2. Add the code to AccountCode type
+ * 3. Run seed script to sync with database
+ */
+
+// ============================================
+// ACCOUNT TYPES
+// ============================================
+
+export const ACCOUNT_TYPES = [
+  'asset',
+  'liability',
+  'income',
+  'direct_cost',
+  'expense',
+  'equity',
+] as const;
+
+export type AccountType = (typeof ACCOUNT_TYPES)[number];
+
+// ============================================
+// CHART OF ACCOUNTS (~16 accounts)
+// ============================================
+
+export interface AccountConfig {
+  /** Unique code (stored in DB) */
+  code: string;
+  /** Display name */
+  name: string;
+  /** Account type */
+  type: AccountType;
+  /** Short description */
+  description: string;
+}
+
+export const CHART_OF_ACCOUNTS: AccountConfig[] = [
+  // --- Assets ---
+  { code: 'BANK', name: 'Bank', type: 'asset', description: 'Bank accounts' },
+  { code: 'CASH', name: 'Cash', type: 'asset', description: 'Cash on hand' },
+  { code: 'ACCOUNTS_RECEIVABLE', name: 'Money Customers Owe Us', type: 'asset', description: 'Outstanding customer payments' },
+  { code: 'FABRIC_INVENTORY', name: 'Fabric Inventory', type: 'asset', description: 'Value of fabric in stock' },
+  { code: 'FINISHED_GOODS', name: 'Finished Goods Inventory', type: 'asset', description: 'Value of finished goods in stock' },
+  { code: 'GST_INPUT', name: 'GST We Can Claim', type: 'asset', description: 'Input GST credit' },
+  { code: 'ADVANCES_GIVEN', name: 'Advances We Gave', type: 'asset', description: 'Advances paid to suppliers/vendors' },
+
+  // --- Liabilities ---
+  { code: 'ACCOUNTS_PAYABLE', name: 'Money We Owe Vendors', type: 'liability', description: 'Outstanding vendor/supplier payments' },
+  { code: 'GST_OUTPUT', name: 'GST We Owe Government', type: 'liability', description: 'Output GST liability' },
+  { code: 'CUSTOMER_ADVANCES', name: 'Customer Advances', type: 'liability', description: 'Prepayments received from customers' },
+
+  // --- Income ---
+  { code: 'SALES_REVENUE', name: 'Sales Revenue', type: 'income', description: 'Revenue from product sales' },
+
+  // --- Direct Costs ---
+  { code: 'COGS', name: 'Cost of Goods Sold', type: 'direct_cost', description: 'Direct cost of products sold' },
+
+  // --- Expenses ---
+  { code: 'OPERATING_EXPENSES', name: 'Operating Expenses', type: 'expense', description: 'Rent, salary, marketing, etc.' },
+  { code: 'MARKETPLACE_FEES', name: 'Marketplace & Payment Fees', type: 'expense', description: 'Platform commissions, payment gateway fees' },
+
+  // --- Equity ---
+  { code: 'OWNER_CAPITAL', name: 'Owner Capital', type: 'equity', description: 'Capital invested by owners' },
+  { code: 'RETAINED_EARNINGS', name: 'Retained Earnings', type: 'equity', description: 'Accumulated profits/losses' },
+];
+
+export type AccountCode =
+  | 'BANK'
+  | 'CASH'
+  | 'ACCOUNTS_RECEIVABLE'
+  | 'FABRIC_INVENTORY'
+  | 'FINISHED_GOODS'
+  | 'GST_INPUT'
+  | 'ADVANCES_GIVEN'
+  | 'ACCOUNTS_PAYABLE'
+  | 'GST_OUTPUT'
+  | 'CUSTOMER_ADVANCES'
+  | 'SALES_REVENUE'
+  | 'COGS'
+  | 'OPERATING_EXPENSES'
+  | 'MARKETPLACE_FEES'
+  | 'OWNER_CAPITAL'
+  | 'RETAINED_EARNINGS';
+
+// ============================================
+// INVOICE CATEGORIES
+// ============================================
+
+export const INVOICE_CATEGORIES = [
+  'fabric',
+  'trims',
+  'service',
+  'logistics',
+  'rent',
+  'salary',
+  'marketing',
+  'packaging',
+  'equipment',
+  'marketplace',
+  'customer_order',
+  'other',
+] as const;
+
+export type InvoiceCategory = (typeof INVOICE_CATEGORIES)[number];
+
+const CATEGORY_LABELS: Record<InvoiceCategory, string> = {
+  fabric: 'Fabric',
+  trims: 'Trims & Accessories',
+  service: 'Service (Print, Wash, etc.)',
+  logistics: 'Logistics & Shipping',
+  rent: 'Rent',
+  salary: 'Salary & Wages',
+  marketing: 'Marketing & Ads',
+  packaging: 'Packaging',
+  equipment: 'Equipment & Tools',
+  marketplace: 'Marketplace Fees',
+  customer_order: 'Customer Order',
+  other: 'Other',
+};
+
+// ============================================
+// INVOICE STATUSES
+// ============================================
+
+export const INVOICE_STATUSES = [
+  'draft',
+  'confirmed',
+  'partially_paid',
+  'paid',
+  'cancelled',
+] as const;
+
+export type InvoiceStatus = (typeof INVOICE_STATUSES)[number];
+
+// ============================================
+// INVOICE TYPES
+// ============================================
+
+export const INVOICE_TYPES = ['payable', 'receivable'] as const;
+
+export type InvoiceType = (typeof INVOICE_TYPES)[number];
+
+// ============================================
+// PAYMENT METHODS
+// ============================================
+
+export const PAYMENT_METHODS = [
+  'bank_transfer',
+  'upi',
+  'cash',
+  'cheque',
+  'card',
+  'razorpay',
+  'shopflo',
+  'cod_remittance',
+  'marketplace_payout',
+  'adjustment',
+  'other',
+] as const;
+
+export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
+
+// ============================================
+// PAYMENT DIRECTIONS
+// ============================================
+
+export const PAYMENT_DIRECTIONS = ['outgoing', 'incoming'] as const;
+
+export type PaymentDirection = (typeof PAYMENT_DIRECTIONS)[number];
+
+// ============================================
+// PAYMENT STATUSES
+// ============================================
+
+export const PAYMENT_STATUSES = ['draft', 'confirmed', 'cancelled'] as const;
+
+export type PaymentStatus = (typeof PAYMENT_STATUSES)[number];
+
+// ============================================
+// LEDGER SOURCE TYPES
+// ============================================
+
+export const LEDGER_SOURCE_TYPES = [
+  'fabric_inward',
+  'production_inward',
+  'order_shipment',
+  'payment_received',
+  'invoice_confirmed',
+  'payment_outgoing',
+  'manual',
+  'adjustment',
+] as const;
+
+export type LedgerSourceType = (typeof LEDGER_SOURCE_TYPES)[number];
+
+// ============================================
+// HELPER FUNCTIONS
+// ============================================
+
+/** Get display label for an invoice category */
+export function getCategoryLabel(category: InvoiceCategory): string {
+  return CATEGORY_LABELS[category] ?? category;
+}
+
+/** Look up an account config by its code */
+export function getAccountByCode(code: string): AccountConfig | undefined {
+  return CHART_OF_ACCOUNTS.find((a) => a.code === code);
+}
+
+/**
+ * Debit-normal accounts: balance goes UP with debits (assets, expenses, direct costs).
+ * Credit-normal accounts: balance goes UP with credits (liabilities, income, equity).
+ */
+export function isDebitNormal(type: AccountType): boolean {
+  return type === 'asset' || type === 'expense' || type === 'direct_cost';
+}
