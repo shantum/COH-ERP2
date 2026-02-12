@@ -28,6 +28,7 @@
 | `/shopify` | Shopify webhooks, product/order sync, fulfillment |
 | `/tracking` | iThink API, AWB, tracking sync, RTO workflow |
 | `/finance` | Ledger, invoices, payments, double-entry accounting |
+| `/payroll` | Employees, salary structure, PF/ESIC/PT, monthly payroll runs |
 | `/database` | Prisma, Kysely, triggers, migrations |
 | `/railway` | Railway CLI, deployments, database access |
 | `/google-sheets` | Sheets hybrid system, buffer tabs, ingestion |

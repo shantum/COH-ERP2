@@ -65,3 +65,7 @@ mcp-chat/
 server/scripts/
 server/analyze-*.ts
 backups/
+
+# Python venv & MS365 token cache
+.venv/
+.inbox-token-cache.json

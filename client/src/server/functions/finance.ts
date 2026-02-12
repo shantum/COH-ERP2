@@ -983,7 +983,13 @@ export const findUnmatchedPayments = createServerFn({ method: 'POST' })
     };
 
     if (counterpartyName) {
-      where.counterpartyName = { contains: counterpartyName, mode: 'insensitive' };
+      // Look up Party aliases so we match all known names (e.g. "Google India Pvt. Ltd." + "GOOGLE INDIA DIGITAL")
+      const party = await prisma.party.findFirst({
+        where: { name: { equals: counterpartyName, mode: 'insensitive' } },
+        select: { aliases: true },
+      });
+      const allNames = [counterpartyName, ...(party?.aliases ?? [])];
+      where.OR = allNames.map((n) => ({ counterpartyName: { contains: n, mode: 'insensitive' } }));
     }
     if (amountMin !== undefined || amountMax !== undefined) {
       where.amount = {
