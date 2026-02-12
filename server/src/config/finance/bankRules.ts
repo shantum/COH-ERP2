@@ -34,9 +34,12 @@ export const VENDOR_RULES: Record<string, VendorRule> = {
   'Kishanlal & Sons':         { category: 'fabric',    debitAccount: 'FABRIC_INVENTORY' },
   'Kishorkumar Kakubhai':     { category: 'fabric',    debitAccount: 'FABRIC_INVENTORY' },
   'Naaz Handloom':            { category: 'fabric',    debitAccount: 'ACCOUNTS_PAYABLE' }, // has matching invoice
+  'Mahaveer & Co':            { category: 'fabric',    debitAccount: 'FABRIC_INVENTORY', description: 'Supima/rib fabric' },
+  'Nandlal Vijaykumar':       { category: 'fabric',    debitAccount: 'FABRIC_INVENTORY' },
 
   // ---- Trims ----
   'Janaksons':                { category: 'trims',     debitAccount: 'FABRIC_INVENTORY' },
+  'Bhairav':                  { category: 'trims',     debitAccount: 'FABRIC_INVENTORY' },
 
   // ---- Rent ----
   'PRATIBHA DILIP JADHAV':    { category: 'rent',      debitAccount: 'OPERATING_EXPENSES', description: 'Unit rent' },
@@ -51,6 +54,9 @@ export const VENDOR_RULES: Record<string, VendorRule> = {
   'Rijuta Banerjee':          { category: 'marketing', debitAccount: 'OPERATING_EXPENSES', description: 'Modeling' },
   'FRANCESCA D M COTTA':      { category: 'marketing', debitAccount: 'OPERATING_EXPENSES', description: 'Photoshoot styling' },
 
+  // ---- Brokerage ----
+  'Urmilla Dias Easy Living':              { category: 'service', debitAccount: 'OPERATING_EXPENSES', description: 'Retail store brokerage' },
+
   // ---- Service vendors ----
   'Datastraw Technologies Private Limited': { category: 'service', debitAccount: 'OPERATING_EXPENSES', description: 'Tech service' },
   'Brego Business Private Limited':         { category: 'service', debitAccount: 'OPERATING_EXPENSES' },
@@ -62,6 +68,10 @@ export const VENDOR_RULES: Record<string, VendorRule> = {
 
   // ---- Packaging ----
   'Basant Envelopes':         { category: 'packaging', debitAccount: 'OPERATING_EXPENSES' },
+  'Shree Satyanarayan Ji Impex': { category: 'packaging', debitAccount: 'OPERATING_EXPENSES', description: 'Packaging bags' },
+
+  // ---- Salary employees (vendor bill payouts) ----
+  'Pranay Das':               { category: 'salary',    debitAccount: 'OPERATING_EXPENSES', description: 'Salary' },
 
   // ---- Statutory payments ----
   'Mohammed Zubear Shaikh':   { category: 'other',     debitAccount: 'OPERATING_EXPENSES', description: 'TDS deposit (statutory)' },
