@@ -7,6 +7,8 @@
  * immediately without waiting for any manual entry.
  *
  * Triggered via deferredExecutor — fire-and-forget, never blocks webhook response.
+ *
+ * Also includes a reconciler that catches any orders missed due to crashes/downtime.
  */
 
 import { sheetsLogger } from '../utils/logger.js';
@@ -47,6 +49,14 @@ interface ShopifyOrder {
     line_items?: ShopifyLineItem[] | null;
 }
 
+export interface ReconcileResult {
+    found: number;
+    pushed: number;
+    failed: number;
+    errors: string[];
+    durationMs: number;
+}
+
 // ============================================
 // HELPERS
 // ============================================
@@ -67,6 +77,19 @@ function formatDate(isoDate: string | null | undefined): string {
     return `${p('year')}-${p('month')}-${p('day')} ${p('hour')}:${p('minute')}:${p('second')}`;
 }
 
+/** Stamp sheetPushedAt on an order after successful push */
+async function stampSheetPushed(orderId: string): Promise<void> {
+    try {
+        await prisma.order.update({
+            where: { id: orderId },
+            data: { sheetPushedAt: new Date() },
+        });
+    } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        log.error({ orderId, err: message }, 'Failed to stamp sheetPushedAt');
+    }
+}
+
 // Total columns in "Orders from COH" tab (A through AD = 30 columns)
 const TOTAL_COLS = 30;
 
@@ -78,9 +101,11 @@ const TOTAL_COLS = 30;
  * Push a new Shopify order to the "Orders from COH" sheet tab.
  * Creates one row per line item. Skips silently if not an orders/create webhook.
  * Adds a bottom border after the last line item of the order.
+ * Stamps sheetPushedAt on the order after successful push.
  */
 export async function pushNewOrderToSheet(
-    shopifyOrder: ShopifyOrder
+    shopifyOrder: ShopifyOrder,
+    orderId?: string
 ): Promise<void> {
 
     const lineItems = shopifyOrder.line_items;
@@ -128,6 +153,11 @@ export async function pushNewOrderToSheet(
             await addBottomBorders(ORDERS_MASTERSHEET_ID, sheetId, [lastRowIdx]);
         }
 
+        // Stamp sheetPushedAt
+        if (orderId) {
+            await stampSheetPushed(orderId);
+        }
+
         log.info(
             { orderName: orderNumber, lineCount: rows.length },
             'Pushed order to Orders from COH sheet'
@@ -148,7 +178,7 @@ export async function pushNewOrderToSheet(
 /**
  * Push an ERP-created order (manual or exchange) to the "Orders from COH" sheet.
  * Queries the order from DB and maps to the same 30-column row format as Shopify orders.
- * Never throws — errors are logged silently.
+ * Stamps sheetPushedAt on success. Never throws — errors are logged silently.
  */
 export async function pushERPOrderToSheet(orderId: string): Promise<void> {
     const order = await prisma.order.findUnique({
@@ -213,6 +243,9 @@ export async function pushERPOrderToSheet(orderId: string): Promise<void> {
             await addBottomBorders(ORDERS_MASTERSHEET_ID, sheetId, [lastRowIdx]);
         }
 
+        // Stamp sheetPushedAt
+        await stampSheetPushed(orderId);
+
         log.info(
             { orderNumber: order.orderNumber, lineCount: rows.length },
             'Pushed ERP order to Orders from COH sheet'
@@ -224,4 +257,77 @@ export async function pushERPOrderToSheet(orderId: string): Promise<void> {
             'Failed to push ERP order to sheet'
         );
     }
+}
+
+// ============================================
+// RECONCILER
+// ============================================
+
+/** How far back to look for unpushed orders (prevents pushing ancient orders on first run) */
+const RECONCILE_LOOKBACK_DAYS = 3;
+/** Max orders to push per reconciliation run */
+const RECONCILE_BATCH_LIMIT = 20;
+
+/**
+ * Find orders that were never pushed to the sheet and push them.
+ * Looks back 3 days and pushes up to 20 at a time (oldest first).
+ * Uses pushERPOrderToSheet which handles all the mapping + stamping.
+ */
+export async function reconcileSheetOrders(): Promise<ReconcileResult> {
+    const start = Date.now();
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - RECONCILE_LOOKBACK_DAYS);
+
+    const result: ReconcileResult = { found: 0, pushed: 0, failed: 0, errors: [], durationMs: 0 };
+
+    try {
+        // Find recent orders that were never pushed
+        const unpushed = await prisma.order.findMany({
+            where: {
+                sheetPushedAt: null,
+                createdAt: { gte: cutoff },
+            },
+            select: { id: true, orderNumber: true },
+            orderBy: { createdAt: 'asc' },
+            take: RECONCILE_BATCH_LIMIT,
+        });
+
+        result.found = unpushed.length;
+
+        if (unpushed.length === 0) {
+            log.info('Sheet reconciler: all orders pushed, nothing to do');
+            result.durationMs = Date.now() - start;
+            return result;
+        }
+
+        log.info(
+            { count: unpushed.length, orders: unpushed.map(o => o.orderNumber) },
+            'Sheet reconciler: found unpushed orders'
+        );
+
+        // Push each one using the ERP push function (it handles stamping)
+        for (const order of unpushed) {
+            try {
+                await pushERPOrderToSheet(order.id);
+                result.pushed++;
+            } catch (err: unknown) {
+                result.failed++;
+                const message = err instanceof Error ? err.message : String(err);
+                result.errors.push(`#${order.orderNumber}: ${message}`);
+                log.error({ orderNumber: order.orderNumber, err: message }, 'Reconciler: failed to push order');
+            }
+        }
+
+        log.info(
+            { found: result.found, pushed: result.pushed, failed: result.failed },
+            'Sheet reconciler: done'
+        );
+    } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        result.errors.push(message);
+        log.error({ err: message }, 'Sheet reconciler: fatal error');
+    }
+
+    result.durationMs = Date.now() - start;
+    return result;
 }

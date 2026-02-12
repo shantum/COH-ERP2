@@ -239,7 +239,7 @@ router.post('/shopify/orders', verifyWebhook, async (req: WebhookRequest, res: R
         // Note: Shopify sometimes sends new orders as orders/updated, so check result.action
         if (result.action === 'created') {
             deferredExecutor.enqueue(async () => {
-                await pushNewOrderToSheet(shopifyOrder as unknown as Parameters<typeof pushNewOrderToSheet>[0]);
+                await pushNewOrderToSheet(shopifyOrder as unknown as Parameters<typeof pushNewOrderToSheet>[0], result.orderId);
             }, { orderId: result.orderId, action: 'push_order_to_sheet' });
         }
 

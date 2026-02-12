@@ -38,6 +38,7 @@ import { asyncHandler } from '../middleware/asyncHandler.js';
 import { ValidationError, NotFoundError, ConflictError, BusinessLogicError } from '../utils/errors.js';
 import sheetOffloadWorker from '../services/sheetOffloadWorker.js';
 import stockSnapshotWorker from '../services/stockSnapshotWorker.js';
+import { reconcileSheetOrders } from '../services/sheetOrderPush.js';
 // ENABLE_SHEET_DELETION deprecated — ingestion now marks rows as DONE
 
 const router: Router = Router();
@@ -187,7 +188,7 @@ interface PermissionsUpdateBody {
 }
 
 /** Background job trigger params */
-type JobId = 'shopify_sync' | 'tracking_sync' | 'cache_cleanup' | 'ingest_inward' | 'ingest_outward' | 'move_shipped_to_outward' | 'preview_ingest_inward' | 'preview_ingest_outward' | 'cleanup_done_rows' | 'migrate_sheet_formulas' | 'snapshot_compute' | 'snapshot_backfill' | 'push_balances' | 'preview_push_balances' | 'push_fabric_balances' | 'import_fabric_balances' | 'preview_fabric_inward' | 'ingest_fabric_inward';
+type JobId = 'shopify_sync' | 'tracking_sync' | 'cache_cleanup' | 'ingest_inward' | 'ingest_outward' | 'move_shipped_to_outward' | 'preview_ingest_inward' | 'preview_ingest_outward' | 'cleanup_done_rows' | 'migrate_sheet_formulas' | 'snapshot_compute' | 'snapshot_backfill' | 'push_balances' | 'preview_push_balances' | 'push_fabric_balances' | 'import_fabric_balances' | 'preview_fabric_inward' | 'ingest_fabric_inward' | 'reconcile_sheet_orders';
 
 /** Background job update body */
 interface JobUpdateBody {
@@ -1444,6 +1445,16 @@ router.get('/background-jobs', authenticateToken, asyncHandler(async (req: Reque
             lastRunAt: stockSnapshotWorker.getStatus().lastRunAt,
             lastResult: stockSnapshotWorker.getStatus().lastRunResult,
             note: 'One-time setup — run once to populate historical data',
+        },
+        {
+            id: 'reconcile_sheet_orders',
+            name: 'Reconcile Sheet Orders',
+            description: 'Finds orders that never got pushed to the Google Sheet (e.g. due to a crash) and pushes them. Looks back 3 days, up to 20 orders per run.',
+            enabled: true,
+            isRunning: false,
+            lastRunAt: null,
+            lastResult: null,
+            note: 'Runs automatically every 15 min — can also trigger manually',
         }
     ];
 
@@ -1573,6 +1584,11 @@ router.post('/background-jobs/:jobId/trigger', requireAdmin, asyncHandler(async 
         case 'ingest_fabric_inward': {
             const result = await sheetOffloadWorker.triggerFabricInward();
             res.json({ message: 'Fabric inward import completed', result });
+            break;
+        }
+        case 'reconcile_sheet_orders': {
+            const result = await reconcileSheetOrders();
+            res.json({ message: 'Sheet order reconciliation completed', result });
             break;
         }
         default:

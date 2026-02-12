@@ -59,6 +59,11 @@ model User {
   returnSettingsUpdates ReturnSettings[]
   // Fabric invoices
   fabricInvoices        FabricInvoice[]  @relation("FabricInvoiceCreator")
+  // Finance relations
+  financeInvoices       Invoice[]        @relation("InvoiceCreator")
+  financePayments       Payment[]        @relation("PaymentCreator")
+  paymentInvoiceMatches PaymentInvoice[] @relation("PaymentInvoiceMatcher")
+  ledgerEntries         LedgerEntry[]    @relation("LedgerEntryCreator")
 
   @@index([roleId])
 }
@@ -342,6 +347,8 @@ model Supplier {
   fabricColours              FabricColour[]      @relation("FabricColourSupplier")
   trimItems                  TrimItem[]          @relation("TrimSupplier")
   fabricInvoices             FabricInvoice[]     @relation("FabricInvoiceSupplier")
+  financeInvoices            Invoice[]           @relation("InvoiceSupplier")
+  financePayments            Payment[]           @relation("PaymentSupplier")
 }
 
 // NOTE: FabricTransaction model removed - use FabricColourTransaction instead
@@ -425,6 +432,8 @@ model Customer {
   feedback          Feedback[]
   orders            Order[]
   returnRequests    ReturnRequest[]
+  financeInvoices   Invoice[] @relation("InvoiceCustomer")
+  financePayments   Payment[] @relation("PaymentCustomer")
 
   @@index([createdAt])
 }
@@ -459,6 +468,7 @@ model Order {
   isExchange           Boolean            @default(false)
   originalOrderId      String?
   shipByDate           DateTime?
+  sheetPushedAt        DateTime?          // When order was pushed to "Orders from COH" sheet
   partiallyCancelled   Boolean            @default(false)
   paymentConfirmedAt   DateTime?
   paymentConfirmedBy   String?
@@ -475,6 +485,7 @@ model Order {
   exchangeSourceLines  OrderLine[]        @relation("ExchangeOrderLine") // Lines that created this exchange order
   returnPrimeRequests  ReturnPrimeRequest[] // Return Prime requests linked to this order
   channelOrderLines    ChannelOrderLine[] // BT report analytics lines linked to this order
+  financeInvoices      Invoice[]           @relation("InvoiceOrder")
 
   @@index([customerId])
   @@index([status])
@@ -1270,7 +1281,9 @@ model Vendor {
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
 
-  serviceItems ServiceItem[]
+  serviceItems    ServiceItem[]
+  financeInvoices Invoice[] @relation("InvoiceVendor")
+  financePayments Payment[] @relation("PaymentVendor")
 }
 
 // ============================================
@@ -1787,6 +1800,7 @@ model FabricInvoice {
   supplier        Supplier? @relation("FabricInvoiceSupplier", fields: [supplierId], references: [id])
   createdBy       User      @relation("FabricInvoiceCreator", fields: [createdById], references: [id])
   lines           FabricInvoiceLine[]
+  financeInvoice  Invoice?  @relation("FabricInvoiceBridge")
 
   @@index([status])
   @@index([supplierId])
@@ -1821,4 +1835,227 @@ model FabricInvoiceLine {
 
   @@index([invoiceId])
   @@index([fabricColourId])
+}
+
+// ============================================
+// FINANCE: LEDGER, INVOICES, PAYMENTS
+// ============================================
+
+/// Chart of accounts — seeded from config, balances maintained by DB trigger
+model LedgerAccount {
+  id        String   @id @default(uuid())
+  code      String   @unique
+  name      String
+  type      String   // asset, liability, income, direct_cost, expense, equity
+  balance   Float    @default(0) // Maintained by DB trigger on LedgerEntryLine changes
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  lines LedgerEntryLine[]
+
+  @@index([type])
+}
+
+/// A journal entry (header) — groups debit/credit lines that must balance
+model LedgerEntry {
+  id           String   @id @default(uuid())
+  entryDate    DateTime
+  description  String
+  sourceType   String   // fabric_inward, production_inward, invoice_confirmed, manual, etc.
+  sourceId     String?  // FK to originating record (for idempotency + tracing)
+  isReversed   Boolean  @default(false)
+  reversedById String?  // FK to the reversal entry
+  notes        String?
+  createdById  String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  createdBy  User          @relation("LedgerEntryCreator", fields: [createdById], references: [id])
+  reversedBy LedgerEntry?  @relation("LedgerEntryReversal", fields: [reversedById], references: [id])
+  reversals  LedgerEntry[] @relation("LedgerEntryReversal")
+  lines      LedgerEntryLine[]
+  invoice    Invoice?      @relation("InvoiceLedgerEntry")
+  payment    Payment?      @relation("PaymentLedgerEntry")
+
+  @@unique([sourceType, sourceId]) // Idempotency: one entry per source event
+  @@index([entryDate])
+  @@index([sourceType])
+  @@index([createdAt])
+}
+
+/// Individual debit or credit line within a journal entry
+model LedgerEntryLine {
+  id          String  @id @default(uuid())
+  entryId     String
+  accountId   String
+  debit       Float   @default(0)
+  credit      Float   @default(0)
+  description String?
+
+  entry   LedgerEntry   @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  account LedgerAccount @relation(fields: [accountId], references: [id])
+
+  @@index([entryId])
+  @@index([accountId])
+}
+
+/// Source document for "money is owed" — vendor bills or customer receivables
+model Invoice {
+  id               String    @id @default(uuid())
+  invoiceNumber    String?
+  type             String    // payable, receivable
+  category         String    // fabric, trims, service, rent, salary, etc.
+  status           String    @default("draft") // draft, confirmed, partially_paid, paid, cancelled
+
+  invoiceDate      DateTime?
+  dueDate          DateTime?
+
+  // Counterparty (one of these)
+  supplierId       String?
+  vendorId         String?
+  customerId       String?
+  counterpartyName String?   // Fallback if no linked entity
+
+  // Amounts
+  subtotal         Float?
+  gstAmount        Float?
+  totalAmount      Float
+  paidAmount       Float     @default(0)
+  balanceDue       Float     @default(0)
+
+  // Linked records
+  orderId          String?
+  fabricInvoiceId  String?   @unique // Optional 1:1 bridge to FabricInvoice
+
+  // File attachment (stored as binary, same pattern as FabricInvoice)
+  fileData         Bytes?
+  fileName         String?
+  fileMimeType     String?
+  fileSizeBytes    Int?
+
+  // AI parsing metadata (for future AI upload)
+  aiRawResponse    Json?
+  aiModel          String?
+  aiConfidence     Float?
+
+  // Ledger link
+  ledgerEntryId    String?   @unique
+
+  // Tracking
+  notes            String?
+  createdById      String
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  // Relations
+  supplier      Supplier?      @relation("InvoiceSupplier", fields: [supplierId], references: [id])
+  vendor        Vendor?        @relation("InvoiceVendor", fields: [vendorId], references: [id])
+  customer      Customer?      @relation("InvoiceCustomer", fields: [customerId], references: [id])
+  order         Order?         @relation("InvoiceOrder", fields: [orderId], references: [id])
+  fabricInvoice FabricInvoice? @relation("FabricInvoiceBridge", fields: [fabricInvoiceId], references: [id])
+  ledgerEntry   LedgerEntry?   @relation("InvoiceLedgerEntry", fields: [ledgerEntryId], references: [id])
+  createdBy     User           @relation("InvoiceCreator", fields: [createdById], references: [id])
+  lines         InvoiceLine[]
+  matchedPayments PaymentInvoice[]
+
+  @@index([type])
+  @@index([status])
+  @@index([category])
+  @@index([supplierId])
+  @@index([vendorId])
+  @@index([customerId])
+  @@index([orderId])
+  @@index([createdAt])
+  @@index([invoiceNumber])
+}
+
+/// Line item on an invoice
+model InvoiceLine {
+  id          String  @id @default(uuid())
+  invoiceId   String
+  description String?
+  hsnCode     String?
+  qty         Float?
+  unit        String?
+  rate        Float?
+  amount      Float?
+  gstPercent  Float?
+  gstAmount   Float?
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+}
+
+/// Record of actual money moving
+model Payment {
+  id              String   @id @default(uuid())
+  referenceNumber String?
+  direction       String   // outgoing, incoming
+  method          String   // bank_transfer, upi, cash, etc.
+  status          String   @default("confirmed") // draft, confirmed, cancelled
+
+  amount          Float
+  matchedAmount   Float    @default(0)
+  unmatchedAmount Float    @default(0)
+
+  paymentDate     DateTime
+
+  // Counterparty (one of these)
+  supplierId       String?
+  vendorId         String?
+  customerId       String?
+  counterpartyName String?
+
+  // File attachment
+  fileData      Bytes?
+  fileName      String?
+  fileMimeType  String?
+  fileSizeBytes Int?
+
+  // Ledger link
+  ledgerEntryId String? @unique
+
+  // Tracking
+  notes       String?
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  supplier    Supplier?    @relation("PaymentSupplier", fields: [supplierId], references: [id])
+  vendor      Vendor?      @relation("PaymentVendor", fields: [vendorId], references: [id])
+  customer    Customer?    @relation("PaymentCustomer", fields: [customerId], references: [id])
+  ledgerEntry LedgerEntry? @relation("PaymentLedgerEntry", fields: [ledgerEntryId], references: [id])
+  createdBy   User         @relation("PaymentCreator", fields: [createdById], references: [id])
+  matchedInvoices PaymentInvoice[]
+
+  @@index([direction])
+  @@index([method])
+  @@index([status])
+  @@index([supplierId])
+  @@index([vendorId])
+  @@index([customerId])
+  @@index([paymentDate])
+  @@index([createdAt])
+}
+
+/// Many-to-many join: which payments cover which invoices
+model PaymentInvoice {
+  id         String   @id @default(uuid())
+  paymentId  String
+  invoiceId  String
+  amount     Float    // How much of this payment goes to this invoice
+  notes      String?
+  matchedAt  DateTime @default(now())
+  matchedById String
+
+  payment   Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  matchedBy User    @relation("PaymentInvoiceMatcher", fields: [matchedById], references: [id])
+
+  @@unique([paymentId, invoiceId])
+  @@index([paymentId])
+  @@index([invoiceId])
 }
