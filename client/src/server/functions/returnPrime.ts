@@ -153,65 +153,66 @@ function computeStats(requests: ReturnPrimeRequest[]): ReturnPrimeStats {
 // ============================================
 
 /**
+ * Core dashboard query logic — shared by dashboard and analytics handlers
+ */
+async function fetchDashboardData(
+    filters: z.infer<typeof ReturnPrimeFiltersSchema>,
+): Promise<ReturnPrimeDashboardData> {
+    const prisma = await getPrisma();
+
+    // Build where clause
+    const where: Prisma.ReturnPrimeRequestWhereInput = {};
+
+    if (filters.dateFrom) {
+        where.rpCreatedAt = { gte: new Date(filters.dateFrom) };
+    }
+    if (filters.dateTo) {
+        where.rpCreatedAt = {
+            ...(typeof where.rpCreatedAt === 'object' && where.rpCreatedAt !== null ? where.rpCreatedAt : {}),
+            lte: new Date(filters.dateTo + 'T23:59:59'),
+        };
+    }
+    if (filters.requestType && filters.requestType !== 'all') {
+        where.requestType = filters.requestType;
+    }
+    if (filters.search) {
+        const search = filters.search.trim();
+        if (search.includes('@')) {
+            where.customerEmail = { contains: search, mode: 'insensitive' };
+        } else if (search.toUpperCase().startsWith('RET') || search.toUpperCase().startsWith('EXC')) {
+            where.rpRequestNumber = { contains: search.toUpperCase(), mode: 'insensitive' };
+        } else if (/^\d+$/.test(search)) {
+            where.shopifyOrderName = { contains: search };
+        } else {
+            where.OR = [
+                { rpRequestNumber: { contains: search, mode: 'insensitive' } },
+                { shopifyOrderName: { contains: search } },
+                { customerName: { contains: search, mode: 'insensitive' } },
+                { customerEmail: { contains: search, mode: 'insensitive' } },
+            ];
+        }
+    }
+
+    const localRequests = await prisma.returnPrimeRequest.findMany({
+        where,
+        orderBy: { rpCreatedAt: 'desc' },
+        take: 500,
+    });
+
+    const requests = localRequests.map(transformLocalToApiFormat);
+    const stats = computeStats(requests);
+
+    return { requests, stats, hasNextPage: false, hasPreviousPage: false };
+}
+
+/**
  * Fetch Return Prime dashboard data from local database
  */
 export const getReturnPrimeDashboard = createServerFn({ method: 'POST' })
     .inputValidator((input: unknown) => ReturnPrimeFiltersSchema.parse(input))
     .handler(async ({ data: filters }): Promise<ReturnPrimeDashboardData> => {
-        const prisma = await getPrisma();
-
         try {
-            // Build where clause
-            const where: Prisma.ReturnPrimeRequestWhereInput = {};
-
-            if (filters.dateFrom) {
-                where.rpCreatedAt = { gte: new Date(filters.dateFrom) };
-            }
-            if (filters.dateTo) {
-                where.rpCreatedAt = {
-                    ...(typeof where.rpCreatedAt === 'object' && where.rpCreatedAt !== null ? where.rpCreatedAt : {}),
-                    lte: new Date(filters.dateTo + 'T23:59:59'),
-                };
-            }
-            if (filters.requestType && filters.requestType !== 'all') {
-                where.requestType = filters.requestType;
-            }
-            if (filters.search) {
-                const search = filters.search.trim();
-                if (search.includes('@')) {
-                    where.customerEmail = { contains: search, mode: 'insensitive' };
-                } else if (search.toUpperCase().startsWith('RET') || search.toUpperCase().startsWith('EXC')) {
-                    where.rpRequestNumber = { contains: search.toUpperCase(), mode: 'insensitive' };
-                } else if (/^\d+$/.test(search)) {
-                    where.shopifyOrderName = { contains: search };
-                } else {
-                    // Search in multiple fields
-                    where.OR = [
-                        { rpRequestNumber: { contains: search, mode: 'insensitive' } },
-                        { shopifyOrderName: { contains: search } },
-                        { customerName: { contains: search, mode: 'insensitive' } },
-                        { customerEmail: { contains: search, mode: 'insensitive' } },
-                    ];
-                }
-            }
-
-            // Fetch from local DB
-            const localRequests = await prisma.returnPrimeRequest.findMany({
-                where,
-                orderBy: { rpCreatedAt: 'desc' },
-                take: 500,
-            });
-
-            // Transform to API response format for UI compatibility
-            const requests = localRequests.map(transformLocalToApiFormat);
-            const stats = computeStats(requests);
-
-            return {
-                requests,
-                stats,
-                hasNextPage: false,
-                hasPreviousPage: false,
-            };
+            return await fetchDashboardData(filters);
         } catch (error: unknown) {
             const message = error instanceof Error ? error.message : 'Unknown error';
             console.error('[Server Function] Error in getReturnPrimeDashboard:', message);
@@ -251,8 +252,8 @@ export const getReturnPrimeAnalytics = createServerFn({ method: 'POST' })
     .inputValidator((input: unknown) => ReturnPrimeFiltersSchema.parse(input))
     .handler(async ({ data: filters }) => {
         try {
-            // Reuse dashboard fetch
-            const dashboardData = await getReturnPrimeDashboard({ data: filters });
+            // Reuse core dashboard logic directly (avoids server-fn type issues)
+            const dashboardData = await fetchDashboardData(filters);
             const { requests } = dashboardData;
 
             // Compute analytics

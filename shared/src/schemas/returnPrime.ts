@@ -281,7 +281,6 @@ export const LineItemRefundSchema = z.object({
     requested_mode: z.string().nullable().optional(),
     actual_mode: z.string().nullable().optional(),
     refund_others_text: z.string().nullable().optional(),
-    meta: z.unknown().nullable().optional(),
     status: z.string().nullable().optional(),
     refunded_amount: z
         .object({
