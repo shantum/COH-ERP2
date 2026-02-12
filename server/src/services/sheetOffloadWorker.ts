@@ -2560,15 +2560,19 @@ async function triggerMoveShipped(): Promise<MoveShippedResult | null> {
             outwardRows.push(copiedRow);
         }
 
-        // Step 1: Write to Outward (Live)
+        // Step 1: Write to Outward (Live) — use writeRange to exact row position
+        // (appendRows uses values.append which auto-detects table boundaries and can paste at wrong column)
         const outwardTab = LIVE_TABS.OUTWARD;
-        await appendRows(
+        const existingRows = await readRange(ORDERS_MASTERSHEET_ID, `'${outwardTab}'!A:AG`);
+        const startRow = existingRows.length + 1; // 1-based, after all existing rows (including header)
+        const endRow = startRow + outwardRows.length - 1;
+        await writeRange(
             ORDERS_MASTERSHEET_ID,
-            `'${outwardTab}'!A:AF`,
+            `'${outwardTab}'!A${startRow}:AF${endRow}`,
             outwardRows
         );
         result.rowsWrittenToOutward = outwardRows.length;
-        sheetsLogger.info({ tab: outwardTab, written: outwardRows.length }, 'Written shipped rows to Outward (Live)');
+        sheetsLogger.info({ tab: outwardTab, written: outwardRows.length, startRow, endRow }, 'Written shipped rows to Outward (Live)');
 
         // Step 2: Verify
         const outwardUidRows = await readRange(
