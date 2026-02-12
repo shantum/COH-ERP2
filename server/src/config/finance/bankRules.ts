@@ -36,15 +36,22 @@ export const VENDOR_RULES: Record<string, VendorRule> = {
   'Naaz Handloom':            { category: 'fabric',    debitAccount: 'ACCOUNTS_PAYABLE' }, // has matching invoice
   'Mahaveer & Co':            { category: 'fabric',    debitAccount: 'FABRIC_INVENTORY', description: 'Supima/rib fabric' },
   'Nandlal Vijaykumar':       { category: 'fabric',    debitAccount: 'FABRIC_INVENTORY' },
+  'SHREE DHANLAXMI TEXTILES': { category: 'fabric',    debitAccount: 'FABRIC_INVENTORY' },
+  'Girish & Co':              { category: 'fabric',    debitAccount: 'FABRIC_INVENTORY', description: 'Linen fabric' },
+  'CHACHA Clothing Co.':      { category: 'fabric',    debitAccount: 'FABRIC_INVENTORY', description: 'Sample fabric' },
 
-  // ---- Trims ----
+  // ---- Trims / Labels ----
   'Janaksons':                { category: 'trims',     debitAccount: 'FABRIC_INVENTORY' },
   'Bhairav':                  { category: 'trims',     debitAccount: 'FABRIC_INVENTORY' },
+  'Tag House International':  { category: 'trims',     debitAccount: 'FABRIC_INVENTORY', description: 'Tags/labels' },
+  'Saraswathi Labels & Packaging Pvt. Ltd.': { category: 'trims', debitAccount: 'FABRIC_INVENTORY', description: 'Labels' },
 
   // ---- Rent ----
   'PRATIBHA DILIP JADHAV':    { category: 'rent',      debitAccount: 'OPERATING_EXPENSES', description: 'Unit rent' },
   'PRASAD DILIP JADHAV':      { category: 'rent',      debitAccount: 'OPERATING_EXPENSES', description: 'Unit rent' },
   'CMM':                      { category: 'rent',      debitAccount: 'OPERATING_EXPENSES', description: 'Panjim retail store rent' },
+  'Dilip Somsing Jadhav':     { category: 'rent',      debitAccount: 'OPERATING_EXPENSES', description: 'Unit rent' },
+  'Dilip Somsing Jadhav 2':   { category: 'rent',      debitAccount: 'OPERATING_EXPENSES', description: 'Unit rent' },
 
   // ---- Marketing ----
   'Google India Pvt. Ltd.':   { category: 'marketing', debitAccount: 'OPERATING_EXPENSES' },
@@ -92,6 +99,18 @@ export const VENDOR_RULES: Record<string, VendorRule> = {
   'MOHD. IMRAN DYEING':       { category: 'service',   debitAccount: 'OPERATING_EXPENSES', description: 'Fabric dyeing' },
   'D. K. Prints':             { category: 'service',   debitAccount: 'OPERATING_EXPENSES', description: 'Fabric printing' },
   'S M Exports':              { category: 'service',   debitAccount: 'OPERATING_EXPENSES', description: 'Production service' },
+  'ZED Creation':             { category: 'service',   debitAccount: 'OPERATING_EXPENSES', description: 'Fabric wash processing' },
+  'Dev Process':              { category: 'service',   debitAccount: 'OPERATING_EXPENSES', description: 'Fabric processing' },
+
+  // ---- Garment production vendors ----
+  'SHUBH CREATION':           { category: 'service',   debitAccount: 'OPERATING_EXPENSES', description: 'Garment production' },
+  'DARSHAN CREATION PVT. LTD.': { category: 'service', debitAccount: 'OPERATING_EXPENSES', description: 'Garment production' },
+  'Gemini Fashion':           { category: 'service',   debitAccount: 'OPERATING_EXPENSES', description: 'Garment production' },
+  'Mehta Clothing':           { category: 'service',   debitAccount: 'OPERATING_EXPENSES', description: 'Garment production' },
+  'MAYKA LIFESTYLE':          { category: 'service',   debitAccount: 'OPERATING_EXPENSES', description: 'Garment production' },
+
+  // ---- Retail store ----
+  'Bowerbird Interios':       { category: 'service',   debitAccount: 'OPERATING_EXPENSES', description: 'Retail store interiors' },
 
   // ---- Logistics ----
   'DP INTERNATIONAL':         { category: 'logistics', debitAccount: 'OPERATING_EXPENSES', description: 'Courier/logistics' },
@@ -121,6 +140,8 @@ export const TAILOR_NAMES = new Set([
   'Jyoti Rakesh Kumar Patel',
   'Prabhakar Maharana',
   'Mahindra P',
+  'Sanjay Kumar',
+  'MD ARIF',
 ]);
 
 // ============================================
