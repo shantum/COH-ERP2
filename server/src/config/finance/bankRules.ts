@@ -39,6 +39,9 @@ export const VENDOR_RULES: Record<string, VendorRule> = {
   'SHREE DHANLAXMI TEXTILES': { category: 'fabric',    debitAccount: 'FABRIC_INVENTORY' },
   'Girish & Co':              { category: 'fabric',    debitAccount: 'FABRIC_INVENTORY', description: 'Linen fabric' },
   'CHACHA Clothing Co.':      { category: 'fabric',    debitAccount: 'FABRIC_INVENTORY', description: 'Sample fabric' },
+  'V Clothing':               { category: 'fabric',    debitAccount: 'FABRIC_INVENTORY', description: 'Linen fabric' },
+  'Shakti Silk Mills EXP':    { category: 'fabric',    debitAccount: 'FABRIC_INVENTORY', description: 'Silk fabric' },
+  'Hitesh Trading Co.':       { category: 'fabric',    debitAccount: 'FABRIC_INVENTORY', description: 'Viscose fabric' },
 
   // ---- Trims / Labels ----
   'Janaksons':                { category: 'trims',     debitAccount: 'FABRIC_INVENTORY' },
@@ -87,6 +90,7 @@ export const VENDOR_RULES: Record<string, VendorRule> = {
   // ---- Unit/misc expenses ----
   'Sanjog Enterprises':       { category: 'other',     debitAccount: 'OPERATING_EXPENSES', description: 'Unit water expenses' },
   'M.R. VISHWAKARMA':         { category: 'equipment', debitAccount: 'OPERATING_EXPENSES', description: 'Machine maintenance' },
+  'Kalpesh G. Bhongle':       { category: 'other',     debitAccount: 'OPERATING_EXPENSES', description: 'Unit electrician' },
 
   // ---- Marketing (Meta Ads via RazorpayX) ----
   'Facebook India Online Services Pvt. Ltd.': { category: 'marketing', debitAccount: 'OPERATING_EXPENSES', description: 'Facebook/Meta Ads' },
