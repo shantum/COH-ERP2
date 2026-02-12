@@ -1,0 +1,245 @@
+/**
+ * Bank Statement Import Rules
+ *
+ * Central config for how bank transactions get categorized and booked.
+ * Used by both RazorpayX and HDFC import scripts.
+ *
+ * To change how a vendor/payee is categorized, edit the maps below.
+ * The import scripts read from here — changes take effect on next run.
+ */
+
+// ============================================
+// VENDOR → CATEGORY (RazorpayX payouts)
+// ============================================
+
+export interface VendorRule {
+  /** Finance invoice category */
+  category: string;
+  /** Ledger account to debit when paying this vendor */
+  debitAccount: string;
+  /** Human-readable description override */
+  description?: string;
+}
+
+/**
+ * Maps RazorpayX contact names to their accounting treatment.
+ * When a "vendor bill" payout is made to one of these contacts,
+ * the debitAccount determines where the expense lands in the ledger.
+ */
+export const VENDOR_RULES: Record<string, VendorRule> = {
+  // ---- Fabric suppliers ----
+  'Circular Textiles':        { category: 'fabric',    debitAccount: 'FABRIC_INVENTORY' },
+  'Arkap Knits Pvt Ltd':      { category: 'fabric',    debitAccount: 'FABRIC_INVENTORY' },
+  'SHREE BALAJI ENTERPRISES': { category: 'fabric',    debitAccount: 'FABRIC_INVENTORY' },
+  'Kishanlal & Sons':         { category: 'fabric',    debitAccount: 'FABRIC_INVENTORY' },
+  'Kishorkumar Kakubhai':     { category: 'fabric',    debitAccount: 'FABRIC_INVENTORY' },
+  'Naaz Handloom':            { category: 'fabric',    debitAccount: 'ACCOUNTS_PAYABLE' }, // has matching invoice
+
+  // ---- Trims ----
+  'Janaksons':                { category: 'trims',     debitAccount: 'FABRIC_INVENTORY' },
+
+  // ---- Rent ----
+  'PRATIBHA DILIP JADHAV':    { category: 'rent',      debitAccount: 'OPERATING_EXPENSES', description: 'Unit rent' },
+  'PRASAD DILIP JADHAV':      { category: 'rent',      debitAccount: 'OPERATING_EXPENSES', description: 'Unit rent' },
+  'CMM':                      { category: 'rent',      debitAccount: 'OPERATING_EXPENSES', description: 'Panjim retail store rent' },
+
+  // ---- Marketing ----
+  'Google India Pvt. Ltd.':   { category: 'marketing', debitAccount: 'OPERATING_EXPENSES' },
+  'Brandslane':               { category: 'marketing', debitAccount: 'OPERATING_EXPENSES' },
+  'Snehal Fernandes':         { category: 'marketing', debitAccount: 'OPERATING_EXPENSES', description: 'Social media' },
+  'Studio Sousa':             { category: 'marketing', debitAccount: 'OPERATING_EXPENSES', description: 'Photography' },
+  'Rijuta Banerjee':          { category: 'marketing', debitAccount: 'OPERATING_EXPENSES', description: 'Modeling' },
+  'FRANCESCA D M COTTA':      { category: 'marketing', debitAccount: 'OPERATING_EXPENSES', description: 'Photoshoot styling' },
+
+  // ---- Service vendors ----
+  'Datastraw Technologies Private Limited': { category: 'service', debitAccount: 'OPERATING_EXPENSES', description: 'Tech service' },
+  'Brego Business Private Limited':         { category: 'service', debitAccount: 'OPERATING_EXPENSES' },
+  'Rhyzome Consulting Private Limited':     { category: 'service', debitAccount: 'OPERATING_EXPENSES', description: 'Website management' },
+  'Bharat Pandurang More':                  { category: 'service', debitAccount: 'OPERATING_EXPENSES', description: 'Pattern master' },
+  'Wash N Wear Apparels Processor':         { category: 'service', debitAccount: 'OPERATING_EXPENSES', description: 'Wash processing' },
+
+  // ---- Packaging ----
+  'Basant Envelopes':         { category: 'packaging', debitAccount: 'OPERATING_EXPENSES' },
+
+  // ---- Statutory payments ----
+  'Mohammed Zubear Shaikh':   { category: 'other',     debitAccount: 'OPERATING_EXPENSES', description: 'TDS deposit (statutory)' },
+  'Swapnil Suresh Gite':      { category: 'salary',    debitAccount: 'OPERATING_EXPENSES', description: 'PF deposit (statutory)' },
+
+  // ---- Unit/misc expenses ----
+  'Sanjog Enterprises':       { category: 'other',     debitAccount: 'OPERATING_EXPENSES', description: 'Unit water expenses' },
+  'M.R. VISHWAKARMA':         { category: 'equipment', debitAccount: 'OPERATING_EXPENSES', description: 'Machine maintenance' },
+};
+
+// ============================================
+// TAILOR NAMES (piecework detection)
+// ============================================
+
+/**
+ * People who are on salary but also get small "vendor bill" payouts
+ * for production piecework. When their name appears on a vendor bill,
+ * it's booked as production service expense (not salary).
+ */
+export const TAILOR_NAMES = new Set([
+  'Anwar Ali',
+  'Bablu Turi',
+  'Rajkumar',
+  'Ramji Prajapati',
+  'Leena Divekar',
+  'Chintamani Rajkumar',
+  'Haresh Sadhu Poojary',
+  'Manoj Kumar Goutam',
+  'Vishal Vishwanath Jadhav',
+  'Mohamad Hasmuddin Mansuri',
+  'ABDULLAH ANSARI',
+  'Jyoti Rakesh Kumar Patel',
+  'Prabhakar Maharana',
+  'Mahindra P',
+]);
+
+// ============================================
+// RAZORPAYX PURPOSE → ACCOUNTS
+// ============================================
+
+/**
+ * For non-vendor-bill payouts, the purpose field tells us what it is.
+ */
+export const PURPOSE_RULES: Record<string, { debitAccount: string; creditAccount: string }> = {
+  refund:   { debitAccount: 'SALES_REVENUE',     creditAccount: 'BANK' },
+  salary:   { debitAccount: 'OPERATING_EXPENSES', creditAccount: 'BANK' },
+  rzp_fees: { debitAccount: 'MARKETPLACE_FEES',   creditAccount: 'BANK' },
+};
+
+// ============================================
+// UPI PAYEE → CATEGORY (HDFC statement)
+// ============================================
+
+export interface UpiPayeeRule {
+  debitAccount: string;
+  description: string;
+  category?: string;
+}
+
+/**
+ * Maps UPI payee names (partial match) to their accounting treatment.
+ * Used when parsing HDFC bank statement UPI transactions.
+ */
+export const UPI_PAYEE_RULES: Record<string, UpiPayeeRule> = {
+  'CRED CLUB':                { debitAccount: 'ADVANCES_GIVEN',      description: 'Credit card payment (parked)' },
+  'ITHINK LOGISTIC':          { debitAccount: 'ADVANCES_GIVEN',      description: 'Logistics wallet top-up' },
+  'GOOGLE INDIA DIGITAL':     { debitAccount: 'OPERATING_EXPENSES',  description: 'Google Ads', category: 'marketing' },
+  'GOOGLE INDIA SERVICE':     { debitAccount: 'OPERATING_EXPENSES',  description: 'Google services', category: 'marketing' },
+  'GOOGLE PLAY':              { debitAccount: 'OPERATING_EXPENSES',  description: 'Google Play subscription', category: 'marketing' },
+  'ADOBE SYSTEMS':            { debitAccount: 'OPERATING_EXPENSES',  description: 'Adobe subscription', category: 'service' },
+  'SHOPIFY COMMERCE':         { debitAccount: 'MARKETPLACE_FEES',    description: 'Shopify subscription' },
+  'SHOPFLO':                  { debitAccount: 'MARKETPLACE_FEES',    description: 'Shopflo fee' },
+  'KAISHAR KHAN':             { debitAccount: 'CASH',                description: 'Petty cash' },
+  'SWAPNIL SURESH':           { debitAccount: 'OPERATING_EXPENSES',  description: 'PF deposit (statutory)', category: 'salary' },
+  'PALLAVI  DESAI':           { debitAccount: 'OPERATING_EXPENSES',  description: 'Reimbursement' },
+  'GIRISH AND COMPANY':       { debitAccount: 'FABRIC_INVENTORY',    description: 'Fabric purchase', category: 'fabric' },
+  'PORTER':                   { debitAccount: 'OPERATING_EXPENSES',  description: 'Porter logistics', category: 'logistics' },
+  'BLINKIT':                  { debitAccount: 'OPERATING_EXPENSES',  description: 'Office supplies' },
+  'VIMAL ELECTRONICS':        { debitAccount: 'OPERATING_EXPENSES',  description: 'Office equipment', category: 'equipment' },
+  'MAPUSA SERVICE':           { debitAccount: 'OPERATING_EXPENSES',  description: 'Vehicle/fuel' },
+  'MANISHA SANJAY':           { debitAccount: 'OPERATING_EXPENSES',  description: 'Misc payment' },
+  'MSSHREE SUNDHA':           { debitAccount: 'OPERATING_EXPENSES',  description: 'Courier/transport', category: 'logistics' },
+};
+
+// ============================================
+// HDFC NARRATION PATTERNS
+// ============================================
+
+/**
+ * Rules for categorizing HDFC transactions based on narration text.
+ * Checked in order — first match wins. Use UPPERCASE for matching.
+ *
+ * 'match' is checked against the narration (case-insensitive).
+ * 'skip' means this transaction is an inter-account transfer and should not be imported.
+ */
+export interface NarrationRule {
+  /** String to look for in narration (uppercase) */
+  match: string;
+  /** Second string that must also be present (optional) */
+  matchAlso?: string;
+  /** Whether this applies to withdrawals, deposits, or both */
+  direction: 'in' | 'out' | 'both';
+  /** Skip this transaction (inter-account transfer) */
+  skip?: boolean;
+  /** Ledger account to debit */
+  debitAccount?: string;
+  /** Ledger account to credit */
+  creditAccount?: string;
+  /** Description for the ledger entry */
+  description?: string;
+  /** Finance category */
+  category?: string;
+}
+
+export const HDFC_NARRATION_RULES: NarrationRule[] = [
+  // ---- Inter-account transfers (SKIP) ----
+  { match: 'CANOE DESIGN RAZORPAY RBL', direction: 'both', skip: true, description: 'Transfer to RazorpayX' },
+  { match: 'XXXXXXXX5105',              direction: 'both', skip: true, description: 'Transfer to RazorpayX' },
+  { match: '054105001906-CANOE DESIGN',  direction: 'both', skip: true, description: 'Transfer from ICICI account' },
+
+  // ---- Incoming: Gateway & Marketplace settlements ----
+  { match: 'RAZORPAY SOFTWARE', matchAlso: 'ESCROW', direction: 'in', debitAccount: 'BANK', creditAccount: 'SALES_REVENUE', description: 'Razorpay settlement' },
+  { match: 'PAYU PAYMENTS',              direction: 'in', debitAccount: 'BANK', creditAccount: 'SALES_REVENUE', description: 'PayU settlement' },
+  { match: 'RAZORPAY SOFTWARE', matchAlso: 'NODAL', direction: 'in', debitAccount: 'BANK', creditAccount: 'SALES_REVENUE', description: 'Razorpay Nodal settlement' },
+  { match: 'RAZORPAY PAYMENTS',          direction: 'in', debitAccount: 'BANK', creditAccount: 'SALES_REVENUE', description: 'Razorpay Payments settlement' },
+  { match: 'MYNTRA',                     direction: 'in', debitAccount: 'BANK', creditAccount: 'SALES_REVENUE', description: 'Myntra settlement' },
+  { match: 'NYKAA FASHION',              direction: 'in', debitAccount: 'BANK', creditAccount: 'SALES_REVENUE', description: 'Nykaa settlement' },
+  { match: 'ITHINK LOGISTIC',            direction: 'in', debitAccount: 'BANK', creditAccount: 'SALES_REVENUE', description: 'iThink COD remittance' },
+  { match: 'SHOPFLO',                    direction: 'in', debitAccount: 'BANK', creditAccount: 'SALES_REVENUE', description: 'Shopflo settlement' },
+
+  // ---- Incoming: Owner capital ----
+  { match: 'ANIL GUPTA',                 direction: 'in', debitAccount: 'BANK', creditAccount: 'OWNER_CAPITAL', description: 'Owner capital — Anil Gupta' },
+  { match: 'SANTOSH DESAI',              direction: 'in', debitAccount: 'BANK', creditAccount: 'OWNER_CAPITAL', description: 'Owner capital (loan) — Santosh Desai' },
+
+  // ---- Outgoing: Known categories ----
+  { match: 'RAZORPAY PAYROLL',           direction: 'out', debitAccount: 'OPERATING_EXPENSES', creditAccount: 'BANK', description: 'Salary: Payroll', category: 'salary' },
+  { match: 'FACEBOOK INDIA',             direction: 'out', debitAccount: 'OPERATING_EXPENSES', creditAccount: 'BANK', description: 'Facebook/Meta Ads', category: 'marketing' },
+  { match: 'BILLDKPLAYSTOREGOOGL',       direction: 'out', debitAccount: 'OPERATING_EXPENSES', creditAccount: 'BANK', description: 'Google Play Store', category: 'marketing' },
+  { match: 'BROWNTAPE',                  direction: 'out', debitAccount: 'OPERATING_EXPENSES', creditAccount: 'BANK', description: 'BrownTape (software)', category: 'service' },
+
+  // ---- Outgoing: Cash ----
+  { match: 'ATW-',                       direction: 'out', debitAccount: 'CASH', creditAccount: 'BANK', description: 'ATM withdrawal' },
+  { match: 'NWD-',                       direction: 'out', debitAccount: 'CASH', creditAccount: 'BANK', description: 'Cash withdrawal' },
+
+  // ---- Outgoing: Bank charges ----
+  { match: 'SI ',                        direction: 'out', debitAccount: 'OPERATING_EXPENSES', creditAccount: 'BANK', description: 'Bank standing instruction' },
+];
+
+// ============================================
+// HELPERS
+// ============================================
+
+/** Look up a vendor rule by RazorpayX contact name. Falls back to tailor piecework or default. */
+export function getVendorRule(contactName: string, purpose: string): VendorRule {
+  if (VENDOR_RULES[contactName]) return VENDOR_RULES[contactName];
+  if (purpose === 'vendor bill' && TAILOR_NAMES.has(contactName)) {
+    return { category: 'service', debitAccount: 'OPERATING_EXPENSES', description: 'Production piecework' };
+  }
+  return { category: 'other', debitAccount: 'OPERATING_EXPENSES' };
+}
+
+/** Look up a UPI payee rule by partial name match. Returns null if no match. */
+export function getUpiPayeeRule(payeeName: string): UpiPayeeRule | null {
+  const upper = payeeName.toUpperCase();
+  for (const [key, rule] of Object.entries(UPI_PAYEE_RULES)) {
+    if (upper.includes(key)) return rule;
+  }
+  return null;
+}
+
+/** Match an HDFC narration against the rules. Returns the first matching rule or null. */
+export function matchNarrationRule(narration: string, isWithdrawal: boolean): NarrationRule | null {
+  const n = narration.toUpperCase();
+  const direction = isWithdrawal ? 'out' : 'in';
+
+  for (const rule of HDFC_NARRATION_RULES) {
+    if (rule.direction !== 'both' && rule.direction !== direction) continue;
+    if (!n.includes(rule.match)) continue;
+    if (rule.matchAlso && !n.includes(rule.matchAlso)) continue;
+    return rule;
+  }
+  return null;
+}
