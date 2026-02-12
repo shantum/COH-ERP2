@@ -70,6 +70,21 @@ export const VENDOR_RULES: Record<string, VendorRule> = {
   // ---- Unit/misc expenses ----
   'Sanjog Enterprises':       { category: 'other',     debitAccount: 'OPERATING_EXPENSES', description: 'Unit water expenses' },
   'M.R. VISHWAKARMA':         { category: 'equipment', debitAccount: 'OPERATING_EXPENSES', description: 'Machine maintenance' },
+
+  // ---- Marketing (Meta Ads via RazorpayX) ----
+  'Facebook India Online Services Pvt. Ltd.': { category: 'marketing', debitAccount: 'OPERATING_EXPENSES', description: 'Facebook/Meta Ads' },
+
+  // ---- Packaging ----
+  'Greymark Packaging (MUM)': { category: 'packaging', debitAccount: 'OPERATING_EXPENSES', description: 'Packaging' },
+  'Barscan Systems & Ribbons Pvt. Ltd': { category: 'packaging', debitAccount: 'OPERATING_EXPENSES', description: 'Barcode labels' },
+
+  // ---- Fabric processing ----
+  'MOHD. IMRAN DYEING':       { category: 'service',   debitAccount: 'OPERATING_EXPENSES', description: 'Fabric dyeing' },
+  'D. K. Prints':             { category: 'service',   debitAccount: 'OPERATING_EXPENSES', description: 'Fabric printing' },
+  'S M Exports':              { category: 'service',   debitAccount: 'OPERATING_EXPENSES', description: 'Production service' },
+
+  // ---- Logistics ----
+  'DP INTERNATIONAL':         { category: 'logistics', debitAccount: 'OPERATING_EXPENSES', description: 'Courier/logistics' },
 };
 
 // ============================================
