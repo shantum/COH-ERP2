@@ -39,7 +39,7 @@ export const INGESTED_PREFIX = 'DONE:' as const;
 /**
  * How many days to keep DONE rows before cleanup deletes them.
  */
-export const CLEANUP_RETENTION_DAYS = 7;
+export const CLEANUP_RETENTION_DAYS = 0;
 
 // ============================================
 // SPREADSHEET IDS
