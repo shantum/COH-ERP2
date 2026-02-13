@@ -1170,6 +1170,18 @@ async function deductFabricForSamplingRows(
         samplingRows.map(r => r.referenceId)
     );
 
+    // Skip rows dated before the last reconciliation — those balances were
+    // already verified by physical count, so deducting again would double-count
+    const lastRecon = await prisma.fabricColourTransaction.findFirst({
+        where: { reason: 'reconciliation' },
+        orderBy: { createdAt: 'desc' },
+        select: { createdAt: true },
+    });
+    const lastReconDate = lastRecon?.createdAt ?? null;
+    if (lastReconDate) {
+        sheetsLogger.debug({ lastReconDate: lastReconDate.toISOString() }, 'Fabric deduction: will skip rows dated before last reconciliation');
+    }
+
     // Build fabric transaction data
     const fabricTxnData: Array<{
         fabricColourId: string;
@@ -1186,11 +1198,18 @@ async function deductFabricForSamplingRows(
     let skippedNoFabric = 0;
     let skippedZeroConsumption = 0;
     let skippedDuplicate = 0;
+    let skippedBeforeRecon = 0;
 
     for (const row of samplingRows) {
         // Skip duplicates
         if (existingFabricRefs.has(row.referenceId)) {
             skippedDuplicate++;
+            continue;
+        }
+
+        // Skip rows dated before the last reconciliation
+        if (lastReconDate && row.date! <= lastReconDate) {
+            skippedBeforeRecon++;
             continue;
         }
 
@@ -1253,6 +1272,7 @@ async function deductFabricForSamplingRows(
         skippedNoFabric,
         skippedZeroConsumption,
         skippedDuplicate,
+        skippedBeforeRecon,
         affectedFabricColours: affectedFabricColourIds.size,
     }, 'Fabric deduction for sampling inwards complete');
 }
