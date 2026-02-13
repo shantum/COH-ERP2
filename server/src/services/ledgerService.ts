@@ -251,20 +251,12 @@ export async function bookFabricConsumptionForMonth(
   const startIST = new Date(Date.UTC(year, month - 1, 1, -5, -30));
   const endIST = new Date(Date.UTC(year, month, 1, -5, -30));
 
-  // Calculate fabric cost for all production inwards × BOM fabric cost
-  // Includes ALL inward transactions except returns/RTO (those are handled by bookReturnReversalForMonth)
+  // Calculate cost for all production inwards using pre-computed SKU bomCost
+  // bomCost is trigger-maintained (includes fabric + trims + services) — no JOIN multiplication risk
   const result = await prisma.$queryRaw<{ fabric_cost: number }[]>`
-    SELECT COALESCE(SUM(
-      it.qty
-      * COALESCE(vbl.quantity, s."fabricConsumption", 1.5)
-      * COALESCE(fc."costPerUnit", f."costPerUnit", 0)
-    ), 0)::float AS fabric_cost
+    SELECT COALESCE(SUM(it.qty * COALESCE(s."bomCost", 0)), 0)::float AS fabric_cost
     FROM "InventoryTransaction" it
     JOIN "Sku" s ON s.id = it."skuId"
-    JOIN "Variation" v ON v.id = s."variationId"
-    LEFT JOIN "VariationBomLine" vbl ON vbl."variationId" = v.id AND vbl."fabricColourId" IS NOT NULL
-    LEFT JOIN "FabricColour" fc ON fc.id = vbl."fabricColourId"
-    LEFT JOIN "Fabric" f ON f.id = fc."fabricId"
     WHERE it."txnType" = 'inward'
       AND it.reason NOT IN ('rto_received', 'return_receipt')
       AND it."createdAt" >= ${startIST}
@@ -352,19 +344,11 @@ export async function bookShipmentCOGSForMonth(
   const startIST = new Date(Date.UTC(year, month - 1, 1, -5, -30));
   const endIST = new Date(Date.UTC(year, month, 1, -5, -30));
 
-  // Calculate cost of shipped goods using same BOM formula
+  // Calculate cost of shipped goods using pre-computed SKU bomCost
   const result = await prisma.$queryRaw<{ total_cost: number }[]>`
-    SELECT COALESCE(SUM(
-      it.qty
-      * COALESCE(vbl.quantity, s."fabricConsumption", 1.5)
-      * COALESCE(fc."costPerUnit", f."costPerUnit", 0)
-    ), 0)::float AS total_cost
+    SELECT COALESCE(SUM(it.qty * COALESCE(s."bomCost", 0)), 0)::float AS total_cost
     FROM "InventoryTransaction" it
     JOIN "Sku" s ON s.id = it."skuId"
-    JOIN "Variation" v ON v.id = s."variationId"
-    LEFT JOIN "VariationBomLine" vbl ON vbl."variationId" = v.id AND vbl."fabricColourId" IS NOT NULL
-    LEFT JOIN "FabricColour" fc ON fc.id = vbl."fabricColourId"
-    LEFT JOIN "Fabric" f ON f.id = fc."fabricId"
     WHERE it."txnType" = 'outward'
       AND it.reason = 'sale'
       AND it."createdAt" >= ${startIST}
@@ -450,19 +434,11 @@ export async function bookReturnReversalForMonth(
   const startIST = new Date(Date.UTC(year, month - 1, 1, -5, -30));
   const endIST = new Date(Date.UTC(year, month, 1, -5, -30));
 
-  // Calculate cost of returned goods using same BOM formula
+  // Calculate cost of returned goods using pre-computed SKU bomCost
   const result = await prisma.$queryRaw<{ total_cost: number }[]>`
-    SELECT COALESCE(SUM(
-      it.qty
-      * COALESCE(vbl.quantity, s."fabricConsumption", 1.5)
-      * COALESCE(fc."costPerUnit", f."costPerUnit", 0)
-    ), 0)::float AS total_cost
+    SELECT COALESCE(SUM(it.qty * COALESCE(s."bomCost", 0)), 0)::float AS total_cost
     FROM "InventoryTransaction" it
     JOIN "Sku" s ON s.id = it."skuId"
-    JOIN "Variation" v ON v.id = s."variationId"
-    LEFT JOIN "VariationBomLine" vbl ON vbl."variationId" = v.id AND vbl."fabricColourId" IS NOT NULL
-    LEFT JOIN "FabricColour" fc ON fc.id = vbl."fabricColourId"
-    LEFT JOIN "Fabric" f ON f.id = fc."fabricId"
     WHERE it."txnType" = 'inward'
       AND it.reason IN ('rto_received', 'return_receipt')
       AND it."createdAt" >= ${startIST}
