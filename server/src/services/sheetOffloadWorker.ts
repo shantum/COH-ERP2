@@ -61,8 +61,12 @@ import {
     FABRIC_BALANCES_HEADERS,
     FABRIC_BALANCES_COLS,
     FABRIC_BALANCES_COUNT_DATETIME,
+    MAX_QTY_PER_ROW,
+    MAX_FUTURE_DAYS,
+    MAX_PAST_DAYS,
 } from '../config/sync/sheets.js';
 import { generateFabricColourCode } from '../config/fabric/codes.js';
+import { bookFabricConsumptionForMonth, bookShipmentCOGSForMonth, bookReturnReversalForMonth } from './ledgerService.js';
 
 // ============================================
 // TYPES
@@ -99,6 +103,7 @@ interface CleanupDoneResult {
     startedAt: string;
     inwardDeleted: number;
     outwardDeleted: number;
+    fabricInwardDeleted: number;
     errors: string[];
     durationMs: number;
 }
@@ -450,9 +455,15 @@ function parseSheetDate(value: string | undefined): Date | null {
 
     // ISO format "YYYY-MM-DD"
     if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) {
-        const parsed = new Date(trimmed);
-        if (!isNaN(parsed.getTime()) && parsed.getFullYear() > 1900) return parsed;
-        return null;
+        const isoMatch = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (!isoMatch) return null;
+        const [, yStr, mStr, dStr] = isoMatch;
+        const y = Number(yStr), m = Number(mStr), dy = Number(dStr);
+        const parsed = new Date(y, m - 1, dy);
+        // Validate calendar date didn't roll over (e.g. Feb 31 → Mar 3)
+        if (parsed.getFullYear() !== y || parsed.getMonth() !== m - 1 || parsed.getDate() !== dy) return null;
+        if (y < 1901) return null;
+        return parsed;
     }
 
     // Slash/dash/dot separated: A/B/YYYY
@@ -478,8 +489,9 @@ function parseSheetDate(value: string | undefined): Date | null {
     }
 
     const d = new Date(year, month - 1, day);
-    if (!isNaN(d.getTime())) return d;
-    return null;
+    // Validate calendar date didn't roll over (e.g. Feb 31 → Mar 3)
+    if (d.getFullYear() !== year || d.getMonth() !== month - 1 || d.getDate() !== day) return null;
+    return d;
 }
 
 /**
@@ -534,10 +546,18 @@ function parseSheetDateTime(value: string | undefined): Date | null {
     return null;
 }
 
+/**
+ * Parse quantity from sheet cell.
+ * Returns 0 for empty/invalid. Rejects Infinity, NaN, and non-integer values.
+ * Returns negative value to signal "non-integer" for better error messages.
+ * Convention: 0 = empty/invalid, -1 = non-integer fractional, -2 = Infinity/NaN
+ */
 function parseQty(value: string | undefined): number {
     if (!value?.trim()) return 0;
-    const num = Math.round(Number(value.trim()));
-    return num > 0 ? num : 0;
+    const raw = Number(value.trim());
+    if (!Number.isFinite(raw)) return -2; // Infinity or NaN
+    if (raw !== Math.floor(raw)) return -1; // fractional like 2.5
+    return raw > 0 ? raw : 0;
 }
 
 function mapSourceToReason(source: string): TxnReason {
@@ -595,10 +615,11 @@ async function writeImportErrors(
     }
     if (current) ranges.push(current);
 
-    for (const range of ranges) {
-        const rangeStr = `'${tab}'!${errorColLetter}${range.startRow}:${errorColLetter}${range.startRow + range.values.length - 1}`;
-        await writeRange(spreadsheetId, rangeStr, range.values);
-    }
+    const batchData = ranges.map(range => ({
+        range: `'${tab}'!${errorColLetter}${range.startRow}:${errorColLetter}${range.startRow + range.values.length - 1}`,
+        values: range.values,
+    }));
+    await batchWriteRanges(spreadsheetId, batchData);
 
     const errorCount = sorted.filter(e => e.error).length;
     if (errorCount > 0) {
@@ -610,6 +631,7 @@ interface SkuLookupInfo {
     id: string;
     variationId: string;
     fabricConsumption: number;
+    isActive: boolean;
 }
 
 async function bulkLookupSkus(skuCodes: string[]): Promise<Map<string, SkuLookupInfo>> {
@@ -617,9 +639,9 @@ async function bulkLookupSkus(skuCodes: string[]): Promise<Map<string, SkuLookup
     const unique = [...new Set(skuCodes)];
     const skus = await prisma.sku.findMany({
         where: { skuCode: { in: unique } },
-        select: { id: true, skuCode: true, variationId: true, fabricConsumption: true },
+        select: { id: true, skuCode: true, variationId: true, fabricConsumption: true, isActive: true },
     });
-    return new Map(skus.map(s => [s.skuCode, { id: s.id, variationId: s.variationId, fabricConsumption: s.fabricConsumption }]));
+    return new Map(skus.map(s => [s.skuCode, { id: s.id, variationId: s.variationId, fabricConsumption: s.fabricConsumption, isActive: s.isActive }]));
 }
 
 interface OrderMapEntry {
@@ -648,13 +670,30 @@ async function validateOutwardRows(
         skipReasons[reason] = (skipReasons[reason] ?? 0) + 1;
     };
 
-    // Pass 1: basic field validation
+    const now = new Date();
+    const maxFuture = new Date(now.getTime() + MAX_FUTURE_DAYS * 24 * 60 * 60 * 1000);
+    const maxPast = new Date(now.getTime() - MAX_PAST_DAYS * 24 * 60 * 60 * 1000);
+
+    // Pass 1: strict field validation
     const afterBasic: ParsedRow[] = [];
     for (const row of rows) {
         if (!row.skuCode) { addSkip('empty_sku'); continue; }
+        if (row.qty === -2) { addSkip('qty_not_a_number'); continue; }
+        if (row.qty === -1) { addSkip('qty_not_whole_number'); continue; }
         if (row.qty <= 0) { addSkip('zero_qty'); continue; }
+        if (row.qty > MAX_QTY_PER_ROW) { addSkip(`qty_exceeds_max_${MAX_QTY_PER_ROW}`); continue; }
         if (!skuMap.has(row.skuCode)) { addSkip('unknown_sku'); continue; }
+        if (skuMap.has(row.skuCode) && !skuMap.get(row.skuCode)!.isActive) { addSkip('inactive_sku'); continue; }
         if (!row.date) { addSkip('invalid_date'); continue; }
+        if (row.date > maxFuture) { addSkip('date_too_far_in_future'); continue; }
+        if (row.date < maxPast) { addSkip('date_too_old'); continue; }
+        // Order rows must have courier and AWB
+        if (row.extra) {
+            if (!row.courier) { addSkip('missing_courier'); continue; }
+            if (!row.awb) { addSkip('missing_awb'); continue; }
+        }
+        // Non-order rows must have a destination
+        if (!row.extra && !row.source) { addSkip('missing_destination'); continue; }
         afterBasic.push(row);
     }
 
@@ -881,6 +920,7 @@ function validateInwardRow(
     parsed: ParsedRow,
     rawRow: unknown[],
     skuMap: Map<string, SkuLookupInfo>,
+    activeSkuCodes: Set<string>,
 ): string[] {
     const reasons: string[] = [];
 
@@ -892,16 +932,38 @@ function validateInwardRow(
 
     const source = parsed.source.toLowerCase();
 
+    // Required fields
     if (!parsed.skuCode)    reasons.push('missing SKU (A)');
     if (!rawQty)            reasons.push('missing Qty (B)');
     if (!product)           reasons.push('missing Product (C)');
     if (!dateStr)           reasons.push('missing Date (D)');
     if (!parsed.source)     reasons.push('missing Source (E)');
     if (!parsed.extra)      reasons.push('missing Done By (F)');
-    if (rawQty && parsed.qty <= 0) reasons.push('Qty must be > 0');
+
+    // Qty validation
+    if (rawQty && parsed.qty === -2) reasons.push('Qty is not a valid number');
+    if (rawQty && parsed.qty === -1) reasons.push('Qty must be a whole number (no decimals)');
+    if (rawQty && parsed.qty === 0)  reasons.push('Qty must be > 0');
+    if (parsed.qty > MAX_QTY_PER_ROW) reasons.push(`Qty ${parsed.qty} exceeds max ${MAX_QTY_PER_ROW}`);
+
+    // Date validation — must be parseable, not in future, not too old
+    if (dateStr && !parsed.date) {
+        reasons.push(`invalid Date format "${dateStr}" — use DD/MM/YYYY`);
+    }
+    if (parsed.date) {
+        const now = new Date();
+        const maxFuture = new Date(now.getTime() + MAX_FUTURE_DAYS * 24 * 60 * 60 * 1000);
+        const maxPast = new Date(now.getTime() - MAX_PAST_DAYS * 24 * 60 * 60 * 1000);
+        if (parsed.date > maxFuture) reasons.push(`Date is too far in the future (max ${MAX_FUTURE_DAYS} days)`);
+        if (parsed.date < maxPast) reasons.push(`Date is too old (max ${MAX_PAST_DAYS} days in past)`);
+    }
+
+    // Source validation
     if (parsed.source && !VALID_INWARD_LIVE_SOURCES.some(s => s === source)) {
         reasons.push(`invalid Source "${parsed.source}"`);
     }
+
+    // Source-specific requirements
     if (source === 'repacking' && !barcode) {
         reasons.push('missing Barcode (G) for repacking');
     }
@@ -911,8 +973,12 @@ function validateInwardRow(
     if (source === 'adjustment' && !notes) {
         reasons.push('missing Notes (I) for adjustment');
     }
+
+    // SKU validation — must exist AND be active
     if (parsed.skuCode && !skuMap.has(parsed.skuCode)) {
         reasons.push(`unknown SKU "${parsed.skuCode}"`);
+    } else if (parsed.skuCode && !activeSkuCodes.has(parsed.skuCode)) {
+        reasons.push(`inactive SKU "${parsed.skuCode}"`);
     }
 
     return reasons;
@@ -1008,7 +1074,7 @@ async function deductFabricForSamplingRows(
             referenceId: row.referenceId,
             notes: `${OFFLOAD_NOTES_PREFIX} Auto fabric deduction for sampling inward`,
             createdById: adminUserId,
-            createdAt: row.date ?? new Date(),
+            createdAt: row.date!, // Validated as non-null during validation step
         });
 
         affectedFabricColourIds.add(fabric.fabricColourId);
@@ -1114,6 +1180,9 @@ async function ingestInwardLive(result: IngestInwardResult): Promise<Set<string>
 
     // --- Step 2: Bulk lookup SKUs for validation ---
     const skuMap = await bulkLookupSkus(parsed.map(r => r.skuCode));
+    const activeSkuCodes = new Set<string>(
+        [...skuMap.entries()].filter(([, info]) => info.isActive).map(([code]) => code)
+    );
 
     // --- Step 3: Validate each row ---
     const validRows: ParsedRow[] = [];
@@ -1122,7 +1191,7 @@ async function ingestInwardLive(result: IngestInwardResult): Promise<Set<string>
     let invalidCount = 0;
 
     for (const p of parsed) {
-        const reasons = validateInwardRow(p, rows[p.rowIndex], skuMap);
+        const reasons = validateInwardRow(p, rows[p.rowIndex], skuMap, activeSkuCodes);
         if (reasons.length === 0) {
             validRows.push(p);
         } else {
@@ -1210,7 +1279,7 @@ async function ingestInwardLive(result: IngestInwardResult): Promise<Set<string>
                 notes: row.notes,
                 userNotes: row.userNotes || null,
                 createdById: adminUserId,
-                createdAt: row.date ?? new Date(),
+                createdAt: row.date!, // Validated as non-null during validation step
                 source: row.source || null,
                 performedBy: row.extra || null,
                 tailorNumber: row.tailor || null,
@@ -1246,6 +1315,63 @@ async function ingestInwardLive(result: IngestInwardResult): Promise<Set<string>
         } catch (err: unknown) {
             const message = err instanceof Error ? err.message : 'Unknown error';
             sheetsLogger.error({ error: message }, 'Fabric deduction failed (non-fatal)');
+        }
+    }
+
+    // --- Step 7: Book production → finished goods for affected months ---
+    // When sampling inwards are ingested, fabric becomes finished goods
+    const samplingRows = successfulRows.filter(
+        r => FABRIC_DEDUCT_SOURCES.some(s => s === r.source.toLowerCase().trim())
+    );
+    if (samplingRows.length > 0) {
+        try {
+            const affectedMonths = new Set<string>();
+            for (const row of samplingRows) {
+                const d = row.date!; // Validated as non-null during validation step
+                const ist = new Date(d.getTime() + (5.5 * 60 * 60 * 1000));
+                affectedMonths.add(`${ist.getFullYear()}-${ist.getMonth() + 1}`);
+            }
+
+            for (const key of affectedMonths) {
+                const [y, m] = key.split('-').map(Number);
+                const res = await bookFabricConsumptionForMonth(prisma, y, m, adminUserId);
+                sheetsLogger.info(
+                    { month: `${y}-${String(m).padStart(2, '0')}`, fabricCost: res.fabricCost, action: res.action },
+                    'Production → Finished Goods updated'
+                );
+            }
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : 'Unknown error';
+            sheetsLogger.error({ error: message }, 'Production finished goods booking failed (non-fatal)');
+        }
+    }
+
+    // --- Step 8: Book return/RTO COGS reversal for affected months ---
+    // When RTO/return inwards are ingested, returned goods go back to finished goods
+    const returnSources = ['rto', 'return', 'repacking'];
+    const returnRows = successfulRows.filter(
+        r => returnSources.includes(r.source.toLowerCase().trim())
+    );
+    if (returnRows.length > 0) {
+        try {
+            const returnMonths = new Set<string>();
+            for (const row of returnRows) {
+                const d = row.date!; // Validated as non-null during validation step
+                const ist = new Date(d.getTime() + (5.5 * 60 * 60 * 1000));
+                returnMonths.add(`${ist.getFullYear()}-${ist.getMonth() + 1}`);
+            }
+
+            for (const key of returnMonths) {
+                const [y, m] = key.split('-').map(Number);
+                const res = await bookReturnReversalForMonth(prisma, y, m, adminUserId);
+                sheetsLogger.info(
+                    { month: `${y}-${String(m).padStart(2, '0')}`, amount: res.amount, action: res.action },
+                    'Return/RTO COGS reversal updated'
+                );
+            }
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : 'Unknown error';
+            sheetsLogger.error({ error: message }, 'Return COGS reversal failed (non-fatal)');
         }
     }
 
@@ -1298,11 +1424,12 @@ async function ingestOutwardLive(
 
         const dest = orderNo ? 'Customer' : '';
 
-        if (!skuCode || qty === 0) continue;
-
         // Skip already-ingested rows
         const status = String(row[OUTWARD_LIVE_COLS.IMPORT_ERRORS] ?? '').trim();
         if (status.startsWith(INGESTED_PREFIX)) continue;
+
+        // Skip completely empty rows (no data at all)
+        if (!skuCode && !String(row[OUTWARD_LIVE_COLS.QTY] ?? '').trim()) continue;
 
         let refId = buildReferenceId(REF_PREFIX.OUTWARD_LIVE, skuCode, qty, dateStr, orderNo || dest);
         if (seenRefs.has(refId)) {
@@ -1369,11 +1496,23 @@ async function ingestOutwardLive(
         if (validRefIds.has(row.referenceId)) continue;    // valid — will be marked DONE
         // Skipped — determine reason
         const skuInfo = skuMap.get(row.skuCode);
+        const now = new Date();
+        const maxFutureDate = new Date(now.getTime() + MAX_FUTURE_DAYS * 24 * 60 * 60 * 1000);
+        const maxPastDate = new Date(now.getTime() - MAX_PAST_DAYS * 24 * 60 * 60 * 1000);
         let reason = 'unknown';
         if (!row.skuCode) reason = 'empty_sku';
+        else if (row.qty === -2) reason = 'qty_not_a_number';
+        else if (row.qty === -1) reason = 'qty_not_whole_number';
         else if (row.qty <= 0) reason = 'zero_qty';
+        else if (row.qty > MAX_QTY_PER_ROW) reason = `qty_exceeds_max_${MAX_QTY_PER_ROW}`;
         else if (!skuInfo) reason = 'unknown_sku';
+        else if (!skuInfo.isActive) reason = 'inactive_sku';
         else if (!row.date) reason = 'invalid_date';
+        else if (row.date > maxFutureDate) reason = 'date_too_far_in_future';
+        else if (row.date < maxPastDate) reason = 'date_too_old';
+        else if (row.extra && !row.courier) reason = 'missing_courier';
+        else if (row.extra && !row.awb) reason = 'missing_awb';
+        else if (!row.extra && !row.source) reason = 'missing_destination';
         else if (row.extra) {
             const order = orderMap.get(row.extra);
             if (!order) reason = 'order_not_found';
@@ -1761,12 +1900,13 @@ async function updateSheetBalances(
 
         if (updates.length > 0) {
             const ranges = groupIntoRanges(updates);
-            for (const range of ranges) {
-                const rangeStr = `'${INVENTORY_TAB.NAME}'!${INVENTORY_TAB.ERP_BALANCE_COL}${range.startRow}:${INVENTORY_TAB.ERP_BALANCE_COL}${range.startRow + range.values.length - 1}`;
-                await writeRange(ORDERS_MASTERSHEET_ID, rangeStr, range.values);
-            }
+            const batchData = ranges.map(range => ({
+                range: `'${INVENTORY_TAB.NAME}'!${INVENTORY_TAB.ERP_BALANCE_COL}${range.startRow}:${INVENTORY_TAB.ERP_BALANCE_COL}${range.startRow + range.values.length - 1}`,
+                values: range.values,
+            }));
+            await batchWriteRanges(ORDERS_MASTERSHEET_ID, batchData);
             totalUpdated = updates.length;
-            sheetsLogger.info({ updated: updates.length, ranges: ranges.length }, 'Inventory col R updated');
+            sheetsLogger.info({ updated: updates.length, ranges: ranges.length }, 'Inventory col R updated (batch)');
         }
     } catch (err: unknown) {
         const message = err instanceof Error ? err.message : 'Unknown error';
@@ -1792,11 +1932,12 @@ async function updateSheetBalances(
 
             if (updates.length > 0) {
                 const ranges = groupIntoRanges(updates);
-                for (const range of ranges) {
-                    const rangeStr = `'${LEDGER_TABS.BALANCE_FINAL}'!F${range.startRow}:F${range.startRow + range.values.length - 1}`;
-                    await writeRange(OFFICE_LEDGER_ID, rangeStr, range.values);
-                }
-                sheetsLogger.info({ updated: updates.length }, 'Balance (Final) col F updated');
+                const batchData = ranges.map(range => ({
+                    range: `'${LEDGER_TABS.BALANCE_FINAL}'!F${range.startRow}:F${range.startRow + range.values.length - 1}`,
+                    values: range.values,
+                }));
+                await batchWriteRanges(OFFICE_LEDGER_ID, batchData);
+                sheetsLogger.info({ updated: updates.length }, 'Balance (Final) col F updated (batch)');
             }
         }
     } catch (err: unknown) {
@@ -2003,12 +2144,15 @@ async function previewIngestInward(): Promise<IngestPreviewResult | null> {
 
         // Validate
         const skuMap = await bulkLookupSkus(parsed.map(r => r.skuCode));
+        const activeSkuCodes = new Set<string>(
+            [...skuMap.entries()].filter(([, info]) => info.isActive).map(([code]) => code)
+        );
         const validRows: ParsedRow[] = [];
         const validationErrors: Record<string, number> = {};
         const rowErrors = new Map<string, string>(); // referenceId → error text
 
         for (const p of parsed) {
-            const reasons = validateInwardRow(p, rows[p.rowIndex], skuMap);
+            const reasons = validateInwardRow(p, rows[p.rowIndex], skuMap, activeSkuCodes);
             if (reasons.length === 0) {
                 validRows.push(p);
             } else {
@@ -2027,7 +2171,7 @@ async function previewIngestInward(): Promise<IngestPreviewResult | null> {
         // Write status column: "ok" for valid, "ok (already in ERP)" for dupes, error text for invalid
         const importErrors: Array<{ rowIndex: number; error: string }> = [];
         for (const p of parsed) {
-            const reasons = validateInwardRow(p, rows[p.rowIndex], skuMap);
+            const reasons = validateInwardRow(p, rows[p.rowIndex], skuMap, activeSkuCodes);
             if (reasons.length > 0) {
                 importErrors.push({ rowIndex: p.rowIndex, error: reasons.join('; ') });
             } else if (existingRefs.has(p.referenceId)) {
@@ -2168,6 +2312,31 @@ async function triggerIngestOutward(): Promise<IngestOutwardResult | null> {
         // Link outward to order lines
         if (linkableItems.length > 0) {
             await linkOutwardToOrders(linkableItems, result, orderMap);
+        }
+
+        // Book shipment COGS for affected months (sale outwards → Dr COGS, Cr FINISHED_GOODS)
+        if (linkableItems.length > 0) {
+            try {
+                const adminUserId = await getAdminUserId();
+                const cogsMonths = new Set<string>();
+                for (const item of linkableItems) {
+                    const d = item.date ?? new Date();
+                    const ist = new Date(d.getTime() + (5.5 * 60 * 60 * 1000));
+                    cogsMonths.add(`${ist.getFullYear()}-${ist.getMonth() + 1}`);
+                }
+
+                for (const key of cogsMonths) {
+                    const [y, m] = key.split('-').map(Number);
+                    const res = await bookShipmentCOGSForMonth(prisma, y, m, adminUserId);
+                    sheetsLogger.info(
+                        { month: `${y}-${String(m).padStart(2, '0')}`, amount: res.amount, action: res.action },
+                        'Shipment COGS updated'
+                    );
+                }
+            } catch (err: unknown) {
+                const message = err instanceof Error ? err.message : 'Unknown error';
+                sheetsLogger.error({ error: message }, 'Shipment COGS booking failed (non-fatal)');
+            }
         }
 
         // Balance update + cache invalidation if anything was ingested
@@ -2454,6 +2623,7 @@ async function triggerMoveShipped(): Promise<MoveShippedResult | null> {
     }
 
     moveShippedState.isRunning = true;
+    try {
     const startTime = Date.now();
     const result: MoveShippedResult = {
         shippedRowsFound: 0,
@@ -2624,11 +2794,12 @@ async function triggerMoveShipped(): Promise<MoveShippedResult | null> {
             .map(r => ({ row: r.rowIndex + 1, value: 1 }))
             .sort((a, b) => a.row - b.row);
         const adRanges = groupIntoRanges(adUpdates);
-        for (const range of adRanges) {
-            const rangeStr = `'${tab}'!AD${range.startRow}:AD${range.startRow + range.values.length - 1}`;
-            await writeRange(ORDERS_MASTERSHEET_ID, rangeStr, range.values);
-        }
-        sheetsLogger.info({ marked: verifiedRows.length, apiCalls: adRanges.length }, 'Marked Outward Done on verified source rows');
+        const adBatchData = adRanges.map(range => ({
+            range: `'${tab}'!AD${range.startRow}:AD${range.startRow + range.values.length - 1}`,
+            values: range.values,
+        }));
+        await batchWriteRanges(ORDERS_MASTERSHEET_ID, adBatchData);
+        sheetsLogger.info({ marked: verifiedRows.length, ranges: adRanges.length }, 'Marked Outward Done on verified source rows (batch)');
 
         // Step 4: Delete verified source rows
         try {
@@ -2670,6 +2841,9 @@ async function triggerMoveShipped(): Promise<MoveShippedResult | null> {
     }, 'triggerMoveShipped completed');
 
     return result;
+    } finally {
+        moveShippedState.isRunning = false;
+    }
 }
 
 // ============================================
@@ -2976,11 +3150,13 @@ async function triggerCleanupDoneRows(): Promise<CleanupDoneResult | null> {
     }
 
     cleanupDoneState.isRunning = true;
+    try {
     const startTime = Date.now();
     const result: CleanupDoneResult = {
         startedAt: new Date().toISOString(),
         inwardDeleted: 0,
         outwardDeleted: 0,
+        fabricInwardDeleted: 0,
         errors: [],
         durationMs: 0,
     };
@@ -3049,6 +3225,35 @@ async function triggerCleanupDoneRows(): Promise<CleanupDoneResult | null> {
             sheetsLogger.error({ error: message }, 'Failed to cleanup outward DONE rows');
         }
 
+        // --- Fabric Inward (Live) ---
+        try {
+            const fabricRows = await readRange(ORDERS_MASTERSHEET_ID, `'${LIVE_TABS.FABRIC_INWARD}'!A:K`);
+            const fabricToDelete: number[] = [];
+
+            for (let i = 1; i < fabricRows.length; i++) {
+                const row = fabricRows[i];
+                const status = String(row[FABRIC_INWARD_LIVE_COLS.STATUS] ?? '').trim();
+                if (!status.startsWith(INGESTED_PREFIX)) continue;
+
+                const dateStr = String(row[FABRIC_INWARD_LIVE_COLS.DATE] ?? '');
+                const rowDate = parseSheetDate(dateStr);
+                if (rowDate && rowDate < cutoffDate) {
+                    fabricToDelete.push(i);
+                }
+            }
+
+            if (fabricToDelete.length > 0) {
+                const sheetId = await getSheetId(ORDERS_MASTERSHEET_ID, LIVE_TABS.FABRIC_INWARD);
+                await deleteRowsBatch(ORDERS_MASTERSHEET_ID, sheetId, fabricToDelete);
+                result.fabricInwardDeleted = fabricToDelete.length;
+                sheetsLogger.info({ deleted: fabricToDelete.length }, 'Cleaned up DONE fabric inward rows');
+            }
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : 'Unknown error';
+            result.errors.push(`Fabric inward cleanup failed: ${message}`);
+            sheetsLogger.error({ error: message }, 'Failed to cleanup fabric inward DONE rows');
+        }
+
     } catch (error: unknown) {
         const message = error instanceof Error ? error.message : 'Unknown error';
         result.errors.push(message);
@@ -3061,18 +3266,22 @@ async function triggerCleanupDoneRows(): Promise<CleanupDoneResult | null> {
     pushRecentRun(cleanupDoneState, {
         startedAt: result.startedAt,
         durationMs: result.durationMs,
-        count: result.inwardDeleted + result.outwardDeleted,
+        count: result.inwardDeleted + result.outwardDeleted + result.fabricInwardDeleted,
         error: result.errors.length > 0 ? result.errors[0] : null,
     });
 
     sheetsLogger.info({
         inwardDeleted: result.inwardDeleted,
         outwardDeleted: result.outwardDeleted,
+        fabricInwardDeleted: result.fabricInwardDeleted,
         errors: result.errors.length,
         durationMs: result.durationMs,
     }, 'triggerCleanupDoneRows completed');
 
     return result;
+    } finally {
+        cleanupDoneState.isRunning = false;
+    }
 }
 
 // ============================================
@@ -3086,6 +3295,7 @@ async function triggerMigrateFormulas(): Promise<MigrateFormulasResult | null> {
     }
 
     migrateFormulasState.isRunning = true;
+    try {
     const startTime = Date.now();
     const result: MigrateFormulasResult = {
         startedAt: new Date().toISOString(),
@@ -3180,6 +3390,9 @@ async function triggerMigrateFormulas(): Promise<MigrateFormulasResult | null> {
     }, 'triggerMigrateFormulas completed');
 
     return result;
+    } finally {
+        migrateFormulasState.isRunning = false;
+    }
 }
 
 // ============================================
@@ -3831,10 +4044,15 @@ function buildFabricInwardRefId(
 /**
  * Parse a numeric value that may be a float (fabric quantities can be decimal).
  */
+/**
+ * Parse fabric quantity — allows decimals (meters/kg) but rejects Infinity/NaN/negative.
+ * Returns 0 for empty/invalid, -2 for Infinity/NaN.
+ */
 function parseFabricQty(value: string | undefined): number {
     if (!value?.trim()) return 0;
     const num = Number(value.trim());
-    return isFinite(num) && num > 0 ? num : 0;
+    if (!Number.isFinite(num)) return -2;
+    return num > 0 ? num : 0;
 }
 
 /**
@@ -4085,6 +4303,9 @@ async function triggerFabricInward(): Promise<FabricInwardResult | null> {
         // Parse and validate
         interface ParsedFabricRow {
             rowIndex: number;
+            material: string;
+            fabric: string;
+            colour: string;
             fabricCode: string;
             qty: number;
             costPerUnit: number;
@@ -4101,11 +4322,16 @@ async function triggerFabricInward(): Promise<FabricInwardResult | null> {
         for (let i = 1; i < rows.length; i++) {
             const row = rows[i];
             const fabricCode = String(row[FABRIC_INWARD_LIVE_COLS.FABRIC_CODE] ?? '').trim();
-            if (!fabricCode) continue;
+            const material = String(row[FABRIC_INWARD_LIVE_COLS.MATERIAL] ?? '').trim();
+
+            // Skip completely empty rows (no data at all)
+            if (!fabricCode && !material) continue;
 
             const status = String(row[FABRIC_INWARD_LIVE_COLS.STATUS] ?? '').trim();
             if (status.startsWith(INGESTED_PREFIX)) continue;
 
+            const fabric = String(row[FABRIC_INWARD_LIVE_COLS.FABRIC] ?? '').trim();
+            const colour = String(row[FABRIC_INWARD_LIVE_COLS.COLOUR] ?? '').trim();
             const qty = parseFabricQty(String(row[FABRIC_INWARD_LIVE_COLS.QTY] ?? ''));
             const costPerUnit = parseFabricQty(String(row[FABRIC_INWARD_LIVE_COLS.COST_PER_UNIT] ?? ''));
             const supplier = String(row[FABRIC_INWARD_LIVE_COLS.SUPPLIER] ?? '').trim();
@@ -4121,31 +4347,52 @@ async function triggerFabricInward(): Promise<FabricInwardResult | null> {
             seenRefs.add(refId);
 
             parsed.push({
-                rowIndex: i, fabricCode, qty, costPerUnit,
-                supplier, dateStr, date: parseSheetDate(dateStr),
-                notes, referenceId: refId,
+                rowIndex: i, material, fabric, colour, fabricCode,
+                qty, costPerUnit, supplier, dateStr,
+                date: parseSheetDate(dateStr), notes, referenceId: refId,
             });
         }
 
         // Validate
+        const now = new Date();
+        const maxFuture = new Date(now.getTime() + MAX_FUTURE_DAYS * 24 * 60 * 60 * 1000);
+        const maxPast = new Date(now.getTime() - MAX_PAST_DAYS * 24 * 60 * 60 * 1000);
         const validRows: ParsedFabricRow[] = [];
+        const fabricImportErrors: Array<{ rowIndex: number; error: string }> = [];
+
         for (const p of parsed) {
             const reasons: string[] = [];
 
-            if (!fabricByCode.has(p.fabricCode)) reasons.push(`Unknown fabric code: ${p.fabricCode}`);
-            if (p.qty <= 0) reasons.push('Qty must be > 0');
-            if (p.costPerUnit <= 0) reasons.push('Cost per unit must be > 0');
+            if (!p.material) reasons.push('missing Material (A)');
+            if (!p.fabric) reasons.push('missing Fabric (B)');
+            if (!p.colour) reasons.push('missing Colour (C)');
+            if (!p.fabricCode) reasons.push('missing Fabric Code (D)');
+            else if (!fabricByCode.has(p.fabricCode)) reasons.push(`Unknown fabric code: ${p.fabricCode}`);
+            if (p.qty === -2) reasons.push('Qty is not a valid number');
+            if (p.qty === 0) reasons.push('Qty must be > 0');
+            if (p.qty > 0 && p.qty > MAX_QTY_PER_ROW) reasons.push(`Qty ${p.qty} exceeds max ${MAX_QTY_PER_ROW}`);
+            if (p.costPerUnit === -2) reasons.push('Cost is not a valid number');
+            if (p.costPerUnit <= 0 && p.costPerUnit !== -2) reasons.push('Cost per unit must be > 0');
             if (!p.supplier) reasons.push('Supplier is required');
-            if (!p.date) reasons.push('Date is required (DD/MM/YYYY)');
+            if (!p.dateStr) reasons.push('Date is required');
+            else if (!p.date) reasons.push(`Invalid date format "${p.dateStr}" — use DD/MM/YYYY`);
+            if (p.date && p.date > maxFuture) reasons.push(`Date too far in future (max ${MAX_FUTURE_DAYS} days)`);
+            if (p.date && p.date < maxPast) reasons.push(`Date too old (max ${MAX_PAST_DAYS} days in past)`);
 
             if (reasons.length === 0) {
                 validRows.push(p);
             } else {
                 result.skipped++;
+                fabricImportErrors.push({ rowIndex: p.rowIndex, error: reasons.join('; ') });
                 for (const reason of reasons) {
                     result.validationErrors[reason] = (result.validationErrors[reason] ?? 0) + 1;
                 }
             }
+        }
+
+        // Write validation errors back to sheet column K
+        if (fabricImportErrors.length > 0) {
+            await writeImportErrors(ORDERS_MASTERSHEET_ID, tab, fabricImportErrors, 'K');
         }
 
         // Dedup
@@ -4214,7 +4461,7 @@ async function triggerFabricInward(): Promise<FabricInwardResult | null> {
                         referenceId: row.referenceId,
                         notes: row.notes || `${OFFLOAD_NOTES_PREFIX} ${tab}`,
                         createdById: adminUserId,
-                        createdAt: row.date ?? new Date(),
+                        createdAt: row.date!, // Validated as non-null during validation step
                     },
                 });
 

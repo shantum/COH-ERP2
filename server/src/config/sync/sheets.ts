@@ -546,7 +546,7 @@ export const DEFAULT_INWARD_REASON: TxnReason = 'production';
  * Valid sources for Inward (Live) entries.
  * Rows with sources not in this list are rejected during ingestion.
  */
-export const VALID_INWARD_LIVE_SOURCES = ['sampling', 'repacking', 'adjustment'] as const;
+export const VALID_INWARD_LIVE_SOURCES = ['sampling', 'repacking', 'adjustment', 'rto', 'return'] as const;
 
 /**
  * Inward sources that trigger automatic fabric deduction.
@@ -590,9 +590,10 @@ export const OFFLOAD_INTERVAL_MS = 30 * 60 * 1000;
 export const STARTUP_DELAY_MS = 5 * 60 * 1000;
 
 /**
- * Delay between Google Sheets API calls (ms) — stay under 300/min quota
+ * Delay between Google Sheets API calls (ms) — stay under 300/min quota.
+ * 250ms = max 240 calls/min, giving a ~20% safety margin.
  */
-export const API_CALL_DELAY_MS = 200;
+export const API_CALL_DELAY_MS = 250;
 
 /**
  * Max retries for transient API errors (429, 500, 503)
@@ -603,6 +604,28 @@ export const API_MAX_RETRIES = 3;
  * Rows per ingestion batch — controls memory and DB batch size
  */
 export const BATCH_SIZE = 500;
+
+// ============================================
+// INGESTION VALIDATION LIMITS
+// ============================================
+
+/**
+ * Maximum quantity per row. Anything higher is likely a typo.
+ * Rejects rows with qty > this value during inward/outward/fabric ingestion.
+ */
+export const MAX_QTY_PER_ROW = 500;
+
+/**
+ * Maximum days in the future a date can be.
+ * Catches typos like 2027 instead of 2026.
+ */
+export const MAX_FUTURE_DAYS = 3;
+
+/**
+ * Maximum days in the past a date can be.
+ * Catches very old dates that are clearly wrong.
+ */
+export const MAX_PAST_DAYS = 365;
 
 // ============================================
 // AUTH

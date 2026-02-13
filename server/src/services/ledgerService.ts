@@ -217,3 +217,303 @@ export async function entryExistsForSource(
   });
   return !!existing;
 }
+
+// ============================================
+// FABRIC CONSUMPTION → FINISHED GOODS (Production)
+// ============================================
+
+/**
+ * Recalculate and book fabric consumption for a given month.
+ *
+ * Looks at all inward transactions (except returns/RTO) for the month,
+ * multiplies by BOM fabric cost, and creates/updates a journal entry:
+ *   Dr FINISHED_GOODS, Cr FABRIC_INVENTORY
+ *
+ * Production converts raw fabric into finished garments — the cost moves
+ * from fabric inventory to finished goods (not COGS, since we haven't sold yet).
+ *
+ * If an entry already exists and the amount changed, reverses the old
+ * one and creates a fresh entry. Safe to call repeatedly.
+ *
+ * @returns The fabric cost booked, or 0 if nothing changed
+ */
+export async function bookFabricConsumptionForMonth(
+  prisma: PrismaClient,
+  year: number,
+  month: number, // 1-indexed
+  adminUserId: string
+): Promise<{ fabricCost: number; action: 'created' | 'updated' | 'unchanged' | 'zero' }> {
+  const label = `${year}-${String(month).padStart(2, '0')}`;
+  const SOURCE_TYPE = 'fabric_consumption';
+  const SOURCE_ID = `fabric_consumption_${label}`;
+
+  // IST month boundaries → UTC
+  const startIST = new Date(Date.UTC(year, month - 1, 1, -5, -30));
+  const endIST = new Date(Date.UTC(year, month, 1, -5, -30));
+
+  // Calculate fabric cost for all production inwards × BOM fabric cost
+  // Includes ALL inward transactions except returns/RTO (those are handled by bookReturnReversalForMonth)
+  const result = await prisma.$queryRaw<{ fabric_cost: number }[]>`
+    SELECT COALESCE(SUM(
+      it.qty
+      * COALESCE(vbl.quantity, s."fabricConsumption", 1.5)
+      * COALESCE(fc."costPerUnit", f."costPerUnit", 0)
+    ), 0)::float AS fabric_cost
+    FROM "InventoryTransaction" it
+    JOIN "Sku" s ON s.id = it."skuId"
+    JOIN "Variation" v ON v.id = s."variationId"
+    LEFT JOIN "VariationBomLine" vbl ON vbl."variationId" = v.id AND vbl."fabricColourId" IS NOT NULL
+    LEFT JOIN "FabricColour" fc ON fc.id = vbl."fabricColourId"
+    LEFT JOIN "Fabric" f ON f.id = fc."fabricId"
+    WHERE it."txnType" = 'inward'
+      AND it.reason NOT IN ('rto_received', 'return_receipt')
+      AND it."createdAt" >= ${startIST}
+      AND it."createdAt" < ${endIST}
+  `;
+
+  const fabricCost = Math.round((result[0]?.fabric_cost ?? 0) * 100) / 100;
+
+  // Check existing entry
+  const existing = await prisma.ledgerEntry.findUnique({
+    where: { sourceType_sourceId: { sourceType: SOURCE_TYPE, sourceId: SOURCE_ID } },
+    include: { lines: { where: { debit: { gt: 0 } }, select: { debit: true } } },
+  });
+
+  if (existing) {
+    const oldAmount = Math.round((existing.lines[0]?.debit ?? 0) * 100) / 100;
+
+    if (existing.isReversed) {
+      // Already reversed — free up sourceId slot
+      await prisma.ledgerEntry.update({
+        where: { id: existing.id },
+        data: { sourceId: `${SOURCE_ID}_reversed_${existing.id}` },
+      });
+    } else if (Math.abs(oldAmount - fabricCost) < 0.01) {
+      return { fabricCost, action: 'unchanged' };
+    } else {
+      // Amount changed — reverse old, free up sourceId
+      await reverseLedgerEntry(prisma, existing.id, adminUserId);
+      await prisma.ledgerEntry.update({
+        where: { id: existing.id },
+        data: { sourceId: `${SOURCE_ID}_reversed_${existing.id}` },
+      });
+    }
+  }
+
+  if (fabricCost === 0) {
+    return { fabricCost: 0, action: 'zero' };
+  }
+
+  // Last day of the month for entryDate
+  const entryDate = new Date(Date.UTC(year, month, 0));
+
+  await createLedgerEntry(prisma, {
+    entryDate,
+    description: `Production → Finished Goods — ${label} (all production inwards × BOM cost)`,
+    sourceType: SOURCE_TYPE,
+    sourceId: SOURCE_ID,
+    createdById: adminUserId,
+    notes: `Auto-calculated: sum of (BOM fabric qty × fabric cost per unit × units) from all non-return inwards in ${label}. Fabric becomes finished goods inventory.`,
+    lines: [
+      { accountCode: 'FINISHED_GOODS', debit: fabricCost },
+      { accountCode: 'FABRIC_INVENTORY', credit: fabricCost },
+    ],
+  });
+
+  return { fabricCost, action: existing ? 'updated' : 'created' };
+}
+
+// ============================================
+// SHIPMENT → COGS (Finished Goods become Cost)
+// ============================================
+
+/**
+ * Book COGS for shipments in a given month.
+ *
+ * Looks at all outward transactions with reason='sale' for the month,
+ * calculates fabric cost using the same BOM formula, and creates:
+ *   Dr COGS, Cr FINISHED_GOODS
+ *
+ * When goods ship to customers, finished goods become cost of goods sold.
+ *
+ * Same reversal logic as bookFabricConsumptionForMonth — safe to re-run.
+ */
+export async function bookShipmentCOGSForMonth(
+  prisma: PrismaClient,
+  year: number,
+  month: number,
+  adminUserId: string
+): Promise<{ amount: number; action: 'created' | 'updated' | 'unchanged' | 'zero' }> {
+  const label = `${year}-${String(month).padStart(2, '0')}`;
+  const SOURCE_TYPE = 'shipment_cogs';
+  const SOURCE_ID = `shipment_cogs_${label}`;
+
+  // IST month boundaries → UTC
+  const startIST = new Date(Date.UTC(year, month - 1, 1, -5, -30));
+  const endIST = new Date(Date.UTC(year, month, 1, -5, -30));
+
+  // Calculate cost of shipped goods using same BOM formula
+  const result = await prisma.$queryRaw<{ total_cost: number }[]>`
+    SELECT COALESCE(SUM(
+      it.qty
+      * COALESCE(vbl.quantity, s."fabricConsumption", 1.5)
+      * COALESCE(fc."costPerUnit", f."costPerUnit", 0)
+    ), 0)::float AS total_cost
+    FROM "InventoryTransaction" it
+    JOIN "Sku" s ON s.id = it."skuId"
+    JOIN "Variation" v ON v.id = s."variationId"
+    LEFT JOIN "VariationBomLine" vbl ON vbl."variationId" = v.id AND vbl."fabricColourId" IS NOT NULL
+    LEFT JOIN "FabricColour" fc ON fc.id = vbl."fabricColourId"
+    LEFT JOIN "Fabric" f ON f.id = fc."fabricId"
+    WHERE it."txnType" = 'outward'
+      AND it.reason = 'sale'
+      AND it."createdAt" >= ${startIST}
+      AND it."createdAt" < ${endIST}
+  `;
+
+  const amount = Math.round((result[0]?.total_cost ?? 0) * 100) / 100;
+
+  // Check existing entry
+  const existing = await prisma.ledgerEntry.findUnique({
+    where: { sourceType_sourceId: { sourceType: SOURCE_TYPE, sourceId: SOURCE_ID } },
+    include: { lines: { where: { debit: { gt: 0 } }, select: { debit: true } } },
+  });
+
+  if (existing) {
+    const oldAmount = Math.round((existing.lines[0]?.debit ?? 0) * 100) / 100;
+
+    if (existing.isReversed) {
+      await prisma.ledgerEntry.update({
+        where: { id: existing.id },
+        data: { sourceId: `${SOURCE_ID}_reversed_${existing.id}` },
+      });
+    } else if (Math.abs(oldAmount - amount) < 0.01) {
+      return { amount, action: 'unchanged' };
+    } else {
+      await reverseLedgerEntry(prisma, existing.id, adminUserId);
+      await prisma.ledgerEntry.update({
+        where: { id: existing.id },
+        data: { sourceId: `${SOURCE_ID}_reversed_${existing.id}` },
+      });
+    }
+  }
+
+  if (amount === 0) {
+    return { amount: 0, action: 'zero' };
+  }
+
+  const entryDate = new Date(Date.UTC(year, month, 0));
+
+  await createLedgerEntry(prisma, {
+    entryDate,
+    description: `Shipment COGS — ${label} (shipped goods × BOM cost)`,
+    sourceType: SOURCE_TYPE,
+    sourceId: SOURCE_ID,
+    createdById: adminUserId,
+    notes: `Auto-calculated: cost of goods shipped to customers in ${label}. Finished goods become COGS on shipment.`,
+    lines: [
+      { accountCode: 'COGS', debit: amount },
+      { accountCode: 'FINISHED_GOODS', credit: amount },
+    ],
+  });
+
+  return { amount, action: existing ? 'updated' : 'created' };
+}
+
+// ============================================
+// RETURN/RTO → COGS REVERSAL (Back to Finished Goods)
+// ============================================
+
+/**
+ * Book COGS reversal for returns/RTO in a given month.
+ *
+ * Looks at all inward transactions with reason in ('rto_received', 'return_receipt')
+ * for the month, calculates fabric cost, and creates:
+ *   Dr FINISHED_GOODS, Cr COGS
+ *
+ * When goods come back (RTO or customer return), they go back into
+ * finished goods inventory and reduce COGS.
+ *
+ * Same reversal logic — safe to re-run.
+ */
+export async function bookReturnReversalForMonth(
+  prisma: PrismaClient,
+  year: number,
+  month: number,
+  adminUserId: string
+): Promise<{ amount: number; action: 'created' | 'updated' | 'unchanged' | 'zero' }> {
+  const label = `${year}-${String(month).padStart(2, '0')}`;
+  const SOURCE_TYPE = 'return_cogs_reversal';
+  const SOURCE_ID = `return_cogs_reversal_${label}`;
+
+  // IST month boundaries → UTC
+  const startIST = new Date(Date.UTC(year, month - 1, 1, -5, -30));
+  const endIST = new Date(Date.UTC(year, month, 1, -5, -30));
+
+  // Calculate cost of returned goods using same BOM formula
+  const result = await prisma.$queryRaw<{ total_cost: number }[]>`
+    SELECT COALESCE(SUM(
+      it.qty
+      * COALESCE(vbl.quantity, s."fabricConsumption", 1.5)
+      * COALESCE(fc."costPerUnit", f."costPerUnit", 0)
+    ), 0)::float AS total_cost
+    FROM "InventoryTransaction" it
+    JOIN "Sku" s ON s.id = it."skuId"
+    JOIN "Variation" v ON v.id = s."variationId"
+    LEFT JOIN "VariationBomLine" vbl ON vbl."variationId" = v.id AND vbl."fabricColourId" IS NOT NULL
+    LEFT JOIN "FabricColour" fc ON fc.id = vbl."fabricColourId"
+    LEFT JOIN "Fabric" f ON f.id = fc."fabricId"
+    WHERE it."txnType" = 'inward'
+      AND it.reason IN ('rto_received', 'return_receipt')
+      AND it."createdAt" >= ${startIST}
+      AND it."createdAt" < ${endIST}
+  `;
+
+  const amount = Math.round((result[0]?.total_cost ?? 0) * 100) / 100;
+
+  // Check existing entry
+  const existing = await prisma.ledgerEntry.findUnique({
+    where: { sourceType_sourceId: { sourceType: SOURCE_TYPE, sourceId: SOURCE_ID } },
+    include: { lines: { where: { debit: { gt: 0 } }, select: { debit: true } } },
+  });
+
+  if (existing) {
+    const oldAmount = Math.round((existing.lines[0]?.debit ?? 0) * 100) / 100;
+
+    if (existing.isReversed) {
+      await prisma.ledgerEntry.update({
+        where: { id: existing.id },
+        data: { sourceId: `${SOURCE_ID}_reversed_${existing.id}` },
+      });
+    } else if (Math.abs(oldAmount - amount) < 0.01) {
+      return { amount, action: 'unchanged' };
+    } else {
+      await reverseLedgerEntry(prisma, existing.id, adminUserId);
+      await prisma.ledgerEntry.update({
+        where: { id: existing.id },
+        data: { sourceId: `${SOURCE_ID}_reversed_${existing.id}` },
+      });
+    }
+  }
+
+  if (amount === 0) {
+    return { amount: 0, action: 'zero' };
+  }
+
+  const entryDate = new Date(Date.UTC(year, month, 0));
+
+  await createLedgerEntry(prisma, {
+    entryDate,
+    description: `Return/RTO COGS reversal — ${label} (returned goods × BOM cost)`,
+    sourceType: SOURCE_TYPE,
+    sourceId: SOURCE_ID,
+    createdById: adminUserId,
+    notes: `Auto-calculated: cost of returned/RTO goods in ${label}. Returned goods go back to finished goods inventory.`,
+    lines: [
+      { accountCode: 'FINISHED_GOODS', debit: amount },
+      { accountCode: 'COGS', credit: amount },
+    ],
+  });
+
+  return { amount, action: existing ? 'updated' : 'created' };
+}

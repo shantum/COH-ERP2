@@ -57,6 +57,7 @@ export const CHART_OF_ACCOUNTS: AccountConfig[] = [
   { code: 'CUSTOMER_ADVANCES', name: 'Customer Advances', type: 'liability', description: 'Prepayments received from customers' },
   { code: 'TDS_PAYABLE', name: 'TDS Payable', type: 'liability', description: 'TDS deducted at source, owed to government' },
   { code: 'LOAN_GETVANTAGE', name: 'GetVantage Loan', type: 'liability', description: 'Revenue-based financing loan from GetVantage' },
+  { code: 'CREDIT_CARD', name: 'Credit Card', type: 'liability', description: 'Credit card balance — paid via CRED, charged for Shopify/subscriptions' },
 
   // --- Income ---
   { code: 'SALES_REVENUE', name: 'Sales Revenue', type: 'income', description: 'Revenue from product sales' },
@@ -88,6 +89,7 @@ export type AccountCode =
   | 'CUSTOMER_ADVANCES'
   | 'TDS_PAYABLE'
   | 'LOAN_GETVANTAGE'
+  | 'CREDIT_CARD'
   | 'SALES_REVENUE'
   | 'COGS'
   | 'OPERATING_EXPENSES'
@@ -253,6 +255,9 @@ export const LEDGER_SOURCE_TYPES = [
   'hdfc_statement',
   'bank_payout',
   'bank_charge',
+  'fabric_consumption',
+  'shipment_cogs',
+  'return_cogs_reversal',
   'manual',
   'adjustment',
 ] as const;
