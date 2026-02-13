@@ -162,6 +162,7 @@ export const INVOICE_CATEGORIES = [
   'equipment',
   'marketplace',
   'customer_order',
+  'statutory',
   'other',
 ] as const;
 
@@ -179,6 +180,7 @@ const CATEGORY_LABELS: Record<InvoiceCategory, string> = {
   equipment: 'Equipment & Tools',
   marketplace: 'Marketplace Fees',
   customer_order: 'Customer Order',
+  statutory: 'Statutory / TDS',
   other: 'Other',
 };
 

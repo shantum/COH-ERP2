@@ -4,7 +4,7 @@
  * Dashboard, Invoices, Payments, and Ledger tabs.
  */
 
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { useNavigate } from '@tanstack/react-router';
@@ -328,19 +328,19 @@ function InvoicesTab({ search }: { search: FinanceSearchParams }) {
       }
     }
 
-    // Build CSV — RazorpayX 11-column format
+    // Build CSV — RazorpayX 11-column format (headers must match their template exactly)
     const header = [
-      'Beneficiary Name (Mandatory)',
-      "Beneficiary's Account Number (Mandatory)",
-      'IFSC Code (Mandatory)',
-      'Payout Amount (Mandatory)',
-      'Payout Mode (Mandatory)',
-      'Payout Narration (Optional)',
-      'Notes (Optional)',
+      'Beneficiary Name (Mandatory) Special characters not supported',
+      "Beneficiary's Account Number (Mandatory) Typically 9-18 digits",
+      "IFSC Code (Mandatory) 11 digit code of the beneficiary\u2019s bank account. Eg. HDFC0004277",
+      'Payout Amount (Mandatory) Amount should be in rupees',
+      'Payout Mode (Mandatory) Select IMPS/NEFT/RTGS',
+      'Payout Narration (Optional) Will appear on bank statement (max 30 char with no special characters)',
+      'Notes (Optional) A note for internal reference',
       'Phone Number (Optional)',
       'Email ID (Optional)',
-      'Contact Reference ID (Optional)',
-      'Payout Reference ID (Optional)',
+      'Contact Reference ID (Optional) Eg: Employee ID or Customer ID',
+      'Payout Reference ID (Optional) Eg: Bill no or Invoice No or Pay ID',
     ].join(',');
 
     const csvEscape = (v: string) =>
@@ -356,18 +356,18 @@ function InvoicesTab({ search }: { search: FinanceSearchParams }) {
       const mode = amount >= 500000 ? 'NEFT' : 'IMPS';
       const beneficiary = party.bankAccountName || party.name;
       const narration = sanitizeNarration(party.name);
-      const notes = (inv.invoiceNumber || inv.id) + ' | ' + inv.category;
+      const notes = (inv.invoiceNumber || inv.id) + ' ' + inv.category;
       const refId = inv.invoiceNumber || inv.id;
 
       return [
         csvEscape(beneficiary),
-        csvEscape(party.bankAccountNumber!),
-        csvEscape(party.bankIfsc!),
+        party.bankAccountNumber!,
+        party.bankIfsc!,
         String(amount),
         mode,
         csvEscape(narration),
         csvEscape(notes),
-        party.phone || '',
+        (party.phone || '').replace(/^\+91/, ''),
         party.email || '',
         party.id,
         csvEscape(refId),
@@ -606,15 +606,22 @@ function InvoicesTab({ search }: { search: FinanceSearchParams }) {
 function PaymentsTab({ search }: { search: FinanceSearchParams }) {
   const navigate = useNavigate();
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [voucherPrefill, setVoucherPrefill] = useState<{
+    type: 'payable' | 'receivable';
+    totalAmount: number;
+    counterpartyName: string;
+    partyId?: string;
+  } | null>(null);
 
   const listFn = useServerFn(listPayments);
   const { data, isLoading } = useQuery({
-    queryKey: ['finance', 'payments', search.direction, search.method, search.search, search.page],
+    queryKey: ['finance', 'payments', search.direction, search.method, search.matchStatus, search.search, search.page],
     queryFn: () =>
       listFn({
         data: {
           ...(search.direction ? { direction: search.direction } : {}),
           ...(search.method ? { method: search.method } : {}),
+          ...(search.matchStatus && search.matchStatus !== 'all' ? { matchStatus: search.matchStatus } : {}),
           ...(search.search ? { search: search.search } : {}),
           page: search.page,
           limit: search.limit,
@@ -652,6 +659,15 @@ function PaymentsTab({ search }: { search: FinanceSearchParams }) {
           </SelectContent>
         </Select>
 
+        <Select value={search.matchStatus ?? 'all'} onValueChange={(v) => updateSearch({ matchStatus: v === 'all' ? undefined : v as 'unmatched' | 'matched', page: 1 })}>
+          <SelectTrigger className="w-[190px]"><SelectValue placeholder="Match Status" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All</SelectItem>
+            <SelectItem value="unmatched">Needs Documentation</SelectItem>
+            <SelectItem value="matched">Fully Matched</SelectItem>
+          </SelectContent>
+        </Select>
+
         <Input
           placeholder="Search payments..."
           value={search.search ?? ''}
@@ -683,6 +699,7 @@ function PaymentsTab({ search }: { search: FinanceSearchParams }) {
                   <th className="text-right p-3 font-medium">Matched</th>
                   <th className="text-left p-3 font-medium">Status</th>
                   <th className="text-left p-3 font-medium">Date</th>
+                  <th className="text-right p-3 font-medium">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -705,10 +722,27 @@ function PaymentsTab({ search }: { search: FinanceSearchParams }) {
                     <td className="p-3 text-right font-mono text-muted-foreground">{formatCurrency(pmt.matchedAmount)}</td>
                     <td className="p-3"><StatusBadge status={pmt.status} /></td>
                     <td className="p-3 text-xs text-muted-foreground">{new Date(pmt.paymentDate).toLocaleDateString('en-IN')}</td>
+                    <td className="p-3 text-right">
+                      {pmt.unmatchedAmount > 0.01 && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="text-xs h-7"
+                          onClick={() => setVoucherPrefill({
+                            type: 'payable',
+                            totalAmount: Math.round(pmt.unmatchedAmount * 100) / 100,
+                            counterpartyName: pmt.party?.name ?? pmt.counterpartyName ?? '',
+                            ...(pmt.party?.id ? { partyId: pmt.party.id } : {}),
+                          })}
+                        >
+                          <Plus className="h-3 w-3 mr-1" /> Voucher
+                        </Button>
+                      )}
+                    </td>
                   </tr>
                 ))}
                 {(!data?.payments || data.payments.length === 0) && (
-                  <tr><td colSpan={8} className="p-8 text-center text-muted-foreground">No payments found</td></tr>
+                  <tr><td colSpan={9} className="p-8 text-center text-muted-foreground">No payments found</td></tr>
                 )}
               </tbody>
             </table>
@@ -719,6 +753,13 @@ function PaymentsTab({ search }: { search: FinanceSearchParams }) {
       )}
 
       <CreatePaymentModal open={showCreateModal} onClose={() => setShowCreateModal(false)} />
+
+      {/* Create Voucher modal (pre-filled from payment row) */}
+      <CreateInvoiceModal
+        open={!!voucherPrefill}
+        onClose={() => setVoucherPrefill(null)}
+        prefill={voucherPrefill ?? undefined}
+      />
     </div>
   );
 }
@@ -949,7 +990,11 @@ function ConfirmPayableDialog({ invoice, isPending, onConfirm, onClose }: {
 // CREATE INVOICE MODAL
 // ============================================
 
-function CreateInvoiceModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+function CreateInvoiceModal({ open, onClose, prefill }: {
+  open: boolean;
+  onClose: () => void;
+  prefill?: { type: 'payable' | 'receivable'; totalAmount: number; counterpartyName: string; partyId?: string };
+}) {
   const queryClient = useQueryClient();
   const createFn = useServerFn(createInvoice);
 
@@ -962,7 +1007,25 @@ function CreateInvoiceModal({ open, onClose }: { open: boolean; onClose: () => v
     gstAmount: '',
     invoiceDate: new Date().toISOString().split('T')[0],
     notes: '',
+    partyId: undefined as string | undefined,
   });
+
+  // When prefill changes (voucher button clicked), reset form with prefilled values
+  const prevPrefillRef = useRef<typeof prefill>(undefined);
+  if (prefill && prefill !== prevPrefillRef.current) {
+    prevPrefillRef.current = prefill;
+    setForm({
+      type: prefill.type,
+      category: 'other',
+      invoiceNumber: '',
+      counterpartyName: prefill.counterpartyName,
+      totalAmount: String(prefill.totalAmount),
+      gstAmount: '',
+      invoiceDate: new Date().toISOString().split('T')[0],
+      notes: '',
+      partyId: prefill.partyId,
+    });
+  }
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -976,6 +1039,7 @@ function CreateInvoiceModal({ open, onClose }: { open: boolean; onClose: () => v
           ...(form.gstAmount ? { gstAmount: Number(form.gstAmount) } : {}),
           ...(form.invoiceDate ? { invoiceDate: form.invoiceDate } : {}),
           ...(form.notes ? { notes: form.notes } : {}),
+          ...(form.partyId ? { partyId: form.partyId } : {}),
         },
       }),
     onSuccess: () => {
@@ -985,7 +1049,8 @@ function CreateInvoiceModal({ open, onClose }: { open: boolean; onClose: () => v
     },
   });
 
-  const resetForm = () =>
+  const resetForm = () => {
+    prevPrefillRef.current = undefined;
     setForm({
       type: 'payable',
       category: 'other',
@@ -995,7 +1060,9 @@ function CreateInvoiceModal({ open, onClose }: { open: boolean; onClose: () => v
       gstAmount: '',
       invoiceDate: new Date().toISOString().split('T')[0],
       notes: '',
+      partyId: undefined,
     });
+  };
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>

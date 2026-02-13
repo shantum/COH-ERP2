@@ -623,6 +623,8 @@ function categoryToExpenseAccount(category: string): string {
       return 'OPERATING_EXPENSES';
     case 'marketplace':
       return 'MARKETPLACE_FEES';
+    case 'statutory':
+      return 'TDS_PAYABLE';
     default:
       return 'OPERATING_EXPENSES';
   }
@@ -692,13 +694,15 @@ export const listPayments = createServerFn({ method: 'POST' })
   .inputValidator((input: unknown) => ListPaymentsInput.parse(input))
   .handler(async ({ data }) => {
     const prisma = await getPrisma();
-    const { direction, method, status, search, page = 1, limit = 50 } = data ?? {};
+    const { direction, method, status, matchStatus, search, page = 1, limit = 50 } = data ?? {};
     const skip = (page - 1) * limit;
 
     const where: Record<string, unknown> = {};
     if (direction) where.direction = direction;
     if (method) where.method = method;
     if (status) where.status = status;
+    if (matchStatus === 'unmatched') where.unmatchedAmount = { gt: 0.01 };
+    if (matchStatus === 'matched') where.unmatchedAmount = { lte: 0.01 };
     if (search) {
       where.OR = [
         { referenceNumber: { contains: search, mode: 'insensitive' } },

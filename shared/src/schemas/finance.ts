@@ -23,6 +23,8 @@ export const FinanceSearchParams = z.object({
   direction: z.enum(['outgoing', 'incoming']).optional().catch(undefined),
   /** Payment method filter */
   method: z.string().optional().catch(undefined),
+  /** Payment match status filter */
+  matchStatus: z.enum(['all', 'unmatched', 'matched']).optional().catch(undefined),
   /** Ledger account code filter */
   accountCode: z.string().optional().catch(undefined),
   /** Ledger source type filter */
@@ -155,6 +157,7 @@ export const ListPaymentsInput = z.object({
   direction: z.enum(['outgoing', 'incoming']).optional(),
   method: z.string().optional(),
   status: z.string().optional(),
+  matchStatus: z.enum(['all', 'unmatched', 'matched']).optional(),
   search: z.string().optional(),
   page: z.coerce.number().int().positive().default(1),
   limit: z.coerce.number().int().positive().max(200).default(50),
@@ -181,7 +184,7 @@ export type PartyCategory = (typeof PARTY_CATEGORIES)[number];
 
 export const INVOICE_CATEGORIES = [
   'fabric', 'trims', 'service', 'logistics', 'rent', 'salary',
-  'marketing', 'packaging', 'equipment', 'marketplace', 'customer_order', 'other',
+  'marketing', 'packaging', 'equipment', 'marketplace', 'customer_order', 'statutory', 'other',
 ] as const;
 
 export type InvoiceCategory = (typeof INVOICE_CATEGORIES)[number];
@@ -198,6 +201,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   equipment: 'Equipment & Tools',
   marketplace: 'Marketplace Fees',
   customer_order: 'Customer Order',
+  statutory: 'Statutory / TDS',
   other: 'Other',
 };
 
@@ -225,6 +229,7 @@ export const CHART_OF_ACCOUNTS = [
   { code: 'GST_OUTPUT', name: 'GST We Owe Government', type: 'liability' },
   { code: 'CUSTOMER_ADVANCES', name: 'Customer Advances', type: 'liability' },
   { code: 'TDS_PAYABLE', name: 'TDS Payable', type: 'liability' },
+  { code: 'CREDIT_CARD', name: 'Credit Card', type: 'liability' },
   { code: 'SALES_REVENUE', name: 'Sales Revenue', type: 'income' },
   { code: 'COGS', name: 'Cost of Goods Sold', type: 'direct_cost' },
   { code: 'OPERATING_EXPENSES', name: 'Operating Expenses', type: 'expense' },
