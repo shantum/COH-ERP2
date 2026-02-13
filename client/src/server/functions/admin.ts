@@ -96,11 +96,11 @@ const getServerLogsSchema = z.object({
 
 // Background Jobs
 const startBackgroundJobSchema = z.object({
-    jobId: z.enum(['shopify_sync', 'tracking_sync', 'cache_cleanup', 'ingest_inward', 'ingest_outward', 'move_shipped_to_outward', 'preview_ingest_inward', 'preview_ingest_outward', 'cleanup_done_rows', 'migrate_sheet_formulas', 'snapshot_compute', 'snapshot_backfill', 'push_balances', 'preview_push_balances', 'push_fabric_balances', 'import_fabric_balances', 'preview_fabric_inward', 'ingest_fabric_inward', 'reconcile_sheet_orders', 'sync_sheet_status']),
+    jobId: z.enum(['shopify_sync', 'tracking_sync', 'cache_cleanup', 'ingest_inward', 'ingest_outward', 'move_shipped_to_outward', 'preview_ingest_inward', 'preview_ingest_outward', 'cleanup_done_rows', 'migrate_sheet_formulas', 'snapshot_compute', 'snapshot_backfill', 'push_balances', 'preview_push_balances', 'push_fabric_balances', 'import_fabric_balances', 'preview_fabric_inward', 'ingest_fabric_inward', 'reconcile_sheet_orders', 'sync_sheet_status', 'run_inward_cycle', 'run_outward_cycle']),
 });
 
 const cancelBackgroundJobSchema = z.object({
-    jobId: z.enum(['shopify_sync', 'tracking_sync', 'cache_cleanup', 'ingest_inward', 'ingest_outward', 'move_shipped_to_outward', 'preview_ingest_inward', 'preview_ingest_outward', 'cleanup_done_rows', 'migrate_sheet_formulas', 'snapshot_compute', 'snapshot_backfill', 'push_balances', 'preview_push_balances', 'push_fabric_balances', 'import_fabric_balances', 'preview_fabric_inward', 'ingest_fabric_inward', 'reconcile_sheet_orders', 'sync_sheet_status']),
+    jobId: z.enum(['shopify_sync', 'tracking_sync', 'cache_cleanup', 'ingest_inward', 'ingest_outward', 'move_shipped_to_outward', 'preview_ingest_inward', 'preview_ingest_outward', 'cleanup_done_rows', 'migrate_sheet_formulas', 'snapshot_compute', 'snapshot_backfill', 'push_balances', 'preview_push_balances', 'push_fabric_balances', 'import_fabric_balances', 'preview_fabric_inward', 'ingest_fabric_inward', 'reconcile_sheet_orders', 'sync_sheet_status', 'run_inward_cycle', 'run_outward_cycle']),
 });
 
 const updateBackgroundJobSchema = z.object({
@@ -1078,6 +1078,50 @@ export const getSheetOffloadStatus = createServerFn({ method: 'GET' })
             return {
                 success: false,
                 error: { code: 'BAD_REQUEST', message: 'Failed to connect to sheet offload service' },
+            };
+        }
+    });
+
+/**
+ * Get real-time cycle progress for the ingestion pipeline modal
+ * Requires admin role
+ */
+export const getCycleProgress = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
+    .handler(async ({ context }): Promise<MutationResult<Record<string, JsonValue>>> => {
+        try {
+            requireAdminRole(context.user.role);
+        } catch {
+            return {
+                success: false,
+                error: { code: 'FORBIDDEN', message: 'Admin access required' },
+            };
+        }
+
+        const baseUrl = getApiBaseUrl();
+        const authToken = getCookie('auth_token');
+
+        try {
+            const response = await fetch(`${baseUrl}/api/admin/sheet-offload/cycle-progress`, {
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+                },
+            });
+
+            if (!response.ok) {
+                return {
+                    success: false,
+                    error: { code: 'BAD_REQUEST', message: 'Failed to fetch cycle progress' },
+                };
+            }
+
+            const result = await response.json() as Record<string, JsonValue>;
+            return { success: true, data: result };
+        } catch {
+            return {
+                success: false,
+                error: { code: 'BAD_REQUEST', message: 'Failed to connect to cycle progress service' },
             };
         }
     });

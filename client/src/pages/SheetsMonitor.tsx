@@ -22,6 +22,7 @@ import {
     type BackgroundJob,
     type SheetsMonitorStats,
 } from '../server/functions/admin';
+import { IngestionCycleModal } from '../components/settings/jobs/IngestionCycleModal';
 
 // ============================================
 // TYPES (matching new per-job server response)
@@ -488,6 +489,7 @@ export default function SheetsMonitor() {
     const queryClient = useQueryClient();
     const [showRecentRuns, setShowRecentRuns] = useState(false);
     const [showTransactions, setShowTransactions] = useState(false);
+    const [cycleModal, setCycleModal] = useState<{ open: boolean; type: 'inward' | 'outward' }>({ open: false, type: 'inward' });
 
     // Server function wrappers
     const getJobsFn = useServerFn(getBackgroundJobs);
@@ -545,7 +547,7 @@ export default function SheetsMonitor() {
     const triggerInwardMutation = useMutation({
         mutationFn: async () => {
             const result = await triggerFn({
-                data: { jobId: 'ingest_inward' as const },
+                data: { jobId: 'run_inward_cycle' as const },
             });
             if (!result.success) throw new Error(result.error?.message);
             return result.data;
@@ -556,7 +558,7 @@ export default function SheetsMonitor() {
     const triggerOutwardMutation = useMutation({
         mutationFn: async () => {
             const result = await triggerFn({
-                data: { jobId: 'ingest_outward' as const },
+                data: { jobId: 'run_outward_cycle' as const },
             });
             if (!result.success) throw new Error(result.error?.message);
             return result.data;
@@ -763,7 +765,10 @@ export default function SheetsMonitor() {
                                 Preview
                             </button>
                             <button
-                                onClick={() => triggerInwardMutation.mutate()}
+                                onClick={() => {
+                                    setCycleModal({ open: true, type: 'inward' });
+                                    triggerInwardMutation.mutate();
+                                }}
                                 disabled={triggerInwardMutation.isPending || inwardState?.isRunning}
                                 className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
@@ -789,7 +794,10 @@ export default function SheetsMonitor() {
                                 Preview
                             </button>
                             <button
-                                onClick={() => triggerOutwardMutation.mutate()}
+                                onClick={() => {
+                                    setCycleModal({ open: true, type: 'outward' });
+                                    triggerOutwardMutation.mutate();
+                                }}
                                 disabled={triggerOutwardMutation.isPending || outwardState?.isRunning}
                                 className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
@@ -1465,6 +1473,13 @@ export default function SheetsMonitor() {
                     <div className="mt-3 text-sm text-gray-400">No sheet-sourced transactions found</div>
                 )}
             </div>
+
+            {/* Ingestion Cycle Modal */}
+            <IngestionCycleModal
+                open={cycleModal.open}
+                type={cycleModal.type}
+                onClose={() => setCycleModal(prev => ({ ...prev, open: false }))}
+            />
         </div>
     );
 }

@@ -171,6 +171,27 @@ export interface CacheStats {
 }
 
 // ============================================
+// CYCLE PROGRESS (REAL-TIME PIPELINE MODAL)
+// ============================================
+
+export interface CycleStep {
+    name: string;
+    status: 'pending' | 'running' | 'done' | 'failed' | 'skipped';
+    detail?: string;
+    durationMs?: number;
+    error?: string;
+}
+
+export interface CycleProgressState {
+    isRunning: boolean;
+    type: 'inward' | 'outward' | null;
+    startedAt: string | null;
+    completedAt: string | null;
+    steps: CycleStep[];
+    totalDurationMs?: number;
+}
+
+// ============================================
 // OFFLOAD STATUS ENDPOINT RESPONSE
 // ============================================
 

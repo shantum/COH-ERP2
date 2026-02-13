@@ -190,7 +190,7 @@ interface PermissionsUpdateBody {
 }
 
 /** Background job trigger params */
-type JobId = 'shopify_sync' | 'tracking_sync' | 'cache_cleanup' | 'ingest_inward' | 'ingest_outward' | 'move_shipped_to_outward' | 'preview_ingest_inward' | 'preview_ingest_outward' | 'cleanup_done_rows' | 'migrate_sheet_formulas' | 'snapshot_compute' | 'snapshot_backfill' | 'push_balances' | 'preview_push_balances' | 'push_fabric_balances' | 'import_fabric_balances' | 'preview_fabric_inward' | 'ingest_fabric_inward' | 'reconcile_sheet_orders' | 'sync_sheet_status';
+type JobId = 'shopify_sync' | 'tracking_sync' | 'cache_cleanup' | 'ingest_inward' | 'ingest_outward' | 'move_shipped_to_outward' | 'preview_ingest_inward' | 'preview_ingest_outward' | 'cleanup_done_rows' | 'migrate_sheet_formulas' | 'snapshot_compute' | 'snapshot_backfill' | 'push_balances' | 'preview_push_balances' | 'push_fabric_balances' | 'import_fabric_balances' | 'preview_fabric_inward' | 'ingest_fabric_inward' | 'reconcile_sheet_orders' | 'sync_sheet_status' | 'run_inward_cycle' | 'run_outward_cycle';
 
 /** Background job update body */
 interface JobUpdateBody {
@@ -1523,6 +1523,18 @@ router.post('/background-jobs/:jobId/trigger', requireAdmin, asyncHandler(async 
             res.json({ message: 'Ingest outward triggered', result });
             break;
         }
+        case 'run_inward_cycle': {
+            sheetOffloadWorker.resetCycleProgress();
+            const result = await trackWorkerRun('sheet_inward_cycle', () => sheetOffloadWorker.runInwardCycle(), 'manual');
+            res.json({ message: 'Inward cycle triggered', result });
+            break;
+        }
+        case 'run_outward_cycle': {
+            sheetOffloadWorker.resetCycleProgress();
+            const result = await trackWorkerRun('sheet_outward_cycle', () => sheetOffloadWorker.runOutwardCycle(), 'manual');
+            res.json({ message: 'Outward cycle triggered', result });
+            break;
+        }
         case 'move_shipped_to_outward': {
             const result = await trackWorkerRun('sheet_move_shipped', () => sheetOffloadWorker.triggerMoveShipped(), 'manual');
             res.json({ message: 'Move shipped → outward completed', result });
@@ -1832,6 +1844,14 @@ router.get('/sheet-offload/status', requireAdmin, asyncHandler(async (_req: Requ
         schedulerActive: status.schedulerActive,
         bufferCounts,
     });
+}));
+
+/**
+ * Get cycle progress for the real-time CLI modal
+ * @route GET /api/admin/sheet-offload/cycle-progress
+ */
+router.get('/sheet-offload/cycle-progress', requireAdmin, asyncHandler(async (_req: Request, res: Response) => {
+    res.json(sheetOffloadWorker.getCycleProgress());
 }));
 
 /**

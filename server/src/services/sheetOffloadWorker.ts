@@ -421,6 +421,154 @@ const fabricInwardState: JobState<FabricInwardResult> = {
 };
 
 // ============================================
+// CYCLE PROGRESS STATE
+// ============================================
+
+interface CycleStep {
+    name: string;
+    status: 'pending' | 'running' | 'done' | 'failed' | 'skipped';
+    detail?: string;
+    durationMs?: number;
+    error?: string;
+}
+
+interface CycleProgressState {
+    isRunning: boolean;
+    type: 'inward' | 'outward' | null;
+    startedAt: string | null;
+    completedAt: string | null;
+    steps: CycleStep[];
+    totalDurationMs?: number;
+}
+
+const cycleProgress: CycleProgressState = {
+    isRunning: false,
+    type: null,
+    startedAt: null,
+    completedAt: null,
+    steps: [],
+};
+
+const INWARD_STEPS = [
+    'Balance check',
+    'CSV backup',
+    'Push balances',
+    'DB health check',
+    'Read sheet rows',
+    'Validate rows',
+    'DB write',
+    'Mark DONE',
+    'Push updated balances',
+    'Verify balances',
+    'Cleanup DONE rows',
+    'Summary',
+];
+
+const OUTWARD_STEPS = [
+    'Balance check',
+    'CSV backup',
+    'Push balances',
+    'DB health check',
+    'Read sheet rows',
+    'Validate rows',
+    'DB write',
+    'Link orders',
+    'Book COGS',
+    'Mark DONE',
+    'Push updated balances',
+    'Verify balances',
+    'Cleanup DONE rows',
+    'Summary',
+];
+
+function initCycleSteps(type: 'inward' | 'outward'): void {
+    const names = type === 'inward' ? INWARD_STEPS : OUTWARD_STEPS;
+    cycleProgress.isRunning = true;
+    cycleProgress.type = type;
+    cycleProgress.startedAt = new Date().toISOString();
+    cycleProgress.completedAt = null;
+    cycleProgress.totalDurationMs = undefined;
+    cycleProgress.steps = names.map(name => ({ name, status: 'pending' }));
+}
+
+function getStep(name: string): CycleStep | undefined {
+    return cycleProgress.steps.find(s => s.name === name);
+}
+
+function stepStart(name: string): number {
+    const step = getStep(name);
+    if (step) {
+        step.status = 'running';
+        step.detail = undefined;
+        step.error = undefined;
+        step.durationMs = undefined;
+    }
+    return Date.now();
+}
+
+function stepDone(name: string, startMs: number, detail?: string): void {
+    const step = getStep(name);
+    if (step) {
+        step.status = 'done';
+        step.durationMs = Date.now() - startMs;
+        if (detail) step.detail = detail;
+    }
+}
+
+function stepFailed(name: string, startMs: number, error: string): void {
+    const step = getStep(name);
+    if (step) {
+        step.status = 'failed';
+        step.durationMs = Date.now() - startMs;
+        step.error = error;
+    }
+}
+
+function stepSkipped(name: string, detail?: string): void {
+    const step = getStep(name);
+    if (step) {
+        step.status = 'skipped';
+        if (detail) step.detail = detail;
+    }
+}
+
+function skipRemainingSteps(): void {
+    for (const step of cycleProgress.steps) {
+        if (step.status === 'pending') {
+            step.status = 'skipped';
+        }
+    }
+}
+
+function finishCycle(startMs: number): void {
+    cycleProgress.isRunning = false;
+    cycleProgress.completedAt = new Date().toISOString();
+    cycleProgress.totalDurationMs = Date.now() - startMs;
+}
+
+function getCycleProgress(): CycleProgressState {
+    return { ...cycleProgress, steps: cycleProgress.steps.map(s => ({ ...s })) };
+}
+
+function resetCycleProgress(): void {
+    cycleProgress.isRunning = false;
+    cycleProgress.type = null;
+    cycleProgress.startedAt = null;
+    cycleProgress.completedAt = null;
+    cycleProgress.totalDurationMs = undefined;
+    cycleProgress.steps = [];
+}
+
+/**
+ * Optional step tracker passed into ingest functions for granular progress updates.
+ */
+interface StepTracker {
+    start(name: string): number;
+    done(name: string, startMs: number, detail?: string): void;
+    fail(name: string, startMs: number, error: string): void;
+}
+
+// ============================================
 // HELPERS
 // ============================================
 
@@ -1113,15 +1261,19 @@ async function deductFabricForSamplingRows(
 // PHASE A: INGEST INWARD (LIVE)
 // ============================================
 
-async function ingestInwardLive(result: IngestInwardResult): Promise<Set<string>> {
+async function ingestInwardLive(result: IngestInwardResult, tracker?: StepTracker): Promise<Set<string>> {
     const tab = LIVE_TABS.INWARD;
     const affectedSkuIds = new Set<string>();
+
+    // --- Step: Read sheet rows ---
+    const readStart = tracker?.start('Read sheet rows') ?? 0;
 
     sheetsLogger.info({ tab }, 'Reading inward live tab');
 
     const rows = await readRange(ORDERS_MASTERSHEET_ID, `'${tab}'!A:J`);
     if (rows.length <= 1) {
         sheetsLogger.info({ tab }, 'No data rows');
+        tracker?.done('Read sheet rows', readStart, '0 rows');
         return affectedSkuIds;
     }
 
@@ -1175,8 +1327,14 @@ async function ingestInwardLive(result: IngestInwardResult): Promise<Set<string>
 
     if (parsed.length === 0) {
         sheetsLogger.info({ tab }, 'No data rows to process');
+        tracker?.done('Read sheet rows', readStart, '0 pending rows');
         return affectedSkuIds;
     }
+
+    tracker?.done('Read sheet rows', readStart, `${parsed.length} rows`);
+
+    // --- Step: Validate rows ---
+    const validateStart = tracker?.start('Validate rows') ?? 0;
 
     // --- Step 2: Bulk lookup SKUs for validation ---
     const skuMap = await bulkLookupSkus(parsed.map(r => r.skuCode));
@@ -1227,12 +1385,15 @@ async function ingestInwardLive(result: IngestInwardResult): Promise<Set<string>
 
     if (validRows.length === 0) {
         sheetsLogger.info({ tab, total: parsed.length, invalid: invalidCount }, 'No valid rows after validation');
+        tracker?.done('Validate rows', validateStart, `0 valid, ${invalidCount} invalid`);
         return affectedSkuIds;
     }
 
     // --- Step 4: Dedup valid rows against existing transactions ---
     const existingRefs = await findExistingReferenceIds(validRows.map(r => r.referenceId));
     const newRows = validRows.filter(r => !existingRefs.has(r.referenceId));
+
+    tracker?.done('Validate rows', validateStart, `${newRows.length} new, ${validRows.length - newRows.length} dupe, ${invalidCount} invalid`);
 
     if (newRows.length === 0) {
         sheetsLogger.info({ tab, total: validRows.length }, 'All valid rows already ingested');
@@ -1244,6 +1405,9 @@ async function ingestInwardLive(result: IngestInwardResult): Promise<Set<string>
         );
         return affectedSkuIds;
     }
+
+    // --- Step: DB write ---
+    const dbWriteStart = tracker?.start('DB write') ?? 0;
 
     // --- Step 5: Create transactions ---
     const adminUserId = await getAdminUserId();
@@ -1307,6 +1471,12 @@ async function ingestInwardLive(result: IngestInwardResult): Promise<Set<string>
         ingested: successfulRows.length,
         skippedInvalid: invalidCount,
     }, 'Inward ingestion complete');
+
+    if (result.errors > 0) {
+        tracker?.fail('DB write', dbWriteStart, `${result.errors} batch errors`);
+    } else {
+        tracker?.done('DB write', dbWriteStart, `${successfulRows.length} created`);
+    }
 
     // --- Step 6: Auto-deduct fabric for sampling inwards ---
     if (successfulRows.length > 0) {
@@ -1375,6 +1545,9 @@ async function ingestInwardLive(result: IngestInwardResult): Promise<Set<string>
         }
     }
 
+    // --- Step: Mark DONE ---
+    const markStart = tracker?.start('Mark DONE') ?? 0;
+
     // Mark successfully ingested rows + already-deduped rows as DONE
     const dupeRows = validRows.filter(r => existingRefs.has(r.referenceId));
     const rowsToMark = [
@@ -1382,6 +1555,8 @@ async function ingestInwardLive(result: IngestInwardResult): Promise<Set<string>
         ...dupeRows.map(r => ({ rowIndex: r.rowIndex, referenceId: r.referenceId })),
     ];
     await markRowsIngested(ORDERS_MASTERSHEET_ID, tab, rowsToMark, 'J', result);
+
+    tracker?.done('Mark DONE', markStart, `${rowsToMark.length} rows`);
 
     return affectedSkuIds;
 }
@@ -1391,17 +1566,22 @@ async function ingestInwardLive(result: IngestInwardResult): Promise<Set<string>
 // ============================================
 
 async function ingestOutwardLive(
-    result: IngestOutwardResult
+    result: IngestOutwardResult,
+    tracker?: StepTracker
 ): Promise<{ affectedSkuIds: Set<string>; linkableItems: LinkableOutward[]; orderMap: Map<string, OrderMapEntry> }> {
     const tab = LIVE_TABS.OUTWARD;
     const affectedSkuIds = new Set<string>();
     const linkableItems: LinkableOutward[] = [];
+
+    // --- Step: Read sheet rows ---
+    const readStart = tracker?.start('Read sheet rows') ?? 0;
 
     sheetsLogger.info({ tab }, 'Reading outward live tab');
 
     const rows = await readRange(ORDERS_MASTERSHEET_ID, `'${tab}'!A:AG`);
     if (rows.length <= 1) {
         sheetsLogger.info({ tab }, 'No data rows');
+        tracker?.done('Read sheet rows', readStart, '0 rows');
         return { affectedSkuIds, linkableItems, orderMap: new Map() };
     }
 
@@ -1460,14 +1640,21 @@ async function ingestOutwardLive(
 
     if (parsed.length === 0) {
         sheetsLogger.info({ tab }, 'No valid rows to ingest');
+        tracker?.done('Read sheet rows', readStart, '0 pending rows');
         return { affectedSkuIds, linkableItems, orderMap: new Map() };
     }
+
+    tracker?.done('Read sheet rows', readStart, `${parsed.length} rows`);
+
+    // --- Step: Validate rows ---
+    const validateStart = tracker?.start('Validate rows') ?? 0;
 
     const existingRefs = await findExistingReferenceIds(parsed.map(r => r.referenceId));
     const newRows = parsed.filter(r => !existingRefs.has(r.referenceId));
 
     if (newRows.length === 0) {
         sheetsLogger.info({ tab, total: parsed.length }, 'All rows already ingested');
+        tracker?.done('Validate rows', validateStart, `0 new, ${parsed.length} dupe`);
         // Mark all-dupe rows as DONE
         await markRowsIngested(
             ORDERS_MASTERSHEET_ID, tab,
@@ -1529,6 +1716,11 @@ async function ingestOutwardLive(
     if (outwardImportErrors.length > 0) {
         await writeImportErrors(ORDERS_MASTERSHEET_ID, tab, outwardImportErrors, 'AG');
     }
+
+    tracker?.done('Validate rows', validateStart, `${validRows.length} valid, ${newRows.length - validRows.length} skipped`);
+
+    // --- Step: DB write ---
+    const dbWriteStart = tracker?.start('DB write') ?? 0;
 
     const adminUserId = await getAdminUserId();
     const successfulRows: ParsedRow[] = [];
@@ -1606,6 +1798,15 @@ async function ingestOutwardLive(
 
     sheetsLogger.info({ tab, ingested: successfulRows.length }, 'Outward ingestion complete');
 
+    if (result.errors > 0) {
+        tracker?.fail('DB write', dbWriteStart, `${result.errors} batch errors`);
+    } else {
+        tracker?.done('DB write', dbWriteStart, `${successfulRows.length} created`);
+    }
+
+    // --- Step: Mark DONE ---
+    const markStart = tracker?.start('Mark DONE') ?? 0;
+
     // Mark successfully ingested rows + already-deduped rows as DONE
     const dupeRows = parsed.filter(r => existingRefs.has(r.referenceId));
     const rowsToMark = [
@@ -1613,6 +1814,8 @@ async function ingestOutwardLive(
         ...dupeRows.map(r => ({ rowIndex: r.rowIndex, referenceId: r.referenceId })),
     ];
     await markRowsIngested(ORDERS_MASTERSHEET_ID, tab, rowsToMark, 'AG', result);
+
+    tracker?.done('Mark DONE', markStart, `${rowsToMark.length} rows`);
 
     return { affectedSkuIds, linkableItems, orderMap };
 }
@@ -2964,6 +3167,136 @@ async function previewPushBalances(): Promise<PushBalancesPreviewResult> {
     };
 }
 
+/**
+ * Core push balances logic — pushes ALL SKU balances to both sheets.
+ * Extracted so both triggerPushBalances and cycle runners can call it.
+ */
+async function pushBalancesCore(): Promise<{ skusUpdated: number; errors: number }> {
+    const skus = await prisma.sku.findMany({
+        select: { id: true, skuCode: true, currentBalance: true },
+    });
+
+    sheetsLogger.info({ skuCount: skus.length }, 'Push balances: fetched all SKUs');
+
+    const balanceByCode = new Map<string, number>();
+    for (const sku of skus) {
+        balanceByCode.set(sku.skuCode, sku.currentBalance);
+    }
+
+    let totalUpdated = 0;
+    let errors = 0;
+
+    // --- Target 1: Inventory tab col R (Mastersheet) ---
+    try {
+        const inventoryRows = await readRange(
+            ORDERS_MASTERSHEET_ID,
+            `'${INVENTORY_TAB.NAME}'!${INVENTORY_TAB.SKU_COL}:${INVENTORY_TAB.SKU_COL}`
+        );
+
+        const dataStart = INVENTORY_TAB.DATA_START_ROW - 1;
+        const updates: Array<{ row: number; value: number }> = [];
+
+        for (let i = dataStart; i < inventoryRows.length; i++) {
+            const skuCode = String(inventoryRows[i]?.[0] ?? '').trim();
+            if (skuCode && balanceByCode.has(skuCode)) {
+                updates.push({ row: i + 1, value: balanceByCode.get(skuCode)! });
+            }
+        }
+
+        if (updates.length > 0) {
+            const ranges = groupIntoRanges(updates);
+            const batchData = ranges.map(range => ({
+                range: `'${INVENTORY_TAB.NAME}'!${INVENTORY_TAB.ERP_BALANCE_COL}${range.startRow}:${INVENTORY_TAB.ERP_BALANCE_COL}${range.startRow + range.values.length - 1}`,
+                values: range.values,
+            }));
+            await batchWriteRanges(ORDERS_MASTERSHEET_ID, batchData);
+            totalUpdated += updates.length;
+            sheetsLogger.info({ updated: updates.length, ranges: ranges.length }, 'Push balances: Inventory col R updated (batch)');
+        }
+    } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : 'Unknown error';
+        sheetsLogger.error({ error: message }, 'Push balances: Failed to update Inventory col R');
+        errors++;
+    }
+
+    // --- Target 2: Balance (Final) col F (Office Ledger) ---
+    try {
+        const balanceRows = await readRange(
+            OFFICE_LEDGER_ID,
+            `'${LEDGER_TABS.BALANCE_FINAL}'!A:A`
+        );
+
+        if (balanceRows.length > 2) {
+            const updates: Array<{ row: number; value: number }> = [];
+            for (let i = 2; i < balanceRows.length; i++) {
+                const skuCode = String(balanceRows[i]?.[0] ?? '').trim();
+                if (skuCode && balanceByCode.has(skuCode)) {
+                    updates.push({ row: i + 1, value: balanceByCode.get(skuCode)! });
+                }
+            }
+
+            if (updates.length > 0) {
+                const ranges = groupIntoRanges(updates);
+                const batchData = ranges.map(range => ({
+                    range: `'${LEDGER_TABS.BALANCE_FINAL}'!F${range.startRow}:F${range.startRow + range.values.length - 1}`,
+                    values: range.values,
+                }));
+                await batchWriteRanges(OFFICE_LEDGER_ID, batchData);
+                totalUpdated += updates.length;
+                sheetsLogger.info({ updated: updates.length }, 'Push balances: Balance (Final) col F updated (batch)');
+            }
+        }
+    } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : 'Unknown error';
+        sheetsLogger.error({ error: message }, 'Push balances: Failed to update Balance (Final) col F');
+        errors++;
+    }
+
+    return { skusUpdated: totalUpdated, errors };
+}
+
+/**
+ * Clean up DONE rows from a single sheet tab.
+ * Extracted so both triggerCleanupDoneRows and cycle runners can call it.
+ */
+async function cleanupSingleTab(
+    tabName: string,
+    dateColIndex: number,
+    statusColIndex: number,
+    readRange_: string
+): Promise<{ deleted: number; error?: string }> {
+    try {
+        const rows = await readRange(ORDERS_MASTERSHEET_ID, readRange_);
+        const toDelete: number[] = [];
+        const cutoffDate = new Date();
+        cutoffDate.setDate(cutoffDate.getDate() - CLEANUP_RETENTION_DAYS);
+
+        for (let i = 1; i < rows.length; i++) {
+            const row = rows[i];
+            const status = String(row[statusColIndex] ?? '').trim();
+            if (!status.startsWith(INGESTED_PREFIX)) continue;
+
+            const dateStr = String(row[dateColIndex] ?? '');
+            const rowDate = parseSheetDate(dateStr);
+            if (rowDate && rowDate < cutoffDate) {
+                toDelete.push(i);
+            }
+        }
+
+        if (toDelete.length > 0) {
+            const sheetId = await getSheetId(ORDERS_MASTERSHEET_ID, tabName);
+            await deleteRowsBatch(ORDERS_MASTERSHEET_ID, sheetId, toDelete);
+            sheetsLogger.info({ tab: tabName, deleted: toDelete.length }, 'Cleaned up DONE rows');
+        }
+
+        return { deleted: toDelete.length };
+    } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : 'Unknown error';
+        sheetsLogger.error({ tab: tabName, error: message }, 'Failed to cleanup DONE rows');
+        return { deleted: 0, error: `${tabName} cleanup failed: ${message}` };
+    }
+}
+
 async function triggerPushBalances(): Promise<PushBalancesResult | null> {
     if (pushBalancesState.isRunning) {
         sheetsLogger.warn('triggerPushBalances skipped — already running');
@@ -2975,94 +3308,12 @@ async function triggerPushBalances(): Promise<PushBalancesResult | null> {
     const start = Date.now();
 
     try {
-        // Fetch all SKUs with balances in a single query
-        const skus = await prisma.sku.findMany({
-            select: { id: true, skuCode: true, currentBalance: true },
-        });
-
-        sheetsLogger.info({ skuCount: skus.length }, 'Push balances: fetched all SKUs');
-
-        const tracker = { errors: 0, skusUpdated: 0 };
-
-        const balanceByCode = new Map<string, number>();
-        for (const sku of skus) {
-            balanceByCode.set(sku.skuCode, sku.currentBalance);
-        }
-
-        let totalUpdated = 0;
-
-        // --- Target 1: Inventory tab col R (Mastersheet) ---
-        try {
-            const inventoryRows = await readRange(
-                ORDERS_MASTERSHEET_ID,
-                `'${INVENTORY_TAB.NAME}'!${INVENTORY_TAB.SKU_COL}:${INVENTORY_TAB.SKU_COL}`
-            );
-
-            const dataStart = INVENTORY_TAB.DATA_START_ROW - 1;
-            const updates: Array<{ row: number; value: number }> = [];
-
-            for (let i = dataStart; i < inventoryRows.length; i++) {
-                const skuCode = String(inventoryRows[i]?.[0] ?? '').trim();
-                if (skuCode && balanceByCode.has(skuCode)) {
-                    updates.push({ row: i + 1, value: balanceByCode.get(skuCode)! });
-                }
-            }
-
-            if (updates.length > 0) {
-                const ranges = groupIntoRanges(updates);
-                const batchData = ranges.map(range => ({
-                    range: `'${INVENTORY_TAB.NAME}'!${INVENTORY_TAB.ERP_BALANCE_COL}${range.startRow}:${INVENTORY_TAB.ERP_BALANCE_COL}${range.startRow + range.values.length - 1}`,
-                    values: range.values,
-                }));
-                await batchWriteRanges(ORDERS_MASTERSHEET_ID, batchData);
-                totalUpdated += updates.length;
-                sheetsLogger.info({ updated: updates.length, ranges: ranges.length }, 'Push balances: Inventory col R updated (batch)');
-            }
-        } catch (err: unknown) {
-            const message = err instanceof Error ? err.message : 'Unknown error';
-            sheetsLogger.error({ error: message }, 'Push balances: Failed to update Inventory col R');
-            tracker.errors++;
-        }
-
-        // --- Target 2: Balance (Final) col F (Office Ledger) ---
-        try {
-            const balanceRows = await readRange(
-                OFFICE_LEDGER_ID,
-                `'${LEDGER_TABS.BALANCE_FINAL}'!A:A`
-            );
-
-            if (balanceRows.length > 2) {
-                const updates: Array<{ row: number; value: number }> = [];
-                for (let i = 2; i < balanceRows.length; i++) {
-                    const skuCode = String(balanceRows[i]?.[0] ?? '').trim();
-                    if (skuCode && balanceByCode.has(skuCode)) {
-                        updates.push({ row: i + 1, value: balanceByCode.get(skuCode)! });
-                    }
-                }
-
-                if (updates.length > 0) {
-                    const ranges = groupIntoRanges(updates);
-                    const batchData = ranges.map(range => ({
-                        range: `'${LEDGER_TABS.BALANCE_FINAL}'!F${range.startRow}:F${range.startRow + range.values.length - 1}`,
-                        values: range.values,
-                    }));
-                    await batchWriteRanges(OFFICE_LEDGER_ID, batchData);
-                    totalUpdated += updates.length;
-                    sheetsLogger.info({ updated: updates.length }, 'Push balances: Balance (Final) col F updated (batch)');
-                }
-            }
-        } catch (err: unknown) {
-            const message = err instanceof Error ? err.message : 'Unknown error';
-            sheetsLogger.error({ error: message }, 'Push balances: Failed to update Balance (Final) col F');
-            tracker.errors++;
-        }
-
-        tracker.skusUpdated = totalUpdated;
+        const coreResult = await pushBalancesCore();
 
         const result: PushBalancesResult = {
             startedAt,
-            skusUpdated: tracker.skusUpdated,
-            errors: tracker.errors,
+            skusUpdated: coreResult.skusUpdated,
+            errors: coreResult.errors,
             durationMs: Date.now() - start,
             error: null,
         };
@@ -3162,97 +3413,19 @@ async function triggerCleanupDoneRows(): Promise<CleanupDoneResult | null> {
     };
 
     try {
-        const cutoffDate = new Date();
-        cutoffDate.setDate(cutoffDate.getDate() - CLEANUP_RETENTION_DAYS);
-        sheetsLogger.info({ cutoffDate: cutoffDate.toISOString(), retentionDays: CLEANUP_RETENTION_DAYS }, 'Starting DONE row cleanup');
+        sheetsLogger.info({ retentionDays: CLEANUP_RETENTION_DAYS }, 'Starting DONE row cleanup');
 
-        // --- Inward (Live) ---
-        try {
-            const inwardRows = await readRange(ORDERS_MASTERSHEET_ID, `'${LIVE_TABS.INWARD}'!A:J`);
-            const inwardToDelete: number[] = [];
+        const inward = await cleanupSingleTab(LIVE_TABS.INWARD, INWARD_LIVE_COLS.DATE, INWARD_LIVE_COLS.IMPORT_ERRORS, `'${LIVE_TABS.INWARD}'!A:J`);
+        result.inwardDeleted = inward.deleted;
+        if (inward.error) result.errors.push(inward.error);
 
-            for (let i = 1; i < inwardRows.length; i++) {
-                const row = inwardRows[i];
-                const status = String(row[INWARD_LIVE_COLS.IMPORT_ERRORS] ?? '').trim();
-                if (!status.startsWith(INGESTED_PREFIX)) continue;
+        const outward = await cleanupSingleTab(LIVE_TABS.OUTWARD, OUTWARD_LIVE_COLS.OUTWARD_DATE, OUTWARD_LIVE_COLS.IMPORT_ERRORS, `'${LIVE_TABS.OUTWARD}'!A:AG`);
+        result.outwardDeleted = outward.deleted;
+        if (outward.error) result.errors.push(outward.error);
 
-                const dateStr = String(row[INWARD_LIVE_COLS.DATE] ?? '');
-                const rowDate = parseSheetDate(dateStr);
-                if (rowDate && rowDate < cutoffDate) {
-                    inwardToDelete.push(i);
-                }
-            }
-
-            if (inwardToDelete.length > 0) {
-                const sheetId = await getSheetId(ORDERS_MASTERSHEET_ID, LIVE_TABS.INWARD);
-                await deleteRowsBatch(ORDERS_MASTERSHEET_ID, sheetId, inwardToDelete);
-                result.inwardDeleted = inwardToDelete.length;
-                sheetsLogger.info({ deleted: inwardToDelete.length }, 'Cleaned up DONE inward rows');
-            }
-        } catch (err: unknown) {
-            const message = err instanceof Error ? err.message : 'Unknown error';
-            result.errors.push(`Inward cleanup failed: ${message}`);
-            sheetsLogger.error({ error: message }, 'Failed to cleanup inward DONE rows');
-        }
-
-        // --- Outward (Live) ---
-        try {
-            const outwardRows = await readRange(ORDERS_MASTERSHEET_ID, `'${LIVE_TABS.OUTWARD}'!A:AG`);
-            const outwardToDelete: number[] = [];
-
-            for (let i = 1; i < outwardRows.length; i++) {
-                const row = outwardRows[i];
-                const status = String(row[OUTWARD_LIVE_COLS.IMPORT_ERRORS] ?? '').trim();
-                if (!status.startsWith(INGESTED_PREFIX)) continue;
-
-                const outwardDateStr = String(row[OUTWARD_LIVE_COLS.OUTWARD_DATE] ?? '');
-                const orderDateStr = String(row[OUTWARD_LIVE_COLS.ORDER_DATE] ?? '');
-                const rowDate = parseSheetDate(outwardDateStr) ?? parseSheetDate(orderDateStr);
-                if (rowDate && rowDate < cutoffDate) {
-                    outwardToDelete.push(i);
-                }
-            }
-
-            if (outwardToDelete.length > 0) {
-                const sheetId = await getSheetId(ORDERS_MASTERSHEET_ID, LIVE_TABS.OUTWARD);
-                await deleteRowsBatch(ORDERS_MASTERSHEET_ID, sheetId, outwardToDelete);
-                result.outwardDeleted = outwardToDelete.length;
-                sheetsLogger.info({ deleted: outwardToDelete.length }, 'Cleaned up DONE outward rows');
-            }
-        } catch (err: unknown) {
-            const message = err instanceof Error ? err.message : 'Unknown error';
-            result.errors.push(`Outward cleanup failed: ${message}`);
-            sheetsLogger.error({ error: message }, 'Failed to cleanup outward DONE rows');
-        }
-
-        // --- Fabric Inward (Live) ---
-        try {
-            const fabricRows = await readRange(ORDERS_MASTERSHEET_ID, `'${LIVE_TABS.FABRIC_INWARD}'!A:K`);
-            const fabricToDelete: number[] = [];
-
-            for (let i = 1; i < fabricRows.length; i++) {
-                const row = fabricRows[i];
-                const status = String(row[FABRIC_INWARD_LIVE_COLS.STATUS] ?? '').trim();
-                if (!status.startsWith(INGESTED_PREFIX)) continue;
-
-                const dateStr = String(row[FABRIC_INWARD_LIVE_COLS.DATE] ?? '');
-                const rowDate = parseSheetDate(dateStr);
-                if (rowDate && rowDate < cutoffDate) {
-                    fabricToDelete.push(i);
-                }
-            }
-
-            if (fabricToDelete.length > 0) {
-                const sheetId = await getSheetId(ORDERS_MASTERSHEET_ID, LIVE_TABS.FABRIC_INWARD);
-                await deleteRowsBatch(ORDERS_MASTERSHEET_ID, sheetId, fabricToDelete);
-                result.fabricInwardDeleted = fabricToDelete.length;
-                sheetsLogger.info({ deleted: fabricToDelete.length }, 'Cleaned up DONE fabric inward rows');
-            }
-        } catch (err: unknown) {
-            const message = err instanceof Error ? err.message : 'Unknown error';
-            result.errors.push(`Fabric inward cleanup failed: ${message}`);
-            sheetsLogger.error({ error: message }, 'Failed to cleanup fabric inward DONE rows');
-        }
+        const fabric = await cleanupSingleTab(LIVE_TABS.FABRIC_INWARD, FABRIC_INWARD_LIVE_COLS.DATE, FABRIC_INWARD_LIVE_COLS.STATUS, `'${LIVE_TABS.FABRIC_INWARD}'!A:K`);
+        result.fabricInwardDeleted = fabric.deleted;
+        if (fabric.error) result.errors.push(fabric.error);
 
     } catch (error: unknown) {
         const message = error instanceof Error ? error.message : 'Unknown error';
@@ -4524,6 +4697,408 @@ async function triggerFabricInward(): Promise<FabricInwardResult | null> {
 }
 
 // ============================================
+// UNIFIED CYCLE RUNNERS
+// ============================================
+
+/**
+ * Unified inward ingestion pipeline with step-by-step progress tracking.
+ * Wraps pre-flight, import, and post-flight into one self-contained cycle.
+ */
+async function runInwardCycle(): Promise<IngestInwardResult> {
+    // Guard against ALL concurrent operations
+    if (cycleProgress.isRunning || ingestInwardState.isRunning || ingestOutwardState.isRunning || pushBalancesState.isRunning || cleanupDoneState.isRunning) {
+        return {
+            startedAt: new Date().toISOString(),
+            inwardIngested: 0, skipped: 0, rowsMarkedDone: 0, skusUpdated: 0,
+            errors: 0, durationMs: 0,
+            error: 'Another cycle or sheet job is already running',
+            inwardValidationErrors: {},
+        };
+    }
+
+    const cycleStart = Date.now();
+    initCycleSteps('inward');
+    ingestInwardState.isRunning = true;
+
+    const result: IngestInwardResult = {
+        startedAt: new Date().toISOString(),
+        inwardIngested: 0,
+        skipped: 0,
+        rowsMarkedDone: 0,
+        skusUpdated: 0,
+        errors: 0,
+        durationMs: 0,
+        error: null,
+        inwardValidationErrors: {},
+    };
+
+    const tracker: StepTracker = {
+        start: stepStart,
+        done: stepDone,
+        fail: stepFailed,
+    };
+
+    try {
+        // PRE-FLIGHT 1: Balance check
+        let s = stepStart('Balance check');
+        let beforeSnapshot: BalanceSnapshot | null = null;
+        try {
+            beforeSnapshot = await readInventorySnapshot();
+            stepDone('Balance check', s, `${beforeSnapshot.rowCount} SKUs read`);
+        } catch (err: unknown) {
+            stepFailed('Balance check', s, err instanceof Error ? err.message : 'Unknown error');
+        }
+
+        // PRE-FLIGHT 2: Read current balances
+        s = stepStart('CSV backup');
+        try {
+            const skus = await prisma.sku.findMany({
+                select: { skuCode: true, currentBalance: true },
+            });
+            stepDone('CSV backup', s, `${skus.length} SKUs read`);
+        } catch (err: unknown) {
+            stepFailed('CSV backup', s, err instanceof Error ? err.message : 'Unknown error');
+        }
+
+        // PRE-FLIGHT 3: Push balances
+        s = stepStart('Push balances');
+        try {
+            const pushResult = await pushBalancesCore();
+            stepDone('Push balances', s, `${pushResult.skusUpdated} updated`);
+        } catch (err: unknown) {
+            stepFailed('Push balances', s, err instanceof Error ? err.message : 'Unknown error');
+        }
+
+        // PRE-FLIGHT 4: DB health check (fatal)
+        s = stepStart('DB health check');
+        try {
+            await prisma.$queryRaw`SELECT 1`;
+            stepDone('DB health check', s, 'OK');
+        } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : 'Unknown error';
+            stepFailed('DB health check', s, msg);
+            skipRemainingSteps();
+            result.error = `DB health check failed: ${msg}`;
+            result.durationMs = Date.now() - cycleStart;
+            finishCycle(cycleStart);
+            return result;
+        }
+
+        // IMPORT: Read + Validate + DB write + Mark DONE
+        // Step tracking happens inside ingestInwardLive via the tracker
+        const affectedSkuIds = await ingestInwardLive(result, tracker);
+
+        // Mark any import steps still pending as skipped (e.g. early return with no data)
+        for (const name of ['Read sheet rows', 'Validate rows', 'DB write', 'Mark DONE']) {
+            const step = getStep(name);
+            if (step && step.status === 'pending') step.status = 'skipped';
+        }
+
+        // POST-FLIGHT: Push updated balances
+        s = stepStart('Push updated balances');
+        try {
+            if (affectedSkuIds.size > 0) {
+                await updateSheetBalances(affectedSkuIds, result);
+            }
+            if (result.inwardIngested > 0) {
+                invalidateCaches();
+            }
+            stepDone('Push updated balances', s, `${result.skusUpdated} updated`);
+        } catch (err: unknown) {
+            stepFailed('Push updated balances', s, err instanceof Error ? err.message : 'Unknown error');
+        }
+
+        // POST-FLIGHT: Verify balances
+        s = stepStart('Verify balances');
+        try {
+            if (beforeSnapshot && result.inwardIngested > 0) {
+                await new Promise(resolve => setTimeout(resolve, 8000));
+                const afterSnapshot = await readInventorySnapshot();
+                const verification = compareSnapshots(beforeSnapshot, afterSnapshot);
+                result.balanceVerification = verification;
+                stepDone('Verify balances', s, verification.passed ? 'Passed' : `${verification.drifted} drifted`);
+            } else {
+                stepSkipped('Verify balances', 'No changes to verify');
+            }
+        } catch (err: unknown) {
+            stepFailed('Verify balances', s, err instanceof Error ? err.message : 'Unknown error');
+        }
+
+        // POST-FLIGHT: Cleanup DONE rows (inward tab only)
+        s = stepStart('Cleanup DONE rows');
+        try {
+            const cleanup = await cleanupSingleTab(
+                LIVE_TABS.INWARD,
+                INWARD_LIVE_COLS.DATE,
+                INWARD_LIVE_COLS.IMPORT_ERRORS,
+                `'${LIVE_TABS.INWARD}'!A:J`
+            );
+            stepDone('Cleanup DONE rows', s, `${cleanup.deleted} deleted`);
+        } catch (err: unknown) {
+            stepFailed('Cleanup DONE rows', s, err instanceof Error ? err.message : 'Unknown error');
+        }
+
+        // Summary
+        s = stepStart('Summary');
+        result.durationMs = Date.now() - cycleStart;
+        stepDone('Summary', s, `${result.inwardIngested} ingested, ${result.skipped} skipped`);
+
+        // Update legacy state
+        ingestInwardState.lastRunAt = new Date();
+        ingestInwardState.lastResult = result;
+        pushRecentRun(ingestInwardState, {
+            startedAt: result.startedAt,
+            durationMs: result.durationMs,
+            count: result.inwardIngested,
+            error: result.error,
+        });
+
+        sheetsLogger.info({
+            durationMs: result.durationMs,
+            inwardIngested: result.inwardIngested,
+            skipped: result.skipped,
+        }, 'Inward cycle completed');
+
+        return result;
+    } catch (error: unknown) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        sheetsLogger.error({ error: err.message, stack: err.stack }, 'Inward cycle failed');
+        result.error = err.message;
+        result.durationMs = Date.now() - cycleStart;
+        skipRemainingSteps();
+
+        ingestInwardState.lastResult = result;
+        pushRecentRun(ingestInwardState, {
+            startedAt: result.startedAt,
+            durationMs: result.durationMs,
+            count: result.inwardIngested,
+            error: result.error,
+        });
+
+        return result;
+    } finally {
+        ingestInwardState.isRunning = false;
+        finishCycle(cycleStart);
+    }
+}
+
+/**
+ * Unified outward ingestion pipeline with step-by-step progress tracking.
+ */
+async function runOutwardCycle(): Promise<IngestOutwardResult> {
+    // Guard against ALL concurrent operations
+    if (cycleProgress.isRunning || ingestInwardState.isRunning || ingestOutwardState.isRunning || pushBalancesState.isRunning || cleanupDoneState.isRunning) {
+        return {
+            startedAt: new Date().toISOString(),
+            outwardIngested: 0, ordersLinked: 0, skipped: 0, rowsMarkedDone: 0,
+            skusUpdated: 0, errors: 0, durationMs: 0,
+            error: 'Another cycle or sheet job is already running',
+        };
+    }
+
+    const cycleStart = Date.now();
+    initCycleSteps('outward');
+    ingestOutwardState.isRunning = true;
+
+    const result: IngestOutwardResult = {
+        startedAt: new Date().toISOString(),
+        outwardIngested: 0,
+        ordersLinked: 0,
+        skipped: 0,
+        rowsMarkedDone: 0,
+        skusUpdated: 0,
+        errors: 0,
+        durationMs: 0,
+        error: null,
+    };
+
+    const tracker: StepTracker = {
+        start: stepStart,
+        done: stepDone,
+        fail: stepFailed,
+    };
+
+    try {
+        // PRE-FLIGHT 1: Balance check
+        let s = stepStart('Balance check');
+        let beforeSnapshot: BalanceSnapshot | null = null;
+        try {
+            beforeSnapshot = await readInventorySnapshot();
+            stepDone('Balance check', s, `${beforeSnapshot.rowCount} SKUs read`);
+        } catch (err: unknown) {
+            stepFailed('Balance check', s, err instanceof Error ? err.message : 'Unknown error');
+        }
+
+        // PRE-FLIGHT 2: Read current balances
+        s = stepStart('CSV backup');
+        try {
+            const skus = await prisma.sku.findMany({
+                select: { skuCode: true, currentBalance: true },
+            });
+            stepDone('CSV backup', s, `${skus.length} SKUs read`);
+        } catch (err: unknown) {
+            stepFailed('CSV backup', s, err instanceof Error ? err.message : 'Unknown error');
+        }
+
+        // PRE-FLIGHT 3: Push balances
+        s = stepStart('Push balances');
+        try {
+            const pushResult = await pushBalancesCore();
+            stepDone('Push balances', s, `${pushResult.skusUpdated} updated`);
+        } catch (err: unknown) {
+            stepFailed('Push balances', s, err instanceof Error ? err.message : 'Unknown error');
+        }
+
+        // PRE-FLIGHT 4: DB health check (fatal)
+        s = stepStart('DB health check');
+        try {
+            await prisma.$queryRaw`SELECT 1`;
+            stepDone('DB health check', s, 'OK');
+        } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : 'Unknown error';
+            stepFailed('DB health check', s, msg);
+            skipRemainingSteps();
+            result.error = `DB health check failed: ${msg}`;
+            result.durationMs = Date.now() - cycleStart;
+            finishCycle(cycleStart);
+            return result;
+        }
+
+        // IMPORT: Read + Validate + DB write + Mark DONE
+        const { affectedSkuIds, linkableItems, orderMap } = await ingestOutwardLive(result, tracker);
+
+        // Mark any import steps still pending as skipped (e.g. early return with no data)
+        for (const name of ['Read sheet rows', 'Validate rows', 'DB write', 'Mark DONE']) {
+            const step = getStep(name);
+            if (step && step.status === 'pending') step.status = 'skipped';
+        }
+
+        // IMPORT 7b: Link orders
+        s = stepStart('Link orders');
+        try {
+            if (linkableItems.length > 0) {
+                await linkOutwardToOrders(linkableItems, result, orderMap);
+                stepDone('Link orders', s, `${result.ordersLinked} linked`);
+            } else {
+                stepDone('Link orders', s, 'No orders to link');
+            }
+        } catch (err: unknown) {
+            stepFailed('Link orders', s, err instanceof Error ? err.message : 'Unknown error');
+        }
+
+        // IMPORT 7c: Book COGS
+        s = stepStart('Book COGS');
+        try {
+            if (linkableItems.length > 0) {
+                const adminUserId = await getAdminUserId();
+                const cogsMonths = new Set<string>();
+                for (const item of linkableItems) {
+                    const d = item.date ?? new Date();
+                    const ist = new Date(d.getTime() + (5.5 * 60 * 60 * 1000));
+                    cogsMonths.add(`${ist.getFullYear()}-${ist.getMonth() + 1}`);
+                }
+
+                for (const key of cogsMonths) {
+                    const [y, m] = key.split('-').map(Number);
+                    await bookShipmentCOGSForMonth(prisma, y, m, adminUserId);
+                }
+                stepDone('Book COGS', s, `${cogsMonths.size} months`);
+            } else {
+                stepDone('Book COGS', s, 'No shipments');
+            }
+        } catch (err: unknown) {
+            stepFailed('Book COGS', s, err instanceof Error ? err.message : 'Unknown error');
+        }
+
+        // POST-FLIGHT: Push updated balances
+        s = stepStart('Push updated balances');
+        try {
+            if (affectedSkuIds.size > 0) {
+                await updateSheetBalances(affectedSkuIds, result);
+            }
+            if (result.outwardIngested > 0) {
+                invalidateCaches();
+            }
+            stepDone('Push updated balances', s, `${result.skusUpdated} updated`);
+        } catch (err: unknown) {
+            stepFailed('Push updated balances', s, err instanceof Error ? err.message : 'Unknown error');
+        }
+
+        // POST-FLIGHT: Verify balances
+        s = stepStart('Verify balances');
+        try {
+            if (beforeSnapshot && result.outwardIngested > 0) {
+                await new Promise(resolve => setTimeout(resolve, 8000));
+                const afterSnapshot = await readInventorySnapshot();
+                const verification = compareSnapshots(beforeSnapshot, afterSnapshot);
+                result.balanceVerification = verification;
+                stepDone('Verify balances', s, verification.passed ? 'Passed' : `${verification.drifted} drifted`);
+            } else {
+                stepSkipped('Verify balances', 'No changes to verify');
+            }
+        } catch (err: unknown) {
+            stepFailed('Verify balances', s, err instanceof Error ? err.message : 'Unknown error');
+        }
+
+        // POST-FLIGHT: Cleanup DONE rows (outward tab only)
+        s = stepStart('Cleanup DONE rows');
+        try {
+            const cleanup = await cleanupSingleTab(
+                LIVE_TABS.OUTWARD,
+                OUTWARD_LIVE_COLS.OUTWARD_DATE,
+                OUTWARD_LIVE_COLS.IMPORT_ERRORS,
+                `'${LIVE_TABS.OUTWARD}'!A:AG`
+            );
+            stepDone('Cleanup DONE rows', s, `${cleanup.deleted} deleted`);
+        } catch (err: unknown) {
+            stepFailed('Cleanup DONE rows', s, err instanceof Error ? err.message : 'Unknown error');
+        }
+
+        // Summary
+        s = stepStart('Summary');
+        result.durationMs = Date.now() - cycleStart;
+        stepDone('Summary', s, `${result.outwardIngested} ingested, ${result.ordersLinked} linked`);
+
+        // Update legacy state
+        ingestOutwardState.lastRunAt = new Date();
+        ingestOutwardState.lastResult = result;
+        pushRecentRun(ingestOutwardState, {
+            startedAt: result.startedAt,
+            durationMs: result.durationMs,
+            count: result.outwardIngested,
+            error: result.error,
+        });
+
+        sheetsLogger.info({
+            durationMs: result.durationMs,
+            outwardIngested: result.outwardIngested,
+            ordersLinked: result.ordersLinked,
+        }, 'Outward cycle completed');
+
+        return result;
+    } catch (error: unknown) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        sheetsLogger.error({ error: err.message, stack: err.stack }, 'Outward cycle failed');
+        result.error = err.message;
+        result.durationMs = Date.now() - cycleStart;
+        skipRemainingSteps();
+
+        ingestOutwardState.lastResult = result;
+        pushRecentRun(ingestOutwardState, {
+            startedAt: result.startedAt,
+            durationMs: result.durationMs,
+            count: result.outwardIngested,
+            error: result.error,
+        });
+
+        return result;
+    } finally {
+        ingestOutwardState.isRunning = false;
+        finishCycle(cycleStart);
+    }
+}
+
+// ============================================
 // EXPORTS
 // ============================================
 
@@ -4545,6 +5120,10 @@ export default {
     previewPushBalances,
     previewFabricInward,
     triggerFabricInward,
+    runInwardCycle,
+    runOutwardCycle,
+    getCycleProgress,
+    resetCycleProgress,
 };
 
-export type { IngestInwardResult, IngestOutwardResult, IngestPreviewResult, MoveShippedResult, CleanupDoneResult, MigrateFormulasResult, PushBalancesResult, PushFabricBalancesResult, ImportFabricBalancesResult, PushBalancesPreviewResult, OffloadStatus, RunSummary, BalanceVerificationResult, BalanceSnapshot, InwardPreviewRow, OutwardPreviewRow, FabricInwardResult, FabricInwardPreviewResult, FabricInwardPreviewRow };
+export type { IngestInwardResult, IngestOutwardResult, IngestPreviewResult, MoveShippedResult, CleanupDoneResult, MigrateFormulasResult, PushBalancesResult, PushFabricBalancesResult, ImportFabricBalancesResult, PushBalancesPreviewResult, OffloadStatus, RunSummary, BalanceVerificationResult, BalanceSnapshot, InwardPreviewRow, OutwardPreviewRow, FabricInwardResult, FabricInwardPreviewResult, FabricInwardPreviewRow, CycleStep, CycleProgressState };
