@@ -166,6 +166,51 @@ export async function readRange(
 }
 
 /**
+ * Read multiple ranges in a single API call using values.batchGet.
+ * Much faster than calling readRange() in a loop.
+ * @returns Map of range string to 2D string array
+ */
+export async function batchReadRanges(
+    spreadsheetId: string,
+    ranges: string[]
+): Promise<Map<string, string[][]>> {
+    if (ranges.length === 0) return new Map();
+
+    const client = getClient();
+
+    const response = await withRetry(
+        () => client.spreadsheets.values.batchGet({
+            spreadsheetId,
+            ranges,
+            valueRenderOption: 'FORMATTED_VALUE',
+        }),
+        `batchReadRanges(${ranges.length} ranges)`
+    );
+
+    // Google guarantees valueRanges is in the same order as input ranges.
+    // Store parsed data under the original requested key (primary) and
+    // Google's normalized key (alias) — parse values only once.
+    const result = new Map<string, string[][]>();
+    const valueRanges = response.data.valueRanges ?? [];
+
+    for (let i = 0; i < valueRanges.length; i++) {
+        const vr = valueRanges[i];
+        const raw = vr.values ?? [];
+        const parsed = raw.map(row => row.map(cell => String(cell ?? '')));
+
+        // Primary: store under the original key the caller used
+        result.set(ranges[i], parsed);
+
+        // Alias: also store under Google's normalized key if different
+        if (vr.range && vr.range !== ranges[i]) {
+            result.set(vr.range, parsed);
+        }
+    }
+
+    return result;
+}
+
+/**
  * Overwrite cells in a spreadsheet range.
  */
 export async function writeRange(

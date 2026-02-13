@@ -211,3 +211,93 @@ export async function ensureFolder(
     driveLogger.info({ folderId, name, parentId }, 'Created folder on Drive');
     return folderId;
 }
+
+/**
+ * Move a file or folder from one parent to another.
+ * @returns true if successful
+ */
+export async function moveFile(
+    fileId: string,
+    newParentId: string,
+    oldParentId: string
+): Promise<void> {
+    const client = getClient();
+
+    await withRetry(
+        () => client.files.update({
+            fileId,
+            addParents: newParentId,
+            removeParents: oldParentId,
+            fields: 'id,parents',
+        }),
+        `moveFile(${fileId})`
+    );
+
+    driveLogger.info({ fileId, newParentId, oldParentId }, 'File moved on Drive');
+}
+
+/**
+ * List all items (files and folders) inside a folder.
+ */
+export async function listFolder(
+    folderId: string
+): Promise<Array<{ id: string; name: string; mimeType: string; size?: string }>> {
+    const client = getClient();
+    const items: Array<{ id: string; name: string; mimeType: string; size?: string }> = [];
+    let pageToken: string | undefined;
+
+    do {
+        const result = await withRetry(
+            () => client.files.list({
+                q: `'${folderId}' in parents and trashed=false`,
+                fields: 'nextPageToken,files(id,name,mimeType,size)',
+                pageSize: 100,
+                pageToken,
+            }),
+            `listFolder(${folderId})`
+        );
+
+        for (const f of result.data.files ?? []) {
+            if (f.id && f.name && f.mimeType) {
+                items.push({ id: f.id, name: f.name, mimeType: f.mimeType, size: f.size ?? undefined });
+            }
+        }
+        pageToken = result.data.nextPageToken ?? undefined;
+    } while (pageToken);
+
+    return items;
+}
+
+/**
+ * Delete a file or empty folder from Drive (move to trash).
+ */
+export async function trashFile(fileId: string): Promise<void> {
+    const client = getClient();
+
+    await withRetry(
+        () => client.files.update({
+            fileId,
+            requestBody: { trashed: true },
+        }),
+        `trashFile(${fileId})`
+    );
+
+    driveLogger.info({ fileId }, 'File trashed on Drive');
+}
+
+/**
+ * Rename a file on Drive.
+ */
+export async function renameFile(fileId: string, newName: string): Promise<void> {
+    const client = getClient();
+
+    await withRetry(
+        () => client.files.update({
+            fileId,
+            requestBody: { name: newName },
+        }),
+        `renameFile(${fileId})`
+    );
+
+    driveLogger.info({ fileId, newName }, 'File renamed on Drive');
+}

@@ -69,3 +69,6 @@ backups/
 # Python venv & MS365 token cache
 .venv/
 .inbox-token-cache.json
+
+# Email attachment downloads
+downloads/

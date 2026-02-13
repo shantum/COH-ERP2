@@ -110,12 +110,12 @@ export const VENDOR_RULES: Record<string, VendorRule> = {
   'ZED Creation':             { category: 'service',   debitAccount: 'OPERATING_EXPENSES', description: 'Fabric wash processing' },
   'Dev Process':              { category: 'service',   debitAccount: 'OPERATING_EXPENSES', description: 'Fabric processing' },
 
-  // ---- Garment production vendors ----
-  'SHUBH CREATION':           { category: 'service',   debitAccount: 'OPERATING_EXPENSES', description: 'Garment production' },
-  'DARSHAN CREATION PVT. LTD.': { category: 'service', debitAccount: 'OPERATING_EXPENSES', description: 'Garment production' },
-  'Gemini Fashion':           { category: 'service',   debitAccount: 'OPERATING_EXPENSES', description: 'Garment production' },
-  'Mehta Clothing':           { category: 'service',   debitAccount: 'OPERATING_EXPENSES', description: 'Garment production' },
-  'MAYKA LIFESTYLE':          { category: 'service',   debitAccount: 'OPERATING_EXPENSES', description: 'Garment production' },
+  // ---- Fabric vendors (production fabrics) ----
+  'SHUBH CREATION':           { category: 'fabric',    debitAccount: 'FABRIC_INVENTORY', description: 'Fabric purchase' },
+  'DARSHAN CREATION PVT. LTD.': { category: 'fabric',  debitAccount: 'FABRIC_INVENTORY', description: 'Fabric purchase' },
+  'Gemini Fashion':           { category: 'fabric',    debitAccount: 'FABRIC_INVENTORY', description: 'Fabric purchase' },
+  'Mehta Clothing':           { category: 'fabric',    debitAccount: 'FABRIC_INVENTORY', description: 'Fabric purchase' },
+  'MAYKA LIFESTYLE':          { category: 'fabric',    debitAccount: 'FABRIC_INVENTORY', description: 'Fabric purchase' },
 
   // ---- Retail store ----
   'Bowerbird Interios':       { category: 'service',   debitAccount: 'OPERATING_EXPENSES', description: 'Retail store interiors' },
@@ -180,7 +180,7 @@ export interface UpiPayeeRule {
  * Used when parsing HDFC bank statement UPI transactions.
  */
 export const UPI_PAYEE_RULES: Record<string, UpiPayeeRule> = {
-  'CRED CLUB':                { debitAccount: 'ADVANCES_GIVEN',      description: 'Credit card payment (parked)' },
+  'CRED CLUB':                { debitAccount: 'CREDIT_CARD',         description: 'Credit card bill payment via CRED' },
   'ITHINK LOGISTIC':          { debitAccount: 'ADVANCES_GIVEN',      description: 'Logistics wallet top-up' },
   'GOOGLE INDIA DIGITAL':     { debitAccount: 'OPERATING_EXPENSES',  description: 'Google Ads', category: 'marketing' },
   'GOOGLE INDIA SERVICE':     { debitAccount: 'OPERATING_EXPENSES',  description: 'Google services', category: 'marketing' },
@@ -304,7 +304,7 @@ export function getVendorRule(contactName: string, purpose: string, noteDesc?: s
     return rule;
   }
   if (purpose === 'vendor bill' && TAILOR_NAMES.has(contactName)) {
-    return { category: 'service', debitAccount: 'OPERATING_EXPENSES', description: 'Production piecework' };
+    return { category: 'salary', debitAccount: 'OPERATING_EXPENSES', description: 'Production piecework' };
   }
   return { category: 'other', debitAccount: 'UNMATCHED_PAYMENTS' };
 }

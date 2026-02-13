@@ -33,6 +33,7 @@
 | `/railway` | Railway CLI, deployments, database access |
 | `/google-sheets` | Sheets hybrid system, buffer tabs, ingestion |
 | `/sync-from-sheet` | Sheet Sync UI, CSV uploads, sync jobs |
+| `/docs-drive` | Google Drive folder audit, completeness, naming, duplicates |
 | `/review` | Strict code review of recent changes |
 | `/plan` | Multi-session implementation plans |
 | `/update-skill` | Refresh skill files after codebase changes |

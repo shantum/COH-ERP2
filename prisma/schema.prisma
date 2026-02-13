@@ -351,6 +351,7 @@ model Party {
   bankAccountNumber String?
   bankIfsc          String?
   bankName          String?
+  razorpayContactId String?
   paymentTermsDays  Int?
   aliases           String[] @default([])
   isActive          Boolean  @default(true)

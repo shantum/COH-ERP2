@@ -658,6 +658,7 @@ export type Party = {
     bankAccountNumber: string | null;
     bankIfsc: string | null;
     bankName: string | null;
+    razorpayContactId: string | null;
     paymentTermsDays: number | null;
     aliases: Generated<string[]>;
     isActive: Generated<boolean>;

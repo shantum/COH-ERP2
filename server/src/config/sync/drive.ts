@@ -54,6 +54,12 @@ export const DRIVE_SYNC_BATCH_SIZE = 10;
  */
 export const DRIVE_UNLINKED_FOLDER_NAME = '_Unlinked';
 
+/**
+ * Folder name for all vendor/party invoice folders.
+ * Party subfolders are created inside this folder (not at the root).
+ */
+export const DRIVE_VENDOR_INVOICES_FOLDER_NAME = 'Vendor Invoices';
+
 // ============================================
 // HELPERS
 // ============================================
