@@ -803,9 +803,7 @@ export type Product = {
     exchangeCount: Generated<number>;
     returnCount: Generated<number>;
     writeOffCount: Generated<number>;
-    trimsCost: number | null;
     packagingCost: number | null;
-    liningCost: number | null;
     shopifyProductIds: Generated<string[]>;
 };
 export type ProductBomTemplate = {
@@ -1132,9 +1130,7 @@ export type Sku = {
     isCustomSku: Generated<boolean>;
     linkedOrderLineId: string | null;
     parentSkuId: string | null;
-    trimsCost: number | null;
     packagingCost: number | null;
-    liningCost: number | null;
     laborMinutes: number | null;
     bomCost: number | null;
 };
@@ -1252,9 +1248,7 @@ export type Variation = {
     imageUrl: string | null;
     isActive: Generated<boolean>;
     hasLining: Generated<boolean>;
-    trimsCost: number | null;
     packagingCost: number | null;
-    liningCost: number | null;
     laborMinutes: number | null;
     bomCost: number | null;
     shopifySourceProductId: string | null;

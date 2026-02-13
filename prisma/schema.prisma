@@ -121,9 +121,7 @@ model Product {
   exchangeCount            Int         @default(0)
   returnCount              Int         @default(0)
   writeOffCount            Int         @default(0)
-  trimsCost                Float?
   packagingCost            Float?
-  liningCost               Float?
   shopifyProductIds        String[]    @default([])
   variations               Variation[]
   bomTemplates             ProductBomTemplate[] // BOM structure for this product
@@ -144,9 +142,7 @@ model Variation {
   imageUrl               String?
   isActive               Boolean @default(true)
   hasLining              Boolean @default(false)
-  trimsCost              Float?
   packagingCost          Float?
-  liningCost             Float?
   laborMinutes           Float?
   bomCost                Float?   // Computed total BOM cost (sum of SKU bomCosts)
   shopifySourceProductId String?
@@ -183,9 +179,7 @@ model Sku {
   isCustomSku            Boolean                       @default(false)
   linkedOrderLineId      String?                       @unique
   parentSkuId            String?
-  trimsCost              Float?
   packagingCost          Float?
-  liningCost             Float?
   laborMinutes           Float?
   bomCost                Float?   // Computed total BOM cost (fabric + trims + services)
   feedbackProductLinks   FeedbackProductLink[]
