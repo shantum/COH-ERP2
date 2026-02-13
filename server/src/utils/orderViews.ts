@@ -746,17 +746,19 @@ function parseCity(shippingAddress: string | null | undefined): string {
 }
 
 /** Days after shipping before flagging as needs_review */
-const DELIVERY_REVIEW_DAYS = 10;
+export const DELIVERY_REVIEW_DAYS = 10;
+
+export type DeliveryConfirmationFlag = 'confirm_delivery' | 'needs_review' | null;
 
 /**
  * Compute delivery confirmation flag for a single line.
  * null = not applicable, 'confirm_delivery' = tracking says delivered, 'needs_review' = stale shipped
  */
-function computeDeliveryFlag(
+export function computeDeliveryFlag(
     lineStatus: string | null,
     trackingStatus: string | null,
-    shippedAt: string | null,
-): FlattenedOrderRow['deliveryConfirmationFlag'] {
+    shippedAt: string | Date | null,
+): DeliveryConfirmationFlag {
     // Not shipped yet or already delivered — no flag needed
     if (!lineStatus || lineStatus !== 'shipped') return null;
 
@@ -765,9 +767,8 @@ function computeDeliveryFlag(
 
     // Shipped 10+ days with no delivery confirmation from any source
     if (shippedAt) {
-        const daysSinceShipped = Math.floor(
-            (Date.now() - new Date(shippedAt).getTime()) / (1000 * 60 * 60 * 24)
-        );
+        const ts = shippedAt instanceof Date ? shippedAt.getTime() : new Date(shippedAt).getTime();
+        const daysSinceShipped = Math.floor((Date.now() - ts) / (1000 * 60 * 60 * 24));
         if (daysSinceShipped >= DELIVERY_REVIEW_DAYS) return 'needs_review';
     }
 

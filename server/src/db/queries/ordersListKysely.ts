@@ -12,6 +12,7 @@
 
 import { sql, type SqlBool } from 'kysely';
 import { kysely } from '../index.js';
+import { computeDeliveryFlag, type DeliveryConfirmationFlag } from '../../utils/orderViews.js';
 
 // ============================================
 // TYPES (inferred from query, per Directive 1)
@@ -556,7 +557,7 @@ export function transformKyselyToRows(orders: OrderRow[]) {
         shopifyCourier: string | null;
         shopifyTrackingUrl: string | null;
         customerTags: string[] | null;
-        deliveryConfirmationFlag: 'confirm_delivery' | 'needs_review' | null;
+        deliveryConfirmationFlag: DeliveryConfirmationFlag;
     }> = [];
 
     for (const order of orders) {
@@ -761,15 +762,11 @@ export function transformKyselyToRows(orders: OrderRow[]) {
                 shopifyCourier: order.shopifyCourier,
                 shopifyTrackingUrl: order.shopifyTrackingUrl,
                 customerTags,
-                deliveryConfirmationFlag: (() => {
-                    if (line.lineStatus !== 'shipped') return null;
-                    if (line.lineTrackingStatus === 'delivered') return 'confirm_delivery' as const;
-                    if (line.lineShippedAt) {
-                        const days = Math.floor((Date.now() - new Date(line.lineShippedAt).getTime()) / (1000 * 60 * 60 * 24));
-                        if (days >= 10) return 'needs_review' as const;
-                    }
-                    return null;
-                })(),
+                deliveryConfirmationFlag: computeDeliveryFlag(
+                    line.lineStatus,
+                    line.lineTrackingStatus,
+                    line.lineShippedAt,
+                ),
             });
         }
     }

@@ -512,7 +512,6 @@ export async function syncFulfillmentsToOrderLines(
             where: {
                 orderId,
                 lineStatus: 'shipped',
-                trackingStatus: 'delivered',
             },
             data: {
                 lineStatus: 'delivered',
