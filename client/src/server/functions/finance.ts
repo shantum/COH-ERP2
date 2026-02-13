@@ -234,7 +234,7 @@ export const listInvoices = createServerFn({ method: 'POST' })
           customer: { select: { id: true, email: true, firstName: true, lastName: true } },
           _count: { select: { lines: true, matchedPayments: true } },
         },
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ invoiceDate: 'desc' }, { createdAt: 'desc' }],
         skip,
         take: limit,
       }),
