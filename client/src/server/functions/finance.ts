@@ -200,6 +200,351 @@ export const getFinanceSummary = createServerFn({ method: 'GET' })
   });
 
 // ============================================
+// INTEGRITY CHECKS (flag problems)
+// ============================================
+
+type Alert = { severity: 'error' | 'warning'; category: string; message: string; details?: string };
+
+export const getFinanceAlerts = createServerFn({ method: 'GET' })
+  .middleware([authMiddleware])
+  .handler(async () => {
+    const prisma = await getPrisma();
+    const alerts: Alert[] = [];
+
+    // 1. Overpaid invoices: matched payments exceed total
+    const overpaid = await prisma.$queryRaw<Array<{
+      id: string; invoice_number: string | null; counterparty: string | null;
+      total_amount: number; tds_amount: number; paid_amount: number;
+    }>>`
+      SELECT i.id, i."invoiceNumber" AS invoice_number,
+             COALESCE(p.name, i."counterpartyName") AS counterparty,
+             i."totalAmount"::float AS total_amount,
+             COALESCE(i."tdsAmount", 0)::float AS tds_amount,
+             i."paidAmount"::float AS paid_amount
+      FROM "Invoice" i
+      LEFT JOIN "Party" p ON p.id = i."partyId"
+      WHERE i.status != 'cancelled'
+        AND i."paidAmount" > (i."totalAmount" - COALESCE(i."tdsAmount", 0) + 1)
+    `;
+    for (const inv of overpaid) {
+      alerts.push({
+        severity: 'error',
+        category: 'Overpaid Invoice',
+        message: `${inv.invoice_number || 'No #'} — ${inv.counterparty || 'Unknown'}: paid Rs ${Math.round(inv.paid_amount).toLocaleString('en-IN')} but only Rs ${Math.round(inv.total_amount - inv.tds_amount).toLocaleString('en-IN')} owed`,
+      });
+    }
+
+    // 2. Over-allocated payments: matched amount > payment amount
+    const overallocated = await prisma.$queryRaw<Array<{
+      id: string; reference: string | null; counterparty: string | null;
+      amount: number; matched_amount: number;
+    }>>`
+      SELECT pay.id, pay."referenceNumber" AS reference,
+             COALESCE(p.name, pay."counterpartyName") AS counterparty,
+             pay.amount::float AS amount,
+             pay."matchedAmount"::float AS matched_amount
+      FROM "Payment" pay
+      LEFT JOIN "Party" p ON p.id = pay."partyId"
+      WHERE pay.status != 'cancelled'
+        AND pay."matchedAmount" > pay.amount + 1
+    `;
+    for (const pay of overallocated) {
+      alerts.push({
+        severity: 'error',
+        category: 'Over-allocated Payment',
+        message: `${pay.reference || pay.id.slice(0, 8)} — ${pay.counterparty || 'Unknown'}: allocated Rs ${Math.round(pay.matched_amount).toLocaleString('en-IN')} but payment was only Rs ${Math.round(pay.amount).toLocaleString('en-IN')}`,
+      });
+    }
+
+    // 3. Payments missing ledger entries
+    const noEntry = await prisma.payment.count({
+      where: { status: 'confirmed', ledgerEntryId: null },
+    });
+    if (noEntry > 0) {
+      alerts.push({
+        severity: 'error',
+        category: 'Missing Ledger Entry',
+        message: `${noEntry} confirmed payment(s) have no ledger entry`,
+      });
+    }
+
+    // 4. Same vendor double-booked from different banks in same period
+    const doubles = await prisma.$queryRaw<Array<{
+      period: string; vendor: string; source_count: number; total: number; sources: string;
+    }>>`
+      WITH tagged AS (
+        SELECT le.period, le."sourceType",
+               ROUND(lel.debit::numeric) AS amount,
+               CASE
+                 WHEN le.description ILIKE '%facebook%' OR le.description ILIKE '%meta ads%' THEN 'Facebook'
+                 WHEN (le.description ILIKE '%google india%' OR le.description ILIKE '%google ads%')
+                      AND le.description NOT ILIKE '%play%' AND le.description NOT ILIKE '%service%' THEN 'Google Ads'
+                 ELSE NULL
+               END AS vendor
+        FROM "LedgerEntryLine" lel
+        JOIN "LedgerEntry" le ON le.id = lel."entryId"
+        JOIN "LedgerAccount" la ON la.id = lel."accountId"
+        WHERE la.type IN ('expense', 'direct_cost')
+          AND le."isReversed" = false
+          AND lel.debit > 0
+          AND le."sourceType" IN ('bank_payout', 'hdfc_statement')
+      )
+      SELECT period, vendor,
+             COUNT(DISTINCT "sourceType")::int AS source_count,
+             SUM(amount)::float AS total,
+             STRING_AGG(DISTINCT "sourceType", ' + ') AS sources
+      FROM tagged
+      WHERE vendor IS NOT NULL
+      GROUP BY period, vendor
+      HAVING COUNT(DISTINCT "sourceType") > 1
+      ORDER BY period DESC
+    `;
+    for (const d of doubles) {
+      alerts.push({
+        severity: 'warning',
+        category: 'Double-booked Vendor',
+        message: `${d.vendor} in ${d.period}: Rs ${Math.round(d.total).toLocaleString('en-IN')} from ${d.sources}`,
+        details: 'Same vendor paid from both HDFC and RazorpayX — check if one is a duplicate',
+      });
+    }
+
+    // 5. Large unmatched payments (>50K, no invoice link)
+    const unmatched = await prisma.$queryRaw<Array<{
+      id: string; reference: string | null; counterparty: string | null;
+      amount: number; unmatched: number; payment_date: Date;
+    }>>`
+      SELECT pay.id, pay."referenceNumber" AS reference,
+             COALESCE(p.name, pay."counterpartyName") AS counterparty,
+             pay.amount::float AS amount,
+             pay."unmatchedAmount"::float AS unmatched,
+             pay."paymentDate" AS payment_date
+      FROM "Payment" pay
+      LEFT JOIN "Party" p ON p.id = pay."partyId"
+      WHERE pay.status = 'confirmed'
+        AND pay.direction = 'outgoing'
+        AND pay."unmatchedAmount" > 50000
+      ORDER BY pay."unmatchedAmount" DESC
+      LIMIT 20
+    `;
+    for (const pay of unmatched) {
+      alerts.push({
+        severity: 'warning',
+        category: 'Large Unmatched Payment',
+        message: `${pay.counterparty || 'Unknown'}: Rs ${Math.round(pay.unmatched).toLocaleString('en-IN')} unmatched (${pay.reference || 'no ref'})`,
+        details: `Paid ${new Date(pay.payment_date).toISOString().slice(0, 10)} — needs invoice link to split GST`,
+      });
+    }
+
+    // 6. Confirmed invoices without billing period (payable only)
+    const noPeriod = await prisma.invoice.count({
+      where: {
+        type: 'payable',
+        status: { in: ['confirmed', 'partially_paid', 'paid'] },
+        billingPeriod: null,
+        category: { in: ['marketing', 'service', 'rent'] },
+      },
+    });
+    if (noPeriod > 0) {
+      alerts.push({
+        severity: 'warning',
+        category: 'Missing Billing Period',
+        message: `${noPeriod} confirmed payable invoice(s) have no billing period set`,
+      });
+    }
+
+    // 7. Unbalanced ledger entries (debits != credits)
+    const unbalanced = await prisma.$queryRaw<Array<{
+      id: string; description: string; entry_date: Date;
+      total_debit: number; total_credit: number;
+    }>>`
+      SELECT le.id, le.description, le."entryDate" AS entry_date,
+             COALESCE(SUM(lel.debit), 0)::float AS total_debit,
+             COALESCE(SUM(lel.credit), 0)::float AS total_credit
+      FROM "LedgerEntry" le
+      JOIN "LedgerEntryLine" lel ON lel."entryId" = le.id
+      WHERE le."isReversed" = false
+      GROUP BY le.id, le.description, le."entryDate"
+      HAVING ABS(SUM(lel.debit) - SUM(lel.credit)) > 0.50
+      ORDER BY ABS(SUM(lel.debit) - SUM(lel.credit)) DESC
+      LIMIT 10
+    `;
+    for (const ub of unbalanced) {
+      const diff = Math.abs(ub.total_debit - ub.total_credit);
+      alerts.push({
+        severity: 'error',
+        category: 'Unbalanced Entry',
+        message: `"${ub.description.slice(0, 50)}" — off by Rs ${Math.round(diff).toLocaleString('en-IN')}`,
+        details: `Dr ${Math.round(ub.total_debit).toLocaleString('en-IN')} vs Cr ${Math.round(ub.total_credit).toLocaleString('en-IN')}`,
+      });
+    }
+
+    // 8. Suspense balance (money in UNMATCHED_PAYMENTS needing reclassification)
+    const suspense = await prisma.ledgerAccount.findFirst({
+      where: { code: 'UNMATCHED_PAYMENTS' },
+      select: { balance: true },
+    });
+    if (suspense && Math.abs(suspense.balance) > 100) {
+      alerts.push({
+        severity: 'warning',
+        category: 'Suspense Balance',
+        message: `Rs ${Math.abs(Math.round(suspense.balance)).toLocaleString('en-IN')} sitting in Unmatched Payments — needs reclassifying`,
+        details: 'Create invoices and link to these payments to move money to correct accounts',
+      });
+    }
+
+    // 9. Duplicate payments (same ref + similar amount + same counterparty)
+    const dupes = await prisma.$queryRaw<Array<{
+      reference: string; counterparty: string; amount: number; cnt: number;
+    }>>`
+      SELECT pay."referenceNumber" AS reference,
+             COALESCE(p.name, pay."counterpartyName") AS counterparty,
+             pay.amount::float AS amount,
+             COUNT(*)::int AS cnt
+      FROM "Payment" pay
+      LEFT JOIN "Party" p ON p.id = pay."partyId"
+      WHERE pay.status != 'cancelled'
+        AND pay."referenceNumber" IS NOT NULL
+        AND pay."referenceNumber" != ''
+      GROUP BY pay."referenceNumber", COALESCE(p.name, pay."counterpartyName"), pay.amount
+      HAVING COUNT(*) > 1
+      ORDER BY pay.amount DESC
+      LIMIT 10
+    `;
+    for (const d of dupes) {
+      alerts.push({
+        severity: 'error',
+        category: 'Duplicate Payment',
+        message: `${d.counterparty || 'Unknown'}: Rs ${Math.round(d.amount).toLocaleString('en-IN')} x${d.cnt} (ref: ${d.reference})`,
+      });
+    }
+
+    // 10. Invoice paidAmount out of sync with actual PaymentInvoice records
+    const invoiceMismatch = await prisma.$queryRaw<Array<{
+      id: string; invoice_number: string | null; counterparty: string | null;
+      paid_amount: number; actual_paid: number;
+    }>>`
+      SELECT i.id, i."invoiceNumber" AS invoice_number,
+             COALESCE(p.name, i."counterpartyName") AS counterparty,
+             i."paidAmount"::float AS paid_amount,
+             COALESCE(SUM(pi.amount), 0)::float AS actual_paid
+      FROM "Invoice" i
+      LEFT JOIN "Party" p ON p.id = i."partyId"
+      LEFT JOIN "PaymentInvoice" pi ON pi."invoiceId" = i.id
+      WHERE i.status != 'cancelled'
+      GROUP BY i.id, i."invoiceNumber", p.name, i."counterpartyName", i."paidAmount"
+      HAVING ABS(i."paidAmount" - COALESCE(SUM(pi.amount), 0)) > 1
+      LIMIT 10
+    `;
+    for (const m of invoiceMismatch) {
+      alerts.push({
+        severity: 'error',
+        category: 'Invoice Amount Mismatch',
+        message: `${m.invoice_number || 'No #'} — ${m.counterparty || 'Unknown'}: shows Rs ${Math.round(m.paid_amount).toLocaleString('en-IN')} paid but actual matches total Rs ${Math.round(m.actual_paid).toLocaleString('en-IN')}`,
+      });
+    }
+
+    // 11. Payment matchedAmount out of sync
+    const paymentMismatch = await prisma.$queryRaw<Array<{
+      id: string; reference: string | null; counterparty: string | null;
+      matched_amount: number; actual_matched: number;
+    }>>`
+      SELECT pay.id, pay."referenceNumber" AS reference,
+             COALESCE(p.name, pay."counterpartyName") AS counterparty,
+             pay."matchedAmount"::float AS matched_amount,
+             COALESCE(SUM(pi.amount), 0)::float AS actual_matched
+      FROM "Payment" pay
+      LEFT JOIN "Party" p ON p.id = pay."partyId"
+      LEFT JOIN "PaymentInvoice" pi ON pi."paymentId" = pay.id
+      WHERE pay.status != 'cancelled'
+      GROUP BY pay.id, pay."referenceNumber", p.name, pay."counterpartyName", pay."matchedAmount"
+      HAVING ABS(pay."matchedAmount" - COALESCE(SUM(pi.amount), 0)) > 1
+      LIMIT 10
+    `;
+    for (const m of paymentMismatch) {
+      alerts.push({
+        severity: 'error',
+        category: 'Payment Amount Mismatch',
+        message: `${m.counterparty || 'Unknown'} (${m.reference || 'no ref'}): shows Rs ${Math.round(m.matched_amount).toLocaleString('en-IN')} matched but actual total Rs ${Math.round(m.actual_matched).toLocaleString('en-IN')}`,
+      });
+    }
+
+    // 12. Confirmed invoices with no ledger entry AND no linked payment
+    const orphanInvoices = await prisma.$queryRaw<Array<{
+      id: string; invoice_number: string | null; counterparty: string | null;
+      total_amount: number; status: string;
+    }>>`
+      SELECT i.id, i."invoiceNumber" AS invoice_number,
+             COALESCE(p.name, i."counterpartyName") AS counterparty,
+             i."totalAmount"::float AS total_amount,
+             i.status
+      FROM "Invoice" i
+      LEFT JOIN "Party" p ON p.id = i."partyId"
+      LEFT JOIN "PaymentInvoice" pi ON pi."invoiceId" = i.id
+      WHERE i.status IN ('confirmed', 'partially_paid', 'paid')
+        AND i."ledgerEntryId" IS NULL
+        AND pi.id IS NULL
+      LIMIT 10
+    `;
+    for (const inv of orphanInvoices) {
+      alerts.push({
+        severity: 'error',
+        category: 'Orphan Invoice',
+        message: `${inv.invoice_number || 'No #'} — ${inv.counterparty || 'Unknown'}: ${inv.status} but no ledger entry and no payment link`,
+        details: `Rs ${Math.round(inv.total_amount).toLocaleString('en-IN')}`,
+      });
+    }
+
+    // 13. Old draft invoices (>30 days)
+    const oldDrafts = await prisma.invoice.count({
+      where: {
+        status: 'draft',
+        createdAt: { lt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) },
+      },
+    });
+    if (oldDrafts > 0) {
+      alerts.push({
+        severity: 'warning',
+        category: 'Stale Drafts',
+        message: `${oldDrafts} invoice draft(s) older than 30 days — confirm or delete them`,
+      });
+    }
+
+    // 14. Reversed entries still linked to invoices/payments
+    const reversedStillLinked = await prisma.$queryRaw<Array<{
+      id: string; description: string; linked_to: string;
+    }>>`
+      SELECT le.id, le.description,
+             CASE
+               WHEN i.id IS NOT NULL THEN 'Invoice ' || COALESCE(i."invoiceNumber", i.id::text)
+               WHEN pay.id IS NOT NULL THEN 'Payment ' || COALESCE(pay."referenceNumber", pay.id::text)
+               ELSE 'Unknown'
+             END AS linked_to
+      FROM "LedgerEntry" le
+      LEFT JOIN "Invoice" i ON i."ledgerEntryId" = le.id
+      LEFT JOIN "Payment" pay ON pay."ledgerEntryId" = le.id
+      WHERE le."isReversed" = true
+        AND (i.id IS NOT NULL OR pay.id IS NOT NULL)
+      LIMIT 10
+    `;
+    for (const r of reversedStillLinked) {
+      alerts.push({
+        severity: 'error',
+        category: 'Reversed But Linked',
+        message: `"${r.description.slice(0, 40)}" was reversed but still linked to ${r.linked_to}`,
+      });
+    }
+
+    return {
+      success: true as const,
+      alerts,
+      counts: {
+        errors: alerts.filter((a) => a.severity === 'error').length,
+        warnings: alerts.filter((a) => a.severity === 'warning').length,
+      },
+    };
+  });
+
+// ============================================
 // INVOICE — LIST
 // ============================================
 
@@ -1145,52 +1490,176 @@ export const getMonthlyPnl = createServerFn({ method: 'GET' })
       ORDER BY le."period" DESC, la."type", la."code"
     `;
 
-    // Build per-month P&L
+    // Build per-month P&L with account-level breakdowns
+    type AccountLine = { code: string; name: string; amount: number };
     const monthMap = new Map<string, {
       period: string;
-      revenue: number;
-      cogs: number;
-      expenses: { code: string; name: string; amount: number }[];
+      revenueLines: AccountLine[];
+      cogsLines: AccountLine[];
+      expenseLines: AccountLine[];
+      totalRevenue: number;
+      totalCogs: number;
       totalExpenses: number;
     }>();
 
     for (const row of rows) {
       if (!monthMap.has(row.period)) {
-        monthMap.set(row.period, { period: row.period, revenue: 0, cogs: 0, expenses: [], totalExpenses: 0 });
+        monthMap.set(row.period, {
+          period: row.period,
+          revenueLines: [], cogsLines: [], expenseLines: [],
+          totalRevenue: 0, totalCogs: 0, totalExpenses: 0,
+        });
       }
       const month = monthMap.get(row.period)!;
 
-      // Income accounts: credit-normal (revenue = credits - debits)
       if (row.account_type === 'income') {
-        month.revenue += row.total_credit - row.total_debit;
-      }
-      // Direct cost: debit-normal (cost = debits - credits)
-      else if (row.account_type === 'direct_cost') {
-        month.cogs += row.total_debit - row.total_credit;
-      }
-      // Expense: debit-normal (expense = debits - credits)
-      else if (row.account_type === 'expense') {
+        const amount = row.total_credit - row.total_debit;
+        if (Math.abs(amount) > 0.01) {
+          month.revenueLines.push({ code: row.account_code, name: row.account_name, amount });
+          month.totalRevenue += amount;
+        }
+      } else if (row.account_type === 'direct_cost') {
         const amount = row.total_debit - row.total_credit;
         if (Math.abs(amount) > 0.01) {
-          month.expenses.push({ code: row.account_code, name: row.account_name, amount });
+          month.cogsLines.push({ code: row.account_code, name: row.account_name, amount });
+          month.totalCogs += amount;
+        }
+      } else if (row.account_type === 'expense') {
+        const amount = row.total_debit - row.total_credit;
+        if (Math.abs(amount) > 0.01) {
+          month.expenseLines.push({ code: row.account_code, name: row.account_name, amount });
           month.totalExpenses += amount;
         }
       }
     }
 
-    // Convert to sorted array
+    const round = (n: number) => Math.round(n * 100) / 100;
     const months = Array.from(monthMap.values())
       .map((m) => ({
-        ...m,
-        revenue: Math.round(m.revenue * 100) / 100,
-        cogs: Math.round(m.cogs * 100) / 100,
-        grossProfit: Math.round((m.revenue - m.cogs) * 100) / 100,
-        totalExpenses: Math.round(m.totalExpenses * 100) / 100,
-        netProfit: Math.round((m.revenue - m.cogs - m.totalExpenses) * 100) / 100,
+        period: m.period,
+        revenue: round(m.totalRevenue),
+        revenueLines: m.revenueLines.map((l) => ({ ...l, amount: round(l.amount) })).sort((a, b) => b.amount - a.amount),
+        cogs: round(m.totalCogs),
+        cogsLines: m.cogsLines.map((l) => ({ ...l, amount: round(l.amount) })).sort((a, b) => b.amount - a.amount),
+        grossProfit: round(m.totalRevenue - m.totalCogs),
+        expenses: m.expenseLines.map((l) => ({ ...l, amount: round(l.amount) })).sort((a, b) => b.amount - a.amount),
+        totalExpenses: round(m.totalExpenses),
+        netProfit: round(m.totalRevenue - m.totalCogs - m.totalExpenses),
       }))
       .sort((a, b) => b.period.localeCompare(a.period));
 
     return { success: true as const, months };
+  });
+
+// ============================================
+// P&L ACCOUNT DETAIL (drill-down)
+// ============================================
+
+const pnlAccountDetailInput = z.object({
+  period: z.string().regex(/^\d{4}-\d{2}$/),
+  accountCode: z.string(),
+});
+
+export const getPnlAccountDetail = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
+  .inputValidator((input: unknown) => pnlAccountDetailInput.parse(input))
+  .handler(async ({ data }) => {
+    const prisma = await getPrisma();
+
+    // Get individual entries for this account + period
+    const rows = await prisma.$queryRaw<Array<{
+      entry_id: string;
+      description: string;
+      source_type: string;
+      entry_date: Date;
+      debit: number;
+      credit: number;
+      invoice_category: string | null;
+      counterparty: string | null;
+    }>>`
+      SELECT
+        le.id AS entry_id,
+        le.description,
+        le."sourceType" AS source_type,
+        le."entryDate" AS entry_date,
+        lel.debit::float AS debit,
+        lel.credit::float AS credit,
+        i.category AS invoice_category,
+        COALESCE(p.name, i."counterpartyName", pay."counterpartyName") AS counterparty
+      FROM "LedgerEntryLine" lel
+      JOIN "LedgerEntry" le ON le.id = lel."entryId"
+      JOIN "LedgerAccount" la ON la.id = lel."accountId"
+      LEFT JOIN "Invoice" i ON i."ledgerEntryId" = le.id
+      LEFT JOIN "Payment" pay ON pay."ledgerEntryId" = le.id
+      LEFT JOIN "Party" p ON p.id = COALESCE(i."partyId", pay."partyId")
+      WHERE le."isReversed" = false
+        AND la.code = ${data.accountCode}
+        AND le.period = ${data.period}
+        AND (lel.debit > 0.01 OR lel.credit > 0.01)
+      ORDER BY GREATEST(lel.debit, lel.credit) DESC
+    `;
+
+    // Categorize each entry
+    type DetailLine = { description: string; amount: number; date: string; counterparty: string | null };
+    const categoryMap = new Map<string, { label: string; total: number; lines: DetailLine[] }>();
+
+    const addToCategory = (key: string, label: string, line: DetailLine) => {
+      if (!categoryMap.has(key)) categoryMap.set(key, { label, total: 0, lines: [] });
+      const cat = categoryMap.get(key)!;
+      cat.total += line.amount;
+      cat.lines.push(line);
+    };
+
+    for (const row of rows) {
+      const amount = Math.round(Math.max(row.debit, row.credit) * 100) / 100;
+      const date = new Date(row.entry_date).toISOString().slice(0, 10);
+      const line: DetailLine = { description: row.description, amount, date, counterparty: row.counterparty };
+
+      // Use invoice category if available
+      if (row.invoice_category) {
+        addToCategory(row.invoice_category, row.invoice_category, line);
+        continue;
+      }
+
+      // Parse description prefix for bank entries
+      const desc = row.description;
+      if (desc.startsWith('Salary:') || desc.startsWith('Salary ')) {
+        addToCategory('salary', 'Salary & Wages', line);
+      } else if (desc.startsWith('Vendor:')) {
+        // Extract purpose from "Vendor: <purpose> — <name>"
+        const purpose = desc.replace(/^Vendor:\s*/, '').split('—')[0].trim().toLowerCase();
+        if (purpose.includes('marketing') || purpose.includes('social media') || purpose.includes('photoshoot') || purpose.includes('styling') || purpose.includes('model')) {
+          addToCategory('marketing', 'Marketing & Creative', line);
+        } else if (purpose.includes('rent') || purpose.includes('architect')) {
+          addToCategory('rent', 'Rent & Premises', line);
+        } else if (purpose.includes('tds') || purpose.includes('pf') || purpose.includes('statutory')) {
+          addToCategory('statutory', 'Statutory (TDS/PF)', line);
+        } else if (purpose.includes('salary') || purpose.includes('wage')) {
+          addToCategory('salary', 'Salary & Wages', line);
+        } else {
+          addToCategory('service', 'Services & Professional', line);
+        }
+      } else if (desc.startsWith('CC HDFC:') || desc.startsWith('CC ICICI:')) {
+        addToCategory('cc_charges', 'Credit Card Charges', line);
+      } else if (desc.includes('PF deposit') || desc.includes('CBDT') || desc.includes('TDS')) {
+        addToCategory('statutory', 'Statutory (TDS/PF)', line);
+      } else if (desc.includes('Google') || desc.includes('Facebook') || desc.includes('Meta')) {
+        addToCategory('marketing', 'Marketing & Creative', line);
+      } else if (desc.includes('Reimbursement')) {
+        addToCategory('reimbursement', 'Reimbursements', line);
+      } else if (desc.includes('Standing Instruction') || desc.includes(' SI ')) {
+        addToCategory('bank_charges', 'Bank & SI Charges', line);
+      } else {
+        addToCategory('other', 'Other', line);
+      }
+    }
+
+    // Sort categories by total descending
+    const categories = Array.from(categoryMap.values())
+      .map((c) => ({ ...c, total: Math.round(c.total * 100) / 100 }))
+      .sort((a, b) => b.total - a.total);
+
+    return { success: true as const, categories };
   });
 
 // ============================================
