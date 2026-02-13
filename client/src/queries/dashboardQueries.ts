@@ -16,7 +16,6 @@
 
 import { queryOptions } from '@tanstack/react-query';
 import { getTopProductsForDashboard, getTopCustomersForDashboard } from '../server/functions/reports';
-import { getTopFabricsForDashboard } from '../server/functions/fabrics';
 import { getOrdersAnalytics } from '../server/functions/orders';
 
 /**
@@ -36,17 +35,6 @@ export const topProductsQueryOptions = (days: number, level: 'product' | 'variat
   queryOptions({
     queryKey: ['topProducts', days, level],
     queryFn: () => getTopProductsForDashboard({ data: { days, level, limit: 15 } }),
-    staleTime: 60 * 1000, // 1 minute
-  });
-
-/**
- * Top fabrics report (Server Function)
- * NOTE: getTopFabricsForDashboard is deprecated - returns empty array
- */
-export const topFabricsQueryOptions = (days: number, level: 'type' | 'color') =>
-  queryOptions({
-    queryKey: ['topFabrics', days, level],
-    queryFn: () => getTopFabricsForDashboard(),
     staleTime: 60 * 1000, // 1 minute
   });
 

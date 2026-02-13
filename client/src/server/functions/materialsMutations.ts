@@ -973,3 +973,70 @@ export const getParties = createServerFn({ method: 'GET' })
             parties,
         };
     });
+
+// ============================================
+// PARTY MUTATIONS
+// ============================================
+
+const createPartySchema = z.object({
+    name: z.string().min(1),
+    category: z.string().min(1),
+    contactName: z.string().optional().nullable(),
+    email: z.string().email().optional().nullable(),
+    phone: z.string().optional().nullable(),
+    address: z.string().optional().nullable(),
+});
+
+type PartySuccessResult = {
+    success: true;
+    party: PrismaParty;
+};
+
+type PartyErrorResult = {
+    success: false;
+    error: {
+        code: 'NOT_FOUND' | 'CONFLICT';
+        message: string;
+    };
+};
+
+/**
+ * Create a new party
+ */
+export const createParty = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => createPartySchema.parse(input))
+    .handler(async ({ data }): Promise<PartySuccessResult | PartyErrorResult> => {
+        const prisma = await getPrisma();
+
+        // Check for duplicate name
+        const existing = await prisma.party.findFirst({
+            where: { name: data.name },
+        });
+
+        if (existing) {
+            return {
+                success: false,
+                error: {
+                    code: 'CONFLICT',
+                    message: 'A party with this name already exists',
+                },
+            };
+        }
+
+        const party = await prisma.party.create({
+            data: {
+                name: data.name,
+                category: data.category,
+                contactName: data.contactName ?? null,
+                email: data.email ?? null,
+                phone: data.phone ?? null,
+                address: data.address ?? null,
+            },
+        });
+
+        return {
+            success: true,
+            party,
+        };
+    });

@@ -67,14 +67,12 @@ export interface Product {
   category: string;
   productType: string;
   gender: string;
-  fabricTypeId: string | null;
   baseProductionTimeMins: number;
   defaultFabricConsumption: number | null;
   imageUrl: string | null;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
-  fabricType?: FabricType;
   variations?: Variation[];
 }
 
@@ -118,27 +116,16 @@ export interface Sku {
 // FABRICS
 // ============================================
 
-export interface FabricType {
-  id: string;
-  name: string;
-  composition: string | null;
-  unit: string;
-  avgShrinkagePct: number;
-}
-
 export interface Fabric {
   id: string;
-  fabricTypeId: string;
+  materialId: string;
   name: string;
   colorName: string;
   standardColor: string | null;
   colorHex: string | null;
-  costPerUnit: number;
+  costPerUnit: number | null;
   partyId: string | null;
-  leadTimeDays: number;
-  minOrderQty: number;
   isActive: boolean;
-  fabricType?: FabricType;
   party?: Party;
 }
 
@@ -537,43 +524,12 @@ export interface UpdateSkuData extends Partial<CreateSkuData> {
   packagingCost?: number | null;
 }
 
-// Fabrics
-export interface CreateFabricData {
-  fabricTypeId: string;
-  name: string;
-  colorName: string;
-  standardColor?: string;
-  colorHex?: string;
-  costPerUnit: number;
-  partyId?: string;
-  leadTimeDays?: number;
-  minOrderQty?: number;
-}
-
-export interface CreateFabricTypeData {
-  name: string;
-  composition?: string;
-  unit: string;
-  avgShrinkagePct?: number;
-}
-
 export interface CreatePartyData {
   name: string;
   contactName?: string;
   email?: string;
   phone?: string;
   address?: string;
-}
-
-export interface CreateFabricTransactionData {
-  txnType: 'inward' | 'outward';
-  qty: number;
-  unit: string;
-  reason: string;
-  referenceId?: string;
-  notes?: string;
-  costPerUnit?: number;
-  partyId?: string;
 }
 
 // Inventory

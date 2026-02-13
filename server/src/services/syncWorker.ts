@@ -14,7 +14,7 @@ import prisma from '../lib/prisma.js';
 import type { ShopifyOrder } from './shopify.js';
 import shopifyClient from './shopify.js';
 import { cacheAndProcessOrder } from './shopifyOrderProcessor.js';
-import { syncSingleProduct, ensureDefaultFabric } from './productSyncService.js';
+import { syncSingleProduct } from './productSyncService.js';
 import { syncSingleCustomer } from './customerSyncService.js';
 import { syncLogger } from '../utils/logger.js';
 import { SYNC_WORKER_CONFIG } from '../constants.js';
@@ -632,16 +632,13 @@ class SyncWorker {
             // Products are usually fewer, fetch all at once
             const shopifyProducts = await shopifyClient.getAllProducts();
 
-            // Get or create default fabric using shared helper
-            const defaultFabric = await ensureDefaultFabric(prisma);
-
             let created = 0, updated = 0, skipped = 0, errors = 0;
             const errorLog: ErrorLogEntry[] = [];
 
             for (const shopifyProduct of shopifyProducts) {
                 try {
                     // Use shared service for product sync
-                    const result = await syncSingleProduct(prisma, shopifyProduct, defaultFabric.id);
+                    const result = await syncSingleProduct(prisma, shopifyProduct);
                     if (result.created) created += result.created;
                     if (result.updated) updated += result.updated;
                 } catch (err) {

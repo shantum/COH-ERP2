@@ -4,7 +4,7 @@
  * Used by both background jobs (syncWorker.ts) and direct sync routes (shopify.js)
  */
 
-import type { PrismaClient, Fabric, Product } from '@prisma/client';
+import type { PrismaClient, Product } from '@prisma/client';
 import type { ShopifyProduct, ShopifyVariant } from './shopify.js';
 import shopifyClient from './shopify.js';
 import { resolveProductCategory } from '../config/mappings/index.js';
@@ -120,41 +120,6 @@ interface SyncAllProductsReturn {
 // ============================================
 
 /**
- * Ensure a default fabric exists for new variations
- * NOTE: FabricType removed - fabric now links to Material directly
- * NOTE: fabricId removed from Variation - fabric assignment now via BOM
- * This function still creates a default Fabric for backward compatibility with
- * existing code that may reference it, but variations are no longer linked to fabrics directly.
- */
-export async function ensureDefaultFabric(prisma: PrismaClient): Promise<Fabric> {
-    let defaultFabric = await prisma.fabric.findFirst({
-        where: { name: 'Default Fabric' }
-    });
-    if (!defaultFabric) {
-        // Create or find default material
-        let material = await prisma.material.findFirst({
-            where: { name: 'Default' }
-        });
-        if (!material) {
-            material = await prisma.material.create({
-                data: { name: 'Default' }
-            });
-        }
-        defaultFabric = await prisma.fabric.create({
-            data: {
-                materialId: material.id,
-                name: 'Default Fabric',
-                colorName: 'Default',
-                costPerUnit: 0,
-                defaultLeadTimeDays: 14,
-                defaultMinOrderQty: 1
-            }
-        });
-    }
-    return defaultFabric;
-}
-
-/**
  * Normalize size values (e.g., XXL -> 2XL)
  */
 export function normalizeSize(rawSize: string): string {
@@ -202,7 +167,6 @@ export function groupVariantsByColor(variants: ShopifyVariantWithInventory[]): V
 export async function syncSingleProduct(
     prisma: PrismaClient,
     shopifyProduct: ShopifyProductWithImages,
-    defaultFabricId: string
 ): Promise<SyncResult> {
     const result: SyncResult = { created: 0, updated: 0 };
 
@@ -544,11 +508,8 @@ export async function cacheAndProcessProduct(
             },
         });
 
-        // Ensure default fabric exists
-        const defaultFabric = await ensureDefaultFabric(prisma);
-
         // Sync product to ERP
-        const result = await syncSingleProduct(prisma, shopifyProduct, defaultFabric.id);
+        const result = await syncSingleProduct(prisma, shopifyProduct);
 
         // Mark as processed
         await prisma.shopifyProductCache.update({
@@ -637,9 +598,6 @@ export async function syncAllProducts(
         shopifyProducts = await shopifyClient.getProducts({ limit, status: 'any' });
     }
 
-    // Ensure default fabric exists
-    const defaultFabric = await ensureDefaultFabric(prisma);
-
     for (let i = 0; i < shopifyProducts.length; i++) {
         const shopifyProduct = shopifyProducts[i] as ShopifyProductWithImages;
         try {
@@ -664,7 +622,7 @@ export async function syncAllProducts(
                 },
             });
 
-            const productResult = await syncSingleProduct(prisma, shopifyProduct, defaultFabric.id);
+            const productResult = await syncSingleProduct(prisma, shopifyProduct);
 
             // Mark as processed
             await prisma.shopifyProductCache.update({

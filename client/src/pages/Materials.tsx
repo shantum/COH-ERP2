@@ -18,8 +18,8 @@ import { useSearch, useNavigate } from '@tanstack/react-router';
 import { useServerFn } from '@tanstack/react-start';
 import { Layers, Scissors, Package, X } from 'lucide-react';
 
-import { getParties } from '@/server/functions/fabrics';
 import {
+    getParties,
     createTrim,
     updateTrim,
     createService,
@@ -39,12 +39,10 @@ type TabType = 'materials' | 'trims' | 'services';
 interface Party {
     id: string;
     name: string;
-    email?: string | null;
-    phone?: string | null;
-    address?: string | null;
-    contactName?: string | null;
+    category: string;
+    email: string | null;
+    phone: string | null;
     isActive: boolean;
-    createdAt: Date;
 }
 
 // Trim item type (matches TrimsTable Trim interface)
@@ -188,7 +186,7 @@ export default function Materials() {
     // Fetch parties
     const { data: partiesData } = useQuery({
         queryKey: ['parties'],
-        queryFn: () => getPartiesFn({ data: {} }),
+        queryFn: () => getPartiesFn(),
     });
     const parties: Party[] | undefined = partiesData?.parties;
 

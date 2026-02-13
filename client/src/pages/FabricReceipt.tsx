@@ -33,8 +33,7 @@ import {
     updateFabricColourTransaction,
     deleteFabricColourTransaction,
 } from '../server/functions/fabricColourMutations';
-import { getParties } from '../server/functions/materialsMutations';
-import { createParty } from '../server/functions/fabricMutations';
+import { getParties, createParty } from '../server/functions/materialsMutations';
 import type { FabricColour } from '../components/products/unified-edit/types';
 import { ColorSwatch } from '../components/products/unified-edit/shared/FabricSelector';
 import { useAuth } from '../hooks/useAuth';

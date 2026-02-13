@@ -18,13 +18,9 @@ export type {
   UpdateSkuData,
 
   // Fabrics
-  FabricType,
   Fabric,
   Party,
-  CreateFabricData,
-  CreateFabricTypeData,
   CreatePartyData,
-  CreateFabricTransactionData,
 
   // Customers
   Customer,
