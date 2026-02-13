@@ -35,6 +35,15 @@ interface LedgerLineInput {
 }
 
 /**
+ * Convert a Date to IST "YYYY-MM" period string.
+ * IST = UTC + 5:30
+ */
+function dateToPeriod(date: Date): string {
+  const ist = new Date(date.getTime() + (5.5 * 60 * 60 * 1000));
+  return `${ist.getUTCFullYear()}-${String(ist.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
+/**
  * Create a balanced journal entry with debit/credit lines.
  * Resolves account codes → IDs, validates balance, creates entry + lines.
  * DB trigger handles balance updates automatically.
@@ -43,6 +52,7 @@ async function inlineCreateLedgerEntry(
   prisma: Awaited<ReturnType<typeof getPrisma>>,
   input: {
     entryDate: Date;
+    period: string;
     description: string;
     sourceType: string;
     sourceId?: string;
@@ -51,7 +61,7 @@ async function inlineCreateLedgerEntry(
     notes?: string;
   }
 ) {
-  const { entryDate, description, sourceType, sourceId, lines, createdById, notes } = input;
+  const { entryDate, period, description, sourceType, sourceId, lines, createdById, notes } = input;
 
   // Validate minimum 2 lines (debit + credit)
   if (lines.length < 2) {
@@ -91,6 +101,7 @@ async function inlineCreateLedgerEntry(
   return prisma.ledgerEntry.create({
     data: {
       entryDate,
+      period,
       description,
       sourceType,
       sourceId: sourceId ?? null,
@@ -126,7 +137,8 @@ async function inlineReverseLedgerEntry(
 
   const reversal = await prisma.ledgerEntry.create({
     data: {
-      entryDate: new Date(),
+      entryDate: original.entryDate,
+      period: original.period,
       description: `Reversal: ${original.description}`,
       sourceType: 'adjustment',
       notes: `Reversal of entry ${original.id}`,
@@ -305,6 +317,7 @@ export const createInvoice = createServerFn({ method: 'POST' })
         status: 'draft',
         invoiceDate: data.invoiceDate ? new Date(data.invoiceDate) : null,
         dueDate: data.dueDate ? new Date(data.dueDate) : null,
+        billingPeriod: data.billingPeriod ?? null,
         ...(data.partyId ? { partyId: data.partyId } : {}),
         ...(data.customerId ? { customerId: data.customerId } : {}),
         counterpartyName: data.counterpartyName ?? null,
@@ -373,6 +386,7 @@ export const updateInvoice = createServerFn({ method: 'POST' })
       updates.balanceDue = updateData.totalAmount; // Reset since still draft
     }
     if (updateData.notes !== undefined) updates.notes = updateData.notes;
+    if (updateData.billingPeriod !== undefined) updates.billingPeriod = updateData.billingPeriod;
 
     await prisma.invoice.update({ where: { id }, data: updates });
 
@@ -397,7 +411,7 @@ export const confirmInvoice = createServerFn({ method: 'POST' })
 
     const invoice = await prisma.invoice.findUnique({
       where: { id: data.id },
-      select: { id: true, type: true, category: true, status: true, totalAmount: true, gstAmount: true, subtotal: true, counterpartyName: true, invoiceNumber: true, partyId: true },
+      select: { id: true, type: true, category: true, status: true, totalAmount: true, gstAmount: true, subtotal: true, counterpartyName: true, invoiceNumber: true, partyId: true, invoiceDate: true, billingPeriod: true },
     });
 
     if (!invoice) return { success: false as const, error: 'Invoice not found' };
@@ -425,8 +439,10 @@ export const confirmInvoice = createServerFn({ method: 'POST' })
     const lines = buildInvoiceLedgerLines(invoice, tdsAmount);
 
     return prisma.$transaction(async (tx) => {
+      const invoiceEntryDate = invoice.invoiceDate ? new Date(invoice.invoiceDate) : new Date();
       const entry = await inlineCreateLedgerEntry(tx as typeof prisma, {
-        entryDate: new Date(),
+        entryDate: invoiceEntryDate,
+        period: invoice.billingPeriod ?? dateToPeriod(invoiceEntryDate),
         description: `Invoice ${invoice.invoiceNumber ?? invoice.id} confirmed (${invoice.type})`,
         sourceType: 'invoice_confirmed',
         sourceId: invoice.id,
@@ -456,7 +472,7 @@ export const confirmInvoice = createServerFn({ method: 'POST' })
  */
 async function confirmInvoiceWithLinkedPayment(
   prisma: Awaited<ReturnType<typeof getPrisma>>,
-  invoice: { id: string; category: string; totalAmount: number; gstAmount: number | null; subtotal: number | null; invoiceNumber: string | null },
+  invoice: { id: string; category: string; totalAmount: number; gstAmount: number | null; subtotal: number | null; invoiceNumber: string | null; invoiceDate: Date | null; billingPeriod: string | null },
   paymentId: string,
   tdsAmount: number,
   userId: string,
@@ -469,7 +485,7 @@ async function confirmInvoiceWithLinkedPayment(
     where: { id: paymentId },
     select: {
       id: true, amount: true, unmatchedAmount: true, matchedAmount: true, status: true,
-      ledgerEntryId: true,
+      paymentDate: true, ledgerEntryId: true,
       ledgerEntry: { include: { lines: { include: { account: { select: { code: true } } } } } },
     },
   });
@@ -490,6 +506,10 @@ async function confirmInvoiceWithLinkedPayment(
 
   // Build adjustment lines (only if something needs fixing)
   const needsAdjustment = originalAccount !== correctExpense || gstAmount > 0 || tdsAmount > 0;
+
+  // Determine the correct P&L period for this invoice
+  const invoiceEntryDate = invoice.invoiceDate ? new Date(invoice.invoiceDate) : new Date(payment.paymentDate);
+  const invoicePeriod = invoice.billingPeriod ?? dateToPeriod(invoiceEntryDate);
 
   // Use a transaction to keep all writes atomic
   return prisma.$transaction(async (tx) => {
@@ -515,7 +535,8 @@ async function confirmInvoiceWithLinkedPayment(
       }
 
       const adjEntry = await inlineCreateLedgerEntry(tx as typeof prisma, {
-        entryDate: new Date(),
+        entryDate: invoiceEntryDate,
+        period: invoicePeriod,
         description: `Invoice ${invoice.invoiceNumber ?? invoice.id} linked to payment — reclassification`,
         sourceType: 'invoice_payment_linked',
         sourceId: invoice.id,
@@ -523,6 +544,15 @@ async function confirmInvoiceWithLinkedPayment(
         createdById: userId,
       });
       adjustmentEntryId = adjEntry.id;
+    }
+
+    // Update the payment's ledger entry period to match the invoice's billing period
+    // This moves the expense from the cash-basis month to the accrual-basis month
+    if (payment.ledgerEntryId) {
+      await tx.ledgerEntry.update({
+        where: { id: payment.ledgerEntryId },
+        data: { period: invoicePeriod },
+      });
     }
 
     // Create PaymentInvoice match record
@@ -755,8 +785,10 @@ export const createFinancePayment = createServerFn({ method: 'POST' })
     const sourceType = data.direction === 'outgoing' ? 'payment_outgoing' : 'payment_received';
 
     return prisma.$transaction(async (tx) => {
+      const paymentEntryDate = new Date(data.paymentDate);
       const entry = await inlineCreateLedgerEntry(tx as typeof prisma, {
-        entryDate: new Date(data.paymentDate),
+        entryDate: paymentEntryDate,
+        period: dateToPeriod(paymentEntryDate),
         description: `Payment ${data.direction}: ${data.counterpartyName ?? data.method} — ${data.amount}`,
         sourceType,
         sourceId: `payment_${data.referenceNumber ?? data.paymentDate}_${data.counterpartyName ?? 'unknown'}_${data.amount}`,
@@ -975,8 +1007,10 @@ export const createManualEntry = createServerFn({ method: 'POST' })
   .handler(async ({ data, context }) => {
     const prisma = await getPrisma();
     const userId = context.user.id;
+    const manualEntryDate = new Date(data.entryDate);
     const entry = await inlineCreateLedgerEntry(prisma, {
-      entryDate: new Date(data.entryDate),
+      entryDate: manualEntryDate,
+      period: dateToPeriod(manualEntryDate),
       description: data.description,
       sourceType: 'manual',
       lines: data.lines.map((l) => ({
@@ -1075,6 +1109,88 @@ export const findUnmatchedPayments = createServerFn({ method: 'POST' })
     });
 
     return { success: true as const, payments };
+  });
+
+// ============================================
+// MONTHLY P&L (accrual basis, grouped by period)
+// ============================================
+
+export const getMonthlyPnl = createServerFn({ method: 'GET' })
+  .middleware([authMiddleware])
+  .handler(async () => {
+    const prisma = await getPrisma();
+
+    // Raw query: group by period + account type, excluding reversed entries
+    const rows = await prisma.$queryRaw<Array<{
+      period: string;
+      account_type: string;
+      account_code: string;
+      account_name: string;
+      total_debit: number;
+      total_credit: number;
+    }>>`
+      SELECT
+        le."period",
+        la."type" AS account_type,
+        la."code" AS account_code,
+        la."name" AS account_name,
+        COALESCE(SUM(lel."debit"), 0)::float AS total_debit,
+        COALESCE(SUM(lel."credit"), 0)::float AS total_credit
+      FROM "LedgerEntryLine" lel
+      JOIN "LedgerEntry" le ON le.id = lel."entryId"
+      JOIN "LedgerAccount" la ON la.id = lel."accountId"
+      WHERE le."isReversed" = false
+        AND la."type" IN ('income', 'direct_cost', 'expense')
+      GROUP BY le."period", la."type", la."code", la."name"
+      ORDER BY le."period" DESC, la."type", la."code"
+    `;
+
+    // Build per-month P&L
+    const monthMap = new Map<string, {
+      period: string;
+      revenue: number;
+      cogs: number;
+      expenses: { code: string; name: string; amount: number }[];
+      totalExpenses: number;
+    }>();
+
+    for (const row of rows) {
+      if (!monthMap.has(row.period)) {
+        monthMap.set(row.period, { period: row.period, revenue: 0, cogs: 0, expenses: [], totalExpenses: 0 });
+      }
+      const month = monthMap.get(row.period)!;
+
+      // Income accounts: credit-normal (revenue = credits - debits)
+      if (row.account_type === 'income') {
+        month.revenue += row.total_credit - row.total_debit;
+      }
+      // Direct cost: debit-normal (cost = debits - credits)
+      else if (row.account_type === 'direct_cost') {
+        month.cogs += row.total_debit - row.total_credit;
+      }
+      // Expense: debit-normal (expense = debits - credits)
+      else if (row.account_type === 'expense') {
+        const amount = row.total_debit - row.total_credit;
+        if (Math.abs(amount) > 0.01) {
+          month.expenses.push({ code: row.account_code, name: row.account_name, amount });
+          month.totalExpenses += amount;
+        }
+      }
+    }
+
+    // Convert to sorted array
+    const months = Array.from(monthMap.values())
+      .map((m) => ({
+        ...m,
+        revenue: Math.round(m.revenue * 100) / 100,
+        cogs: Math.round(m.cogs * 100) / 100,
+        grossProfit: Math.round((m.revenue - m.cogs) * 100) / 100,
+        totalExpenses: Math.round(m.totalExpenses * 100) / 100,
+        netProfit: Math.round((m.revenue - m.cogs - m.totalExpenses) * 100) / 100,
+      }))
+      .sort((a, b) => b.period.localeCompare(a.period));
+
+    return { success: true as const, months };
   });
 
 // ============================================

@@ -13,7 +13,7 @@ import { requireAdmin } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { parseInvoice, parseIndianDate } from '../services/invoiceParser.js';
 import { matchInvoiceLines } from '../services/invoiceMatcher.js';
-import { createLedgerEntry } from '../services/ledgerService.js';
+import { createLedgerEntry, dateToPeriod } from '../services/ledgerService.js';
 import logger from '../utils/logger.js';
 
 const log = logger.child({ module: 'fabricInvoices' });
@@ -447,8 +447,10 @@ router.post('/:id/confirm', requireAdmin, asyncHandler(async (req: Request, res:
                 ledgerLines.push({ accountCode: 'GST_INPUT', debit: gstAmount, description: 'GST input credit' });
             }
 
+            const fabricEntryDate = invoice.invoiceDate ?? new Date();
             const entry = await createLedgerEntry(req.prisma, {
-                entryDate: invoice.invoiceDate ?? new Date(),
+                entryDate: fabricEntryDate,
+                period: dateToPeriod(fabricEntryDate),
                 description: `Fabric invoice ${invoice.invoiceNumber ?? invoice.id} — ${invoice.supplierName ?? 'Unknown'}`,
                 sourceType: 'fabric_inward',
                 sourceId: invoice.id,

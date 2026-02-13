@@ -413,6 +413,7 @@ export type Invoice = {
     status: Generated<string>;
     invoiceDate: Timestamp | null;
     dueDate: Timestamp | null;
+    billingPeriod: string | null;
     partyId: string | null;
     customerId: string | null;
     counterpartyName: string | null;
@@ -465,6 +466,7 @@ export type LedgerAccount = {
 export type LedgerEntry = {
     id: Generated<string>;
     entryDate: Timestamp;
+    period: string;
     description: string;
     sourceType: string;
     sourceId: string | null;

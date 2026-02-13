@@ -244,6 +244,7 @@ export const HDFC_NARRATION_RULES: NarrationRule[] = [
   { match: 'CANOE DESIGN RAZORPAY RBL', direction: 'out', debitAccount: 'BANK_RAZORPAYX', creditAccount: 'BANK_HDFC', description: 'Transfer to RazorpayX' },
   { match: 'XXXXXXXX5105',              direction: 'out', debitAccount: 'BANK_RAZORPAYX', creditAccount: 'BANK_HDFC', description: 'Transfer to RazorpayX' },
   { match: '054105001906-CANOE DESIGN',  direction: 'both', skip: true, description: 'Transfer from ICICI account' },
+  { match: 'RAZORPAYSOFTWAREPR',         direction: 'in',   debitAccount: 'BANK_HDFC', creditAccount: 'BANK_RAZORPAYX', description: 'Transfer from RazorpayX' },
 
   // ---- Incoming: Gateway & Marketplace settlements ----
   { match: 'RAZORPAY SOFTWARE', matchAlso: 'ESCROW', direction: 'in', debitAccount: 'BANK_HDFC', creditAccount: 'SALES_REVENUE', description: 'Razorpay settlement' },
@@ -260,6 +261,7 @@ export const HDFC_NARRATION_RULES: NarrationRule[] = [
   { match: 'SANTOSH DESAI',              direction: 'in', debitAccount: 'BANK_HDFC', creditAccount: 'OWNER_CAPITAL', description: 'Owner capital (loan) — Santosh Desai' },
   { match: 'SHANTUM  GUPTA',             direction: 'in', debitAccount: 'BANK_HDFC', creditAccount: 'OWNER_CAPITAL', description: 'Owner capital — Shantum Gupta' },
   { match: 'SHANTUM GUPTA',              direction: 'in', debitAccount: 'BANK_HDFC', creditAccount: 'OWNER_CAPITAL', description: 'Owner capital — Shantum Gupta' },
+  { match: 'SHANTUMGUPTA',               direction: 'in', debitAccount: 'BANK_HDFC', creditAccount: 'OWNER_CAPITAL', description: 'Owner capital — Shantum Gupta' },
   { match: 'KAAVNI MULTIMELTS',          direction: 'in', debitAccount: 'BANK_HDFC', creditAccount: 'OWNER_CAPITAL', description: 'Owner capital (loan) — Kaavni Multimelts' },
 
   // ---- Incoming: B2B / Retail partners ----

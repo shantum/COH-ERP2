@@ -155,6 +155,7 @@ async function inlineCreateLedgerEntry(
   prisma: Awaited<ReturnType<typeof getPrisma>>,
   input: {
     entryDate: Date;
+    period: string;
     description: string;
     sourceType: string;
     sourceId?: string;
@@ -163,7 +164,7 @@ async function inlineCreateLedgerEntry(
     notes?: string;
   },
 ) {
-  const { entryDate, description, sourceType, sourceId, lines, createdById, notes } = input;
+  const { entryDate, period, description, sourceType, sourceId, lines, createdById, notes } = input;
 
   const totalDebit = lines.reduce((sum, l) => sum + (l.debit ?? 0), 0);
   const totalCredit = lines.reduce((sum, l) => sum + (l.credit ?? 0), 0);
@@ -186,6 +187,7 @@ async function inlineCreateLedgerEntry(
   return prisma.ledgerEntry.create({
     data: {
       entryDate,
+      period,
       description,
       sourceType,
       sourceId: sourceId ?? null,
@@ -626,8 +628,10 @@ export const confirmPayrollRun = createServerFn({ method: 'POST' })
       });
 
       // Confirm the invoice (creates ledger entry: Dr OPERATING_EXPENSES, Cr ACCOUNTS_PAYABLE)
+      const salaryLabel = `${run.year}-${String(run.month).padStart(2, '0')}`;
       const entry = await inlineCreateLedgerEntry(prisma, {
         entryDate: new Date(run.year, run.month - 1, new Date(run.year, run.month, 0).getDate()),
+        period: salaryLabel,
         description: `Salary: ${slip.employee.name} - ${monthLabel}`,
         sourceType: 'invoice_confirmed',
         sourceId: invoice.id,
@@ -703,7 +707,8 @@ export const cancelPayrollRun = createServerFn({ method: 'POST' })
           if (original && !original.isReversed) {
             const reversal = await prisma.ledgerEntry.create({
               data: {
-                entryDate: new Date(),
+                entryDate: original.entryDate,
+                period: original.period,
                 description: `Reversal: ${original.description}`,
                 sourceType: 'adjustment',
                 notes: `Reversal of entry ${original.id}`,

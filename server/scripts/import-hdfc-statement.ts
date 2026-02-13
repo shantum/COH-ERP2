@@ -59,7 +59,7 @@ function categorize(narration: string, isWithdrawal: boolean): TxnCategory {
 
   if (isWithdrawal && n.includes('IMPS')) return { debitAccount: 'UNMATCHED_PAYMENTS', creditAccount: 'BANK_HDFC', description: `IMPS: ${narration.slice(0, 60)}` };
   if (isWithdrawal) return { debitAccount: 'UNMATCHED_PAYMENTS', creditAccount: 'BANK_HDFC', description: `Payment: ${narration.slice(0, 60)}` };
-  return { debitAccount: 'BANK_HDFC', creditAccount: 'SALES_REVENUE', description: `Deposit: ${narration.slice(0, 60)}` };
+  return { debitAccount: 'BANK_HDFC', creditAccount: 'UNMATCHED_PAYMENTS', description: `Deposit: ${narration.slice(0, 60)}` };
 }
 
 // ============================================
@@ -103,6 +103,11 @@ function parseHDFCDate(dateStr: string): Date {
   const [dd, mm, yy] = dateStr.split('/');
   const year = parseInt(yy) < 50 ? `20${yy}` : `19${yy}`;
   return new Date(`${year}-${mm}-${dd}T00:00:00+05:30`);
+}
+
+function dateToPeriod(date: Date): string {
+  const ist = new Date(date.getTime() + (5.5 * 60 * 60 * 1000));
+  return `${ist.getUTCFullYear()}-${String(ist.getUTCMonth() + 1).padStart(2, '0')}`;
 }
 
 function extractPayee(narration: string): string {
@@ -185,6 +190,7 @@ async function main() {
     entryBatch.push({
       id: entryId,
       entryDate,
+      period: dateToPeriod(entryDate),
       description: cat.description,
       sourceType: 'hdfc_statement',
       sourceId,

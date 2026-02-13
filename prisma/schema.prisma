@@ -1841,6 +1841,7 @@ model LedgerAccount {
 model LedgerEntry {
   id           String   @id @default(uuid())
   entryDate    DateTime
+  period       String   // "YYYY-MM" — which P&L month this belongs to (accrual basis)
   description  String
   sourceType   String   // fabric_inward, production_inward, invoice_confirmed, manual, etc.
   sourceId     String?  // FK to originating record (for idempotency + tracing)
@@ -1860,6 +1861,7 @@ model LedgerEntry {
 
   @@unique([sourceType, sourceId]) // Idempotency: one entry per source event
   @@index([entryDate])
+  @@index([period])
   @@index([sourceType])
   @@index([createdAt])
 }
@@ -1890,6 +1892,7 @@ model Invoice {
 
   invoiceDate      DateTime?
   dueDate          DateTime?
+  billingPeriod    String?   // "YYYY-MM" — which month this bill covers (for accrual P&L)
 
   // Counterparty (one of these)
   partyId          String?

@@ -24,12 +24,22 @@ export interface LedgerLine {
 
 export interface CreateLedgerEntryInput {
   entryDate: Date;
+  period: string; // "YYYY-MM" — which P&L month this belongs to
   description: string;
   sourceType: string;
   sourceId?: string;
   lines: LedgerLine[];
   createdById: string;
   notes?: string;
+}
+
+/**
+ * Convert a Date to IST "YYYY-MM" period string.
+ * IST = UTC + 5:30
+ */
+export function dateToPeriod(date: Date): string {
+  const ist = new Date(date.getTime() + (5.5 * 60 * 60 * 1000));
+  return `${ist.getUTCFullYear()}-${String(ist.getUTCMonth() + 1).padStart(2, '0')}`;
 }
 
 // ============================================
@@ -50,7 +60,7 @@ export async function createLedgerEntry(
   prisma: PrismaClient,
   input: CreateLedgerEntryInput
 ) {
-  const { entryDate, description, sourceType, sourceId, lines, createdById, notes } = input;
+  const { entryDate, period, description, sourceType, sourceId, lines, createdById, notes } = input;
 
   // Validate at least 2 lines
   if (lines.length < 2) {
@@ -100,6 +110,7 @@ export async function createLedgerEntry(
   const entry = await prisma.ledgerEntry.create({
     data: {
       entryDate,
+      period,
       description,
       sourceType,
       sourceId: sourceId ?? null,
@@ -148,7 +159,8 @@ export async function reverseLedgerEntry(
   // Create reversal entry — swap debit and credit on each line
   const reversal = await prisma.ledgerEntry.create({
     data: {
-      entryDate: new Date(),
+      entryDate: original.entryDate,
+      period: original.period,
       description: `Reversal: ${original.description}`,
       sourceType: 'adjustment',
       notes: `Reversal of entry ${original.id}`,
@@ -301,6 +313,7 @@ export async function bookFabricConsumptionForMonth(
 
   await createLedgerEntry(prisma, {
     entryDate,
+    period: label,
     description: `Production → Finished Goods — ${label} (all production inwards × BOM cost)`,
     sourceType: SOURCE_TYPE,
     sourceId: SOURCE_ID,
@@ -390,6 +403,7 @@ export async function bookShipmentCOGSForMonth(
 
   await createLedgerEntry(prisma, {
     entryDate,
+    period: label,
     description: `Shipment COGS — ${label} (shipped goods × BOM cost)`,
     sourceType: SOURCE_TYPE,
     sourceId: SOURCE_ID,
@@ -480,6 +494,7 @@ export async function bookReturnReversalForMonth(
 
   await createLedgerEntry(prisma, {
     entryDate,
+    period: label,
     description: `Return/RTO COGS reversal — ${label} (returned goods × BOM cost)`,
     sourceType: SOURCE_TYPE,
     sourceId: SOURCE_ID,

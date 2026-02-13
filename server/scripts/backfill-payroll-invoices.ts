@@ -9,6 +9,11 @@ import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
+function dateToPeriod(date: Date): string {
+  const ist = new Date(date.getTime() + (5.5 * 60 * 60 * 1000));
+  return `${ist.getUTCFullYear()}-${String(ist.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 /** Tolerance for amount matching (₹) */
@@ -97,6 +102,7 @@ async function main() {
       const entry = await prisma.ledgerEntry.create({
         data: {
           entryDate: invoiceDate,
+          period: dateToPeriod(invoiceDate),
           description: `Salary: ${slip.employee.name} - ${monthLabel}`,
           sourceType: 'invoice_confirmed',
           sourceId: invoice.id,

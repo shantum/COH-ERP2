@@ -20,6 +20,7 @@ import {
   createFinancePayment,
   createManualEntry,
   findUnmatchedPayments,
+  getMonthlyPnl,
 } from '../server/functions/finance';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
@@ -78,6 +79,7 @@ export default function Finance() {
           <TabsTrigger value="invoices">Invoices</TabsTrigger>
           <TabsTrigger value="payments">Payments</TabsTrigger>
           <TabsTrigger value="ledger">Ledger</TabsTrigger>
+          <TabsTrigger value="pnl">P&L</TabsTrigger>
         </TabsList>
 
         <TabsContent value="dashboard" className="mt-4">
@@ -91,6 +93,9 @@ export default function Finance() {
         </TabsContent>
         <TabsContent value="ledger" className="mt-4">
           <LedgerTab search={search} />
+        </TabsContent>
+        <TabsContent value="pnl" className="mt-4">
+          <PnlTab />
         </TabsContent>
       </Tabs>
     </div>
@@ -876,6 +881,68 @@ function LedgerTab({ search }: { search: FinanceSearchParams }) {
 }
 
 // ============================================
+// P&L TAB (accrual basis, grouped by period)
+// ============================================
+
+function PnlTab() {
+  const pnlFn = useServerFn(getMonthlyPnl);
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['finance', 'pnl'],
+    queryFn: () => pnlFn(),
+  });
+
+  if (isLoading) return <LoadingState />;
+  if (!data?.success) return <div className="text-muted-foreground text-center py-8">Failed to load P&L</div>;
+
+  const months = data.months;
+
+  const fmt = (n: number) => {
+    const sign = n < 0 ? '-' : '';
+    return `${sign}Rs ${Math.abs(n).toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+  };
+
+  return (
+    <div className="space-y-4">
+      <h3 className="text-lg font-semibold">Monthly P&L (Accrual Basis)</h3>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm border-collapse">
+          <thead>
+            <tr className="border-b">
+              <th className="text-left py-2 px-3 font-medium">Period</th>
+              <th className="text-right py-2 px-3 font-medium">Revenue</th>
+              <th className="text-right py-2 px-3 font-medium">COGS</th>
+              <th className="text-right py-2 px-3 font-medium">Gross Profit</th>
+              <th className="text-right py-2 px-3 font-medium">Expenses</th>
+              <th className="text-right py-2 px-3 font-medium">Net Profit</th>
+            </tr>
+          </thead>
+          <tbody>
+            {months.map((m) => (
+              <tr key={m.period} className="border-b hover:bg-muted/50">
+                <td className="py-2 px-3 font-medium">{m.period}</td>
+                <td className="py-2 px-3 text-right">{fmt(m.revenue)}</td>
+                <td className="py-2 px-3 text-right">{fmt(m.cogs)}</td>
+                <td className={`py-2 px-3 text-right font-medium ${m.grossProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                  {fmt(m.grossProfit)}
+                </td>
+                <td className="py-2 px-3 text-right">{fmt(m.totalExpenses)}</td>
+                <td className={`py-2 px-3 text-right font-semibold ${m.netProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                  {fmt(m.netProfit)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {months.length === 0 && (
+        <div className="text-muted-foreground text-center py-8">No ledger entries found</div>
+      )}
+    </div>
+  );
+}
+
+// ============================================
 // CONFIRM PAYABLE DIALOG (link to payment)
 // ============================================
 
@@ -1006,6 +1073,7 @@ function CreateInvoiceModal({ open, onClose, prefill }: {
     totalAmount: '',
     gstAmount: '',
     invoiceDate: new Date().toISOString().split('T')[0],
+    billingPeriod: '',
     notes: '',
     partyId: undefined as string | undefined,
   });
@@ -1022,6 +1090,7 @@ function CreateInvoiceModal({ open, onClose, prefill }: {
       totalAmount: String(prefill.totalAmount),
       gstAmount: '',
       invoiceDate: new Date().toISOString().split('T')[0],
+      billingPeriod: '',
       notes: '',
       partyId: prefill.partyId,
     });
@@ -1038,6 +1107,7 @@ function CreateInvoiceModal({ open, onClose, prefill }: {
           totalAmount: Number(form.totalAmount),
           ...(form.gstAmount ? { gstAmount: Number(form.gstAmount) } : {}),
           ...(form.invoiceDate ? { invoiceDate: form.invoiceDate } : {}),
+          ...(form.billingPeriod ? { billingPeriod: form.billingPeriod } : {}),
           ...(form.notes ? { notes: form.notes } : {}),
           ...(form.partyId ? { partyId: form.partyId } : {}),
         },
@@ -1059,6 +1129,7 @@ function CreateInvoiceModal({ open, onClose, prefill }: {
       totalAmount: '',
       gstAmount: '',
       invoiceDate: new Date().toISOString().split('T')[0],
+      billingPeriod: '',
       notes: '',
       partyId: undefined,
     });
@@ -1113,9 +1184,15 @@ function CreateInvoiceModal({ open, onClose, prefill }: {
               <Input type="number" value={form.gstAmount} onChange={(e) => setForm({ ...form, gstAmount: e.target.value })} placeholder="0.00" />
             </div>
           </div>
-          <div>
-            <Label>Invoice Date</Label>
-            <Input type="date" value={form.invoiceDate} onChange={(e) => setForm({ ...form, invoiceDate: e.target.value })} />
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label>Invoice Date</Label>
+              <Input type="date" value={form.invoiceDate} onChange={(e) => setForm({ ...form, invoiceDate: e.target.value })} />
+            </div>
+            <div>
+              <Label>Billing Period</Label>
+              <Input type="month" value={form.billingPeriod} onChange={(e) => setForm({ ...form, billingPeriod: e.target.value })} placeholder="Optional" />
+            </div>
           </div>
           <div>
             <Label>Notes</Label>

@@ -12,7 +12,7 @@ import { z } from 'zod';
 
 export const FinanceSearchParams = z.object({
   /** Active tab */
-  tab: z.enum(['dashboard', 'invoices', 'payments', 'ledger']).catch('dashboard'),
+  tab: z.enum(['dashboard', 'invoices', 'payments', 'ledger', 'pnl']).catch('dashboard'),
   /** Invoice type filter */
   type: z.enum(['payable', 'receivable']).optional().catch(undefined),
   /** Invoice status filter */
@@ -63,6 +63,7 @@ export const CreateInvoiceSchema = z.object({
   category: z.string(),
   invoiceDate: z.string().optional(),
   dueDate: z.string().optional(),
+  billingPeriod: z.string().regex(/^\d{4}-\d{2}$/).optional(),
   partyId: z.string().uuid().optional(),
   customerId: z.string().uuid().optional(),
   counterpartyName: z.string().optional(),
@@ -82,6 +83,7 @@ export const UpdateInvoiceSchema = z.object({
   category: z.string().optional(),
   invoiceDate: z.string().optional(),
   dueDate: z.string().optional(),
+  billingPeriod: z.string().regex(/^\d{4}-\d{2}$/).nullable().optional(),
   partyId: z.string().uuid().nullable().optional(),
   customerId: z.string().uuid().nullable().optional(),
   counterpartyName: z.string().nullable().optional(),

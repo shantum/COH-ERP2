@@ -80,6 +80,11 @@ function parseDate(dateStr: string): Date {
   return new Date(`${yyyy}-${mm}-${dd}T00:00:00+05:30`);
 }
 
+function dateToPeriod(date: Date): string {
+  const ist = new Date(date.getTime() + (5.5 * 60 * 60 * 1000));
+  return `${ist.getUTCFullYear()}-${String(ist.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
 function extractNoteDescription(notes: string): string | null {
   if (!notes || notes === '{}') return null;
   try {
@@ -211,6 +216,7 @@ async function main() {
     entryBatch.push({
       id: entryId,
       entryDate: processedAt,
+      period: dateToPeriod(processedAt),
       description: entryDesc,
       sourceType: 'bank_payout',
       sourceId: payoutId,
@@ -354,6 +360,7 @@ async function main() {
       chargeEntries.push({
         id: entryId,
         entryDate: txnDate,
+        period: dateToPeriod(txnDate),
         description: 'Bank charges (RazorpayX)',
         sourceType: 'bank_charge',
         sourceId: txnId,

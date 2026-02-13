@@ -62,7 +62,8 @@ Ops team fabric entry --------------------------------> Fabric Inward (Live) --+
                |  [ingest_inward]        |    |  [ingest_outward]          |
                |  Inward (Live) -> DB    |    |  Outward (Live) -> DB      |
                |  + fabric deduction     |    |  + link OrderLines         |
-               |  + mark DONE            |    |  + mark DONE               |
+               |  + mark DONE            |    |  + book COGS               |
+               |  + book fabric costs    |    |  + mark DONE               |
                +------------+------------+    +-------------+--------------+
                             |                               |
                             v                               v
@@ -83,16 +84,22 @@ Ops team fabric entry --------------------------------> Fabric Inward (Live) --+
                +-------------------------+
 ```
 
-Nine independent jobs managed by `sheetOffloadWorker.ts`:
-- **`ingest_inward`** -- Reads Inward (Live), creates INWARD transactions, deducts fabric for sampling, marks DONE, pushes balances, invalidates caches.
-- **`ingest_outward`** -- Reads Outward (Live), creates OUTWARD transactions, links to OrderLines (evidence-based fulfillment), marks DONE, pushes balances, invalidates caches.
+Nine independent jobs + two unified cycle runners managed by `sheetOffloadWorker.ts`:
+- **`ingest_inward`** -- Reads Inward (Live), creates INWARD transactions, deducts fabric for sampling, books fabric consumption costs, marks DONE, pushes balances, invalidates caches.
+- **`ingest_outward`** -- Reads Outward (Live), creates OUTWARD transactions, links to OrderLines (evidence-based fulfillment), books shipment COGS, marks DONE, pushes balances, invalidates caches.
 - **`move_shipped_to_outward`** -- Manual trigger only. Copies shipped rows from "Orders from COH" to "Outward (Live)" with verification step. No balance updates.
 - **`push_balances`** -- Standalone job: pushes ERP `currentBalance` to Inventory col R and Balance Final col F via batch API.
-- **`push_fabric_balances`** -- Pushes `FabricColour.currentBalance` to Fabric Balances tab in Barcode Mastersheet.
-- **`import_fabric_balances`** -- Reads Fabric Balances tab from sheet, reconciles against ERP using time-aware historical balance calculation.
-- **`ingest_fabric_inward`** -- Reads Fabric Inward (Live), creates `FabricColourTransaction` records, marks DONE.
-- **`cleanup_done_rows`** -- Deletes rows marked `DONE:*` immediately (retention = 0 days) from Inward (Live) and Outward (Live).
+- **`push_fabric_balances`** -- Pushes `FabricColour.currentBalance` to Fabric Balances tab in Barcode Mastersheet. Creates new sheet rows for fabric colours not yet on the sheet.
+- **`import_fabric_balances`** -- Reads Fabric Balances tab from sheet, reconciles against ERP using time-aware historical balance calculation. Creates adjustment transactions for mismatches.
+- **`ingest_fabric_inward`** -- Reads Fabric Inward (Live), creates `FabricColourTransaction` records, auto-creates suppliers if new, marks DONE.
+- **`cleanup_done_rows`** -- Deletes rows marked `DONE:*` immediately (retention = 0 days) from Inward (Live), Outward (Live), and Fabric Inward (Live).
 - **`migrate_sheet_formulas`** -- Rewrites Inventory col C and Balance Final col E formulas from SUMIF to V2 SUMIFS (excludes DONE rows).
+
+**Unified Cycle Runners** (`runInwardCycle`, `runOutwardCycle`):
+- Wrap pre-flight checks, import, and post-flight into one self-contained pipeline with step-by-step progress tracking.
+- Steps: Balance check -> CSV backup -> Push balances -> DB health check -> Read sheet rows -> Validate rows -> DB write -> (Link orders / Book COGS for outward) -> Mark DONE -> Push updated balances -> Verify balances -> Cleanup DONE rows -> Summary.
+- Real-time progress available via `getCycleProgress()` -- each step has `pending | running | done | failed | skipped` status.
+- Guards against concurrent operations (won't run if any other cycle or sheet job is running).
 
 ---
 
@@ -169,6 +176,10 @@ After a successful push, `stampSheetPushed(orderId)` sets `order.sheetPushedAt =
 - Has its own concurrency guard (`statusSyncRunning`)
 - Batch-queries all matching orders from DB in one call
 - Uses `batchWriteRanges()` for efficient multi-row updates
+
+### Single Order Sync
+
+`syncSingleOrderToSheet(orderNumber)` updates the sheet row(s) for a specific order. Looks up the order's line data from DB, reads the "Orders from COH" tab, finds matching rows by order number + SKU, and writes updated status/courier/AWB values. Used for on-demand updates (e.g., after tracking sync updates a single order).
 
 ### Design Decisions
 
@@ -359,28 +370,32 @@ Move shipped operations are tracked via `trackWorkerRun()` which writes to the `
 
 ---
 
-## 4. Offload Worker (9 Independent Jobs)
+## 4. Offload Worker (9 Independent Jobs + 2 Cycle Runners)
 
 **File:** `sheetOffloadWorker.ts`
 
-**Exports:** `{ start, stop, getStatus, triggerIngestInward, triggerIngestOutward, triggerMoveShipped, triggerCleanupDoneRows, triggerMigrateFormulas, triggerPushBalances, triggerPushFabricBalances, triggerImportFabricBalances, getBufferCounts, previewIngestInward, previewIngestOutward, previewPushBalances, previewFabricInward, triggerFabricInward }`
+**Exports:** `{ start, stop, getStatus, triggerIngestInward, triggerIngestOutward, triggerMoveShipped, triggerCleanupDoneRows, triggerMigrateFormulas, triggerPushBalances, triggerPushFabricBalances, triggerImportFabricBalances, getBufferCounts, previewIngestInward, previewIngestOutward, previewPushBalances, previewFabricInward, triggerFabricInward, runInwardCycle, runOutwardCycle, getCycleProgress, resetCycleProgress }`
 
-The worker manages 9 independently triggerable background jobs + 4 preview (dry-run) jobs, each with its own `JobState<T>` (concurrency guard, `isRunning`, `lastRunAt`, `lastResult`, `recentRuns`). Requires `ENABLE_SHEET_OFFLOAD=true`.
+The worker manages 9 independently triggerable background jobs + 4 preview (dry-run) jobs + 2 unified cycle runners, each with its own `JobState<T>` (concurrency guard, `isRunning`, `lastRunAt`, `lastResult`, `recentRuns`). Requires `ENABLE_SHEET_OFFLOAD=true`.
 
 ### Result Types
 
 | Type | Key Fields |
 |------|------------|
-| `IngestInwardResult` | `inwardIngested`, `skipped`, `rowsMarkedDone`, `skusUpdated`, `errors`, `durationMs`, `error`, `inwardValidationErrors`, `fabricDeductionResult?` |
-| `IngestOutwardResult` | `outwardIngested`, `ordersLinked`, `skipped`, `rowsMarkedDone`, `skusUpdated`, `errors`, `durationMs`, `error`, `outwardSkipReasons?` |
-| `IngestPreviewResult` | `tab`, `totalRows`, `valid`, `invalid`, `duplicates`, `validationErrors`, `skipReasons?`, `affectedSkuCodes`, `durationMs`, `balanceSnapshot?` |
+| `IngestInwardResult` | `inwardIngested`, `skipped`, `rowsMarkedDone`, `skusUpdated`, `errors`, `durationMs`, `error`, `inwardValidationErrors`, `balanceVerification?` |
+| `IngestOutwardResult` | `outwardIngested`, `ordersLinked`, `skipped`, `rowsMarkedDone`, `skusUpdated`, `errors`, `durationMs`, `error`, `outwardSkipReasons?`, `balanceVerification?` |
+| `IngestPreviewResult` | `tab`, `totalRows`, `valid`, `invalid`, `duplicates`, `validationErrors`, `skipReasons?`, `affectedSkuCodes`, `durationMs`, `previewRows?`, `balanceSnapshot?` |
 | `MoveShippedResult` | `shippedRowsFound`, `skippedRows`, `skipReasons`, `rowsWrittenToOutward`, `rowsVerified`, `rowsDeletedFromOrders`, `errors`, `durationMs` |
-| `CleanupDoneResult` | `inwardDeleted`, `outwardDeleted`, `errors`, `durationMs` |
-| `MigrateFormulasResult` | `inventoryUpdated`, `balanceFinalUpdated`, `errors`, `durationMs` |
-| `PushBalancesResult` | `skusUpdated`, `inventoryWritten`, `balanceFinalWritten`, `errors`, `durationMs` |
-| `PushFabricBalancesResult` | `fabricColoursUpdated`, `rowsWritten`, `errors`, `durationMs` |
-| `ImportFabricBalancesResult` | `rowsRead`, `matched`, `mismatches`, `mismatchDetails`, `errors`, `durationMs` |
-| `PushBalancesPreviewResult` | `totalSkus`, `erpBalances`, `sheetBalances`, `mismatches`, `mismatchDetails`, `durationMs` |
+| `CleanupDoneResult` | `inwardDeleted`, `outwardDeleted`, `fabricInwardDeleted`, `errors`, `durationMs` |
+| `MigrateFormulasResult` | `inventoryRowsUpdated`, `balanceFinalRowsUpdated`, `errors`, `durationMs` |
+| `PushBalancesResult` | `skusUpdated`, `errors`, `durationMs`, `error` |
+| `PushFabricBalancesResult` | `totalColours`, `newColoursAdded`, `balancesUpdated`, `errors`, `durationMs`, `error` |
+| `ImportFabricBalancesResult` | `rowsWithCounts`, `adjustmentsCreated`, `alreadyMatching`, `skipped`, `skipReasons`, `adjustments[]`, `durationMs`, `error` |
+| `PushBalancesPreviewResult` | `totalSkusInDb`, `mastersheetMatched`, `mastersheetWouldChange`, `ledgerMatched`, `ledgerWouldChange`, `alreadyCorrect`, `wouldChange`, `sampleChanges[]`, `durationMs` |
+| `FabricInwardResult` | `imported`, `skipped`, `rowsMarkedDone`, `suppliersCreated`, `errors`, `durationMs`, `error`, `validationErrors` |
+| `FabricInwardPreviewResult` | `tab`, `totalRows`, `valid`, `invalid`, `duplicates`, `validationErrors`, `affectedFabricCodes`, `durationMs`, `previewRows?` |
+| `CycleStep` | `name`, `status` (`pending`/`running`/`done`/`failed`/`skipped`), `detail?`, `durationMs?`, `error?` |
+| `CycleProgressState` | `isRunning`, `type` (`inward`/`outward`/null), `startedAt`, `completedAt`, `steps[]`, `totalDurationMs?` |
 
 ### Status Structure (`getStatus()`)
 
@@ -411,8 +426,9 @@ Structured as clear steps:
 4. **Dedup valid rows**: Checks valid rows against existing DB via `findExistingReferenceIds()` (chunked at 2,000)
 5. **Create transactions**: Creates `InventoryTransaction` records in batches with `txnType: TXN_TYPE.INWARD`, `reason` mapped via `INWARD_SOURCE_MAP`
 6. **Fabric deduction**: For sampling inwards, auto-deducts fabric via BOM lookup (see Fabric Auto-Deduction below)
-7. **Mark DONE**: Writes `DONE:{referenceId}` to Import Errors column for ingested + already-deduped rows. Invalid rows keep their error message.
-8. **Push balances + invalidate caches**: Updates sheet balances and invalidates caches if any SKUs were affected.
+7. **Book fabric consumption costs**: Calls `bookFabricConsumptionForMonth()` and `bookReturnReversalForMonth()` from `ledgerService` to create double-entry ledger entries for the affected months.
+8. **Mark DONE**: Writes `DONE:{referenceId}` to Import Errors column for ingested + already-deduped rows. Invalid rows keep their error message.
+9. **Push balances + invalidate caches**: Updates sheet balances and invalidates caches if any SKUs were affected.
 
 #### Inward Validation (`validateInwardRow()`)
 
@@ -422,11 +438,13 @@ Structured as clear steps:
 | 2. Barcode for repacking | Col G (Barcode) required when source is `"repacking"` | `missing Barcode (G) for repacking` |
 | 3. Tailor for sampling | Col H (Tailor Number) required when source is `"sampling"` | `missing Tailor Number (H) for sampling` |
 | 4. Notes for adjustment | Col I (Notes) required when source is `"adjustment"` | `missing Notes (I) for adjustment` |
-| 5. Valid source | Source must be one of `VALID_INWARD_LIVE_SOURCES` (`sampling`, `repacking`, `adjustment`) | `invalid Source "xyz"` |
+| 5. Valid source | Source must be one of `VALID_INWARD_LIVE_SOURCES` (`sampling`, `repacking`, `adjustment`, `rto`, `return`) | `invalid Source "xyz"` |
 | 6. SKU exists | SKU code must exist in ERP `Sku` table | `unknown SKU "ABC-123"` |
 | 7. Positive quantity | Qty must be > 0 | `Qty must be > 0` |
+| 8. Quantity limit | Qty must be <= `MAX_QTY_PER_ROW` (500) | `Qty too large` |
+| 9. Reasonable date | Date must be within `MAX_PAST_DAYS` (365) to `MAX_FUTURE_DAYS` (3) from today | `date too far in past/future` |
 
-**`VALID_INWARD_LIVE_SOURCES`** = `['sampling', 'repacking', 'adjustment'] as const` in `config/sync/sheets.ts`.
+**`VALID_INWARD_LIVE_SOURCES`** = `['sampling', 'repacking', 'adjustment', 'rto', 'return'] as const` in `config/sync/sheets.ts`.
 
 #### Fabric Auto-Deduction for Sampling Inwards
 
@@ -454,6 +472,7 @@ Same parse/dedup pattern as ingest inward, but:
 - Also extracts **courier** (col J) and **AWB** (col K) for order linking
 - **Order+SKU dedup**: Checks for `duplicate_order_sku` -- if an outward for the same `orderNumber|skuId` already exists in DB, the row is skipped
 - Marks ingested rows with `DONE:{referenceId}`
+- **Books shipment COGS**: After linking orders, calls `bookShipmentCOGSForMonth()` to create ledger entries for cost of goods sold.
 
 #### Channel Order Matching
 
@@ -474,6 +493,8 @@ Two-pass validation before ingestion:
 | `unknown_sku` | SKU code not found in ERP `Sku` table |
 | `invalid_date` | No parseable date from either Outward Date or Order Date |
 | `duplicate_order_sku` | Same order+SKU combination already exists in DB |
+| `qty_too_large` | Qty exceeds `MAX_QTY_PER_ROW` (500) |
+| `date_out_of_range` | Date outside `MAX_PAST_DAYS` to `MAX_FUTURE_DAYS` range |
 
 **Pass 2 -- Order-Level Checks (only for rows with an order number):**
 
@@ -512,11 +533,11 @@ Standalone job that pushes ERP `currentBalance` for all SKUs to sheets via batch
 
 Uses `batchWriteRanges()` from `googleSheetsClient.ts` which sends all range updates in a single `batchUpdate` API call, dramatically reducing API quota usage compared to individual writes.
 
-**Preview mode** (`previewPushBalances`): Reads current sheet values and compares to ERP balances. Returns `PushBalancesPreviewResult` with mismatch details showing which SKUs are out of sync.
+**Preview mode** (`previewPushBalances`): Reads current sheet values and compares to ERP balances. Returns `PushBalancesPreviewResult` with mismatch details showing which SKUs are out of sync. Sample changes include `skuCode`, `productName`, `colorName`, `size`, `sheet` (which sheet), `sheetValue`, `dbValue`.
 
 ### Job 4: Push Fabric Balances (`triggerPushFabricBalances`)
 
-Pushes `FabricColour.currentBalance` to the "Fabric Balances" tab in the Barcode Mastersheet. Maps fabric colour codes to sheet rows and writes balances.
+Pushes `FabricColour.currentBalance` to the "Fabric Balances" tab in the Barcode Mastersheet. Maps fabric colour codes to sheet rows and writes balances. Creates new rows on the sheet for any fabric colours not yet present. Returns `PushFabricBalancesResult` with `totalColours`, `newColoursAdded`, and `balancesUpdated`.
 
 ### Job 5: Import Fabric Balances (`triggerImportFabricBalances`)
 
@@ -526,7 +547,8 @@ Pushes `FabricColour.currentBalance` to the "Fabric Balances" tab in the Barcode
 2. Calculates what the ERP balance was AT THAT COUNT TIME by replaying transactions:
    - Current balance - (transactions after count time)
 3. Compares the historical ERP balance to the physical count
-4. Reports mismatches with details
+4. Creates adjustment `FabricColourTransaction` records for mismatches (inward if count > system, outward if count < system)
+5. Reports adjustments with details: `fabricCode`, `colour`, `fabric`, `systemBalance`, `physicalCount`, `delta`, `type`
 
 This handles the real-world scenario where physical counts happen at a specific time, but the ERP balance keeps changing as transactions flow in.
 
@@ -534,15 +556,45 @@ This handles the real-world scenario where physical counts happen at a specific 
 
 Reads "Fabric Inward (Live)" tab, creates `FabricColourTransaction` records with `txnType: INWARD`. Same parse/validate/dedup/mark-DONE pattern as inventory ingest jobs.
 
-Column config: `FABRIC_INWARD_LIVE_COLS` and `FABRIC_INWARD_LIVE_HEADERS` in sheets.ts.
+- Auto-creates supplier Party records if a supplier name is entered that doesn't exist in the DB. Tracks `suppliersCreated` count in the result.
+- Column config: `FABRIC_INWARD_LIVE_COLS` and `FABRIC_INWARD_LIVE_HEADERS` in sheets.ts.
 
 ### Job 7: Cleanup DONE Rows (`triggerCleanupDoneRows`)
 
-Deletes rows from Inward (Live) and Outward (Live) where the Import Errors column starts with `DONE:`. With `CLEANUP_RETENTION_DAYS = 0`, DONE rows are deleted immediately on the next cleanup run. Processes each tab independently. Returns `CleanupDoneResult` with counts per tab.
+Deletes rows from Inward (Live), Outward (Live), and Fabric Inward (Live) where the Import Errors/Status column starts with `DONE:`. With `CLEANUP_RETENTION_DAYS = 0`, DONE rows are deleted immediately on the next cleanup run. Processes each tab independently. Returns `CleanupDoneResult` with counts per tab: `inwardDeleted`, `outwardDeleted`, `fabricInwardDeleted`.
 
 ### Job 8: Migrate Sheet Formulas (`triggerMigrateFormulas`)
 
-Rewrites formulas in Inventory tab col C and Balance (Final) col E from old SUMIF style to V2 SUMIFS style (with `"<>DONE:*"` exclusion). Reads existing formula cells, generates new formulas using the template functions, and writes back. Returns `MigrateFormulasResult` with counts of updated cells.
+Rewrites formulas in Inventory tab col C and Balance (Final) col E from old SUMIF style to V2 SUMIFS style (with `"<>DONE:*"` exclusion). Reads existing formula cells, generates new formulas using the template functions, and writes back. Returns `MigrateFormulasResult` with `inventoryRowsUpdated` and `balanceFinalRowsUpdated`.
+
+### Unified Cycle Runners
+
+**Functions:** `runInwardCycle()`, `runOutwardCycle()`
+
+These wrap the full ingestion pipeline into a single operation with step-by-step progress tracking via `CycleProgressState`. Each cycle runs these steps:
+
+**Inward Cycle Steps:**
+1. Balance check -- read Inventory tab snapshot
+2. CSV backup -- read all SKU balances from DB
+3. Push balances -- sync ERP balances to sheet
+4. DB health check -- verify DB connectivity (fatal if fails)
+5. Read sheet rows -- read Inward (Live)
+6. Validate rows -- run validation rules
+7. DB write -- create InventoryTransactions
+8. Mark DONE -- write DONE markers
+9. Push updated balances -- sync new balances after import
+10. Verify balances -- compare before/after snapshots
+11. Cleanup DONE rows -- delete marked rows
+12. Summary -- finalize results
+
+**Outward Cycle Steps:**
+Same as inward, plus:
+- Link orders -- link outward items to OrderLines
+- Book COGS -- create ledger entries for shipment costs
+
+**Real-time progress:** `getCycleProgress()` returns the current state. The frontend uses SSE to poll this for a live progress modal. `resetCycleProgress()` clears the state.
+
+**Concurrency:** Cycles guard against ALL concurrent sheet operations -- won't start if any cycle, ingest, push, or cleanup job is already running.
 
 ### Balance Verification (Before/After Snapshots)
 
@@ -574,7 +626,7 @@ They run the same parse -> validate -> dedup pipeline as the real jobs but do NO
 - Update sheet balances
 - Invalidate caches
 
-They DO write Import Errors to the sheet so ops can see validation errors without data being committed. Preview results include `balanceSnapshot` showing ERP vs sheet balance state.
+They DO write Import Errors to the sheet so ops can see validation errors without data being committed. Preview results include `balanceSnapshot` showing ERP vs sheet balance state. Inward/outward previews include `previewRows` with per-row status.
 
 ---
 
@@ -653,7 +705,7 @@ For outward rows with an order number, checks the `duplicate_order_sku` skip rea
 
 ## 7. Configuration
 
-All configuration in `server/src/config/sync/sheets.ts` (~700 lines). Re-exported from `server/src/config/sync/index.ts`.
+All configuration in `server/src/config/sync/sheets.ts` (~720 lines). Re-exported from `server/src/config/sync/index.ts`.
 
 ### Feature Flags
 
@@ -671,13 +723,21 @@ All configuration in `server/src/config/sync/sheets.ts` (~700 lines). Re-exporte
 | `CLEANUP_RETENTION_DAYS` | `0` | Days before DONE rows are deleted by cleanup job (immediate) |
 | `FABRIC_DEDUCT_SOURCES` | `['sampling']` | Inward sources that trigger automatic fabric deduction |
 
+### Ingestion Validation Limits
+
+| Config | Value | Purpose |
+|--------|-------|---------|
+| `MAX_QTY_PER_ROW` | `500` | Max quantity per row -- anything higher is rejected as a typo |
+| `MAX_FUTURE_DAYS` | `3` | Max days in the future for a date -- catches typos like wrong year |
+| `MAX_PAST_DAYS` | `365` | Max days in the past for a date -- catches very old dates |
+
 ### Timing
 
 | Config | Value | Purpose |
 |--------|-------|---------|
 | `OFFLOAD_INTERVAL_MS` | 30 min | Interval between scheduled cycles |
 | `STARTUP_DELAY_MS` | 5 min | Delay before first run |
-| `API_CALL_DELAY_MS` | 200ms | Min delay between API calls (300/min quota) |
+| `API_CALL_DELAY_MS` | 250ms | Min delay between API calls (300/min quota, ~20% safety margin) |
 | `API_MAX_RETRIES` | 3 | Retries on transient errors (429, 500, 503) |
 | `BATCH_SIZE` | 500 | Rows per ingestion batch |
 
@@ -708,11 +768,12 @@ LIVE_BALANCE_FORMULA_V2_TEMPLATE = (row: number) => `=F${row}+IFERROR(SUMIFS(IMP
 
 ```typescript
 // Valid sources for Inward (Live) -- rows with other sources are rejected
-VALID_INWARD_LIVE_SOURCES = ['sampling', 'repacking', 'adjustment'] as const
+VALID_INWARD_LIVE_SOURCES = ['sampling', 'repacking', 'adjustment', 'rto', 'return'] as const
 
 // Mapping for Inward (Live) sources to transaction reasons
 INWARD_SOURCE_MAP: sampling -> production, production -> production, tailor -> production,
-                   repacking -> return_receipt, return -> return_receipt, adjustment -> adjustment, ...
+                   repacking -> return_receipt, return -> return_receipt, adjustment -> adjustment,
+                   rto -> rto_received, reject -> damage, ...
 DEFAULT_INWARD_REASON = 'production'
 
 // Mapping for Outward (Live) destinations to transaction reasons
@@ -793,6 +854,8 @@ BARCODE_TABS = { MAIN: 'Sheet1', FABRIC_BALANCES, PRODUCT_WEIGHTS }
 | `preview_push_balances` | `previewPushBalances()` | Manual only |
 | `preview_fabric_inward` | `previewFabricInward()` | Manual only |
 | `reconcile_sheet_orders` | `reconcileSheetOrders()` | Manual only |
+| `inward_cycle` | `runInwardCycle()` | Manual only |
+| `outward_cycle` | `runOutwardCycle()` | Manual only |
 
 ### Sheet Sync -- CSV-based (in `server/src/routes/sheetSync.ts`)
 
@@ -822,16 +885,19 @@ Displays:
 - Balance verification results (before/after snapshots)
 - Fabric balance sync state
 - Preview results for inward, outward, push balances, fabric inward
+- **Cycle progress modal**: Real-time step-by-step progress for inward/outward cycles
 
 ### Client-Side Type Mirrors
 
-**File:** `client/src/components/settings/jobs/sheetJobTypes.ts` (~206 lines)
+**File:** `client/src/components/settings/jobs/sheetJobTypes.ts` (~227 lines)
 
 Mirrors all server-side result types for the frontend:
 - `IngestInwardResult`, `IngestOutwardResult`, `MoveShippedResult`
 - `CleanupDoneResult`, `MigrateFormulasResult`
 - `PushBalancesResult`, `PushFabricBalancesResult`, `ImportFabricBalancesResult`
 - `PushBalancesPreviewResult`, `IngestPreviewResult`
+- `FabricInwardResult` (not in this file -- from worker types)
+- `CycleStep`, `CycleProgressState` (real-time pipeline modal)
 - `OffloadStatusResponse` (all 9 job states + schedulerActive + bufferCounts)
 
 ### BackgroundJobsTab (in `BackgroundJobsTab.tsx`)
@@ -858,20 +924,21 @@ Lists all background jobs including sheet jobs. Each job card shows:
 
 | File | Purpose |
 |------|---------|
-| `server/src/services/sheetOffloadWorker.ts` | Main worker: 9 independent jobs, per-job state, start/stop/getStatus/getBufferCounts, balance verification, fabric deduction |
-| `server/src/services/googleSheetsClient.ts` | Authenticated Sheets API client: JWT auth, rate limiter, retry, CRUD ops, border formatting, `batchWriteRanges()` |
-| `server/src/services/googleDriveClient.ts` | Google Drive API v3 client (OAuth2): upload files, ensure folders, rate limiter, retry. Module-level singleton |
-| `server/src/services/sheetOrderPush.ts` | Push Shopify + ERP orders to "Orders from COH" tab, self-healing reconciler, channel detail updates, order status sync |
-| `server/src/services/driveFinanceSync.ts` | Auto-push invoice/payment files to Drive organized by party/FY. On-demand sync, no scheduled interval |
-| `server/src/config/sync/sheets.ts` | All sheet config: spreadsheet IDs, tab names, column mappings, timing, formulas, V2 templates (~700 lines) |
-| `server/src/config/sync/drive.ts` | Drive config: folder ID, API settings, batch size, FY helper function |
+| `server/src/services/sheetOffloadWorker.ts` | Main worker: 9 independent jobs + 2 cycle runners, per-job state, start/stop/getStatus/getBufferCounts, balance verification, fabric deduction, ledger booking |
+| `server/src/services/googleSheetsClient.ts` | Authenticated Sheets API client: JWT auth, rate limiter, retry, CRUD ops, border formatting, `batchWriteRanges()`, `batchReadRanges()` |
+| `server/src/services/googleDriveClient.ts` | Google Drive API v3 client (OAuth2): upload, ensureFolder, listFolder, moveFile, trashFile, renameFile. Module-level singleton |
+| `server/src/services/sheetOrderPush.ts` | Push Shopify + ERP orders to "Orders from COH" tab, self-healing reconciler, channel detail updates, order status sync, single order sync |
+| `server/src/services/driveFinanceSync.ts` | Auto-push invoice/payment files to Drive organized by party/FY. Scheduled every 30 min + on-demand |
+| `server/src/config/sync/sheets.ts` | All sheet config: spreadsheet IDs, tab names, column mappings, timing, formulas, V2 templates, validation limits (~720 lines) |
+| `server/src/config/sync/drive.ts` | Drive config: folder ID, API settings, batch size, FY helper function, vendor invoices folder name |
 | `server/src/config/sync/index.ts` | Re-exports all sheets + drive config |
+| `server/src/services/ledgerService.ts` | Double-entry ledger booking: `bookFabricConsumptionForMonth`, `bookShipmentCOGSForMonth`, `bookReturnReversalForMonth` |
 
 ### Routes & Server Functions
 
 | File | Purpose |
 |------|---------|
-| `server/src/routes/admin.ts` | Offload status/trigger, background jobs endpoints, sheet monitor stats |
+| `server/src/routes/admin.ts` | Offload status/trigger, background jobs endpoints, sheet monitor stats, cycle progress |
 | `server/src/routes/sheetSync.ts` | CSV-based sheet sync: plan/execute/status |
 | `client/src/server/functions/admin.ts` | Server functions for background jobs + sheet monitor |
 | `client/src/server/functions/sheetSync.ts` | Server functions for sheet sync |
@@ -880,8 +947,8 @@ Lists all background jobs including sheet jobs. Each job card shows:
 
 | File | Purpose |
 |------|---------|
-| `client/src/pages/SheetsMonitor.tsx` | Sheets Monitor dashboard at `/sheets-monitor` (3 query intervals) |
-| `client/src/components/settings/jobs/sheetJobTypes.ts` | Client-side type mirrors for all 9 job result types |
+| `client/src/pages/SheetsMonitor.tsx` | Sheets Monitor dashboard at `/sheets-monitor` (3 query intervals + cycle progress modal) |
+| `client/src/components/settings/jobs/sheetJobTypes.ts` | Client-side type mirrors for all job result types + cycle progress |
 | `client/src/components/settings/tabs/SheetSyncTab.tsx` | OffloadMonitor + CSV sheet sync UI |
 | `client/src/components/settings/tabs/BackgroundJobsTab.tsx` | Background jobs dashboard |
 
@@ -924,7 +991,7 @@ Lists all background jobs including sheet jobs. Each job card shows:
 
 - **Error `code` is a STRING** -- `googleapis` errors have `code` as string, not number. Always use `Number(error.code)` for comparison.
 - **Sheet data types are mixed** -- `values.get()` returns mixed types. Always coerce with `String(cell ?? '')`.
-- **API quota: 300 requests/min** -- Rate limiter in `googleSheetsClient.ts` enforces 200ms between calls. Use `batchWriteRanges()` for bulk writes (single API call).
+- **API quota: 300 requests/min** -- Rate limiter in `googleSheetsClient.ts` enforces 250ms between calls (~240/min, 20% safety margin). Use `batchWriteRanges()` or `batchReadRanges()` for bulk operations (single API call).
 - **IMPORTRANGE vs same-sheet** -- Live tabs in Mastersheet enable same-sheet SUMIFS (fast). Balance (Final) in Office Ledger needs IMPORTRANGE (slower, must wrap in IFERROR).
 - **Credentials (Sheets)**: Loaded from env var `GOOGLE_SERVICE_ACCOUNT_JSON` first (Railway), then falls back to key file `server/config/google-service-account.json` (local dev). The env var contains the full JSON string.
 - **Credentials (Drive)**: Uses OAuth2, NOT the service account. Service accounts have zero storage quota so uploads would silently fail. Drive needs `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_OAUTH_REFRESH_TOKEN`.
@@ -941,18 +1008,23 @@ Lists all background jobs including sheet jobs. Each job card shows:
 ### Worker
 
 - **Per-job concurrency guards** -- Each of the 9 jobs has its own `JobState<T>` with `isRunning` boolean. If already running, the trigger function returns `null`. Jobs are independent.
+- **Cycle runners guard against ALL concurrent operations** -- `runInwardCycle`/`runOutwardCycle` check all job states before starting.
 - **Non-destructive marking** -- `markRowsIngested()` writes `DONE:{referenceId}` to Import Errors column via `writeImportErrors()`. This replaces the old row deletion approach.
 - **Admin user requirement** -- `createdById` on InventoryTransaction is a required FK. Worker looks up first admin user by role and caches the ID.
 - **Evidence-based fulfillment** -- `linkOutwardToOrders` only updates lines in `LINKABLE_STATUSES` (`pending`, `allocated`, `picked`, `packed`). Already-shipped/cancelled lines are safely skipped. Uses FIFO consumption for duplicate SKUs in same order.
 - **Fabric auto-deduction** -- Only triggers for sources in `FABRIC_DEDUCT_SOURCES` (currently `['sampling']`). Looks up BOM FABRIC components to calculate deduction qty.
+- **Ledger integration** -- After ingestion, the worker books double-entry ledger entries: `bookFabricConsumptionForMonth` (inward), `bookShipmentCOGSForMonth` (outward), `bookReturnReversalForMonth` (returns).
 - **Worker run tracking** -- Ingest and move jobs call `trackWorkerRun()` to persist results to the `WorkerRun` table, visible in the Sheets Monitor.
-- **Time-aware fabric reconciliation** -- `importFabricBalances` uses `parseSheetDateTime()` to parse count timestamps and calculates historical ERP balance AT the count time.
+- **Time-aware fabric reconciliation** -- `importFabricBalances` uses `parseSheetDateTime()` to parse count timestamps and calculates historical ERP balance AT the count time. Creates adjustment transactions for mismatches.
+- **Fabric inward auto-creates suppliers** -- If a supplier name in Fabric Inward (Live) doesn't exist as a Party, it's auto-created.
+- **Ingestion validation limits** -- `MAX_QTY_PER_ROW` (500), `MAX_FUTURE_DAYS` (3), `MAX_PAST_DAYS` (365) catch typos and obviously wrong data.
 
 ### Tabs
 
 - **Aggregate vs individual tabs** -- Office Ledger "Orders Outward" is an IMPORTRANGE aggregate (SKU+Qty only, 3K rows). Must NOT be used for ingestion. Mastersheet "Outward" has individual rows with order numbers (39K rows).
 - **Notes column difference** -- Inward (Final) col H is "Tailor Number", but Inward (Archive) col H is "notes". Column mappings handle this.
-- **Fabric Inward (Live)** -- New buffer tab for fabric transactions. Has its own column mapping (`FABRIC_INWARD_LIVE_COLS`) and headers.
+- **Fabric Inward (Live)** -- Buffer tab for fabric transactions. Has its own column mapping (`FABRIC_INWARD_LIVE_COLS`) and headers.
+- **Cleanup covers 3 tabs** -- DONE row cleanup now processes Inward (Live), Outward (Live), AND Fabric Inward (Live).
 
 ---
 
@@ -965,11 +1037,12 @@ Auto-pushes finance document files (invoice PDFs, payment receipts) from the ERP
 ### Folder Structure
 
 ```
-COH Finance/                         (root — DRIVE_FINANCE_FOLDER_ID env var)
-  Party Name/
-    FY 2025-26/
-      PartyName_INV-1801_2025-06-15.pdf
-      PartyName_PAY-UTR123_2025-06-15.pdf
+COH Finance/                         (root -- DRIVE_FINANCE_FOLDER_ID env var)
+  Vendor Invoices/                   (DRIVE_VENDOR_INVOICES_FOLDER_NAME)
+    Party Name/
+      FY 2025-26/
+        PartyName_INV-1801_2025-06-15.pdf
+        PartyName_PAY-UTR123_2025-06-15.pdf
   _Unlinked/                         (no party linked)
     FY 2025-26/
       Unknown_INV-abc123_2025-04-01.png
@@ -977,7 +1050,7 @@ COH Finance/                         (root — DRIVE_FINANCE_FOLDER_ID env var)
 
 ### How It Works
 
-1. `uploadInvoiceFile(invoiceId)` / `uploadPaymentFile(paymentId)` -- Fetches file from DB (`fileData` column), resolves Drive folder (party + FY), uploads, saves `driveFileId`/`driveUrl`/`driveUploadedAt` on the record
+1. `uploadInvoiceFile(invoiceId)` / `uploadPaymentFile(paymentId)` -- Fetches file from DB (`fileData` column), resolves Drive folder (Vendor Invoices -> party -> FY), uploads, saves `driveFileId`/`driveUrl`/`driveUploadedAt` on the record
 2. `syncAllPendingFiles()` -- Batch mode: finds all invoices/payments with `fileData` but no `driveFileId`, uploads them sequentially
 3. Folder caching: `ensureFolder()` results are cached in memory (`folderCache` Map) to avoid repeated Drive lookups
 
@@ -1001,17 +1074,22 @@ The Drive client uses **OAuth2 with a refresh token** instead of the service acc
 | `DRIVE_API_MAX_RETRIES` | 3 | Retries on 429/500/503 |
 | `DRIVE_SYNC_BATCH_SIZE` | 10 | Files per sync batch |
 | `DRIVE_UNLINKED_FOLDER_NAME` | `_Unlinked` | Folder for docs without a party |
+| `DRIVE_VENDOR_INVOICES_FOLDER_NAME` | `Vendor Invoices` | Parent folder for all party invoice subfolders |
 | `getFinancialYear(date)` | helper | Returns FY string like "FY 2025-26" (Indian April-March FY) |
 
 ### Worker Pattern
 
-`driveFinanceSync.ts` follows the standard worker pattern: `start()`, `stop()`, `getStatus()`, `triggerSync()`. On-demand only (no scheduled interval). Registered in `server/src/index.js`.
+`driveFinanceSync.ts` follows the standard worker pattern: `start()`, `stop()`, `getStatus()`, `triggerSync()`. Runs on a **scheduled 30-minute interval** (with 3-minute startup delay) + on-demand via `triggerSync()`. Registered in `server/src/index.js`.
 
 ---
 
 ## 13. Operational Runbook
 
 ### Running the Full Shipped -> Outward -> Ingest Flow
+
+**Recommended: Use Unified Cycles.** The `inward_cycle` and `outward_cycle` jobs wrap all pre-flight, import, and post-flight steps into one operation with real-time progress tracking. Trigger from the Background Jobs page.
+
+**Manual step-by-step (if needed):**
 
 1. **Check buffer tab state** -- Go to Sheets Monitor or Settings > Sheet Sync > OffloadMonitor. Note current pending row counts.
 
@@ -1021,11 +1099,11 @@ The Drive client uses **OAuth2 with a refresh token** instead of the service acc
    - "Outward (Live)" has new rows
    - "Orders from COH" shipped rows are deleted (or marked col AD = 1)
 
-4. **Run ingest inward** -- Trigger `ingest_inward`. Check `IngestInwardResult`: inwardIngested count, inwardValidationErrors, fabricDeductionResult.
+4. **Run ingest inward** -- Trigger `ingest_inward`. Check `IngestInwardResult`: inwardIngested count, inwardValidationErrors, balanceVerification.
 
 5. **Run ingest outward** -- Trigger `ingest_outward`. Check `IngestOutwardResult`: outwardIngested, ordersLinked, outwardSkipReasons.
 
-6. **Push balances** -- Trigger `push_balances`. Check `PushBalancesResult`: skusUpdated, inventoryWritten, balanceFinalWritten. (This is now separate from ingest jobs.)
+6. **Push balances** -- Trigger `push_balances`. Check `PushBalancesResult`: skusUpdated. (This is now separate from ingest jobs.)
 
 7. **Cross-check balance** -- Open Inventory tab col C. The displayed balance should be unchanged before and after (the formula invariant). Check balance verification snapshots in the job results.
 
@@ -1037,8 +1115,8 @@ The Drive client uses **OAuth2 with a refresh token** instead of the service acc
 ### Fabric Reconciliation Flow
 
 1. **Push fabric balances** -- Trigger `push_fabric_balances` to sync ERP fabric balances to sheet.
-2. **Import fabric balances** -- Trigger `import_fabric_balances` to read physical counts and compare against time-aware ERP balances.
-3. **Review mismatches** -- Check `ImportFabricBalancesResult.mismatchDetails` for discrepancies.
+2. **Import fabric balances** -- Trigger `import_fabric_balances` to read physical counts and compare against time-aware ERP balances. Creates adjustment transactions for mismatches.
+3. **Review results** -- Check `ImportFabricBalancesResult.adjustments` for created adjustments.
 
 ### Fabric Inward Flow
 
@@ -1048,7 +1126,7 @@ The Drive client uses **OAuth2 with a refresh token** instead of the service acc
 ### Cleanup Flow
 
 1. **Trigger cleanup** -- Run `cleanup_done_rows` to delete DONE rows (immediate, retention = 0 days).
-2. **Check result** -- `CleanupDoneResult` shows `inwardDeleted` and `outwardDeleted` counts.
+2. **Check result** -- `CleanupDoneResult` shows `inwardDeleted`, `outwardDeleted`, and `fabricInwardDeleted` counts.
 
 ### Emergency Stop
 
@@ -1059,7 +1137,7 @@ The Drive client uses **OAuth2 with a refresh token** instead of the service acc
 ### Debugging Discrepancies
 
 1. **Check recent runs** -- Sheets Monitor shows recent runs with per-job results
-2. **Check for skipped rows** -- For inward: check `inwardValidationErrors`. For outward: check `outwardSkipReasons` (e.g., `unknown_sku`, `invalid_date`, `order_not_found`, `order_line_not_found`, `duplicate_order_sku`). Invalid rows remain on the sheet with their error.
+2. **Check for skipped rows** -- For inward: check `inwardValidationErrors`. For outward: check `outwardSkipReasons` (e.g., `unknown_sku`, `invalid_date`, `order_not_found`, `order_line_not_found`, `duplicate_order_sku`, `qty_too_large`, `date_out_of_range`). Invalid rows remain on the sheet with their error.
 3. **Check dedup** -- If ingested count is less than sheet row count, some rows were already ingested (matching referenceId or DONE-marked)
 4. **Preview push balances** -- Run `preview_push_balances` to see exact ERP vs sheet balance differences
 5. **Formula check** -- If displayed balance is wrong, check if formulas are V2 (SUMIFS with DONE exclusion). Run `migrate_sheet_formulas` if needed.
