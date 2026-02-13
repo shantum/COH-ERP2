@@ -10,16 +10,17 @@ import { CostInheritanceField } from '../shared/CostInheritanceField';
 interface VariationCostsTabProps {
   form: UseFormReturn<VariationFormData>;
   costCascade: CostCascade;
+  bomCost: number | null;
   disabled?: boolean;
 }
 
 export function VariationCostsTab({
   form,
   costCascade,
+  bomCost,
   disabled = false,
 }: VariationCostsTabProps) {
-  const { control, watch } = form;
-  const hasLining = watch('hasLining');
+  const { control } = form;
 
   return (
     <div className="space-y-6">
@@ -31,6 +32,19 @@ export function VariationCostsTab({
           <p className="text-blue-600 mt-0.5">
             Leave empty to inherit from product. Set a value to override.
           </p>
+        </div>
+      </div>
+
+      {/* BOM Cost (read-only) */}
+      <div className="space-y-4">
+        <h4 className="text-sm font-medium text-gray-900">BOM Cost</h4>
+        <div className="bg-gray-50 rounded-lg p-3 border">
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-gray-600">Fabric + Trims + Services (from BOM)</span>
+            <span className="text-sm font-medium text-gray-900">
+              {bomCost != null ? `₹${bomCost.toFixed(0)}` : 'Not set'}
+            </span>
+          </div>
         </div>
       </div>
 
@@ -47,16 +61,6 @@ export function VariationCostsTab({
         />
 
         <CostInheritanceField
-          name="trimsCost"
-          label="Trims Cost"
-          control={control}
-          cascade={costCascade.trimsCost}
-          unit=""
-          level="variation"
-          disabled={disabled}
-        />
-
-        <CostInheritanceField
           name="packagingCost"
           label="Packaging Cost"
           control={control}
@@ -65,19 +69,6 @@ export function VariationCostsTab({
           level="variation"
           disabled={disabled}
         />
-
-        {/* Lining cost - only show if hasLining is true */}
-        {hasLining && (
-          <CostInheritanceField
-            name="liningCost"
-            label="Lining Cost"
-            control={control}
-            cascade={costCascade.liningCost}
-            unit=""
-            level="variation"
-            disabled={disabled}
-          />
-        )}
       </div>
 
       {/* Cascade explanation */}

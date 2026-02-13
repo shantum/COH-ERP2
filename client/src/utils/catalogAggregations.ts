@@ -45,17 +45,13 @@ export function aggregateByVariation(items: CatalogRow[]): CatalogRow[] {
                 skuCount: 0,
                 skuIds: [], // Track all SKU IDs for bulk updates
                 // Use variation-level costs for editing
-                trimsCost: item.variationTrimsCost ?? item.productTrimsCost ?? null,
-                liningCost: item.hasLining ? (item.variationLiningCost ?? item.productLiningCost ?? null) : null,
                 packagingCost: item.variationPackagingCost ?? item.productPackagingCost ?? item.globalPackagingCost ?? null,
                 laborMinutes: item.variationLaborMinutes ?? item.productLaborMinutes ?? null,
                 // Track sums for averaging
                 _mrpSum: 0,
                 _fabricConsumptionSum: 0,
-                _fabricCostSum: 0,
+                _bomCostSum: 0,
                 _laborCostSum: 0,
-                _liningCostSum: 0,
-                _liningCostCount: 0, // Only count items with lining
                 _totalCostSum: 0,
                 _exGstPriceSum: 0,
                 _gstAmountSum: 0,
@@ -71,12 +67,8 @@ export function aggregateByVariation(items: CatalogRow[]): CatalogRow[] {
         // Sum values for averaging
         group._mrpSum += item.mrp || 0;
         group._fabricConsumptionSum += item.fabricConsumption || 0;
-        group._fabricCostSum += item.fabricCost || 0;
+        group._bomCostSum += item.bomCost || 0;
         group._laborCostSum += item.laborCost || 0;
-        if (item.hasLining && item.liningCost != null) {
-            group._liningCostSum += item.liningCost;
-            group._liningCostCount += 1;
-        }
         group._totalCostSum += item.totalCost || 0;
         group._exGstPriceSum += item.exGstPrice || 0;
         group._gstAmountSum += item.gstAmount || 0;
@@ -92,11 +84,8 @@ export function aggregateByVariation(items: CatalogRow[]): CatalogRow[] {
         if (group.skuCount > 0) {
             group.mrp = Math.round(group._mrpSum / group.skuCount);
             group.fabricConsumption = Math.round((group._fabricConsumptionSum / group.skuCount) * 100) / 100;
-            group.fabricCost = Math.round(group._fabricCostSum / group.skuCount);
+            group.bomCost = Math.round(group._bomCostSum / group.skuCount);
             group.laborCost = Math.round(group._laborCostSum / group.skuCount);
-            if (group._liningCostCount > 0) {
-                group.liningCost = Math.round(group._liningCostSum / group._liningCostCount);
-            }
             group.totalCost = Math.round(group._totalCostSum / group.skuCount);
             group.exGstPrice = Math.round(group._exGstPriceSum / group.skuCount);
             group.gstAmount = Math.round(group._gstAmountSum / group.skuCount);
@@ -108,10 +97,8 @@ export function aggregateByVariation(items: CatalogRow[]): CatalogRow[] {
         // Clean up temp fields
         delete group._mrpSum;
         delete group._fabricConsumptionSum;
-        delete group._fabricCostSum;
+        delete group._bomCostSum;
         delete group._laborCostSum;
-        delete group._liningCostSum;
-        delete group._liningCostCount;
         delete group._totalCostSum;
         delete group._exGstPriceSum;
         delete group._gstAmountSum;
@@ -151,18 +138,14 @@ export function aggregateByProduct(items: CatalogRow[]): CatalogRow[] {
                 skuIds: [], // Track all SKU IDs for bulk updates
                 _uniqueFabricIds: new Set<string>(), // Track unique fabric IDs
                 // Use product-level costs for editing
-                trimsCost: item.productTrimsCost ?? null,
-                liningCost: item.productLiningCost ?? null,
                 packagingCost: item.productPackagingCost ?? item.globalPackagingCost ?? null,
                 laborMinutes: item.productLaborMinutes ?? null,
                 hasLining: false, // Will be set to true if any variation has lining
                 // Track sums for averaging
                 _mrpSum: 0,
                 _fabricConsumptionSum: 0,
-                _fabricCostSum: 0,
+                _bomCostSum: 0,
                 _laborCostSum: 0,
-                _liningCostSum: 0,
-                _liningCostCount: 0,
                 _totalCostSum: 0,
                 _exGstPriceSum: 0,
                 _gstAmountSum: 0,
@@ -181,12 +164,8 @@ export function aggregateByProduct(items: CatalogRow[]): CatalogRow[] {
         // Sum values for averaging
         group._mrpSum += item.mrp || 0;
         group._fabricConsumptionSum += item.fabricConsumption || 0;
-        group._fabricCostSum += item.fabricCost || 0;
+        group._bomCostSum += item.bomCost || 0;
         group._laborCostSum += item.laborCost || 0;
-        if (item.hasLining && item.liningCost != null) {
-            group._liningCostSum += item.liningCost;
-            group._liningCostCount += 1;
-        }
         group._totalCostSum += item.totalCost || 0;
         group._exGstPriceSum += item.exGstPrice || 0;
         group._gstAmountSum += item.gstAmount || 0;
@@ -215,11 +194,8 @@ export function aggregateByProduct(items: CatalogRow[]): CatalogRow[] {
         if (group.skuCount > 0) {
             group.mrp = Math.round(group._mrpSum / group.skuCount);
             group.fabricConsumption = Math.round((group._fabricConsumptionSum / group.skuCount) * 100) / 100;
-            group.fabricCost = Math.round(group._fabricCostSum / group.skuCount);
+            group.bomCost = Math.round(group._bomCostSum / group.skuCount);
             group.laborCost = Math.round(group._laborCostSum / group.skuCount);
-            if (group._liningCostCount > 0) {
-                group.liningCost = Math.round(group._liningCostSum / group._liningCostCount);
-            }
             group.totalCost = Math.round(group._totalCostSum / group.skuCount);
             group.exGstPrice = Math.round(group._exGstPriceSum / group.skuCount);
             group.gstAmount = Math.round(group._gstAmountSum / group.skuCount);
@@ -231,10 +207,8 @@ export function aggregateByProduct(items: CatalogRow[]): CatalogRow[] {
         // Clean up temp fields
         delete group._mrpSum;
         delete group._fabricConsumptionSum;
-        delete group._fabricCostSum;
+        delete group._bomCostSum;
         delete group._laborCostSum;
-        delete group._liningCostSum;
-        delete group._liningCostCount;
         delete group._totalCostSum;
         delete group._exGstPriceSum;
         delete group._gstAmountSum;

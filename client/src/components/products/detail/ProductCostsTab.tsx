@@ -1,21 +1,18 @@
 /**
- * ProductCostsTab - Cost breakdown and cascade display for Product detail panel
+ * ProductCostsTab - Cost breakdown from BOM system for Product detail panel
  *
  * Shows:
- * - Product-level cost settings
- * - Cost cascade explanation
- * - Per-SKU cost breakdown summary
+ * - Product-level cost settings (packagingCost, laborMinutes)
+ * - Per-SKU BOM cost breakdown from product tree data
  */
 
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { DollarSign, Info, AlertCircle, Loader2, ArrowDown, TrendingUp } from 'lucide-react';
+import { DollarSign, Info, TrendingUp } from 'lucide-react';
 import { useServerFn } from '@tanstack/react-start';
 import {
     getCostConfig,
-    getCogs,
     type CostConfigResult,
-    type CogsResult,
 } from '../../../server/functions/bomMutations';
 import type { ProductTreeNode } from '../types';
 
@@ -24,11 +21,8 @@ interface ProductCostsTabProps {
 }
 
 export function ProductCostsTab({ product }: ProductCostsTabProps) {
-    // Server Functions
     const getCostConfigFn = useServerFn(getCostConfig);
-    const getCogsFn = useServerFn(getCogs);
 
-    // Fetch cost config (global defaults)
     const { data: costConfig } = useQuery<CostConfigResult | null>({
         queryKey: ['costConfig'],
         queryFn: async () => {
@@ -41,40 +35,61 @@ export function ProductCostsTab({ product }: ProductCostsTabProps) {
         staleTime: 5 * 60 * 1000,
     });
 
-    // Fetch COGS data for this product's SKUs
-    const { data: cogsData, isLoading, error } = useQuery<CogsResult[]>({
-        queryKey: ['productCogs', product.id],
-        queryFn: async () => {
-            // Fetch all COGS and filter for this product
-            const result = await getCogsFn({ data: undefined });
-            if (!result.success || !result.data) {
-                throw new Error(result.error?.message || 'Failed to load COGS');
+    // Collect SKU data from product tree (already available via props)
+    const skuData = useMemo(() => {
+        const skus: Array<{
+            skuCode: string;
+            colorName: string;
+            size: string;
+            mrp: number;
+            bomCost: number;
+            laborCost: number;
+            packagingCost: number;
+            totalCost: number;
+            marginPct: number;
+        }> = [];
+
+        const laborRate = costConfig?.laborRatePerMin ?? 2.5;
+        const defaultPackaging = costConfig?.defaultPackagingCost ?? 50;
+
+        for (const variation of product.children ?? []) {
+            for (const sku of variation.children ?? []) {
+                const bomCost = sku.bomCost ?? 0;
+                const laborMinutes = sku.laborMinutes ?? variation.laborMinutes ?? product.laborMinutes ?? 60;
+                const laborCost = (laborMinutes ?? 0) * laborRate;
+                const packagingCost = sku.packagingCost ?? variation.packagingCost ?? product.packagingCost ?? defaultPackaging;
+                const totalCost = bomCost + laborCost + (packagingCost ?? 0);
+                const mrp = sku.mrp ?? 0;
+                const marginPct = mrp > 0 ? ((mrp - totalCost) / mrp) * 100 : 0;
+
+                skus.push({
+                    skuCode: sku.skuCode ?? '',
+                    colorName: variation.colorName ?? '',
+                    size: sku.size ?? '',
+                    mrp,
+                    bomCost,
+                    laborCost: Math.round(laborCost * 100) / 100,
+                    packagingCost: packagingCost ?? 0,
+                    totalCost: Math.round(totalCost * 100) / 100,
+                    marginPct,
+                });
             }
-            return result.data.filter((item) =>
-                product.children?.some(v =>
-                    v.children?.some(s => s.id === item.skuId)
-                )
-            );
-        },
-        enabled: !!product.id,
-    });
+        }
+        return skus;
+    }, [product, costConfig]);
 
     // Calculate summary stats
     const summary = useMemo(() => {
-        if (!cogsData || cogsData.length === 0) {
-            return { avgCogs: 0, avgMargin: 0, minMargin: 0, maxMargin: 0 };
+        if (skuData.length === 0) {
+            return { avgCost: 0, avgMargin: 0 };
         }
-
-        const cogs = cogsData.map((c) => c.totalCogs);
-        const margins = cogsData.map((c) => c.marginPct);
-
+        const costs = skuData.map(s => s.totalCost);
+        const margins = skuData.map(s => s.marginPct);
         return {
-            avgCogs: cogs.reduce((a: number, b: number) => a + b, 0) / cogs.length,
-            avgMargin: margins.reduce((a: number, b: number) => a + b, 0) / margins.length,
-            minMargin: Math.min(...margins),
-            maxMargin: Math.max(...margins),
+            avgCost: costs.reduce((a, b) => a + b, 0) / costs.length,
+            avgMargin: margins.reduce((a, b) => a + b, 0) / margins.length,
         };
-    }, [cogsData]);
+    }, [skuData]);
 
     return (
         <div className="space-y-6">
@@ -86,17 +101,6 @@ export function ProductCostsTab({ product }: ProductCostsTabProps) {
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
-                    <CostSettingCard
-                        label="Trims Cost"
-                        productValue={product.trimsCost}
-                        defaultLabel="Not set (uses variation/SKU)"
-                    />
-                    <CostSettingCard
-                        label="Lining Cost"
-                        productValue={product.liningCost}
-                        defaultLabel="Not set"
-                        showIf={product.hasLining}
-                    />
                     <CostSettingCard
                         label="Packaging Cost"
                         productValue={product.packagingCost}
@@ -123,54 +127,30 @@ export function ProductCostsTab({ product }: ProductCostsTabProps) {
                 </div>
             </div>
 
-            {/* Cost Cascade Explanation */}
+            {/* Cost Formula Explanation */}
             <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
-                <div className="flex items-start gap-2 mb-3">
+                <div className="flex items-start gap-2">
                     <Info size={16} className="text-gray-500 mt-0.5" />
                     <div>
-                        <h4 className="text-sm font-medium text-gray-700">Cost Cascade</h4>
+                        <h4 className="text-sm font-medium text-gray-700">Cost Formula</h4>
                         <p className="text-xs text-gray-500 mt-1">
-                            Costs flow from SKU → Variation → Product → Global Defaults
+                            Total Cost = BOM Cost (fabric + trims + services) + Labor + Packaging
                         </p>
                     </div>
-                </div>
-
-                <div className="flex items-center justify-between text-xs bg-white rounded-lg p-3">
-                    <CascadeLevel label="SKU" color="teal" />
-                    <ArrowDown size={12} className="text-gray-400" />
-                    <CascadeLevel label="Variation" color="purple" />
-                    <ArrowDown size={12} className="text-gray-400" />
-                    <CascadeLevel label="Product" color="blue" />
-                    <ArrowDown size={12} className="text-gray-400" />
-                    <CascadeLevel label="Default" color="gray" />
                 </div>
             </div>
 
             {/* Summary Stats */}
-            {isLoading && (
-                <div className="flex items-center justify-center h-32">
-                    <Loader2 size={24} className="animate-spin text-gray-400" />
-                    <span className="ml-2 text-gray-500">Calculating costs...</span>
-                </div>
-            )}
-
-            {error && (
-                <div className="flex items-center gap-2 p-4 bg-red-50 text-red-700 rounded-lg">
-                    <AlertCircle size={20} />
-                    <span>Failed to load cost data</span>
-                </div>
-            )}
-
-            {cogsData && cogsData.length > 0 && (
+            {skuData.length > 0 && (
                 <div>
                     <h4 className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-3">
-                        Cost Summary ({cogsData.length} SKUs)
+                        Cost Summary ({skuData.length} SKUs)
                     </h4>
 
                     <div className="grid grid-cols-2 gap-4 mb-4">
                         <StatCard
-                            label="Average COGS"
-                            value={`₹${summary.avgCogs.toFixed(2)}`}
+                            label="Average Cost"
+                            value={`₹${summary.avgCost.toFixed(0)}`}
                             icon={DollarSign}
                         />
                         <StatCard
@@ -188,13 +168,14 @@ export function ProductCostsTab({ product }: ProductCostsTabProps) {
                                 <tr>
                                     <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">SKU</th>
                                     <th className="px-3 py-2 text-right text-xs font-medium text-gray-500">MRP</th>
-                                    <th className="px-3 py-2 text-right text-xs font-medium text-gray-500">COGS</th>
+                                    <th className="px-3 py-2 text-right text-xs font-medium text-gray-500">BOM</th>
+                                    <th className="px-3 py-2 text-right text-xs font-medium text-gray-500">Total</th>
                                     <th className="px-3 py-2 text-right text-xs font-medium text-gray-500">Margin</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y">
-                                {cogsData.slice(0, 10).map((sku) => (
-                                    <tr key={sku.skuId} className="hover:bg-gray-50">
+                                {skuData.slice(0, 10).map((sku) => (
+                                    <tr key={sku.skuCode} className="hover:bg-gray-50">
                                         <td className="px-3 py-2">
                                             <div>
                                                 <span className="text-gray-900">{sku.colorName} - {sku.size}</span>
@@ -204,8 +185,11 @@ export function ProductCostsTab({ product }: ProductCostsTabProps) {
                                         <td className="px-3 py-2 text-right tabular-nums">
                                             ₹{sku.mrp.toLocaleString()}
                                         </td>
+                                        <td className="px-3 py-2 text-right tabular-nums text-blue-600">
+                                            ₹{sku.bomCost.toFixed(0)}
+                                        </td>
                                         <td className="px-3 py-2 text-right tabular-nums">
-                                            ₹{sku.totalCogs.toFixed(2)}
+                                            ₹{sku.totalCost.toFixed(0)}
                                         </td>
                                         <td className={`px-3 py-2 text-right tabular-nums font-medium ${
                                             sku.marginPct >= 30 ? 'text-green-600' :
@@ -217,16 +201,16 @@ export function ProductCostsTab({ product }: ProductCostsTabProps) {
                                 ))}
                             </tbody>
                         </table>
-                        {cogsData.length > 10 && (
+                        {skuData.length > 10 && (
                             <div className="px-3 py-2 text-center text-xs text-gray-500 border-t bg-gray-50">
-                                Showing 10 of {cogsData.length} SKUs
+                                Showing 10 of {skuData.length} SKUs
                             </div>
                         )}
                     </div>
                 </div>
             )}
 
-            {cogsData && cogsData.length === 0 && (
+            {skuData.length === 0 && (
                 <div className="text-center py-8 border border-dashed border-gray-300 rounded-lg">
                     <DollarSign size={40} className="mx-auto mb-2 text-gray-300" />
                     <p className="text-sm text-gray-500">No cost data available</p>
@@ -245,12 +229,9 @@ interface CostSettingCardProps {
     defaultValue?: number;
     defaultLabel: string;
     unit?: string;
-    showIf?: boolean;
 }
 
-function CostSettingCard({ label, productValue, defaultValue, defaultLabel, unit = '₹', showIf = true }: CostSettingCardProps) {
-    if (!showIf) return null;
-
+function CostSettingCard({ label, productValue, defaultValue, defaultLabel, unit = '₹' }: CostSettingCardProps) {
     const hasValue = productValue !== null && productValue !== undefined;
     const displayValue = hasValue ? productValue : defaultValue;
 
@@ -267,21 +248,6 @@ function CostSettingCard({ label, productValue, defaultValue, defaultLabel, unit
                 )}
             </div>
         </div>
-    );
-}
-
-function CascadeLevel({ label, color }: { label: string; color: string }) {
-    const colors: Record<string, string> = {
-        teal: 'bg-teal-100 text-teal-700 border-teal-200',
-        purple: 'bg-purple-100 text-purple-700 border-purple-200',
-        blue: 'bg-blue-100 text-blue-700 border-blue-200',
-        gray: 'bg-gray-100 text-gray-700 border-gray-200',
-    };
-
-    return (
-        <span className={`px-2 py-1 rounded border text-xs font-medium ${colors[color]}`}>
-            {label}
-        </span>
     );
 }
 

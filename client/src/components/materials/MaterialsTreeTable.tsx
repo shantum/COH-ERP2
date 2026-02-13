@@ -160,7 +160,7 @@ export function MaterialsTreeTable({
         if (node.type === 'colour') {
             updateColour.mutate({ id: node.id, data: { leadTimeDays: value } });
         } else if (node.type === 'fabric') {
-            updateFabric.mutate({ id: node.id, data: { leadTimeDays: value } });
+            updateFabric.mutate({ id: node.id, data: { defaultLeadTimeDays: value } });
         }
     }, [updateColour, updateFabric]);
 
@@ -169,7 +169,7 @@ export function MaterialsTreeTable({
         if (node.type === 'colour') {
             updateColour.mutate({ id: node.id, data: { minOrderQty: value } });
         } else if (node.type === 'fabric') {
-            updateFabric.mutate({ id: node.id, data: { minOrderQty: value } });
+            updateFabric.mutate({ id: node.id, data: { defaultMinOrderQty: value } });
         }
     }, [updateColour, updateFabric]);
 

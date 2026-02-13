@@ -264,8 +264,7 @@ export function filterConfidentialFields<T extends DataWithConfidentialFields>(
         if (!hasPermission(userPermissions, 'products:view:cost')) {
             delete result.fabricCost;
             delete result.laborCost;
-            delete result.trimsCost;
-            delete result.liningCost;
+            delete result.bomCost;
             delete result.packagingCost;
             delete result.totalCost;
             delete result.totalCogs;
@@ -273,13 +272,7 @@ export function filterConfidentialFields<T extends DataWithConfidentialFields>(
             delete result.costPerUnit;
             delete result.laborRatePerMin;
 
-            // Cascade cost fields (SKU -> Variation -> Product -> Global)
-            delete result.skuTrimsCost;
-            delete result.variationTrimsCost;
-            delete result.productTrimsCost;
-            delete result.skuLiningCost;
-            delete result.variationLiningCost;
-            delete result.productLiningCost;
+            // Cascade cost fields
             delete result.skuPackagingCost;
             delete result.variationPackagingCost;
             delete result.productPackagingCost;

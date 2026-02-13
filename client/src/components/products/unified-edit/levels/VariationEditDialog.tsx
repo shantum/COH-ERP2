@@ -149,6 +149,7 @@ export function VariationEditDialog({
           <VariationCostsTab
             form={form}
             costCascade={costCascade}
+            bomCost={variation.bomCost}
             disabled={isSaving}
           />
         )}

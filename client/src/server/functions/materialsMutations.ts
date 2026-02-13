@@ -349,7 +349,6 @@ export const createFabric = createServerFn({ method: 'POST' })
                     costPerUnit: data.defaultCostPerUnit || null,
                     defaultLeadTimeDays: data.defaultLeadTimeDays || null,
                     defaultMinOrderQty: data.defaultMinOrderQty || null,
-                    colorName: 'N/A',
                 },
                 include: {
                     material: true,

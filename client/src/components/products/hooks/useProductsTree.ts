@@ -39,9 +39,7 @@ type UpdateProductData = {
     defaultFabricConsumption?: number | null;
     imageUrl?: string | null;
     isActive?: boolean;
-    trimsCost?: number | null;
     packagingCost?: number | null;
-    liningCost?: number | null;
 };
 
 /** Fields accepted by updateVariation (minus 'id') */
@@ -52,9 +50,7 @@ type UpdateVariationData = {
     imageUrl?: string | null;
     hasLining?: boolean;
     isActive?: boolean;
-    trimsCost?: number | null;
     packagingCost?: number | null;
-    liningCost?: number | null;
     laborMinutes?: number | null;
 };
 
@@ -65,9 +61,7 @@ type UpdateSkuData = {
     targetStockQty?: number;
     targetStockMethod?: string;
     isActive?: boolean;
-    trimsCost?: number | null;
     packagingCost?: number | null;
-    liningCost?: number | null;
     laborMinutes?: number | null;
 };
 

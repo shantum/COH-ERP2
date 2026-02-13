@@ -54,9 +54,7 @@ export function useVariationEditForm({
           colorName: data.colorName,
           colorHex: data.colorHex ?? undefined,
           hasLining: data.hasLining,
-          trimsCost: data.trimsCost ?? undefined,
           packagingCost: data.packagingCost ?? undefined,
-          liningCost: data.liningCost ?? undefined,
           laborMinutes: data.laborMinutes ?? undefined,
           isActive: data.isActive,
         },
@@ -116,8 +114,6 @@ export function useVariationEditForm({
     };
 
     return {
-      trimsCost: resolveCost(variation.trimsCost, product.trimsCost, 0),
-      liningCost: resolveCost(variation.liningCost, product.liningCost, 0),
       packagingCost: resolveCost(variation.packagingCost, product.packagingCost, 50),
       laborMinutes: resolveCost(variation.laborMinutes, product.baseProductionTimeMins, 60),
       fabricConsumption: {
@@ -155,8 +151,6 @@ function getDefaultValues(variation: VariationDetailData): VariationFormData {
     colorName: variation.colorName ?? '',
     colorHex: variation.colorHex ?? null,
     hasLining: variation.hasLining ?? false,
-    trimsCost: variation.trimsCost ?? null,
-    liningCost: variation.liningCost ?? null,
     packagingCost: variation.packagingCost ?? null,
     laborMinutes: variation.laborMinutes ?? null,
     isActive: variation.isActive ?? true,

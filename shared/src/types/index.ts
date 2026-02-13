@@ -106,25 +106,12 @@ export interface Sku {
   shopifyInventoryItemId: string | null;
   shopifyVariantId: string | null;
   variation?: Variation;
-  skuCosting?: SkuCosting;
   // Custom SKU fields
   isCustomSku?: boolean; // True only for SKU created via order customization (not regular catalog SKUs)
   parentSkuId?: string; // Points to original catalog SKU if this is a custom SKU
   customizationType?: string; // 'length'|'size'|'measurements'|'other' - only populated for custom SKUs
   customizationValue?: string; // User-specified value (e.g., "32 inches" for length adjustment)
   customizationNotes?: string; // Additional notes about customization
-}
-
-export interface SkuCosting {
-  skuId: string;
-  fabricCost: number;
-  laborTimeMins: number;
-  laborRatePerMin: number;
-  laborCost: number;
-  packagingCost: number;
-  otherCost: number;
-  totalCogs: number;
-  lastUpdated: string;
 }
 
 // ============================================
@@ -519,7 +506,6 @@ export interface CreateProductData {
 
 export interface UpdateProductData extends Partial<CreateProductData> {
   isActive?: boolean;
-  trimsCost?: number | null;
   packagingCost?: number | null;
 }
 
@@ -534,7 +520,6 @@ export interface CreateVariationData {
 
 export interface UpdateVariationData extends Partial<CreateVariationData> {
   isActive?: boolean;
-  trimsCost?: number | null;
   packagingCost?: number | null;
 }
 
@@ -549,7 +534,6 @@ export interface CreateSkuData {
 
 export interface UpdateSkuData extends Partial<CreateSkuData> {
   isActive?: boolean;
-  trimsCost?: number | null;
   packagingCost?: number | null;
 }
 

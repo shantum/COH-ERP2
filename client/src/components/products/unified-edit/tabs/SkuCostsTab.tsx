@@ -4,20 +4,20 @@
 
 import { type UseFormReturn } from 'react-hook-form';
 import { Info } from 'lucide-react';
-import type { SkuFormData, CostCascade, VariationDetailData } from '../types';
+import type { SkuFormData, CostCascade } from '../types';
 import { CostInheritanceField } from '../shared/CostInheritanceField';
 
 interface SkuCostsTabProps {
   form: UseFormReturn<SkuFormData>;
   costCascade: CostCascade;
-  variation: VariationDetailData;
+  bomCost: number | null;
   disabled?: boolean;
 }
 
 export function SkuCostsTab({
   form,
   costCascade,
-  variation,
+  bomCost,
   disabled = false,
 }: SkuCostsTabProps) {
   const { control } = form;
@@ -32,6 +32,19 @@ export function SkuCostsTab({
           <p className="text-blue-600 mt-0.5">
             These values override variation and product defaults. Clear to inherit.
           </p>
+        </div>
+      </div>
+
+      {/* BOM Cost (read-only) */}
+      <div className="space-y-4">
+        <h4 className="text-sm font-medium text-gray-900">BOM Cost</h4>
+        <div className="bg-gray-50 rounded-lg p-3 border">
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-gray-600">Fabric + Trims + Services (from BOM)</span>
+            <span className="text-sm font-medium text-gray-900">
+              {bomCost != null ? `₹${bomCost.toFixed(0)}` : 'Not set'}
+            </span>
+          </div>
         </div>
       </div>
 
@@ -63,54 +76,24 @@ export function SkuCostsTab({
         />
       </div>
 
-      {/* Other costs */}
+      {/* Packaging */}
       <div className="space-y-4">
-        <h4 className="text-sm font-medium text-gray-900">Other Costs</h4>
-
-        <div className="grid grid-cols-2 gap-4">
-          <CostInheritanceField
-            name="trimsCost"
-            label="Trims Cost"
-            control={control}
-            cascade={costCascade.trimsCost}
-            unit=""
-            level="sku"
-            disabled={disabled}
-          />
-
-          <CostInheritanceField
-            name="packagingCost"
-            label="Packaging Cost"
-            control={control}
-            cascade={costCascade.packagingCost}
-            unit=""
-            level="sku"
-            disabled={disabled}
-          />
-        </div>
-
-        {/* Lining cost - only show if variation has lining */}
-        {variation.hasLining && (
-          <CostInheritanceField
-            name="liningCost"
-            label="Lining Cost"
-            control={control}
-            cascade={costCascade.liningCost}
-            unit=""
-            level="sku"
-            disabled={disabled}
-          />
-        )}
+        <h4 className="text-sm font-medium text-gray-900">Packaging</h4>
+        <CostInheritanceField
+          name="packagingCost"
+          label="Packaging Cost"
+          control={control}
+          cascade={costCascade.packagingCost}
+          unit=""
+          level="sku"
+          disabled={disabled}
+        />
       </div>
 
       {/* Cascade visualization */}
       <div className="pt-4 border-t">
         <h4 className="text-sm font-medium text-gray-700 mb-3">Cost Cascade</h4>
         <div className="text-xs space-y-1.5">
-          <CascadeRow
-            label="Trims"
-            cascade={costCascade.trimsCost}
-          />
           <CascadeRow
             label="Packaging"
             cascade={costCascade.packagingCost}

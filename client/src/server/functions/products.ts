@@ -71,8 +71,6 @@ export interface ProductNode {
     skuCount: number;
     totalStock: number;
     avgMrp: number | null;
-    trimsCost: number | null;
-    liningCost: number | null;
     packagingCost: number | null;
     laborMinutes: number | null;
     // Shopify status (inherited by variations)
@@ -110,8 +108,6 @@ export interface VariationNode {
     hasLining: boolean;
     totalStock: number;
     avgMrp: number | null;
-    trimsCost: number | null;
-    liningCost: number | null;
     packagingCost: number | null;
     laborMinutes: number | null;
     // Shopify & Sales fields
@@ -141,8 +137,6 @@ export interface SkuNode {
     currentBalance: number;
     availableBalance: number;
     targetStockQty?: number;
-    trimsCost: number | null;
-    liningCost: number | null;
     packagingCost: number | null;
     laborMinutes: number | null;
     // Shopify & Sales fields
@@ -169,8 +163,6 @@ interface SkuData {
     currentBalance: number;
     isActive: boolean;
     bomCost: number | null;
-    trimsCost: number | null;
-    liningCost: number | null;
     packagingCost: number | null;
     laborMinutes: number | null;
 }
@@ -186,8 +178,6 @@ interface VariationData {
     isActive: boolean;
     hasLining: boolean;
     bomCost: number | null;
-    trimsCost: number | null;
-    liningCost: number | null;
     packagingCost: number | null;
     laborMinutes: number | null;
     shopifySourceProductId: string | null;
@@ -205,8 +195,6 @@ interface ProductData {
     shopifyProductId: string | null;
     imageUrl: string | null;
     isActive: boolean;
-    trimsCost: number | null;
-    liningCost: number | null;
     packagingCost: number | null;
     baseProductionTimeMins: number;
     // NOTE: fabricType relation removed - now derived from BOM materials
@@ -431,8 +419,6 @@ export const getProductsTree = createServerFn({ method: 'GET' })
                                 currentBalance: balance,
                                 availableBalance: balance,
                                 targetStockQty: sku.targetStockQty ?? undefined,
-                                trimsCost: sku.trimsCost,
-                                liningCost: sku.liningCost,
                                 packagingCost: sku.packagingCost,
                                 laborMinutes: sku.laborMinutes,
                                 // Shopify & Sales fields
@@ -485,8 +471,6 @@ export const getProductsTree = createServerFn({ method: 'GET' })
                             hasLining: variation.hasLining,
                             totalStock: variationStock,
                             avgMrp,
-                            trimsCost: variation.trimsCost,
-                            liningCost: variation.liningCost,
                             packagingCost: variation.packagingCost,
                             laborMinutes: variation.laborMinutes,
                             // Shopify & Sales fields
@@ -567,8 +551,6 @@ export const getProductsTree = createServerFn({ method: 'GET' })
                     skuCount: productSkuCount,
                     totalStock: productStock,
                     avgMrp,
-                    trimsCost: product.trimsCost,
-                    liningCost: product.liningCost,
                     packagingCost: product.packagingCost,
                     laborMinutes: product.baseProductionTimeMins,
                     shopifyStatus: productShopifyStatus,
@@ -825,8 +807,6 @@ export interface ProductDetailResponse {
     fabricTypeName: string | null;
     baseProductionTimeMins: number;
     defaultFabricConsumption: number | null;
-    trimsCost: number | null;
-    liningCost: number | null;
     packagingCost: number | null;
     isActive: boolean;
     imageUrl: string | null;
@@ -844,8 +824,7 @@ export interface VariationDetailResponse {
     fabricColourName: string | null;
     materialName: string | null;
     hasLining: boolean;
-    trimsCost: number | null;
-    liningCost: number | null;
+    bomCost: number | null;
     packagingCost: number | null;
     laborMinutes: number | null;
     isActive: boolean;
@@ -861,8 +840,7 @@ export interface SkuDetailResponse {
     fabricConsumption: number | null;
     mrp: number | null;
     targetStockQty: number | null;
-    trimsCost: number | null;
-    liningCost: number | null;
+    bomCost: number | null;
     packagingCost: number | null;
     laborMinutes: number | null;
     isActive: boolean;
@@ -934,8 +912,6 @@ export const getProductById = createServerFn({ method: 'GET' })
                 fabricTypeName: null,
                 baseProductionTimeMins: product.baseProductionTimeMins,
                 defaultFabricConsumption: product.defaultFabricConsumption,
-                trimsCost: product.trimsCost,
-                liningCost: product.liningCost,
                 packagingCost: product.packagingCost,
                 isActive: product.isActive,
                 imageUrl: product.imageUrl,
@@ -950,8 +926,7 @@ export const getProductById = createServerFn({ method: 'GET' })
                     fabricColourName: null,
                     materialName: null,
                     hasLining: v.hasLining,
-                    trimsCost: v.trimsCost,
-                    liningCost: v.liningCost,
+                    bomCost: v.bomCost,
                     packagingCost: v.packagingCost,
                     laborMinutes: v.laborMinutes,
                     isActive: v.isActive,
@@ -964,8 +939,7 @@ export const getProductById = createServerFn({ method: 'GET' })
                         fabricConsumption: s.fabricConsumption,
                         mrp: s.mrp,
                         targetStockQty: s.targetStockQty,
-                        trimsCost: s.trimsCost,
-                        liningCost: s.liningCost,
+                        bomCost: s.bomCost,
                         packagingCost: s.packagingCost,
                         laborMinutes: s.laborMinutes,
                         isActive: s.isActive,

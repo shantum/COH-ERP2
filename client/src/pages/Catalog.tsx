@@ -7,13 +7,10 @@
  * - Product (product): Aggregate by style (all colors/sizes per product)
  * - Consumption (consumption): Fabric matrix (sizes × fabric consumption)
  *
- * COST CASCADE LOGIC (for each view):
- * Each row shows EFFECTIVE cost (best from hierarchy):
- *   trimsCost: SKU → Variation → Product → null
- *   liningCost: SKU → Variation → Product → null (only if hasLining=true)
+ * COST FORMULA:
+ *   totalCost = bomCost (from BOM) + laborCost + packagingCost
  *   packagingCost: SKU → Variation → Product → GlobalDefault
  *   laborMinutes: SKU → Variation → Product → 60
- *   fabricCost: Consumption * (Fabric.costPerUnit ?? FabricType.defaultCostPerUnit)
  *
  * EDITING & BULK UPDATES:
  * - Inline cell editing for costs
@@ -109,7 +106,7 @@ export default function Catalog() {
         defaultPageSize: 100,
         // Hide cost calculation columns by default (users can enable via Columns dropdown)
         // fabricConsumption remains visible as it's a key data field
-        defaultHiddenColumns: ['fabricCost', 'laborMinutes', 'laborCost', 'trimsCost', 'liningCost', 'packagingCost', 'totalCost', 'exGstPrice', 'gstAmount', 'costMultiple'],
+        defaultHiddenColumns: ['bomCost', 'laborMinutes', 'laborCost', 'packagingCost', 'totalCost', 'exGstPrice', 'gstAmount', 'costMultiple'],
     });
 
     // View level state
@@ -316,9 +313,9 @@ export default function Catalog() {
         },
     });
 
-    // Inline cost update mutation (trimsCost, liningCost, packagingCost, or laborMinutes)
+    // Inline cost update mutation (packagingCost or laborMinutes)
     const updateCostMutation = useMutation({
-        mutationFn: async ({ level, id, field, value }: { level: 'product' | 'variation' | 'sku'; id: string; field: 'trimsCost' | 'liningCost' | 'packagingCost' | 'laborMinutes'; value: number | null }) => {
+        mutationFn: async ({ level, id, field, value }: { level: 'product' | 'variation' | 'sku'; id: string; field: 'packagingCost' | 'laborMinutes'; value: number | null }) => {
             const fieldData = { [field]: value };
             let result;
             if (level === 'product') {
@@ -508,11 +505,11 @@ export default function Catalog() {
         }
     }, [updateConsumption]);
 
-    // Handle cost cell value change (trimsCost, liningCost, packagingCost, or laborMinutes)
+    // Handle cost cell value change (packagingCost or laborMinutes)
     const handleCostChange = useCallback((params: CellValueChangedEvent) => {
         const { data, colDef, newValue } = params;
-        const field = colDef.field as 'trimsCost' | 'liningCost' | 'packagingCost' | 'laborMinutes';
-        if (field !== 'trimsCost' && field !== 'liningCost' && field !== 'packagingCost' && field !== 'laborMinutes') return;
+        const field = colDef.field as 'packagingCost' | 'laborMinutes';
+        if (field !== 'packagingCost' && field !== 'laborMinutes') return;
 
         const newCost = newValue === '' || newValue === null ? null : parseFloat(newValue);
         if (newValue !== '' && newValue !== null && isNaN(newCost as number)) return;
@@ -897,7 +894,7 @@ export default function Catalog() {
                             onCellValueChanged={(params) => {
                                 if (viewLevel === 'consumption') {
                                     handleConsumptionChange(params);
-                                } else if (params.colDef.field === 'trimsCost' || params.colDef.field === 'liningCost' || params.colDef.field === 'packagingCost' || params.colDef.field === 'laborMinutes') {
+                                } else if (params.colDef.field === 'packagingCost' || params.colDef.field === 'laborMinutes') {
                                     handleCostChange(params);
                                 } else if (params.colDef.field === 'fabricConsumption') {
                                     // Handle fabric consumption edit

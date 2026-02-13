@@ -166,13 +166,11 @@ export type Employee = {
 export type Fabric = {
     id: Generated<string>;
     name: string;
-    colorName: string;
+    colorName: Generated<string>;
     standardColor: string | null;
     colorHex: string | null;
     costPerUnit: number | null;
     partyId: string | null;
-    leadTimeDays: number | null;
-    minOrderQty: number | null;
     isActive: Generated<boolean>;
     materialId: string | null;
     constructionType: string | null;
@@ -1154,17 +1152,6 @@ export type SkuBomLine = {
     createdAt: Generated<Timestamp>;
     updatedAt: Timestamp;
 };
-export type SkuCosting = {
-    skuId: string;
-    fabricCost: number;
-    laborTimeMins: number;
-    laborRatePerMin: number;
-    laborCost: number;
-    packagingCost: Generated<number>;
-    otherCost: Generated<number>;
-    totalCogs: number;
-    lastUpdated: Generated<Timestamp>;
-};
 export type SyncJob = {
     id: Generated<string>;
     jobType: string;
@@ -1387,7 +1374,6 @@ export type DB = {
     ShopifyProductCache: ShopifyProductCache;
     Sku: Sku;
     SkuBomLine: SkuBomLine;
-    SkuCosting: SkuCosting;
     SyncJob: SyncJob;
     SystemSetting: SystemSetting;
     Tailor: Tailor;

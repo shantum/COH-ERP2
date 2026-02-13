@@ -55,9 +55,7 @@ export function useSkuEditForm({
           fabricConsumption: data.fabricConsumption ?? undefined,
           mrp: data.mrp ?? undefined,
           targetStockQty: data.targetStockQty ?? undefined,
-          trimsCost: data.trimsCost ?? undefined,
           packagingCost: data.packagingCost ?? undefined,
-          liningCost: data.liningCost ?? undefined,
           laborMinutes: data.laborMinutes ?? undefined,
           isActive: data.isActive,
         },
@@ -128,18 +126,6 @@ export function useSkuEditForm({
     };
 
     return {
-      trimsCost: resolveCost(
-        sku.trimsCost,
-        variation.trimsCost,
-        product.trimsCost,
-        0
-      ),
-      liningCost: resolveCost(
-        sku.liningCost,
-        variation.liningCost,
-        product.liningCost,
-        0
-      ),
       packagingCost: resolveCost(
         sku.packagingCost,
         variation.packagingCost,
@@ -187,8 +173,6 @@ function getDefaultValues(sku: SkuDetailData): SkuFormData {
     fabricConsumption: sku.fabricConsumption ?? null,
     mrp: sku.mrp ?? null,
     targetStockQty: sku.targetStockQty ?? null,
-    trimsCost: sku.trimsCost ?? null,
-    liningCost: sku.liningCost ?? null,
     packagingCost: sku.packagingCost ?? null,
     laborMinutes: sku.laborMinutes ?? null,
     isActive: sku.isActive ?? true,

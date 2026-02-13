@@ -76,9 +76,7 @@ const updateProductSchema = z.object({
     defaultFabricConsumption: z.number().positive().optional().nullable(),
     imageUrl: z.string().url().optional().nullable(),
     isActive: z.boolean().optional(),
-    trimsCost: z.number().nonnegative().optional().nullable(),
     packagingCost: z.number().nonnegative().optional().nullable(),
-    liningCost: z.number().nonnegative().optional().nullable(),
 });
 
 const deleteProductSchema = z.object({
@@ -104,9 +102,7 @@ const updateVariationSchema = z.object({
     imageUrl: z.string().url().optional().nullable(),
     hasLining: z.boolean().optional(),
     isActive: z.boolean().optional(),
-    trimsCost: z.number().nonnegative().optional().nullable(),
     packagingCost: z.number().nonnegative().optional().nullable(),
-    liningCost: z.number().nonnegative().optional().nullable(),
     laborMinutes: z.number().positive().optional().nullable(),
 });
 
@@ -127,9 +123,7 @@ const updateSkuSchema = z.object({
     targetStockQty: z.number().int().nonnegative().optional(),
     targetStockMethod: z.string().optional(),
     isActive: z.boolean().optional(),
-    trimsCost: z.number().nonnegative().optional().nullable(),
     packagingCost: z.number().nonnegative().optional().nullable(),
-    liningCost: z.number().nonnegative().optional().nullable(),
     laborMinutes: z.number().positive().optional().nullable(),
 });
 
@@ -193,9 +187,7 @@ export const updateProduct = createServerFn({ method: 'POST' })
                 if (data.defaultFabricConsumption !== undefined) updateData.defaultFabricConsumption = data.defaultFabricConsumption;
                 if (data.imageUrl !== undefined) updateData.imageUrl = data.imageUrl;
                 if (data.isActive !== undefined) updateData.isActive = data.isActive;
-                if (data.trimsCost !== undefined) updateData.trimsCost = data.trimsCost;
                 if (data.packagingCost !== undefined) updateData.packagingCost = data.packagingCost;
-                if (data.liningCost !== undefined) updateData.liningCost = data.liningCost;
 
                 const product = await prisma.product.update({
                     where: { id: data.id },
@@ -293,9 +285,7 @@ export const updateVariation = createServerFn({ method: 'POST' })
                 if (data.imageUrl !== undefined) updateData.imageUrl = data.imageUrl;
                 if (data.hasLining !== undefined) updateData.hasLining = data.hasLining;
                 if (data.isActive !== undefined) updateData.isActive = data.isActive;
-                if (data.trimsCost !== undefined) updateData.trimsCost = data.trimsCost;
                 if (data.packagingCost !== undefined) updateData.packagingCost = data.packagingCost;
-                if (data.liningCost !== undefined) updateData.liningCost = data.liningCost;
                 if (data.laborMinutes !== undefined) updateData.laborMinutes = data.laborMinutes;
 
                 const variation = await prisma.variation.update({
@@ -382,9 +372,7 @@ export const updateSku = createServerFn({ method: 'POST' })
                 if (data.targetStockQty !== undefined) updateData.targetStockQty = data.targetStockQty;
                 if (data.targetStockMethod !== undefined) updateData.targetStockMethod = data.targetStockMethod;
                 if (data.isActive !== undefined) updateData.isActive = data.isActive;
-                if (data.trimsCost !== undefined) updateData.trimsCost = data.trimsCost;
                 if (data.packagingCost !== undefined) updateData.packagingCost = data.packagingCost;
-                if (data.liningCost !== undefined) updateData.liningCost = data.liningCost;
                 if (data.laborMinutes !== undefined) updateData.laborMinutes = data.laborMinutes;
 
                 const sku = await prisma.sku.update({

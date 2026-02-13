@@ -49,8 +49,8 @@ interface FabricColourWithRelations {
         name: string;
         materialId: string | null;
         costPerUnit: number | null;
-        leadTimeDays: number | null;
-        minOrderQty: number | null;
+        defaultLeadTimeDays: number | null;
+        defaultMinOrderQty: number | null;
         unit: string | null;
         material: {
             id: string;
@@ -653,9 +653,9 @@ export const getFabricColourStockAnalysis = createServerFn({ method: 'GET' })
                     const effectiveCost =
                         colour.costPerUnit ?? colour.fabric.costPerUnit ?? 0;
                     const effectiveLeadTime =
-                        colour.leadTimeDays ?? colour.fabric.leadTimeDays ?? 14;
+                        colour.leadTimeDays ?? colour.fabric.defaultLeadTimeDays ?? 14;
                     const effectiveMinOrder =
-                        colour.minOrderQty ?? colour.fabric.minOrderQty ?? 10;
+                        colour.minOrderQty ?? colour.fabric.defaultMinOrderQty ?? 10;
 
                     const daysOfStock =
                         avgDailyConsumption > 0

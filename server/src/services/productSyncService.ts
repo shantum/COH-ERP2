@@ -146,8 +146,8 @@ export async function ensureDefaultFabric(prisma: PrismaClient): Promise<Fabric>
                 name: 'Default Fabric',
                 colorName: 'Default',
                 costPerUnit: 0,
-                leadTimeDays: 14,
-                minOrderQty: 1
+                defaultLeadTimeDays: 14,
+                defaultMinOrderQty: 1
             }
         });
     }

@@ -231,8 +231,7 @@ describe('filterConfidentialFields - Cost Fields', () => {
         name: 'Test Product',
         fabricCost: 150.00,
         laborCost: 50.00,
-        trimsCost: 25.00,
-        liningCost: 30.00,
+        bomCost: 175.00,
         packagingCost: 10.00,
         totalCost: 265.00,
         totalCogs: 265.00,
@@ -245,8 +244,7 @@ describe('filterConfidentialFields - Cost Fields', () => {
 
         expect(result.fabricCost).toBe(150.00);
         expect(result.laborCost).toBe(50.00);
-        expect(result.trimsCost).toBe(25.00);
-        expect(result.liningCost).toBe(30.00);
+        expect(result.bomCost).toBe(175.00);
         expect(result.packagingCost).toBe(10.00);
         expect(result.totalCost).toBe(265.00);
         expect(result.totalCogs).toBe(265.00);
@@ -260,8 +258,7 @@ describe('filterConfidentialFields - Cost Fields', () => {
 
         expect(result.fabricCost).toBeUndefined();
         expect(result.laborCost).toBeUndefined();
-        expect(result.trimsCost).toBeUndefined();
-        expect(result.liningCost).toBeUndefined();
+        expect(result.bomCost).toBeUndefined();
         expect(result.packagingCost).toBeUndefined();
         expect(result.totalCost).toBeUndefined();
         expect(result.totalCogs).toBeUndefined();

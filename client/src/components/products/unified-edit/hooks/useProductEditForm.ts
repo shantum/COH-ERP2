@@ -68,9 +68,7 @@ export function useProductEditForm({ productId, onSuccess, onError }: UseProduct
           gender: data.gender,
           baseProductionTimeMins: data.baseProductionTimeMins,
           defaultFabricConsumption: data.defaultFabricConsumption,
-          trimsCost: data.trimsCost,
           packagingCost: data.packagingCost,
-          liningCost: data.liningCost,
           isActive: data.isActive,
         },
       });
@@ -93,22 +91,6 @@ export function useProductEditForm({ productId, onSuccess, onError }: UseProduct
 
   // Cost cascade (Product is top level, so it just shows defaults)
   const costCascade = useMemo((): CostCascade => ({
-    trimsCost: {
-      effectiveValue: product?.trimsCost ?? 0,
-      source: product?.trimsCost != null ? 'product' : 'default',
-      skuValue: null,
-      variationValue: null,
-      productValue: product?.trimsCost ?? null,
-      defaultValue: 0,
-    },
-    liningCost: {
-      effectiveValue: product?.liningCost ?? 0,
-      source: product?.liningCost != null ? 'product' : 'default',
-      skuValue: null,
-      variationValue: null,
-      productValue: product?.liningCost ?? null,
-      defaultValue: 0,
-    },
     packagingCost: {
       effectiveValue: product?.packagingCost ?? 50,
       source: product?.packagingCost != null ? 'product' : 'default',
@@ -163,8 +145,6 @@ function getDefaultValues(product?: ProductDetailData | null): ProductFormData {
     gender: product?.gender ?? 'Women',
     baseProductionTimeMins: product?.baseProductionTimeMins ?? 60,
     defaultFabricConsumption: product?.defaultFabricConsumption ?? null,
-    trimsCost: product?.trimsCost ?? null,
-    liningCost: product?.liningCost ?? null,
     packagingCost: product?.packagingCost ?? null,
     isActive: product?.isActive ?? true,
   };

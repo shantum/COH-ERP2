@@ -59,33 +59,11 @@ export function ProductCostsTab({ form, disabled = false }: ProductCostsTabProps
       <div className="space-y-4">
         <h4 className="text-sm font-medium text-gray-900">Cost Defaults</h4>
 
-        <div className="grid grid-cols-2 gap-4">
-          <SimpleCostField
-            name="trimsCost"
-            label="Trims Cost"
-            control={control}
-            defaultValue={0}
-            unit=""
-            step="0.01"
-            disabled={disabled}
-          />
-
-          <SimpleCostField
-            name="packagingCost"
-            label="Packaging Cost"
-            control={control}
-            defaultValue={50}
-            unit=""
-            step="0.01"
-            disabled={disabled}
-          />
-        </div>
-
         <SimpleCostField
-          name="liningCost"
-          label="Lining Cost"
+          name="packagingCost"
+          label="Packaging Cost"
           control={control}
-          defaultValue={0}
+          defaultValue={50}
           unit=""
           step="0.01"
           disabled={disabled}
@@ -94,9 +72,9 @@ export function ProductCostsTab({ form, disabled = false }: ProductCostsTabProps
 
       {/* Cascade explanation */}
       <div className="text-xs text-gray-500 pt-2 border-t">
-        <p><strong>Cost cascade:</strong> SKU → Variation → Product → System default</p>
+        <p><strong>Cost formula:</strong> Total = BOM Cost + Labor + Packaging</p>
         <p className="mt-1">
-          If a SKU doesn't have a value, it uses the variation's value. If the variation doesn't have one, it uses this product's value.
+          BOM cost (fabric + trims + services) is set via the BOM editor. Labor and packaging cascade from SKU → Variation → Product → System default.
         </p>
       </div>
     </div>

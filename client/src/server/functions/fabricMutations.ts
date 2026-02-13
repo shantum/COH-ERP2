@@ -100,8 +100,6 @@ const createFabricSchema = z.object({
     pattern: z.string().optional().nullable(),
     unit: z.string().optional().nullable(),
     costPerUnit: z.number().optional().nullable(),
-    leadTimeDays: z.number().int().optional().nullable(),
-    minOrderQty: z.number().optional().nullable(),
     partyId: z.string().uuid().optional().nullable(),
 });
 
@@ -114,8 +112,8 @@ const updateFabricSchema = z.object({
     pattern: z.string().optional().nullable(),
     unit: z.string().optional().nullable(),
     costPerUnit: z.number().optional().nullable(),
-    leadTimeDays: z.number().int().optional().nullable(),
-    minOrderQty: z.number().optional().nullable(),
+    defaultLeadTimeDays: z.number().int().optional().nullable(),
+    defaultMinOrderQty: z.number().optional().nullable(),
     partyId: z.string().uuid().optional().nullable(),
     isActive: z.boolean().optional(),
 });
@@ -228,8 +226,6 @@ export const createFabric = createServerFn({ method: 'POST' })
                 pattern: data.pattern ?? null,
                 unit: data.unit ?? 'meters',
                 costPerUnit: data.costPerUnit ?? null,
-                leadTimeDays: data.leadTimeDays ?? null,
-                minOrderQty: data.minOrderQty ?? null,
                 partyId: data.partyId ?? null,
             },
             include: {

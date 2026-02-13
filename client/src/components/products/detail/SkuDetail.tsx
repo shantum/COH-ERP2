@@ -103,8 +103,7 @@ function SkuInfoContent({ sku }: { sku: ProductTreeNode }) {
             </InfoSection>
 
             <InfoSection title="Costs (Override)">
-                <InfoRow label="Trims Cost" value={formatCost(sku.trimsCost)} />
-                <InfoRow label="Lining Cost" value={formatCost(sku.liningCost)} />
+                <InfoRow label="BOM Cost" value={formatCost(sku.bomCost)} />
                 <InfoRow label="Packaging Cost" value={formatCost(sku.packagingCost)} />
                 <InfoRow label="Labor Minutes" value={sku.laborMinutes ? `${sku.laborMinutes} min` : null} />
             </InfoSection>

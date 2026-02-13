@@ -130,7 +130,7 @@ export function SkuEditDialog({
           <SkuCostsTab
             form={form}
             costCascade={costCascade}
-            variation={variation}
+            bomCost={sku.bomCost}
             disabled={isSaving}
           />
         )}

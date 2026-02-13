@@ -201,7 +201,6 @@ model Sku {
   parentSku              Sku?                          @relation("CustomSkus", fields: [parentSkuId], references: [id])
   customSkus             Sku[]                         @relation("CustomSkus")
   variation              Variation                     @relation(fields: [variationId], references: [id])
-  skuCosting             SkuCosting?
   writeOffLogs           WriteOffLog[]
   bomLines               SkuBomLine[]                  // NEW: BOM overrides for this SKU
   monthlySnapshots       MonthlyStockSnapshot[]
@@ -209,19 +208,6 @@ model Sku {
   @@index([variationId])
   @@index([parentSkuId])
   @@index([isCustomSku])
-}
-
-model SkuCosting {
-  skuId           String   @id
-  fabricCost      Float
-  laborTimeMins   Int
-  laborRatePerMin Float
-  laborCost       Float
-  packagingCost   Float    @default(0)
-  otherCost       Float    @default(0)
-  totalCogs       Float
-  lastUpdated     DateTime @default(now())
-  sku             Sku      @relation(fields: [skuId], references: [id])
 }
 
 model CostConfig {
@@ -299,13 +285,11 @@ model Fabric {
   id                  String                     @id @default(uuid())
   // NOTE: fabricTypeId removed - fabric now links directly to Material
   name                String
-  colorName           String
+  colorName           String                     @default("N/A")
   standardColor       String?
   colorHex            String?
   costPerUnit         Float?
   partyId             String?
-  leadTimeDays        Int?
-  minOrderQty         Float?
   isActive            Boolean                    @default(true)
 
   // Material hierarchy fields

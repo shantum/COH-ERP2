@@ -56,13 +56,10 @@ export interface CatalogSkuItem {
     size: string;
     mrp: number | null;
     fabricConsumption: number | null;
-    trimsCost: number | null;
-    liningCost: number | null;
+    bomCost: number;
     packagingCost: number | null;
     laborMinutes: number;
     // Costing
-    fabricCostPerUnit: number;
-    fabricCost: number;
     laborCost: number;
     totalCost: number;
     // GST & Pricing
@@ -299,12 +296,10 @@ async function callExpressApi<T>(
  * Returns flat array of all SKUs with product hierarchy, inventory, and costing data.
  * Supports filtering by gender, category, productId, stock status, and search.
  *
- * COSTING CASCADE (null at any level = fallback to next):
- *   trimsCost: SKU -> Variation -> Product -> null
- *   liningCost: SKU -> Variation -> Product -> null (only if hasLining=true)
+ * COSTING: totalCost = bomCost + laborCost + packagingCost
+ *   bomCost: Pre-computed on SKU from BOM (fabric + trims + services)
  *   packagingCost: SKU -> Variation -> Product -> CostConfig.defaultPackagingCost
  *   laborMinutes: SKU -> Variation -> Product.baseProductionTimeMins -> 60
- *   fabricCost: SKU.fabricConsumption * (Fabric.costPerUnit ?? FabricType.defaultCostPerUnit)
  */
 export const getCatalogProducts = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
@@ -434,29 +429,15 @@ export const getCatalogProducts = createServerFn({ method: 'GET' })
                     const product = sku.variation.product;
                     const variation = sku.variation;
 
-                    // Cascade costs
-                    const effectiveTrimsCost =
-                        sku.trimsCost ?? variation.trimsCost ?? product.trimsCost ?? null;
-                    const effectiveLiningCost = variation.hasLining
-                        ? (sku.liningCost ?? variation.liningCost ?? product.liningCost ?? null)
-                        : null;
+                    // BOM-based costing: bomCost covers fabric + trims + services
+                    const bomCost = Number(sku.bomCost) || 0;
                     const effectivePackagingCost =
                         sku.packagingCost ?? variation.packagingCost ?? product.packagingCost ?? globalPackagingCost;
                     const effectiveLaborMinutes =
                         sku.laborMinutes ?? variation.laborMinutes ?? product.baseProductionTimeMins ?? 60;
 
-                    // Calculate fabric cost
-                    // NOTE: Fabric cost now comes from BOM, not from variation.fabric
-                    // This will need to be fetched from BOM for accurate costing
-                    const fabricCostPerUnit = 0; // TODO: Get from VariationBomLine
-                    const fabricCost = (Number(sku.fabricConsumption) || 0) * fabricCostPerUnit;
                     const laborCost = (Number(effectiveLaborMinutes) || 0) * laborRatePerMin;
-                    const totalCost =
-                        (fabricCost || 0) +
-                        (laborCost || 0) +
-                        (effectiveTrimsCost || 0) +
-                        (effectiveLiningCost || 0) +
-                        (effectivePackagingCost || 0);
+                    const totalCost = bomCost + laborCost + (effectivePackagingCost || 0);
 
                     // GST calculations
                     const mrp = Number(sku.mrp) || 0;
@@ -471,12 +452,9 @@ export const getCatalogProducts = createServerFn({ method: 'GET' })
                         size: sku.size,
                         mrp: sku.mrp ?? null,
                         fabricConsumption: sku.fabricConsumption ?? null,
-                        trimsCost: effectiveTrimsCost,
-                        liningCost: effectiveLiningCost,
+                        bomCost,
                         packagingCost: effectivePackagingCost,
                         laborMinutes: effectiveLaborMinutes,
-                        fabricCostPerUnit,
-                        fabricCost: Math.round(fabricCost * 100) / 100,
                         laborCost: Math.round(laborCost * 100) / 100,
                         totalCost: Math.round(totalCost * 100) / 100,
                         gstRate,

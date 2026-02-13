@@ -293,7 +293,6 @@ router.post('/clear', requireAdmin, asyncHandler(async (req: Request, res: Respo
             { name: 'feedbackRatings', model: prisma.feedbackRating },
             { name: 'feedback', model: prisma.feedback },
             // SKU related
-            { name: 'skuCostings', model: prisma.skuCosting },
             { name: 'skus', model: prisma.sku },
             // Variations and Products
             { name: 'variations', model: prisma.variation },

@@ -38,8 +38,6 @@ export interface ProductFormData {
   gender: string;
   baseProductionTimeMins: number;
   defaultFabricConsumption: number | null;
-  trimsCost: number | null;
-  liningCost: number | null;
   packagingCost: number | null;
   isActive: boolean;
 }
@@ -48,8 +46,6 @@ export interface VariationFormData {
   colorName: string;
   colorHex: string | null;
   hasLining: boolean;
-  trimsCost: number | null;
-  liningCost: number | null;
   packagingCost: number | null;
   laborMinutes: number | null;
   isActive: boolean;
@@ -60,8 +56,6 @@ export interface SkuFormData {
   fabricConsumption: number | null;
   mrp: number | null;
   targetStockQty: number | null;
-  trimsCost: number | null;
-  liningCost: number | null;
   packagingCost: number | null;
   laborMinutes: number | null;
   isActive: boolean;
@@ -81,8 +75,6 @@ export interface CostCascadeValue {
 }
 
 export interface CostCascade {
-  trimsCost: CostCascadeValue;
-  liningCost: CostCascadeValue;
   packagingCost: CostCascadeValue;
   laborMinutes: CostCascadeValue;
   fabricConsumption: CostCascadeValue;
@@ -99,8 +91,6 @@ export interface ProductDetailData {
   gender: string;
   baseProductionTimeMins: number;
   defaultFabricConsumption: number | null;
-  trimsCost: number | null;
-  liningCost: number | null;
   packagingCost: number | null;
   isActive: boolean;
   imageUrl: string | null;
@@ -118,8 +108,7 @@ export interface VariationDetailData {
   fabricName: string | null;
   materialName: string | null;
   hasLining: boolean;
-  trimsCost: number | null;
-  liningCost: number | null;
+  bomCost: number | null;
   packagingCost: number | null;
   laborMinutes: number | null;
   isActive: boolean;
@@ -135,8 +124,7 @@ export interface SkuDetailData {
   fabricConsumption: number | null;
   mrp: number | null;
   targetStockQty: number | null;
-  trimsCost: number | null;
-  liningCost: number | null;
+  bomCost: number | null;
   packagingCost: number | null;
   laborMinutes: number | null;
   isActive: boolean;
@@ -215,8 +203,6 @@ export interface TabConfig {
 // === Default Values ===
 
 export const DEFAULT_COST_VALUES = {
-  trimsCost: 0,
-  liningCost: 0,
   packagingCost: 50,
   laborMinutes: 60,
   fabricConsumption: 1.5,

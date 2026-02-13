@@ -10,7 +10,6 @@ export type {
   Product,
   Variation,
   Sku,
-  SkuCosting,
   CreateProductData,
   UpdateProductData,
   CreateVariationData,

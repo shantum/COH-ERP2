@@ -68,9 +68,7 @@ export interface ProductTreeNode {
     availableBalance?: number;
     targetStockQty?: number;
 
-    // === Cost fields (cascade: SKU → Variation → Product → Default) ===
-    trimsCost?: number | null;
-    liningCost?: number | null;
+    // === Cost fields ===
     packagingCost?: number | null;
     laborMinutes?: number | null;
 

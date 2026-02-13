@@ -120,8 +120,7 @@ function VariationInfoContent({ variation }: { variation: ProductTreeNode }) {
             </InfoSection>
 
             <InfoSection title="Costs (Override)">
-                <InfoRow label="Trims Cost" value={formatCost(variation.trimsCost)} />
-                <InfoRow label="Lining Cost" value={formatCost(variation.liningCost)} />
+                <InfoRow label="BOM Cost" value={formatCost(variation.bomCost)} />
                 <InfoRow label="Packaging Cost" value={formatCost(variation.packagingCost)} />
                 <InfoRow label="Labor Minutes" value={variation.laborMinutes ? `${variation.laborMinutes} min` : null} />
             </InfoSection>

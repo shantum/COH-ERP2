@@ -151,15 +151,8 @@ export function createProductCostColumns(): PermissionColDef[] {
         createCostColumn('laborCost', 'Labor Cost', {
             viewPermission: 'products:view:cost',
         }),
-        createCostColumn('trimsCost', 'Trims Cost', {
+        createCostColumn('bomCost', 'BOM Cost', {
             viewPermission: 'products:view:cost',
-            editPermission: 'products:edit:cost',
-            editable: true,
-        }),
-        createCostColumn('liningCost', 'Lining Cost', {
-            viewPermission: 'products:view:cost',
-            editPermission: 'products:edit:cost',
-            editable: true,
         }),
         createCostColumn('packagingCost', 'Packaging Cost', {
             viewPermission: 'products:view:cost',

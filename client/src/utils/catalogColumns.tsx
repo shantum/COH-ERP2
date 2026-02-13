@@ -31,7 +31,7 @@ import { getOptimizedImageUrl } from './imageOptimization';
 export const ALL_COLUMN_IDS = [
     'image', 'productName', 'styleCode', 'category', 'gender', 'productType', 'fabricTypeName',
     'colorName', 'hasLining', 'fabricName',
-    'skuCode', 'size', 'mrp', 'fabricConsumption', 'fabricCost', 'laborMinutes', 'laborCost', 'trimsCost', 'liningCost', 'packagingCost', 'totalCost',
+    'skuCode', 'size', 'mrp', 'fabricConsumption', 'bomCost', 'laborMinutes', 'laborCost', 'packagingCost', 'totalCost',
     'exGstPrice', 'gstAmount', 'costMultiple',
     'currentBalance', 'reservedBalance', 'availableBalance', 'shopifyQty', 'targetStockQty', 'shopifyStatus', 'status',
     'actions'
@@ -53,11 +53,9 @@ export const DEFAULT_HEADERS: Record<string, string> = {
     size: 'Size',
     mrp: 'MRP',
     fabricConsumption: 'Fab (m)',
-    fabricCost: 'Fab ₹',
+    bomCost: 'BOM ₹',
     laborMinutes: 'Labor (min)',
     laborCost: 'Labor ₹',
-    trimsCost: 'Trims ₹',
-    liningCost: 'Lin ₹',
     packagingCost: 'Pkg ₹',
     totalCost: 'Cost ₹',
     exGstPrice: 'Ex-GST',
@@ -341,9 +339,9 @@ export function createColumnDefs({
             cellStyle: { backgroundColor: '#f0f9ff' }, // Light blue for editable
         },
         {
-            colId: 'fabricCost',
-            headerName: DEFAULT_HEADERS.fabricCost,
-            field: 'fabricCost',
+            colId: 'bomCost',
+            headerName: DEFAULT_HEADERS.bomCost,
+            field: 'bomCost',
             width: 70,
             viewPermission: 'products:view:cost',
             valueFormatter: (params: ValueFormatterParams) =>
@@ -372,38 +370,6 @@ export function createColumnDefs({
             valueFormatter: (params: ValueFormatterParams) =>
                 params.value != null ? `₹${Number(params.value).toFixed(0)}` : '-',
             cellClass: 'text-right text-xs text-purple-600',
-        },
-        {
-            colId: 'trimsCost',
-            headerName: DEFAULT_HEADERS.trimsCost,
-            field: 'trimsCost',
-            width: 70,
-            viewPermission: 'products:view:cost',
-            editPermission: 'products:edit:cost',
-            editable: true,
-            valueFormatter: (params: ValueFormatterParams) =>
-                params.value != null ? `₹${Number(params.value).toFixed(0)}` : '-',
-            cellClass: 'text-right text-xs cursor-pointer hover:bg-blue-50',
-            cellStyle: { backgroundColor: '#f0f9ff' }, // Light blue for editable
-        },
-        {
-            colId: 'liningCost',
-            headerName: DEFAULT_HEADERS.liningCost,
-            field: 'liningCost',
-            width: 65,
-            viewPermission: 'products:view:cost',
-            editPermission: 'products:edit:cost',
-            editable: (params: EditableCallbackParams) => params.data?.hasLining === true, // Only editable if hasLining
-            valueFormatter: (params: ValueFormatterParams) => {
-                // Show "-" if no lining
-                if (!params.data?.hasLining) return '-';
-                return params.value != null ? `₹${Number(params.value).toFixed(0)}` : '-';
-            },
-            cellClass: (params: CellClassParams) => {
-                if (!params.data?.hasLining) return 'text-right text-xs text-gray-300';
-                return 'text-right text-xs cursor-pointer hover:bg-blue-50';
-            },
-            cellStyle: (params: CellClassParams) => params.data?.hasLining ? { backgroundColor: '#f0f9ff' } : undefined,
         },
         {
             colId: 'packagingCost',
