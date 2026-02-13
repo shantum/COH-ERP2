@@ -432,16 +432,30 @@ export async function updateSheetChannelDetails(updates: ChannelDetailUpdate[]):
 }
 
 // ============================================
-// SYNC ORDER STATUS TO SHEET (scheduled)
+// SYNC ORDER STATUS TO SHEET (scheduled + targeted)
 // ============================================
 
 let statusSyncRunning = false;
+
+/** Clean channel name for display: shopify_online → shopify */
+function cleanChannel(ch: string): string {
+    if (ch === 'shopify_online') return 'shopify';
+    return ch || 'unknown';
+}
+
+/** Build display status: channel-trackingStatus (or channel-lineStatus as fallback) */
+function buildDisplayStatus(channel: string, lineStatus: string, trackingStatus: string | null): string {
+    const prefix = cleanChannel(channel);
+    const status = trackingStatus || lineStatus;
+    return `${prefix}-${status}`;
+}
 
 /**
  * Sync order status, courier, and AWB from ERP database to the Google Sheet.
  * Reads "Orders from COH", looks up each order in the DB, and updates
  * columns Y (status), Z (courier), AA (AWB) where the ERP has newer data.
  *
+ * Status format: "channel-status" (e.g. "shopify-in_transit", "myntra-shipped")
  * Only updates rows where at least one value has changed (avoids unnecessary writes).
  */
 export async function syncSheetOrderStatus(): Promise<{ checked: number; updated: number }> {
@@ -474,11 +488,13 @@ export async function syncSheetOrderStatus(): Promise<{ checked: number; updated
             where: { orderNumber: { in: [...orderNumbers] } },
             select: {
                 orderNumber: true,
+                channel: true,
                 orderLines: {
                     select: {
                         lineStatus: true,
                         courier: true,
                         awbNumber: true,
+                        trackingStatus: true,
                         sku: { select: { skuCode: true } },
                     },
                 },
@@ -491,7 +507,7 @@ export async function syncSheetOrderStatus(): Promise<{ checked: number; updated
             for (const line of order.orderLines) {
                 const key = `${order.orderNumber}|${line.sku.skuCode}`;
                 erpData.set(key, {
-                    status: line.lineStatus,
+                    status: buildDisplayStatus(order.channel, line.lineStatus, line.trackingStatus),
                     courier: line.courier,
                     awb: line.awbNumber,
                 });
@@ -545,4 +561,71 @@ export async function syncSheetOrderStatus(): Promise<{ checked: number; updated
     }
 
     return result;
+}
+
+/**
+ * Immediately sync a single order's status/courier/AWB to the sheet.
+ * Called right after a fulfillment webhook so the AWB shows instantly.
+ * Reads only column B+G to find matching rows, then writes Y:AA.
+ */
+export async function syncSingleOrderToSheet(orderNumber: string): Promise<void> {
+    try {
+        const tab = MASTERSHEET_TABS.ORDERS_FROM_COH;
+
+        // Query this order's line data from DB
+        const order = await prisma.order.findFirst({
+            where: { orderNumber },
+            select: {
+                channel: true,
+                orderLines: {
+                    select: {
+                        lineStatus: true,
+                        courier: true,
+                        awbNumber: true,
+                        trackingStatus: true,
+                        sku: { select: { skuCode: true } },
+                    },
+                },
+            },
+        });
+        if (!order || order.orderLines.length === 0) return;
+
+        // Build lookup by SKU
+        const lineData = new Map<string, { status: string; courier: string; awb: string }>();
+        for (const line of order.orderLines) {
+            lineData.set(line.sku.skuCode, {
+                status: buildDisplayStatus(order.channel, line.lineStatus, line.trackingStatus),
+                courier: line.courier || '',
+                awb: line.awbNumber || '',
+            });
+        }
+
+        // Read columns B (order#) and G (SKU) to find matching rows
+        const rows = await readRange(ORDERS_MASTERSHEET_ID, `'${tab}'!B:G`);
+        if (rows.length <= 1) return;
+
+        const writeData: Array<{ range: string; values: (string | number)[][] }> = [];
+        for (let i = 1; i < rows.length; i++) {
+            const rowOrderNo = String(rows[i][0] ?? '').trim();
+            if (rowOrderNo !== orderNumber) continue;
+
+            const rowSku = String(rows[i][5] ?? '').trim();
+            const data = lineData.get(rowSku);
+            if (!data) continue;
+
+            const rowNum = i + 1;
+            writeData.push({
+                range: `'${tab}'!Y${rowNum}:AA${rowNum}`,
+                values: [[data.status, data.courier, data.awb]],
+            });
+        }
+
+        if (writeData.length > 0) {
+            await batchWriteRanges(ORDERS_MASTERSHEET_ID, writeData);
+            log.info({ orderNumber, rows: writeData.length }, 'Synced order status/AWB to sheet immediately');
+        }
+    } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        log.error({ orderNumber, error: message }, 'Failed to sync single order to sheet');
+    }
 }

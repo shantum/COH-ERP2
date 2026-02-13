@@ -38,7 +38,7 @@ const updateWebhookLog = _updateWebhookLog as (
 import { upsertCustomerFromWebhook } from '../utils/customerUtils.js';
 import { webhookLogger as log } from '../utils/logger.js';
 import { deferredExecutor } from '../services/deferredExecutor.js';
-import { pushNewOrderToSheet } from '../services/sheetOrderPush.js';
+import { pushNewOrderToSheet, syncSingleOrderToSheet } from '../services/sheetOrderPush.js';
 
 // ============================================
 // TYPE DEFINITIONS
@@ -241,6 +241,13 @@ router.post('/shopify/orders', verifyWebhook, async (req: WebhookRequest, res: R
             deferredExecutor.enqueue(async () => {
                 await pushNewOrderToSheet(shopifyOrder as unknown as Parameters<typeof pushNewOrderToSheet>[0], result.orderId);
             }, { orderId: result.orderId, action: 'push_order_to_sheet' });
+        }
+
+        // Immediately sync AWB/courier/status to sheet when fulfillment data arrives
+        if (result.fulfillmentSync?.synced && orderName) {
+            deferredExecutor.enqueue(async () => {
+                await syncSingleOrderToSheet(String(orderName));
+            }, { orderId: result.orderId, action: 'sync_order_status_to_sheet' });
         }
 
         // Log success with result data
