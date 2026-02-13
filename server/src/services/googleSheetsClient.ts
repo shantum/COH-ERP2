@@ -166,6 +166,79 @@ export async function readRange(
 }
 
 /**
+ * Convert a Google Sheets serial number to a JS Date.
+ * Google Sheets epoch: Dec 30, 1899.
+ * Returns null if the value isn't a valid serial number.
+ */
+export function serialToDate(value: unknown): Date | null {
+    const num = typeof value === 'number' ? value : Number(value);
+    if (!Number.isFinite(num) || num < 1 || num > 200000) return null;
+
+    // Google Sheets epoch is Dec 30, 1899 (serial 0 = Dec 30, serial 1 = Dec 31, serial 2 = Jan 1 1900)
+    // Account for the Lotus 1-2-3 bug: serial 60 is Feb 29, 1900 (which doesn't exist)
+    const epoch = new Date(1899, 11, 30); // Dec 30, 1899
+    const days = Math.floor(num);
+    const d = new Date(epoch.getTime() + days * 24 * 60 * 60 * 1000);
+
+    // Validate the result is a real date
+    if (isNaN(d.getTime()) || d.getFullYear() < 1901) return null;
+    return d;
+}
+
+/**
+ * Read a range with serial numbers for date columns.
+ * Does two API calls in parallel: FORMATTED_VALUE (text) + UNFORMATTED_VALUE (serials).
+ * Returns text for all columns, but replaces date columns with the raw serial number.
+ *
+ * @param dateColIndices - 0-based column indices that contain dates
+ * @returns 2D array of strings, where date columns contain the serial number as a string
+ */
+export async function readRangeWithSerials(
+    spreadsheetId: string,
+    range: string,
+    dateColIndices: number[]
+): Promise<string[][]> {
+    const client = getClient();
+
+    // Two parallel API calls — one for display text, one for raw serial numbers
+    const [formattedResp, unformattedResp] = await Promise.all([
+        withRetry(
+            () => client.spreadsheets.values.get({
+                spreadsheetId,
+                range,
+                valueRenderOption: 'FORMATTED_VALUE',
+            }),
+            `readRangeWithSerials:formatted(${range})`
+        ),
+        withRetry(
+            () => client.spreadsheets.values.get({
+                spreadsheetId,
+                range,
+                valueRenderOption: 'UNFORMATTED_VALUE',
+            }),
+            `readRangeWithSerials:unformatted(${range})`
+        ),
+    ]);
+
+    const formatted = formattedResp.data.values ?? [];
+    const unformatted = unformattedResp.data.values ?? [];
+    const dateColSet = new Set(dateColIndices);
+
+    return formatted.map((row, rowIdx) => {
+        return row.map((cell, colIdx) => {
+            if (dateColSet.has(colIdx)) {
+                // Use the serial number from unformatted if available
+                const rawVal = unformatted[rowIdx]?.[colIdx];
+                if (rawVal !== undefined && rawVal !== null && rawVal !== '') {
+                    return String(rawVal);
+                }
+            }
+            return String(cell ?? '');
+        });
+    });
+}
+
+/**
  * Read multiple ranges in a single API call using values.batchGet.
  * Much faster than calling readRange() in a loop.
  * @returns Map of range string to 2D string array

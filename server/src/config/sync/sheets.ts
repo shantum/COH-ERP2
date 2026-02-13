@@ -555,6 +555,12 @@ export const VALID_INWARD_LIVE_SOURCES = ['sampling', 'repacking', 'adjustment',
  */
 export const FABRIC_DEDUCT_SOURCES = ['sampling'] as const;
 
+/**
+ * Inward sources that trigger production ledger booking (Fabric → Finished Goods).
+ * Includes both sampling (new production) and adjustment (stock corrections).
+ */
+export const PRODUCTION_BOOKING_SOURCES = ['sampling', 'adjustment'] as const;
+
 // ============================================
 // OUTWARD DESTINATION MAPPING
 // ============================================

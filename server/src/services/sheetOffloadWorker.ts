@@ -27,6 +27,8 @@ import { inventoryBalanceCache } from './inventoryBalanceCache.js';
 import { broadcastOrderUpdate } from '../routes/sse.js';
 import {
     readRange,
+    readRangeWithSerials,
+    serialToDate,
     writeRange,
     batchWriteRanges,
     appendRows,
@@ -48,6 +50,7 @@ import {
     INWARD_SOURCE_MAP,
     VALID_INWARD_LIVE_SOURCES,
     FABRIC_DEDUCT_SOURCES,
+    PRODUCTION_BOOKING_SOURCES,
     DEFAULT_INWARD_REASON,
     OUTWARD_DESTINATION_MAP,
     DEFAULT_OUTWARD_REASON,
@@ -601,6 +604,16 @@ function parseSheetDate(value: string | undefined): Date | null {
 
     const trimmed = value.trim();
 
+    // Serial number from UNFORMATTED_VALUE (e.g., "46063" or "46063.0")
+    // readRangeWithSerials passes serial numbers as strings for date columns
+    if (/^\d+(\.\d+)?$/.test(trimmed)) {
+        const num = Number(trimmed);
+        if (num >= 1 && num <= 200000) {
+            const d = serialToDate(num);
+            if (d) return d;
+        }
+    }
+
     // ISO format "YYYY-MM-DD"
     if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) {
         const isoMatch = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/);
@@ -726,9 +739,19 @@ function buildReferenceId(
     skuCode: string,
     qty: number,
     dateStr: string,
-    extra: string = ''
+    extra: string = '',
+    parsedDate?: Date | null
 ): string {
-    const datePart = dateStr.replace(/[/\-.\s]/g, '').slice(0, 8) || 'nodate';
+    // Prefer canonical DDMMYYYY from parsed Date (stable regardless of input format)
+    let datePart: string;
+    if (parsedDate) {
+        const dd = String(parsedDate.getDate()).padStart(2, '0');
+        const mm = String(parsedDate.getMonth() + 1).padStart(2, '0');
+        const yyyy = String(parsedDate.getFullYear());
+        datePart = `${dd}${mm}${yyyy}`;
+    } else {
+        datePart = dateStr.replace(/[/\-.\s]/g, '').slice(0, 8) || 'nodate';
+    }
     const extraPart = extra ? `:${extra.slice(0, 20).replace(/[^a-zA-Z0-9]/g, '')}` : '';
     return `${prefix}:${skuCode}:${qty}:${datePart}${extraPart}`;
 }
@@ -1069,6 +1092,7 @@ function validateInwardRow(
     rawRow: unknown[],
     skuMap: Map<string, SkuLookupInfo>,
     activeSkuCodes: Set<string>,
+    lastReconDate: Date | null,
 ): string[] {
     const reasons: string[] = [];
 
@@ -1104,6 +1128,10 @@ function validateInwardRow(
         const maxPast = new Date(now.getTime() - MAX_PAST_DAYS * 24 * 60 * 60 * 1000);
         if (parsed.date > maxFuture) reasons.push(`Date is too far in the future (max ${MAX_FUTURE_DAYS} days)`);
         if (parsed.date < maxPast) reasons.push(`Date is too old (max ${MAX_PAST_DAYS} days in past)`);
+        if (lastReconDate && parsed.date <= lastReconDate) {
+            const recoStr = lastReconDate.toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'Asia/Kolkata' });
+            reasons.push(`Date is before last reconciliation (${recoStr}) — backdated entries not allowed`);
+        }
     }
 
     // Source validation
@@ -1144,7 +1172,8 @@ function validateInwardRow(
 async function deductFabricForSamplingRows(
     successfulRows: ParsedRow[],
     skuMap: Map<string, SkuLookupInfo>,
-    adminUserId: string
+    adminUserId: string,
+    lastReconDate: Date | null
 ): Promise<void> {
     // Filter to only sampling source rows
     const samplingRows = successfulRows.filter(
@@ -1172,12 +1201,6 @@ async function deductFabricForSamplingRows(
 
     // Skip rows dated before the last reconciliation — those balances were
     // already verified by physical count, so deducting again would double-count
-    const lastRecon = await prisma.fabricColourTransaction.findFirst({
-        where: { reason: 'reconciliation' },
-        orderBy: { createdAt: 'desc' },
-        select: { createdAt: true },
-    });
-    const lastReconDate = lastRecon?.createdAt ?? null;
     if (lastReconDate) {
         sheetsLogger.debug({ lastReconDate: lastReconDate.toISOString() }, 'Fabric deduction: will skip rows dated before last reconciliation');
     }
@@ -1290,7 +1313,7 @@ async function ingestInwardLive(result: IngestInwardResult, tracker?: StepTracke
 
     sheetsLogger.info({ tab }, 'Reading inward live tab');
 
-    const rows = await readRange(ORDERS_MASTERSHEET_ID, `'${tab}'!A:J`);
+    const rows = await readRangeWithSerials(ORDERS_MASTERSHEET_ID, `'${tab}'!A:J`, [INWARD_LIVE_COLS.DATE]);
     if (rows.length <= 1) {
         sheetsLogger.info({ tab }, 'No data rows');
         tracker?.done('Read sheet rows', readStart, '0 rows');
@@ -1317,8 +1340,9 @@ async function ingestInwardLive(result: IngestInwardResult, tracker?: StepTracke
         const tailor = String(row[INWARD_LIVE_COLS.TAILOR] ?? '').trim();
         const barcode = String(row[INWARD_LIVE_COLS.BARCODE] ?? '').trim();
         const userNotes = String(row[INWARD_LIVE_COLS.NOTES] ?? '').trim();
+        const parsedDate = parseSheetDate(dateStr);
 
-        let refId = buildReferenceId(REF_PREFIX.INWARD_LIVE, skuCode, qty, dateStr, source);
+        let refId = buildReferenceId(REF_PREFIX.INWARD_LIVE, skuCode, qty, dateStr, source, parsedDate);
         if (seenRefs.has(refId)) {
             let counter = 2;
             while (seenRefs.has(`${refId}:${counter}`)) counter++;
@@ -1330,7 +1354,7 @@ async function ingestInwardLive(result: IngestInwardResult, tracker?: StepTracke
             rowIndex: i,
             skuCode,
             qty,
-            date: parseSheetDate(dateStr),
+            date: parsedDate,
             source,
             extra: doneBy,
             tailor,
@@ -1356,11 +1380,18 @@ async function ingestInwardLive(result: IngestInwardResult, tracker?: StepTracke
     // --- Step: Validate rows ---
     const validateStart = tracker?.start('Validate rows') ?? 0;
 
-    // --- Step 2: Bulk lookup SKUs for validation ---
+    // --- Step 2: Bulk lookup SKUs + last reconciliation date for validation ---
     const skuMap = await bulkLookupSkus(parsed.map(r => r.skuCode));
     const activeSkuCodes = new Set<string>(
         [...skuMap.entries()].filter(([, info]) => info.isActive).map(([code]) => code)
     );
+
+    const lastRecon = await prisma.fabricColourTransaction.findFirst({
+        where: { reason: 'reconciliation' },
+        orderBy: { createdAt: 'desc' },
+        select: { createdAt: true },
+    });
+    const lastReconDate = lastRecon?.createdAt ?? null;
 
     // --- Step 3: Validate each row ---
     const validRows: ParsedRow[] = [];
@@ -1369,7 +1400,7 @@ async function ingestInwardLive(result: IngestInwardResult, tracker?: StepTracke
     let invalidCount = 0;
 
     for (const p of parsed) {
-        const reasons = validateInwardRow(p, rows[p.rowIndex], skuMap, activeSkuCodes);
+        const reasons = validateInwardRow(p, rows[p.rowIndex], skuMap, activeSkuCodes, lastReconDate);
         if (reasons.length === 0) {
             validRows.push(p);
         } else {
@@ -1501,7 +1532,7 @@ async function ingestInwardLive(result: IngestInwardResult, tracker?: StepTracke
     // --- Step 6: Auto-deduct fabric for sampling inwards ---
     if (successfulRows.length > 0) {
         try {
-            await deductFabricForSamplingRows(successfulRows, skuMap, adminUserId);
+            await deductFabricForSamplingRows(successfulRows, skuMap, adminUserId, lastReconDate);
         } catch (err: unknown) {
             const message = err instanceof Error ? err.message : 'Unknown error';
             sheetsLogger.error({ error: message }, 'Fabric deduction failed (non-fatal)');
@@ -1509,14 +1540,14 @@ async function ingestInwardLive(result: IngestInwardResult, tracker?: StepTracke
     }
 
     // --- Step 7: Book production → finished goods for affected months ---
-    // When sampling inwards are ingested, fabric becomes finished goods
-    const samplingRows = successfulRows.filter(
-        r => FABRIC_DEDUCT_SOURCES.some(s => s === r.source.toLowerCase().trim())
+    // When sampling/adjustment inwards are ingested, fabric becomes finished goods
+    const productionRows = successfulRows.filter(
+        r => PRODUCTION_BOOKING_SOURCES.some(s => s === r.source.toLowerCase().trim())
     );
-    if (samplingRows.length > 0) {
+    if (productionRows.length > 0) {
         try {
             const affectedMonths = new Set<string>();
-            for (const row of samplingRows) {
+            for (const row of productionRows) {
                 const d = row.date!; // Validated as non-null during validation step
                 const ist = new Date(d.getTime() + (5.5 * 60 * 60 * 1000));
                 affectedMonths.add(`${ist.getFullYear()}-${ist.getMonth() + 1}`);
@@ -1598,7 +1629,7 @@ async function ingestOutwardLive(
 
     sheetsLogger.info({ tab }, 'Reading outward live tab');
 
-    const rows = await readRange(ORDERS_MASTERSHEET_ID, `'${tab}'!A:AG`);
+    const rows = await readRangeWithSerials(ORDERS_MASTERSHEET_ID, `'${tab}'!A:AG`, [OUTWARD_LIVE_COLS.ORDER_DATE, OUTWARD_LIVE_COLS.OUTWARD_DATE]);
     if (rows.length <= 1) {
         sheetsLogger.info({ tab }, 'No data rows');
         tracker?.done('Read sheet rows', readStart, '0 rows');
@@ -1631,7 +1662,9 @@ async function ingestOutwardLive(
         // Skip completely empty rows (no data at all)
         if (!skuCode && !String(row[OUTWARD_LIVE_COLS.QTY] ?? '').trim()) continue;
 
-        let refId = buildReferenceId(REF_PREFIX.OUTWARD_LIVE, skuCode, qty, dateStr, orderNo || dest);
+        const parsedDate = parseSheetDate(outwardDateStr) ?? parseSheetDate(orderDateStr);
+
+        let refId = buildReferenceId(REF_PREFIX.OUTWARD_LIVE, skuCode, qty, dateStr, orderNo || dest, parsedDate);
         if (seenRefs.has(refId)) {
             let counter = 2;
             while (seenRefs.has(`${refId}:${counter}`)) counter++;
@@ -1643,7 +1676,7 @@ async function ingestOutwardLive(
             rowIndex: i,
             skuCode,
             qty,
-            date: parseSheetDate(outwardDateStr) ?? parseSheetDate(orderDateStr),
+            date: parsedDate,
             source: dest,
             extra: orderNo,
             tailor: '',
@@ -2319,7 +2352,7 @@ async function previewIngestInward(): Promise<IngestPreviewResult | null> {
         const tab = LIVE_TABS.INWARD;
         sheetsLogger.info({ tab }, 'Preview: reading inward live tab');
 
-        const rows = await readRange(ORDERS_MASTERSHEET_ID, `'${tab}'!A:J`);
+        const rows = await readRangeWithSerials(ORDERS_MASTERSHEET_ID, `'${tab}'!A:J`, [INWARD_LIVE_COLS.DATE]);
         if (rows.length <= 1) {
             return { tab, totalRows: 0, valid: 0, invalid: 0, duplicates: 0, validationErrors: {}, affectedSkuCodes: [], durationMs: Date.now() - startTime };
         }
@@ -2341,8 +2374,9 @@ async function previewIngestInward(): Promise<IngestPreviewResult | null> {
             const source = String(row[INWARD_LIVE_COLS.SOURCE] ?? '').trim();
             const doneBy = String(row[INWARD_LIVE_COLS.DONE_BY] ?? '').trim();
             const tailor = String(row[INWARD_LIVE_COLS.TAILOR] ?? '').trim();
+            const parsedDate = parseSheetDate(dateStr);
 
-            let refId = buildReferenceId(REF_PREFIX.INWARD_LIVE, skuCode, qty, dateStr, source);
+            let refId = buildReferenceId(REF_PREFIX.INWARD_LIVE, skuCode, qty, dateStr, source, parsedDate);
             if (seenRefs.has(refId)) {
                 let counter = 2;
                 while (seenRefs.has(`${refId}:${counter}`)) counter++;
@@ -2354,7 +2388,7 @@ async function previewIngestInward(): Promise<IngestPreviewResult | null> {
             const userNotes = String(row[INWARD_LIVE_COLS.NOTES] ?? '').trim();
 
             parsed.push({
-                rowIndex: i, skuCode, qty, date: parseSheetDate(dateStr),
+                rowIndex: i, skuCode, qty, date: parsedDate,
                 source, extra: doneBy, tailor, barcode, userNotes, orderNotes: '', cohNotes: '',
                 courier: '', awb: '',
                 referenceId: refId, notes: `${OFFLOAD_NOTES_PREFIX} ${tab}`,
@@ -2370,12 +2404,20 @@ async function previewIngestInward(): Promise<IngestPreviewResult | null> {
         const activeSkuCodes = new Set<string>(
             [...skuMap.entries()].filter(([, info]) => info.isActive).map(([code]) => code)
         );
+
+        const previewLastRecon = await prisma.fabricColourTransaction.findFirst({
+            where: { reason: 'reconciliation' },
+            orderBy: { createdAt: 'desc' },
+            select: { createdAt: true },
+        });
+        const previewLastReconDate = previewLastRecon?.createdAt ?? null;
+
         const validRows: ParsedRow[] = [];
         const validationErrors: Record<string, number> = {};
         const rowErrors = new Map<string, string>(); // referenceId → error text
 
         for (const p of parsed) {
-            const reasons = validateInwardRow(p, rows[p.rowIndex], skuMap, activeSkuCodes);
+            const reasons = validateInwardRow(p, rows[p.rowIndex], skuMap, activeSkuCodes, previewLastReconDate);
             if (reasons.length === 0) {
                 validRows.push(p);
             } else {
@@ -2394,7 +2436,7 @@ async function previewIngestInward(): Promise<IngestPreviewResult | null> {
         // Write status column: "ok" for valid, "ok (already in ERP)" for dupes, error text for invalid
         const importErrors: Array<{ rowIndex: number; error: string }> = [];
         for (const p of parsed) {
-            const reasons = validateInwardRow(p, rows[p.rowIndex], skuMap, activeSkuCodes);
+            const reasons = validateInwardRow(p, rows[p.rowIndex], skuMap, activeSkuCodes, previewLastReconDate);
             if (reasons.length > 0) {
                 importErrors.push({ rowIndex: p.rowIndex, error: reasons.join('; ') });
             } else if (existingRefs.has(p.referenceId)) {
@@ -2649,7 +2691,7 @@ async function previewIngestOutward(): Promise<IngestPreviewResult | null> {
         const tab = LIVE_TABS.OUTWARD;
         sheetsLogger.info({ tab }, 'Preview: reading outward live tab');
 
-        const rows = await readRange(ORDERS_MASTERSHEET_ID, `'${tab}'!A:AG`);
+        const rows = await readRangeWithSerials(ORDERS_MASTERSHEET_ID, `'${tab}'!A:AG`, [OUTWARD_LIVE_COLS.ORDER_DATE, OUTWARD_LIVE_COLS.OUTWARD_DATE]);
         if (rows.length <= 1) {
             return { tab, totalRows: 0, valid: 0, invalid: 0, duplicates: 0, validationErrors: {}, affectedSkuCodes: [], durationMs: Date.now() - startTime };
         }
@@ -2675,7 +2717,9 @@ async function previewIngestOutward(): Promise<IngestPreviewResult | null> {
             const status = String(row[OUTWARD_LIVE_COLS.IMPORT_ERRORS] ?? '').trim();
             if (status.startsWith(INGESTED_PREFIX)) continue;
 
-            let refId = buildReferenceId(REF_PREFIX.OUTWARD_LIVE, skuCode, qty, dateStr, orderNo || dest);
+            const parsedDate = parseSheetDate(outwardDateStr) ?? parseSheetDate(orderDateStr);
+
+            let refId = buildReferenceId(REF_PREFIX.OUTWARD_LIVE, skuCode, qty, dateStr, orderNo || dest, parsedDate);
             if (seenRefs.has(refId)) {
                 let counter = 2;
                 while (seenRefs.has(`${refId}:${counter}`)) counter++;
@@ -2688,7 +2732,7 @@ async function previewIngestOutward(): Promise<IngestPreviewResult | null> {
 
             parsed.push({
                 rowIndex: i, skuCode, qty,
-                date: parseSheetDate(outwardDateStr) ?? parseSheetDate(orderDateStr),
+                date: parsedDate,
                 source: dest, extra: orderNo, tailor: '', barcode: '', userNotes: '',
                 orderNotes, cohNotes, courier, awb,
                 referenceId: refId, notes: `${OFFLOAD_NOTES_PREFIX} ${tab}`,
@@ -3286,7 +3330,7 @@ async function cleanupSingleTab(
     readRange_: string
 ): Promise<{ deleted: number; error?: string }> {
     try {
-        const rows = await readRange(ORDERS_MASTERSHEET_ID, readRange_);
+        const rows = await readRangeWithSerials(ORDERS_MASTERSHEET_ID, readRange_, [dateColIndex]);
         const toDelete: number[] = [];
         const cutoffDate = new Date();
         cutoffDate.setDate(cutoffDate.getDate() - CLEANUP_RETENTION_DAYS);
@@ -3881,9 +3925,10 @@ async function triggerImportFabricBalances(): Promise<ImportFabricBalancesResult
     try {
         const tabName = MASTERSHEET_TABS.FABRIC_BALANCES;
 
-        // 1. Read the sheet + Count Date + Time cells
-        const [rows, countDateRows, countTimeRows] = await Promise.all([
+        // 1. Read the sheet + Count Date (serial) + Time cells
+        const [rows, countDateSerialRows, countDateFormattedRows, countTimeRows] = await Promise.all([
             readRange(ORDERS_MASTERSHEET_ID, `'${tabName}'!A:J`),
+            readRangeWithSerials(ORDERS_MASTERSHEET_ID, `'${tabName}'!${FABRIC_BALANCES_COUNT_DATETIME.DATE_CELL}`, [0]),
             readRange(ORDERS_MASTERSHEET_ID, `'${tabName}'!${FABRIC_BALANCES_COUNT_DATETIME.DATE_CELL}`),
             readRange(ORDERS_MASTERSHEET_ID, `'${tabName}'!${FABRIC_BALANCES_COUNT_DATETIME.TIME_CELL}`),
         ]);
@@ -3901,17 +3946,40 @@ async function triggerImportFabricBalances(): Promise<ImportFabricBalancesResult
         }
 
         // Parse Count Date + Time — REQUIRED for accurate reconciliation
-        const countDateStr = String(countDateRows?.[0]?.[0] ?? '').trim();
+        // Try serial number first (from UNFORMATTED_VALUE), fall back to formatted text
+        const countDateSerialStr = String(countDateSerialRows?.[0]?.[0] ?? '').trim();
+        const countDateFormattedStr = String(countDateFormattedRows?.[0]?.[0] ?? '').trim();
+        const countDateStr = countDateSerialStr || countDateFormattedStr;
         const countTimeStr = String(countTimeRows?.[0]?.[0] ?? '').trim();
 
-        // Combine date + time into a single string for parsing (e.g., "10/02/2026 7:00 PM")
-        const combinedDateTimeStr = countTimeStr ? `${countDateStr} ${countTimeStr}` : countDateStr;
-        const countDateTime = parseSheetDateTime(combinedDateTimeStr);
+        // If we got a serial number for the date, parse it directly and add time
+        let countDateTime: Date | null = null;
+        const serialDate = parseSheetDate(countDateSerialStr);
+        if (serialDate && countTimeStr) {
+            // Parse time and apply to the serial-parsed date
+            const timeMatch = countTimeStr.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/i);
+            if (timeMatch) {
+                let hours = Number(timeMatch[1]);
+                const minutes = Number(timeMatch[2] || 0);
+                const ampm = timeMatch[3]?.toLowerCase();
+                if (ampm === 'pm' && hours < 12) hours += 12;
+                if (ampm === 'am' && hours === 12) hours = 0;
+                serialDate.setHours(hours, minutes, 0, 0);
+            }
+            countDateTime = serialDate;
+        } else if (serialDate) {
+            countDateTime = serialDate;
+        } else {
+            // Fall back to text-based parsing
+            const combinedDateTimeStr = countTimeStr ? `${countDateFormattedStr} ${countTimeStr}` : countDateFormattedStr;
+            countDateTime = parseSheetDateTime(combinedDateTimeStr);
+        }
 
         if (!countDateTime) {
+            const displayStr = countTimeStr ? `${countDateFormattedStr} ${countTimeStr}` : countDateFormattedStr;
             const errorMsg = !countDateStr
                 ? 'Count Date (cell M1) is empty. Pick the date when the physical count was taken.'
-                : `Could not parse count date/time: "${combinedDateTimeStr}". Pick a date in M1 and time in O1.`;
+                : `Could not parse count date/time: "${displayStr}". Pick a date in M1 and time in O1.`;
             const result: ImportFabricBalancesResult = {
                 startedAt, rowsWithCounts: 0, adjustmentsCreated: 0,
                 alreadyMatching: 0, skipped: 0, skipReasons: {},
@@ -3923,7 +3991,7 @@ async function triggerImportFabricBalances(): Promise<ImportFabricBalancesResult
             return result;
         }
 
-        const countDateTimeStr = combinedDateTimeStr;
+        const countDateTimeStr = countTimeStr ? `${countDateFormattedStr} ${countTimeStr}` : countDateFormattedStr;
 
         sheetsLogger.info({ totalRows: rows.length - 1, countDateTime: countDateTime.toISOString() }, 'importFabricBalances: reading sheet');
 
@@ -4227,9 +4295,18 @@ function buildFabricInwardRefId(
     fabricCode: string,
     qty: number,
     dateStr: string,
-    supplier: string
+    supplier: string,
+    parsedDate?: Date | null
 ): string {
-    const datePart = dateStr.replace(/[/\-.\s]/g, '').slice(0, 8) || 'nodate';
+    let datePart: string;
+    if (parsedDate) {
+        const dd = String(parsedDate.getDate()).padStart(2, '0');
+        const mm = String(parsedDate.getMonth() + 1).padStart(2, '0');
+        const yyyy = String(parsedDate.getFullYear());
+        datePart = `${dd}${mm}${yyyy}`;
+    } else {
+        datePart = dateStr.replace(/[/\-.\s]/g, '').slice(0, 8) || 'nodate';
+    }
     const supplierPart = supplier.slice(0, 20).replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
     return `${REF_PREFIX.FABRIC_INWARD_LIVE}:${fabricCode}:${qty}:${datePart}:${supplierPart}`;
 }
@@ -4265,7 +4342,7 @@ async function previewFabricInward(): Promise<FabricInwardPreviewResult | null> 
         const tab = LIVE_TABS.FABRIC_INWARD;
         sheetsLogger.info({ tab }, 'Preview: reading fabric inward live tab');
 
-        const rows = await readRange(ORDERS_MASTERSHEET_ID, `'${tab}'!A:K`);
+        const rows = await readRangeWithSerials(ORDERS_MASTERSHEET_ID, `'${tab}'!A:K`, [FABRIC_INWARD_LIVE_COLS.DATE]);
         if (rows.length <= 1) {
             return {
                 tab, totalRows: 0, valid: 0, invalid: 0, duplicates: 0,
@@ -4319,8 +4396,9 @@ async function previewFabricInward(): Promise<FabricInwardPreviewResult | null> 
             const fabric = String(row[FABRIC_INWARD_LIVE_COLS.FABRIC] ?? '').trim();
             const colour = String(row[FABRIC_INWARD_LIVE_COLS.COLOUR] ?? '').trim();
             const unit = String(row[FABRIC_INWARD_LIVE_COLS.UNIT] ?? '').trim();
+            const parsedDate = parseSheetDate(dateStr);
 
-            let refId = buildFabricInwardRefId(fabricCode, qty, dateStr, supplier);
+            let refId = buildFabricInwardRefId(fabricCode, qty, dateStr, supplier, parsedDate);
             if (seenRefs.has(refId)) {
                 let counter = 2;
                 while (seenRefs.has(`${refId}:${counter}`)) counter++;
@@ -4330,7 +4408,7 @@ async function previewFabricInward(): Promise<FabricInwardPreviewResult | null> 
 
             parsed.push({
                 rowIndex: i, fabricCode, material, fabric, colour,
-                qty, unit, costPerUnit, supplier, dateStr, date: parseSheetDate(dateStr),
+                qty, unit, costPerUnit, supplier, dateStr, date: parsedDate,
                 notes, referenceId: refId,
             });
         }
@@ -4472,7 +4550,7 @@ async function triggerFabricInward(): Promise<FabricInwardResult | null> {
         const tab = LIVE_TABS.FABRIC_INWARD;
         sheetsLogger.info({ tab }, 'Starting fabric inward import');
 
-        const rows = await readRange(ORDERS_MASTERSHEET_ID, `'${tab}'!A:K`);
+        const rows = await readRangeWithSerials(ORDERS_MASTERSHEET_ID, `'${tab}'!A:K`, [FABRIC_INWARD_LIVE_COLS.DATE]);
         if (rows.length <= 1) {
             result.durationMs = Date.now() - startTime;
             fabricInwardState.lastRunAt = new Date();
@@ -4530,8 +4608,9 @@ async function triggerFabricInward(): Promise<FabricInwardResult | null> {
             const supplier = String(row[FABRIC_INWARD_LIVE_COLS.SUPPLIER] ?? '').trim();
             const dateStr = String(row[FABRIC_INWARD_LIVE_COLS.DATE] ?? '').trim();
             const notes = String(row[FABRIC_INWARD_LIVE_COLS.NOTES] ?? '').trim();
+            const parsedDate = parseSheetDate(dateStr);
 
-            let refId = buildFabricInwardRefId(fabricCode, qty, dateStr, supplier);
+            let refId = buildFabricInwardRefId(fabricCode, qty, dateStr, supplier, parsedDate);
             if (seenRefs.has(refId)) {
                 let counter = 2;
                 while (seenRefs.has(`${refId}:${counter}`)) counter++;
@@ -4542,7 +4621,7 @@ async function triggerFabricInward(): Promise<FabricInwardResult | null> {
             parsed.push({
                 rowIndex: i, material, fabric, colour, fabricCode,
                 qty, costPerUnit, supplier, dateStr,
-                date: parseSheetDate(dateStr), notes, referenceId: refId,
+                date: parsedDate, notes, referenceId: refId,
             });
         }
 

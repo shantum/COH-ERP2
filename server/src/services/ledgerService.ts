@@ -286,22 +286,17 @@ export async function bookFabricConsumptionForMonth(
   if (existing) {
     const oldAmount = Math.round((existing.lines[0]?.debit ?? 0) * 100) / 100;
 
-    if (existing.isReversed) {
-      // Already reversed — free up sourceId slot
-      await prisma.ledgerEntry.update({
-        where: { id: existing.id },
-        data: { sourceId: `${SOURCE_ID}_reversed_${existing.id}` },
-      });
-    } else if (Math.abs(oldAmount - fabricCost) < 0.01) {
+    if (!existing.isReversed && Math.abs(oldAmount - fabricCost) < 0.01) {
       return { fabricCost, action: 'unchanged' };
-    } else {
-      // Amount changed — reverse old, free up sourceId
-      await reverseLedgerEntry(prisma, existing.id, adminUserId);
-      await prisma.ledgerEntry.update({
-        where: { id: existing.id },
-        data: { sourceId: `${SOURCE_ID}_reversed_${existing.id}` },
-      });
     }
+
+    // If old code reversed this entry, delete the reversal too (net out correctly)
+    if (existing.isReversed && existing.reversedById) {
+      await prisma.ledgerEntry.delete({ where: { id: existing.reversedById } });
+    }
+
+    // Delete old entry — cascade deletes lines, DB trigger corrects balances
+    await prisma.ledgerEntry.delete({ where: { id: existing.id } });
   }
 
   if (fabricCost === 0) {
@@ -379,20 +374,17 @@ export async function bookShipmentCOGSForMonth(
   if (existing) {
     const oldAmount = Math.round((existing.lines[0]?.debit ?? 0) * 100) / 100;
 
-    if (existing.isReversed) {
-      await prisma.ledgerEntry.update({
-        where: { id: existing.id },
-        data: { sourceId: `${SOURCE_ID}_reversed_${existing.id}` },
-      });
-    } else if (Math.abs(oldAmount - amount) < 0.01) {
+    if (!existing.isReversed && Math.abs(oldAmount - amount) < 0.01) {
       return { amount, action: 'unchanged' };
-    } else {
-      await reverseLedgerEntry(prisma, existing.id, adminUserId);
-      await prisma.ledgerEntry.update({
-        where: { id: existing.id },
-        data: { sourceId: `${SOURCE_ID}_reversed_${existing.id}` },
-      });
     }
+
+    // If old code reversed this entry, delete the reversal too (net out correctly)
+    if (existing.isReversed && existing.reversedById) {
+      await prisma.ledgerEntry.delete({ where: { id: existing.reversedById } });
+    }
+
+    // Delete old entry — cascade deletes lines, DB trigger corrects balances
+    await prisma.ledgerEntry.delete({ where: { id: existing.id } });
   }
 
   if (amount === 0) {
@@ -432,7 +424,7 @@ export async function bookShipmentCOGSForMonth(
  * When goods come back (RTO or customer return), they go back into
  * finished goods inventory and reduce COGS.
  *
- * Same reversal logic — safe to re-run.
+ * Delete-and-recreate pattern — safe to re-run.
  */
 export async function bookReturnReversalForMonth(
   prisma: PrismaClient,
@@ -470,20 +462,17 @@ export async function bookReturnReversalForMonth(
   if (existing) {
     const oldAmount = Math.round((existing.lines[0]?.debit ?? 0) * 100) / 100;
 
-    if (existing.isReversed) {
-      await prisma.ledgerEntry.update({
-        where: { id: existing.id },
-        data: { sourceId: `${SOURCE_ID}_reversed_${existing.id}` },
-      });
-    } else if (Math.abs(oldAmount - amount) < 0.01) {
+    if (!existing.isReversed && Math.abs(oldAmount - amount) < 0.01) {
       return { amount, action: 'unchanged' };
-    } else {
-      await reverseLedgerEntry(prisma, existing.id, adminUserId);
-      await prisma.ledgerEntry.update({
-        where: { id: existing.id },
-        data: { sourceId: `${SOURCE_ID}_reversed_${existing.id}` },
-      });
     }
+
+    // If old code reversed this entry, delete the reversal too (net out correctly)
+    if (existing.isReversed && existing.reversedById) {
+      await prisma.ledgerEntry.delete({ where: { id: existing.reversedById } });
+    }
+
+    // Delete old entry — cascade deletes lines, DB trigger corrects balances
+    await prisma.ledgerEntry.delete({ where: { id: existing.id } });
   }
 
   if (amount === 0) {
