@@ -230,7 +230,7 @@ export const listInvoices = createServerFn({ method: 'POST' })
           notes: true,
           driveUrl: true,
           createdAt: true,
-          party: { select: { id: true, name: true } },
+          party: { select: { id: true, name: true, bankAccountName: true, bankAccountNumber: true, bankIfsc: true, phone: true, email: true } },
           customer: { select: { id: true, email: true, firstName: true, lastName: true } },
           _count: { select: { lines: true, matchedPayments: true } },
         },

@@ -33,7 +33,7 @@ import { Textarea } from '@/components/ui/textarea';
 import {
   IndianRupee, Plus, ArrowUpRight, ArrowDownLeft,
   Check, X, BookOpen, ChevronLeft, ChevronRight, Loader2, AlertCircle,
-  ExternalLink, CloudUpload, Link2,
+  ExternalLink, CloudUpload, Link2, Download,
 } from 'lucide-react';
 import {
   type FinanceSearchParams,
@@ -213,6 +213,7 @@ function InvoicesTab({ search }: { search: FinanceSearchParams }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   // For the confirm dialog — stores the invoice being confirmed
   const [confirmingInvoice, setConfirmingInvoice] = useState<{
     id: string; type: string; counterpartyName: string | null; totalAmount: number;
@@ -266,10 +267,122 @@ function InvoicesTab({ search }: { search: FinanceSearchParams }) {
 
   const updateSearch = useCallback(
     (updates: Partial<FinanceSearchParams>) => {
+      setSelectedIds(new Set());
       navigate({ to: '/finance', search: { ...search, ...updates }, replace: true });
     },
     [navigate, search]
   );
+
+  // Invoices eligible for payout selection: unpaid payables
+  const selectableInvoices = useMemo(
+    () =>
+      (data?.invoices ?? []).filter(
+        (inv) =>
+          inv.type === 'payable' &&
+          (inv.status === 'confirmed' || inv.status === 'partially_paid') &&
+          inv.balanceDue > 0
+      ),
+    [data?.invoices]
+  );
+
+  const allSelectableSelected =
+    selectableInvoices.length > 0 && selectableInvoices.every((inv) => selectedIds.has(inv.id));
+
+  const toggleSelectAll = useCallback(() => {
+    if (allSelectableSelected) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(selectableInvoices.map((inv) => inv.id)));
+    }
+  }, [allSelectableSelected, selectableInvoices]);
+
+  const toggleSelect = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const handleDownloadPayoutCsv = useCallback(() => {
+    if (selectedIds.size === 0 || !data?.invoices) return;
+    const selected = data.invoices.filter((inv) => selectedIds.has(inv.id));
+
+    // Validate bank details
+    const missingBank = selected.filter(
+      (inv) => !inv.party?.bankAccountNumber || !inv.party?.bankIfsc
+    );
+    const valid = selected.filter(
+      (inv) => inv.party?.bankAccountNumber && inv.party?.bankIfsc
+    );
+
+    if (missingBank.length > 0) {
+      const names = missingBank.map((inv) => inv.party?.name ?? inv.counterpartyName ?? 'Unknown').join(', ');
+      if (valid.length === 0) {
+        window.alert(`All selected invoices are missing bank details: ${names}`);
+        return;
+      }
+      if (!window.confirm(`${missingBank.length} invoice(s) missing bank details will be skipped: ${names}.\n\nContinue with the remaining ${valid.length}?`)) {
+        return;
+      }
+    }
+
+    // Build CSV — RazorpayX 11-column format
+    const header = [
+      'Beneficiary Name (Mandatory)',
+      "Beneficiary's Account Number (Mandatory)",
+      'IFSC Code (Mandatory)',
+      'Payout Amount (Mandatory)',
+      'Payout Mode (Mandatory)',
+      'Payout Narration (Optional)',
+      'Notes (Optional)',
+      'Phone Number (Optional)',
+      'Email ID (Optional)',
+      'Contact Reference ID (Optional)',
+      'Payout Reference ID (Optional)',
+    ].join(',');
+
+    const csvEscape = (v: string) =>
+      v.includes(',') || v.includes('"') || v.includes('\n')
+        ? '"' + v.replace(/"/g, '""') + '"'
+        : v;
+    const sanitizeNarration = (text: string) =>
+      text.replace(/[^a-zA-Z0-9 ]/g, '').trim().slice(0, 30);
+
+    const rows = valid.map((inv) => {
+      const party = inv.party!;
+      const amount = Math.round(inv.balanceDue * 100) / 100;
+      const mode = amount >= 500000 ? 'NEFT' : 'IMPS';
+      const beneficiary = party.bankAccountName || party.name;
+      const narration = sanitizeNarration(party.name);
+      const notes = (inv.invoiceNumber || inv.id) + ' | ' + inv.category;
+      const refId = inv.invoiceNumber || inv.id;
+
+      return [
+        csvEscape(beneficiary),
+        csvEscape(party.bankAccountNumber!),
+        csvEscape(party.bankIfsc!),
+        String(amount),
+        mode,
+        csvEscape(narration),
+        csvEscape(notes),
+        party.phone || '',
+        party.email || '',
+        party.id,
+        csvEscape(refId),
+      ].join(',');
+    });
+
+    const csv = [header, ...rows].join('\n') + '\n';
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `razorpayx-payout-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [selectedIds, data?.invoices]);
 
   // When user clicks confirm on a payable draft, show the linking dialog
   // For receivable drafts, confirm directly
@@ -328,6 +441,11 @@ function InvoicesTab({ search }: { search: FinanceSearchParams }) {
         />
 
         <div className="ml-auto flex items-center gap-2">
+          {selectedIds.size > 0 && (
+            <Button variant="outline" onClick={handleDownloadPayoutCsv}>
+              <Download className="h-4 w-4 mr-1" /> Download Payout CSV ({selectedIds.size})
+            </Button>
+          )}
           <Button
             variant="outline"
             onClick={() => driveSyncMutation.mutate()}
@@ -352,6 +470,15 @@ function InvoicesTab({ search }: { search: FinanceSearchParams }) {
             <table className="w-full text-sm">
               <thead className="bg-muted/50">
                 <tr>
+                  <th className="p-3 w-10">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 rounded border-gray-300 accent-blue-600"
+                      checked={allSelectableSelected && selectableInvoices.length > 0}
+                      onChange={toggleSelectAll}
+                      disabled={selectableInvoices.length === 0}
+                    />
+                  </th>
                   <th className="text-left p-3 font-medium">Invoice #</th>
                   <th className="text-left p-3 font-medium">Type</th>
                   <th className="text-left p-3 font-medium">Category</th>
@@ -364,8 +491,25 @@ function InvoicesTab({ search }: { search: FinanceSearchParams }) {
                 </tr>
               </thead>
               <tbody>
-                {data?.invoices?.map((inv) => (
+                {data?.invoices?.map((inv) => {
+                  const isSelectable =
+                    inv.type === 'payable' &&
+                    (inv.status === 'confirmed' || inv.status === 'partially_paid') &&
+                    inv.balanceDue > 0;
+                  return (
                   <tr key={inv.id} className="border-t hover:bg-muted/30">
+                    <td className="p-3">
+                      {isSelectable ? (
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 rounded border-gray-300 accent-blue-600"
+                          checked={selectedIds.has(inv.id)}
+                          onChange={() => toggleSelect(inv.id)}
+                        />
+                      ) : (
+                        <span className="block h-4 w-4" />
+                      )}
+                    </td>
                     <td className="p-3 font-mono text-xs">{inv.invoiceNumber ?? '—'}</td>
                     <td className="p-3">
                       <span className={`inline-flex items-center gap-1 text-xs ${inv.type === 'payable' ? 'text-red-600' : 'text-green-600'}`}>
@@ -426,9 +570,10 @@ function InvoicesTab({ search }: { search: FinanceSearchParams }) {
                       </div>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
                 {(!data?.invoices || data.invoices.length === 0) && (
-                  <tr><td colSpan={9} className="p-8 text-center text-muted-foreground">No invoices found</td></tr>
+                  <tr><td colSpan={10} className="p-8 text-center text-muted-foreground">No invoices found</td></tr>
                 )}
               </tbody>
             </table>
