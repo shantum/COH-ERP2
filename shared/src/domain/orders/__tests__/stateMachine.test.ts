@@ -31,6 +31,7 @@ describe('orderStateMachine', () => {
                 'picked',
                 'packed',
                 'shipped',
+                'delivered',
                 'cancelled',
             ]);
         });
@@ -53,6 +54,7 @@ describe('orderStateMachine', () => {
             expect(isValidLineStatus('picked')).toBe(true);
             expect(isValidLineStatus('packed')).toBe(true);
             expect(isValidLineStatus('shipped')).toBe(true);
+            expect(isValidLineStatus('delivered')).toBe(true);
             expect(isValidLineStatus('cancelled')).toBe(true);
         });
 
@@ -79,6 +81,10 @@ describe('orderStateMachine', () => {
         it('allows packed -> shipped', () => {
             expect(isValidTransition('packed', 'shipped')).toBe(true);
         });
+
+        it('allows shipped -> delivered', () => {
+            expect(isValidTransition('shipped', 'delivered')).toBe(true);
+        });
     });
 
     describe('isValidTransition - Backward Corrections', () => {
@@ -96,6 +102,10 @@ describe('orderStateMachine', () => {
 
         it('allows shipped -> packed (unship)', () => {
             expect(isValidTransition('shipped', 'packed')).toBe(true);
+        });
+
+        it('allows delivered -> shipped (revert delivery)', () => {
+            expect(isValidTransition('delivered', 'shipped')).toBe(true);
         });
     });
 
@@ -144,8 +154,8 @@ describe('orderStateMachine', () => {
             expect(isValidTransition('pending', 'packed')).toBe(false);
         });
 
-        it('shipped can only go to packed (unship)', () => {
-            expect(getValidTargetStatuses('shipped')).toEqual(['packed']);
+        it('shipped can go to packed (unship) or delivered', () => {
+            expect(getValidTargetStatuses('shipped')).toEqual(['packed', 'delivered']);
         });
     });
 
@@ -195,6 +205,20 @@ describe('orderStateMachine', () => {
             expect(def?.description).toContain('Unship');
         });
 
+        it('returns correct definition for delivery', () => {
+            const def = getTransitionDefinition('shipped', 'delivered');
+            expect(def).not.toBeNull();
+            expect(def?.inventoryEffect).toBe('none');
+            expect(def?.timestamps).toContainEqual({ field: 'deliveredAt', action: 'set' });
+        });
+
+        it('returns correct definition for reverting delivery', () => {
+            const def = getTransitionDefinition('delivered', 'shipped');
+            expect(def).not.toBeNull();
+            expect(def?.inventoryEffect).toBe('none');
+            expect(def?.timestamps).toContainEqual({ field: 'deliveredAt', action: 'clear' });
+        });
+
         it('returns correct definition for cancel with inventory', () => {
             const def = getTransitionDefinition('allocated', 'cancelled');
             expect(def).not.toBeNull();
@@ -230,8 +254,12 @@ describe('orderStateMachine', () => {
             expect(getValidTargetStatuses('packed')).toEqual(['picked', 'shipped', 'cancelled']);
         });
 
-        it('returns packed as the only target for shipped (unship)', () => {
-            expect(getValidTargetStatuses('shipped')).toEqual(['packed']);
+        it('returns packed and delivered as targets for shipped', () => {
+            expect(getValidTargetStatuses('shipped')).toEqual(['packed', 'delivered']);
+        });
+
+        it('returns shipped as the only target for delivered', () => {
+            expect(getValidTargetStatuses('delivered')).toEqual(['shipped']);
         });
 
         it('returns correct targets for cancelled', () => {
@@ -312,6 +340,7 @@ describe('orderStateMachine', () => {
         it('returns false for statuses without allocated inventory', () => {
             expect(hasAllocatedInventory('pending')).toBe(false);
             expect(hasAllocatedInventory('shipped')).toBe(false);
+            expect(hasAllocatedInventory('delivered')).toBe(false);
             expect(hasAllocatedInventory('cancelled')).toBe(false);
         });
 
@@ -385,9 +414,9 @@ describe('orderStateMachine', () => {
             expect(error).toContain('unknown');
         });
 
-        it('handles shipped status with only packed as target', () => {
+        it('handles shipped status with packed and delivered as targets', () => {
             const error = buildTransitionError('shipped', 'cancelled');
-            expect(error).toContain('packed');
+            expect(error).toContain('packed, delivered');
         });
     });
 
@@ -423,8 +452,8 @@ describe('orderStateMachine', () => {
     });
 
     describe('SHIPPED_OR_BEYOND constant', () => {
-        it('contains shipped and beyond statuses', () => {
-            expect(SHIPPED_OR_BEYOND).toEqual(['shipped', 'delivered', 'rto_initiated', 'rto_received']);
+        it('contains shipped and delivered line statuses only', () => {
+            expect(SHIPPED_OR_BEYOND).toEqual(['shipped', 'delivered']);
         });
     });
 
@@ -471,6 +500,23 @@ describe('orderStateMachine', () => {
             })).toBe('delivered');
         });
 
+        it('returns returned when all active lines are shipped/delivered with rto_delivered tracking', () => {
+            expect(computeOrderStatus({
+                orderLines: [
+                    { lineStatus: 'shipped', trackingStatus: 'rto_delivered' },
+                    { lineStatus: 'shipped', trackingStatus: 'rto_delivered' },
+                ],
+            })).toBe('returned');
+
+            // With cancelled lines
+            expect(computeOrderStatus({
+                orderLines: [
+                    { lineStatus: 'shipped', trackingStatus: 'rto_delivered' },
+                    { lineStatus: 'cancelled' },
+                ],
+            })).toBe('returned');
+        });
+
         it('returns shipped when all active lines are shipped or beyond', () => {
             expect(computeOrderStatus({
                 orderLines: [
@@ -483,7 +529,7 @@ describe('orderStateMachine', () => {
             expect(computeOrderStatus({
                 orderLines: [
                     { lineStatus: 'shipped' },
-                    { lineStatus: 'rto_initiated' },
+                    { lineStatus: 'delivered' },
                 ],
             })).toBe('shipped');
 

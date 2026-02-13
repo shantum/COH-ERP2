@@ -17,11 +17,11 @@
 // TYPE DEFINITIONS
 // ============================================
 
-export type LineStatus = 'pending' | 'allocated' | 'picked' | 'packed' | 'shipped' | 'cancelled';
+export type LineStatus = 'pending' | 'allocated' | 'picked' | 'packed' | 'shipped' | 'delivered' | 'cancelled';
 
 export type InventoryEffect = 'none' | 'create_outward' | 'delete_outward';
 
-export type TimestampField = 'allocatedAt' | 'pickedAt' | 'packedAt' | 'shippedAt';
+export type TimestampField = 'allocatedAt' | 'pickedAt' | 'packedAt' | 'shippedAt' | 'deliveredAt';
 
 export interface TimestampAction {
     field: TimestampField;
@@ -147,6 +147,21 @@ export const LINE_STATUS_TRANSITIONS: Record<LineStatus, TransitionDefinition[]>
             timestamps: [{ field: 'shippedAt', action: 'clear' }],
             description: 'Unship (return to packed, clear AWB)',
         },
+        {
+            to: 'delivered',
+            inventoryEffect: 'none',
+            timestamps: [{ field: 'deliveredAt', action: 'set' }],
+            description: 'Mark as delivered (confirmed by tracking or channel)',
+        },
+    ],
+
+    delivered: [
+        {
+            to: 'shipped',
+            inventoryEffect: 'none',
+            timestamps: [{ field: 'deliveredAt', action: 'clear' }],
+            description: 'Revert to shipped (delivery was incorrect)',
+        },
     ],
 
     cancelled: [
@@ -160,7 +175,7 @@ export const LINE_STATUS_TRANSITIONS: Record<LineStatus, TransitionDefinition[]>
 };
 
 export const LINE_STATUSES: readonly LineStatus[] = [
-    'pending', 'allocated', 'picked', 'packed', 'shipped', 'cancelled',
+    'pending', 'allocated', 'picked', 'packed', 'shipped', 'delivered', 'cancelled',
 ] as const;
 
 /**
@@ -256,18 +271,18 @@ export function calculateInventoryDelta(fromStatus: string, toStatus: string, qt
 
 export type OrderStatus =
     | 'open'
-    | 'on_hold'
-    | 'partially_on_hold'
     | 'delivered'
     | 'shipped'
     | 'partially_shipped'
+    | 'returned'
     | 'cancelled'
     | 'archived';
 
-export const SHIPPED_OR_BEYOND = ['shipped', 'delivered', 'rto_initiated', 'rto_received'] as const;
+export const SHIPPED_OR_BEYOND = ['shipped', 'delivered'] as const;
 
 export interface OrderLineForStatus {
     lineStatus: string;
+    trackingStatus?: string | null;
 }
 
 export interface OrderForStatusComputation {
@@ -278,6 +293,8 @@ export interface OrderForStatusComputation {
 /**
  * Compute order status from line states (pure function).
  * Order status is derived, never set independently.
+ *
+ * Priority: archived > cancelled > returned > delivered > shipped > partially_shipped > open
  */
 export function computeOrderStatus(order: OrderForStatusComputation): OrderStatus {
     if (!order?.orderLines) {
@@ -289,6 +306,15 @@ export function computeOrderStatus(order: OrderForStatusComputation): OrderStatu
     const activeLines = order.orderLines.filter((l) => l.lineStatus !== 'cancelled');
 
     if (activeLines.length === 0) return 'cancelled';
+
+    // Returned: all active lines are shipped/delivered AND have RTO tracking
+    const allShippedOrDelivered = activeLines.every((l) =>
+        (SHIPPED_OR_BEYOND as readonly string[]).includes(l.lineStatus)
+    );
+    if (allShippedOrDelivered) {
+        const allRtoDelivered = activeLines.every((l) => l.trackingStatus === 'rto_delivered');
+        if (allRtoDelivered) return 'returned';
+    }
 
     const deliveredLines = activeLines.filter((l) => l.lineStatus === 'delivered');
     if (deliveredLines.length === activeLines.length) return 'delivered';

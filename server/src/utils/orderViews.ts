@@ -642,7 +642,6 @@ export interface FlattenedOrderRow {
     releasedToShipped: boolean;
     releasedToCancelled: boolean;
     isExchange: boolean;
-    isOnHold: boolean;
     orderAwbNumber: string | null;
     orderCourier: string | null;
     orderShippedAt: string | null;
@@ -725,6 +724,12 @@ export interface FlattenedOrderRow {
 
     // Customer tags
     customerTags: string[] | null;
+
+    // Delivery confirmation flag
+    // null = not applicable (not shipped yet, or already delivered)
+    // 'confirm_delivery' = tracking says delivered but lineStatus still shipped
+    // 'needs_review' = shipped 10+ days with no delivery confirmation
+    deliveryConfirmationFlag: 'confirm_delivery' | 'needs_review' | null;
 }
 
 /**
@@ -738,6 +743,35 @@ function parseCity(shippingAddress: string | null | undefined): string {
     } catch {
         return '-';
     }
+}
+
+/** Days after shipping before flagging as needs_review */
+const DELIVERY_REVIEW_DAYS = 10;
+
+/**
+ * Compute delivery confirmation flag for a single line.
+ * null = not applicable, 'confirm_delivery' = tracking says delivered, 'needs_review' = stale shipped
+ */
+function computeDeliveryFlag(
+    lineStatus: string | null,
+    trackingStatus: string | null,
+    shippedAt: string | null,
+): FlattenedOrderRow['deliveryConfirmationFlag'] {
+    // Not shipped yet or already delivered — no flag needed
+    if (!lineStatus || lineStatus !== 'shipped') return null;
+
+    // Tracking says delivered but line is still shipped — needs confirmation
+    if (trackingStatus === 'delivered') return 'confirm_delivery';
+
+    // Shipped 10+ days with no delivery confirmation from any source
+    if (shippedAt) {
+        const daysSinceShipped = Math.floor(
+            (Date.now() - new Date(shippedAt).getTime()) / (1000 * 60 * 60 * 24)
+        );
+        if (daysSinceShipped >= DELIVERY_REVIEW_DAYS) return 'needs_review';
+    }
+
+    return null;
 }
 
 /**
@@ -857,8 +891,6 @@ export function flattenOrdersToRows(orders: EnrichedOrder[]): FlattenedOrderRow[
                 releasedToShipped: (order.releasedToShipped as boolean) || false,
                 releasedToCancelled: (order.releasedToCancelled as boolean) || false,
                 isExchange: (order.isExchange as boolean) || false,
-                // Note: isOnHold, awbNumber, courier, shippedAt, trackingStatus are now at line level
-                isOnHold: false,
                 orderAwbNumber: null, // No lines, so no AWB
                 orderCourier: null,
                 orderShippedAt: null,
@@ -914,6 +946,7 @@ export function flattenOrdersToRows(orders: EnrichedOrder[]): FlattenedOrderRow[
                 shopifyCourier,
                 shopifyTrackingUrl,
                 customerTags,
+                deliveryConfirmationFlag: null,
             });
             continue;
         }
@@ -952,9 +985,6 @@ export function flattenOrdersToRows(orders: EnrichedOrder[]): FlattenedOrderRow[
                 releasedToShipped: (order.releasedToShipped as boolean) || false,
                 releasedToCancelled: (order.releasedToCancelled as boolean) || false,
                 isExchange: (order.isExchange as boolean) || false,
-                // Note: isOnHold, awbNumber, courier, shippedAt, trackingStatus are now at line level
-                // Use line-level values for "order" fields (for display purposes, use first line's values)
-                isOnHold: false,
                 orderAwbNumber: line.awbNumber || null,
                 orderCourier: line.courier || null,
                 orderShippedAt: line.shippedAt || null,
@@ -1028,6 +1058,11 @@ export function flattenOrdersToRows(orders: EnrichedOrder[]): FlattenedOrderRow[
                 shopifyCourier,
                 shopifyTrackingUrl,
                 customerTags,
+                deliveryConfirmationFlag: computeDeliveryFlag(
+                    line.lineStatus,
+                    line.trackingStatus,
+                    line.shippedAt,
+                ),
             });
         }
     }
@@ -1125,8 +1160,6 @@ export const LINE_SSE_SELECT = {
             releasedToCancelled: true,
             internalNotes: true,
             isExchange: true,
-            // Note: isOnHold, awbNumber, courier, shippedAt, trackingStatus removed from Order
-            // These fields are now at line level
             customer: {
                 select: {
                     tags: true,
@@ -1300,9 +1333,6 @@ export function flattenLineForSSE(
         releasedToCancelled: order.releasedToCancelled || false,
         internalNotes: order.internalNotes || null,
         isExchange: order.isExchange || false,
-        // Note: isOnHold, awbNumber, courier, shippedAt, trackingStatus are now at line level
-        // For SSE, use line-level values for these fields
-        isOnHold: false, // isOnHold no longer exists on Order
         orderAwbNumber: line.awbNumber || null, // Use line-level AWB
         orderCourier: line.courier || null, // Use line-level courier
         orderShippedAt: line.shippedAt instanceof Date ? line.shippedAt.toISOString() : (line.shippedAt || null), // Use line-level shippedAt
@@ -1390,5 +1420,12 @@ export function flattenLineForSSE(
 
         // Customer tags (stored as comma-separated string, split for display)
         customerTags: customer?.tags ? customer.tags.split(',').map(t => t.trim()) : null,
+
+        // Delivery confirmation flag
+        deliveryConfirmationFlag: computeDeliveryFlag(
+            line.lineStatus,
+            line.trackingStatus,
+            line.shippedAt instanceof Date ? line.shippedAt.toISOString() : (line.shippedAt || null),
+        ),
     };
 }

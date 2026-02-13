@@ -23,6 +23,7 @@ import { Readable } from 'stream';
 import { pushERPOrderToSheet, updateSheetChannelDetails } from '../services/sheetOrderPush.js';
 import { readRange } from '../services/googleSheetsClient.js';
 import { ORDERS_MASTERSHEET_ID, MASTERSHEET_TABS } from '../config/sync/sheets.js';
+import { recomputeOrderStatus } from '../utils/orderStatus.js';
 
 const router: Router = Router();
 
@@ -778,11 +779,13 @@ router.post('/execute-import', authenticateToken, async (req: Request, res: Resp
                   const status = line.fulfillmentStatus?.toLowerCase() || '';
                   const isShipped = status === 'shipped' || status === 'delivered' || status === 'manifested';
                   const isDelivered = status === 'delivered';
+                  const isCancelled = status === 'cancelled';
+                  const lineStatus = isDelivered ? 'delivered' : isShipped ? 'shipped' : isCancelled ? 'cancelled' : 'pending';
                   return {
                     skuId: line.skuId!,
                     qty: Math.max(line.qty, 1),
                     unitPrice: line.unitPrice,
-                    lineStatus: 'pending',
+                    lineStatus,
                     channelFulfillmentStatus: line.fulfillmentStatus || null,
                     channelItemId: line.channelItemId,
                     courier: line.courierName || null,
@@ -819,6 +822,9 @@ router.post('/execute-import', authenticateToken, async (req: Request, res: Resp
             });
           }
 
+          // Recompute order status from lines (lines may already be shipped/delivered from CSV)
+          await recomputeOrderStatus(order.id);
+
           // Track processing orders for sheet push
           const hasProcessing = matchedLines.some(l => l.fulfillmentStatus?.toLowerCase() === 'processing');
           if (hasProcessing) {
@@ -851,11 +857,14 @@ router.post('/execute-import', authenticateToken, async (req: Request, res: Resp
               const isDelivered = status === 'delivered';
               const isCancelled = status === 'cancelled';
 
-              // Only update lineStatus from pending — don't overwrite manual changes
+              // Update lineStatus based on CSV — respect ERP workflow for forward progression
               let newLineStatus: string | undefined;
               if (existing.lineStatus === 'pending') {
-                if (isShipped) newLineStatus = 'shipped';
+                if (isDelivered) newLineStatus = 'delivered';
+                else if (isShipped) newLineStatus = 'shipped';
                 else if (isCancelled) newLineStatus = 'cancelled';
+              } else if (existing.lineStatus === 'shipped' && isDelivered) {
+                newLineStatus = 'delivered';
               }
 
               await req.prisma.orderLine.update({
@@ -888,7 +897,7 @@ router.post('/execute-import', authenticateToken, async (req: Request, res: Resp
               const isShipped = status === 'shipped' || status === 'delivered' || status === 'manifested';
               const isDelivered = status === 'delivered';
               const isCancelled = status === 'cancelled';
-              const initialLineStatus = isShipped ? 'shipped' : isCancelled ? 'cancelled' : 'pending';
+              const initialLineStatus = isDelivered ? 'delivered' : isShipped ? 'shipped' : isCancelled ? 'cancelled' : 'pending';
               const newLine = await req.prisma.orderLine.create({
                 data: {
                   orderId: previewOrder.existingOrderId,
@@ -919,6 +928,9 @@ router.post('/execute-import', authenticateToken, async (req: Request, res: Resp
               });
             }
           }
+          // Recompute order status from lines after updates
+          await recomputeOrderStatus(previewOrder.existingOrderId);
+
           ordersUpdated++;
         }
       } catch (orderError) {

@@ -26,14 +26,10 @@ import { trackWorkerRun } from '../utils/workerRunTracker.js';
 /** Nullable tracking status for database fields */
 type NullableTrackingStatus = TrackingStatus | null;
 
-/** Order status */
-type OrderStatus = 'pending' | 'open' | 'allocated' | 'picked' | 'packed' | 'shipped' | 'delivered' | 'returned' | 'cancelled' | 'archived';
-
 /** Order info for AWB mapping */
 interface OrderInfo {
     orderId: string;
     orderNumber: string;
-    orderStatus: OrderStatus;
     paymentMethod: PaymentMethod;
     customerId: string | null;
     rtoInitiatedAt: Date | null;
@@ -69,17 +65,9 @@ interface LineUpdateData {
     rtoReceivedAt?: Date;
 }
 
-/** Order update data for Prisma - ONLY status field exists on Order now */
-/** All tracking fields (trackingStatus, lastScanAt, deliveredAt, etc.) moved to OrderLine */
-interface OrderUpdateData {
-    status?: OrderStatus;
-}
-
 /** Result of line tracking update */
 interface UpdateResult {
     lineUpdateData: LineUpdateData;
-    orderUpdateData: OrderUpdateData;
-    statusChanged: boolean;
 }
 
 /** Sync result summary */
@@ -165,7 +153,6 @@ async function getAwbsNeedingUpdate(): Promise<Map<string, OrderInfo>> {
         trackingStatus: string | null;
         orderId: string;
         orderNumber: string;
-        status: string;
         paymentMethod: string;
         customerId: string | null;
         rtoInitiatedAt: Date | null;
@@ -177,7 +164,6 @@ async function getAwbsNeedingUpdate(): Promise<Map<string, OrderInfo>> {
                 ol."trackingStatus",
                 ol."orderId",
                 o."orderNumber",
-                o.status,
                 o."paymentMethod",
                 o."customerId",
                 ol."rtoInitiatedAt",
@@ -199,7 +185,6 @@ async function getAwbsNeedingUpdate(): Promise<Map<string, OrderInfo>> {
             awbMap.set(line.awbNumber, {
                 orderId: line.orderId,
                 orderNumber: line.orderNumber,
-                orderStatus: line.status as OrderStatus,
                 paymentMethod: line.paymentMethod as PaymentMethod,
                 customerId: line.customerId,
                 rtoInitiatedAt: line.rtoInitiatedAt,
@@ -254,30 +239,20 @@ async function updateLineTracking(
         data: lineUpdateData,
     });
 
-    // Update Order.status ONLY for terminal states (RTO delivered, cancelled)
-    // NOTE: All tracking fields (trackingStatus, lastScanAt, deliveredAt, rtoInitiatedAt, etc.)
-    // have been moved to OrderLine. Order only has `status` field now.
-    const orderUpdateData: OrderUpdateData = {};
-    let statusChanged = false;
-
+    // Promote lineStatus to 'delivered' when tracking confirms delivery
+    // Only promote lines that are currently 'shipped' (don't touch cancelled/pending lines)
     if (trackingData.internalStatus === 'delivered') {
-        trackingLogger.info({ orderNumber: orderInfo.orderNumber }, 'Order delivered (line-level tracking)');
-    }
-
-    if (trackingData.internalStatus === 'rto_delivered') {
-        if (orderInfo.orderStatus === 'shipped' || orderInfo.orderStatus === 'delivered') {
-            orderUpdateData.status = 'returned';
-            statusChanged = true;
-            trackingLogger.info({ orderNumber: orderInfo.orderNumber, newStatus: 'returned' }, 'Order status changed (RTO delivered)');
-        }
-    }
-
-    if (trackingData.internalStatus === 'cancelled') {
-        if (orderInfo.orderStatus === 'shipped') {
-            orderUpdateData.status = 'cancelled';
-            statusChanged = true;
-            trackingLogger.info({ orderNumber: orderInfo.orderNumber, newStatus: 'cancelled' }, 'Order status changed');
-        }
+        await prisma.orderLine.updateMany({
+            where: {
+                awbNumber,
+                lineStatus: 'shipped',
+            },
+            data: {
+                lineStatus: 'delivered',
+                deliveredAt: lineUpdateData.deliveredAt || new Date(),
+            },
+        });
+        trackingLogger.info({ orderNumber: orderInfo.orderNumber }, 'Promoted shipped lines to delivered');
     }
 
     // Increment customer RTO count on first RTO initiation
@@ -289,27 +264,16 @@ async function updateLineTracking(
         trackingLogger.info({ customerId: orderInfo.customerId }, 'Incremented customer rtoCount');
     }
 
-    // Only update Order if status changed
-    if (Object.keys(orderUpdateData).length > 0) {
-        await prisma.order.update({
-            where: { id: orderInfo.orderId },
-            data: orderUpdateData,
-        });
-    }
-
-    // Also recompute order status from lines
-    if (!statusChanged) {
-        await recomputeOrderStatus(orderInfo.orderId);
-    }
+    // Always recompute order status from lines (single source of truth)
+    await recomputeOrderStatus(orderInfo.orderId);
 
     // Update customer tier on RTO (order no longer counts toward LTV)
-    // Note: Delivery doesn't need tier update since order already counted at creation
     const isNewRto = lineUpdateData.rtoInitiatedAt && !orderInfo.rtoInitiatedAt;
     if (isNewRto && orderInfo.customerId) {
         await updateCustomerTier(prisma, orderInfo.customerId);
     }
 
-    return { lineUpdateData, orderUpdateData, statusChanged };
+    return { lineUpdateData };
 }
 
 /**
@@ -444,17 +408,14 @@ async function runTrackingSync(): Promise<SyncResult | null> {
                         const previousStatus = orderInfo.previousTrackingStatus;
                         const newStatus = trackingData.internalStatus;
 
-                        // Update lines (source of truth)
-                        const updateResult = await updateLineTracking(awb, trackingData, orderInfo);
+                        // Update lines (source of truth) and recompute order status
+                        await updateLineTracking(awb, trackingData, orderInfo);
                         result.updated++;
 
                         // Track status transitions for logging
                         if (previousStatus !== newStatus) {
                             if (newStatus === 'delivered') {
                                 result.delivered++;
-                                if (updateResult.orderUpdateData?.status === 'archived') {
-                                    result.archived++;
-                                }
                             }
 
                             if (newStatus?.startsWith('rto_')) {

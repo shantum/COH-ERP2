@@ -33,6 +33,7 @@ import { withOrderLock } from '../utils/orderLock.js';
 import { detectPaymentMethod, extractInternalNote, calculateEffectiveUnitPrice } from '../utils/shopifyHelpers.js';
 import { updateCustomerTier, incrementCustomerOrderCount } from '../utils/tierUtils.js';
 import { syncLogger } from '../utils/logger.js';
+import { recomputeOrderStatus } from '../utils/orderStatus.js';
 
 // ============================================
 // TYPE DEFINITIONS
@@ -501,8 +502,30 @@ export async function syncFulfillmentsToOrderLines(
         }
     }
 
-    // Note: We no longer auto-update order status here
-    // ERP is source of truth - shipped status must go through ERP workflow
+    // Promote shipped lines to delivered when Shopify says delivered
+    // Check if any fulfillment has shipment_status 'delivered'
+    const hasDeliveredFulfillment = fulfillments.some(
+        f => f.shipment_status === 'delivered'
+    );
+    if (hasDeliveredFulfillment) {
+        const promoted = await prisma.orderLine.updateMany({
+            where: {
+                orderId,
+                lineStatus: 'shipped',
+                trackingStatus: 'delivered',
+            },
+            data: {
+                lineStatus: 'delivered',
+                deliveredAt: new Date(),
+            },
+        });
+        if (promoted.count > 0) {
+            syncLogger.info({
+                orderNumber: shopifyOrder.name,
+                promotedCount: promoted.count,
+            }, 'Promoted shipped lines to delivered (Shopify confirmation)');
+        }
+    }
 
     return { synced: syncedCount, fulfillments: fulfillments.length };
 }
@@ -752,6 +775,10 @@ async function handleExistingOrderUpdate(
         }
 
         const fulfillmentSync = await syncFulfillmentsToOrderLines(prisma, existingOrder.id, shopifyOrder);
+
+        // Recompute order status from lines after any mutation
+        await recomputeOrderStatus(existingOrder.id);
+
         return { action: changeType, orderId: existingOrder.id, fulfillmentSync };
     }
 
