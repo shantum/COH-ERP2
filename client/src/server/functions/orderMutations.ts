@@ -17,6 +17,7 @@ import {
     hasAllocatedInventory as sharedHasAllocatedInventory,
     computeOrderStatus,
 } from '@coh/shared/domain';
+import { getInternalApiBaseUrl } from '../utils';
 
 // ============================================
 // INPUT SCHEMAS
@@ -222,7 +223,7 @@ async function broadcastUpdate(event: OrderUpdateEvent, excludeUserId: string): 
         // Dynamic import of SSE broadcast from server
         // In TanStack Start, we need to call the Express server's SSE endpoint
         // For now, we'll use a fetch call to the internal API
-        const baseUrl = process.env.VITE_API_URL || 'http://localhost:3001';
+        const baseUrl = getInternalApiBaseUrl();
         await fetch(`${baseUrl}/api/internal/sse-broadcast`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -750,12 +751,14 @@ export const createOrder = createServerFn({ method: 'POST' })
         );
 
         // Push to "Orders from COH" sheet (fire-and-forget, same pattern as SSE broadcast)
-        const baseUrl = process.env.VITE_API_URL || 'http://localhost:3001';
-        fetch(`${baseUrl}/api/internal/push-order-to-sheet`, {
+        const sheetBaseUrl = getInternalApiBaseUrl();
+        fetch(`${sheetBaseUrl}/api/internal/push-order-to-sheet`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ orderId: order.id }),
-        }).catch(() => {});
+        }).catch((err: unknown) => {
+            console.error('[Server Function] Sheet push failed:', err instanceof Error ? err.message : String(err));
+        });
 
         return {
             success: true,

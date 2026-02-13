@@ -17,6 +17,7 @@ import { getCookie } from '@tanstack/react-start/server';
 import { z } from 'zod';
 import { authMiddleware, type AuthUser } from '../middleware/auth';
 import { getPrisma, type PrismaTransaction } from '@coh/shared/services/db';
+import { getInternalApiBaseUrl } from '../utils';
 import type { PrismaClient } from '@prisma/client';
 
 // ============================================
@@ -969,7 +970,7 @@ export const scheduleReturnPickup = createServerFn({ method: 'POST' })
         // If using iThink, call Express route (auto-groups batch)
         if (shouldUseIthink) {
             try {
-                const baseUrl = process.env.VITE_API_URL || 'http://localhost:3001';
+                const baseUrl = getInternalApiBaseUrl();
                 const authToken = getCookie('auth_token');
                 const headers: Record<string, string> = { 'Content-Type': 'application/json' };
                 if (authToken) {

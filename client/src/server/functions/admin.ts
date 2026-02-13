@@ -18,6 +18,7 @@ import { createServerFn } from '@tanstack/react-start';
 import { getCookie } from '@tanstack/react-start/server';
 import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth';
+import { getInternalApiBaseUrl } from '../utils';
 import { getPrisma } from '@coh/shared/services/db';
 
 
@@ -958,7 +959,7 @@ export const getServerLogs = createServerFn({ method: 'GET' })
         const { level, limit, offset, search } = data;
 
         // Call the Express backend API for logs
-        const baseUrl = process.env.VITE_API_URL || 'http://localhost:3001';
+        const baseUrl = getInternalApiBaseUrl();
         const params = new URLSearchParams();
         params.set('level', level);
         params.set('limit', String(limit));
@@ -1197,7 +1198,7 @@ export const cancelBackgroundJob = createServerFn({ method: 'POST' })
         const { jobId } = data;
 
         // Call the Express backend API to update job settings (disable)
-        const baseUrl = process.env.VITE_API_URL || 'http://localhost:3001';
+        const baseUrl = getInternalApiBaseUrl();
 
         try {
             const response = await fetch(`${baseUrl}/api/admin/background-jobs/${jobId}`, {
@@ -1842,7 +1843,7 @@ export const getLogStats = createServerFn({ method: 'GET' })
         }
 
         // Call the Express backend API for log stats
-        const baseUrl = process.env.VITE_API_URL || 'http://localhost:3001';
+        const baseUrl = getInternalApiBaseUrl();
 
         try {
             const response = await fetch(`${baseUrl}/api/admin/logs/stats`, {
@@ -1885,7 +1886,7 @@ export const clearLogs = createServerFn({ method: 'POST' })
         }
 
         // Call the Express backend API to clear logs
-        const baseUrl = process.env.VITE_API_URL || 'http://localhost:3001';
+        const baseUrl = getInternalApiBaseUrl();
 
         try {
             const response = await fetch(`${baseUrl}/api/admin/logs`, {

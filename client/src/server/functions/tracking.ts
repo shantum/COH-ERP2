@@ -11,6 +11,7 @@ import { createServerFn } from '@tanstack/react-start';
 import { getCookie } from '@tanstack/react-start/server';
 import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth';
+import { getInternalApiBaseUrl } from '../utils';
 
 // ============================================
 // INPUT SCHEMAS
@@ -98,7 +99,7 @@ export interface GetLabelResponse {
 // ============================================
 
 function getApiBaseUrl(): string {
-    return process.env.VITE_API_URL || 'http://localhost:3001/api';
+    return process.env.VITE_API_URL || `${getInternalApiBaseUrl()}/api`;
 }
 
 // ============================================

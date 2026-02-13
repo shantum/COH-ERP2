@@ -15,6 +15,7 @@ import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth';
 import { getPrisma, type PrismaTransaction } from '@coh/shared/services/db';
+import { getInternalApiBaseUrl } from '../utils';
 
 // ============================================
 // INPUT SCHEMAS
@@ -258,7 +259,7 @@ interface ProductionUpdateEvent {
 
 async function broadcastUpdate(event: ProductionUpdateEvent, excludeUserId: string | null): Promise<void> {
     try {
-        const baseUrl = process.env.VITE_API_URL || 'http://localhost:3001';
+        const baseUrl = getInternalApiBaseUrl();
         await fetch(`${baseUrl}/api/internal/sse-broadcast`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
