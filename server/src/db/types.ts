@@ -4,6 +4,47 @@ export type Generated<T> = T extends ColumnType<infer S, infer I, infer U>
   : ColumnType<T, T | undefined, T>;
 export type Timestamp = ColumnType<Date, Date | string, Date | string>;
 
+export type BankImportBatch = {
+    id: Generated<string>;
+    bank: string;
+    fileName: string;
+    rowCount: number;
+    newCount: number;
+    skippedCount: number;
+    totalDebits: number;
+    totalCredits: number;
+    openingBalance: number | null;
+    closingBalance: number | null;
+    balanceMatched: boolean | null;
+    createdAt: Generated<Timestamp>;
+};
+export type BankTransaction = {
+    id: Generated<string>;
+    bank: string;
+    txnHash: string;
+    rawData: unknown;
+    txnDate: Timestamp;
+    amount: number;
+    direction: string;
+    narration: string | null;
+    reference: string | null;
+    utr: string | null;
+    closingBalance: number | null;
+    counterpartyName: string | null;
+    debitAccountCode: string | null;
+    creditAccountCode: string | null;
+    category: string | null;
+    partyId: string | null;
+    matchedInvoiceId: string | null;
+    status: Generated<string>;
+    skipReason: string | null;
+    ledgerEntryId: string | null;
+    paymentId: string | null;
+    legacySourceId: string | null;
+    batchId: string | null;
+    createdAt: Generated<Timestamp>;
+    updatedAt: Timestamp;
+};
 export type ChannelImportBatch = {
     id: Generated<string>;
     channel: string;
@@ -1309,6 +1350,8 @@ export type WriteOffLog = {
     createdAt: Generated<Timestamp>;
 };
 export type DB = {
+    BankImportBatch: BankImportBatch;
+    BankTransaction: BankTransaction;
     ChannelImportBatch: ChannelImportBatch;
     ChannelOrderLine: ChannelOrderLine;
     ComponentRole: ComponentRole;

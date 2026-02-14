@@ -1,4 +1,6 @@
 /**
+ * @deprecated Use import-bank-v2.ts instead (Bank Import V2).
+ *
  * Import HDFC Bank Statement (Bulk)
  *
  * Imports the main HDFC business account transactions into the Finance system.

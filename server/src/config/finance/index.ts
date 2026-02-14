@@ -262,6 +262,9 @@ export const LEDGER_SOURCE_TYPES = [
   'return_cogs_reversal',
   'manual',
   'adjustment',
+  'cc_charge',
+  'bank_import',
+  'cc_charge_import',
 ] as const;
 
 export type LedgerSourceType = (typeof LEDGER_SOURCE_TYPES)[number];

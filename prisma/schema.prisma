@@ -346,6 +346,7 @@ model Party {
   financeInvoices            Invoice[]           @relation("InvoiceParty")
   financePayments            Payment[]           @relation("PaymentParty")
   employee                   Employee?
+  bankTransactions           BankTransaction[]   @relation("BankTxnParty")
 
   @@index([category])
 }
@@ -1858,6 +1859,7 @@ model LedgerEntry {
   lines      LedgerEntryLine[]
   invoice    Invoice?      @relation("InvoiceLedgerEntry")
   payment    Payment?      @relation("PaymentLedgerEntry")
+  bankTransaction BankTransaction? @relation("BankTxnLedgerEntry")
 
   @@unique([sourceType, sourceId]) // Idempotency: one entry per source event
   @@index([entryDate])
@@ -1946,6 +1948,7 @@ model Invoice {
   lines         InvoiceLine[]
   matchedPayments PaymentInvoice[]
   payrollSlip   PayrollSlip?     @relation("PayrollSlipInvoice")
+  bankTransactions BankTransaction[] @relation("BankTxnInvoice")
 
   @@index([type])
   @@index([status])
@@ -2020,6 +2023,7 @@ model Payment {
   ledgerEntry LedgerEntry? @relation("PaymentLedgerEntry", fields: [ledgerEntryId], references: [id])
   createdBy   User         @relation("PaymentCreator", fields: [createdById], references: [id])
   matchedInvoices PaymentInvoice[]
+  bankTransaction BankTransaction? @relation("BankTxnPayment")
 
   @@index([direction])
   @@index([method])
@@ -2210,4 +2214,77 @@ model PayrollSlip {
   @@unique([payrollRunId, employeeId])
   @@index([payrollRunId])
   @@index([employeeId])
+}
+
+// ============================================
+// BANK IMPORT V2
+// ============================================
+
+/// Raw bank transaction row — imported from CSV/hardcoded data, then categorized, then optionally posted to ledger
+model BankTransaction {
+  id                String    @id @default(uuid())
+  bank              String    // "hdfc" | "razorpayx" | "hdfc_cc" | "icici_cc"
+  txnHash           String    @unique // SHA-256 hash for dedup
+  rawData           Json      // Original CSV row as-is
+  txnDate           DateTime
+  amount            Float
+  direction         String    // "debit" | "credit" — from bank's perspective
+  narration         String?
+  reference         String?   // HDFC ref, RazorpayX payout_id, etc.
+  utr               String?
+  closingBalance    Float?
+
+  // Categorization (null until categorized)
+  counterpartyName  String?
+  debitAccountCode  String?
+  creditAccountCode String?
+  category          String?
+  partyId           String?
+  matchedInvoiceId  String?
+
+  // Status: imported → categorized → posted | skipped | legacy_posted
+  status            String    @default("imported")
+  skipReason        String?
+
+  // Links to existing records
+  ledgerEntryId     String?   @unique
+  paymentId         String?   @unique
+  legacySourceId    String?   // Old sourceId format for audit matching
+
+  // Batch tracking
+  batchId           String?
+
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  // Relations
+  party             Party?        @relation("BankTxnParty", fields: [partyId], references: [id])
+  matchedInvoice    Invoice?      @relation("BankTxnInvoice", fields: [matchedInvoiceId], references: [id])
+  ledgerEntry       LedgerEntry?  @relation("BankTxnLedgerEntry", fields: [ledgerEntryId], references: [id])
+  payment           Payment?      @relation("BankTxnPayment", fields: [paymentId], references: [id])
+  batch             BankImportBatch? @relation(fields: [batchId], references: [id])
+
+  @@index([bank, status])
+  @@index([txnDate])
+  @@index([utr])
+  @@index([legacySourceId])
+  @@index([batchId])
+}
+
+/// Batch metadata for a single CSV import run
+model BankImportBatch {
+  id              String    @id @default(uuid())
+  bank            String
+  fileName        String
+  rowCount        Int
+  newCount        Int
+  skippedCount    Int
+  totalDebits     Float
+  totalCredits    Float
+  openingBalance  Float?
+  closingBalance  Float?
+  balanceMatched  Boolean?
+  createdAt       DateTime  @default(now())
+
+  transactions    BankTransaction[]
 }

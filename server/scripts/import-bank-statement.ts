@@ -1,4 +1,6 @@
 /**
+ * @deprecated Use import-bank-v2.ts instead (Bank Import V2).
+ *
  * Import RazorpayX Bank Statement (Bulk)
  *
  * Imports processed payouts from RazorpayX CSV into the Finance system.
