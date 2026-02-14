@@ -270,6 +270,13 @@ export const LEDGER_SOURCE_TYPES = [
 export type LedgerSourceType = (typeof LEDGER_SOURCE_TYPES)[number];
 
 // ============================================
+// BANK IMPORT THRESHOLDS
+// ============================================
+
+/** Outgoing payments below this amount skip AP and post directly as expenses */
+export const AUTO_CLEAR_AMOUNT_THRESHOLD = 100;
+
+// ============================================
 // HELPER FUNCTIONS
 // ============================================
 

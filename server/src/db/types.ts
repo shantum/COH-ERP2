@@ -36,6 +36,8 @@ export type BankTransaction = {
     category: string | null;
     partyId: string | null;
     matchedInvoiceId: string | null;
+    intendedDebitAccount: string | null;
+    postingType: string | null;
     status: Generated<string>;
     skipReason: string | null;
     ledgerEntryId: string | null;
@@ -702,6 +704,7 @@ export type Party = {
     razorpayContactId: string | null;
     paymentTermsDays: number | null;
     aliases: Generated<string[]>;
+    invoiceRequired: Generated<boolean>;
     isActive: Generated<boolean>;
     createdAt: Generated<Timestamp>;
     updatedAt: Timestamp;

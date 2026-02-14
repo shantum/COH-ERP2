@@ -332,6 +332,7 @@ model Party {
   razorpayContactId String?
   paymentTermsDays  Int?
   aliases           String[] @default([])
+  invoiceRequired   Boolean  @default(true)
   isActive          Boolean  @default(true)
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
@@ -1958,6 +1959,7 @@ model Invoice {
   @@index([orderId])
   @@index([createdAt])
   @@index([invoiceNumber])
+  @@index([partyId, invoiceNumber, invoiceDate])
 }
 
 /// Line item on an invoice
@@ -2241,6 +2243,10 @@ model BankTransaction {
   category          String?
   partyId           String?
   matchedInvoiceId  String?
+
+  // AP routing — preserves categorizer's intent even when posted to AP
+  intendedDebitAccount String?  // The expense account from categorization
+  postingType          String?  // 'single_step' or 'two_step'
 
   // Status: imported → categorized → posted | skipped | legacy_posted
   status            String    @default("imported")
