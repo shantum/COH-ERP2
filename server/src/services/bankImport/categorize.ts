@@ -1,18 +1,19 @@
 /**
  * Bank Import V2 — Categorize Service
  *
- * Applies bank rules to imported BankTransactions.
- * Sets debitAccountCode, creditAccountCode, category, partyId, matchedInvoiceId.
- * Same logic as old import scripts — just separated from the posting step.
+ * Party-centric categorization: matches narrations to Party records via aliases,
+ * then uses the Party's TransactionType for accounting treatment.
+ *
+ * No hardcoded rules — all config lives in the database (Party + TransactionType).
+ * To add a new vendor, create a Party record in the UI. Zero code changes.
  */
 
 import { PrismaClient } from '@prisma/client';
 import {
-  matchNarrationRule,
-  getUpiPayeeRule,
-  getVendorRule,
-  PURPOSE_RULES,
-} from '../../config/finance/bankRules.js';
+  findPartyByNarration,
+  resolveAccounting,
+  type PartyWithTxnType,
+} from '../transactionTypeResolver.js';
 
 const prisma = new PrismaClient();
 
@@ -35,58 +36,21 @@ interface CategoryInfo {
   description: string;
   category?: string;
   counterpartyName?: string;
+  partyId?: string;
 }
 
 // ============================================
-// HDFC CATEGORIZATION (same as old script)
+// BANK-SPECIFIC NARRATION PARSING
 // ============================================
 
-function categorizeHdfc(narration: string, direction: 'debit' | 'credit'): CategoryInfo {
-  const isWithdrawal = direction === 'debit';
-  const n = narration.toUpperCase();
-
-  const rule = matchNarrationRule(narration, isWithdrawal);
-  if (rule) {
-    if (rule.skip) {
-      return { skip: true, skipReason: 'inter_account_transfer', debitAccount: '', creditAccount: '', description: rule.description || 'Skipped' };
-    }
-    return {
-      debitAccount: rule.debitAccount!,
-      creditAccount: rule.creditAccount!,
-      description: rule.description || narration.slice(0, 60),
-      category: rule.category,
-    };
-  }
-
-  if (n.startsWith('UPI-')) {
-    const parts = narration.split('-');
-    const payeeName = parts.length > 1 ? parts[1].trim() : 'Unknown';
-    const upiDesc = parts[parts.length - 1]?.trim() || '';
-    const upiRule = getUpiPayeeRule(payeeName);
-    if (isWithdrawal) {
-      if (upiRule) {
-        return {
-          debitAccount: upiRule.debitAccount,
-          creditAccount: 'BANK_HDFC',
-          description: `${upiRule.description} — ${payeeName}`,
-          category: upiRule.category,
-          counterpartyName: payeeName,
-        };
-      }
-      return { debitAccount: 'UNMATCHED_PAYMENTS', creditAccount: 'BANK_HDFC', description: `UPI: ${payeeName} — ${upiDesc}`.slice(0, 80), counterpartyName: payeeName };
-    }
-    return { debitAccount: 'BANK_HDFC', creditAccount: 'UNMATCHED_PAYMENTS', description: `UPI deposit: ${payeeName} — ${upiDesc}`.slice(0, 80) };
-  }
-
-  if (isWithdrawal && n.includes('IMPS')) return { debitAccount: 'UNMATCHED_PAYMENTS', creditAccount: 'BANK_HDFC', description: `IMPS: ${narration.slice(0, 60)}` };
-  if (isWithdrawal) return { debitAccount: 'UNMATCHED_PAYMENTS', creditAccount: 'BANK_HDFC', description: `Payment: ${narration.slice(0, 60)}` };
-  return { debitAccount: 'BANK_HDFC', creditAccount: 'UNMATCHED_PAYMENTS', description: `Deposit: ${narration.slice(0, 60)}` };
+/** Extract UPI payee name from HDFC narration: "UPI-PAYEE NAME-upi@bank-..." */
+function extractUpiPayee(narration: string): string | null {
+  if (!narration.toUpperCase().startsWith('UPI-')) return null;
+  const parts = narration.split('-');
+  return parts.length > 1 ? parts[1].trim() : null;
 }
 
-// ============================================
-// RAZORPAYX CATEGORIZATION (same as old script)
-// ============================================
-
+/** Extract note description from RazorpayX raw data */
 function extractNoteDescription(rawData: Record<string, unknown>): string | null {
   const notes = String(rawData.notes ?? '{}');
   if (!notes || notes === '{}') return null;
@@ -98,30 +62,137 @@ function extractNoteDescription(rawData: Record<string, unknown>): string | null
   } catch { return null; }
 }
 
-function categorizeRazorpayxPayout(rawData: Record<string, unknown>): CategoryInfo {
+// ============================================
+// HDFC CATEGORIZATION
+// ============================================
+
+function categorizeHdfc(
+  narration: string,
+  direction: 'debit' | 'credit',
+  parties: PartyWithTxnType[],
+): CategoryInfo {
+  const isWithdrawal = direction === 'debit';
+
+  // Try alias-based Party match on the full narration
+  const party = findPartyByNarration(narration, parties);
+
+  if (party) {
+    const acct = resolveAccounting(party);
+    const bankAccount = 'BANK_HDFC';
+
+    // Inter-bank transfer: skip if TransactionType is "Inter-bank Transfer"
+    // and it's a known skip pattern (054105001906 ICICI transfer)
+    if (party.transactionType?.name === 'Inter-bank Transfer') {
+      // Check if this is an incoming transfer from RazorpayX or outgoing to it
+      const debit = isWithdrawal ? (acct.debitAccount || 'BANK_RAZORPAYX') : bankAccount;
+      const credit = isWithdrawal ? bankAccount : (acct.creditAccount || 'BANK_RAZORPAYX');
+      return {
+        debitAccount: debit,
+        creditAccount: credit,
+        description: `Transfer: ${party.name}`,
+        partyId: party.id,
+      };
+    }
+
+    if (isWithdrawal) {
+      return {
+        debitAccount: acct.debitAccount || 'UNMATCHED_PAYMENTS',
+        creditAccount: bankAccount,
+        description: `${party.name}`.slice(0, 80),
+        category: acct.category || undefined,
+        counterpartyName: party.name,
+        partyId: party.id,
+      };
+    } else {
+      return {
+        debitAccount: bankAccount,
+        creditAccount: acct.creditAccount || 'UNMATCHED_PAYMENTS',
+        description: `${party.name}`.slice(0, 80),
+        category: acct.category || undefined,
+        counterpartyName: party.name,
+        partyId: party.id,
+      };
+    }
+  }
+
+  // No Party match — try UPI payee extraction for display
+  const upiPayee = extractUpiPayee(narration);
+  if (upiPayee) {
+    const upiDesc = narration.split('-').pop()?.trim() || '';
+    if (isWithdrawal) {
+      return { debitAccount: 'UNMATCHED_PAYMENTS', creditAccount: 'BANK_HDFC', description: `UPI: ${upiPayee} — ${upiDesc}`.slice(0, 80), counterpartyName: upiPayee };
+    }
+    return { debitAccount: 'BANK_HDFC', creditAccount: 'UNMATCHED_PAYMENTS', description: `UPI deposit: ${upiPayee} — ${upiDesc}`.slice(0, 80) };
+  }
+
+  // Generic fallback
+  if (isWithdrawal) return { debitAccount: 'UNMATCHED_PAYMENTS', creditAccount: 'BANK_HDFC', description: `Payment: ${narration.slice(0, 60)}` };
+  return { debitAccount: 'BANK_HDFC', creditAccount: 'UNMATCHED_PAYMENTS', description: `Deposit: ${narration.slice(0, 60)}` };
+}
+
+// ============================================
+// RAZORPAYX CATEGORIZATION
+// ============================================
+
+/** RazorpayX purpose → fallback accounts (for refund/salary/rzp_fees without Party match) */
+const PURPOSE_FALLBACK: Record<string, { debitAccount: string; creditAccount: string }> = {
+  refund:   { debitAccount: 'SALES_REVENUE',     creditAccount: 'BANK_RAZORPAYX' },
+  salary:   { debitAccount: 'OPERATING_EXPENSES', creditAccount: 'BANK_RAZORPAYX' },
+  rzp_fees: { debitAccount: 'MARKETPLACE_FEES',   creditAccount: 'BANK_RAZORPAYX' },
+};
+
+function categorizeRazorpayxPayout(
+  rawData: Record<string, unknown>,
+  parties: PartyWithTxnType[],
+): CategoryInfo {
   const contactName = String(rawData.contact_name ?? '');
   const purpose = String(rawData.purpose ?? '');
-  const referenceId = String(rawData.reference_id ?? '').trim();
   const noteDesc = extractNoteDescription(rawData);
 
-  if (purpose === 'vendor bill') {
-    const info = getVendorRule(contactName, purpose, noteDesc);
-    const desc = noteDesc || info.description || info.category;
+  // Try Party match by contact name
+  const party = findPartyByNarration(contactName, parties);
+
+  if (party && purpose === 'vendor bill') {
+    const acct = resolveAccounting(party);
+    const desc = noteDesc || party.name;
     return {
-      debitAccount: info.debitAccount,
+      debitAccount: acct.debitAccount || 'UNMATCHED_PAYMENTS',
       creditAccount: 'BANK_RAZORPAYX',
       description: `Vendor: ${desc} — ${contactName}`,
-      category: info.category,
+      category: acct.category || undefined,
       counterpartyName: contactName,
+      partyId: party.id,
     };
   }
 
-  if (PURPOSE_RULES[purpose]) {
-    const rule = PURPOSE_RULES[purpose];
+  // Purpose-based fallback (refund, salary, rzp_fees)
+  if (PURPOSE_FALLBACK[purpose]) {
+    const rule = PURPOSE_FALLBACK[purpose];
     const desc = purpose === 'refund' ? `Customer refund — ${contactName}`
       : purpose === 'salary' ? `Salary: ${noteDesc || 'Salary'} — ${contactName}`
       : `Razorpay fee`;
-    return { debitAccount: rule.debitAccount, creditAccount: rule.creditAccount, description: desc, category: purpose };
+
+    return {
+      debitAccount: rule.debitAccount,
+      creditAccount: rule.creditAccount,
+      description: desc,
+      category: purpose,
+      counterpartyName: contactName,
+      ...(party ? { partyId: party.id } : {}),
+    };
+  }
+
+  // Unknown vendor bill or other purpose — still try party match
+  if (party) {
+    const acct = resolveAccounting(party);
+    return {
+      debitAccount: acct.debitAccount || 'UNMATCHED_PAYMENTS',
+      creditAccount: 'BANK_RAZORPAYX',
+      description: `${purpose}: ${contactName}`,
+      category: acct.category || undefined,
+      counterpartyName: contactName,
+      partyId: party.id,
+    };
   }
 
   return { debitAccount: 'UNMATCHED_PAYMENTS', creditAccount: 'BANK_RAZORPAYX', description: `${purpose}: ${contactName}`, counterpartyName: contactName };
@@ -137,17 +208,33 @@ function categorizeRazorpayxCharge(): CategoryInfo {
 }
 
 // ============================================
-// CC CATEGORIZATION (same as old script)
+// CC CATEGORIZATION
 // ============================================
 
-function getExpenseAccount(desc: string): string {
-  const d = desc.toUpperCase();
-  if (d.includes('SHOPFLO') || d.includes('SHOPIFY')) return 'MARKETPLACE_FEES';
-  return 'OPERATING_EXPENSES';
-}
+function categorizeCcCharge(
+  narration: string,
+  bank: string,
+  parties: PartyWithTxnType[],
+): CategoryInfo {
+  // Try Party match on narration
+  const party = findPartyByNarration(narration, parties);
 
-function categorizeCcCharge(narration: string, bank: string): CategoryInfo {
-  const expenseAccount = getExpenseAccount(narration);
+  if (party) {
+    const acct = resolveAccounting(party);
+    return {
+      debitAccount: acct.debitAccount || 'OPERATING_EXPENSES',
+      creditAccount: 'CREDIT_CARD',
+      description: `CC ${bank === 'hdfc_cc' ? 'HDFC' : 'ICICI'}: ${party.name}`.slice(0, 80),
+      category: acct.category || 'other',
+      counterpartyName: party.name,
+      partyId: party.id,
+    };
+  }
+
+  // Fallback: check for marketplace fees
+  const d = narration.toUpperCase();
+  const expenseAccount = (d.includes('SHOPFLO') || d.includes('SHOPIFY')) ? 'MARKETPLACE_FEES' : 'OPERATING_EXPENSES';
+
   return {
     debitAccount: expenseAccount,
     creditAccount: 'CREDIT_CARD',
@@ -169,20 +256,34 @@ export async function categorizeTransactions(options?: { bank?: string }): Promi
     orderBy: { txnDate: 'asc' },
   });
 
-  // Pre-fetch parties for name matching
+  // Pre-fetch ALL active parties with their TransactionType (single query)
   const parties = await prisma.party.findMany({
     where: { isActive: true },
-    select: { id: true, name: true, aliases: true },
+    select: {
+      id: true,
+      name: true,
+      aliases: true,
+      category: true,
+      tdsApplicable: true,
+      tdsSection: true,
+      tdsRate: true,
+      invoiceRequired: true,
+      transactionType: {
+        select: {
+          id: true,
+          name: true,
+          debitAccountCode: true,
+          creditAccountCode: true,
+          defaultGstRate: true,
+          defaultTdsApplicable: true,
+          defaultTdsSection: true,
+          defaultTdsRate: true,
+          invoiceRequired: true,
+          expenseCategory: true,
+        },
+      },
+    },
   });
-
-  // Build name → partyId map (name + all aliases)
-  const partyByName = new Map<string, string>();
-  for (const p of parties) {
-    partyByName.set(p.name.toLowerCase(), p.id);
-    for (const alias of p.aliases) {
-      partyByName.set(alias.toLowerCase(), p.id);
-    }
-  }
 
   // Pre-fetch open invoices for RazorpayX matching
   const openInvoices = await prisma.invoice.findMany({
@@ -199,7 +300,6 @@ export async function categorizeTransactions(options?: { bank?: string }): Promi
   const breakdown: Record<string, { count: number; total: number }> = {};
   let categorized = 0;
   let skipped = 0;
-  const CHUNK = 200;
   const updates: { id: string; data: Record<string, unknown> }[] = [];
 
   for (const txn of txns) {
@@ -207,18 +307,17 @@ export async function categorizeTransactions(options?: { bank?: string }): Promi
     const rawData = (txn.rawData ?? {}) as Record<string, unknown>;
 
     if (txn.bank === 'hdfc') {
-      cat = categorizeHdfc(txn.narration || '', txn.direction as 'debit' | 'credit');
+      cat = categorizeHdfc(txn.narration || '', txn.direction as 'debit' | 'credit', parties);
     } else if (txn.bank === 'razorpayx') {
-      // Distinguish payouts from charges by looking at legacySourceId format
       if (txn.legacySourceId?.startsWith('pay_') || txn.legacySourceId?.startsWith('pout_')) {
-        cat = categorizeRazorpayxPayout(rawData);
+        cat = categorizeRazorpayxPayout(rawData, parties);
       } else if (txn.narration === 'Bank charges (RazorpayX)') {
         cat = categorizeRazorpayxCharge();
       } else {
-        cat = categorizeRazorpayxPayout(rawData);
+        cat = categorizeRazorpayxPayout(rawData, parties);
       }
     } else if (txn.bank === 'hdfc_cc' || txn.bank === 'icici_cc') {
-      cat = categorizeCcCharge(txn.narration || '', txn.bank);
+      cat = categorizeCcCharge(txn.narration || '', txn.bank, parties);
     } else {
       cat = { debitAccount: 'UNMATCHED_PAYMENTS', creditAccount: 'UNMATCHED_PAYMENTS', description: 'Unknown bank type' };
     }
@@ -237,11 +336,22 @@ export async function categorizeTransactions(options?: { bank?: string }): Promi
       continue;
     }
 
-    // Try to match counterparty to a Party
-    const counterparty = cat.counterpartyName || txn.counterpartyName;
-    const partyId = counterparty ? partyByName.get(counterparty.toLowerCase()) : undefined;
+    // Party may already be set by categorize functions
+    let partyId = cat.partyId;
 
-    // For RazorpayX vendor bills, check for invoice match
+    // Fallback: try exact name match if no party from categorization
+    if (!partyId) {
+      const counterparty = cat.counterpartyName || txn.counterpartyName;
+      if (counterparty) {
+        const matchedParty = parties.find(p =>
+          p.name.toLowerCase() === counterparty.toLowerCase() ||
+          p.aliases.some(a => a.toLowerCase() === counterparty.toLowerCase())
+        );
+        if (matchedParty) partyId = matchedParty.id;
+      }
+    }
+
+    // For RazorpayX vendor bills, check for invoice match by reference_id
     let matchedInvoiceId: string | undefined;
     if (txn.bank === 'razorpayx') {
       const referenceId = String(rawData.reference_id ?? '').trim();
@@ -249,7 +359,6 @@ export async function categorizeTransactions(options?: { bank?: string }): Promi
         const inv = invoiceByNumber.get(referenceId) || invoiceById.get(referenceId);
         if (inv) {
           matchedInvoiceId = inv.id;
-          // Override to route through AP when invoice exists
           cat.debitAccount = 'ACCOUNTS_PAYABLE';
         }
       }
@@ -261,7 +370,7 @@ export async function categorizeTransactions(options?: { bank?: string }): Promi
         debitAccountCode: cat.debitAccount,
         creditAccountCode: cat.creditAccount,
         category: cat.category || null,
-        counterpartyName: counterparty || txn.counterpartyName || null,
+        counterpartyName: cat.counterpartyName || txn.counterpartyName || null,
         status: 'categorized',
         ...(partyId ? { partyId } : {}),
         ...(matchedInvoiceId ? { matchedInvoiceId } : {}),
@@ -270,14 +379,13 @@ export async function categorizeTransactions(options?: { bank?: string }): Promi
 
     categorized++;
 
-    // Track breakdown
     const key = `${cat.debitAccount} → ${cat.creditAccount}`;
     if (!breakdown[key]) breakdown[key] = { count: 0, total: 0 };
     breakdown[key].count++;
     breakdown[key].total += txn.amount;
   }
 
-  // Batch update — use concurrent promises in small batches for speed
+  // Batch update
   const BATCH = 50;
   for (let i = 0; i < updates.length; i += BATCH) {
     const batch = updates.slice(i, i + BATCH);

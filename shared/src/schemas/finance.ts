@@ -12,7 +12,7 @@ import { z } from 'zod';
 
 export const FinanceSearchParams = z.object({
   /** Active tab */
-  tab: z.enum(['dashboard', 'invoices', 'payments', 'ledger', 'pnl', 'bank-import']).catch('dashboard'),
+  tab: z.enum(['dashboard', 'invoices', 'payments', 'ledger', 'pnl', 'bank-import', 'parties']).catch('dashboard'),
   /** Bank import: bank filter */
   bankFilter: z.enum(['all', 'hdfc', 'razorpayx', 'hdfc_cc', 'icici_cc']).optional().catch(undefined),
   /** Bank import: status filter */
@@ -35,6 +35,8 @@ export const FinanceSearchParams = z.object({
   accountCode: z.string().optional().catch(undefined),
   /** Ledger source type filter */
   sourceType: z.string().optional().catch(undefined),
+  /** Parties tab: filter by TransactionType ID */
+  partyTxnType: z.string().optional().catch(undefined),
   /** Search query */
   search: z.string().optional().catch(undefined),
   /** Page number */
@@ -252,6 +254,53 @@ export const ListBankTransactionsInput = z.object({
   page: z.coerce.number().int().positive().default(1),
   limit: z.coerce.number().int().positive().max(200).default(50),
 }).optional();
+
+// ============================================
+// TRANSACTION TYPE SCHEMAS
+// ============================================
+
+export const ListPartiesInput = z.object({
+  transactionTypeId: z.string().optional(),
+  search: z.string().optional(),
+  page: z.coerce.number().int().positive().default(1),
+  limit: z.coerce.number().int().positive().max(200).default(200),
+}).optional();
+
+export const UpdatePartySchema = z.object({
+  id: z.string().uuid(),
+  name: z.string().min(1).optional(),
+  category: z.string().optional(),
+  transactionTypeId: z.string().uuid().nullable().optional(),
+  aliases: z.array(z.string()).optional(),
+  tdsApplicable: z.boolean().optional(),
+  tdsSection: z.string().nullable().optional(),
+  tdsRate: z.number().nullable().optional(),
+  invoiceRequired: z.boolean().optional(),
+  contactName: z.string().nullable().optional(),
+  email: z.string().nullable().optional(),
+  phone: z.string().nullable().optional(),
+  gstin: z.string().nullable().optional(),
+  pan: z.string().nullable().optional(),
+  isActive: z.boolean().optional(),
+});
+export type UpdatePartyInput = z.infer<typeof UpdatePartySchema>;
+
+export const CreatePartySchema = z.object({
+  name: z.string().min(1),
+  category: z.string(),
+  transactionTypeId: z.string().uuid().optional(),
+  aliases: z.array(z.string()).optional(),
+  tdsApplicable: z.boolean().optional(),
+  tdsSection: z.string().nullable().optional(),
+  tdsRate: z.number().nullable().optional(),
+  invoiceRequired: z.boolean().optional(),
+  contactName: z.string().nullable().optional(),
+  email: z.string().nullable().optional(),
+  phone: z.string().nullable().optional(),
+  gstin: z.string().nullable().optional(),
+  pan: z.string().nullable().optional(),
+});
+export type CreatePartyInput = z.infer<typeof CreatePartySchema>;
 
 export const CHART_OF_ACCOUNTS = [
   { code: 'BANK_HDFC', name: 'HDFC Bank Account', type: 'asset' },

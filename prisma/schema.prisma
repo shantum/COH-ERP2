@@ -311,6 +311,26 @@ model Fabric {
   @@index([pattern])
 }
 
+/// Reusable accounting recipe — multiple parties share the same TransactionType
+model TransactionType {
+  id                   String   @id @default(uuid())
+  name                 String   @unique  // "Fabric Purchase", "Service Payment"
+  description          String?
+  debitAccountCode     String?  // What to debit for outgoing (FABRIC_INVENTORY, etc.)
+  creditAccountCode    String?  // What to credit for incoming (SALES_REVENUE, etc.)
+  defaultGstRate       Float?   // Default GST % (18, 5, 0)
+  defaultTdsApplicable Boolean  @default(false)
+  defaultTdsSection    String?  // 194C, 194J, 194I, 194H
+  defaultTdsRate       Float?   // Default TDS %
+  invoiceRequired      Boolean  @default(true)
+  expenseCategory      String?  // P&L category (fabric, service, rent, etc.)
+  isActive             Boolean  @default(true)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  parties Party[]
+}
+
 model Party {
   id                String   @id @default(uuid())
   name              String   @unique
@@ -337,6 +357,9 @@ model Party {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
+  transactionTypeId  String?
+  transactionType    TransactionType? @relation(fields: [transactionTypeId], references: [id])
+
   fabrics                    Fabric[]
   fabricOrders               FabricOrder[]
   fabricColourTransactions   FabricColourTransaction[] @relation("FabricColourTxnParty")
@@ -350,6 +373,7 @@ model Party {
   bankTransactions           BankTransaction[]   @relation("BankTxnParty")
 
   @@index([category])
+  @@index([transactionTypeId])
 }
 
 // NOTE: FabricTransaction model removed - use FabricColourTransaction instead

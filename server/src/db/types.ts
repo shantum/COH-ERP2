@@ -708,6 +708,7 @@ export type Party = {
     isActive: Generated<boolean>;
     createdAt: Generated<Timestamp>;
     updatedAt: Timestamp;
+    transactionTypeId: string | null;
 };
 export type Payment = {
     id: Generated<string>;
@@ -1238,6 +1239,22 @@ export type TrackingApiResponse = {
     response: unknown;
     createdAt: Generated<Timestamp>;
 };
+export type TransactionType = {
+    id: Generated<string>;
+    name: string;
+    description: string | null;
+    debitAccountCode: string | null;
+    creditAccountCode: string | null;
+    defaultGstRate: number | null;
+    defaultTdsApplicable: Generated<boolean>;
+    defaultTdsSection: string | null;
+    defaultTdsRate: number | null;
+    invoiceRequired: Generated<boolean>;
+    expenseCategory: string | null;
+    isActive: Generated<boolean>;
+    createdAt: Generated<Timestamp>;
+    updatedAt: Timestamp;
+};
 export type TrimItem = {
     id: Generated<string>;
     code: string;
@@ -1420,6 +1437,7 @@ export type DB = {
     SystemSetting: SystemSetting;
     Tailor: Tailor;
     TrackingApiResponse: TrackingApiResponse;
+    TransactionType: TransactionType;
     TrimItem: TrimItem;
     User: User;
     UserGridPreference: UserGridPreference;

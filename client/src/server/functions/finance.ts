@@ -21,6 +21,9 @@ import {
   ListPaymentsInput,
   ListLedgerEntriesInput,
   ListBankTransactionsInput,
+  ListPartiesInput,
+  UpdatePartySchema,
+  CreatePartySchema,
 } from '@coh/shared/schemas/finance';
 
 // ============================================
@@ -1762,4 +1765,147 @@ export const listBankTransactions = createServerFn({ method: 'POST' })
     ]);
 
     return { success: true as const, transactions, total, page, limit };
+  });
+
+// ============================================
+// TRANSACTION TYPE + PARTY MANAGEMENT
+// ============================================
+
+export const listTransactionTypes = createServerFn({ method: 'GET' })
+  .middleware([authMiddleware])
+  .handler(async () => {
+    const prisma = await getPrisma();
+    const types = await prisma.transactionType.findMany({
+      where: { isActive: true },
+      orderBy: { name: 'asc' },
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        debitAccountCode: true,
+        creditAccountCode: true,
+        defaultGstRate: true,
+        defaultTdsApplicable: true,
+        defaultTdsSection: true,
+        defaultTdsRate: true,
+        invoiceRequired: true,
+        expenseCategory: true,
+        _count: { select: { parties: true } },
+      },
+    });
+    return { success: true as const, types };
+  });
+
+export const listFinanceParties = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
+  .inputValidator((input: unknown) => ListPartiesInput.parse(input))
+  .handler(async ({ data: input }) => {
+    const prisma = await getPrisma();
+    const { transactionTypeId, search, page = 1, limit = 200 } = input ?? {};
+    const skip = (page - 1) * limit;
+
+    const where: Record<string, unknown> = {};
+    if (transactionTypeId) where.transactionTypeId = transactionTypeId;
+    if (search) {
+      where.OR = [
+        { name: { contains: search, mode: 'insensitive' } },
+        { aliases: { has: search.toUpperCase() } },
+        { contactName: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+
+    const [parties, total] = await Promise.all([
+      prisma.party.findMany({
+        where: where as any,
+        select: {
+          id: true,
+          name: true,
+          category: true,
+          aliases: true,
+          tdsApplicable: true,
+          tdsSection: true,
+          tdsRate: true,
+          invoiceRequired: true,
+          isActive: true,
+          contactName: true,
+          email: true,
+          phone: true,
+          gstin: true,
+          pan: true,
+          transactionTypeId: true,
+          transactionType: {
+            select: { id: true, name: true, expenseCategory: true },
+          },
+        },
+        orderBy: { name: 'asc' },
+        skip,
+        take: limit,
+      }),
+      prisma.party.count({ where: where as any }),
+    ]);
+
+    return { success: true as const, parties, total, page, limit };
+  });
+
+export const getFinanceParty = createServerFn({ method: 'GET' })
+  .middleware([authMiddleware])
+  .inputValidator((input: unknown) => z.object({ id: z.string().uuid() }).parse(input))
+  .handler(async ({ data: { id } }) => {
+    const prisma = await getPrisma();
+    const party = await prisma.party.findUnique({
+      where: { id },
+      include: {
+        transactionType: true,
+      },
+    });
+    if (!party) return { success: false as const, error: 'Party not found' };
+    return { success: true as const, party };
+  });
+
+export const updateFinanceParty = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
+  .inputValidator((input: unknown) => UpdatePartySchema.parse(input))
+  .handler(async ({ data }) => {
+    const prisma = await getPrisma();
+    const { id, ...updates } = data;
+
+    const party = await prisma.party.update({
+      where: { id },
+      data: updates as any,
+      include: {
+        transactionType: { select: { id: true, name: true } },
+      },
+    });
+
+    return { success: true as const, party };
+  });
+
+export const createFinanceParty = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
+  .inputValidator((input: unknown) => CreatePartySchema.parse(input))
+  .handler(async ({ data }) => {
+    const prisma = await getPrisma();
+
+    const party = await prisma.party.create({
+      data: {
+        name: data.name,
+        category: data.category,
+        ...(data.transactionTypeId ? { transactionTypeId: data.transactionTypeId } : {}),
+        aliases: data.aliases ?? [],
+        tdsApplicable: data.tdsApplicable ?? false,
+        tdsSection: data.tdsSection ?? null,
+        tdsRate: data.tdsRate ?? null,
+        invoiceRequired: data.invoiceRequired ?? true,
+        contactName: data.contactName ?? null,
+        email: data.email ?? null,
+        phone: data.phone ?? null,
+        gstin: data.gstin ?? null,
+        pan: data.pan ?? null,
+      },
+      include: {
+        transactionType: { select: { id: true, name: true } },
+      },
+    });
+
+    return { success: true as const, party };
   });
