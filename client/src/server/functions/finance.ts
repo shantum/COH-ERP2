@@ -766,16 +766,21 @@ export const confirmInvoice = createServerFn({ method: 'POST' })
     if (!invoice) return { success: false as const, error: 'Invoice not found' };
     if (invoice.status !== 'draft') return { success: false as const, error: 'Can only confirm draft invoices' };
 
-    // Calculate TDS for payable invoices with a TDS-enabled party
+    // Fetch party details for TDS + TransactionType (advance-clearing vendors)
     let tdsAmount = 0;
+    let creditAccountOverride: string | null = null;
     if (invoice.type === 'payable' && invoice.partyId) {
       const party = await prisma.party.findUnique({
         where: { id: invoice.partyId },
-        select: { tdsApplicable: true, tdsRate: true },
+        select: { tdsApplicable: true, tdsRate: true, transactionType: { select: { debitAccountCode: true } } },
       });
       if (party?.tdsApplicable && party.tdsRate && party.tdsRate > 0) {
         const subtotal = invoice.totalAmount - (invoice.gstAmount ?? 0);
         tdsAmount = Math.round(subtotal * (party.tdsRate / 100) * 100) / 100;
+      }
+      // Advance/wallet vendors: invoices clear ADVANCES_GIVEN instead of AP
+      if (party?.transactionType?.debitAccountCode === 'ADVANCES_GIVEN') {
+        creditAccountOverride = 'ADVANCES_GIVEN';
       }
     }
 
@@ -785,7 +790,7 @@ export const confirmInvoice = createServerFn({ method: 'POST' })
     }
 
     // ---- NORMAL AP PATH (invoice first, pay later) ----
-    const lines = buildInvoiceLedgerLines(invoice, tdsAmount);
+    const lines = buildInvoiceLedgerLines(invoice, tdsAmount, creditAccountOverride);
 
     return prisma.$transaction(async (tx) => {
       const invoiceEntryDate = invoice.invoiceDate ? new Date(invoice.invoiceDate) : new Date();
@@ -944,6 +949,7 @@ async function confirmInvoiceWithLinkedPayment(
 /**
  * Build ledger lines for an invoice confirmation.
  * Payable: Dr expense account, Cr ACCOUNTS_PAYABLE (less TDS), Cr TDS_PAYABLE
+ *   - If creditAccountOverride set (e.g. ADVANCES_GIVEN for wallet vendors), uses that instead of AP
  * Receivable: Dr ACCOUNTS_RECEIVABLE, Cr SALES_REVENUE
  */
 function buildInvoiceLedgerLines(invoice: {
@@ -951,16 +957,20 @@ function buildInvoiceLedgerLines(invoice: {
   category: string;
   totalAmount: number;
   gstAmount: number | null;
-}, tdsAmount = 0) {
+}, tdsAmount = 0, creditAccountOverride: string | null = null) {
   const { type, category, totalAmount, gstAmount } = invoice;
   const netAmount = totalAmount - (gstAmount ?? 0);
 
   if (type === 'payable') {
     // Figure out which expense account to debit based on category
     const expenseAccount = categoryToExpenseAccount(category);
+    const creditAccount = creditAccountOverride ?? 'ACCOUNTS_PAYABLE';
+    const creditDescription = creditAccountOverride === 'ADVANCES_GIVEN'
+      ? 'Clearing advance/wallet balance'
+      : 'Amount owed to vendor';
     const lines = [
       { accountCode: expenseAccount, debit: netAmount, description: `${category} expense` },
-      { accountCode: 'ACCOUNTS_PAYABLE', credit: totalAmount - tdsAmount, description: 'Amount owed to vendor' },
+      { accountCode: creditAccount, credit: totalAmount - tdsAmount, description: creditDescription },
     ];
     if (gstAmount && gstAmount > 0) {
       lines.push({ accountCode: 'GST_INPUT', debit: gstAmount, description: 'GST input credit' });
