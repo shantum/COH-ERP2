@@ -66,6 +66,9 @@ model User {
   ledgerEntries         LedgerEntry[]    @relation("LedgerEntryCreator")
   payrollRunsCreated    PayrollRun[]     @relation("PayrollRunCreator")
   payrollRunsConfirmed  PayrollRun[]     @relation("PayrollRunConfirmer")
+  // Changelog relations
+  transactionTypeChangeLogs TransactionTypeChangeLog[] @relation("TxnTypeChangeUser")
+  partyChangeLogs           PartyChangeLog[]           @relation("PartyChangeUser")
 
   @@index([roleId])
 }
@@ -328,7 +331,8 @@ model TransactionType {
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
-  parties Party[]
+  parties    Party[]
+  changeLogs TransactionTypeChangeLog[]
 }
 
 model Party {
@@ -371,9 +375,43 @@ model Party {
   financePayments            Payment[]           @relation("PaymentParty")
   employee                   Employee?
   bankTransactions           BankTransaction[]   @relation("BankTxnParty")
+  changeLogs                 PartyChangeLog[]
 
   @@index([category])
   @@index([transactionTypeId])
+}
+
+model TransactionTypeChangeLog {
+  id                String          @id @default(uuid())
+  transactionTypeId String
+  fieldName         String
+  oldValue          String?
+  newValue          String?
+  changedById       String
+  createdAt         DateTime        @default(now())
+
+  transactionType TransactionType @relation(fields: [transactionTypeId], references: [id], onDelete: Cascade)
+  changedBy       User            @relation("TxnTypeChangeUser", fields: [changedById], references: [id])
+
+  @@index([transactionTypeId])
+  @@index([changedById])
+  @@index([createdAt])
+}
+
+model PartyChangeLog {
+  id          String   @id @default(uuid())
+  partyId     String
+  fieldName   String
+  oldValue    String?
+  newValue    String?
+  changedById String
+  createdAt   DateTime @default(now())
+
+  party     Party @relation(fields: [partyId], references: [id], onDelete: Cascade)
+  changedBy User  @relation("PartyChangeUser", fields: [changedById], references: [id])
+
+  @@index([partyId])
+  @@index([changedById])
 }
 
 // NOTE: FabricTransaction model removed - use FabricColourTransaction instead

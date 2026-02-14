@@ -24,6 +24,8 @@ import {
   ListPartiesInput,
   UpdatePartySchema,
   CreatePartySchema,
+  CreateTransactionTypeSchema,
+  UpdateTransactionTypeSchema,
 } from '@coh/shared/schemas/finance';
 
 // ============================================
@@ -766,9 +768,10 @@ export const confirmInvoice = createServerFn({ method: 'POST' })
     if (!invoice) return { success: false as const, error: 'Invoice not found' };
     if (invoice.status !== 'draft') return { success: false as const, error: 'Can only confirm draft invoices' };
 
-    // Fetch party details for TDS + TransactionType (advance-clearing vendors)
+    // Fetch party details for TDS + TransactionType (advance-clearing vendors + expense account)
     let tdsAmount = 0;
     let creditAccountOverride: string | null = null;
+    let expenseAccountOverride: string | null = null;
     if (invoice.type === 'payable' && invoice.partyId) {
       const party = await prisma.party.findUnique({
         where: { id: invoice.partyId },
@@ -782,15 +785,19 @@ export const confirmInvoice = createServerFn({ method: 'POST' })
       if (party?.transactionType?.debitAccountCode === 'ADVANCES_GIVEN') {
         creditAccountOverride = 'ADVANCES_GIVEN';
       }
+      // Use TransactionType's debit account as expense account (if not advance-clearing)
+      if (party?.transactionType?.debitAccountCode && party.transactionType.debitAccountCode !== 'ADVANCES_GIVEN') {
+        expenseAccountOverride = party.transactionType.debitAccountCode;
+      }
     }
 
     // ---- LINKED PAYMENT PATH (already-paid bill) ----
     if (data.linkedPaymentId && invoice.type === 'payable') {
-      return confirmInvoiceWithLinkedPayment(prisma, invoice, data.linkedPaymentId, tdsAmount, userId);
+      return confirmInvoiceWithLinkedPayment(prisma, invoice, data.linkedPaymentId, tdsAmount, userId, expenseAccountOverride);
     }
 
     // ---- NORMAL AP PATH (invoice first, pay later) ----
-    const lines = buildInvoiceLedgerLines(invoice, tdsAmount, creditAccountOverride);
+    const lines = buildInvoiceLedgerLines(invoice, tdsAmount, creditAccountOverride, expenseAccountOverride);
 
     return prisma.$transaction(async (tx) => {
       const invoiceEntryDate = invoice.invoiceDate ? new Date(invoice.invoiceDate) : new Date();
@@ -830,6 +837,7 @@ async function confirmInvoiceWithLinkedPayment(
   paymentId: string,
   tdsAmount: number,
   userId: string,
+  expenseAccountOverride: string | null = null,
 ) {
   // The amount the vendor was actually paid (total minus TDS withheld)
   const matchAmount = invoice.totalAmount - tdsAmount;
@@ -853,8 +861,8 @@ async function confirmInvoiceWithLinkedPayment(
   const originalDebitLine = payment.ledgerEntry.lines.find(l => l.debit > 0 && !bankCodes.has(l.account.code));
   const originalAccount = originalDebitLine?.account.code ?? 'OPERATING_EXPENSES';
 
-  // Figure out the correct expense account from the invoice category
-  const correctExpense = categoryToExpenseAccount(invoice.category);
+  // Figure out the correct expense account — prefer TransactionType override, fall back to category mapping
+  const correctExpense = expenseAccountOverride ?? categoryToExpenseAccount(invoice.category);
   const gstAmount = invoice.gstAmount ?? 0;
   const netAmount = invoice.totalAmount - gstAmount;
 
@@ -957,13 +965,13 @@ function buildInvoiceLedgerLines(invoice: {
   category: string;
   totalAmount: number;
   gstAmount: number | null;
-}, tdsAmount = 0, creditAccountOverride: string | null = null) {
+}, tdsAmount = 0, creditAccountOverride: string | null = null, expenseAccountOverride: string | null = null) {
   const { type, category, totalAmount, gstAmount } = invoice;
   const netAmount = totalAmount - (gstAmount ?? 0);
 
   if (type === 'payable') {
-    // Figure out which expense account to debit based on category
-    const expenseAccount = categoryToExpenseAccount(category);
+    // Prefer TransactionType's debit account, fall back to category mapping
+    const expenseAccount = expenseAccountOverride ?? categoryToExpenseAccount(category);
     const creditAccount = creditAccountOverride ?? 'ACCOUNTS_PAYABLE';
     const creditDescription = creditAccountOverride === 'ADVANCES_GIVEN'
       ? 'Clearing advance/wallet balance'
@@ -1875,16 +1883,48 @@ export const getFinanceParty = createServerFn({ method: 'GET' })
 export const updateFinanceParty = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
   .inputValidator((input: unknown) => UpdatePartySchema.parse(input))
-  .handler(async ({ data }) => {
+  .handler(async ({ data, context }) => {
     const prisma = await getPrisma();
     const { id, ...updates } = data;
+    const userId = context.user.id;
 
-    const party = await prisma.party.update({
+    // Fetch old values to diff tracked fields
+    const oldParty = await prisma.party.findUnique({
       where: { id },
-      data: updates as any,
-      include: {
-        transactionType: { select: { id: true, name: true } },
-      },
+      select: { transactionTypeId: true, tdsApplicable: true, tdsSection: true, tdsRate: true, invoiceRequired: true },
+    });
+    if (!oldParty) return { success: false as const, error: 'Party not found' };
+
+    const party = await prisma.$transaction(async (tx) => {
+      const updated = await tx.party.update({
+        where: { id },
+        data: updates as any,
+        include: { transactionType: { select: { id: true, name: true } } },
+      });
+
+      // Log changes for tracked fields
+      const trackedFields = ['transactionTypeId', 'tdsApplicable', 'tdsSection', 'tdsRate', 'invoiceRequired'] as const;
+      const logs: { partyId: string; fieldName: string; oldValue: string | null; newValue: string | null; changedById: string }[] = [];
+      for (const field of trackedFields) {
+        if (field in updates) {
+          const oldVal = oldParty[field];
+          const newVal = (updates as any)[field];
+          if (String(oldVal ?? '') !== String(newVal ?? '')) {
+            logs.push({
+              partyId: id,
+              fieldName: field,
+              oldValue: oldVal != null ? String(oldVal) : null,
+              newValue: newVal != null ? String(newVal) : null,
+              changedById: userId,
+            });
+          }
+        }
+      }
+      if (logs.length > 0) {
+        await tx.partyChangeLog.createMany({ data: logs });
+      }
+
+      return updated;
     });
 
     return { success: true as const, party };
@@ -1918,4 +1958,174 @@ export const createFinanceParty = createServerFn({ method: 'POST' })
     });
 
     return { success: true as const, party };
+  });
+
+// ============================================
+// TRANSACTION TYPE — CRUD
+// ============================================
+
+export const getTransactionType = createServerFn({ method: 'GET' })
+  .middleware([authMiddleware])
+  .inputValidator((input: unknown) => z.object({ id: z.string().uuid() }).parse(input))
+  .handler(async ({ data }) => {
+    const prisma = await getPrisma();
+    const tt = await prisma.transactionType.findUnique({
+      where: { id: data.id },
+      include: {
+        _count: { select: { parties: true } },
+        changeLogs: {
+          orderBy: { createdAt: 'desc' },
+          take: 50,
+          include: { changedBy: { select: { name: true } } },
+        },
+      },
+    });
+    if (!tt) return { success: false as const, error: 'Transaction type not found' };
+    return { success: true as const, transactionType: tt };
+  });
+
+export const createTransactionType = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
+  .inputValidator((input: unknown) => CreateTransactionTypeSchema.parse(input))
+  .handler(async ({ data, context }) => {
+    const prisma = await getPrisma();
+    const userId = context.user.id;
+
+    const tt = await prisma.$transaction(async (tx) => {
+      const created = await tx.transactionType.create({
+        data: {
+          name: data.name,
+          ...(data.description ? { description: data.description } : {}),
+          ...(data.debitAccountCode ? { debitAccountCode: data.debitAccountCode } : {}),
+          ...(data.creditAccountCode ? { creditAccountCode: data.creditAccountCode } : {}),
+          ...(data.defaultGstRate != null ? { defaultGstRate: data.defaultGstRate } : {}),
+          defaultTdsApplicable: data.defaultTdsApplicable ?? false,
+          ...(data.defaultTdsSection ? { defaultTdsSection: data.defaultTdsSection } : {}),
+          ...(data.defaultTdsRate != null ? { defaultTdsRate: data.defaultTdsRate } : {}),
+          invoiceRequired: data.invoiceRequired ?? true,
+          ...(data.expenseCategory ? { expenseCategory: data.expenseCategory } : {}),
+        },
+      });
+
+      await tx.transactionTypeChangeLog.create({
+        data: {
+          transactionTypeId: created.id,
+          fieldName: '__created',
+          newValue: created.name,
+          changedById: userId,
+        },
+      });
+
+      return created;
+    });
+
+    return { success: true as const, transactionType: tt };
+  });
+
+export const updateTransactionType = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
+  .inputValidator((input: unknown) => UpdateTransactionTypeSchema.parse(input))
+  .handler(async ({ data, context }) => {
+    const prisma = await getPrisma();
+    const userId = context.user.id;
+    const { id, ...updates } = data;
+
+    const old = await prisma.transactionType.findUnique({ where: { id } });
+    if (!old) return { success: false as const, error: 'Transaction type not found' };
+
+    const tt = await prisma.$transaction(async (tx) => {
+      const updated = await tx.transactionType.update({
+        where: { id },
+        data: updates as any,
+        include: { _count: { select: { parties: true } } },
+      });
+
+      // Diff and log each changed field
+      const fields = ['name', 'description', 'debitAccountCode', 'creditAccountCode', 'defaultGstRate', 'defaultTdsApplicable', 'defaultTdsSection', 'defaultTdsRate', 'invoiceRequired', 'expenseCategory', 'isActive'] as const;
+      const logs: { transactionTypeId: string; fieldName: string; oldValue: string | null; newValue: string | null; changedById: string }[] = [];
+      for (const field of fields) {
+        if (field in updates) {
+          const oldVal = (old as any)[field];
+          const newVal = (updates as any)[field];
+          if (String(oldVal ?? '') !== String(newVal ?? '')) {
+            logs.push({
+              transactionTypeId: id,
+              fieldName: field,
+              oldValue: oldVal != null ? String(oldVal) : null,
+              newValue: newVal != null ? String(newVal) : null,
+              changedById: userId,
+            });
+          }
+        }
+      }
+      if (logs.length > 0) {
+        await tx.transactionTypeChangeLog.createMany({ data: logs });
+      }
+
+      return updated;
+    });
+
+    return { success: true as const, transactionType: tt };
+  });
+
+export const deleteTransactionType = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
+  .inputValidator((input: unknown) => z.object({ id: z.string().uuid() }).parse(input))
+  .handler(async ({ data, context }) => {
+    const prisma = await getPrisma();
+    const userId = context.user.id;
+
+    const tt = await prisma.transactionType.findUnique({
+      where: { id: data.id },
+      include: { _count: { select: { parties: { where: { isActive: true } } } } },
+    });
+    if (!tt) return { success: false as const, error: 'Transaction type not found' };
+    if (tt._count.parties > 0) {
+      return { success: false as const, error: `Cannot deactivate: ${tt._count.parties} active parties are using this type` };
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.transactionType.update({ where: { id: data.id }, data: { isActive: false } });
+      await tx.transactionTypeChangeLog.create({
+        data: {
+          transactionTypeId: data.id,
+          fieldName: '__deactivated',
+          oldValue: 'true',
+          newValue: 'false',
+          changedById: userId,
+        },
+      });
+    });
+
+    return { success: true as const };
+  });
+
+export const getPartyInvoiceDefaults = createServerFn({ method: 'GET' })
+  .middleware([authMiddleware])
+  .inputValidator((input: unknown) => z.object({ partyId: z.string().uuid() }).parse(input))
+  .handler(async ({ data }) => {
+    const prisma = await getPrisma();
+    const party = await prisma.party.findUnique({
+      where: { id: data.partyId },
+      select: {
+        category: true,
+        tdsApplicable: true,
+        tdsSection: true,
+        tdsRate: true,
+        transactionType: {
+          select: { defaultGstRate: true, debitAccountCode: true, expenseCategory: true },
+        },
+      },
+    });
+    if (!party) return { success: false as const, error: 'Party not found' };
+    return {
+      success: true as const,
+      defaults: {
+        category: party.transactionType?.expenseCategory ?? party.category,
+        gstRate: party.transactionType?.defaultGstRate ?? null,
+        tdsApplicable: party.tdsApplicable,
+        tdsSection: party.tdsSection,
+        tdsRate: party.tdsRate,
+      },
+    };
   });

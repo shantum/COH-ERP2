@@ -710,6 +710,15 @@ export type Party = {
     updatedAt: Timestamp;
     transactionTypeId: string | null;
 };
+export type PartyChangeLog = {
+    id: Generated<string>;
+    partyId: string;
+    fieldName: string;
+    oldValue: string | null;
+    newValue: string | null;
+    changedById: string;
+    createdAt: Generated<Timestamp>;
+};
 export type Payment = {
     id: Generated<string>;
     referenceNumber: string | null;
@@ -1255,6 +1264,15 @@ export type TransactionType = {
     createdAt: Generated<Timestamp>;
     updatedAt: Timestamp;
 };
+export type TransactionTypeChangeLog = {
+    id: Generated<string>;
+    transactionTypeId: string;
+    fieldName: string;
+    oldValue: string | null;
+    newValue: string | null;
+    changedById: string;
+    createdAt: Generated<Timestamp>;
+};
 export type TrimItem = {
     id: Generated<string>;
     code: string;
@@ -1410,6 +1428,7 @@ export type DB = {
     OrderLine: OrderLine;
     OrderPayment: OrderPayment;
     Party: Party;
+    PartyChangeLog: PartyChangeLog;
     Payment: Payment;
     PaymentInvoice: PaymentInvoice;
     PayrollRun: PayrollRun;
@@ -1438,6 +1457,7 @@ export type DB = {
     Tailor: Tailor;
     TrackingApiResponse: TrackingApiResponse;
     TransactionType: TransactionType;
+    TransactionTypeChangeLog: TransactionTypeChangeLog;
     TrimItem: TrimItem;
     User: User;
     UserGridPreference: UserGridPreference;

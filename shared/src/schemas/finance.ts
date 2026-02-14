@@ -12,7 +12,7 @@ import { z } from 'zod';
 
 export const FinanceSearchParams = z.object({
   /** Active tab */
-  tab: z.enum(['dashboard', 'invoices', 'payments', 'ledger', 'pnl', 'bank-import', 'parties']).catch('dashboard'),
+  tab: z.enum(['dashboard', 'invoices', 'payments', 'ledger', 'pnl', 'bank-import', 'parties', 'transaction-types']).catch('dashboard'),
   /** Bank import: bank filter */
   bankFilter: z.enum(['all', 'hdfc', 'razorpayx', 'hdfc_cc', 'icici_cc']).optional().catch(undefined),
   /** Bank import: status filter */
@@ -301,6 +301,44 @@ export const CreatePartySchema = z.object({
   pan: z.string().nullable().optional(),
 });
 export type CreatePartyInput = z.infer<typeof CreatePartySchema>;
+
+// ============================================
+// TRANSACTION TYPE CRUD SCHEMAS
+// ============================================
+
+export const CreateTransactionTypeSchema = z.object({
+  name: z.string().min(1),
+  description: z.string().optional(),
+  debitAccountCode: z.string().optional(),
+  creditAccountCode: z.string().optional(),
+  defaultGstRate: z.number().min(0).max(100).optional(),
+  defaultTdsApplicable: z.boolean().optional(),
+  defaultTdsSection: z.string().nullable().optional(),
+  defaultTdsRate: z.number().nullable().optional(),
+  invoiceRequired: z.boolean().optional(),
+  expenseCategory: z.string().nullable().optional(),
+});
+export type CreateTransactionTypeInput = z.infer<typeof CreateTransactionTypeSchema>;
+
+export const UpdateTransactionTypeSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string().min(1).optional(),
+  description: z.string().nullable().optional(),
+  debitAccountCode: z.string().nullable().optional(),
+  creditAccountCode: z.string().nullable().optional(),
+  defaultGstRate: z.number().min(0).max(100).nullable().optional(),
+  defaultTdsApplicable: z.boolean().optional(),
+  defaultTdsSection: z.string().nullable().optional(),
+  defaultTdsRate: z.number().nullable().optional(),
+  invoiceRequired: z.boolean().optional(),
+  expenseCategory: z.string().nullable().optional(),
+  isActive: z.boolean().optional(),
+});
+export type UpdateTransactionTypeInput = z.infer<typeof UpdateTransactionTypeSchema>;
+
+// ============================================
+// CHART OF ACCOUNTS
+// ============================================
 
 export const CHART_OF_ACCOUNTS = [
   { code: 'BANK_HDFC', name: 'HDFC Bank Account', type: 'asset' },
