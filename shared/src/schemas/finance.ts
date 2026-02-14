@@ -12,7 +12,13 @@ import { z } from 'zod';
 
 export const FinanceSearchParams = z.object({
   /** Active tab */
-  tab: z.enum(['dashboard', 'invoices', 'payments', 'ledger', 'pnl']).catch('dashboard'),
+  tab: z.enum(['dashboard', 'invoices', 'payments', 'ledger', 'pnl', 'bank-import']).catch('dashboard'),
+  /** Bank import: bank filter */
+  bankFilter: z.enum(['all', 'hdfc', 'razorpayx', 'hdfc_cc', 'icici_cc']).optional().catch(undefined),
+  /** Bank import: status filter */
+  bankStatus: z.enum(['all', 'imported', 'categorized', 'posted', 'skipped', 'legacy_posted']).optional().catch(undefined),
+  /** Bank import: sub-view */
+  bankView: z.enum(['list', 'import']).optional().catch(undefined),
   /** Invoice type filter */
   type: z.enum(['payable', 'receivable']).optional().catch(undefined),
   /** Invoice status filter */
@@ -217,6 +223,35 @@ export const PAYMENT_METHODS = [
   'bank_transfer', 'upi', 'cash', 'cheque', 'card', 'razorpay',
   'shopflo', 'cod_remittance', 'marketplace_payout', 'adjustment', 'other',
 ] as const;
+
+// ============================================
+// BANK IMPORT
+// ============================================
+
+export const BANK_TYPES = ['hdfc', 'razorpayx', 'hdfc_cc', 'icici_cc'] as const;
+export type BankType = (typeof BANK_TYPES)[number];
+
+export const BANK_TXN_STATUSES = ['imported', 'categorized', 'posted', 'skipped', 'legacy_posted'] as const;
+export type BankTxnStatus = (typeof BANK_TXN_STATUSES)[number];
+
+const BANK_LABELS: Record<string, string> = {
+  hdfc: 'HDFC Bank',
+  razorpayx: 'RazorpayX',
+  hdfc_cc: 'HDFC CC',
+  icici_cc: 'ICICI CC',
+};
+
+export function getBankLabel(bank: string): string {
+  return BANK_LABELS[bank] ?? bank;
+}
+
+export const ListBankTransactionsInput = z.object({
+  bank: z.string().optional(),
+  status: z.string().optional(),
+  search: z.string().optional(),
+  page: z.coerce.number().int().positive().default(1),
+  limit: z.coerce.number().int().positive().max(200).default(50),
+}).optional();
 
 export const CHART_OF_ACCOUNTS = [
   { code: 'BANK_HDFC', name: 'HDFC Bank Account', type: 'asset' },

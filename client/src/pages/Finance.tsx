@@ -23,6 +23,7 @@ import {
   getMonthlyPnl,
   getPnlAccountDetail,
   getFinanceAlerts,
+  listBankTransactions,
 } from '../server/functions/finance';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
@@ -36,7 +37,7 @@ import { Textarea } from '@/components/ui/textarea';
 import {
   IndianRupee, Plus, ArrowUpRight, ArrowDownLeft,
   Check, X, BookOpen, ChevronLeft, ChevronRight, Loader2, AlertCircle,
-  ExternalLink, CloudUpload, Link2, Download,
+  ExternalLink, CloudUpload, Link2, Download, Upload, ArrowLeft,
 } from 'lucide-react';
 import {
   type FinanceSearchParams,
@@ -45,6 +46,9 @@ import {
   PAYMENT_METHODS,
   CHART_OF_ACCOUNTS,
   getCategoryLabel,
+  BANK_TYPES,
+  BANK_TXN_STATUSES,
+  getBankLabel,
 } from '@coh/shared';
 
 // ============================================
@@ -82,6 +86,7 @@ export default function Finance() {
           <TabsTrigger value="payments">Payments</TabsTrigger>
           <TabsTrigger value="ledger">Ledger</TabsTrigger>
           <TabsTrigger value="pnl">P&L</TabsTrigger>
+          <TabsTrigger value="bank-import">Bank Import</TabsTrigger>
         </TabsList>
 
         <TabsContent value="dashboard" className="mt-4">
@@ -98,6 +103,9 @@ export default function Finance() {
         </TabsContent>
         <TabsContent value="pnl" className="mt-4">
           <PnlTab />
+        </TabsContent>
+        <TabsContent value="bank-import" className="mt-4">
+          <BankImportTab search={search} />
         </TabsContent>
       </Tabs>
     </div>
@@ -1119,6 +1127,420 @@ function AccountDrilldown({ period, accountCode, fmt }: {
         );
       })}
     </>
+  );
+}
+
+// ============================================
+// BANK IMPORT TAB
+// ============================================
+
+function BankImportTab({ search }: { search: FinanceSearchParams }) {
+  const navigate = useNavigate();
+  const isImportView = search.bankView === 'import';
+
+  const updateSearch = useCallback(
+    (updates: Partial<FinanceSearchParams>) => {
+      navigate({ to: '/finance', search: { ...search, ...updates }, replace: true });
+    },
+    [navigate, search]
+  );
+
+  if (isImportView) {
+    return <BankImportView onBack={() => updateSearch({ bankView: undefined })} />;
+  }
+
+  return <BankTransactionList search={search} updateSearch={updateSearch} />;
+}
+
+// ---- Transaction List View ----
+
+function BankTransactionList({ search, updateSearch }: {
+  search: FinanceSearchParams;
+  updateSearch: (updates: Partial<FinanceSearchParams>) => void;
+}) {
+  const listFn = useServerFn(listBankTransactions);
+
+  const bank = search.bankFilter && search.bankFilter !== 'all' ? search.bankFilter : undefined;
+  const status = search.bankStatus && search.bankStatus !== 'all' ? search.bankStatus : undefined;
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['finance', 'bank-transactions', bank, status, search.search, search.page],
+    queryFn: () =>
+      listFn({
+        data: {
+          ...(bank ? { bank } : {}),
+          ...(status ? { status } : {}),
+          ...(search.search ? { search: search.search } : {}),
+          page: search.page,
+          limit: search.limit,
+        },
+      }),
+  });
+
+  return (
+    <div className="space-y-4">
+      {/* Filters */}
+      <div className="flex flex-wrap items-center gap-2">
+        <Select value={search.bankFilter ?? 'all'} onValueChange={(v) => updateSearch({ bankFilter: v as any, page: 1 })}>
+          <SelectTrigger className="w-[150px]"><SelectValue placeholder="Bank" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Banks</SelectItem>
+            {BANK_TYPES.map((b) => (
+              <SelectItem key={b} value={b}>{getBankLabel(b)}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        <Select value={search.bankStatus ?? 'all'} onValueChange={(v) => updateSearch({ bankStatus: v as any, page: 1 })}>
+          <SelectTrigger className="w-[160px]"><SelectValue placeholder="Status" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Statuses</SelectItem>
+            {BANK_TXN_STATUSES.map((s) => (
+              <SelectItem key={s} value={s}>{s.replace(/_/g, ' ')}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        <Input
+          placeholder="Search narration..."
+          value={search.search ?? ''}
+          onChange={(e) => updateSearch({ search: e.target.value || undefined, page: 1 })}
+          className="w-[200px]"
+        />
+
+        <div className="ml-auto">
+          <Button onClick={() => updateSearch({ bankView: 'import' })}>
+            <Upload className="h-4 w-4 mr-1" /> Import New
+          </Button>
+        </div>
+      </div>
+
+      {/* Table */}
+      {isLoading ? (
+        <LoadingState />
+      ) : (
+        <>
+          <div className="border rounded-lg overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/50">
+                <tr>
+                  <th className="text-left p-3 font-medium">Date</th>
+                  <th className="text-left p-3 font-medium">Narration</th>
+                  <th className="text-right p-3 font-medium">Amount</th>
+                  <th className="text-left p-3 font-medium">In/Out</th>
+                  <th className="text-left p-3 font-medium">Bank</th>
+                  <th className="text-left p-3 font-medium">Dr Account</th>
+                  <th className="text-left p-3 font-medium">Cr Account</th>
+                  <th className="text-left p-3 font-medium">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data?.transactions?.map((txn) => (
+                  <tr key={txn.id} className="border-t hover:bg-muted/30">
+                    <td className="p-3 text-xs text-muted-foreground whitespace-nowrap">
+                      {new Date(txn.txnDate).toLocaleDateString('en-IN')}
+                    </td>
+                    <td className="p-3 text-xs max-w-[300px] truncate" title={txn.narration ?? ''}>
+                      {txn.counterpartyName ?? txn.narration ?? '—'}
+                    </td>
+                    <td className="p-3 text-right font-mono text-xs">{formatCurrency(txn.amount)}</td>
+                    <td className="p-3">
+                      <span className={`inline-flex items-center gap-1 text-xs ${txn.direction === 'credit' ? 'text-green-600' : 'text-red-600'}`}>
+                        {txn.direction === 'credit' ? <ArrowDownLeft className="h-3 w-3" /> : <ArrowUpRight className="h-3 w-3" />}
+                        {txn.direction === 'credit' ? 'In' : 'Out'}
+                      </span>
+                    </td>
+                    <td className="p-3 text-xs">{getBankLabel(txn.bank)}</td>
+                    <td className="p-3 text-xs text-muted-foreground">{txn.debitAccountCode ?? '—'}</td>
+                    <td className="p-3 text-xs text-muted-foreground">{txn.creditAccountCode ?? '—'}</td>
+                    <td className="p-3"><BankStatusBadge status={txn.status} /></td>
+                  </tr>
+                ))}
+                {(!data?.transactions || data.transactions.length === 0) && (
+                  <tr><td colSpan={8} className="p-8 text-center text-muted-foreground">No transactions found</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          <Pagination page={search.page} total={data?.total ?? 0} limit={search.limit} onPageChange={(p) => updateSearch({ page: p })} />
+        </>
+      )}
+    </div>
+  );
+}
+
+function BankStatusBadge({ status }: { status: string }) {
+  const colors: Record<string, string> = {
+    imported: 'bg-gray-100 text-gray-700',
+    categorized: 'bg-blue-100 text-blue-700',
+    posted: 'bg-green-100 text-green-700',
+    skipped: 'bg-yellow-100 text-yellow-700',
+    legacy_posted: 'bg-purple-100 text-purple-700',
+  };
+  return (
+    <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${colors[status] ?? 'bg-gray-100 text-gray-700'}`}>
+      {status.replace(/_/g, ' ')}
+    </span>
+  );
+}
+
+// ---- Import View (3-step flow) ----
+
+type ImportStep = 'upload' | 'categorize' | 'post';
+
+interface ImportResultState {
+  bank: string;
+  newRows: number;
+  skippedRows: number;
+  totalRows: number;
+  balanceMatched?: boolean;
+}
+
+interface CategorizeResultState {
+  categorized: number;
+  skipped: number;
+  breakdown: Record<string, { count: number; total: number }>;
+}
+
+interface PostResultState {
+  posted: number;
+  errors: number;
+}
+
+function BankImportView({ onBack }: { onBack: () => void }) {
+  const [step, setStep] = useState<ImportStep>('upload');
+  const [selectedBank, setSelectedBank] = useState<string>('hdfc');
+  const [file, setFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [importResult, setImportResult] = useState<ImportResultState | null>(null);
+  const [categorizing, setCategorizing] = useState(false);
+  const [categorizeResult, setCategorizeResult] = useState<CategorizeResultState | null>(null);
+  const [posting, setPosting] = useState(false);
+  const [postResult, setPostResult] = useState<PostResultState | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [dryRun, setDryRun] = useState<{ count: number; byAccount: Record<string, { count: number; total: number }> } | null>(null);
+  const queryClient = useQueryClient();
+
+  const handleUpload = async () => {
+    if (!file) return;
+    setUploading(true);
+    setError(null);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('bank', selectedBank);
+
+      const res = await fetch('/api/bank-import/upload', {
+        method: 'POST',
+        credentials: 'include',
+        body: formData,
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) throw new Error(json.error || 'Upload failed');
+
+      setImportResult(json.result);
+      setStep('categorize');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Upload failed');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleCategorize = async () => {
+    setCategorizing(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/bank-import/categorize', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bank: selectedBank }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) throw new Error(json.error || 'Categorization failed');
+
+      setCategorizeResult(json.result);
+
+      // Fetch dry-run summary
+      const dryRes = await fetch(`/api/bank-import/dry-run?bank=${selectedBank}`, {
+        credentials: 'include',
+      });
+      const dryJson = await dryRes.json();
+      if (dryJson.success) setDryRun(dryJson.summary);
+
+      setStep('post');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Categorization failed');
+    } finally {
+      setCategorizing(false);
+    }
+  };
+
+  const handlePost = async () => {
+    setPosting(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/bank-import/post', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bank: selectedBank }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) throw new Error(json.error || 'Post failed');
+
+      setPostResult(json.result);
+      queryClient.invalidateQueries({ queryKey: ['finance'] });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Post failed');
+    } finally {
+      setPosting(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6 max-w-2xl">
+      <div className="flex items-center gap-3">
+        <Button variant="ghost" size="sm" onClick={onBack}>
+          <ArrowLeft className="h-4 w-4 mr-1" /> Back to List
+        </Button>
+        <h3 className="text-lg font-semibold">Import Bank Statement</h3>
+      </div>
+
+      {error && (
+        <div className="border border-red-300 bg-red-50 text-red-700 rounded-lg p-3 text-sm flex items-center gap-2">
+          <AlertCircle className="h-4 w-4 shrink-0" /> {error}
+        </div>
+      )}
+
+      {/* Step 1: Upload */}
+      <div className={`border rounded-lg p-4 space-y-3 ${step !== 'upload' && importResult ? 'opacity-60' : ''}`}>
+        <h4 className="font-medium text-sm flex items-center gap-2">
+          <span className="bg-blue-100 text-blue-700 rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold">1</span>
+          Upload CSV
+        </h4>
+
+        {step === 'upload' ? (
+          <>
+            <div className="flex items-center gap-3">
+              <Select value={selectedBank} onValueChange={setSelectedBank}>
+                <SelectTrigger className="w-[160px]"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="hdfc">HDFC Bank</SelectItem>
+                  <SelectItem value="razorpayx">RazorpayX</SelectItem>
+                </SelectContent>
+              </Select>
+
+              <label className="flex-1 border-2 border-dashed rounded-lg p-4 text-center cursor-pointer hover:bg-muted/30 transition-colors">
+                <input
+                  type="file"
+                  accept=".csv"
+                  className="hidden"
+                  onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                />
+                {file ? (
+                  <span className="text-sm">{file.name} ({(file.size / 1024).toFixed(0)} KB)</span>
+                ) : (
+                  <span className="text-sm text-muted-foreground">Click to select CSV file</span>
+                )}
+              </label>
+            </div>
+
+            <Button onClick={handleUpload} disabled={!file || uploading}>
+              {uploading ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Upload className="h-4 w-4 mr-1" />}
+              Upload
+            </Button>
+          </>
+        ) : importResult ? (
+          <div className="text-sm space-y-1">
+            <p><strong>{importResult.newRows}</strong> new rows imported, <strong>{importResult.skippedRows}</strong> duplicates skipped</p>
+            {importResult.balanceMatched !== undefined && (
+              <p>Balance check: {importResult.balanceMatched ? <span className="text-green-600">Pass</span> : <span className="text-red-600">Fail</span>}</p>
+            )}
+          </div>
+        ) : null}
+      </div>
+
+      {/* Step 2: Categorize */}
+      {(step === 'categorize' || step === 'post') && (
+        <div className={`border rounded-lg p-4 space-y-3 ${step !== 'categorize' && categorizeResult ? 'opacity-60' : ''}`}>
+          <h4 className="font-medium text-sm flex items-center gap-2">
+            <span className="bg-blue-100 text-blue-700 rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold">2</span>
+            Categorize Transactions
+          </h4>
+
+          {step === 'categorize' && !categorizeResult ? (
+            <Button onClick={handleCategorize} disabled={categorizing}>
+              {categorizing ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
+              Categorize
+            </Button>
+          ) : categorizeResult ? (
+            <div className="text-sm space-y-2">
+              <p><strong>{categorizeResult.categorized}</strong> categorized, <strong>{categorizeResult.skipped}</strong> skipped</p>
+              {Object.keys(categorizeResult.breakdown).length > 0 && (
+                <div className="border rounded overflow-hidden">
+                  <table className="w-full text-xs">
+                    <thead className="bg-muted/50">
+                      <tr>
+                        <th className="text-left p-2 font-medium">Account Flow</th>
+                        <th className="text-right p-2 font-medium">Count</th>
+                        <th className="text-right p-2 font-medium">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {Object.entries(categorizeResult.breakdown).map(([key, val]) => (
+                        <tr key={key} className="border-t">
+                          <td className="p-2">{key}</td>
+                          <td className="p-2 text-right">{val.count}</td>
+                          <td className="p-2 text-right font-mono">{formatCurrency(val.total)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          ) : null}
+        </div>
+      )}
+
+      {/* Step 3: Post */}
+      {step === 'post' && (
+        <div className="border rounded-lg p-4 space-y-3">
+          <h4 className="font-medium text-sm flex items-center gap-2">
+            <span className="bg-blue-100 text-blue-700 rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold">3</span>
+            Post to Ledger
+          </h4>
+
+          {dryRun && !postResult && (
+            <div className="text-sm text-muted-foreground">
+              <p>{dryRun.count} transactions ready to post</p>
+            </div>
+          )}
+
+          {!postResult ? (
+            <Button onClick={handlePost} disabled={posting || (dryRun?.count === 0)}>
+              {posting ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
+              Post to Ledger
+            </Button>
+          ) : (
+            <div className="space-y-3">
+              <div className="text-sm">
+                <p className="text-green-600 font-medium">{postResult.posted} transactions posted to ledger</p>
+                {postResult.errors > 0 && (
+                  <p className="text-red-600">{postResult.errors} errors</p>
+                )}
+              </div>
+              <Button variant="outline" onClick={onBack}>
+                <ArrowLeft className="h-4 w-4 mr-1" /> Back to List
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 

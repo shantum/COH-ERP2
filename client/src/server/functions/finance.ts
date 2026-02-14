@@ -20,6 +20,7 @@ import {
   ListInvoicesInput,
   ListPaymentsInput,
   ListLedgerEntriesInput,
+  ListBankTransactionsInput,
 } from '@coh/shared/schemas/finance';
 
 // ============================================
@@ -1709,4 +1710,56 @@ export const searchCounterparties = createServerFn({ method: 'GET' })
     }
 
     return { success: true as const, results };
+  });
+
+// ============================================
+// BANK TRANSACTIONS — LIST
+// ============================================
+
+export const listBankTransactions = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
+  .inputValidator((input: unknown) => ListBankTransactionsInput.parse(input))
+  .handler(async ({ data }) => {
+    const prisma = await getPrisma();
+    const { bank, status, search, page = 1, limit = 50 } = data ?? {};
+    const skip = (page - 1) * limit;
+
+    const where: Record<string, unknown> = {};
+    if (bank) where.bank = bank;
+    if (status) where.status = status;
+    if (search) {
+      where.OR = [
+        { narration: { contains: search, mode: 'insensitive' } },
+        { counterpartyName: { contains: search, mode: 'insensitive' } },
+        { reference: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+
+    const [transactions, total] = await Promise.all([
+      prisma.bankTransaction.findMany({
+        where,
+        select: {
+          id: true,
+          bank: true,
+          txnDate: true,
+          amount: true,
+          direction: true,
+          narration: true,
+          reference: true,
+          counterpartyName: true,
+          debitAccountCode: true,
+          creditAccountCode: true,
+          status: true,
+          skipReason: true,
+          category: true,
+          createdAt: true,
+        },
+        orderBy: { txnDate: 'desc' },
+        skip,
+        take: limit,
+      }),
+      prisma.bankTransaction.count({ where }),
+    ]);
+
+    return { success: true as const, transactions, total, page, limit };
   });
