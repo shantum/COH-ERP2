@@ -210,8 +210,6 @@ interface ProductData {
 export const getProductsTree = createServerFn({ method: 'GET' })
     .inputValidator((input: unknown) => productsTreeInputSchema.parse(input))
     .handler(async ({ data }): Promise<ProductsTreeResponse> => {
-        console.log('[Server Function] getProductsTree called with:', data);
-
         try {
             const prisma = await getPrisma();
 

@@ -680,8 +680,6 @@ function flattenOrdersToRows(orders: PrismaOrder[]): FlattenedOrderRow[] {
 export const getOrders = createServerFn({ method: 'GET' })
     .inputValidator((input: unknown) => ordersListInputSchema.parse(input))
     .handler(async ({ data }): Promise<OrdersResponse> => {
-        console.log('[Server Function] getOrders called with:', data);
-
         try {
             const prisma = await getPrisma();
 
@@ -776,8 +774,6 @@ export const getOrders = createServerFn({ method: 'GET' })
                 }),
             ]);
 
-            console.log('[Server Function] Query returned', orders.length, 'orders, total:', totalCount);
-
             // Transform to flattened rows for AG-Grid
             const rows = flattenOrdersToRows(orders as PrismaOrder[]);
 
@@ -822,8 +818,6 @@ export interface OrderViewCounts {
  */
 export const getOrderViewCounts = createServerFn({ method: 'GET' })
     .handler(async (): Promise<OrderViewCounts> => {
-        console.log('[Server Function] getOrderViewCounts called');
-
         try {
             const prisma = await getPrisma();
 
@@ -944,8 +938,6 @@ function getTabDisplayName(tab: string): string {
 export const searchAllOrders = createServerFn({ method: 'GET' })
     .inputValidator((input: unknown) => searchAllInputSchema.parse(input))
     .handler(async ({ data }): Promise<SearchAllResponse> => {
-        console.log('[Server Function] searchAllOrders called with:', data);
-
         try {
             const prisma = await getPrisma();
 
@@ -1276,8 +1268,6 @@ export interface SearchUnifiedResponse {
 export const searchUnifiedOrders = createServerFn({ method: 'GET' })
     .inputValidator((input: unknown) => searchUnifiedInputSchema.parse(input))
     .handler(async ({ data }): Promise<SearchUnifiedResponse> => {
-        console.log('[Server Function] searchUnifiedOrders called with:', data);
-
         try {
             const prisma = await getPrisma();
 
@@ -1364,8 +1354,6 @@ export const searchUnifiedOrders = createServerFn({ method: 'GET' })
                     take: pageSize,
                 }),
             ]);
-
-            console.log('[Server Function] searchUnifiedOrders found', orders.length, 'orders, total:', totalCount);
 
             // Transform to flattened rows for AG-Grid
             const rows = flattenOrdersToRows(orders as PrismaOrder[]);
@@ -1625,8 +1613,6 @@ export interface OrdersAnalyticsResponse {
  */
 export const getOrdersAnalytics = createServerFn({ method: 'GET' })
     .handler(async (): Promise<OrdersAnalyticsResponse> => {
-        console.log('[Server Function] getOrdersAnalytics called');
-
         try {
             const prisma = await getPrisma();
 

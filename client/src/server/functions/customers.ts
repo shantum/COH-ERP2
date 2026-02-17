@@ -65,8 +65,6 @@ export interface CustomersListResponse {
 export const getCustomersList = createServerFn({ method: 'GET' })
     .inputValidator((input: unknown) => customersListInputSchema.parse(input))
     .handler(async ({ data }): Promise<CustomersListResponse> => {
-        console.log('[Server Function] getCustomersList called with:', data);
-
         try {
             const prisma = await getPrisma();
 

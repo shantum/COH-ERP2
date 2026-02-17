@@ -172,17 +172,11 @@ async function getDashboardCache() {
  */
 export const getOrdersAnalytics = createServerFn({ method: 'GET' })
     .handler(async (): Promise<OrdersAnalyticsResponse> => {
-        console.log('[Server Function] getOrdersAnalytics called');
-
         try {
             // Check cache first
             const cache = await getDashboardCache();
             const cached = cache.get<OrdersAnalyticsResponse>('analytics:main');
-            if (cached) {
-                console.log('[Server Function] getOrdersAnalytics cache HIT');
-                return cached;
-            }
-            console.log('[Server Function] getOrdersAnalytics cache MISS');
+            if (cached) return cached;
 
             // Import Kysely queries dynamically
             const {
@@ -521,7 +515,6 @@ export const invalidateDashboardCache = createServerFn({ method: 'POST' })
         try {
             const cache = await getDashboardCache();
             cache.invalidateAll();
-            console.log('[Server Function] Dashboard cache invalidated');
             return { success: true };
         } catch (error: unknown) {
             console.error('[Server Function] Error invalidating dashboard cache:', error);

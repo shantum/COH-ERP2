@@ -947,8 +947,6 @@ export const getInventoryList = createServerFn({ method: 'GET' })
             inventoryListInputSchema.parse(input)
     )
     .handler(async ({ data }): Promise<InventoryListResponse> => {
-        console.log('[Server Function] getInventoryList called with:', data);
-
         try {
             const prisma = await getPrisma();
 
