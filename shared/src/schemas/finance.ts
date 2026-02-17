@@ -12,7 +12,7 @@ import { z } from 'zod';
 
 export const FinanceSearchParams = z.object({
   /** Active tab */
-  tab: z.enum(['dashboard', 'invoices', 'payments', 'ledger', 'pnl', 'bank-import', 'parties', 'transaction-types']).catch('dashboard'),
+  tab: z.enum(['dashboard', 'invoices', 'payments', 'pnl', 'bank-import', 'parties', 'transaction-types']).catch('dashboard'),
   /** Bank import: bank filter */
   bankFilter: z.enum(['all', 'hdfc', 'razorpayx', 'hdfc_cc', 'icici_cc']).optional().catch(undefined),
   /** Bank import: status filter */
@@ -44,7 +44,7 @@ export const FinanceSearchParams = z.object({
   /** Items per page */
   limit: z.coerce.number().int().positive().max(200).catch(50),
   /** Modal state */
-  modal: z.enum(['create-invoice', 'create-payment', 'manual-entry', 'view-invoice', 'view-payment', 'view-entry']).optional().catch(undefined),
+  modal: z.enum(['create-invoice', 'create-payment', 'view-invoice', 'view-payment']).optional().catch(undefined),
   /** Record ID for modals */
   modalId: z.string().optional().catch(undefined),
 });
@@ -132,25 +132,6 @@ export const MatchPaymentInvoiceSchema = z.object({
 export type MatchPaymentInvoiceInput = z.infer<typeof MatchPaymentInvoiceSchema>;
 
 // ============================================
-// MANUAL LEDGER ENTRY
-// ============================================
-
-export const ManualLedgerLineSchema = z.object({
-  accountCode: z.string(),
-  debit: z.number().min(0).optional(),
-  credit: z.number().min(0).optional(),
-  description: z.string().optional(),
-});
-
-export const CreateManualLedgerEntrySchema = z.object({
-  entryDate: z.string(),
-  description: z.string().min(1),
-  notes: z.string().optional(),
-  lines: z.array(ManualLedgerLineSchema).min(2),
-});
-export type CreateManualLedgerEntryInput = z.infer<typeof CreateManualLedgerEntrySchema>;
-
-// ============================================
 // LIST QUERY PARAMS (server function inputs)
 // ============================================
 
@@ -173,14 +154,6 @@ export const ListPaymentsInput = z.object({
   limit: z.coerce.number().int().positive().max(200).default(50),
 }).optional();
 
-export const ListLedgerEntriesInput = z.object({
-  accountCode: z.string().optional(),
-  sourceType: z.string().optional(),
-  search: z.string().optional(),
-  page: z.coerce.number().int().positive().default(1),
-  limit: z.coerce.number().int().positive().max(200).default(50),
-}).optional();
-
 // ============================================
 // DISPLAY CONSTANTS (shared between client + server)
 // ============================================
@@ -194,7 +167,7 @@ export type PartyCategory = (typeof PARTY_CATEGORIES)[number];
 
 export const INVOICE_CATEGORIES = [
   'fabric', 'trims', 'service', 'logistics', 'rent', 'salary',
-  'marketing', 'packaging', 'equipment', 'marketplace', 'customer_order', 'statutory', 'other',
+  'marketing', 'packaging', 'equipment', 'marketplace', 'software', 'customer_order', 'statutory', 'other',
 ] as const;
 
 export type InvoiceCategory = (typeof INVOICE_CATEGORIES)[number];
@@ -210,6 +183,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   packaging: 'Packaging',
   equipment: 'Equipment & Tools',
   marketplace: 'Marketplace Fees',
+  software: 'Software & Technology',
   customer_order: 'Customer Order',
   statutory: 'Statutory / TDS',
   other: 'Other',
@@ -358,6 +332,7 @@ export const CHART_OF_ACCOUNTS = [
   { code: 'COGS', name: 'Cost of Goods Sold', type: 'direct_cost' },
   { code: 'OPERATING_EXPENSES', name: 'Operating Expenses', type: 'expense' },
   { code: 'MARKETPLACE_FEES', name: 'Marketplace & Payment Fees', type: 'expense' },
+  { code: 'SOFTWARE_TECHNOLOGY', name: 'Software & Technology', type: 'expense' },
   { code: 'UNMATCHED_PAYMENTS', name: 'Unmatched Payments (Suspense)', type: 'expense' },
   { code: 'OWNER_CAPITAL', name: 'Owner Capital', type: 'equity' },
   { code: 'RETAINED_EARNINGS', name: 'Retained Earnings', type: 'equity' },

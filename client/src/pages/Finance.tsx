@@ -13,12 +13,10 @@ import {
   getFinanceSummary,
   listInvoices,
   listPayments,
-  listLedgerEntries,
   createInvoice,
   confirmInvoice,
   cancelInvoice,
   createFinancePayment,
-  createManualEntry,
   findUnmatchedPayments,
   getMonthlyPnl,
   getPnlAccountDetail,
@@ -28,6 +26,7 @@ import {
   listFinanceParties,
   updateFinanceParty,
   createFinanceParty,
+  getPartyBalances,
   getTransactionType,
   createTransactionType,
   updateTransactionType,
@@ -44,7 +43,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import {
   IndianRupee, Plus, ArrowUpRight, ArrowDownLeft,
-  Check, X, BookOpen, ChevronLeft, ChevronRight, Loader2, AlertCircle,
+  Check, X, ChevronLeft, ChevronRight, Loader2, AlertCircle,
   ExternalLink, CloudUpload, Link2, Download, Upload, ArrowLeft,
   Pencil, Search, Trash2, History,
 } from 'lucide-react';
@@ -94,7 +93,6 @@ export default function Finance() {
           <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
           <TabsTrigger value="invoices">Invoices</TabsTrigger>
           <TabsTrigger value="payments">Payments</TabsTrigger>
-          <TabsTrigger value="ledger">Ledger</TabsTrigger>
           <TabsTrigger value="pnl">P&L</TabsTrigger>
           <TabsTrigger value="bank-import">Bank Import</TabsTrigger>
           <TabsTrigger value="parties">Parties</TabsTrigger>
@@ -109,9 +107,6 @@ export default function Finance() {
         </TabsContent>
         <TabsContent value="payments" className="mt-4">
           <PaymentsTab search={search} />
-        </TabsContent>
-        <TabsContent value="ledger" className="mt-4">
-          <LedgerTab search={search} />
         </TabsContent>
         <TabsContent value="pnl" className="mt-4">
           <PnlTab />
@@ -134,15 +129,6 @@ export default function Finance() {
 // DASHBOARD TAB
 // ============================================
 
-const TYPE_LABELS: Record<string, string> = {
-  asset: 'Assets',
-  liability: 'Liabilities',
-  income: 'Income',
-  direct_cost: 'Direct Costs',
-  expense: 'Expenses',
-  equity: 'Equity',
-};
-
 function DashboardTab() {
   const summaryFn = useServerFn(getFinanceSummary);
   const alertsFn = useServerFn(getFinanceAlerts);
@@ -157,18 +143,7 @@ function DashboardTab() {
     queryFn: () => alertsFn(),
   });
 
-  const accounts = data?.success ? data.accounts : [];
   const summary = data?.success ? data.summary : null;
-
-  // Group accounts by type — must be called every render (hooks rule)
-  const grouped = useMemo(() => {
-    const groups: Record<string, typeof accounts> = {};
-    for (const acct of accounts) {
-      if (!groups[acct.type]) groups[acct.type] = [];
-      groups[acct.type].push(acct);
-    }
-    return groups;
-  }, [accounts]);
 
   if (isLoading) return <LoadingState />;
   if (!data?.success || !summary) return <div className="text-muted-foreground">Failed to load summary</div>;
@@ -176,6 +151,11 @@ function DashboardTab() {
   const alerts = alertsData?.success ? alertsData.alerts : [];
   const errorCount = alertsData?.success ? alertsData.counts.errors : 0;
   const warningCount = alertsData?.success ? alertsData.counts.warnings : 0;
+
+  const fmtDate = (d: string | Date | null) => {
+    if (!d) return '';
+    return `as of ${new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}`;
+  };
 
   return (
     <div className="space-y-6">
@@ -203,13 +183,7 @@ function DashboardTab() {
       )}
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <SummaryCard
-          label="Accounts Receivable"
-          value={summary.totalReceivable}
-          subtitle={`${summary.openReceivableInvoices} open invoices`}
-          color="text-green-700"
-        />
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
         <SummaryCard
           label="Accounts Payable"
           value={summary.totalPayable}
@@ -217,41 +191,31 @@ function DashboardTab() {
           color="text-red-700"
         />
         <SummaryCard
+          label="Accounts Receivable"
+          value={summary.totalReceivable}
+          subtitle={`${summary.openReceivableInvoices} open invoices`}
+          color="text-green-700"
+        />
+        <SummaryCard
           label="HDFC Bank"
-          value={accounts.find((a) => a.code === 'BANK_HDFC')?.balance ?? 0}
+          value={summary.hdfcBalance}
+          subtitle={fmtDate(summary.hdfcBalanceDate)}
           color="text-blue-700"
         />
         <SummaryCard
           label="RazorpayX"
-          value={accounts.find((a) => a.code === 'BANK_RAZORPAYX')?.balance ?? 0}
+          value={summary.rpxBalance}
+          subtitle={fmtDate(summary.rpxBalanceDate)}
           color="text-blue-600"
         />
-        <SummaryCard
-          label="Cash"
-          value={accounts.find((a) => a.code === 'CASH')?.balance ?? 0}
-          color="text-amber-700"
-        />
-      </div>
-
-      {/* Account Balances by Type */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {Object.entries(grouped).map(([type, accts]) => (
-          <div key={type} className="border rounded-lg p-4">
-            <h3 className="font-semibold text-sm text-muted-foreground uppercase mb-3">
-              {TYPE_LABELS[type] ?? type}
-            </h3>
-            <div className="space-y-2">
-              {accts.map((acct) => (
-                <div key={acct.code} className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">{acct.name}</span>
-                  <span className={`font-mono ${acct.balance < 0 ? 'text-red-600' : ''}`}>
-                    {formatCurrency(acct.balance)}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-        ))}
+        {summary.suspenseBalance > 0 && (
+          <SummaryCard
+            label="Suspense"
+            value={summary.suspenseBalance}
+            subtitle="needs reclassifying"
+            color="text-amber-700"
+          />
+        )}
       </div>
     </div>
   );
@@ -832,117 +796,6 @@ function PaymentsTab({ search }: { search: FinanceSearchParams }) {
 }
 
 // ============================================
-// LEDGER TAB
-// ============================================
-
-function LedgerTab({ search }: { search: FinanceSearchParams }) {
-  const navigate = useNavigate();
-  const [showManualEntry, setShowManualEntry] = useState(false);
-
-  const listFn = useServerFn(listLedgerEntries);
-  const { data, isLoading } = useQuery({
-    queryKey: ['finance', 'ledger', search.accountCode, search.sourceType, search.search, search.page],
-    queryFn: () =>
-      listFn({
-        data: {
-          ...(search.accountCode ? { accountCode: search.accountCode } : {}),
-          ...(search.sourceType ? { sourceType: search.sourceType } : {}),
-          ...(search.search ? { search: search.search } : {}),
-          page: search.page,
-          limit: search.limit,
-        },
-      }),
-  });
-
-  const updateSearch = useCallback(
-    (updates: Partial<FinanceSearchParams>) => {
-      navigate({ to: '/finance', search: { ...search, ...updates }, replace: true });
-    },
-    [navigate, search]
-  );
-
-  return (
-    <div className="space-y-4">
-      {/* Filters */}
-      <div className="flex flex-wrap items-center gap-2">
-        <Select value={search.accountCode ?? 'all'} onValueChange={(v) => updateSearch({ accountCode: v === 'all' ? undefined : v, page: 1 })}>
-          <SelectTrigger className="w-[220px]"><SelectValue placeholder="Account" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Accounts</SelectItem>
-            {CHART_OF_ACCOUNTS.map((a) => (
-              <SelectItem key={a.code} value={a.code}>{a.name}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-
-        <Input
-          placeholder="Search entries..."
-          value={search.search ?? ''}
-          onChange={(e) => updateSearch({ search: e.target.value || undefined, page: 1 })}
-          className="w-[200px]"
-        />
-
-        <div className="ml-auto">
-          <Button onClick={() => setShowManualEntry(true)}>
-            <BookOpen className="h-4 w-4 mr-1" /> Manual Entry
-          </Button>
-        </div>
-      </div>
-
-      {/* Entries */}
-      {isLoading ? (
-        <LoadingState />
-      ) : (
-        <>
-          <div className="space-y-3">
-            {data?.entries?.map((entry) => {
-              const totalDebit = entry.lines.reduce((s, l) => s + l.debit, 0);
-              return (
-                <div key={entry.id} className={`border rounded-lg p-4 ${entry.isReversed ? 'opacity-50' : ''}`}>
-                  <div className="flex items-start justify-between mb-2">
-                    <div>
-                      <p className="font-medium text-sm">{entry.description}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {new Date(entry.entryDate).toLocaleDateString('en-IN')}
-                        {' · '}
-                        {entry.sourceType.replace(/_/g, ' ')}
-                        {entry.isReversed && ' · REVERSED'}
-                        {' · by '}
-                        {entry.createdBy.name}
-                      </p>
-                    </div>
-                    <span className="font-mono text-sm font-medium">{formatCurrency(totalDebit)}</span>
-                  </div>
-                  <div className="grid grid-cols-2 gap-x-4 text-xs">
-                    {entry.lines.map((line) => (
-                      <div key={line.id} className="flex justify-between py-0.5">
-                        <span className="text-muted-foreground">
-                          {line.debit > 0 ? 'Dr' : 'Cr'} {line.account.name}
-                        </span>
-                        <span className="font-mono">
-                          {formatCurrency(line.debit > 0 ? line.debit : line.credit)}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              );
-            })}
-            {(!data?.entries || data.entries.length === 0) && (
-              <div className="p-8 text-center text-muted-foreground border rounded-lg">No ledger entries found</div>
-            )}
-          </div>
-
-          <Pagination page={search.page} total={data?.total ?? 0} limit={search.limit} onPageChange={(p) => updateSearch({ page: p })} />
-        </>
-      )}
-
-      <ManualEntryModal open={showManualEntry} onClose={() => setShowManualEntry(false)} />
-    </div>
-  );
-}
-
-// ============================================
 // P&L TAB (accrual basis, grouped by period)
 // ============================================
 
@@ -1009,7 +862,7 @@ function PnlTab() {
                 </td>
                 <td className="py-1 px-3 text-right text-muted-foreground">{fmt(l.amount)}</td>
               </tr>
-              {isDrilling && <AccountDrilldown period={period} accountCode={l.code} fmt={fmt} />}
+              {isDrilling && <AccountDrilldown period={period} category={l.code} fmt={fmt} />}
             </Fragment>
           );
         })}
@@ -1070,24 +923,24 @@ function PnlTab() {
         </table>
       </div>
       {months.length === 0 && (
-        <div className="text-muted-foreground text-center py-8">No ledger entries found</div>
+        <div className="text-muted-foreground text-center py-8">No P&L data found</div>
       )}
     </div>
   );
 }
 
-// Lazy-loaded account drill-down: shows categorized entries for one account+period
-function AccountDrilldown({ period, accountCode, fmt }: {
+// Lazy-loaded drill-down: shows invoices for one category+period
+function AccountDrilldown({ period, category, fmt }: {
   period: string;
-  accountCode: string;
+  category: string;
   fmt: (n: number) => string;
 }) {
   const detailFn = useServerFn(getPnlAccountDetail);
   const [expandedCat, setExpandedCat] = useState<Set<string>>(new Set());
 
   const { data, isLoading } = useQuery({
-    queryKey: ['finance', 'pnl-detail', period, accountCode],
-    queryFn: () => detailFn({ data: { period, accountCode } }),
+    queryKey: ['finance', 'pnl-detail', period, category],
+    queryFn: () => detailFn({ data: { period, category } }),
   });
 
   if (isLoading) {
@@ -1541,12 +1394,12 @@ function BankImportView({ onBack }: { onBack: () => void }) {
           {!postResult ? (
             <Button onClick={handlePost} disabled={posting || (dryRun?.count === 0)}>
               {posting ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
-              Post to Ledger
+              Post Transactions
             </Button>
           ) : (
             <div className="space-y-3">
               <div className="text-sm">
-                <p className="text-green-600 font-medium">{postResult.posted} transactions posted to ledger</p>
+                <p className="text-green-600 font-medium">{postResult.posted} transactions posted</p>
                 {postResult.errors > 0 && (
                   <p className="text-red-600">{postResult.errors} errors</p>
                 )}
@@ -1605,9 +1458,7 @@ function ConfirmPayableDialog({ invoice, isPending, onConfirm, onClose }: {
             <div className="space-y-2">
               <p className="text-sm text-muted-foreground">Found {payments.length} unmatched payment{payments.length !== 1 ? 's' : ''}:</p>
               <div className="max-h-[240px] overflow-y-auto space-y-1.5">
-                {payments.map((pmt) => {
-                  const debitAccount = pmt.ledgerEntry?.lines?.[0]?.account;
-                  return (
+                {payments.map((pmt) => (
                     <button
                       key={pmt.id}
                       type="button"
@@ -1628,7 +1479,7 @@ function ConfirmPayableDialog({ invoice, isPending, onConfirm, onClose }: {
                         <span>{pmt.counterpartyName ?? '—'}</span>
                         <span>{pmt.referenceNumber ?? pmt.method.replace(/_/g, ' ')}</span>
                       </div>
-                      {debitAccount && debitAccount.code === 'UNMATCHED_PAYMENTS' && (
+                      {pmt.debitAccountCode === 'UNMATCHED_PAYMENTS' && (
                         <span className="inline-flex items-center mt-1 text-[10px] text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded">
                           suspense — will be reclassified
                         </span>
@@ -1639,8 +1490,7 @@ function ConfirmPayableDialog({ invoice, isPending, onConfirm, onClose }: {
                         </span>
                       )}
                     </button>
-                  );
-                })}
+                  ))}
               </div>
             </div>
           ) : (
@@ -1760,7 +1610,7 @@ function CreateInvoiceModal({ open, onClose, prefill }: {
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>New Invoice</DialogTitle>
-          <DialogDescription>Create a draft invoice. Confirm it later to create a ledger entry.</DialogDescription>
+          <DialogDescription>Create a draft invoice. Confirm it later to book the expense.</DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
@@ -1885,7 +1735,7 @@ function CreatePaymentModal({ open, onClose }: { open: boolean; onClose: () => v
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>Record Payment</DialogTitle>
-          <DialogDescription>Record a payment. This immediately creates a ledger entry.</DialogDescription>
+          <DialogDescription>Record a payment transaction.</DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
@@ -1942,149 +1792,6 @@ function CreatePaymentModal({ open, onClose }: { open: boolean; onClose: () => v
           >
             {mutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
             Record Payment
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// ============================================
-// MANUAL LEDGER ENTRY MODAL
-// ============================================
-
-interface ManualLine {
-  accountCode: string;
-  debit: string;
-  credit: string;
-  description: string;
-}
-
-function ManualEntryModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const queryClient = useQueryClient();
-  const createFn = useServerFn(createManualEntry);
-
-  const [description, setDescription] = useState('');
-  const [entryDate, setEntryDate] = useState(new Date().toISOString().split('T')[0]);
-  const [notes, setNotes] = useState('');
-  const [lines, setLines] = useState<ManualLine[]>([
-    { accountCode: '', debit: '', credit: '', description: '' },
-    { accountCode: '', debit: '', credit: '', description: '' },
-  ]);
-
-  const updateLine = (idx: number, field: keyof ManualLine, value: string) => {
-    const updated = [...lines];
-    updated[idx] = { ...updated[idx], [field]: value };
-    setLines(updated);
-  };
-
-  const addLine = () => setLines([...lines, { accountCode: '', debit: '', credit: '', description: '' }]);
-  const removeLine = (idx: number) => {
-    if (lines.length <= 2) return;
-    setLines(lines.filter((_, i) => i !== idx));
-  };
-
-  const totalDebit = lines.reduce((s, l) => s + (Number(l.debit) || 0), 0);
-  const totalCredit = lines.reduce((s, l) => s + (Number(l.credit) || 0), 0);
-  const isBalanced = Math.abs(totalDebit - totalCredit) < 0.01 && totalDebit > 0;
-
-  const mutation = useMutation({
-    mutationFn: () =>
-      createFn({
-        data: {
-          entryDate,
-          description,
-          ...(notes ? { notes } : {}),
-          lines: lines
-            .filter((l) => l.accountCode && (Number(l.debit) > 0 || Number(l.credit) > 0))
-            .map((l) => ({
-              accountCode: l.accountCode,
-              ...(Number(l.debit) > 0 ? { debit: Number(l.debit) } : {}),
-              ...(Number(l.credit) > 0 ? { credit: Number(l.credit) } : {}),
-              ...(l.description ? { description: l.description } : {}),
-            })),
-        },
-      }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['finance'] });
-      onClose();
-    },
-  });
-
-  return (
-    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>Manual Journal Entry</DialogTitle>
-          <DialogDescription>Record a balanced double-entry. Debits must equal credits.</DialogDescription>
-        </DialogHeader>
-        <div className="space-y-3">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label>Description</Label>
-              <Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What's this for?" />
-            </div>
-            <div>
-              <Label>Date</Label>
-              <Input type="date" value={entryDate} onChange={(e) => setEntryDate(e.target.value)} />
-            </div>
-          </div>
-
-          <div className="border rounded-lg p-3 space-y-2">
-            <div className="grid grid-cols-[1fr_100px_100px_1fr_32px] gap-2 text-xs font-medium text-muted-foreground">
-              <span>Account</span>
-              <span className="text-right">Debit</span>
-              <span className="text-right">Credit</span>
-              <span>Note</span>
-              <span />
-            </div>
-            {lines.map((line, idx) => (
-              <div key={idx} className="grid grid-cols-[1fr_100px_100px_1fr_32px] gap-2">
-                <Select value={line.accountCode || 'none'} onValueChange={(v) => updateLine(idx, 'accountCode', v === 'none' ? '' : v)}>
-                  <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Account" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none" disabled>Select account</SelectItem>
-                    {CHART_OF_ACCOUNTS.map((a) => (
-                      <SelectItem key={a.code} value={a.code}>{a.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Input className="h-8 text-xs text-right" type="number" placeholder="0" value={line.debit} onChange={(e) => updateLine(idx, 'debit', e.target.value)} />
-                <Input className="h-8 text-xs text-right" type="number" placeholder="0" value={line.credit} onChange={(e) => updateLine(idx, 'credit', e.target.value)} />
-                <Input className="h-8 text-xs" placeholder="Note" value={line.description} onChange={(e) => updateLine(idx, 'description', e.target.value)} />
-                <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => removeLine(idx)} disabled={lines.length <= 2}>
-                  <X className="h-3 w-3" />
-                </Button>
-              </div>
-            ))}
-            <div className="flex items-center justify-between pt-2 border-t">
-              <Button variant="outline" size="sm" onClick={addLine}>+ Add Line</Button>
-              <div className="flex items-center gap-4 text-sm font-mono">
-                <span>Dr: {formatCurrency(totalDebit)}</span>
-                <span>Cr: {formatCurrency(totalCredit)}</span>
-                {!isBalanced && totalDebit > 0 && (
-                  <span className="text-red-500 flex items-center gap-1">
-                    <AlertCircle className="h-3 w-3" /> Unbalanced
-                  </span>
-                )}
-                {isBalanced && <span className="text-green-600"><Check className="h-4 w-4" /></span>}
-              </div>
-            </div>
-          </div>
-
-          <div>
-            <Label>Notes</Label>
-            <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} />
-          </div>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button
-            onClick={() => mutation.mutate()}
-            disabled={!description || !isBalanced || mutation.isPending}
-          >
-            {mutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
-            Create Entry
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -2535,6 +2242,7 @@ function PartiesTab({ search }: { search: FinanceSearchParams }) {
   const updateFn = useServerFn(updateFinanceParty);
   const createFn = useServerFn(createFinanceParty);
 
+  const balancesFn = useServerFn(getPartyBalances);
   const [editingParty, setEditingParty] = useState<any>(null);
   const [isCreating, setIsCreating] = useState(false);
 
@@ -2542,6 +2250,15 @@ function PartiesTab({ search }: { search: FinanceSearchParams }) {
     queryKey: ['finance', 'transactionTypes'],
     queryFn: () => listTTFn(),
   });
+
+  const { data: balData } = useQuery({
+    queryKey: ['finance', 'partyBalances'],
+    queryFn: () => balancesFn(),
+  });
+  const balanceMap = useMemo(() => {
+    if (!balData?.success) return new Map<string, { total_invoiced: number; total_paid: number; outstanding: number }>();
+    return new Map(balData.balances.map((b: any) => [b.id, b]));
+  }, [balData]);
 
   const { data, isLoading } = useQuery({
     queryKey: ['finance', 'parties', 'list', search.partyTxnType, search.search, search.page],
@@ -2634,7 +2351,9 @@ function PartiesTab({ search }: { search: FinanceSearchParams }) {
               <tr className="border-b bg-muted/50">
                 <th className="text-left p-3 font-medium">Name</th>
                 <th className="text-left p-3 font-medium">Transaction Type</th>
-                <th className="text-left p-3 font-medium">Aliases</th>
+                <th className="text-right p-3 font-medium">Invoiced</th>
+                <th className="text-right p-3 font-medium">Paid</th>
+                <th className="text-right p-3 font-medium">Outstanding</th>
                 <th className="text-left p-3 font-medium">TDS</th>
                 <th className="text-center p-3 font-medium">Invoice?</th>
                 <th className="text-center p-3 font-medium">Active</th>
@@ -2657,18 +2376,22 @@ function PartiesTab({ search }: { search: FinanceSearchParams }) {
                       <span className="text-xs text-muted-foreground">—</span>
                     )}
                   </td>
-                  <td className="p-3 max-w-[300px]">
-                    <div className="flex flex-wrap gap-1">
-                      {party.aliases.slice(0, 3).map((alias: string, i: number) => (
-                        <span key={i} className="inline-flex px-1.5 py-0.5 rounded text-xs bg-gray-100 text-gray-600 font-mono truncate max-w-[140px]" title={alias}>
-                          {alias}
-                        </span>
-                      ))}
-                      {party.aliases.length > 3 && (
-                        <span className="text-xs text-muted-foreground">+{party.aliases.length - 3} more</span>
-                      )}
-                    </div>
-                  </td>
+                  {(() => {
+                    const bal = balanceMap.get(party.id);
+                    return (
+                      <>
+                        <td className="p-3 text-right text-xs tabular-nums">{bal ? formatCurrency(bal.total_invoiced) : '—'}</td>
+                        <td className="p-3 text-right text-xs tabular-nums">{bal ? formatCurrency(bal.total_paid) : '—'}</td>
+                        <td className="p-3 text-right text-xs tabular-nums font-medium">
+                          {bal && bal.outstanding > 0.01 ? (
+                            <span className="text-amber-600">{formatCurrency(bal.outstanding)}</span>
+                          ) : bal ? (
+                            <span className="text-green-600">Settled</span>
+                          ) : '—'}
+                        </td>
+                      </>
+                    );
+                  })()}
                   <td className="p-3 text-xs">
                     {party.tdsApplicable ? (
                       <span>{party.tdsSection} @ {party.tdsRate}%</span>

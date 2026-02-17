@@ -1,7 +1,7 @@
 /**
  * Finance Server Functions
  *
- * Invoice CRUD, payment CRUD, ledger queries, and manual journal entries.
+ * Invoice CRUD, payment CRUD, party management, and transaction types.
  * File uploads go through Express route (needs multer).
  */
 
@@ -16,10 +16,8 @@ import {
   UpdateInvoiceSchema,
   CreateFinancePaymentSchema,
   MatchPaymentInvoiceSchema,
-  CreateManualLedgerEntrySchema,
   ListInvoicesInput,
   ListPaymentsInput,
-  ListLedgerEntriesInput,
   ListBankTransactionsInput,
   ListPartiesInput,
   UpdatePartySchema,
@@ -28,18 +26,6 @@ import {
   UpdateTransactionTypeSchema,
 } from '@coh/shared/schemas/finance';
 
-// ============================================
-// INLINE LEDGER HELPERS
-// (Avoids cross-project import from server/)
-// ============================================
-
-interface LedgerLineInput {
-  accountCode: string;
-  debit?: number;
-  credit?: number;
-  description?: string;
-}
-
 /**
  * Convert a Date to IST "YYYY-MM" period string.
  * IST = UTC + 5:30
@@ -47,125 +33,6 @@ interface LedgerLineInput {
 function dateToPeriod(date: Date): string {
   const ist = new Date(date.getTime() + (5.5 * 60 * 60 * 1000));
   return `${ist.getUTCFullYear()}-${String(ist.getUTCMonth() + 1).padStart(2, '0')}`;
-}
-
-/**
- * Create a balanced journal entry with debit/credit lines.
- * Resolves account codes → IDs, validates balance, creates entry + lines.
- * DB trigger handles balance updates automatically.
- */
-async function inlineCreateLedgerEntry(
-  prisma: Awaited<ReturnType<typeof getPrisma>>,
-  input: {
-    entryDate: Date;
-    period: string;
-    description: string;
-    sourceType: string;
-    sourceId?: string;
-    lines: LedgerLineInput[];
-    createdById: string;
-    notes?: string;
-  }
-) {
-  const { entryDate, period, description, sourceType, sourceId, lines, createdById, notes } = input;
-
-  // Validate minimum 2 lines (debit + credit)
-  if (lines.length < 2) {
-    throw new Error('A journal entry needs at least 2 lines (debit + credit)');
-  }
-
-  // Validate debits = credits
-  const totalDebit = lines.reduce((sum, l) => sum + (l.debit ?? 0), 0);
-  const totalCredit = lines.reduce((sum, l) => sum + (l.credit ?? 0), 0);
-  if (Math.abs(totalDebit - totalCredit) > 0.01) {
-    throw new Error(`Debits (${totalDebit.toFixed(2)}) must equal credits (${totalCredit.toFixed(2)})`);
-  }
-
-  // Validate each line has exactly one of debit or credit
-  for (const line of lines) {
-    const d = line.debit ?? 0;
-    const c = line.credit ?? 0;
-    if (d > 0 && c > 0) {
-      throw new Error(`Line "${line.accountCode}" has both debit and credit`);
-    }
-    if (d === 0 && c === 0) {
-      throw new Error(`Line "${line.accountCode}" has zero debit and credit`);
-    }
-  }
-
-  // Resolve account codes to IDs
-  const accountCodes = [...new Set(lines.map((l) => l.accountCode))];
-  const accounts = await prisma.ledgerAccount.findMany({
-    where: { code: { in: accountCodes } },
-    select: { id: true, code: true },
-  });
-  const accountMap = new Map(accounts.map((a) => [a.code, a.id]));
-  for (const code of accountCodes) {
-    if (!accountMap.has(code)) throw new Error(`Unknown account code: ${code}`);
-  }
-
-  return prisma.ledgerEntry.create({
-    data: {
-      entryDate,
-      period,
-      description,
-      sourceType,
-      sourceId: sourceId ?? null,
-      notes: notes ?? null,
-      createdById,
-      lines: {
-        create: lines.map((line) => ({
-          accountId: accountMap.get(line.accountCode)!,
-          debit: line.debit ?? 0,
-          credit: line.credit ?? 0,
-          description: line.description ?? null,
-        })),
-      },
-    },
-    include: {
-      lines: { include: { account: { select: { code: true, name: true } } } },
-    },
-  });
-}
-
-/** Create a mirror entry that reverses the original (swaps all debits and credits) */
-async function inlineReverseLedgerEntry(
-  prisma: Awaited<ReturnType<typeof getPrisma>>,
-  entryId: string,
-  userId: string
-) {
-  const original = await prisma.ledgerEntry.findUnique({
-    where: { id: entryId },
-    include: { lines: true },
-  });
-  if (!original) throw new Error('Ledger entry not found');
-  if (original.isReversed) throw new Error('Entry is already reversed');
-
-  const reversal = await prisma.ledgerEntry.create({
-    data: {
-      entryDate: original.entryDate,
-      period: original.period,
-      description: `Reversal: ${original.description}`,
-      sourceType: 'adjustment',
-      notes: `Reversal of entry ${original.id}`,
-      createdById: userId,
-      lines: {
-        create: original.lines.map((line) => ({
-          accountId: line.accountId,
-          debit: line.credit, // swap
-          credit: line.debit, // swap
-          description: `Reversal: ${line.description ?? ''}`,
-        })),
-      },
-    },
-  });
-
-  await prisma.ledgerEntry.update({
-    where: { id: entryId },
-    data: { isReversed: true, reversedById: reversal.id },
-  });
-
-  return reversal;
 }
 
 // ============================================
@@ -177,28 +44,26 @@ export const getFinanceSummary = createServerFn({ method: 'GET' })
   .handler(async () => {
     const prisma = await getPrisma();
 
-    const accounts = await prisma.ledgerAccount.findMany({
-      where: { isActive: true },
-      select: { code: true, name: true, type: true, balance: true },
-      orderBy: { code: 'asc' },
-    });
-
-    // Aggregate some useful summaries
-    const totalPayable = accounts.find((a) => a.code === 'ACCOUNTS_PAYABLE')?.balance ?? 0;
-    const totalReceivable = accounts.find((a) => a.code === 'ACCOUNTS_RECEIVABLE')?.balance ?? 0;
-
-    // Count open invoices
-    const [payableCount, receivableCount] = await Promise.all([
+    const [apResult, arResult, hdfcBalance, rpxBalance, suspenseResult, payableCount, receivableCount] = await Promise.all([
+      prisma.invoice.aggregate({ where: { type: 'payable', status: { in: ['confirmed', 'partially_paid'] } }, _sum: { balanceDue: true } }),
+      prisma.invoice.aggregate({ where: { type: 'receivable', status: { in: ['confirmed', 'partially_paid'] } }, _sum: { balanceDue: true } }),
+      prisma.bankTransaction.findFirst({ where: { bank: 'hdfc', closingBalance: { not: null } }, orderBy: { txnDate: 'desc' }, select: { closingBalance: true, txnDate: true } }),
+      prisma.bankTransaction.findFirst({ where: { bank: 'razorpayx', closingBalance: { not: null } }, orderBy: { txnDate: 'desc' }, select: { closingBalance: true, txnDate: true } }),
+      prisma.payment.aggregate({ where: { direction: 'outgoing', status: 'confirmed', debitAccountCode: 'UNMATCHED_PAYMENTS', unmatchedAmount: { gt: 0.01 } }, _sum: { unmatchedAmount: true } }),
       prisma.invoice.count({ where: { type: 'payable', status: { in: ['confirmed', 'partially_paid'] } } }),
       prisma.invoice.count({ where: { type: 'receivable', status: { in: ['confirmed', 'partially_paid'] } } }),
     ]);
 
     return {
       success: true as const,
-      accounts,
       summary: {
-        totalPayable,
-        totalReceivable,
+        totalPayable: apResult._sum.balanceDue ?? 0,
+        totalReceivable: arResult._sum.balanceDue ?? 0,
+        hdfcBalance: hdfcBalance?.closingBalance ?? 0,
+        hdfcBalanceDate: hdfcBalance?.txnDate ?? null,
+        rpxBalance: rpxBalance?.closingBalance ?? 0,
+        rpxBalanceDate: rpxBalance?.txnDate ?? null,
+        suspenseBalance: suspenseResult._sum.unmatchedAmount ?? 0,
         openPayableInvoices: payableCount,
         openReceivableInvoices: receivableCount,
       },
@@ -262,47 +127,31 @@ export const getFinanceAlerts = createServerFn({ method: 'GET' })
       });
     }
 
-    // 3. Payments missing ledger entries
-    const noEntry = await prisma.payment.count({
-      where: { status: 'confirmed', ledgerEntryId: null },
-    });
-    if (noEntry > 0) {
-      alerts.push({
-        severity: 'error',
-        category: 'Missing Ledger Entry',
-        message: `${noEntry} confirmed payment(s) have no ledger entry`,
-      });
-    }
-
     // 4. Same vendor double-booked from different banks in same period
     const doubles = await prisma.$queryRaw<Array<{
       period: string; vendor: string; source_count: number; total: number; sources: string;
     }>>`
       WITH tagged AS (
-        SELECT le.period, le."sourceType",
-               ROUND(lel.debit::numeric) AS amount,
+        SELECT TO_CHAR(bt."txnDate" AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM') AS period,
+               bt.bank,
+               bt.amount::numeric AS amount,
                CASE
-                 WHEN le.description ILIKE '%facebook%' OR le.description ILIKE '%meta ads%' THEN 'Facebook'
-                 WHEN (le.description ILIKE '%google india%' OR le.description ILIKE '%google ads%')
-                      AND le.description NOT ILIKE '%play%' AND le.description NOT ILIKE '%service%' THEN 'Google Ads'
+                 WHEN bt."counterpartyName" ILIKE '%facebook%' OR bt."counterpartyName" ILIKE '%meta%' THEN 'Facebook'
+                 WHEN bt."counterpartyName" ILIKE '%google india%' OR bt."counterpartyName" ILIKE '%google ads%' THEN 'Google Ads'
                  ELSE NULL
                END AS vendor
-        FROM "LedgerEntryLine" lel
-        JOIN "LedgerEntry" le ON le.id = lel."entryId"
-        JOIN "LedgerAccount" la ON la.id = lel."accountId"
-        WHERE la.type IN ('expense', 'direct_cost')
-          AND le."isReversed" = false
-          AND lel.debit > 0
-          AND le."sourceType" IN ('bank_payout', 'hdfc_statement')
+        FROM "BankTransaction" bt
+        WHERE bt.direction = 'debit'
+          AND bt.status IN ('posted', 'legacy_posted')
       )
       SELECT period, vendor,
-             COUNT(DISTINCT "sourceType")::int AS source_count,
+             COUNT(DISTINCT bank)::int AS source_count,
              SUM(amount)::float AS total,
-             STRING_AGG(DISTINCT "sourceType", ' + ') AS sources
+             STRING_AGG(DISTINCT bank, ' + ') AS sources
       FROM tagged
       WHERE vendor IS NOT NULL
       GROUP BY period, vendor
-      HAVING COUNT(DISTINCT "sourceType") > 1
+      HAVING COUNT(DISTINCT bank) > 1
       ORDER BY period DESC
     `;
     for (const d of doubles) {
@@ -358,42 +207,17 @@ export const getFinanceAlerts = createServerFn({ method: 'GET' })
       });
     }
 
-    // 7. Unbalanced ledger entries (debits != credits)
-    const unbalanced = await prisma.$queryRaw<Array<{
-      id: string; description: string; entry_date: Date;
-      total_debit: number; total_credit: number;
-    }>>`
-      SELECT le.id, le.description, le."entryDate" AS entry_date,
-             COALESCE(SUM(lel.debit), 0)::float AS total_debit,
-             COALESCE(SUM(lel.credit), 0)::float AS total_credit
-      FROM "LedgerEntry" le
-      JOIN "LedgerEntryLine" lel ON lel."entryId" = le.id
-      WHERE le."isReversed" = false
-      GROUP BY le.id, le.description, le."entryDate"
-      HAVING ABS(SUM(lel.debit) - SUM(lel.credit)) > 0.50
-      ORDER BY ABS(SUM(lel.debit) - SUM(lel.credit)) DESC
-      LIMIT 10
-    `;
-    for (const ub of unbalanced) {
-      const diff = Math.abs(ub.total_debit - ub.total_credit);
-      alerts.push({
-        severity: 'error',
-        category: 'Unbalanced Entry',
-        message: `"${ub.description.slice(0, 50)}" — off by Rs ${Math.round(diff).toLocaleString('en-IN')}`,
-        details: `Dr ${Math.round(ub.total_debit).toLocaleString('en-IN')} vs Cr ${Math.round(ub.total_credit).toLocaleString('en-IN')}`,
-      });
-    }
-
-    // 8. Suspense balance (money in UNMATCHED_PAYMENTS needing reclassification)
-    const suspense = await prisma.ledgerAccount.findFirst({
-      where: { code: 'UNMATCHED_PAYMENTS' },
-      select: { balance: true },
+    // 8. Suspense balance (unmatched payments in suspense)
+    const suspenseTotal = await prisma.payment.aggregate({
+      where: { direction: 'outgoing', status: 'confirmed', debitAccountCode: 'UNMATCHED_PAYMENTS', unmatchedAmount: { gt: 0.01 } },
+      _sum: { unmatchedAmount: true },
     });
-    if (suspense && Math.abs(suspense.balance) > 100) {
+    const suspenseAmt = suspenseTotal._sum.unmatchedAmount ?? 0;
+    if (suspenseAmt > 100) {
       alerts.push({
         severity: 'warning',
         category: 'Suspense Balance',
-        message: `Rs ${Math.abs(Math.round(suspense.balance)).toLocaleString('en-IN')} sitting in Unmatched Payments — needs reclassifying`,
+        message: `Rs ${Math.abs(Math.round(suspenseAmt)).toLocaleString('en-IN')} sitting in Unmatched Payments — needs reclassifying`,
         details: 'Create invoices and link to these payments to move money to correct accounts',
       });
     }
@@ -474,32 +298,6 @@ export const getFinanceAlerts = createServerFn({ method: 'GET' })
       });
     }
 
-    // 12. Confirmed invoices with no ledger entry AND no linked payment
-    const orphanInvoices = await prisma.$queryRaw<Array<{
-      id: string; invoice_number: string | null; counterparty: string | null;
-      total_amount: number; status: string;
-    }>>`
-      SELECT i.id, i."invoiceNumber" AS invoice_number,
-             COALESCE(p.name, i."counterpartyName") AS counterparty,
-             i."totalAmount"::float AS total_amount,
-             i.status
-      FROM "Invoice" i
-      LEFT JOIN "Party" p ON p.id = i."partyId"
-      LEFT JOIN "PaymentInvoice" pi ON pi."invoiceId" = i.id
-      WHERE i.status IN ('confirmed', 'partially_paid', 'paid')
-        AND i."ledgerEntryId" IS NULL
-        AND pi.id IS NULL
-      LIMIT 10
-    `;
-    for (const inv of orphanInvoices) {
-      alerts.push({
-        severity: 'error',
-        category: 'Orphan Invoice',
-        message: `${inv.invoice_number || 'No #'} — ${inv.counterparty || 'Unknown'}: ${inv.status} but no ledger entry and no payment link`,
-        details: `Rs ${Math.round(inv.total_amount).toLocaleString('en-IN')}`,
-      });
-    }
-
     // 13. Old draft invoices (>30 days)
     const oldDrafts = await prisma.invoice.count({
       where: {
@@ -512,31 +310,6 @@ export const getFinanceAlerts = createServerFn({ method: 'GET' })
         severity: 'warning',
         category: 'Stale Drafts',
         message: `${oldDrafts} invoice draft(s) older than 30 days — confirm or delete them`,
-      });
-    }
-
-    // 14. Reversed entries still linked to invoices/payments
-    const reversedStillLinked = await prisma.$queryRaw<Array<{
-      id: string; description: string; linked_to: string;
-    }>>`
-      SELECT le.id, le.description,
-             CASE
-               WHEN i.id IS NOT NULL THEN 'Invoice ' || COALESCE(i."invoiceNumber", i.id::text)
-               WHEN pay.id IS NOT NULL THEN 'Payment ' || COALESCE(pay."referenceNumber", pay.id::text)
-               ELSE 'Unknown'
-             END AS linked_to
-      FROM "LedgerEntry" le
-      LEFT JOIN "Invoice" i ON i."ledgerEntryId" = le.id
-      LEFT JOIN "Payment" pay ON pay."ledgerEntryId" = le.id
-      WHERE le."isReversed" = true
-        AND (i.id IS NOT NULL OR pay.id IS NOT NULL)
-      LIMIT 10
-    `;
-    for (const r of reversedStillLinked) {
-      alerts.push({
-        severity: 'error',
-        category: 'Reversed But Linked',
-        message: `"${r.description.slice(0, 40)}" was reversed but still linked to ${r.linked_to}`,
       });
     }
 
@@ -629,11 +402,6 @@ export const getInvoice = createServerFn({ method: 'GET' })
               select: { id: true, referenceNumber: true, method: true, amount: true, paymentDate: true },
             },
             matchedBy: { select: { id: true, name: true } },
-          },
-        },
-        ledgerEntry: {
-          include: {
-            lines: { include: { account: { select: { code: true, name: true } } } },
           },
         },
         party: { select: { id: true, name: true, tdsApplicable: true, tdsSection: true, tdsRate: true } },
@@ -745,7 +513,7 @@ export const updateInvoice = createServerFn({ method: 'POST' })
   });
 
 // ============================================
-// INVOICE — CONFIRM (draft → confirmed + ledger entry)
+// INVOICE — CONFIRM (draft -> confirmed)
 // ============================================
 
 const confirmInvoiceInput = z.object({
@@ -770,7 +538,6 @@ export const confirmInvoice = createServerFn({ method: 'POST' })
 
     // Fetch party details for TDS + TransactionType (advance-clearing vendors + expense account)
     let tdsAmount = 0;
-    let creditAccountOverride: string | null = null;
     let expenseAccountOverride: string | null = null;
     if (invoice.type === 'payable' && invoice.partyId) {
       const party = await prisma.party.findUnique({
@@ -780,10 +547,6 @@ export const confirmInvoice = createServerFn({ method: 'POST' })
       if (party?.tdsApplicable && party.tdsRate && party.tdsRate > 0) {
         const subtotal = invoice.totalAmount - (invoice.gstAmount ?? 0);
         tdsAmount = Math.round(subtotal * (party.tdsRate / 100) * 100) / 100;
-      }
-      // Advance/wallet vendors: invoices clear ADVANCES_GIVEN instead of AP
-      if (party?.transactionType?.debitAccountCode === 'ADVANCES_GIVEN') {
-        creditAccountOverride = 'ADVANCES_GIVEN';
       }
       // Use TransactionType's debit account as expense account (if not advance-clearing)
       if (party?.transactionType?.debitAccountCode && party.transactionType.debitAccountCode !== 'ADVANCES_GIVEN') {
@@ -797,36 +560,24 @@ export const confirmInvoice = createServerFn({ method: 'POST' })
     }
 
     // ---- NORMAL AP PATH (invoice first, pay later) ----
-    const lines = buildInvoiceLedgerLines(invoice, tdsAmount, creditAccountOverride, expenseAccountOverride);
-
-    return prisma.$transaction(async (tx) => {
-      const invoiceEntryDate = invoice.invoiceDate ? new Date(invoice.invoiceDate) : new Date();
-      const entry = await inlineCreateLedgerEntry(tx as typeof prisma, {
-        entryDate: invoiceEntryDate,
-        period: invoice.billingPeriod ?? dateToPeriod(invoiceEntryDate),
-        description: `Invoice ${invoice.invoiceNumber ?? invoice.id} confirmed (${invoice.type})`,
-        sourceType: 'invoice_confirmed',
-        sourceId: invoice.id,
-        lines,
-        createdById: userId,
-      });
-
-      await tx.invoice.update({
-        where: { id: invoice.id },
-        data: {
-          status: 'confirmed',
-          ledgerEntryId: entry.id,
-          ...(tdsAmount > 0 ? { tdsAmount, balanceDue: invoice.totalAmount - tdsAmount } : {}),
-        },
-      });
-
-      return { success: true as const };
+    const invoiceEntryDate = invoice.invoiceDate ? new Date(invoice.invoiceDate) : new Date();
+    await prisma.invoice.update({
+      where: { id: invoice.id },
+      data: {
+        status: 'confirmed',
+        ...(tdsAmount > 0 ? { tdsAmount, balanceDue: invoice.totalAmount - tdsAmount } : {}),
+        // Default billingPeriod from invoiceDate if not set
+        ...(!invoice.billingPeriod ? { billingPeriod: dateToPeriod(invoiceEntryDate) } : {}),
+      },
     });
+
+    return { success: true as const };
   });
 
 /**
  * Confirm an invoice and link it to an existing payment.
- * Instead of creating AP, posts an adjustment entry to fix expense category / split GST / book TDS.
+ * Creates PaymentInvoice match, updates payment matched/unmatched amounts,
+ * and marks invoice as paid.
  *
  * The match amount uses the net payable (totalAmount - tdsAmount) because TDS is withheld
  * and never paid to the vendor. So payment.amount should roughly equal matchAmount.
@@ -837,86 +588,24 @@ async function confirmInvoiceWithLinkedPayment(
   paymentId: string,
   tdsAmount: number,
   userId: string,
-  expenseAccountOverride: string | null = null,
+  _expenseAccountOverride: string | null = null,
 ) {
   // The amount the vendor was actually paid (total minus TDS withheld)
   const matchAmount = invoice.totalAmount - tdsAmount;
 
-  // Look up the payment and its ledger entry lines
   const payment = await prisma.payment.findUnique({
     where: { id: paymentId },
     select: {
-      id: true, amount: true, unmatchedAmount: true, matchedAmount: true, status: true,
-      paymentDate: true, ledgerEntryId: true,
-      ledgerEntry: { include: { lines: { include: { account: { select: { code: true } } } } } },
+      id: true, amount: true, unmatchedAmount: true, matchedAmount: true,
+      status: true, paymentDate: true, debitAccountCode: true,
     },
   });
   if (!payment) throw new Error('Payment not found');
   if (payment.status === 'cancelled') throw new Error('Payment is cancelled');
-  if (!payment.ledgerEntry) throw new Error('Payment has no ledger entry — cannot determine original account');
   if (payment.unmatchedAmount < matchAmount - 0.01) throw new Error('Payment unmatched amount is less than invoice net payable');
-
-  // Find what account the bank import originally debited (skip bank/cash accounts)
-  const bankCodes = new Set(['BANK_HDFC', 'BANK_RAZORPAYX', 'CASH']);
-  const originalDebitLine = payment.ledgerEntry.lines.find(l => l.debit > 0 && !bankCodes.has(l.account.code));
-  const originalAccount = originalDebitLine?.account.code ?? 'OPERATING_EXPENSES';
-
-  // Figure out the correct expense account — prefer TransactionType override, fall back to category mapping
-  const correctExpense = expenseAccountOverride ?? categoryToExpenseAccount(invoice.category);
-  const gstAmount = invoice.gstAmount ?? 0;
-  const netAmount = invoice.totalAmount - gstAmount;
-
-  // Build adjustment lines (only if something needs fixing)
-  const needsAdjustment = originalAccount !== correctExpense || gstAmount > 0 || tdsAmount > 0;
-
-  // Determine the correct P&L period for this invoice
-  const invoiceEntryDate = invoice.invoiceDate ? new Date(invoice.invoiceDate) : new Date(payment.paymentDate);
-  const invoicePeriod = invoice.billingPeriod ?? dateToPeriod(invoiceEntryDate);
 
   // Use a transaction to keep all writes atomic
   return prisma.$transaction(async (tx) => {
-    let adjustmentEntryId: string | null = null;
-
-    if (needsAdjustment) {
-      const adjustmentLines: LedgerLineInput[] = [];
-
-      // Debit the correct expense account for the net amount
-      adjustmentLines.push({ accountCode: correctExpense, debit: netAmount, description: `${invoice.category} expense (invoice ${invoice.invoiceNumber ?? invoice.id})` });
-
-      // Debit GST if the invoice has it
-      if (gstAmount > 0) {
-        adjustmentLines.push({ accountCode: 'GST_INPUT', debit: gstAmount, description: 'GST input credit (from invoice)' });
-      }
-
-      // Credit the original account (reverse what the bank import debited)
-      adjustmentLines.push({ accountCode: originalAccount, credit: matchAmount, description: `Reclassify from ${originalAccount}` });
-
-      // Credit TDS if applicable
-      if (tdsAmount > 0) {
-        adjustmentLines.push({ accountCode: 'TDS_PAYABLE', credit: tdsAmount, description: 'TDS deducted at source' });
-      }
-
-      const adjEntry = await inlineCreateLedgerEntry(tx as typeof prisma, {
-        entryDate: invoiceEntryDate,
-        period: invoicePeriod,
-        description: `Invoice ${invoice.invoiceNumber ?? invoice.id} linked to payment — reclassification`,
-        sourceType: 'invoice_payment_linked',
-        sourceId: invoice.id,
-        lines: adjustmentLines,
-        createdById: userId,
-      });
-      adjustmentEntryId = adjEntry.id;
-    }
-
-    // Update the payment's ledger entry period to match the invoice's billing period
-    // This moves the expense from the cash-basis month to the accrual-basis month
-    if (payment.ledgerEntryId) {
-      await tx.ledgerEntry.update({
-        where: { id: payment.ledgerEntryId },
-        data: { period: invoicePeriod },
-      });
-    }
-
     // Create PaymentInvoice match record
     await tx.paymentInvoice.create({
       data: {
@@ -937,16 +626,16 @@ async function confirmInvoiceWithLinkedPayment(
       },
     });
 
-    // Update Invoice: mark as paid, link adjustment entry if one was created
-    // Note: ledgerEntryId has a @unique constraint, so only set it if we made a new entry
+    // Update Invoice: mark as paid
     await tx.invoice.update({
       where: { id: invoice.id },
       data: {
         status: 'paid',
         paidAmount: matchAmount,
         balanceDue: 0,
-        ...(adjustmentEntryId ? { ledgerEntryId: adjustmentEntryId } : {}),
         ...(tdsAmount > 0 ? { tdsAmount } : {}),
+        // Default billingPeriod from invoiceDate if not set
+        ...(!invoice.billingPeriod ? { billingPeriod: dateToPeriod(invoice.invoiceDate ? new Date(invoice.invoiceDate) : new Date(payment.paymentDate)) } : {}),
       },
     });
 
@@ -954,76 +643,25 @@ async function confirmInvoiceWithLinkedPayment(
   });
 }
 
-/**
- * Build ledger lines for an invoice confirmation.
- * Payable: Dr expense account, Cr ACCOUNTS_PAYABLE (less TDS), Cr TDS_PAYABLE
- *   - If creditAccountOverride set (e.g. ADVANCES_GIVEN for wallet vendors), uses that instead of AP
- * Receivable: Dr ACCOUNTS_RECEIVABLE, Cr SALES_REVENUE
- */
-function buildInvoiceLedgerLines(invoice: {
-  type: string;
-  category: string;
-  totalAmount: number;
-  gstAmount: number | null;
-}, tdsAmount = 0, creditAccountOverride: string | null = null, expenseAccountOverride: string | null = null) {
-  const { type, category, totalAmount, gstAmount } = invoice;
-  const netAmount = totalAmount - (gstAmount ?? 0);
-
-  if (type === 'payable') {
-    // Prefer TransactionType's debit account, fall back to category mapping
-    const expenseAccount = expenseAccountOverride ?? categoryToExpenseAccount(category);
-    const creditAccount = creditAccountOverride ?? 'ACCOUNTS_PAYABLE';
-    const creditDescription = creditAccountOverride === 'ADVANCES_GIVEN'
-      ? 'Clearing advance/wallet balance'
-      : 'Amount owed to vendor';
-    const lines = [
-      { accountCode: expenseAccount, debit: netAmount, description: `${category} expense` },
-      { accountCode: creditAccount, credit: totalAmount - tdsAmount, description: creditDescription },
-    ];
-    if (gstAmount && gstAmount > 0) {
-      lines.push({ accountCode: 'GST_INPUT', debit: gstAmount, description: 'GST input credit' });
-    }
-    if (tdsAmount > 0) {
-      lines.push({ accountCode: 'TDS_PAYABLE', credit: tdsAmount, description: 'TDS deducted at source' });
-    }
-    return lines;
-  }
-
-  // Receivable
-  const lines = [
-    { accountCode: 'ACCOUNTS_RECEIVABLE', debit: totalAmount, description: 'Amount due from customer' },
-    { accountCode: 'SALES_REVENUE', credit: netAmount, description: 'Revenue' },
-  ];
-  if (gstAmount && gstAmount > 0) {
-    lines.push({ accountCode: 'GST_OUTPUT', credit: gstAmount, description: 'GST output liability' });
-  }
-  return lines;
-}
-
-/** Map invoice category → ledger expense account code */
-function categoryToExpenseAccount(category: string): string {
+/** Map invoice category -> P&L display name (cosmetic grouping for UI) */
+function categoryToExpenseAccountName(category: string): string {
   switch (category) {
     case 'fabric':
-      return 'FABRIC_INVENTORY';
     case 'trims':
     case 'packaging':
-      return 'FABRIC_INVENTORY'; // Raw materials bucket
-    case 'service':
-      return 'OPERATING_EXPENSES';
-    case 'logistics':
-      return 'OPERATING_EXPENSES';
-    case 'rent':
-    case 'salary':
-    case 'equipment':
-      return 'OPERATING_EXPENSES';
-    case 'marketing':
-      return 'OPERATING_EXPENSES';
+      return 'Fabric & Materials';
     case 'marketplace':
-      return 'MARKETPLACE_FEES';
+      return 'Marketplace Fees';
+    case 'software':
+      return 'Software & Technology';
     case 'statutory':
-      return 'TDS_PAYABLE';
+      return 'TDS & Statutory';
+    case 'salary':
+      return 'Salary & Wages';
+    case 'customer_order':
+      return 'Customer Orders';
     default:
-      return 'OPERATING_EXPENSES';
+      return 'Operating Expenses';
   }
 }
 
@@ -1036,13 +674,12 @@ const cancelInvoiceInput = z.object({ id: z.string().uuid() });
 export const cancelInvoice = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
   .inputValidator((input: unknown) => cancelInvoiceInput.parse(input))
-  .handler(async ({ data, context }) => {
+  .handler(async ({ data }) => {
     const prisma = await getPrisma();
-    const userId = context.user.id;
 
     const invoice = await prisma.invoice.findUnique({
       where: { id: data.id },
-      select: { id: true, status: true, ledgerEntryId: true },
+      select: { id: true, status: true },
     });
 
     if (!invoice) return { success: false as const, error: 'Invoice not found' };
@@ -1067,12 +704,7 @@ export const cancelInvoice = createServerFn({ method: 'POST' })
         await tx.paymentInvoice.deleteMany({ where: { invoiceId: data.id } });
       }
 
-      // 2. Reverse ledger entry if one exists
-      if (invoice.ledgerEntryId) {
-        await inlineReverseLedgerEntry(tx as typeof prisma, invoice.ledgerEntryId, userId);
-      }
-
-      // 3. Cancel the invoice and reset paid amounts
+      // 2. Cancel the invoice and reset paid amounts
       await tx.invoice.update({
         where: { id: data.id },
         data: { status: 'cancelled', paidAmount: 0, balanceDue: 0 },
@@ -1139,7 +771,7 @@ export const listPayments = createServerFn({ method: 'POST' })
   });
 
 // ============================================
-// PAYMENT — CREATE (+ auto ledger entry)
+// PAYMENT — CREATE
 // ============================================
 
 export const createFinancePayment = createServerFn({ method: 'POST' })
@@ -1148,72 +780,29 @@ export const createFinancePayment = createServerFn({ method: 'POST' })
   .handler(async ({ data, context }) => {
     const prisma = await getPrisma();
     const userId = context.user.id;
-    const lines = buildPaymentLedgerLines(data);
-    const sourceType = data.direction === 'outgoing' ? 'payment_outgoing' : 'payment_received';
+    const debitAccountCode = data.direction === 'outgoing' ? 'ACCOUNTS_PAYABLE' : 'BANK_HDFC';
 
-    return prisma.$transaction(async (tx) => {
-      const paymentEntryDate = new Date(data.paymentDate);
-      const entry = await inlineCreateLedgerEntry(tx as typeof prisma, {
-        entryDate: paymentEntryDate,
-        period: dateToPeriod(paymentEntryDate),
-        description: `Payment ${data.direction}: ${data.counterpartyName ?? data.method} — ${data.amount}`,
-        sourceType,
-        sourceId: `payment_${data.referenceNumber ?? data.paymentDate}_${data.counterpartyName ?? 'unknown'}_${data.amount}`,
-        lines,
+    const payment = await prisma.payment.create({
+      data: {
+        referenceNumber: data.referenceNumber ?? null,
+        direction: data.direction,
+        method: data.method,
+        status: 'confirmed',
+        amount: data.amount,
+        unmatchedAmount: data.amount,
+        paymentDate: new Date(data.paymentDate),
+        ...(data.partyId ? { partyId: data.partyId } : {}),
+        ...(data.customerId ? { customerId: data.customerId } : {}),
+        counterpartyName: data.counterpartyName ?? null,
+        debitAccountCode,
+        notes: data.notes ?? null,
         createdById: userId,
-      });
-
-      const payment = await tx.payment.create({
-        data: {
-          referenceNumber: data.referenceNumber ?? null,
-          direction: data.direction,
-          method: data.method,
-          status: 'confirmed',
-          amount: data.amount,
-          unmatchedAmount: data.amount,
-          paymentDate: new Date(data.paymentDate),
-          ...(data.partyId ? { partyId: data.partyId } : {}),
-          ...(data.customerId ? { customerId: data.customerId } : {}),
-          counterpartyName: data.counterpartyName ?? null,
-          ledgerEntryId: entry.id,
-          notes: data.notes ?? null,
-          createdById: userId,
-        },
-        select: { id: true, referenceNumber: true, amount: true, direction: true },
-      });
-
-      return { success: true as const, payment };
+      },
+      select: { id: true, referenceNumber: true, amount: true, direction: true },
     });
+
+    return { success: true as const, payment };
   });
-
-/**
- * Build ledger lines for a payment.
- * Outgoing: Dr ACCOUNTS_PAYABLE, Cr BANK
- * Incoming: Dr BANK, Cr ACCOUNTS_RECEIVABLE
- */
-function buildPaymentLedgerLines(data: {
-  direction: string;
-  method: string;
-  amount: number;
-}) {
-  // Route to the correct bank account:
-  // Cash → CASH, outgoing (vendor payouts) → BANK_RAZORPAYX, incoming → BANK_HDFC
-  const cashAccount = data.method === 'cash' ? 'CASH'
-    : data.direction === 'outgoing' ? 'BANK_RAZORPAYX'
-    : 'BANK_HDFC';
-
-  if (data.direction === 'outgoing') {
-    return [
-      { accountCode: 'ACCOUNTS_PAYABLE', debit: data.amount, description: 'Vendor payment' },
-      { accountCode: cashAccount, credit: data.amount, description: `Paid via ${data.method}` },
-    ];
-  }
-
-  return [
-    { accountCode: cashAccount, debit: data.amount, description: `Received via ${data.method}` },
-    { accountCode: 'ACCOUNTS_RECEIVABLE', credit: data.amount, description: 'Customer payment' },
-  ];
-}
 
 // ============================================
 // PAYMENT — MATCH TO INVOICE
@@ -1321,93 +910,6 @@ export const unmatchPayment = createServerFn({ method: 'POST' })
     });
   });
 
-// ============================================
-// LEDGER — LIST ENTRIES
-// ============================================
-
-export const listLedgerEntries = createServerFn({ method: 'POST' })
-  .middleware([authMiddleware])
-  .inputValidator((input: unknown) => ListLedgerEntriesInput.parse(input))
-  .handler(async ({ data }) => {
-    const prisma = await getPrisma();
-    const { accountCode, sourceType, search, page = 1, limit = 50 } = data ?? {};
-    const skip = (page - 1) * limit;
-
-    const where: Record<string, unknown> = {};
-    if (sourceType) where.sourceType = sourceType;
-    if (search) {
-      where.OR = [
-        { description: { contains: search, mode: 'insensitive' } },
-        { notes: { contains: search, mode: 'insensitive' } },
-      ];
-    }
-    if (accountCode) {
-      where.lines = { some: { account: { code: accountCode } } };
-    }
-
-    const [entries, total] = await Promise.all([
-      prisma.ledgerEntry.findMany({
-        where,
-        include: {
-          lines: {
-            include: { account: { select: { code: true, name: true, type: true } } },
-          },
-          createdBy: { select: { id: true, name: true } },
-        },
-        orderBy: { entryDate: 'desc' },
-        skip,
-        take: limit,
-      }),
-      prisma.ledgerEntry.count({ where }),
-    ]);
-
-    return { success: true as const, entries, total, page, limit };
-  });
-
-// ============================================
-// LEDGER — MANUAL ENTRY
-// ============================================
-
-export const createManualEntry = createServerFn({ method: 'POST' })
-  .middleware([authMiddleware])
-  .inputValidator((input: unknown) => CreateManualLedgerEntrySchema.parse(input))
-  .handler(async ({ data, context }) => {
-    const prisma = await getPrisma();
-    const userId = context.user.id;
-    const manualEntryDate = new Date(data.entryDate);
-    const entry = await inlineCreateLedgerEntry(prisma, {
-      entryDate: manualEntryDate,
-      period: dateToPeriod(manualEntryDate),
-      description: data.description,
-      sourceType: 'manual',
-      lines: data.lines.map((l) => ({
-        accountCode: l.accountCode,
-        debit: l.debit,
-        credit: l.credit,
-        description: l.description,
-      })),
-      createdById: userId,
-      notes: data.notes,
-    });
-
-    return { success: true as const, entry: { id: entry.id } };
-  });
-
-// ============================================
-// LEDGER — REVERSE ENTRY
-// ============================================
-
-const reverseEntryInput = z.object({ id: z.string().uuid() });
-
-export const reverseEntry = createServerFn({ method: 'POST' })
-  .middleware([authMiddleware])
-  .inputValidator((input: unknown) => reverseEntryInput.parse(input))
-  .handler(async ({ data, context }) => {
-    const prisma = await getPrisma();
-    const userId = context.user.id;
-    const reversal = await inlineReverseLedgerEntry(prisma, data.id, userId);
-    return { success: true as const, reversal: { id: reversal.id } };
-  });
 
 // ============================================
 // FIND UNMATCHED PAYMENTS (for invoice linking)
@@ -1459,17 +961,7 @@ export const findUnmatchedPayments = createServerFn({ method: 'POST' })
         counterpartyName: true,
         method: true,
         notes: true,
-        ledgerEntry: {
-          select: {
-            lines: {
-              select: {
-                account: { select: { code: true, name: true } },
-                debit: true,
-              },
-              where: { debit: { gt: 0 } },
-            },
-          },
-        },
+        debitAccountCode: true,
       },
       orderBy: { paymentDate: 'desc' },
       take: 20,
@@ -1479,7 +971,7 @@ export const findUnmatchedPayments = createServerFn({ method: 'POST' })
   });
 
 // ============================================
-// MONTHLY P&L (accrual basis, grouped by period)
+// MONTHLY P&L (invoice-based + inventory cost)
 // ============================================
 
 export const getMonthlyPnl = createServerFn({ method: 'GET' })
@@ -1487,32 +979,56 @@ export const getMonthlyPnl = createServerFn({ method: 'GET' })
   .handler(async () => {
     const prisma = await getPrisma();
 
-    // Raw query: group by period + account type, excluding reversed entries
-    const rows = await prisma.$queryRaw<Array<{
-      period: string;
-      account_type: string;
-      account_code: string;
-      account_name: string;
-      total_debit: number;
-      total_credit: number;
+    // 1. Revenue: receivable invoices grouped by billing period
+    const revenueRows = await prisma.$queryRaw<Array<{
+      period: string; amount: number;
     }>>`
-      SELECT
-        le."period",
-        la."type" AS account_type,
-        la."code" AS account_code,
-        la."name" AS account_name,
-        COALESCE(SUM(lel."debit"), 0)::float AS total_debit,
-        COALESCE(SUM(lel."credit"), 0)::float AS total_credit
-      FROM "LedgerEntryLine" lel
-      JOIN "LedgerEntry" le ON le.id = lel."entryId"
-      JOIN "LedgerAccount" la ON la.id = lel."accountId"
-      WHERE le."isReversed" = false
-        AND la."type" IN ('income', 'direct_cost', 'expense')
-      GROUP BY le."period", la."type", la."code", la."name"
-      ORDER BY le."period" DESC, la."type", la."code"
+      SELECT COALESCE(i."billingPeriod", TO_CHAR(i."invoiceDate" AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM')) AS period,
+             SUM(i."totalAmount" - COALESCE(i."gstAmount", 0))::float AS amount
+      FROM "Invoice" i
+      WHERE i.type = 'receivable'
+        AND i.status IN ('confirmed', 'partially_paid', 'paid')
+      GROUP BY period
     `;
 
-    // Build per-month P&L with account-level breakdowns
+    // 2. Expenses: payable invoices grouped by billing period + category
+    const expenseRows = await prisma.$queryRaw<Array<{
+      period: string; category: string; amount: number;
+    }>>`
+      SELECT COALESCE(i."billingPeriod", TO_CHAR(i."invoiceDate" AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM')) AS period,
+             i.category,
+             SUM(i."totalAmount" - COALESCE(i."gstAmount", 0))::float AS amount
+      FROM "Invoice" i
+      WHERE i.type = 'payable'
+        AND i.status IN ('confirmed', 'partially_paid', 'paid')
+      GROUP BY period, i.category
+    `;
+
+    // 3. COGS: outward sale transactions x BOM cost
+    const cogsRows = await prisma.$queryRaw<Array<{
+      period: string; amount: number;
+    }>>`
+      SELECT TO_CHAR(it."createdAt" AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM') AS period,
+             SUM(it.qty * COALESCE(s."bomCost", 0))::float AS amount
+      FROM "InventoryTransaction" it
+      JOIN "Sku" s ON s.id = it."skuId"
+      WHERE it."txnType" = 'outward' AND it.reason = 'sale'
+      GROUP BY period
+    `;
+
+    // 4. COGS reversal: RTO/return inward transactions
+    const cogsReversalRows = await prisma.$queryRaw<Array<{
+      period: string; amount: number;
+    }>>`
+      SELECT TO_CHAR(it."createdAt" AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM') AS period,
+             SUM(it.qty * COALESCE(s."bomCost", 0))::float AS amount
+      FROM "InventoryTransaction" it
+      JOIN "Sku" s ON s.id = it."skuId"
+      WHERE it."txnType" = 'inward' AND it.reason IN ('rto_received', 'return_receipt')
+      GROUP BY period
+    `;
+
+    // Build per-month P&L
     type AccountLine = { code: string; name: string; amount: number };
     const monthMap = new Map<string, {
       period: string;
@@ -1524,35 +1040,59 @@ export const getMonthlyPnl = createServerFn({ method: 'GET' })
       totalExpenses: number;
     }>();
 
-    for (const row of rows) {
-      if (!monthMap.has(row.period)) {
-        monthMap.set(row.period, {
-          period: row.period,
+    const getMonth = (period: string) => {
+      if (!monthMap.has(period)) {
+        monthMap.set(period, {
+          period,
           revenueLines: [], cogsLines: [], expenseLines: [],
           totalRevenue: 0, totalCogs: 0, totalExpenses: 0,
         });
       }
-      const month = monthMap.get(row.period)!;
+      return monthMap.get(period)!;
+    };
 
-      if (row.account_type === 'income') {
-        const amount = row.total_credit - row.total_debit;
-        if (Math.abs(amount) > 0.01) {
-          month.revenueLines.push({ code: row.account_code, name: row.account_name, amount });
-          month.totalRevenue += amount;
-        }
-      } else if (row.account_type === 'direct_cost') {
-        const amount = row.total_debit - row.total_credit;
-        if (Math.abs(amount) > 0.01) {
-          month.cogsLines.push({ code: row.account_code, name: row.account_name, amount });
-          month.totalCogs += amount;
-        }
-      } else if (row.account_type === 'expense') {
-        const amount = row.total_debit - row.total_credit;
-        if (Math.abs(amount) > 0.01) {
-          month.expenseLines.push({ code: row.account_code, name: row.account_name, amount });
-          month.totalExpenses += amount;
-        }
+    // Revenue
+    for (const row of revenueRows) {
+      if (!row.period) continue;
+      const month = getMonth(row.period);
+      month.revenueLines.push({ code: 'SALES_REVENUE', name: 'Sales Revenue', amount: row.amount });
+      month.totalRevenue += row.amount;
+    }
+
+    // Expenses by category
+    for (const row of expenseRows) {
+      if (!row.period) continue;
+      const month = getMonth(row.period);
+      const name = categoryToExpenseAccountName(row.category);
+      // Merge same display name
+      const existing = month.expenseLines.find(l => l.name === name);
+      if (existing) {
+        existing.amount += row.amount;
+      } else {
+        month.expenseLines.push({ code: row.category, name, amount: row.amount });
       }
+      month.totalExpenses += row.amount;
+    }
+
+    // COGS
+    for (const row of cogsRows) {
+      if (!row.period) continue;
+      const month = getMonth(row.period);
+      month.cogsLines.push({ code: 'COGS', name: 'Cost of Goods Sold', amount: row.amount });
+      month.totalCogs += row.amount;
+    }
+
+    // COGS reversal (subtract from COGS)
+    for (const row of cogsReversalRows) {
+      if (!row.period) continue;
+      const month = getMonth(row.period);
+      const existing = month.cogsLines.find(l => l.code === 'COGS');
+      if (existing) {
+        existing.amount -= row.amount;
+      } else {
+        month.cogsLines.push({ code: 'COGS', name: 'Cost of Goods Sold', amount: -row.amount });
+      }
+      month.totalCogs -= row.amount;
     }
 
     const round = (n: number) => Math.round(n * 100) / 100;
@@ -1579,7 +1119,7 @@ export const getMonthlyPnl = createServerFn({ method: 'GET' })
 
 const pnlAccountDetailInput = z.object({
   period: z.string().regex(/^\d{4}-\d{2}$/),
-  accountCode: z.string(),
+  category: z.string().optional(),
 });
 
 export const getPnlAccountDetail = createServerFn({ method: 'POST' })
@@ -1588,100 +1128,92 @@ export const getPnlAccountDetail = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     const prisma = await getPrisma();
 
-    // Get individual entries for this account + period
-    const rows = await prisma.$queryRaw<Array<{
-      entry_id: string;
-      description: string;
-      source_type: string;
-      entry_date: Date;
-      debit: number;
-      credit: number;
-      invoice_category: string | null;
-      counterparty: string | null;
-    }>>`
-      SELECT
-        le.id AS entry_id,
-        le.description,
-        le."sourceType" AS source_type,
-        le."entryDate" AS entry_date,
-        lel.debit::float AS debit,
-        lel.credit::float AS credit,
-        i.category AS invoice_category,
-        COALESCE(p.name, i."counterpartyName", pay."counterpartyName") AS counterparty
-      FROM "LedgerEntryLine" lel
-      JOIN "LedgerEntry" le ON le.id = lel."entryId"
-      JOIN "LedgerAccount" la ON la.id = lel."accountId"
-      LEFT JOIN "Invoice" i ON i."ledgerEntryId" = le.id
-      LEFT JOIN "Payment" pay ON pay."ledgerEntryId" = le.id
-      LEFT JOIN "Party" p ON p.id = COALESCE(i."partyId", pay."partyId")
-      WHERE le."isReversed" = false
-        AND la.code = ${data.accountCode}
-        AND le.period = ${data.period}
-        AND (lel.debit > 0.01 OR lel.credit > 0.01)
-      ORDER BY GREATEST(lel.debit, lel.credit) DESC
-    `;
+    // Invoice-based drill-down by category + period
+    const periodStart = new Date(`${data.period}-01`);
+    const periodEnd = new Date(periodStart);
+    periodEnd.setMonth(periodEnd.getMonth() + 1);
 
-    // Categorize each entry
+    const where: Record<string, unknown> = {
+      status: { in: ['confirmed', 'partially_paid', 'paid'] },
+      OR: [
+        { billingPeriod: data.period },
+        { billingPeriod: null, invoiceDate: { gte: periodStart, lt: periodEnd } },
+      ],
+    };
+    if (data.category) where.category = data.category;
+
+    const invoices = await prisma.invoice.findMany({
+      where: where as any,
+      select: {
+        id: true,
+        invoiceNumber: true,
+        category: true,
+        totalAmount: true,
+        gstAmount: true,
+        invoiceDate: true,
+        counterpartyName: true,
+        type: true,
+        party: { select: { name: true } },
+      },
+      orderBy: { totalAmount: 'desc' },
+      take: 100,
+    });
+
+    // Group by category
     type DetailLine = { description: string; amount: number; date: string; counterparty: string | null };
     const categoryMap = new Map<string, { label: string; total: number; lines: DetailLine[] }>();
 
-    const addToCategory = (key: string, label: string, line: DetailLine) => {
+    for (const inv of invoices) {
+      const amount = Math.round((inv.totalAmount - (inv.gstAmount ?? 0)) * 100) / 100;
+      const date = inv.invoiceDate ? new Date(inv.invoiceDate).toISOString().slice(0, 10) : '';
+      const counterparty = inv.party?.name ?? inv.counterpartyName;
+      const key = inv.category;
+      const label = categoryToExpenseAccountName(inv.category);
+
       if (!categoryMap.has(key)) categoryMap.set(key, { label, total: 0, lines: [] });
       const cat = categoryMap.get(key)!;
-      cat.total += line.amount;
-      cat.lines.push(line);
-    };
-
-    for (const row of rows) {
-      const amount = Math.round(Math.max(row.debit, row.credit) * 100) / 100;
-      const date = new Date(row.entry_date).toISOString().slice(0, 10);
-      const line: DetailLine = { description: row.description, amount, date, counterparty: row.counterparty };
-
-      // Use invoice category if available
-      if (row.invoice_category) {
-        addToCategory(row.invoice_category, row.invoice_category, line);
-        continue;
-      }
-
-      // Parse description prefix for bank entries
-      const desc = row.description;
-      if (desc.startsWith('Salary:') || desc.startsWith('Salary ')) {
-        addToCategory('salary', 'Salary & Wages', line);
-      } else if (desc.startsWith('Vendor:')) {
-        // Extract purpose from "Vendor: <purpose> — <name>"
-        const purpose = desc.replace(/^Vendor:\s*/, '').split('—')[0].trim().toLowerCase();
-        if (purpose.includes('marketing') || purpose.includes('social media') || purpose.includes('photoshoot') || purpose.includes('styling') || purpose.includes('model')) {
-          addToCategory('marketing', 'Marketing & Creative', line);
-        } else if (purpose.includes('rent') || purpose.includes('architect')) {
-          addToCategory('rent', 'Rent & Premises', line);
-        } else if (purpose.includes('tds') || purpose.includes('pf') || purpose.includes('statutory')) {
-          addToCategory('statutory', 'Statutory (TDS/PF)', line);
-        } else if (purpose.includes('salary') || purpose.includes('wage')) {
-          addToCategory('salary', 'Salary & Wages', line);
-        } else {
-          addToCategory('service', 'Services & Professional', line);
-        }
-      } else if (desc.startsWith('CC HDFC:') || desc.startsWith('CC ICICI:')) {
-        addToCategory('cc_charges', 'Credit Card Charges', line);
-      } else if (desc.includes('PF deposit') || desc.includes('CBDT') || desc.includes('TDS')) {
-        addToCategory('statutory', 'Statutory (TDS/PF)', line);
-      } else if (desc.includes('Google') || desc.includes('Facebook') || desc.includes('Meta')) {
-        addToCategory('marketing', 'Marketing & Creative', line);
-      } else if (desc.includes('Reimbursement')) {
-        addToCategory('reimbursement', 'Reimbursements', line);
-      } else if (desc.includes('Standing Instruction') || desc.includes(' SI ')) {
-        addToCategory('bank_charges', 'Bank & SI Charges', line);
-      } else {
-        addToCategory('other', 'Other', line);
-      }
+      cat.total += amount;
+      cat.lines.push({
+        description: `${inv.invoiceNumber ?? 'No #'} — ${counterparty ?? 'Unknown'}`,
+        amount,
+        date,
+        counterparty,
+      });
     }
 
-    // Sort categories by total descending
     const categories = Array.from(categoryMap.values())
       .map((c) => ({ ...c, total: Math.round(c.total * 100) / 100 }))
       .sort((a, b) => b.total - a.total);
 
     return { success: true as const, categories };
+  });
+
+// ============================================
+// PARTY BALANCES (outstanding per vendor)
+// ============================================
+
+export const getPartyBalances = createServerFn({ method: 'GET' })
+  .middleware([authMiddleware])
+  .handler(async () => {
+    const prisma = await getPrisma();
+
+    const balances = await prisma.$queryRaw<Array<{
+      id: string; name: string;
+      total_invoiced: number; total_paid: number; outstanding: number;
+    }>>`
+      SELECT p.id, p.name,
+        COALESCE(SUM(i."totalAmount"), 0)::float AS total_invoiced,
+        COALESCE(SUM(i."paidAmount"), 0)::float AS total_paid,
+        COALESCE(SUM(i."balanceDue"), 0)::float AS outstanding
+      FROM "Party" p
+      LEFT JOIN "Invoice" i ON i."partyId" = p.id
+        AND i.type = 'payable' AND i.status != 'cancelled'
+      WHERE p."isActive" = true
+      GROUP BY p.id, p.name
+      ORDER BY outstanding DESC
+    `;
+
+    return { success: true as const, balances };
   });
 
 // ============================================

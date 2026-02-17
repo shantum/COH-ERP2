@@ -8,7 +8,6 @@
  */
 
 import { PrismaClient } from '@prisma/client';
-import { createLedgerEntry, dateToPeriod } from '../ledgerService.js';
 import { AUTO_CLEAR_AMOUNT_THRESHOLD } from '../../config/finance/index.js';
 
 const prisma = new PrismaClient();
@@ -168,7 +167,7 @@ export async function getDryRunSummary(options?: { bank?: string }): Promise<Dry
 export async function postTransactions(options?: { bank?: string }): Promise<PostResult> {
   // Get admin user for createdById
   const admin = await prisma.user.findFirst({ where: { role: 'admin' } });
-  if (!admin) throw new Error('No admin user found — needed for ledger entry createdById');
+  if (!admin) throw new Error('No admin user found — needed for payment createdById');
 
   const where: Record<string, unknown> = { status: 'categorized' };
   if (options?.bank) where.bank = options.bank;
@@ -213,40 +212,16 @@ export async function postTransactions(options?: { bank?: string }): Promise<Pos
           invoiceRequired,
         );
 
-        const description = txn.narration
-          ? txn.narration.slice(0, 100)
-          : `${txn.bank} ${txn.direction}: ${txn.amount}`;
-
         const entryDate = new Date(txn.txnDate);
-        const period = dateToPeriod(entryDate);
-
-        // Determine source type
-        const sourceType = txn.bank === 'hdfc' ? 'bank_import'
-          : txn.bank === 'razorpayx' ? 'bank_import'
-          : 'cc_charge_import';
-
-        // Create ledger entry with routing decision
-        const entry = await createLedgerEntry(prisma as any, {
-          entryDate,
-          period,
-          description,
-          sourceType,
-          sourceId: txn.id,
-          lines: [
-            { accountCode: decision.debitAccount, debit: txn.amount },
-            { accountCode: decision.creditAccount, credit: txn.amount },
-          ],
-          createdById: admin.id,
-        });
 
         // Create or re-use Payment for outgoing bank transactions
         let paymentId: string | undefined;
         if (txn.direction === 'debit' && (txn.bank === 'hdfc' || txn.bank === 'razorpayx')) {
           if (txn.paymentId) {
-            // Re-use existing Payment (preserved from old import) — just update ledgerEntryId
+            // Re-use existing Payment (preserved from old import) — just update debitAccountCode
             await prisma.payment.update({
               where: { id: txn.paymentId },
-              data: { ledgerEntryId: entry.id },
+              data: { debitAccountCode: decision.intendedDebitAccount ?? decision.debitAccount },
             });
             paymentId = txn.paymentId;
           } else {
@@ -260,7 +235,7 @@ export async function postTransactions(options?: { bank?: string }): Promise<Pos
                 paymentDate: entryDate,
                 referenceNumber: txn.reference ?? txn.utr ?? null,
                 counterpartyName: txn.counterpartyName ?? null,
-                ledgerEntryId: entry.id,
+                debitAccountCode: decision.intendedDebitAccount ?? decision.debitAccount,
                 createdById: admin.id,
                 ...(txn.partyId ? { partyId: txn.partyId } : {}),
               },
@@ -274,7 +249,6 @@ export async function postTransactions(options?: { bank?: string }): Promise<Pos
           where: { id: txn.id },
           data: {
             status: 'posted',
-            ledgerEntryId: entry.id,
             intendedDebitAccount: decision.intendedDebitAccount,
             postingType: decision.type,
             ...(paymentId && !txn.paymentId ? { paymentId } : {}),

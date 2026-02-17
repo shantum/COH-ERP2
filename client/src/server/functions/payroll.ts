@@ -141,71 +141,6 @@ function calculateSlip(input: CalcInput) {
 }
 
 // ============================================
-// INLINE LEDGER HELPER (same as finance.ts)
-// ============================================
-
-interface LedgerLineInput {
-  accountCode: string;
-  debit?: number;
-  credit?: number;
-  description?: string;
-}
-
-async function inlineCreateLedgerEntry(
-  prisma: Awaited<ReturnType<typeof getPrisma>>,
-  input: {
-    entryDate: Date;
-    period: string;
-    description: string;
-    sourceType: string;
-    sourceId?: string;
-    lines: LedgerLineInput[];
-    createdById: string;
-    notes?: string;
-  },
-) {
-  const { entryDate, period, description, sourceType, sourceId, lines, createdById, notes } = input;
-
-  const totalDebit = lines.reduce((sum, l) => sum + (l.debit ?? 0), 0);
-  const totalCredit = lines.reduce((sum, l) => sum + (l.credit ?? 0), 0);
-  if (Math.abs(totalDebit - totalCredit) > 0.01) {
-    throw new Error(
-      `Debits (${totalDebit.toFixed(2)}) must equal credits (${totalCredit.toFixed(2)})`,
-    );
-  }
-
-  const accountCodes = [...new Set(lines.map((l) => l.accountCode))];
-  const accounts = await prisma.ledgerAccount.findMany({
-    where: { code: { in: accountCodes } },
-    select: { id: true, code: true },
-  });
-  const accountMap = new Map(accounts.map((a) => [a.code, a.id]));
-  for (const code of accountCodes) {
-    if (!accountMap.has(code)) throw new Error(`Unknown account code: ${code}`);
-  }
-
-  return prisma.ledgerEntry.create({
-    data: {
-      entryDate,
-      period,
-      description,
-      sourceType,
-      sourceId: sourceId ?? null,
-      notes: notes ?? null,
-      createdById,
-      lines: {
-        create: lines.map((line) => ({
-          accountId: accountMap.get(line.accountCode)!,
-          debit: line.debit ?? 0,
-          credit: line.credit ?? 0,
-          description: line.description ?? null,
-        })),
-      },
-    },
-  });
-}
-
-// ============================================
 // EMPLOYEE — LIST
 // ============================================
 
@@ -611,13 +546,16 @@ export const confirmPayrollRun = createServerFn({ method: 'POST' })
     for (const slip of run.slips) {
       if (slip.netPay <= 0) continue;
 
-      // Create payable invoice (salary category)
+      const salaryLabel = `${run.year}-${String(run.month).padStart(2, '0')}`;
+
+      // Create payable invoice (salary category) — confirmed directly, no ledger entry
       const invoice = await prisma.invoice.create({
         data: {
           type: 'payable',
           category: 'salary',
-          status: 'draft',
+          status: 'confirmed',
           invoiceDate: new Date(run.year, run.month - 1, new Date(run.year, run.month, 0).getDate()),
+          billingPeriod: salaryLabel,
           totalAmount: slip.netPay,
           balanceDue: slip.netPay,
           counterpartyName: slip.employee.name,
@@ -625,26 +563,6 @@ export const confirmPayrollRun = createServerFn({ method: 'POST' })
           notes: `Salary for ${monthLabel}`,
           createdById: userId,
         },
-      });
-
-      // Confirm the invoice (creates ledger entry: Dr OPERATING_EXPENSES, Cr ACCOUNTS_PAYABLE)
-      const salaryLabel = `${run.year}-${String(run.month).padStart(2, '0')}`;
-      const entry = await inlineCreateLedgerEntry(prisma, {
-        entryDate: new Date(run.year, run.month - 1, new Date(run.year, run.month, 0).getDate()),
-        period: salaryLabel,
-        description: `Salary: ${slip.employee.name} - ${monthLabel}`,
-        sourceType: 'invoice_confirmed',
-        sourceId: invoice.id,
-        lines: [
-          { accountCode: 'OPERATING_EXPENSES', debit: slip.netPay, description: `Salary - ${slip.employee.name}` },
-          { accountCode: 'ACCOUNTS_PAYABLE', credit: slip.netPay, description: `Salary payable - ${slip.employee.name}` },
-        ],
-        createdById: userId,
-      });
-
-      await prisma.invoice.update({
-        where: { id: invoice.id },
-        data: { status: 'confirmed', ledgerEntryId: entry.id },
       });
 
       // Link invoice to slip
@@ -674,9 +592,8 @@ export const confirmPayrollRun = createServerFn({ method: 'POST' })
 export const cancelPayrollRun = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
   .inputValidator((input: unknown) => z.object({ id: z.string().uuid() }).parse(input))
-  .handler(async ({ data, context }) => {
+  .handler(async ({ data }) => {
     const prisma = await getPrisma();
-    const userId = context.user.id;
 
     const run = await prisma.payrollRun.findUnique({
       where: { id: data.id },
@@ -685,7 +602,7 @@ export const cancelPayrollRun = createServerFn({ method: 'POST' })
           select: {
             id: true,
             invoiceId: true,
-            invoice: { select: { id: true, ledgerEntryId: true, status: true } },
+            invoice: { select: { id: true, status: true } },
           },
         },
       },
@@ -694,42 +611,10 @@ export const cancelPayrollRun = createServerFn({ method: 'POST' })
     if (!run) return { success: false as const, error: 'Payroll run not found' };
     if (run.status === 'cancelled') return { success: false as const, error: 'Already cancelled' };
 
-    // If confirmed, reverse the invoices
+    // If confirmed, cancel the invoices
     if (run.status === 'confirmed') {
       for (const slip of run.slips) {
-        if (slip.invoice && slip.invoice.ledgerEntryId) {
-          // Reverse the ledger entry
-          const original = await prisma.ledgerEntry.findUnique({
-            where: { id: slip.invoice.ledgerEntryId },
-            include: { lines: true },
-          });
-
-          if (original && !original.isReversed) {
-            const reversal = await prisma.ledgerEntry.create({
-              data: {
-                entryDate: original.entryDate,
-                period: original.period,
-                description: `Reversal: ${original.description}`,
-                sourceType: 'adjustment',
-                notes: `Reversal of entry ${original.id}`,
-                createdById: userId,
-                lines: {
-                  create: original.lines.map((line) => ({
-                    accountId: line.accountId,
-                    debit: line.credit,
-                    credit: line.debit,
-                    description: `Reversal: ${line.description ?? ''}`,
-                  })),
-                },
-              },
-            });
-
-            await prisma.ledgerEntry.update({
-              where: { id: original.id },
-              data: { isReversed: true, reversedById: reversal.id },
-            });
-          }
-
+        if (slip.invoice) {
           // Cancel the invoice
           await prisma.invoice.update({
             where: { id: slip.invoice.id },

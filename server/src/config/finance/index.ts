@@ -14,7 +14,7 @@
 // ACCOUNT TYPES
 // ============================================
 
-export const ACCOUNT_TYPES = [
+const ACCOUNT_TYPES = [
   'asset',
   'liability',
   'income',
@@ -23,7 +23,7 @@ export const ACCOUNT_TYPES = [
   'equity',
 ] as const;
 
-export type AccountType = (typeof ACCOUNT_TYPES)[number];
+type AccountType = (typeof ACCOUNT_TYPES)[number];
 
 // ============================================
 // CHART OF ACCOUNTS (~16 accounts)
@@ -68,6 +68,7 @@ export const CHART_OF_ACCOUNTS: AccountConfig[] = [
   // --- Expenses ---
   { code: 'OPERATING_EXPENSES', name: 'Operating Expenses', type: 'expense', description: 'Rent, salary, marketing, etc.' },
   { code: 'MARKETPLACE_FEES', name: 'Marketplace & Payment Fees', type: 'expense', description: 'Platform commissions, payment gateway fees' },
+  { code: 'SOFTWARE_TECHNOLOGY', name: 'Software & Technology', type: 'expense', description: 'Shopify, SaaS subscriptions, tech tools' },
   { code: 'UNMATCHED_PAYMENTS', name: 'Unmatched Payments (Suspense)', type: 'expense', description: 'Bank payments not yet matched to an invoice' },
 
   // --- Equity ---
@@ -94,6 +95,7 @@ export type AccountCode =
   | 'COGS'
   | 'OPERATING_EXPENSES'
   | 'MARKETPLACE_FEES'
+  | 'SOFTWARE_TECHNOLOGY'
   | 'UNMATCHED_PAYMENTS'
   | 'OWNER_CAPITAL'
   | 'RETAINED_EARNINGS';
@@ -161,6 +163,7 @@ export const INVOICE_CATEGORIES = [
   'packaging',
   'equipment',
   'marketplace',
+  'software',
   'customer_order',
   'statutory',
   'other',
@@ -179,6 +182,7 @@ const CATEGORY_LABELS: Record<InvoiceCategory, string> = {
   packaging: 'Packaging',
   equipment: 'Equipment & Tools',
   marketplace: 'Marketplace Fees',
+  software: 'Software & Technology',
   customer_order: 'Customer Order',
   statutory: 'Statutory / TDS',
   other: 'Other',
@@ -243,33 +247,6 @@ export const PAYMENT_STATUSES = ['draft', 'confirmed', 'cancelled'] as const;
 export type PaymentStatus = (typeof PAYMENT_STATUSES)[number];
 
 // ============================================
-// LEDGER SOURCE TYPES
-// ============================================
-
-export const LEDGER_SOURCE_TYPES = [
-  'fabric_inward',
-  'production_inward',
-  'order_shipment',
-  'payment_received',
-  'invoice_confirmed',
-  'invoice_payment_linked',
-  'payment_outgoing',
-  'hdfc_statement',
-  'bank_payout',
-  'bank_charge',
-  'fabric_consumption',
-  'shipment_cogs',
-  'return_cogs_reversal',
-  'manual',
-  'adjustment',
-  'cc_charge',
-  'bank_import',
-  'cc_charge_import',
-] as const;
-
-export type LedgerSourceType = (typeof LEDGER_SOURCE_TYPES)[number];
-
-// ============================================
 // BANK IMPORT THRESHOLDS
 // ============================================
 
@@ -283,17 +260,4 @@ export const AUTO_CLEAR_AMOUNT_THRESHOLD = 100;
 /** Get display label for an invoice category */
 export function getCategoryLabel(category: InvoiceCategory): string {
   return CATEGORY_LABELS[category] ?? category;
-}
-
-/** Look up an account config by its code */
-export function getAccountByCode(code: string): AccountConfig | undefined {
-  return CHART_OF_ACCOUNTS.find((a) => a.code === code);
-}
-
-/**
- * Debit-normal accounts: balance goes UP with debits (assets, expenses, direct costs).
- * Credit-normal accounts: balance goes UP with credits (liabilities, income, equity).
- */
-export function isDebitNormal(type: AccountType): boolean {
-  return type === 'asset' || type === 'expense' || type === 'direct_cost';
 }

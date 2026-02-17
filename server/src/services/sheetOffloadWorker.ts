@@ -69,7 +69,6 @@ import {
     MAX_PAST_DAYS,
 } from '../config/sync/sheets.js';
 import { generateFabricColourCode } from '../config/fabric/codes.js';
-import { bookFabricConsumptionForMonth, bookShipmentCOGSForMonth, bookReturnReversalForMonth } from './ledgerService.js';
 
 // ============================================
 // TYPES
@@ -1539,62 +1538,6 @@ async function ingestInwardLive(result: IngestInwardResult, tracker?: StepTracke
         }
     }
 
-    // --- Step 7: Book production → finished goods for affected months ---
-    // When sampling/adjustment inwards are ingested, fabric becomes finished goods
-    const productionRows = successfulRows.filter(
-        r => PRODUCTION_BOOKING_SOURCES.some(s => s === r.source.toLowerCase().trim())
-    );
-    if (productionRows.length > 0) {
-        try {
-            const affectedMonths = new Set<string>();
-            for (const row of productionRows) {
-                const d = row.date!; // Validated as non-null during validation step
-                const ist = new Date(d.getTime() + (5.5 * 60 * 60 * 1000));
-                affectedMonths.add(`${ist.getFullYear()}-${ist.getMonth() + 1}`);
-            }
-
-            for (const key of affectedMonths) {
-                const [y, m] = key.split('-').map(Number);
-                const res = await bookFabricConsumptionForMonth(prisma, y, m, adminUserId);
-                sheetsLogger.info(
-                    { month: `${y}-${String(m).padStart(2, '0')}`, fabricCost: res.fabricCost, action: res.action },
-                    'Production → Finished Goods updated'
-                );
-            }
-        } catch (err: unknown) {
-            const message = err instanceof Error ? err.message : 'Unknown error';
-            sheetsLogger.error({ error: message }, 'Production finished goods booking failed (non-fatal)');
-        }
-    }
-
-    // --- Step 8: Book return/RTO COGS reversal for affected months ---
-    // When RTO/return inwards are ingested, returned goods go back to finished goods
-    const returnSources = ['rto', 'return', 'repacking'];
-    const returnRows = successfulRows.filter(
-        r => returnSources.includes(r.source.toLowerCase().trim())
-    );
-    if (returnRows.length > 0) {
-        try {
-            const returnMonths = new Set<string>();
-            for (const row of returnRows) {
-                const d = row.date!; // Validated as non-null during validation step
-                const ist = new Date(d.getTime() + (5.5 * 60 * 60 * 1000));
-                returnMonths.add(`${ist.getFullYear()}-${ist.getMonth() + 1}`);
-            }
-
-            for (const key of returnMonths) {
-                const [y, m] = key.split('-').map(Number);
-                const res = await bookReturnReversalForMonth(prisma, y, m, adminUserId);
-                sheetsLogger.info(
-                    { month: `${y}-${String(m).padStart(2, '0')}`, amount: res.amount, action: res.action },
-                    'Return/RTO COGS reversal updated'
-                );
-            }
-        } catch (err: unknown) {
-            const message = err instanceof Error ? err.message : 'Unknown error';
-            sheetsLogger.error({ error: message }, 'Return COGS reversal failed (non-fatal)');
-        }
-    }
 
     // --- Step: Mark DONE ---
     const markStart = tracker?.start('Mark DONE') ?? 0;
@@ -2579,30 +2522,6 @@ async function triggerIngestOutward(): Promise<IngestOutwardResult | null> {
             await linkOutwardToOrders(linkableItems, result, orderMap);
         }
 
-        // Book shipment COGS for affected months (sale outwards → Dr COGS, Cr FINISHED_GOODS)
-        if (linkableItems.length > 0) {
-            try {
-                const adminUserId = await getAdminUserId();
-                const cogsMonths = new Set<string>();
-                for (const item of linkableItems) {
-                    const d = item.date ?? new Date();
-                    const ist = new Date(d.getTime() + (5.5 * 60 * 60 * 1000));
-                    cogsMonths.add(`${ist.getFullYear()}-${ist.getMonth() + 1}`);
-                }
-
-                for (const key of cogsMonths) {
-                    const [y, m] = key.split('-').map(Number);
-                    const res = await bookShipmentCOGSForMonth(prisma, y, m, adminUserId);
-                    sheetsLogger.info(
-                        { month: `${y}-${String(m).padStart(2, '0')}`, amount: res.amount, action: res.action },
-                        'Shipment COGS updated'
-                    );
-                }
-            } catch (err: unknown) {
-                const message = err instanceof Error ? err.message : 'Unknown error';
-                sheetsLogger.error({ error: message }, 'Shipment COGS booking failed (non-fatal)');
-            }
-        }
 
         // Balance update + cache invalidation if anything was ingested
         if (affectedSkuIds.size > 0) {
@@ -5085,29 +5004,6 @@ async function runOutwardCycle(): Promise<IngestOutwardResult> {
             stepFailed('Link orders', s, err instanceof Error ? err.message : 'Unknown error');
         }
 
-        // IMPORT 7c: Book COGS
-        s = stepStart('Book COGS');
-        try {
-            if (linkableItems.length > 0) {
-                const adminUserId = await getAdminUserId();
-                const cogsMonths = new Set<string>();
-                for (const item of linkableItems) {
-                    const d = item.date ?? new Date();
-                    const ist = new Date(d.getTime() + (5.5 * 60 * 60 * 1000));
-                    cogsMonths.add(`${ist.getFullYear()}-${ist.getMonth() + 1}`);
-                }
-
-                for (const key of cogsMonths) {
-                    const [y, m] = key.split('-').map(Number);
-                    await bookShipmentCOGSForMonth(prisma, y, m, adminUserId);
-                }
-                stepDone('Book COGS', s, `${cogsMonths.size} months`);
-            } else {
-                stepDone('Book COGS', s, 'No shipments');
-            }
-        } catch (err: unknown) {
-            stepFailed('Book COGS', s, err instanceof Error ? err.message : 'Unknown error');
-        }
 
         // POST-FLIGHT: Push updated balances
         s = stepStart('Push updated balances');

@@ -2072,8 +2072,11 @@ model Payment {
   driveUrl         String?
   driveUploadedAt  DateTime?
 
-  // Ledger link
+  // Ledger link (historical — no longer created for new payments)
   ledgerEntryId String? @unique
+
+  // Accounting: what account was this payment booked to
+  debitAccountCode String?
 
   // Tracking
   notes       String?
