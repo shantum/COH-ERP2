@@ -39,6 +39,10 @@ import returnsRoutes from './routes/returns.js';
 import trackingRoutes from './routes/tracking.js';
 import sheetSyncRoutes from './routes/sheetSync.js';
 import channelsRoutes from './routes/channels.js';
+import fabricInvoicesRoutes from './routes/fabricInvoices.js';
+import financeUploadRoutes from './routes/financeUpload.js';
+import bankImportRoutes from './routes/bankImport.js';
+import chatRoutes from './routes/chat.js';
 import returnPrimeWebhooks from './routes/returnPrimeWebhooks.js';
 import returnPrimeSync from './routes/returnPrimeSync.js';
 import returnPrimeAdminRoutes from './routes/returnPrimeAdminRoutes.js';
@@ -47,6 +51,8 @@ import scheduledSync from './services/scheduledSync.js';
 import trackingSync from './services/trackingSync.js';
 import cacheProcessor from './services/cacheProcessor.js';
 import cacheDumpWorker from './services/cacheDumpWorker.js';
+import sheetOffloadWorker from './services/sheetOffloadWorker.js';
+import driveFinanceSync from './services/driveFinanceSync.js';
 import { runAllCleanup } from './utils/cacheCleanup.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import shutdownCoordinator from './utils/shutdownCoordinator.js';
@@ -152,6 +158,10 @@ export async function createExpressApp() {
   app.use('/api/tracking', trackingRoutes);
   app.use('/api/channels', channelsRoutes);
   app.use('/api/admin/sheet-sync', sheetSyncRoutes);
+  app.use('/api/fabric-invoices', fabricInvoicesRoutes);
+  app.use('/api/finance', financeUploadRoutes);
+  app.use('/api/bank-import', bankImportRoutes);
+  app.use('/api/chat', chatRoutes);
 
   // Return Prime integration
   app.use('/api/webhooks/returnprime', returnPrimeWebhooks);
@@ -239,11 +249,15 @@ export async function startBackgroundWorkers() {
     trackingSync.start();
     cacheProcessor.start();
     cacheDumpWorker.start();
+    sheetOffloadWorker.start();
+    driveFinanceSync.start();
 
     shutdownCoordinator.register('scheduledSync', () => scheduledSync.stop(), 5000);
     shutdownCoordinator.register('trackingSync', () => trackingSync.stop(), 5000);
     shutdownCoordinator.register('cacheProcessor', () => cacheProcessor.stop(), 5000);
     shutdownCoordinator.register('cacheDumpWorker', () => cacheDumpWorker.stop(), 5000);
+    shutdownCoordinator.register('sheetOffloadWorker', () => sheetOffloadWorker.stop(), 5000);
+    shutdownCoordinator.register('driveFinanceSync', () => driveFinanceSync.stop(), 5000);
   }
 
   // Start Pulse broadcaster
