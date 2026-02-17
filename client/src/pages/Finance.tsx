@@ -1187,11 +1187,25 @@ function BankImportView({ onBack }: { onBack: () => void }) {
   const [importResult, setImportResult] = useState<ImportResultState | null>(null);
   const [categorizing, setCategorizing] = useState(false);
   const [categorizeResult, setCategorizeResult] = useState<CategorizeResultState | null>(null);
+  const [categorizedTxns, setCategorizedTxns] = useState<Array<{
+    id: string;
+    txnDate: string | Date;
+    narration: string | null;
+    amount: number;
+    direction: string;
+    counterpartyName: string | null;
+    category: string | null;
+    debitAccountCode: string | null;
+    creditAccountCode: string | null;
+    status: string;
+  }>>([]);
+  const [loadingTxns, setLoadingTxns] = useState(false);
   const [posting, setPosting] = useState(false);
   const [postResult, setPostResult] = useState<PostResultState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dryRun, setDryRun] = useState<{ count: number; byAccount: Record<string, { count: number; total: number }> } | null>(null);
   const queryClient = useQueryClient();
+  const listTxnsFn = useServerFn(listBankTransactions);
 
   const handleUpload = async () => {
     if (!file) return;
@@ -1233,6 +1247,17 @@ function BankImportView({ onBack }: { onBack: () => void }) {
       if (!res.ok || !json.success) throw new Error(json.error || 'Categorization failed');
 
       setCategorizeResult(json.result);
+
+      // Fetch categorized transactions for review
+      setLoadingTxns(true);
+      try {
+        const txnRes = await listTxnsFn({
+          data: { bank: selectedBank, status: 'categorized', limit: 200 },
+        });
+        if (txnRes.success) setCategorizedTxns(txnRes.transactions);
+      } finally {
+        setLoadingTxns(false);
+      }
 
       // Fetch dry-run summary
       const dryRes = await fetch(`/api/bank-import/dry-run?bank=${selectedBank}`, {
@@ -1348,30 +1373,66 @@ function BankImportView({ onBack }: { onBack: () => void }) {
               Categorize
             </Button>
           ) : categorizeResult ? (
-            <div className="text-sm space-y-2">
-              <p><strong>{categorizeResult.categorized}</strong> categorized, <strong>{categorizeResult.skipped}</strong> skipped</p>
-              {Object.keys(categorizeResult.breakdown).length > 0 && (
-                <div className="border rounded overflow-hidden">
+            <div className="text-sm space-y-3">
+              {/* Summary stats */}
+              {(() => {
+                const matched = categorizedTxns.filter(t => t.category !== 'UNMATCHED_PAYMENTS' && t.category);
+                const unmatched = categorizedTxns.filter(t => t.category === 'UNMATCHED_PAYMENTS' || !t.category);
+                const total = categorizedTxns.reduce((sum, t) => sum + t.amount, 0);
+                return (
+                  <div className="flex flex-wrap gap-4 text-xs">
+                    <span><strong>{categorizeResult.categorized}</strong> categorized, <strong>{categorizeResult.skipped}</strong> skipped</span>
+                    {categorizedTxns.length > 0 && (
+                      <>
+                        <span className="text-green-600">{matched.length} matched</span>
+                        {unmatched.length > 0 && <span className="text-amber-600">{unmatched.length} unmatched</span>}
+                        <span className="font-mono">{formatCurrency(total)} total</span>
+                      </>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* Transaction review table */}
+              {loadingTxns ? (
+                <div className="flex items-center gap-2 text-muted-foreground text-xs py-4">
+                  <Loader2 className="h-3 w-3 animate-spin" /> Loading transactions...
+                </div>
+              ) : categorizedTxns.length > 0 ? (
+                <div className="border rounded overflow-hidden max-h-[400px] overflow-y-auto">
                   <table className="w-full text-xs">
-                    <thead className="bg-muted/50">
+                    <thead className="bg-muted/50 sticky top-0">
                       <tr>
-                        <th className="text-left p-2 font-medium">Account Flow</th>
-                        <th className="text-right p-2 font-medium">Count</th>
-                        <th className="text-right p-2 font-medium">Total</th>
+                        <th className="text-left p-2 font-medium">Date</th>
+                        <th className="text-left p-2 font-medium">Narration</th>
+                        <th className="text-right p-2 font-medium">Amount</th>
+                        <th className="text-left p-2 font-medium">Party</th>
+                        <th className="text-left p-2 font-medium">Category</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {Object.entries(categorizeResult.breakdown).map(([key, val]) => (
-                        <tr key={key} className="border-t">
-                          <td className="p-2">{key}</td>
-                          <td className="p-2 text-right">{val.count}</td>
-                          <td className="p-2 text-right font-mono">{formatCurrency(val.total)}</td>
-                        </tr>
-                      ))}
+                      {categorizedTxns.map((txn) => {
+                        const isUnmatched = txn.category === 'UNMATCHED_PAYMENTS' || !txn.category;
+                        return (
+                          <tr key={txn.id} className={`border-t ${isUnmatched ? 'bg-amber-50' : ''}`}>
+                            <td className="p-2 whitespace-nowrap">{new Date(txn.txnDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</td>
+                            <td className="p-2 max-w-[250px] truncate" title={txn.narration ?? ''}>{txn.narration ?? '—'}</td>
+                            <td className={`p-2 text-right font-mono whitespace-nowrap ${txn.direction === 'credit' ? 'text-green-600' : ''}`}>
+                              {txn.direction === 'credit' ? '+' : ''}{formatCurrency(txn.amount)}
+                            </td>
+                            <td className="p-2">{txn.counterpartyName ?? <span className="text-muted-foreground">—</span>}</td>
+                            <td className="p-2">
+                              {isUnmatched
+                                ? <span className="text-amber-600 font-medium">Unmatched</span>
+                                : <span>{txn.category}</span>}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
-              )}
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -1382,7 +1443,7 @@ function BankImportView({ onBack }: { onBack: () => void }) {
         <div className="border rounded-lg p-4 space-y-3">
           <h4 className="font-medium text-sm flex items-center gap-2">
             <span className="bg-blue-100 text-blue-700 rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold">3</span>
-            Post to Ledger
+            Create Payments
           </h4>
 
           {dryRun && !postResult && (
