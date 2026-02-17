@@ -24,6 +24,8 @@ import {
   CreatePartySchema,
   CreateTransactionTypeSchema,
   UpdateTransactionTypeSchema,
+  BANK_STATUS_FILTER_MAP,
+  type BankTxnFilterOption,
 } from '@coh/shared/schemas/finance';
 
 /**
@@ -1300,7 +1302,15 @@ export const listBankTransactions = createServerFn({ method: 'POST' })
 
     const where: Record<string, unknown> = {};
     if (bank) where.bank = bank;
-    if (status) where.status = status;
+    if (status) {
+      // Expand simplified filter values to DB status values
+      const filterMap = BANK_STATUS_FILTER_MAP[status as BankTxnFilterOption];
+      if (filterMap) {
+        where.status = { in: filterMap };
+      } else {
+        where.status = status;
+      }
+    }
     if (batchId) where.batchId = batchId;
     if (search) {
       where.OR = [

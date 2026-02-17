@@ -56,8 +56,10 @@ import {
   CHART_OF_ACCOUNTS,
   getCategoryLabel,
   BANK_TYPES,
-  BANK_TXN_STATUSES,
+  BANK_TXN_FILTER_OPTIONS,
   getBankLabel,
+  getBankStatusLabel,
+  isBankTxnPending,
   PARTY_CATEGORIES,
 } from '@coh/shared';
 
@@ -1087,6 +1089,8 @@ function BankTransactionList({ search, updateSearch }: {
   const listFn = useServerFn(listBankTransactions);
   const queryClient = useQueryClient();
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [batchLoading, setBatchLoading] = useState(false);
 
   const bank = search.bankFilter && search.bankFilter !== 'all' ? search.bankFilter : undefined;
   const status = search.bankStatus && search.bankStatus !== 'all' ? search.bankStatus : undefined;
@@ -1097,7 +1101,7 @@ function BankTransactionList({ search, updateSearch }: {
       listFn({
         data: {
           ...(bank ? { bank } : {}),
-          ...(status ? { status: status } : {}),
+          ...(status ? { status } : {}),
           ...(search.search ? { search: search.search } : {}),
           page: search.page,
           limit: search.limit,
@@ -1105,7 +1109,18 @@ function BankTransactionList({ search, updateSearch }: {
       }),
   });
 
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['finance', 'bank-transactions'] });
+  // Clear selection when filters/page change
+  const prevKeyRef = useRef('');
+  const filterKey = `${bank}-${status}-${search.search}-${search.page}`;
+  if (filterKey !== prevKeyRef.current) {
+    prevKeyRef.current = filterKey;
+    if (selectedIds.size > 0) setSelectedIds(new Set());
+  }
+
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: ['finance', 'bank-transactions'] });
+    setSelectedIds(new Set());
+  };
 
   const handleSkip = async (txnId: string) => {
     await fetch('/api/bank-import/skip', {
@@ -1136,6 +1151,71 @@ function BankTransactionList({ search, updateSearch }: {
     setExpandedId(null);
   };
 
+  const handleConfirm = async (txnId: string) => {
+    const res = await fetch('/api/bank-import/confirm', {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ txnId }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Failed to confirm' }));
+      alert(err.error || 'Failed to confirm');
+      return;
+    }
+    invalidate();
+    setExpandedId(null);
+  };
+
+  const handleBatchConfirm = async () => {
+    if (selectedIds.size === 0) return;
+    setBatchLoading(true);
+    try {
+      await fetch('/api/bank-import/confirm-batch', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ txnIds: [...selectedIds] }),
+      });
+      invalidate();
+    } finally {
+      setBatchLoading(false);
+    }
+  };
+
+  const handleBatchSkip = async () => {
+    if (selectedIds.size === 0) return;
+    setBatchLoading(true);
+    try {
+      await fetch('/api/bank-import/skip-batch', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ txnIds: [...selectedIds] }),
+      });
+      invalidate();
+    } finally {
+      setBatchLoading(false);
+    }
+  };
+
+  const pendingTxns = data?.transactions?.filter((t) => isBankTxnPending(t.status)) ?? [];
+  const allPendingSelected = pendingTxns.length > 0 && pendingTxns.every((t) => selectedIds.has(t.id));
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (allPendingSelected) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(pendingTxns.map((t) => t.id)));
+    }
+  };
+
   return (
     <div className="space-y-4">
       {/* Filters */}
@@ -1153,9 +1233,9 @@ function BankTransactionList({ search, updateSearch }: {
         <Select value={search.bankStatus ?? 'all'} onValueChange={(v) => updateSearch({ bankStatus: v as any, page: 1 })}>
           <SelectTrigger className="w-[160px]"><SelectValue placeholder="Status" /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All Statuses</SelectItem>
-            {BANK_TXN_STATUSES.map((s) => (
-              <SelectItem key={s} value={s}>{s.replace(/_/g, ' ')}</SelectItem>
+            <SelectItem value="all">All</SelectItem>
+            {BANK_TXN_FILTER_OPTIONS.map((s) => (
+              <SelectItem key={s} value={s} className="capitalize">{s.charAt(0).toUpperCase() + s.slice(1)}</SelectItem>
             ))}
           </SelectContent>
         </Select>
@@ -1174,6 +1254,23 @@ function BankTransactionList({ search, updateSearch }: {
         </div>
       </div>
 
+      {/* Batch action bar */}
+      {selectedIds.size > 0 && (
+        <div className="flex items-center gap-3 p-2 px-3 bg-blue-50 border border-blue-200 rounded-lg text-sm">
+          <span className="font-medium">{selectedIds.size} selected</span>
+          <Button size="sm" onClick={handleBatchConfirm} disabled={batchLoading}>
+            {batchLoading ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Check className="h-3 w-3 mr-1" />}
+            Confirm Selected
+          </Button>
+          <Button size="sm" variant="outline" onClick={handleBatchSkip} disabled={batchLoading}>
+            Skip Selected
+          </Button>
+          <button type="button" className="ml-auto text-xs text-muted-foreground hover:text-foreground" onClick={() => setSelectedIds(new Set())}>
+            Clear
+          </button>
+        </div>
+      )}
+
       {/* Table */}
       {isLoading ? (
         <LoadingState />
@@ -1183,24 +1280,45 @@ function BankTransactionList({ search, updateSearch }: {
             <table className="w-full text-sm">
               <thead className="bg-muted/50">
                 <tr>
+                  <th className="p-3 w-8">
+                    {pendingTxns.length > 0 && (
+                      <input
+                        type="checkbox"
+                        checked={allPendingSelected}
+                        onChange={toggleSelectAll}
+                        className="rounded border-gray-300"
+                      />
+                    )}
+                  </th>
                   <th className="text-left p-3 font-medium">Date</th>
                   <th className="text-left p-3 font-medium">Narration</th>
                   <th className="text-right p-3 font-medium">Amount</th>
                   <th className="text-left p-3 font-medium">Party</th>
                   <th className="text-left p-3 font-medium">Bank</th>
                   <th className="text-left p-3 font-medium">Status</th>
-                  <th className="text-left p-3 font-medium w-24">Actions</th>
+                  <th className="text-left p-3 font-medium w-28">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {data?.transactions?.map((txn) => {
                   const isExpanded = expandedId === txn.id;
+                  const isPending = isBankTxnPending(txn.status);
+                  const hasAccounts = !!txn.debitAccountCode && !!txn.creditAccountCode;
                   return (
                     <Fragment key={txn.id}>
                       <tr
-                        className={`border-t hover:bg-muted/30 cursor-pointer ${isExpanded ? 'bg-muted/20' : ''} ${txn.status === 'skipped' ? 'opacity-50' : ''}`}
-                        onClick={() => setExpandedId(isExpanded ? null : txn.id)}
+                        className={`border-t hover:bg-muted/30 ${isExpanded ? 'bg-muted/20' : ''} ${txn.status === 'skipped' ? 'opacity-50' : ''}`}
                       >
+                        <td className="p-3" onClick={(e) => e.stopPropagation()}>
+                          {isPending && (
+                            <input
+                              type="checkbox"
+                              checked={selectedIds.has(txn.id)}
+                              onChange={() => toggleSelect(txn.id)}
+                              className="rounded border-gray-300"
+                            />
+                          )}
+                        </td>
                         <td className="p-3 text-xs text-muted-foreground whitespace-nowrap">
                           {new Date(txn.txnDate).toLocaleDateString('en-IN')}
                         </td>
@@ -1217,24 +1335,42 @@ function BankTransactionList({ search, updateSearch }: {
                         <td className="p-3"><BankStatusBadge status={txn.status} /></td>
                         <td className="p-3" onClick={(e) => e.stopPropagation()}>
                           <div className="flex items-center gap-1">
+                            {isPending && (
+                              <>
+                                <button type="button" className="text-xs text-blue-600 hover:text-blue-800" onClick={() => setExpandedId(isExpanded ? null : txn.id)} title="Edit">
+                                  <Pencil className="h-3.5 w-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  className="text-xs text-green-600 hover:text-green-800 disabled:opacity-30 disabled:cursor-not-allowed"
+                                  onClick={() => handleConfirm(txn.id)}
+                                  disabled={!hasAccounts}
+                                  title={hasAccounts ? 'Confirm' : 'Set accounts first'}
+                                >
+                                  <Check className="h-3.5 w-3.5" />
+                                </button>
+                              </>
+                            )}
                             {txn.status === 'skipped' ? (
                               <button type="button" className="text-xs text-blue-600 hover:text-blue-800" onClick={() => handleUnskip(txn.id)} title="Restore">
                                 <History className="h-3.5 w-3.5" />
                               </button>
-                            ) : (
+                            ) : isPending ? (
                               <button type="button" className="text-xs text-amber-600 hover:text-amber-800" onClick={() => handleSkip(txn.id)} title="Skip">
                                 <X className="h-3.5 w-3.5" />
                               </button>
+                            ) : null}
+                            {(isPending || txn.status === 'skipped') && (
+                              <button type="button" className="text-xs text-red-500 hover:text-red-700" onClick={() => handleDelete(txn.id)} title="Delete">
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
                             )}
-                            <button type="button" className="text-xs text-red-500 hover:text-red-700" onClick={() => handleDelete(txn.id)} title="Delete">
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
                           </div>
                         </td>
                       </tr>
                       {isExpanded && (
                         <tr className="border-t bg-muted/10">
-                          <td colSpan={7} className="p-3">
+                          <td colSpan={8} className="p-3">
                             <BankTxnEditRow
                               txn={txn}
                               onSaved={() => { invalidate(); setExpandedId(null); }}
@@ -1247,7 +1383,7 @@ function BankTransactionList({ search, updateSearch }: {
                   );
                 })}
                 {(!data?.transactions || data.transactions.length === 0) && (
-                  <tr><td colSpan={7} className="p-8 text-center text-muted-foreground">No transactions found</td></tr>
+                  <tr><td colSpan={8} className="p-8 text-center text-muted-foreground">No transactions found</td></tr>
                 )}
               </tbody>
             </table>
@@ -1407,16 +1543,15 @@ function BankTxnEditRow({ txn, onSaved, onClose }: {
 }
 
 function BankStatusBadge({ status }: { status: string }) {
-  const colors: Record<string, string> = {
-    imported: 'bg-gray-100 text-gray-700',
-    categorized: 'bg-blue-100 text-blue-700',
-    posted: 'bg-green-100 text-green-700',
-    skipped: 'bg-yellow-100 text-yellow-700',
-    legacy_posted: 'bg-purple-100 text-purple-700',
+  const label = getBankStatusLabel(status);
+  const colorMap: Record<string, string> = {
+    Pending: 'bg-gray-100 text-gray-700',
+    Confirmed: 'bg-green-100 text-green-700',
+    Skipped: 'bg-yellow-100 text-yellow-700',
   };
   return (
-    <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${colors[status] ?? 'bg-gray-100 text-gray-700'}`}>
-      {status.replace(/_/g, ' ')}
+    <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${colorMap[label] ?? 'bg-gray-100 text-gray-700'}`}>
+      {label}
     </span>
   );
 }

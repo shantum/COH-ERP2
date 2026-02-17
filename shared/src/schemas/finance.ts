@@ -15,8 +15,8 @@ export const FinanceSearchParams = z.object({
   tab: z.enum(['dashboard', 'invoices', 'payments', 'pnl', 'bank-import', 'parties', 'transaction-types']).catch('dashboard'),
   /** Bank import: bank filter */
   bankFilter: z.enum(['all', 'hdfc', 'razorpayx', 'hdfc_cc', 'icici_cc']).optional().catch(undefined),
-  /** Bank import: status filter */
-  bankStatus: z.enum(['all', 'imported', 'categorized', 'posted', 'skipped', 'legacy_posted']).optional().catch(undefined),
+  /** Bank import: status filter (simplified) */
+  bankStatus: z.enum(['all', 'pending', 'confirmed', 'skipped']).optional().catch(undefined),
   /** Bank import: sub-view */
   bankView: z.enum(['list', 'import']).optional().catch(undefined),
   /** Invoice type filter */
@@ -206,6 +206,30 @@ export type BankType = (typeof BANK_TYPES)[number];
 
 export const BANK_TXN_STATUSES = ['imported', 'categorized', 'posted', 'skipped', 'legacy_posted'] as const;
 export type BankTxnStatus = (typeof BANK_TXN_STATUSES)[number];
+
+/** Simplified filter options for the UI (display only — no DB migration) */
+export const BANK_TXN_FILTER_OPTIONS = ['pending', 'confirmed', 'skipped'] as const;
+export type BankTxnFilterOption = (typeof BANK_TXN_FILTER_OPTIONS)[number];
+
+/** Maps UI filter values to DB status values */
+export const BANK_STATUS_FILTER_MAP: Record<BankTxnFilterOption, BankTxnStatus[]> = {
+  pending: ['imported', 'categorized'],
+  confirmed: ['posted', 'legacy_posted'],
+  skipped: ['skipped'],
+};
+
+/** Maps DB status to display label */
+export function getBankStatusLabel(status: string): string {
+  if (status === 'imported' || status === 'categorized') return 'Pending';
+  if (status === 'posted' || status === 'legacy_posted') return 'Confirmed';
+  if (status === 'skipped') return 'Skipped';
+  return status;
+}
+
+/** Check if a DB status is "pending" (editable/confirmable) */
+export function isBankTxnPending(status: string): boolean {
+  return status === 'imported' || status === 'categorized';
+}
 
 const BANK_LABELS: Record<string, string> = {
   hdfc: 'HDFC Bank',

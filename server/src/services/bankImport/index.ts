@@ -17,5 +17,5 @@ export type { CategorizeResult, CategoryInfo } from './categorize.js';
 export { auditExistingEntries } from './audit.js';
 export type { AuditResult } from './audit.js';
 
-export { getDryRunSummary, postTransactions } from './post.js';
-export type { DryRunSummary, PostResult } from './post.js';
+export { postTransactions, confirmSingleTransaction, confirmBatch } from './post.js';
+export type { PostResult, ConfirmResult, BatchConfirmResult } from './post.js';

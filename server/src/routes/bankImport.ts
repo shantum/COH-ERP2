@@ -17,8 +17,9 @@ import {
   importHdfcStatement,
   importRazorpayxPayouts,
   categorizeTransactions,
-  getDryRunSummary,
   postTransactions,
+  confirmSingleTransaction,
+  confirmBatch,
   parseHdfcRows,
   parseRazorpayxRows,
   checkDuplicateHashes,
@@ -221,21 +222,7 @@ router.post('/preview', requireAdmin, upload.single('file'), asyncHandler(async 
 }));
 
 // ============================================
-// POST /categorize — Apply rules to imported transactions
-// ============================================
-
-router.post('/categorize', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
-  const bank = req.body.bank as string | undefined;
-  log.info({ bank }, 'Categorize triggered');
-
-  const result = await categorizeTransactions(bank ? { bank } : undefined);
-  log.info({ categorized: result.categorized, skipped: result.skipped }, 'Categorize complete');
-
-  res.json({ success: true, result });
-}));
-
-// ============================================
-// POST /post — Post categorized transactions to ledger
+// POST /post — Post all pending transactions (legacy batch)
 // ============================================
 
 router.post('/post', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
@@ -249,13 +236,63 @@ router.post('/post', requireAdmin, asyncHandler(async (req: Request, res: Respon
 }));
 
 // ============================================
-// GET /dry-run — Preview what posting would do
+// POST /confirm — Confirm a single transaction
 // ============================================
 
-router.get('/dry-run', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
-  const bank = req.query.bank as string | undefined;
-  const summary = await getDryRunSummary(bank ? { bank } : undefined);
-  res.json({ success: true, summary });
+router.post('/confirm', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
+  const { txnId } = req.body;
+  if (!txnId) {
+    res.status(400).json({ error: 'txnId is required' });
+    return;
+  }
+
+  log.info({ txnId }, 'Confirm single transaction');
+  const result = await confirmSingleTransaction(txnId);
+
+  if (!result.success) {
+    res.status(400).json({ error: result.error });
+    return;
+  }
+
+  res.json({ success: true, paymentId: result.paymentId });
+}));
+
+// ============================================
+// POST /confirm-batch — Confirm multiple transactions
+// ============================================
+
+router.post('/confirm-batch', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
+  const { txnIds } = req.body;
+  if (!txnIds || !Array.isArray(txnIds) || txnIds.length === 0) {
+    res.status(400).json({ error: 'txnIds array is required' });
+    return;
+  }
+
+  log.info({ count: txnIds.length }, 'Confirm batch');
+  const result = await confirmBatch(txnIds);
+  log.info({ confirmed: result.confirmed, errors: result.errors }, 'Batch confirm complete');
+
+  res.json({ success: true, result });
+}));
+
+// ============================================
+// POST /skip-batch — Skip multiple transactions
+// ============================================
+
+router.post('/skip-batch', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
+  const { txnIds, reason } = req.body;
+  if (!txnIds || !Array.isArray(txnIds) || txnIds.length === 0) {
+    res.status(400).json({ error: 'txnIds array is required' });
+    return;
+  }
+
+  log.info({ count: txnIds.length }, 'Skip batch');
+  await req.prisma.bankTransaction.updateMany({
+    where: { id: { in: txnIds }, status: { in: ['imported', 'categorized'] } },
+    data: { status: 'skipped', skipReason: reason || 'Batch skipped' },
+  });
+
+  res.json({ success: true });
 }));
 
 // ============================================

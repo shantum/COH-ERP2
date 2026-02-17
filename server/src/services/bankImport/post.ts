@@ -1,10 +1,7 @@
 /**
  * Bank Import V2 — Post Service
  *
- * Posts categorized BankTransactions to the ledger.
- * Routes outgoing payments through ACCOUNTS_PAYABLE when the party
- * requires invoices (invoiceRequired = true), or posts directly
- * for small amounts and whitelisted parties.
+ * Confirms BankTransactions — creates Payment records and marks as posted.
  */
 
 import { PrismaClient } from '@prisma/client';
@@ -16,20 +13,23 @@ const prisma = new PrismaClient();
 // TYPES
 // ============================================
 
-export interface DryRunSummary {
-  count: number;
-  totalDebits: number;
-  totalCredits: number;
-  byAccount: Record<string, { count: number; total: number }>;
-  singleStep: number;
-  twoStep: number;
-}
-
 export interface PostResult {
   posted: number;
   errors: number;
   singleStep: number;
   twoStep: number;
+  errorDetails: string[];
+}
+
+export interface ConfirmResult {
+  success: boolean;
+  paymentId?: string;
+  error?: string;
+}
+
+export interface BatchConfirmResult {
+  confirmed: number;
+  errors: number;
   errorDetails: string[];
 }
 
@@ -101,70 +101,102 @@ function decidePosting(
 }
 
 // ============================================
-// DRY RUN
+// CONFIRM SINGLE TRANSACTION
 // ============================================
 
-export async function getDryRunSummary(options?: { bank?: string }): Promise<DryRunSummary> {
-  const where: Record<string, unknown> = {
-    status: { in: ['imported', 'categorized'] },
-    debitAccountCode: { not: null },
-  };
-  if (options?.bank) where.bank = options.bank;
+export async function confirmSingleTransaction(txnId: string): Promise<ConfirmResult> {
+  const admin = await prisma.user.findFirst({ where: { role: 'admin' } });
+  if (!admin) throw new Error('No admin user found — needed for payment createdById');
 
-  const txns = await prisma.bankTransaction.findMany({
-    where: where as any,
-    select: {
-      amount: true,
-      direction: true,
-      debitAccountCode: true,
-      creditAccountCode: true,
-      partyId: true,
+  const txn = await prisma.bankTransaction.findUnique({ where: { id: txnId } });
+  if (!txn) return { success: false, error: 'Transaction not found' };
+  if (txn.status === 'posted' || txn.status === 'legacy_posted') {
+    return { success: false, error: 'Transaction already confirmed' };
+  }
+  if (txn.status === 'skipped') {
+    return { success: false, error: 'Transaction is skipped — unskip it first' };
+  }
+  if (!txn.debitAccountCode || !txn.creditAccountCode) {
+    return { success: false, error: 'Missing account codes — edit the transaction first' };
+  }
+
+  const invoiceRequired = txn.partyId
+    ? (await prisma.party.findUnique({ where: { id: txn.partyId }, select: { invoiceRequired: true } }))?.invoiceRequired ?? true
+    : true;
+
+  const decision = decidePosting(txn.direction, txn.amount, txn.debitAccountCode, txn.creditAccountCode, invoiceRequired);
+  const entryDate = new Date(txn.txnDate);
+
+  let paymentId: string | undefined;
+  if (txn.direction === 'debit' && (txn.bank === 'hdfc' || txn.bank === 'razorpayx')) {
+    if (txn.paymentId) {
+      await prisma.payment.update({
+        where: { id: txn.paymentId },
+        data: { debitAccountCode: decision.intendedDebitAccount ?? decision.debitAccount },
+      });
+      paymentId = txn.paymentId;
+    } else {
+      const payment = await prisma.payment.create({
+        data: {
+          direction: 'outgoing',
+          method: 'bank_transfer',
+          status: 'confirmed',
+          amount: txn.amount,
+          unmatchedAmount: txn.amount,
+          paymentDate: entryDate,
+          referenceNumber: txn.reference ?? txn.utr ?? null,
+          debitAccountCode: decision.intendedDebitAccount ?? decision.debitAccount,
+          createdById: admin.id,
+          ...(txn.partyId ? { partyId: txn.partyId } : {}),
+        },
+      });
+      paymentId = payment.id;
+    }
+  }
+
+  await prisma.bankTransaction.update({
+    where: { id: txn.id },
+    data: {
+      status: 'posted',
+      intendedDebitAccount: decision.intendedDebitAccount,
+      postingType: decision.type,
+      ...(paymentId && !txn.paymentId ? { paymentId } : {}),
     },
   });
 
-  // Pre-fetch party invoiceRequired flags
-  const partyIds = [...new Set(txns.map(t => t.partyId).filter(Boolean))] as string[];
-  const parties = partyIds.length > 0
-    ? await prisma.party.findMany({
-        where: { id: { in: partyIds } },
-        select: { id: true, invoiceRequired: true },
-      })
-    : [];
-  const partyMap = new Map(parties.map(p => [p.id, p.invoiceRequired]));
-
-  let totalDebits = 0;
-  let totalCredits = 0;
-  let singleStep = 0;
-  let twoStep = 0;
-  const byAccount: Record<string, { count: number; total: number }> = {};
-
-  for (const txn of txns) {
-    if (txn.direction === 'debit') totalDebits += txn.amount;
-    else totalCredits += txn.amount;
-
-    const invoiceRequired = txn.partyId ? (partyMap.get(txn.partyId) ?? true) : true;
-    const decision = decidePosting(
-      txn.direction,
-      txn.amount,
-      txn.debitAccountCode ?? 'UNMATCHED_PAYMENTS',
-      txn.creditAccountCode ?? 'UNMATCHED_PAYMENTS',
-      invoiceRequired,
-    );
-
-    if (decision.type === 'single_step') singleStep++;
-    else twoStep++;
-
-    const key = `${decision.debitAccount} → ${decision.creditAccount}`;
-    if (!byAccount[key]) byAccount[key] = { count: 0, total: 0 };
-    byAccount[key].count++;
-    byAccount[key].total += txn.amount;
-  }
-
-  return { count: txns.length, totalDebits, totalCredits, byAccount, singleStep, twoStep };
+  return { success: true, paymentId };
 }
 
 // ============================================
-// POST TRANSACTIONS
+// CONFIRM BATCH
+// ============================================
+
+export async function confirmBatch(txnIds: string[]): Promise<BatchConfirmResult> {
+  let confirmed = 0;
+  let errors = 0;
+  const errorDetails: string[] = [];
+
+  for (const txnId of txnIds) {
+    try {
+      const result = await confirmSingleTransaction(txnId);
+      if (result.success) {
+        confirmed++;
+      } else {
+        errors++;
+        errorDetails.push(`${txnId}: ${result.error}`);
+      }
+    } catch (err) {
+      errors++;
+      const msg = err instanceof Error ? err.message : String(err);
+      errorDetails.push(`${txnId}: ${msg}`);
+    }
+  }
+
+  return { confirmed, errors, errorDetails };
+}
+
+// ============================================
+// POST TRANSACTIONS (legacy batch — used by /post endpoint)
 // ============================================
 
 export async function postTransactions(options?: { bank?: string }): Promise<PostResult> {
