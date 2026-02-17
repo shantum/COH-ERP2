@@ -187,6 +187,7 @@ export async function pushERPOrderToSheet(orderId: string): Promise<void> {
         include: {
             orderLines: {
                 include: { sku: { select: { skuCode: true } } },
+                // All scalar fields (lineStatus, trackingStatus, courier, awbNumber) included by default
             },
         },
     });
@@ -230,6 +231,10 @@ export async function pushERPOrderToSheet(orderId: string): Promise<void> {
         if (order.shipByDate) {
             row[11] = `SHIP BY ${order.shipByDate.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' })}`;
         }
+        // Y/Z/AA: Status, Courier, AWB — written at push time to avoid race condition
+        row[24] = buildDisplayStatus(order.channel, line.lineStatus, line.trackingStatus);
+        row[25] = line.courier ?? '';
+        row[26] = line.awbNumber ?? '';
         return row;
     });
 

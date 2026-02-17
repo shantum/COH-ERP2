@@ -69,15 +69,12 @@ interface PreviewResponse {
     existingUpdated: number;
     unmatchedSkus: string[];
   };
-  rawRows: unknown[];
+  cacheKey: string;
 }
 
 interface ExecuteResult {
   ordersCreated: number;
   ordersUpdated: number;
-  sheetPushed?: number;
-  sheetSkipped?: number;
-  sheetError?: string;
   errors: Array<{ order: string; error: string }>;
 }
 
@@ -139,11 +136,29 @@ async function previewImport(file: File): Promise<PreviewResponse> {
   return res.json();
 }
 
-async function executeImport(data: {
-  selectedOrders: PreviewOrder[];
-  rawRows: unknown[];
-  filename: string;
-}): Promise<ExecuteResult> {
+interface ProgressEvent {
+  type: 'progress';
+  completed: number;
+  total: number;
+  created: number;
+  updated: number;
+  errors: number;
+}
+
+interface CompleteEvent {
+  type: 'complete';
+  batchId: string;
+  ordersCreated: number;
+  ordersUpdated: number;
+  errors: Array<{ order: string; error: string }>;
+}
+
+type SSEEvent = ProgressEvent | CompleteEvent;
+
+async function executeImportStreaming(
+  data: { selectedOrders: PreviewOrder[]; cacheKey: string; filename: string },
+  onProgress: (event: ProgressEvent) => void,
+): Promise<ExecuteResult> {
   const res = await fetch('/api/channels/execute-import', {
     method: 'POST',
     credentials: 'include',
@@ -154,7 +169,43 @@ async function executeImport(data: {
     const err = await res.json().catch(() => ({ error: 'Import failed' }));
     throw new Error(err.error || 'Import failed');
   }
-  return res.json();
+
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let result: ExecuteResult | null = null;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+
+    // Parse SSE events: "data: {...}\n\n"
+    const parts = buffer.split('\n\n');
+    buffer = parts.pop()!; // Keep incomplete chunk
+
+    for (const part of parts) {
+      const line = part.trim();
+      if (!line.startsWith('data: ')) continue;
+      const json = line.slice(6);
+      try {
+        const event = JSON.parse(json) as SSEEvent;
+        if (event.type === 'progress') {
+          onProgress(event);
+        } else if (event.type === 'complete') {
+          result = {
+            ordersCreated: event.ordersCreated,
+            ordersUpdated: event.ordersUpdated,
+            errors: event.errors,
+          };
+        }
+      } catch { /* skip malformed events */ }
+    }
+  }
+
+  if (!result) throw new Error('Stream ended without complete event');
+  return result;
 }
 
 // ============================================
@@ -193,6 +244,7 @@ export default function ChannelImport() {
   const [preview, setPreview] = useState<PreviewResponse | null>(null);
   const [selectedOrderIds, setSelectedOrderIds] = useState<Set<string>>(new Set());
   const [executeResult, setExecuteResult] = useState<ExecuteResult | null>(null);
+  const [importProgress, setImportProgress] = useState<ProgressEvent | null>(null);
 
   // Import history
   const historyQuery = useQuery<ImportBatch[]>({
@@ -222,16 +274,8 @@ export default function ChannelImport() {
     },
   });
 
-  // Execute mutation
-  const executeMutation = useMutation({
-    mutationFn: executeImport,
-    onSuccess: (data) => {
-      setExecuteResult(data);
-      setPageState('complete');
-      queryClient.invalidateQueries({ queryKey: ['channels'] });
-      queryClient.invalidateQueries({ queryKey: ['orders'] });
-    },
-  });
+  // Execute — uses streaming, not a simple mutation
+  const [executeError, setExecuteError] = useState<string | null>(null);
 
   // ============================================
   // FILE HANDLERS
@@ -267,17 +311,31 @@ export default function ChannelImport() {
     previewMutation.mutate(selectedFile);
   }, [selectedFile, previewMutation]);
 
-  const handleExecute = useCallback(() => {
+  const handleExecute = useCallback(async () => {
     if (!preview) return;
     const selected = preview.orders.filter(o => selectedOrderIds.has(o.channelOrderId));
     if (selected.length === 0) return;
     setPageState('importing');
-    executeMutation.mutate({
-      selectedOrders: selected,
-      rawRows: preview.rawRows,
-      filename: selectedFile?.name || 'import.csv',
-    });
-  }, [preview, selectedOrderIds, selectedFile, executeMutation]);
+    setImportProgress(null);
+    setExecuteError(null);
+    try {
+      const result = await executeImportStreaming(
+        {
+          selectedOrders: selected,
+          cacheKey: preview.cacheKey,
+          filename: selectedFile?.name || 'import.csv',
+        },
+        (progress) => setImportProgress(progress),
+      );
+      setExecuteResult(result);
+      setPageState('complete');
+      queryClient.invalidateQueries({ queryKey: ['channels'] });
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
+    } catch (err) {
+      setExecuteError(err instanceof Error ? err.message : 'Import failed');
+      setPageState('preview'); // Go back to preview so they can retry
+    }
+  }, [preview, selectedOrderIds, selectedFile, queryClient]);
 
   const handleReset = useCallback(() => {
     setPageState('idle');
@@ -285,9 +343,10 @@ export default function ChannelImport() {
     setPreview(null);
     setSelectedOrderIds(new Set());
     setExecuteResult(null);
+    setImportProgress(null);
+    setExecuteError(null);
     previewMutation.reset();
-    executeMutation.reset();
-  }, [previewMutation, executeMutation]);
+  }, [previewMutation]);
 
   // ============================================
   // SELECTION HELPERS
@@ -648,6 +707,42 @@ export default function ChannelImport() {
             </Button>
           </div>
 
+          {/* Progress Bar */}
+          {pageState === 'importing' && importProgress && (
+            <Card className="border-blue-200">
+              <CardContent className="py-4">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-medium">
+                    Importing orders: {importProgress.completed} / {importProgress.total}
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    {importProgress.created} created, {importProgress.updated} updated
+                    {importProgress.errors > 0 && `, ${importProgress.errors} errors`}
+                  </span>
+                </div>
+                <div className="w-full bg-gray-200 rounded-full h-2">
+                  <div
+                    className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                    style={{ width: `${importProgress.total > 0 ? (importProgress.completed / importProgress.total) * 100 : 0}%` }}
+                  />
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Execute Error */}
+          {executeError && (
+            <Card className="border-red-200 bg-red-50">
+              <CardContent className="py-4">
+                <div className="flex items-center gap-2 text-red-700">
+                  <AlertCircle className="w-5 h-5" />
+                  <span className="font-medium">Import failed</span>
+                </div>
+                <p className="text-sm text-red-600 mt-1">{executeError}</p>
+              </CardContent>
+            </Card>
+          )}
+
           {/* AG-Grid Preview Table */}
           <div className="ag-theme-quartz" style={{ height: Math.min(600, 80 + gridRows.length * 28) }}>
             <AgGridReact<GridRow>
@@ -688,16 +783,9 @@ export default function ChannelImport() {
                 <p className="text-xl font-semibold text-blue-700">{executeResult.ordersUpdated}</p>
               </div>
             </div>
-            {(executeResult.sheetPushed != null || executeResult.sheetSkipped != null) && (
-              <div className="mt-4 text-sm text-muted-foreground">
-                Google Sheet: {executeResult.sheetPushed ?? 0} pushed, {executeResult.sheetSkipped ?? 0} already there
-              </div>
-            )}
-            {executeResult.sheetError && (
-              <div className="mt-2 p-3 bg-red-50 border border-red-200 rounded-lg">
-                <p className="text-sm font-medium text-red-700">{executeResult.sheetError}</p>
-              </div>
-            )}
+            <div className="mt-4 text-sm text-muted-foreground">
+              Google Sheet updates are being processed in the background.
+            </div>
             {executeResult.errors.length > 0 && (
               <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
                 <p className="text-sm font-medium text-amber-700">

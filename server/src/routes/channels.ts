@@ -20,12 +20,29 @@ import { authenticateToken } from '../middleware/auth.js';
 import { parse } from 'fast-csv';
 import multer from 'multer';
 import { Readable } from 'stream';
+import { randomUUID } from 'crypto';
 import { pushERPOrderToSheet, updateSheetChannelDetails } from '../services/sheetOrderPush.js';
 import { readRange } from '../services/googleSheetsClient.js';
 import { ORDERS_MASTERSHEET_ID, MASTERSHEET_TABS } from '../config/sync/sheets.js';
 import { recomputeOrderStatus } from '../utils/orderStatus.js';
+import { deferredExecutor } from '../services/deferredExecutor.js';
+import prisma from '../lib/prisma.js';
 
 const router: Router = Router();
+
+// ============================================
+// CSV CACHE (avoids sending full CSV back through client)
+// ============================================
+
+const csvCache = new Map<string, { rows: BtReportRow[]; expiresAt: number }>();
+const CSV_CACHE_TTL_MS = 15 * 60 * 1000; // 15 min
+
+function cleanCSVCache() {
+  const now = Date.now();
+  for (const [key, val] of csvCache) {
+    if (val.expiresAt < now) csvCache.delete(key);
+  }
+}
 
 // ============================================
 // TYPE DEFINITIONS
@@ -243,10 +260,10 @@ async function parseCSVBuffer(buffer: Buffer): Promise<BtReportRow[]> {
  * Extracted from the /import endpoint so both analytics + order import can use it.
  */
 async function upsertChannelOrderLine(
-  prisma: import('@prisma/client').PrismaClient,
+  prismaClient: import('@prisma/client').PrismaClient,
   row: BtReportRow,
   importBatchId: string,
-): Promise<'created' | 'updated'> {
+): Promise<void> {
   const channelOrderId = row['Order Id']!.trim();
   const channelItemId = row['Item ID']!.trim();
   const channel = normalizeChannel(row['Channel Name']);
@@ -291,26 +308,13 @@ async function upsertChannelOrderLine(
     importBatchId,
   };
 
-  const existing = await prisma.channelOrderLine.findUnique({
+  await prismaClient.channelOrderLine.upsert({
     where: {
-      channel_channelOrderId_channelItemId: {
-        channel,
-        channelOrderId,
-        channelItemId,
-      },
+      channel_channelOrderId_channelItemId: { channel, channelOrderId, channelItemId },
     },
+    create: lineData,
+    update: { ...lineData, importedAt: new Date() },
   });
-
-  if (existing) {
-    await prisma.channelOrderLine.update({
-      where: { id: existing.id },
-      data: { ...lineData, importedAt: new Date() },
-    });
-    return 'updated';
-  } else {
-    await prisma.channelOrderLine.create({ data: lineData });
-    return 'created';
-  }
 }
 
 // ============================================
@@ -363,7 +367,7 @@ interface PreviewResponse {
     existingUpdated: number;
     unmatchedSkus: string[];
   };
-  rawRows: BtReportRow[];
+  cacheKey: string;
 }
 
 // ============================================
@@ -427,9 +431,8 @@ router.post('/import', authenticateToken, upload.single('file'), async (req: Req
         if (!maxDate || orderDate > maxDate) maxDate = orderDate;
         channelsFound.add(normalizeChannel(row['Channel Name']));
 
-        const action = await upsertChannelOrderLine(req.prisma, row, importBatch.id);
-        if (action === 'created') results.created++;
-        else results.updated++;
+        await upsertChannelOrderLine(req.prisma, row, importBatch.id);
+        results.created++;
       } catch (rowError) {
         const errorMessage = rowError instanceof Error ? rowError.message : 'Unknown error';
         results.errors.push({ row: rowNum, error: errorMessage });
@@ -686,7 +689,12 @@ router.post('/preview-import', authenticateToken, upload.single('file'), async (
       unmatchedSkus: Array.from(unmatchedSkus).filter(Boolean),
     };
 
-    const response: PreviewResponse = { orders: previewOrders, summary, rawRows: rows };
+    // Store parsed rows in server-side cache (avoids sending full CSV back to client)
+    cleanCSVCache();
+    const cacheKey = randomUUID();
+    csvCache.set(cacheKey, { rows, expiresAt: Date.now() + CSV_CACHE_TTL_MS });
+
+    const response: PreviewResponse = { orders: previewOrders, summary, cacheKey };
     res.json(response);
   } catch (error) {
     console.error('Preview import error:', error);
@@ -700,9 +708,9 @@ router.post('/preview-import', authenticateToken, upload.single('file'), async (
 
 router.post('/execute-import', authenticateToken, async (req: Request, res: Response) => {
   try {
-    const { selectedOrders, rawRows, filename } = req.body as {
+    const { selectedOrders, cacheKey, filename } = req.body as {
       selectedOrders: PreviewOrder[];
-      rawRows: BtReportRow[];
+      cacheKey: string;
       filename: string;
     };
 
@@ -711,6 +719,11 @@ router.post('/execute-import', authenticateToken, async (req: Request, res: Resp
       return;
     }
 
+    // Look up cached CSV rows
+    const cached = cacheKey ? csvCache.get(cacheKey) : null;
+    const rawRows: BtReportRow[] = cached?.rows ?? [];
+    if (cached) csvCache.delete(cacheKey); // One-time use
+
     const userId = (req as unknown as { user?: { userId?: string } }).user?.userId;
 
     // Create import batch
@@ -718,7 +731,7 @@ router.post('/execute-import', authenticateToken, async (req: Request, res: Resp
       data: {
         channel: 'multiple',
         filename: filename || 'channel-import.csv',
-        rowsTotal: rawRows?.length || 0,
+        rowsTotal: rawRows.length,
         rowsImported: 0,
         rowsSkipped: 0,
         rowsUpdated: 0,
@@ -727,297 +740,298 @@ router.post('/execute-import', authenticateToken, async (req: Request, res: Resp
       },
     });
 
+    // Separate orders by type
+    const newOrders = selectedOrders.filter(o => o.importStatus === 'new');
+    const updatedOrders = selectedOrders.filter(o => o.importStatus === 'existing_updated' && o.existingOrderId);
+    const totalOrders = newOrders.length + updatedOrders.length;
+
+    // SSE streaming for progress
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+
+    const sendProgress = (data: Record<string, unknown>) => {
+      res.write(`data: ${JSON.stringify(data)}\n\n`);
+    };
+
     let ordersCreated = 0;
     let ordersUpdated = 0;
     const errors: Array<{ order: string; error: string }> = [];
     const processingOrders: Array<{ id: string; orderNumber: string }> = [];
 
-    for (const previewOrder of selectedOrders) {
+    const CHUNK_SIZE = 20;
+
+    // ---- Process NEW orders in chunked transactions ----
+    for (let i = 0; i < newOrders.length; i += CHUNK_SIZE) {
+      const chunk = newOrders.slice(i, i + CHUNK_SIZE);
       try {
-        if (previewOrder.importStatus === 'new') {
-          // Only import lines with matched SKUs
-          const matchedLines = previewOrder.lines.filter(l => l.skuMatched && l.skuId);
-          if (matchedLines.length === 0) {
-            errors.push({ order: previewOrder.channelRef, error: 'No matched SKUs' });
-            continue;
+        const chunkResult = await req.prisma.$transaction(async (tx) => {
+          const created: Array<{ id: string; orderNumber: string }> = [];
+          const chunkErrors: Array<{ order: string; error: string }> = [];
+
+          for (const previewOrder of chunk) {
+            try {
+              const matchedLines = previewOrder.lines.filter(l => l.skuMatched && l.skuId);
+              if (matchedLines.length === 0) {
+                chunkErrors.push({ order: previewOrder.channelRef, error: 'No matched SKUs' });
+                continue;
+              }
+
+              const isCOD = previewOrder.orderType?.toUpperCase() === 'COD';
+              const totalAmount = matchedLines.reduce((sum, l) => sum + l.unitPrice * l.qty, 0);
+
+              let shippingAddress: string | null = null;
+              if (previewOrder.city || previewOrder.state || previewOrder.zip || previewOrder.address1) {
+                shippingAddress = JSON.stringify({
+                  address1: previewOrder.address1 || '',
+                  address2: previewOrder.address2 || '',
+                  city: previewOrder.city || '',
+                  state: previewOrder.state || '',
+                  zip: previewOrder.zip || '',
+                });
+              }
+
+              const shipByDate = previewOrder.dispatchByDate ? new Date(previewOrder.dispatchByDate) : null;
+
+              const order = await tx.order.create({
+                data: {
+                  orderNumber: previewOrder.channelRef,
+                  channel: previewOrder.channel,
+                  channelOrderId: previewOrder.channelOrderId,
+                  customerName: previewOrder.customerName || 'Channel Customer',
+                  customerPhone: previewOrder.customerPhone || null,
+                  shippingAddress,
+                  orderDate: new Date(previewOrder.orderDate),
+                  totalAmount,
+                  paymentMethod: isCOD ? 'COD' : 'Prepaid',
+                  paymentStatus: isCOD ? 'pending' : 'paid',
+                  status: 'open',
+                  ...(shipByDate && !isNaN(shipByDate.getTime()) ? { shipByDate } : {}),
+                  orderLines: {
+                    create: matchedLines.map(line => {
+                      const status = line.fulfillmentStatus?.toLowerCase() || '';
+                      const isShipped = status === 'shipped' || status === 'delivered' || status === 'manifested';
+                      const isDelivered = status === 'delivered';
+                      const isCancelled = status === 'cancelled';
+                      const lineStatus = isDelivered ? 'delivered' : isShipped ? 'shipped' : isCancelled ? 'cancelled' : 'pending';
+                      return {
+                        skuId: line.skuId!,
+                        qty: Math.max(line.qty, 1),
+                        unitPrice: line.unitPrice,
+                        lineStatus,
+                        channelFulfillmentStatus: line.fulfillmentStatus || null,
+                        channelItemId: line.channelItemId,
+                        courier: line.courierName || null,
+                        awbNumber: line.awbNumber || null,
+                        ...(isShipped ? { shippedAt: line.dispatchDate ? new Date(line.dispatchDate) : new Date() } : {}),
+                        ...(isDelivered ? { deliveredAt: line.deliveryDate ? new Date(line.deliveryDate) : new Date() } : {}),
+                      };
+                    }),
+                  },
+                },
+              });
+
+              // Link ChannelOrderLines to this Order + OrderLines
+              const createdLines = await tx.orderLine.findMany({
+                where: { orderId: order.id },
+                select: { id: true, channelItemId: true },
+              });
+              const lineIdMap = new Map(createdLines.filter(l => l.channelItemId).map(l => [l.channelItemId!, l.id]));
+
+              for (const line of matchedLines) {
+                const orderLineId = lineIdMap.get(line.channelItemId) || null;
+                await tx.channelOrderLine.updateMany({
+                  where: {
+                    channel: previewOrder.channel,
+                    channelOrderId: previewOrder.channelOrderId,
+                    channelItemId: line.channelItemId,
+                  },
+                  data: {
+                    orderId: order.id,
+                    ...(orderLineId ? { orderLineId } : {}),
+                  },
+                });
+              }
+
+              // Recompute order status inside transaction
+              await recomputeOrderStatus(order.id, tx);
+
+              created.push({ id: order.id, orderNumber: previewOrder.channelRef });
+
+              // Track processing orders for sheet push
+              const hasProcessing = matchedLines.some(l => l.fulfillmentStatus?.toLowerCase() === 'processing');
+              if (hasProcessing) {
+                processingOrders.push({ id: order.id, orderNumber: previewOrder.channelRef });
+              }
+            } catch (orderError) {
+              const msg = orderError instanceof Error ? orderError.message : 'Unknown error';
+              chunkErrors.push({ order: previewOrder.channelRef, error: msg });
+            }
           }
 
-          const isCOD = previewOrder.orderType?.toUpperCase() === 'COD';
-          const totalAmount = matchedLines.reduce((sum, l) => sum + l.unitPrice * l.qty, 0);
+          return { created: created.length, errors: chunkErrors };
+        }, { timeout: 30000 });
 
-          // Build shipping address JSON (skip for warehouse orders)
-          let shippingAddress: string | null = null;
-          if (previewOrder.city || previewOrder.state || previewOrder.zip || previewOrder.address1) {
-            shippingAddress = JSON.stringify({
-              address1: previewOrder.address1 || '',
-              address2: previewOrder.address2 || '',
-              city: previewOrder.city || '',
-              state: previewOrder.state || '',
-              zip: previewOrder.zip || '',
-            });
-          }
+        ordersCreated += chunkResult.created;
+        errors.push(...chunkResult.errors);
+      } catch (chunkError) {
+        // Entire chunk rolled back
+        const msg = chunkError instanceof Error ? chunkError.message : 'Unknown error';
+        for (const o of chunk) {
+          errors.push({ order: o.channelRef, error: `Chunk failed: ${msg}` });
+        }
+      }
 
-          // Parse dispatch by date as shipByDate
-          const shipByDate = previewOrder.dispatchByDate ? new Date(previewOrder.dispatchByDate) : null;
+      sendProgress({
+        type: 'progress',
+        completed: ordersCreated + ordersUpdated + errors.length,
+        total: totalOrders,
+        created: ordersCreated,
+        updated: ordersUpdated,
+        errors: errors.length,
+      });
+    }
 
-          const order = await req.prisma.order.create({
-            data: {
-              orderNumber: previewOrder.channelRef,
-              channel: previewOrder.channel,
-              channelOrderId: previewOrder.channelOrderId,
-              customerName: previewOrder.customerName || 'Channel Customer',
-              customerPhone: previewOrder.customerPhone || null,
-              shippingAddress,
-              orderDate: new Date(previewOrder.orderDate),
-              totalAmount,
-              paymentMethod: isCOD ? 'COD' : 'Prepaid',
-              paymentStatus: isCOD ? 'pending' : 'paid',
-              status: 'open',
-              ...(shipByDate && !isNaN(shipByDate.getTime()) ? { shipByDate } : {}),
-              orderLines: {
-                create: matchedLines.map(line => {
+    // ---- Process UPDATED orders in chunked transactions ----
+    for (let i = 0; i < updatedOrders.length; i += CHUNK_SIZE) {
+      const chunk = updatedOrders.slice(i, i + CHUNK_SIZE);
+      try {
+        const chunkResult = await req.prisma.$transaction(async (tx) => {
+          let chunkUpdated = 0;
+          const chunkErrors: Array<{ order: string; error: string }> = [];
+
+          for (const previewOrder of chunk) {
+            try {
+              const shipByDate = previewOrder.dispatchByDate ? new Date(previewOrder.dispatchByDate) : null;
+              if (shipByDate && !isNaN(shipByDate.getTime())) {
+                await tx.order.update({
+                  where: { id: previewOrder.existingOrderId! },
+                  data: { shipByDate },
+                });
+              }
+
+              const existingLines = await tx.orderLine.findMany({
+                where: { orderId: previewOrder.existingOrderId! },
+                select: { id: true, channelItemId: true, lineStatus: true },
+              });
+              const existingLineMap = new Map(existingLines.map(l => [l.channelItemId, { id: l.id, lineStatus: l.lineStatus }]));
+
+              for (const line of previewOrder.lines) {
+                const existing = existingLineMap.get(line.channelItemId);
+
+                if (existing) {
                   const status = line.fulfillmentStatus?.toLowerCase() || '';
                   const isShipped = status === 'shipped' || status === 'delivered' || status === 'manifested';
                   const isDelivered = status === 'delivered';
                   const isCancelled = status === 'cancelled';
-                  const lineStatus = isDelivered ? 'delivered' : isShipped ? 'shipped' : isCancelled ? 'cancelled' : 'pending';
-                  return {
-                    skuId: line.skuId!,
-                    qty: Math.max(line.qty, 1),
-                    unitPrice: line.unitPrice,
-                    lineStatus,
-                    channelFulfillmentStatus: line.fulfillmentStatus || null,
-                    channelItemId: line.channelItemId,
-                    courier: line.courierName || null,
-                    awbNumber: line.awbNumber || null,
-                    ...(isShipped ? { shippedAt: line.dispatchDate ? new Date(line.dispatchDate) : new Date() } : {}),
-                    ...(isDelivered ? { deliveredAt: line.deliveryDate ? new Date(line.deliveryDate) : new Date() } : {}),
-                  };
-                }),
-              },
-            },
-          });
 
-          ordersCreated++;
+                  let newLineStatus: string | undefined;
+                  if (existing.lineStatus === 'pending') {
+                    if (isDelivered) newLineStatus = 'delivered';
+                    else if (isShipped) newLineStatus = 'shipped';
+                    else if (isCancelled) newLineStatus = 'cancelled';
+                  } else if (existing.lineStatus === 'shipped' && isDelivered) {
+                    newLineStatus = 'delivered';
+                  }
 
-          // Link ChannelOrderLines to this Order + OrderLines
-          const createdLines = await req.prisma.orderLine.findMany({
-            where: { orderId: order.id },
-            select: { id: true, channelItemId: true },
-          });
-          const lineIdMap = new Map(createdLines.filter(l => l.channelItemId).map(l => [l.channelItemId!, l.id]));
+                  await tx.orderLine.update({
+                    where: { id: existing.id },
+                    data: {
+                      channelFulfillmentStatus: line.fulfillmentStatus || null,
+                      ...(line.courierName ? { courier: line.courierName } : {}),
+                      ...(line.awbNumber ? { awbNumber: line.awbNumber } : {}),
+                      ...(isShipped && line.dispatchDate ? { shippedAt: new Date(line.dispatchDate) } : {}),
+                      ...(isDelivered && line.deliveryDate ? { deliveredAt: new Date(line.deliveryDate) } : {}),
+                      ...(newLineStatus ? { lineStatus: newLineStatus } : {}),
+                    },
+                  });
 
-          for (const line of matchedLines) {
-            const orderLineId = lineIdMap.get(line.channelItemId) || null;
-            await req.prisma.channelOrderLine.updateMany({
-              where: {
-                channel: previewOrder.channel,
-                channelOrderId: previewOrder.channelOrderId,
-                channelItemId: line.channelItemId,
-              },
-              data: {
-                orderId: order.id,
-                ...(orderLineId ? { orderLineId } : {}),
-              },
-            });
-          }
+                  await tx.channelOrderLine.updateMany({
+                    where: {
+                      channel: previewOrder.channel,
+                      channelOrderId: previewOrder.channelOrderId,
+                      channelItemId: line.channelItemId,
+                    },
+                    data: {
+                      orderId: previewOrder.existingOrderId,
+                      orderLineId: existing.id,
+                    },
+                  });
+                } else if (line.skuId) {
+                  const status = line.fulfillmentStatus?.toLowerCase() || '';
+                  const isShipped = status === 'shipped' || status === 'delivered' || status === 'manifested';
+                  const isDelivered = status === 'delivered';
+                  const isCancelled = status === 'cancelled';
+                  const initialLineStatus = isDelivered ? 'delivered' : isShipped ? 'shipped' : isCancelled ? 'cancelled' : 'pending';
 
-          // Recompute order status from lines (lines may already be shipped/delivered from CSV)
-          await recomputeOrderStatus(order.id);
+                  const newLine = await tx.orderLine.create({
+                    data: {
+                      orderId: previewOrder.existingOrderId!,
+                      skuId: line.skuId,
+                      qty: line.qty,
+                      unitPrice: line.unitPrice,
+                      lineStatus: initialLineStatus,
+                      channelFulfillmentStatus: line.fulfillmentStatus || null,
+                      channelItemId: line.channelItemId,
+                      courier: line.courierName || null,
+                      awbNumber: line.awbNumber || null,
+                      ...(isShipped ? { shippedAt: line.dispatchDate ? new Date(line.dispatchDate) : new Date() } : {}),
+                      ...(isDelivered ? { deliveredAt: line.deliveryDate ? new Date(line.deliveryDate) : new Date() } : {}),
+                    },
+                  });
 
-          // Track processing orders for sheet push
-          const hasProcessing = matchedLines.some(l => l.fulfillmentStatus?.toLowerCase() === 'processing');
-          if (hasProcessing) {
-            processingOrders.push({ id: order.id, orderNumber: previewOrder.channelRef });
-          }
-        } else if (previewOrder.importStatus === 'existing_updated' && previewOrder.existingOrderId) {
-          // Update order-level shipByDate if present
-          const shipByDate = previewOrder.dispatchByDate ? new Date(previewOrder.dispatchByDate) : null;
-          if (shipByDate && !isNaN(shipByDate.getTime())) {
-            await req.prisma.order.update({
-              where: { id: previewOrder.existingOrderId },
-              data: { shipByDate },
-            });
-          }
-
-          // Update existing order's lines
-          const existingLines = await req.prisma.orderLine.findMany({
-            where: { orderId: previewOrder.existingOrderId },
-            select: { id: true, channelItemId: true, lineStatus: true },
-          });
-          const existingLineMap = new Map(existingLines.map(l => [l.channelItemId, { id: l.id, lineStatus: l.lineStatus }]));
-
-          for (const line of previewOrder.lines) {
-            const existing = existingLineMap.get(line.channelItemId);
-
-            if (existing) {
-              // Update existing line
-              const status = line.fulfillmentStatus?.toLowerCase() || '';
-              const isShipped = status === 'shipped' || status === 'delivered' || status === 'manifested';
-              const isDelivered = status === 'delivered';
-              const isCancelled = status === 'cancelled';
-
-              // Update lineStatus based on CSV — respect ERP workflow for forward progression
-              let newLineStatus: string | undefined;
-              if (existing.lineStatus === 'pending') {
-                if (isDelivered) newLineStatus = 'delivered';
-                else if (isShipped) newLineStatus = 'shipped';
-                else if (isCancelled) newLineStatus = 'cancelled';
-              } else if (existing.lineStatus === 'shipped' && isDelivered) {
-                newLineStatus = 'delivered';
+                  await tx.channelOrderLine.updateMany({
+                    where: {
+                      channel: previewOrder.channel,
+                      channelOrderId: previewOrder.channelOrderId,
+                      channelItemId: line.channelItemId,
+                    },
+                    data: {
+                      orderId: previewOrder.existingOrderId,
+                      orderLineId: newLine.id,
+                    },
+                  });
+                }
               }
 
-              await req.prisma.orderLine.update({
-                where: { id: existing.id },
-                data: {
-                  channelFulfillmentStatus: line.fulfillmentStatus || null,
-                  ...(line.courierName ? { courier: line.courierName } : {}),
-                  ...(line.awbNumber ? { awbNumber: line.awbNumber } : {}),
-                  ...(isShipped && line.dispatchDate ? { shippedAt: new Date(line.dispatchDate) } : {}),
-                  ...(isDelivered && line.deliveryDate ? { deliveredAt: new Date(line.deliveryDate) } : {}),
-                  ...(newLineStatus ? { lineStatus: newLineStatus } : {}),
-                },
-              });
-
-              // Link ChannelOrderLine to this OrderLine
-              await req.prisma.channelOrderLine.updateMany({
-                where: {
-                  channel: previewOrder.channel,
-                  channelOrderId: previewOrder.channelOrderId,
-                  channelItemId: line.channelItemId,
-                },
-                data: {
-                  orderId: previewOrder.existingOrderId,
-                  orderLineId: existing.id,
-                },
-              });
-            } else if (line.skuId) {
-              // New line on marketplace — create it
-              const status = line.fulfillmentStatus?.toLowerCase() || '';
-              const isShipped = status === 'shipped' || status === 'delivered' || status === 'manifested';
-              const isDelivered = status === 'delivered';
-              const isCancelled = status === 'cancelled';
-              const initialLineStatus = isDelivered ? 'delivered' : isShipped ? 'shipped' : isCancelled ? 'cancelled' : 'pending';
-              const newLine = await req.prisma.orderLine.create({
-                data: {
-                  orderId: previewOrder.existingOrderId,
-                  skuId: line.skuId,
-                  qty: line.qty,
-                  unitPrice: line.unitPrice,
-                  lineStatus: initialLineStatus,
-                  channelFulfillmentStatus: line.fulfillmentStatus || null,
-                  channelItemId: line.channelItemId,
-                  courier: line.courierName || null,
-                  awbNumber: line.awbNumber || null,
-                  ...(isShipped ? { shippedAt: line.dispatchDate ? new Date(line.dispatchDate) : new Date() } : {}),
-                  ...(isDelivered ? { deliveredAt: line.deliveryDate ? new Date(line.deliveryDate) : new Date() } : {}),
-                },
-              });
-
-              // Link ChannelOrderLine to new OrderLine
-              await req.prisma.channelOrderLine.updateMany({
-                where: {
-                  channel: previewOrder.channel,
-                  channelOrderId: previewOrder.channelOrderId,
-                  channelItemId: line.channelItemId,
-                },
-                data: {
-                  orderId: previewOrder.existingOrderId,
-                  orderLineId: newLine.id,
-                },
-              });
+              await recomputeOrderStatus(previewOrder.existingOrderId!, tx);
+              chunkUpdated++;
+            } catch (orderError) {
+              const msg = orderError instanceof Error ? orderError.message : 'Unknown error';
+              chunkErrors.push({ order: previewOrder.channelRef, error: msg });
             }
           }
-          // Recompute order status from lines after updates
-          await recomputeOrderStatus(previewOrder.existingOrderId);
 
-          ordersUpdated++;
-        }
-      } catch (orderError) {
-        const msg = orderError instanceof Error ? orderError.message : 'Unknown error';
-        errors.push({ order: previewOrder.channelRef, error: msg });
-      }
-    }
+          return { updated: chunkUpdated, errors: chunkErrors };
+        }, { timeout: 30000 });
 
-    // Upsert all rawRows into ChannelOrderLine analytics (fire-and-forget for speed)
-    if (rawRows && rawRows.length > 0) {
-      const analyticsResults = { created: 0, updated: 0, skipped: 0 };
-      for (const row of rawRows) {
-        try {
-          const oid = row['Order Id']?.trim();
-          const iid = row['Item ID']?.trim();
-          if (!oid || !iid || !parseDate(row['Order Date(IST)'], row['Order Time(IST)'])) {
-            analyticsResults.skipped++;
-            continue;
-          }
-          const action = await upsertChannelOrderLine(req.prisma, row, importBatch.id);
-          if (action === 'created') analyticsResults.created++;
-          else analyticsResults.updated++;
-        } catch {
-          analyticsResults.skipped++;
+        ordersUpdated += chunkResult.updated;
+        errors.push(...chunkResult.errors);
+      } catch (chunkError) {
+        const msg = chunkError instanceof Error ? chunkError.message : 'Unknown error';
+        for (const o of chunk) {
+          errors.push({ order: o.channelRef, error: `Chunk failed: ${msg}` });
         }
       }
 
-      await req.prisma.channelImportBatch.update({
-        where: { id: importBatch.id },
-        data: {
-          rowsImported: analyticsResults.created,
-          rowsUpdated: analyticsResults.updated,
-          rowsSkipped: analyticsResults.skipped,
-          ordersCreated,
-          ordersUpdated,
-        },
+      sendProgress({
+        type: 'progress',
+        completed: ordersCreated + ordersUpdated + errors.length,
+        total: totalOrders,
+        created: ordersCreated,
+        updated: ordersUpdated,
+        errors: errors.length,
       });
     }
 
-    // Push processing orders to Google Sheet (skip those already in sheet)
-    let sheetPushed = 0;
-    let sheetSkipped = 0;
-    let sheetError: string | null = null;
+    // Update batch record with order counts
+    await req.prisma.channelImportBatch.update({
+      where: { id: importBatch.id },
+      data: { ordersCreated, ordersUpdated },
+    });
 
-    if (processingOrders.length > 0) {
-      try {
-        // Read existing order numbers from Google Sheet column B
-        const sheetRange = `'${MASTERSHEET_TABS.ORDERS_FROM_COH}'!B:B`;
-        const sheetRows = await readRange(ORDERS_MASTERSHEET_ID, sheetRange);
-        const sheetOrderNums = new Set<string>();
-        for (const row of sheetRows) {
-          const val = String(row[0] ?? '').trim();
-          if (val) sheetOrderNums.add(val);
-        }
-
-        // Filter out orders already in sheet (with format matching)
-        const toPush = processingOrders.filter(o => {
-          const ref = o.orderNumber;
-          // Exact match
-          if (sheetOrderNums.has(ref)) return false;
-          // Myntra: sheet may have first 8 chars of UUID
-          if (ref.includes('-') && ref.length > 20) {
-            const short = ref.split('-')[0];
-            if (sheetOrderNums.has(short)) return false;
-          }
-          // Nykaa: sheet may have ref without "--1" suffix
-          if (ref.endsWith('--1')) {
-            const trimmed = ref.slice(0, -3);
-            if (sheetOrderNums.has(trimmed)) return false;
-          }
-          return true;
-        });
-
-        sheetPushed = toPush.length;
-        sheetSkipped = processingOrders.length - toPush.length;
-
-        for (const order of toPush) {
-          pushERPOrderToSheet(order.id).catch(() => {});
-        }
-      } catch {
-        // If sheet read fails, skip pushing — don't risk duplicates
-        sheetError = 'Could not read Google Sheet — sheet push was skipped';
-      }
-    }
-
-    // Update channel details (status, courier, AWB) in sheet for all imported orders
-    let sheetDetailsUpdated = 0;
+    // Build channel detail updates for sheet (used by deferred task)
     const channelDetailUpdates = selectedOrders.flatMap(order =>
       order.lines
         .filter(l => l.skuMatched && (l.fulfillmentStatus || l.courierName || l.awbNumber))
@@ -1030,26 +1044,91 @@ router.post('/execute-import', authenticateToken, async (req: Request, res: Resp
         }))
     );
 
-    if (channelDetailUpdates.length > 0) {
-      try {
-        const detailResult = await updateSheetChannelDetails(channelDetailUpdates);
-        sheetDetailsUpdated = detailResult.updated;
-      } catch (err) {
-        console.error('Failed to update sheet channel details:', err);
-      }
+    // ---- Deferred: Sheet pushes (sequential, rate-limited) ----
+    if (processingOrders.length > 0) {
+      const ordersToPush = [...processingOrders];
+      deferredExecutor.enqueue(async () => {
+        try {
+          const sheetRange = `'${MASTERSHEET_TABS.ORDERS_FROM_COH}'!B:B`;
+          const sheetRows = await readRange(ORDERS_MASTERSHEET_ID, sheetRange);
+          const sheetOrderNums = new Set<string>();
+          for (const row of sheetRows) {
+            const val = String(row[0] ?? '').trim();
+            if (val) sheetOrderNums.add(val);
+          }
+
+          const toPush = ordersToPush.filter(o => {
+            const ref = o.orderNumber;
+            if (sheetOrderNums.has(ref)) return false;
+            if (ref.includes('-') && ref.length > 20) {
+              const short = ref.split('-')[0];
+              if (sheetOrderNums.has(short)) return false;
+            }
+            if (ref.endsWith('--1')) {
+              const trimmed = ref.slice(0, -3);
+              if (sheetOrderNums.has(trimmed)) return false;
+            }
+            return true;
+          });
+
+          for (const order of toPush) {
+            await pushERPOrderToSheet(order.id); // sequential, rate-limited
+          }
+        } catch (err) {
+          console.error('Deferred sheet push failed:', err);
+        }
+      }, { action: 'channel_sheet_push' });
     }
 
-    res.json({
-      message: 'Import completed',
+    // ---- Deferred: Sheet detail updates (runs after pushes — FIFO) ----
+    if (channelDetailUpdates.length > 0) {
+      const updates = [...channelDetailUpdates];
+      deferredExecutor.enqueue(async () => {
+        try {
+          await updateSheetChannelDetails(updates);
+        } catch (err) {
+          console.error('Deferred sheet detail update failed:', err);
+        }
+      }, { action: 'channel_sheet_details' });
+    }
+
+    // ---- Deferred: Analytics upserts (lowest priority) ----
+    if (rawRows.length > 0) {
+      const batchId = importBatch.id;
+      const rowsCopy = [...rawRows];
+      deferredExecutor.enqueue(async () => {
+        let upserted = 0;
+        let skipped = 0;
+        for (const row of rowsCopy) {
+          try {
+            const oid = row['Order Id']?.trim();
+            const iid = row['Item ID']?.trim();
+            if (!oid || !iid || !parseDate(row['Order Date(IST)'], row['Order Time(IST)'])) {
+              skipped++;
+              continue;
+            }
+            await upsertChannelOrderLine(prisma, row, batchId);
+            upserted++;
+          } catch {
+            skipped++;
+          }
+        }
+        await prisma.channelImportBatch.update({
+          where: { id: batchId },
+          data: { rowsImported: upserted, rowsSkipped: skipped },
+        });
+      }, { action: 'channel_analytics' });
+    }
+
+    // Send final complete event
+    sendProgress({
+      type: 'complete',
       batchId: importBatch.id,
       ordersCreated,
       ordersUpdated,
-      sheetPushed,
-      sheetSkipped,
-      sheetDetailsUpdated,
-      ...(sheetError ? { sheetError } : {}),
       errors: errors.slice(0, 20),
     });
+    res.end();
   } catch (error) {
     console.error('Execute import error:', error);
     res.status(500).json({ error: 'Failed to execute import' });
