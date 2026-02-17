@@ -344,4 +344,162 @@ router.post('/assign-party', requireAdmin, asyncHandler(async (req: Request, res
   res.json({ success: true, transaction: updated });
 }));
 
+// ============================================
+// PATCH /update — Edit bank transaction fields (party, accounts, category)
+// ============================================
+
+router.patch('/update', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
+  const { txnId, partyId, debitAccountCode, creditAccountCode, category } = req.body;
+  if (!txnId) {
+    res.status(400).json({ error: 'txnId is required' });
+    return;
+  }
+
+  const txn = await req.prisma.bankTransaction.findUnique({
+    where: { id: txnId },
+    select: { id: true, bank: true, direction: true, status: true },
+  });
+
+  if (!txn) {
+    res.status(404).json({ error: 'Bank transaction not found' });
+    return;
+  }
+
+  const data: Record<string, unknown> = {};
+
+  // If partyId is provided, resolve accounting from party's TransactionType
+  if (partyId !== undefined) {
+    if (partyId === null) {
+      // Clear party
+      data.partyId = null;
+      data.counterpartyName = null;
+    } else {
+      const party = await req.prisma.party.findUnique({
+        where: { id: partyId },
+        select: {
+          id: true, name: true, category: true,
+          transactionType: {
+            select: {
+              debitAccountCode: true, creditAccountCode: true, expenseCategory: true,
+            },
+          },
+        },
+      });
+
+      if (!party) {
+        res.status(404).json({ error: 'Party not found' });
+        return;
+      }
+
+      data.partyId = party.id;
+      data.counterpartyName = party.name;
+
+      // Auto-fill accounts from party's TransactionType if not explicitly provided
+      if (debitAccountCode === undefined && creditAccountCode === undefined && party.transactionType) {
+        const isDebit = txn.direction === 'debit';
+        const bankAccountMap: Record<string, string> = {
+          hdfc: 'BANK_HDFC', razorpayx: 'BANK_RAZORPAYX',
+          hdfc_cc: 'CREDIT_CARD', icici_cc: 'CREDIT_CARD',
+        };
+        const bankAccount = bankAccountMap[txn.bank] || 'BANK_HDFC';
+
+        data.debitAccountCode = isDebit ? (party.transactionType.debitAccountCode || 'UNMATCHED_PAYMENTS') : bankAccount;
+        data.creditAccountCode = isDebit ? bankAccount : (party.transactionType.creditAccountCode || 'UNMATCHED_PAYMENTS');
+        data.category = party.transactionType.expenseCategory || party.category || null;
+      }
+    }
+  }
+
+  // Explicit account overrides
+  if (debitAccountCode !== undefined) data.debitAccountCode = debitAccountCode;
+  if (creditAccountCode !== undefined) data.creditAccountCode = creditAccountCode;
+  if (category !== undefined) data.category = category;
+
+  const updated = await req.prisma.bankTransaction.update({
+    where: { id: txnId },
+    data: data as any,
+    select: {
+      id: true, bank: true, txnDate: true, amount: true, direction: true,
+      narration: true, reference: true, counterpartyName: true,
+      debitAccountCode: true, creditAccountCode: true, category: true,
+      status: true, partyId: true,
+      party: { select: { id: true, name: true } },
+    },
+  });
+
+  log.info({ txnId, updates: Object.keys(data) }, 'Bank transaction updated');
+  res.json({ success: true, transaction: updated });
+}));
+
+// ============================================
+// POST /skip — Mark transaction as skipped
+// ============================================
+
+router.post('/skip', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
+  const { txnId, reason } = req.body;
+  if (!txnId) {
+    res.status(400).json({ error: 'txnId is required' });
+    return;
+  }
+
+  const updated = await req.prisma.bankTransaction.update({
+    where: { id: txnId },
+    data: { status: 'skipped', skipReason: reason || 'Manually skipped' },
+    select: { id: true, status: true },
+  });
+
+  log.info({ txnId, reason }, 'Bank transaction skipped');
+  res.json({ success: true, transaction: updated });
+}));
+
+// ============================================
+// POST /unskip — Restore skipped transaction
+// ============================================
+
+router.post('/unskip', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
+  const { txnId } = req.body;
+  if (!txnId) {
+    res.status(400).json({ error: 'txnId is required' });
+    return;
+  }
+
+  const updated = await req.prisma.bankTransaction.update({
+    where: { id: txnId },
+    data: { status: 'imported', skipReason: null },
+    select: { id: true, status: true },
+  });
+
+  log.info({ txnId }, 'Bank transaction unskipped');
+  res.json({ success: true, transaction: updated });
+}));
+
+// ============================================
+// DELETE /:id — Delete a bank transaction
+// ============================================
+
+router.delete('/:id', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+
+  const txn = await req.prisma.bankTransaction.findUnique({
+    where: { id: id as string },
+    select: { id: true, status: true, paymentId: true, ledgerEntryId: true },
+  });
+
+  if (!txn) {
+    res.status(404).json({ error: 'Bank transaction not found' });
+    return;
+  }
+
+  // Don't delete posted transactions with linked records
+  if (txn.paymentId || txn.ledgerEntryId) {
+    res.status(400).json({ error: 'Cannot delete a transaction with linked payment or ledger entry' });
+    return;
+  }
+
+  await req.prisma.bankTransaction.delete({ where: { id: id as string } });
+
+  log.info({ txnId: id }, 'Bank transaction deleted');
+  res.json({ success: true });
+}));
+
 export default router;

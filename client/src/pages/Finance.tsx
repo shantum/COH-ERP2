@@ -1085,23 +1085,59 @@ function BankTransactionList({ search, updateSearch }: {
   updateSearch: (updates: Partial<FinanceSearchParams>) => void;
 }) {
   const listFn = useServerFn(listBankTransactions);
+  const queryClient = useQueryClient();
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const bank = search.bankFilter && search.bankFilter !== 'all' ? search.bankFilter : undefined;
+  // Default to showing non-posted (imported + categorized) unless user explicitly picks a status
   const status = search.bankStatus && search.bankStatus !== 'all' ? search.bankStatus : undefined;
+  const defaultStatus = !search.bankStatus ? 'imported' : undefined;
+  const effectiveStatus = status ?? defaultStatus;
 
   const { data, isLoading } = useQuery({
-    queryKey: ['finance', 'bank-transactions', bank, status, search.search, search.page],
+    queryKey: ['finance', 'bank-transactions', bank, effectiveStatus, search.search, search.page],
     queryFn: () =>
       listFn({
         data: {
           ...(bank ? { bank } : {}),
-          ...(status ? { status } : {}),
+          ...(effectiveStatus ? { status: effectiveStatus } : {}),
           ...(search.search ? { search: search.search } : {}),
           page: search.page,
           limit: search.limit,
         },
       }),
   });
+
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['finance', 'bank-transactions'] });
+
+  const handleSkip = async (txnId: string) => {
+    await fetch('/api/bank-import/skip', {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ txnId }),
+    });
+    invalidate();
+    setExpandedId(null);
+  };
+
+  const handleUnskip = async (txnId: string) => {
+    await fetch('/api/bank-import/unskip', {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ txnId }),
+    });
+    invalidate();
+    setExpandedId(null);
+  };
+
+  const handleDelete = async (txnId: string) => {
+    if (!confirm('Delete this transaction?')) return;
+    await fetch(`/api/bank-import/${txnId}`, {
+      method: 'DELETE', credentials: 'include',
+    });
+    invalidate();
+    setExpandedId(null);
+  };
 
   return (
     <div className="space-y-4">
@@ -1117,7 +1153,7 @@ function BankTransactionList({ search, updateSearch }: {
           </SelectContent>
         </Select>
 
-        <Select value={search.bankStatus ?? 'all'} onValueChange={(v) => updateSearch({ bankStatus: v as any, page: 1 })}>
+        <Select value={search.bankStatus ?? 'imported'} onValueChange={(v) => updateSearch({ bankStatus: v as any, page: 1 })}>
           <SelectTrigger className="w-[160px]"><SelectValue placeholder="Status" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Statuses</SelectItem>
@@ -1153,37 +1189,68 @@ function BankTransactionList({ search, updateSearch }: {
                   <th className="text-left p-3 font-medium">Date</th>
                   <th className="text-left p-3 font-medium">Narration</th>
                   <th className="text-right p-3 font-medium">Amount</th>
-                  <th className="text-left p-3 font-medium">In/Out</th>
+                  <th className="text-left p-3 font-medium">Party</th>
                   <th className="text-left p-3 font-medium">Bank</th>
-                  <th className="text-left p-3 font-medium">Dr Account</th>
-                  <th className="text-left p-3 font-medium">Cr Account</th>
                   <th className="text-left p-3 font-medium">Status</th>
+                  <th className="text-left p-3 font-medium w-24">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {data?.transactions?.map((txn) => (
-                  <tr key={txn.id} className="border-t hover:bg-muted/30">
-                    <td className="p-3 text-xs text-muted-foreground whitespace-nowrap">
-                      {new Date(txn.txnDate).toLocaleDateString('en-IN')}
-                    </td>
-                    <td className="p-3 text-xs max-w-[300px] truncate" title={txn.narration ?? ''}>
-                      {txn.counterpartyName ?? txn.narration ?? '—'}
-                    </td>
-                    <td className="p-3 text-right font-mono text-xs">{formatCurrency(txn.amount)}</td>
-                    <td className="p-3">
-                      <span className={`inline-flex items-center gap-1 text-xs ${txn.direction === 'credit' ? 'text-green-600' : 'text-red-600'}`}>
-                        {txn.direction === 'credit' ? <ArrowDownLeft className="h-3 w-3" /> : <ArrowUpRight className="h-3 w-3" />}
-                        {txn.direction === 'credit' ? 'In' : 'Out'}
-                      </span>
-                    </td>
-                    <td className="p-3 text-xs">{getBankLabel(txn.bank)}</td>
-                    <td className="p-3 text-xs text-muted-foreground">{txn.debitAccountCode ?? '—'}</td>
-                    <td className="p-3 text-xs text-muted-foreground">{txn.creditAccountCode ?? '—'}</td>
-                    <td className="p-3"><BankStatusBadge status={txn.status} /></td>
-                  </tr>
-                ))}
+                {data?.transactions?.map((txn) => {
+                  const isExpanded = expandedId === txn.id;
+                  return (
+                    <Fragment key={txn.id}>
+                      <tr
+                        className={`border-t hover:bg-muted/30 cursor-pointer ${isExpanded ? 'bg-muted/20' : ''} ${txn.status === 'skipped' ? 'opacity-50' : ''}`}
+                        onClick={() => setExpandedId(isExpanded ? null : txn.id)}
+                      >
+                        <td className="p-3 text-xs text-muted-foreground whitespace-nowrap">
+                          {new Date(txn.txnDate).toLocaleDateString('en-IN')}
+                        </td>
+                        <td className="p-3 text-xs max-w-[250px] truncate" title={txn.narration ?? ''}>
+                          {txn.narration ?? '—'}
+                        </td>
+                        <td className={`p-3 text-right font-mono text-xs ${txn.direction === 'credit' ? 'text-green-600' : ''}`}>
+                          {txn.direction === 'credit' ? '+' : ''}{formatCurrency(txn.amount)}
+                        </td>
+                        <td className="p-3 text-xs">
+                          {txn.party?.name ?? txn.counterpartyName ?? <span className="text-amber-600">—</span>}
+                        </td>
+                        <td className="p-3 text-xs">{getBankLabel(txn.bank)}</td>
+                        <td className="p-3"><BankStatusBadge status={txn.status} /></td>
+                        <td className="p-3" onClick={(e) => e.stopPropagation()}>
+                          <div className="flex items-center gap-1">
+                            {txn.status === 'skipped' ? (
+                              <button type="button" className="text-xs text-blue-600 hover:text-blue-800" onClick={() => handleUnskip(txn.id)} title="Restore">
+                                <History className="h-3.5 w-3.5" />
+                              </button>
+                            ) : (
+                              <button type="button" className="text-xs text-amber-600 hover:text-amber-800" onClick={() => handleSkip(txn.id)} title="Skip">
+                                <X className="h-3.5 w-3.5" />
+                              </button>
+                            )}
+                            <button type="button" className="text-xs text-red-500 hover:text-red-700" onClick={() => handleDelete(txn.id)} title="Delete">
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                      {isExpanded && (
+                        <tr className="border-t bg-muted/10">
+                          <td colSpan={7} className="p-3">
+                            <BankTxnEditRow
+                              txn={txn}
+                              onSaved={() => { invalidate(); setExpandedId(null); }}
+                              onClose={() => setExpandedId(null)}
+                            />
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })}
                 {(!data?.transactions || data.transactions.length === 0) && (
-                  <tr><td colSpan={8} className="p-8 text-center text-muted-foreground">No transactions found</td></tr>
+                  <tr><td colSpan={7} className="p-8 text-center text-muted-foreground">No transactions found</td></tr>
                 )}
               </tbody>
             </table>
@@ -1192,6 +1259,152 @@ function BankTransactionList({ search, updateSearch }: {
           <Pagination page={search.page} total={data?.total ?? 0} limit={search.limit} onPageChange={(p) => updateSearch({ page: p })} />
         </>
       )}
+    </div>
+  );
+}
+
+// ---- Inline Edit Row for Bank Transaction ----
+
+function BankTxnEditRow({ txn, onSaved, onClose }: {
+  txn: { id: string; partyId?: string | null; party?: { id: string; name: string } | null; debitAccountCode: string | null; creditAccountCode: string | null; category: string | null; narration: string | null; reference?: string | null; counterpartyName?: string | null; direction: string; bank: string };
+  onSaved: () => void;
+  onClose: () => void;
+}) {
+  const [debitAccount, setDebitAccount] = useState(txn.debitAccountCode ?? '');
+  const [creditAccount, setCreditAccount] = useState(txn.creditAccountCode ?? '');
+  const [category, setCategory] = useState(txn.category ?? '');
+  const [saving, setSaving] = useState(false);
+  const searchFn = useServerFn(searchCounterparties);
+  const [partyQuery, setPartyQuery] = useState('');
+  const [partyOpen, setPartyOpen] = useState(false);
+  const [selectedParty, setSelectedParty] = useState<{ id: string; name: string } | null>(txn.party ?? null);
+
+  const { data: partyResults } = useQuery({
+    queryKey: ['finance', 'party-search', partyQuery],
+    queryFn: () => searchFn({ data: { query: partyQuery, type: 'party' } }),
+    enabled: partyQuery.length >= 2,
+  });
+
+  const parties = partyResults?.success ? partyResults.results : [];
+
+  const handlePartySelect = (party: { id: string; name: string }) => {
+    setSelectedParty(party);
+    setPartyOpen(false);
+    setPartyQuery('');
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const body: Record<string, unknown> = { txnId: txn.id };
+
+      // Party change
+      if (selectedParty?.id !== (txn.party?.id ?? txn.partyId)) {
+        body.partyId = selectedParty?.id ?? null;
+      }
+
+      // Account overrides (only if changed)
+      if (debitAccount !== (txn.debitAccountCode ?? '')) body.debitAccountCode = debitAccount || null;
+      if (creditAccount !== (txn.creditAccountCode ?? '')) body.creditAccountCode = creditAccount || null;
+      if (category !== (txn.category ?? '')) body.category = category || null;
+
+      if (Object.keys(body).length <= 1) { onClose(); return; } // Nothing changed
+
+      const res = await fetch('/api/bank-import/update', {
+        method: 'PATCH', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (res.ok) onSaved();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-2 gap-3 text-xs">
+        {/* Full narration */}
+        <div className="col-span-2">
+          <span className="text-muted-foreground">Narration:</span>
+          <p className="mt-0.5">{txn.narration ?? '—'}</p>
+          {txn.reference && <p className="text-muted-foreground mt-0.5">Ref: {txn.reference}</p>}
+        </div>
+
+        {/* Party */}
+        <div>
+          <Label className="text-xs">Party</Label>
+          <div className="relative mt-1">
+            {selectedParty ? (
+              <div className="flex items-center gap-2">
+                <span className="text-sm">{selectedParty.name}</span>
+                <button type="button" className="text-xs text-red-500 hover:text-red-700" onClick={() => setSelectedParty(null)}>
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            ) : (
+              <>
+                <Input
+                  value={partyQuery}
+                  onChange={(e) => { setPartyQuery(e.target.value); setPartyOpen(true); }}
+                  placeholder="Search party..."
+                  className="h-8 text-xs"
+                  onFocus={() => setPartyOpen(true)}
+                />
+                {partyOpen && partyQuery.length >= 2 && parties.length > 0 && (
+                  <div className="absolute z-20 top-9 left-0 w-full bg-white border rounded-md shadow-lg max-h-[150px] overflow-y-auto">
+                    {parties.map((p) => (
+                      <button key={p.id} type="button" className="block w-full text-left px-3 py-1.5 text-xs hover:bg-muted/50" onClick={() => handlePartySelect(p)}>
+                        {p.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Category */}
+        <div>
+          <Label className="text-xs">Category</Label>
+          <Input value={category} onChange={(e) => setCategory(e.target.value)} className="h-8 text-xs mt-1" placeholder="e.g. vendor, service" />
+        </div>
+
+        {/* Debit Account */}
+        <div>
+          <Label className="text-xs">Debit Account</Label>
+          <Select value={debitAccount} onValueChange={setDebitAccount}>
+            <SelectTrigger className="h-8 text-xs mt-1"><SelectValue placeholder="Select..." /></SelectTrigger>
+            <SelectContent>
+              {CHART_OF_ACCOUNTS.map((a) => (
+                <SelectItem key={a.code} value={a.code} className="text-xs">{a.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* Credit Account */}
+        <div>
+          <Label className="text-xs">Credit Account</Label>
+          <Select value={creditAccount} onValueChange={setCreditAccount}>
+            <SelectTrigger className="h-8 text-xs mt-1"><SelectValue placeholder="Select..." /></SelectTrigger>
+            <SelectContent>
+              {CHART_OF_ACCOUNTS.map((a) => (
+                <SelectItem key={a.code} value={a.code} className="text-xs">{a.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      <div className="flex gap-2">
+        <Button size="sm" onClick={handleSave} disabled={saving}>
+          {saving ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Check className="h-3 w-3 mr-1" />}
+          Save
+        </Button>
+        <Button size="sm" variant="outline" onClick={onClose}>Cancel</Button>
+      </div>
     </div>
   );
 }
@@ -1211,39 +1424,7 @@ function BankStatusBadge({ status }: { status: string }) {
   );
 }
 
-// ---- Import View (3-step flow) ----
-
-type ImportStep = 'upload' | 'preview' | 'review' | 'post';
-
-interface ImportResultState {
-  bank: string;
-  newRows: number;
-  skippedRows: number;
-  totalRows: number;
-  balanceMatched?: boolean;
-  partiesMatched?: number;
-  partiesUnmatched?: number;
-  batchId: string;
-}
-
-interface PostResultState {
-  posted: number;
-  errors: number;
-}
-
-type ReviewTxn = {
-  id: string;
-  txnDate: string | Date;
-  narration: string | null;
-  amount: number;
-  direction: string;
-  party?: { id: string; name: string } | null;
-  partyId?: string | null;
-  category: string | null;
-  debitAccountCode: string | null;
-  creditAccountCode: string | null;
-  status: string;
-};
+// ---- Import View (2-step: upload → preview → import → done) ----
 
 type PreviewRow = {
   txnDate: string;
@@ -1272,40 +1453,15 @@ interface BankPreviewState {
 }
 
 function BankImportView({ onBack }: { onBack: () => void }) {
-  const [step, setStep] = useState<ImportStep>('upload');
+  const [step, setStep] = useState<'upload' | 'preview' | 'done'>('upload');
   const [selectedBank, setSelectedBank] = useState<string>('hdfc');
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [bankPreview, setBankPreview] = useState<BankPreviewState | null>(null);
   const [importing, setImporting] = useState(false);
-  const [importResult, setImportResult] = useState<ImportResultState | null>(null);
-  const [reviewTxns, setReviewTxns] = useState<ReviewTxn[]>([]);
-  const [loadingTxns, setLoadingTxns] = useState(false);
-  const [posting, setPosting] = useState(false);
-  const [postResult, setPostResult] = useState<PostResultState | null>(null);
+  const [importResult, setImportResult] = useState<{ newRows: number; skippedRows: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [dryRun, setDryRun] = useState<{ count: number; byAccount: Record<string, { count: number; total: number }> } | null>(null);
   const queryClient = useQueryClient();
-  const listTxnsFn = useServerFn(listBankTransactions);
-
-  const fetchReviewData = async (batchId: string) => {
-    setLoadingTxns(true);
-    try {
-      const txnRes = await listTxnsFn({
-        data: { batchId, limit: 200 },
-      });
-      if (txnRes.success) setReviewTxns(txnRes.transactions);
-    } finally {
-      setLoadingTxns(false);
-    }
-
-    // Fetch dry-run summary
-    const dryRes = await fetch(`/api/bank-import/dry-run?bank=${selectedBank}`, {
-      credentials: 'include',
-    });
-    const dryJson = await dryRes.json();
-    if (dryJson.success) setDryRun(dryJson.summary);
-  };
 
   // Step 1: Upload CSV → preview (no DB write)
   const handlePreview = async () => {
@@ -1334,7 +1490,7 @@ function BankImportView({ onBack }: { onBack: () => void }) {
     }
   };
 
-  // Step 2: Confirm → actually import to DB
+  // Step 2: Confirm → import to DB
   const handleImport = async () => {
     if (!file) return;
     setImporting(true);
@@ -1352,17 +1508,9 @@ function BankImportView({ onBack }: { onBack: () => void }) {
       const json = await res.json();
       if (!res.ok || !json.success) throw new Error(json.error || 'Import failed');
 
-      const result: ImportResultState = {
-        ...json.result,
-        partiesMatched: json.result.partiesMatched,
-        partiesUnmatched: json.result.partiesUnmatched,
-        batchId: json.result.batchId,
-      };
-      setImportResult(result);
-
-      // Fetch transactions for review and go to review step
-      await fetchReviewData(result.batchId);
-      setStep('review');
+      setImportResult({ newRows: json.result.newRows, skippedRows: json.result.skippedRows });
+      setStep('done');
+      queryClient.invalidateQueries({ queryKey: ['finance', 'bank-transactions'] });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Import failed');
     } finally {
@@ -1370,45 +1518,13 @@ function BankImportView({ onBack }: { onBack: () => void }) {
     }
   };
 
-  const handlePost = async () => {
-    setPosting(true);
-    setError(null);
-    try {
-      const res = await fetch('/api/bank-import/post', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ bank: selectedBank }),
-      });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.error || 'Post failed');
-
-      setPostResult(json.result);
-      queryClient.invalidateQueries({ queryKey: ['finance'] });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Post failed');
-    } finally {
-      setPosting(false);
-    }
-  };
-
-  const handlePartyAssigned = () => {
-    if (importResult?.batchId) {
-      fetchReviewData(importResult.batchId);
-    }
-  };
-
-  const matchedCount = reviewTxns.filter(t => t.partyId || (t.party && t.party.id)).length;
-  const unmatchedCount = reviewTxns.filter(t => !t.partyId && (!t.party || !t.party.id)).length;
-
-  const previewNewRows = bankPreview?.rows.filter(r => !r.isDuplicate) ?? [];
-  const previewNewCount = previewNewRows.length;
+  const previewNewCount = bankPreview?.rows.filter(r => !r.isDuplicate).length ?? 0;
 
   return (
     <div className="space-y-6 max-w-3xl">
       <div className="flex items-center gap-3">
         <Button variant="ghost" size="sm" onClick={onBack}>
-          <ArrowLeft className="h-4 w-4 mr-1" /> Back to List
+          <ArrowLeft className="h-4 w-4 mr-1" /> Back
         </Button>
         <h3 className="text-lg font-semibold">Import Bank Statement</h3>
       </div>
@@ -1420,151 +1536,63 @@ function BankImportView({ onBack }: { onBack: () => void }) {
       )}
 
       {/* Step 1: Upload */}
-      <div className={`border rounded-lg p-4 space-y-3 ${step !== 'upload' ? 'opacity-60' : ''}`}>
-        <h4 className="font-medium text-sm flex items-center gap-2">
-          <span className="bg-blue-100 text-blue-700 rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold">1</span>
-          Upload CSV
-        </h4>
+      {step === 'upload' && (
+        <div className="border rounded-lg p-4 space-y-3">
+          <div className="flex items-center gap-3">
+            <Select value={selectedBank} onValueChange={setSelectedBank}>
+              <SelectTrigger className="w-[160px]"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="hdfc">HDFC Bank</SelectItem>
+                <SelectItem value="razorpayx">RazorpayX</SelectItem>
+              </SelectContent>
+            </Select>
 
-        {step === 'upload' ? (
-          <>
-            <div className="flex items-center gap-3">
-              <Select value={selectedBank} onValueChange={setSelectedBank}>
-                <SelectTrigger className="w-[160px]"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="hdfc">HDFC Bank</SelectItem>
-                  <SelectItem value="razorpayx">RazorpayX</SelectItem>
-                </SelectContent>
-              </Select>
-
-              <label className="flex-1 border-2 border-dashed rounded-lg p-4 text-center cursor-pointer hover:bg-muted/30 transition-colors">
-                <input
-                  type="file"
-                  accept=".csv"
-                  className="hidden"
-                  onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-                />
-                {file ? (
-                  <span className="text-sm">{file.name} ({(file.size / 1024).toFixed(0)} KB)</span>
-                ) : (
-                  <span className="text-sm text-muted-foreground">Click to select CSV file</span>
-                )}
-              </label>
-            </div>
-
-            <Button onClick={handlePreview} disabled={!file || uploading}>
-              {uploading ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Eye className="h-4 w-4 mr-1" />}
-              {uploading ? 'Parsing...' : 'Preview'}
-            </Button>
-          </>
-        ) : (
-          <p className="text-sm text-muted-foreground">{file?.name} ({selectedBank.toUpperCase()})</p>
-        )}
-      </div>
-
-      {/* Step 2: Preview */}
-      {(step === 'preview' || step === 'review' || step === 'post') && bankPreview && (
-        <div className={`border rounded-lg p-4 space-y-3 ${step !== 'preview' ? 'opacity-60' : ''}`}>
-          <h4 className="font-medium text-sm flex items-center gap-2">
-            <span className="bg-blue-100 text-blue-700 rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold">2</span>
-            Preview
-          </h4>
-
-          {step === 'preview' ? (
-            <>
-              {/* Summary bar */}
-              <div className="flex flex-wrap gap-3 text-xs">
-                <span className="px-2 py-1 rounded bg-green-50 text-green-700 font-medium">{bankPreview.newRows} new</span>
-                {bankPreview.duplicateRows > 0 && (
-                  <span className="px-2 py-1 rounded bg-gray-100 text-gray-500">{bankPreview.duplicateRows} duplicates</span>
-                )}
-                <span className="px-2 py-1 rounded bg-green-50 text-green-700">{bankPreview.partiesMatched} matched</span>
-                {bankPreview.partiesUnmatched > 0 && (
-                  <span className="px-2 py-1 rounded bg-amber-50 text-amber-700">{bankPreview.partiesUnmatched} unmatched</span>
-                )}
-                {bankPreview.balanceMatched !== undefined && (
-                  <span className={`px-2 py-1 rounded ${bankPreview.balanceMatched ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
-                    Balance: {bankPreview.balanceMatched ? 'Pass' : 'Fail'}
-                  </span>
-                )}
-              </div>
-
-              {/* Preview table */}
-              {bankPreview.rows.length > 0 && (
-                <div className="border rounded overflow-hidden max-h-[400px] overflow-y-auto">
-                  <table className="w-full text-xs">
-                    <thead className="bg-muted/50 sticky top-0">
-                      <tr>
-                        <th className="text-left p-2 font-medium">Date</th>
-                        <th className="text-left p-2 font-medium">Narration</th>
-                        <th className="text-right p-2 font-medium">Amount</th>
-                        <th className="text-left p-2 font-medium">Party</th>
-                        <th className="text-left p-2 font-medium w-16">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {bankPreview.rows.map((row, i) => (
-                        <tr
-                          key={i}
-                          className={`border-t ${
-                            row.isDuplicate
-                              ? 'opacity-40 line-through'
-                              : !row.partyId
-                                ? 'bg-amber-50'
-                                : ''
-                          }`}
-                        >
-                          <td className="p-2 whitespace-nowrap">{new Date(row.txnDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</td>
-                          <td className="p-2 max-w-[250px] truncate" title={row.narration ?? ''}>{row.narration ?? '—'}</td>
-                          <td className={`p-2 text-right font-mono whitespace-nowrap ${row.direction === 'credit' ? 'text-green-600' : ''}`}>
-                            {row.direction === 'credit' ? '+' : ''}{formatCurrency(row.amount)}
-                          </td>
-                          <td className="p-2">{row.partyName ?? <span className="text-amber-600">—</span>}</td>
-                          <td className="p-2">
-                            {row.isDuplicate
-                              ? <span className="text-gray-400">Dup</span>
-                              : <span className="text-green-600">New</span>}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+            <label className="flex-1 border-2 border-dashed rounded-lg p-4 text-center cursor-pointer hover:bg-muted/30 transition-colors">
+              <input
+                type="file"
+                accept=".csv"
+                className="hidden"
+                onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              />
+              {file ? (
+                <span className="text-sm">{file.name} ({(file.size / 1024).toFixed(0)} KB)</span>
+              ) : (
+                <span className="text-sm text-muted-foreground">Click to select CSV file</span>
               )}
+            </label>
+          </div>
 
-              <Button onClick={handleImport} disabled={importing || previewNewCount === 0}>
-                {importing ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Upload className="h-4 w-4 mr-1" />}
-                {importing ? 'Importing...' : previewNewCount === 0 ? 'No new transactions' : `Import ${previewNewCount} Transactions`}
-              </Button>
-            </>
-          ) : (
-            <div className="text-sm text-muted-foreground">
-              <p>{bankPreview.newRows} new, {bankPreview.duplicateRows} duplicates</p>
-            </div>
-          )}
+          <Button onClick={handlePreview} disabled={!file || uploading}>
+            {uploading ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Eye className="h-4 w-4 mr-1" />}
+            {uploading ? 'Parsing...' : 'Preview'}
+          </Button>
         </div>
       )}
 
-      {/* Step 3: Review */}
-      {(step === 'review' || step === 'post') && (
-        <div className={`border rounded-lg p-4 space-y-3 ${step === 'post' ? 'opacity-60' : ''}`}>
-          <h4 className="font-medium text-sm flex items-center gap-2">
-            <span className="bg-blue-100 text-blue-700 rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold">3</span>
-            Review Transactions
-          </h4>
+      {/* Step 2: Preview */}
+      {step === 'preview' && bankPreview && (
+        <div className="border rounded-lg p-4 space-y-3">
+          <p className="text-sm text-muted-foreground">{file?.name} ({selectedBank.toUpperCase()})</p>
 
-          <div className="flex flex-wrap gap-4 text-xs">
-            <span className="text-green-600">{matchedCount} matched</span>
-            {unmatchedCount > 0 && <span className="text-amber-600">{unmatchedCount} unmatched</span>}
-            <span className="font-mono">{formatCurrency(reviewTxns.reduce((sum, t) => sum + t.amount, 0))} total</span>
+          {/* Summary bar */}
+          <div className="flex flex-wrap gap-3 text-xs">
+            <span className="px-2 py-1 rounded bg-green-50 text-green-700 font-medium">{bankPreview.newRows} new</span>
+            {bankPreview.duplicateRows > 0 && (
+              <span className="px-2 py-1 rounded bg-gray-100 text-gray-500">{bankPreview.duplicateRows} duplicates</span>
+            )}
+            <span className="px-2 py-1 rounded bg-green-50 text-green-700">{bankPreview.partiesMatched} matched</span>
+            {bankPreview.partiesUnmatched > 0 && (
+              <span className="px-2 py-1 rounded bg-amber-50 text-amber-700">{bankPreview.partiesUnmatched} unmatched</span>
+            )}
+            {bankPreview.balanceMatched !== undefined && (
+              <span className={`px-2 py-1 rounded ${bankPreview.balanceMatched ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+                Balance: {bankPreview.balanceMatched ? 'Pass' : 'Fail'}
+              </span>
+            )}
           </div>
 
-          {/* Transaction review table */}
-          {loadingTxns ? (
-            <div className="flex items-center gap-2 text-muted-foreground text-xs py-4">
-              <Loader2 className="h-3 w-3 animate-spin" /> Loading transactions...
-            </div>
-          ) : reviewTxns.length > 0 ? (
+          {/* Preview table */}
+          {bankPreview.rows.length > 0 && (
             <div className="border rounded overflow-hidden max-h-[400px] overflow-y-auto">
               <table className="w-full text-xs">
                 <thead className="bg-muted/50 sticky top-0">
@@ -1572,171 +1600,55 @@ function BankImportView({ onBack }: { onBack: () => void }) {
                     <th className="text-left p-2 font-medium">Date</th>
                     <th className="text-left p-2 font-medium">Narration</th>
                     <th className="text-right p-2 font-medium">Amount</th>
-                    <th className="text-left p-2 font-medium min-w-[180px]">Party</th>
-                    <th className="text-left p-2 font-medium">Category</th>
+                    <th className="text-left p-2 font-medium">Party</th>
+                    <th className="text-left p-2 font-medium w-16">Status</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {reviewTxns.map((txn) => {
-                    const hasParty = !!(txn.partyId || txn.party?.id);
-                    return (
-                      <tr key={txn.id} className={`border-t ${!hasParty ? 'bg-amber-50' : ''}`}>
-                        <td className="p-2 whitespace-nowrap">{new Date(txn.txnDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</td>
-                        <td className="p-2 max-w-[250px] truncate" title={txn.narration ?? ''}>{txn.narration ?? '—'}</td>
-                        <td className={`p-2 text-right font-mono whitespace-nowrap ${txn.direction === 'credit' ? 'text-green-600' : ''}`}>
-                          {txn.direction === 'credit' ? '+' : ''}{formatCurrency(txn.amount)}
-                        </td>
-                        <td className="p-2">
-                          {hasParty ? (
-                            <span>{txn.party?.name ?? '—'}</span>
-                          ) : (
-                            <PartyAssignDropdown txnId={txn.id} onAssigned={handlePartyAssigned} />
-                          )}
-                        </td>
-                        <td className="p-2">
-                          {!hasParty
-                            ? <span className="text-amber-600 font-medium">Unmatched</span>
-                            : <span>{txn.category ?? '—'}</span>}
-                        </td>
-                      </tr>
-                    );
-                  })}
+                  {bankPreview.rows.map((row, i) => (
+                    <tr
+                      key={i}
+                      className={`border-t ${
+                        row.isDuplicate ? 'opacity-40 line-through' : !row.partyId ? 'bg-amber-50' : ''
+                      }`}
+                    >
+                      <td className="p-2 whitespace-nowrap">{new Date(row.txnDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</td>
+                      <td className="p-2 max-w-[250px] truncate" title={row.narration ?? ''}>{row.narration ?? '—'}</td>
+                      <td className={`p-2 text-right font-mono whitespace-nowrap ${row.direction === 'credit' ? 'text-green-600' : ''}`}>
+                        {row.direction === 'credit' ? '+' : ''}{formatCurrency(row.amount)}
+                      </td>
+                      <td className="p-2">{row.partyName ?? <span className="text-amber-600">—</span>}</td>
+                      <td className="p-2">
+                        {row.isDuplicate ? <span className="text-gray-400">Dup</span> : <span className="text-green-600">New</span>}
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
-          ) : (
-            <p className="text-sm text-muted-foreground">No transactions in this batch.</p>
           )}
 
-          {step === 'review' && (
-            <Button onClick={() => setStep('post')}>
-              Continue to Post
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => { setStep('upload'); setBankPreview(null); }}>Back</Button>
+            <Button onClick={handleImport} disabled={importing || previewNewCount === 0}>
+              {importing ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Upload className="h-4 w-4 mr-1" />}
+              {importing ? 'Importing...' : previewNewCount === 0 ? 'No new transactions' : `Import ${previewNewCount} Transactions`}
             </Button>
-          )}
+          </div>
         </div>
       )}
 
-      {/* Step 4: Post */}
-      {step === 'post' && (
-        <div className="border rounded-lg p-4 space-y-3">
-          <h4 className="font-medium text-sm flex items-center gap-2">
-            <span className="bg-blue-100 text-blue-700 rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold">4</span>
-            Post
-          </h4>
-
-          {dryRun && !postResult && (
-            <div className="text-sm text-muted-foreground">
-              <p>{dryRun.count} transactions ready to post</p>
-            </div>
-          )}
-
-          {!postResult ? (
-            <Button onClick={handlePost} disabled={posting || (dryRun?.count === 0)}>
-              {posting ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
-              Post Transactions
-            </Button>
-          ) : (
-            <div className="space-y-3">
-              <div className="text-sm">
-                <p className="text-green-600 font-medium">{postResult.posted} transactions posted</p>
-                {postResult.errors > 0 && (
-                  <p className="text-red-600">{postResult.errors} errors</p>
-                )}
-              </div>
-              <Button variant="outline" onClick={onBack}>
-                <ArrowLeft className="h-4 w-4 mr-1" /> Back to List
-              </Button>
-            </div>
-          )}
+      {/* Done */}
+      {step === 'done' && importResult && (
+        <div className="border border-green-200 bg-green-50 rounded-lg p-4 space-y-3">
+          <p className="text-sm font-medium text-green-700">Import complete</p>
+          <p className="text-sm"><strong>{importResult.newRows}</strong> new transactions imported, <strong>{importResult.skippedRows}</strong> duplicates skipped</p>
+          <p className="text-xs text-muted-foreground">You can edit party assignments and accounts in the transaction list.</p>
+          <Button onClick={onBack}>
+            <ArrowLeft className="h-4 w-4 mr-1" /> Back to Transactions
+          </Button>
         </div>
       )}
-    </div>
-  );
-}
-
-// ---- Party Assignment Dropdown ----
-
-function PartyAssignDropdown({ txnId, onAssigned }: { txnId: string; onAssigned: () => void }) {
-  const [query, setQuery] = useState('');
-  const [open, setOpen] = useState(false);
-  const [assigning, setAssigning] = useState(false);
-  const searchFn = useServerFn(searchCounterparties);
-
-  const { data } = useQuery({
-    queryKey: ['finance', 'party-search', query],
-    queryFn: () => searchFn({ data: { query, type: 'party' } }),
-    enabled: query.length >= 2,
-  });
-
-  const results = data?.success ? data.results : [];
-
-  const handleAssign = async (partyId: string) => {
-    setAssigning(true);
-    try {
-      const res = await fetch('/api/bank-import/assign-party', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ txnId, partyId }),
-      });
-      if (res.ok) {
-        setOpen(false);
-        setQuery('');
-        onAssigned();
-      }
-    } finally {
-      setAssigning(false);
-    }
-  };
-
-  if (!open) {
-    return (
-      <button
-        type="button"
-        className="text-xs text-blue-600 hover:text-blue-800 underline"
-        onClick={() => setOpen(true)}
-      >
-        Assign party
-      </button>
-    );
-  }
-
-  return (
-    <div className="relative">
-      <Input
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        placeholder="Search party..."
-        className="h-7 text-xs w-[160px]"
-        autoFocus
-      />
-      {query.length >= 2 && results.length > 0 && (
-        <div className="absolute z-10 top-8 left-0 w-[200px] bg-white border rounded-md shadow-lg max-h-[150px] overflow-y-auto">
-          {results.map((r) => (
-            <button
-              key={r.id}
-              type="button"
-              className="block w-full text-left px-3 py-1.5 text-xs hover:bg-muted/50 disabled:opacity-50"
-              onClick={() => handleAssign(r.id)}
-              disabled={assigning}
-            >
-              {r.name}
-            </button>
-          ))}
-        </div>
-      )}
-      {query.length >= 2 && results.length === 0 && (
-        <div className="absolute z-10 top-8 left-0 w-[200px] bg-white border rounded-md shadow-lg p-2 text-xs text-muted-foreground">
-          No parties found
-        </div>
-      )}
-      <button
-        type="button"
-        className="text-xs text-muted-foreground hover:text-foreground mt-1"
-        onClick={() => { setOpen(false); setQuery(''); }}
-      >
-        Cancel
-      </button>
     </div>
   );
 }
