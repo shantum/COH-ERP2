@@ -26,6 +26,7 @@ import {
   UpdateTransactionTypeSchema,
   BANK_STATUS_FILTER_MAP,
   type BankTxnFilterOption,
+  generatePaymentNarration,
 } from '@coh/shared/schemas/finance';
 
 /**
@@ -583,7 +584,7 @@ export const confirmInvoice = createServerFn({ method: 'POST' })
  */
 async function confirmInvoiceWithLinkedPayment(
   prisma: Awaited<ReturnType<typeof getPrisma>>,
-  invoice: { id: string; category: string; totalAmount: number; gstAmount: number | null; subtotal: number | null; invoiceNumber: string | null; invoiceDate: Date | null; billingPeriod: string | null },
+  invoice: { id: string; category: string; totalAmount: number; gstAmount: number | null; subtotal: number | null; invoiceNumber: string | null; partyId: string | null; invoiceDate: Date | null; billingPeriod: string | null },
   paymentId: string,
   tdsAmount: number,
   userId: string,
@@ -596,12 +597,26 @@ async function confirmInvoiceWithLinkedPayment(
     where: { id: paymentId },
     select: {
       id: true, amount: true, unmatchedAmount: true, matchedAmount: true,
-      status: true, paymentDate: true, debitAccountCode: true,
+      status: true, paymentDate: true, debitAccountCode: true, notes: true,
     },
   });
   if (!payment) throw new Error('Payment not found');
   if (payment.status === 'cancelled') throw new Error('Payment is cancelled');
   if (payment.unmatchedAmount < matchAmount - 0.01) throw new Error('Payment unmatched amount is less than invoice net payable');
+
+  // Auto-generate narration if payment doesn't have one
+  let narration: string | null = null;
+  if (!payment.notes) {
+    const partyName = invoice.partyId
+      ? (await prisma.party.findUnique({ where: { id: invoice.partyId }, select: { name: true } }))?.name
+      : null;
+    narration = generatePaymentNarration({
+      partyName,
+      category: invoice.category,
+      invoiceNumber: invoice.invoiceNumber,
+      billingPeriod: invoice.billingPeriod,
+    });
+  }
 
   // Use a transaction to keep all writes atomic
   return prisma.$transaction(async (tx) => {
@@ -616,12 +631,13 @@ async function confirmInvoiceWithLinkedPayment(
       },
     });
 
-    // Update Payment: matched/unmatched amounts
+    // Update Payment: matched/unmatched amounts + narration
     await tx.payment.update({
       where: { id: paymentId },
       data: {
         matchedAmount: payment.matchedAmount + matchAmount,
         unmatchedAmount: Math.max(0, payment.unmatchedAmount - matchAmount),
+        ...(narration ? { notes: narration } : {}),
       },
     });
 

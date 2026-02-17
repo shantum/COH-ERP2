@@ -190,6 +190,37 @@ export function getCategoryLabel(category: string): string {
   return CATEGORY_LABELS[category] ?? category;
 }
 
+/**
+ * Generate a narration for a payment based on available context.
+ * e.g. "Being amount paid for Rent to CMM for 2026-01"
+ */
+export function generatePaymentNarration(opts: {
+  partyName?: string | null;
+  category?: string | null;
+  invoiceNumber?: string | null;
+  billingPeriod?: string | null;
+}): string {
+  const parts: string[] = ['Being amount paid'];
+
+  if (opts.category) {
+    parts.push(`for ${getCategoryLabel(opts.category)}`);
+  }
+
+  if (opts.partyName) {
+    parts.push(`to ${opts.partyName}`);
+  }
+
+  if (opts.invoiceNumber) {
+    parts.push(`against invoice ${opts.invoiceNumber}`);
+  }
+
+  if (opts.billingPeriod) {
+    parts.push(`for ${opts.billingPeriod}`);
+  }
+
+  return parts.join(' ');
+}
+
 export const INVOICE_STATUSES = ['draft', 'confirmed', 'partially_paid', 'paid', 'cancelled'] as const;
 
 export const PAYMENT_METHODS = [

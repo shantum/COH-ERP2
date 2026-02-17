@@ -6,6 +6,7 @@
 
 import { PrismaClient } from '@prisma/client';
 import { AUTO_CLEAR_AMOUNT_THRESHOLD } from '../../config/finance/index.js';
+import { generatePaymentNarration } from '@coh/shared';
 
 const prisma = new PrismaClient();
 
@@ -141,19 +142,32 @@ export async function confirmSingleTransaction(txnId: string): Promise<ConfirmRe
     }
   }
 
-  const invoiceRequired = partyId
-    ? (await prisma.party.findUnique({ where: { id: partyId }, select: { invoiceRequired: true } }))?.invoiceRequired ?? true
-    : true;
+  // Fetch party details for invoiceRequired flag + name for narration
+  const party = partyId
+    ? await prisma.party.findUnique({ where: { id: partyId }, select: { name: true, invoiceRequired: true } })
+    : null;
+  const invoiceRequired = party?.invoiceRequired ?? true;
 
   const decision = decidePosting(txn.direction, txn.amount, txn.debitAccountCode, txn.creditAccountCode, invoiceRequired);
   const entryDate = new Date(txn.txnDate);
 
+  // Generate narration from available context
+  const narration = generatePaymentNarration({
+    partyName: party?.name ?? txn.counterpartyName,
+    category: txn.category,
+  });
+
   let paymentId: string | undefined;
   if (txn.direction === 'debit' && (txn.bank === 'hdfc' || txn.bank === 'razorpayx')) {
     if (txn.paymentId) {
+      // Update existing payment — add narration if it doesn't have one
+      const existing = await prisma.payment.findUnique({ where: { id: txn.paymentId }, select: { notes: true } });
       await prisma.payment.update({
         where: { id: txn.paymentId },
-        data: { debitAccountCode: decision.intendedDebitAccount ?? decision.debitAccount },
+        data: {
+          debitAccountCode: decision.intendedDebitAccount ?? decision.debitAccount,
+          ...(!existing?.notes && narration ? { notes: narration } : {}),
+        },
       });
       paymentId = txn.paymentId;
     } else {
@@ -169,6 +183,7 @@ export async function confirmSingleTransaction(txnId: string): Promise<ConfirmRe
           debitAccountCode: decision.intendedDebitAccount ?? decision.debitAccount,
           createdById: admin.id,
           ...(partyId ? { partyId } : {}),
+          ...(narration ? { notes: narration } : {}),
         },
       });
       paymentId = payment.id;
