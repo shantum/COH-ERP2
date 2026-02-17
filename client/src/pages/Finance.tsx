@@ -1089,18 +1089,15 @@ function BankTransactionList({ search, updateSearch }: {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const bank = search.bankFilter && search.bankFilter !== 'all' ? search.bankFilter : undefined;
-  // Default to showing non-posted (imported + categorized) unless user explicitly picks a status
   const status = search.bankStatus && search.bankStatus !== 'all' ? search.bankStatus : undefined;
-  const defaultStatus = !search.bankStatus ? 'imported' : undefined;
-  const effectiveStatus = status ?? defaultStatus;
 
   const { data, isLoading } = useQuery({
-    queryKey: ['finance', 'bank-transactions', bank, effectiveStatus, search.search, search.page],
+    queryKey: ['finance', 'bank-transactions', bank, status, search.search, search.page],
     queryFn: () =>
       listFn({
         data: {
           ...(bank ? { bank } : {}),
-          ...(effectiveStatus ? { status: effectiveStatus } : {}),
+          ...(status ? { status: status } : {}),
           ...(search.search ? { search: search.search } : {}),
           page: search.page,
           limit: search.limit,
@@ -1153,7 +1150,7 @@ function BankTransactionList({ search, updateSearch }: {
           </SelectContent>
         </Select>
 
-        <Select value={search.bankStatus ?? 'imported'} onValueChange={(v) => updateSearch({ bankStatus: v as any, page: 1 })}>
+        <Select value={search.bankStatus ?? 'all'} onValueChange={(v) => updateSearch({ bankStatus: v as any, page: 1 })}>
           <SelectTrigger className="w-[160px]"><SelectValue placeholder="Status" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Statuses</SelectItem>
