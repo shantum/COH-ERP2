@@ -32,6 +32,7 @@ import {
   updateTransactionType,
   deleteTransactionType,
   searchCounterparties,
+  updatePaymentNotes,
 } from '../server/functions/finance';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
@@ -647,9 +648,58 @@ function InvoicesTab({ search }: { search: FinanceSearchParams }) {
 // PAYMENTS TAB
 // ============================================
 
+function InlinePaymentNotes({ paymentId, notes, onSaved }: { paymentId: string; notes: string | null; onSaved: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(notes ?? '');
+  const [saving, setSaving] = useState(false);
+  const updateFn = useServerFn(updatePaymentNotes);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const save = async () => {
+    const trimmed = value.trim();
+    if (trimmed === (notes ?? '')) { setEditing(false); return; }
+    setSaving(true);
+    try {
+      await updateFn({ data: { id: paymentId, notes: trimmed || null } });
+      onSaved();
+    } finally {
+      setSaving(false);
+      setEditing(false);
+    }
+  };
+
+  if (editing) {
+    return (
+      <input
+        ref={inputRef}
+        className="w-full text-[11px] border-b border-blue-300 bg-transparent outline-none py-0.5 text-muted-foreground"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onBlur={save}
+        onKeyDown={(e) => { if (e.key === 'Enter') save(); if (e.key === 'Escape') setEditing(false); }}
+        placeholder="Add narration..."
+        autoFocus
+        disabled={saving}
+      />
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      className={`text-[11px] text-left w-full truncate ${notes ? 'text-muted-foreground' : 'text-muted-foreground/50 italic'} hover:text-foreground`}
+      onClick={() => { setEditing(true); setValue(notes ?? ''); }}
+      title={notes || 'Click to add narration'}
+    >
+      {notes || 'Add narration...'}
+    </button>
+  );
+}
+
 function PaymentsTab({ search }: { search: FinanceSearchParams }) {
   const navigate = useNavigate();
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const queryClient = useQueryClient();
 
   const listFn = useServerFn(listPayments);
   const { data, isLoading } = useQuery({
@@ -779,11 +829,16 @@ function PaymentsTab({ search }: { search: FinanceSearchParams }) {
                           <div className="font-mono text-[10px] text-muted-foreground mt-0.5 max-w-[180px] truncate" title={pmt.referenceNumber}>{pmt.referenceNumber}</div>
                         )}
                       </td>
-                      <td className="p-3 max-w-[180px]">
+                      <td className="p-3 max-w-[220px]">
                         <div className="truncate font-medium text-xs" title={typeof partyName === 'string' ? partyName : ''}>{partyName}</div>
                         {refundOrderInfo && (
                           <div className="text-[10px] text-muted-foreground mt-0.5">Order {refundOrderInfo}</div>
                         )}
+                        <InlinePaymentNotes
+                          paymentId={pmt.id}
+                          notes={pmt.notes}
+                          onSaved={() => queryClient.invalidateQueries({ queryKey: ['finance', 'payments'] })}
+                        />
                       </td>
                       <td className="p-3 text-right font-mono whitespace-nowrap">{formatCurrency(pmt.amount)}</td>
                       <td className="p-3">

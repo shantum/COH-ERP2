@@ -833,6 +833,27 @@ export const createFinancePayment = createServerFn({ method: 'POST' })
   });
 
 // ============================================
+// PAYMENT — UPDATE NOTES
+// ============================================
+
+const updatePaymentNotesInput = z.object({
+  id: z.string().uuid(),
+  notes: z.string().nullable(),
+});
+
+export const updatePaymentNotes = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
+  .inputValidator((input: unknown) => updatePaymentNotesInput.parse(input))
+  .handler(async ({ data }) => {
+    const prisma = await getPrisma();
+    await prisma.payment.update({
+      where: { id: data.id },
+      data: { notes: data.notes },
+    });
+    return { success: true as const };
+  });
+
+// ============================================
 // PAYMENT — MATCH TO INVOICE
 // ============================================
 
