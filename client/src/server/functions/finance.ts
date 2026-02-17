@@ -539,11 +539,13 @@ export const confirmInvoice = createServerFn({ method: 'POST' })
     // Fetch party details for TDS + TransactionType (advance-clearing vendors + expense account)
     let tdsAmount = 0;
     let expenseAccountOverride: string | null = null;
+    let partyName: string | null = null;
     if (invoice.type === 'payable' && invoice.partyId) {
       const party = await prisma.party.findUnique({
         where: { id: invoice.partyId },
-        select: { tdsApplicable: true, tdsRate: true, transactionType: { select: { debitAccountCode: true } } },
+        select: { name: true, tdsApplicable: true, tdsRate: true, transactionType: { select: { debitAccountCode: true } } },
       });
+      partyName = party?.name ?? null;
       if (party?.tdsApplicable && party.tdsRate && party.tdsRate > 0) {
         const subtotal = invoice.totalAmount - (invoice.gstAmount ?? 0);
         tdsAmount = Math.round(subtotal * (party.tdsRate / 100) * 100) / 100;
@@ -556,7 +558,7 @@ export const confirmInvoice = createServerFn({ method: 'POST' })
 
     // ---- LINKED PAYMENT PATH (already-paid bill) ----
     if (data.linkedPaymentId && invoice.type === 'payable') {
-      return confirmInvoiceWithLinkedPayment(prisma, invoice, data.linkedPaymentId, tdsAmount, userId, expenseAccountOverride);
+      return confirmInvoiceWithLinkedPayment(prisma, invoice, data.linkedPaymentId, tdsAmount, userId, expenseAccountOverride, partyName);
     }
 
     // ---- NORMAL AP PATH (invoice first, pay later) ----
@@ -589,6 +591,7 @@ async function confirmInvoiceWithLinkedPayment(
   tdsAmount: number,
   userId: string,
   _expenseAccountOverride: string | null = null,
+  partyName: string | null = null,
 ) {
   // The amount the vendor was actually paid (total minus TDS withheld)
   const matchAmount = invoice.totalAmount - tdsAmount;
@@ -607,9 +610,6 @@ async function confirmInvoiceWithLinkedPayment(
   // Auto-generate narration if payment doesn't have one
   let narration: string | null = null;
   if (!payment.notes) {
-    const partyName = invoice.partyId
-      ? (await prisma.party.findUnique({ where: { id: invoice.partyId }, select: { name: true } }))?.name
-      : null;
     narration = generatePaymentNarration({
       partyName,
       category: invoice.category,
