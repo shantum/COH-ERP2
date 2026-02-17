@@ -20,6 +20,10 @@ import {
   getDryRunSummary,
   postTransactions,
 } from '../services/bankImport/index.js';
+import {
+  findPartyByNarration,
+  resolveAccounting,
+} from '../services/transactionTypeResolver.js';
 
 const log = logger.child({ module: 'bankImport' });
 const router = Router();
@@ -125,6 +129,92 @@ router.get('/dry-run', requireAdmin, asyncHandler(async (req: Request, res: Resp
   const bank = req.query.bank as string | undefined;
   const summary = await getDryRunSummary(bank ? { bank } : undefined);
   res.json({ success: true, summary });
+}));
+
+// ============================================
+// POST /assign-party — Manually assign a party to a bank transaction
+// ============================================
+
+router.post('/assign-party', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
+  const { txnId, partyId } = req.body;
+  if (!txnId || !partyId) {
+    res.status(400).json({ error: 'txnId and partyId are required' });
+    return;
+  }
+
+  // Fetch the party with TransactionType
+  const party = await req.prisma.party.findUnique({
+    where: { id: partyId },
+    select: {
+      id: true,
+      name: true,
+      aliases: true,
+      category: true,
+      tdsApplicable: true,
+      tdsSection: true,
+      tdsRate: true,
+      invoiceRequired: true,
+      transactionType: {
+        select: {
+          id: true,
+          name: true,
+          debitAccountCode: true,
+          creditAccountCode: true,
+          defaultGstRate: true,
+          defaultTdsApplicable: true,
+          defaultTdsSection: true,
+          defaultTdsRate: true,
+          invoiceRequired: true,
+          expenseCategory: true,
+        },
+      },
+    },
+  });
+
+  if (!party) {
+    res.status(404).json({ error: 'Party not found' });
+    return;
+  }
+
+  const txn = await req.prisma.bankTransaction.findUnique({
+    where: { id: txnId },
+    select: { id: true, bank: true, direction: true },
+  });
+
+  if (!txn) {
+    res.status(404).json({ error: 'Bank transaction not found' });
+    return;
+  }
+
+  // Resolve accounting from party's TransactionType
+  const acct = resolveAccounting(party);
+  const isDebit = txn.direction === 'debit';
+
+  // Determine bank account based on bank type
+  const bankAccountMap: Record<string, string> = {
+    hdfc: 'BANK_HDFC',
+    razorpayx: 'BANK_RAZORPAYX',
+    hdfc_cc: 'CREDIT_CARD',
+    icici_cc: 'CREDIT_CARD',
+  };
+  const bankAccount = bankAccountMap[txn.bank] || 'BANK_HDFC';
+
+  const debitAccountCode = isDebit ? (acct.debitAccount || 'UNMATCHED_PAYMENTS') : bankAccount;
+  const creditAccountCode = isDebit ? bankAccount : (acct.creditAccount || 'UNMATCHED_PAYMENTS');
+
+  const updated = await req.prisma.bankTransaction.update({
+    where: { id: txnId },
+    data: {
+      partyId: party.id,
+      counterpartyName: party.name,
+      debitAccountCode,
+      creditAccountCode,
+      category: acct.category || null,
+    },
+  });
+
+  log.info({ txnId, partyId, partyName: party.name }, 'Party assigned to bank transaction');
+  res.json({ success: true, transaction: updated });
 }));
 
 export default router;

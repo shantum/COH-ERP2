@@ -31,6 +31,7 @@ import {
   createTransactionType,
   updateTransactionType,
   deleteTransactionType,
+  searchCounterparties,
 } from '../server/functions/finance';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
@@ -244,10 +245,11 @@ function InvoicesTab({ search }: { search: FinanceSearchParams }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showUploadDialog, setShowUploadDialog] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   // For the confirm dialog — stores the invoice being confirmed
   const [confirmingInvoice, setConfirmingInvoice] = useState<{
-    id: string; type: string; counterpartyName: string | null; totalAmount: number;
+    id: string; type: string; totalAmount: number;
     party?: { id: string; name: string } | null;
   } | null>(null);
 
@@ -349,7 +351,7 @@ function InvoicesTab({ search }: { search: FinanceSearchParams }) {
     );
 
     if (missingBank.length > 0) {
-      const names = missingBank.map((inv) => inv.party?.name ?? inv.counterpartyName ?? 'Unknown').join(', ');
+      const names = missingBank.map((inv) => inv.party?.name ?? 'Unknown').join(', ');
       if (valid.length === 0) {
         window.alert(`All selected invoices are missing bank details: ${names}`);
         return;
@@ -422,7 +424,6 @@ function InvoicesTab({ search }: { search: FinanceSearchParams }) {
       setConfirmingInvoice({
         id: inv.id,
         type: inv.type,
-        counterpartyName: inv.party?.name ?? inv.counterpartyName,
         totalAmount: inv.totalAmount,
         party: inv.party,
       });
@@ -485,6 +486,9 @@ function InvoicesTab({ search }: { search: FinanceSearchParams }) {
           >
             {driveSyncMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <CloudUpload className="h-4 w-4 mr-1" />}
             Sync to Drive
+          </Button>
+          <Button variant="outline" onClick={() => setShowUploadDialog(true)}>
+            <Upload className="h-4 w-4 mr-1" /> Upload Invoice
           </Button>
           <Button onClick={() => setShowCreateModal(true)}>
             <Plus className="h-4 w-4 mr-1" /> New Invoice
@@ -552,7 +556,7 @@ function InvoicesTab({ search }: { search: FinanceSearchParams }) {
                     <td className="p-3">
                       {inv.party?.name ??
                         (inv.customer ? [inv.customer.firstName, inv.customer.lastName].filter(Boolean).join(' ') || inv.customer.email : null) ??
-                        inv.counterpartyName ?? '—'}
+                        '—'}
                     </td>
                     <td className="p-3 text-right font-mono">{formatCurrency(inv.totalAmount)}</td>
                     <td className="p-3 text-right">
@@ -617,6 +621,13 @@ function InvoicesTab({ search }: { search: FinanceSearchParams }) {
       {/* Create Invoice Modal */}
       <CreateInvoiceModal open={showCreateModal} onClose={() => setShowCreateModal(false)} />
 
+      {/* Upload Invoice Dialog */}
+      <UploadInvoiceDialog
+        open={showUploadDialog}
+        onClose={() => setShowUploadDialog(false)}
+        onSuccess={() => queryClient.invalidateQueries({ queryKey: ['finance'] })}
+      />
+
       {/* Confirm + Link Payment Dialog (payable drafts only) */}
       {confirmingInvoice && (
         <ConfirmPayableDialog
@@ -637,12 +648,6 @@ function InvoicesTab({ search }: { search: FinanceSearchParams }) {
 function PaymentsTab({ search }: { search: FinanceSearchParams }) {
   const navigate = useNavigate();
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [voucherPrefill, setVoucherPrefill] = useState<{
-    type: 'payable' | 'receivable';
-    totalAmount: number;
-    counterpartyName: string;
-    partyId?: string;
-  } | null>(null);
 
   const listFn = useServerFn(listPayments);
   const { data, isLoading } = useQuery({
@@ -722,56 +727,113 @@ function PaymentsTab({ search }: { search: FinanceSearchParams }) {
             <table className="w-full text-sm">
               <thead className="bg-muted/50">
                 <tr>
-                  <th className="text-left p-3 font-medium">Reference</th>
-                  <th className="text-left p-3 font-medium">Direction</th>
-                  <th className="text-left p-3 font-medium">Method</th>
-                  <th className="text-left p-3 font-medium">Counterparty</th>
-                  <th className="text-right p-3 font-medium">Amount</th>
-                  <th className="text-right p-3 font-medium">Matched</th>
-                  <th className="text-left p-3 font-medium">Status</th>
                   <th className="text-left p-3 font-medium">Date</th>
-                  <th className="text-right p-3 font-medium">Actions</th>
+                  <th className="text-left p-3 font-medium">Payment</th>
+                  <th className="text-left p-3 font-medium">Party</th>
+                  <th className="text-right p-3 font-medium">Amount</th>
+                  <th className="text-left p-3 font-medium">Category</th>
+                  <th className="text-left p-3 font-medium">GST / TDS</th>
+                  <th className="text-left p-3 font-medium">Invoice</th>
+                  <th className="text-left p-3 font-medium">Period</th>
+                  <th className="text-center p-3 font-medium">Doc</th>
                 </tr>
               </thead>
               <tbody>
-                {data?.payments?.map((pmt) => (
-                  <tr key={pmt.id} className="border-t hover:bg-muted/30">
-                    <td className="p-3 font-mono text-xs">{pmt.referenceNumber ?? '—'}</td>
-                    <td className="p-3">
-                      <span className={`inline-flex items-center gap-1 text-xs ${pmt.direction === 'incoming' ? 'text-green-600' : 'text-red-600'}`}>
-                        {pmt.direction === 'incoming' ? <ArrowDownLeft className="h-3 w-3" /> : <ArrowUpRight className="h-3 w-3" />}
-                        {pmt.direction}
-                      </span>
-                    </td>
-                    <td className="p-3 text-xs">{pmt.method.replace(/_/g, ' ')}</td>
-                    <td className="p-3">
-                      {pmt.party?.name ??
-                        (pmt.customer ? [pmt.customer.firstName, pmt.customer.lastName].filter(Boolean).join(' ') || pmt.customer.email : null) ??
-                        pmt.counterpartyName ?? '—'}
-                    </td>
-                    <td className="p-3 text-right font-mono">{formatCurrency(pmt.amount)}</td>
-                    <td className="p-3 text-right font-mono text-muted-foreground">{formatCurrency(pmt.matchedAmount)}</td>
-                    <td className="p-3"><StatusBadge status={pmt.status} /></td>
-                    <td className="p-3 text-xs text-muted-foreground">{new Date(pmt.paymentDate).toLocaleDateString('en-IN')}</td>
-                    <td className="p-3 text-right">
-                      {pmt.unmatchedAmount > 0.01 && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="text-xs h-7"
-                          onClick={() => setVoucherPrefill({
-                            type: 'payable',
-                            totalAmount: Math.round(pmt.unmatchedAmount * 100) / 100,
-                            counterpartyName: pmt.party?.name ?? pmt.counterpartyName ?? '',
-                            ...(pmt.party?.id ? { partyId: pmt.party.id } : {}),
-                          })}
-                        >
-                          <Plus className="h-3 w-3 mr-1" /> Voucher
-                        </Button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                {data?.payments?.map((pmt) => {
+                  const partyName = pmt.party?.name ??
+                    (pmt.customer ? [pmt.customer.firstName, pmt.customer.lastName].filter(Boolean).join(' ') || pmt.customer.email : null) ??
+                    '—';
+                  const category = pmt.party?.category ?? pmt.bankTransaction?.category ?? null;
+                  const inv = pmt.allocations?.[0]?.invoice;
+                  const gstRate = pmt.party?.transactionType?.defaultGstRate;
+                  const gstAmt = gstRate ? Math.round(pmt.amount * gstRate / (100 + gstRate)) : null;
+                  const hasTds = !!pmt.party?.tdsApplicable;
+                  const tdsRate = pmt.party?.tdsRate;
+                  const tdsAmt = hasTds && tdsRate ? Math.round(pmt.amount * tdsRate / 100) : null;
+
+                  // Extract order info from refund rawData notes
+                  let refundOrderInfo: string | null = null;
+                  if (pmt.bankTransaction?.category === 'refund' && pmt.bankTransaction.rawData) {
+                    try {
+                      const raw = pmt.bankTransaction.rawData as Record<string, unknown>;
+                      const notes = (raw.notes ?? raw.Notes) as Record<string, string> | string | undefined;
+                      const notesStr = typeof notes === 'string' ? notes : notes ? Object.values(notes).join(' ') : '';
+                      const orderMatch = notesStr.match(/(COH\d+|#\d{4,})/i);
+                      if (orderMatch) refundOrderInfo = orderMatch[0];
+                    } catch { /* ignore parse errors */ }
+                  }
+
+                  return (
+                    <tr key={pmt.id} className="border-t hover:bg-muted/30">
+                      <td className="p-3 text-xs whitespace-nowrap">{new Date(pmt.paymentDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: '2-digit' })}</td>
+                      <td className="p-3">
+                        <div className="flex items-center gap-1.5">
+                          <span className={pmt.direction === 'incoming' ? 'text-green-600' : 'text-red-500'}>
+                            {pmt.direction === 'incoming' ? <ArrowDownLeft className="h-3.5 w-3.5" /> : <ArrowUpRight className="h-3.5 w-3.5" />}
+                          </span>
+                          <span className="text-xs">{pmt.method.replace(/_/g, ' ')}</span>
+                        </div>
+                        {pmt.referenceNumber && (
+                          <div className="font-mono text-[10px] text-muted-foreground mt-0.5 max-w-[180px] truncate" title={pmt.referenceNumber}>{pmt.referenceNumber}</div>
+                        )}
+                      </td>
+                      <td className="p-3 max-w-[180px]">
+                        <div className="truncate font-medium text-xs" title={typeof partyName === 'string' ? partyName : ''}>{partyName}</div>
+                        {refundOrderInfo && (
+                          <div className="text-[10px] text-muted-foreground mt-0.5">Order {refundOrderInfo}</div>
+                        )}
+                      </td>
+                      <td className="p-3 text-right font-mono whitespace-nowrap">{formatCurrency(pmt.amount)}</td>
+                      <td className="p-3">
+                        {category ? (
+                          <span className="inline-block bg-muted px-1.5 py-0.5 rounded text-[11px] capitalize">{getCategoryLabel(category)}</span>
+                        ) : (
+                          <span className="text-muted-foreground text-xs">—</span>
+                        )}
+                      </td>
+                      <td className="p-3 text-xs">
+                        <div className="flex flex-col gap-0.5">
+                          {gstRate ? (
+                            <span className="text-green-600">GST {gstRate}%{gstAmt ? ` (${formatCurrency(gstAmt)})` : ''}</span>
+                          ) : pmt.party?.gstin ? (
+                            <span className="text-green-600">GST</span>
+                          ) : (
+                            <span className="text-muted-foreground">No GST</span>
+                          )}
+                          {hasTds ? (
+                            <span className="text-amber-600">TDS {tdsRate}%{tdsAmt ? ` (${formatCurrency(tdsAmt)})` : ''}</span>
+                          ) : null}
+                        </div>
+                      </td>
+                      <td className="p-3 text-xs">
+                        {inv ? (
+                          <div>
+                            <div className="font-medium">{inv.invoiceNumber ?? 'Linked'}</div>
+                            {inv.invoiceDate && (
+                              <div className="text-muted-foreground text-[10px]">{new Date(inv.invoiceDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</div>
+                            )}
+                          </div>
+                        ) : (
+                          <span className={pmt.unmatchedAmount > 0.01 ? 'text-amber-500' : 'text-muted-foreground'}>
+                            {pmt.unmatchedAmount > 0.01 ? 'None' : '—'}
+                          </span>
+                        )}
+                      </td>
+                      <td className="p-3 text-xs text-muted-foreground">{inv?.billingPeriod ?? '—'}</td>
+                      <td className="p-3 text-center">
+                        {pmt.driveUrl ? (
+                          <a href={pmt.driveUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800" title={pmt.fileName ?? 'View on Drive'}>
+                            <ExternalLink className="h-3.5 w-3.5 inline" />
+                          </a>
+                        ) : pmt.fileName ? (
+                          <span className="text-muted-foreground text-xs" title={pmt.fileName}>Local</span>
+                        ) : (
+                          <span className="text-muted-foreground text-xs">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
                 {(!data?.payments || data.payments.length === 0) && (
                   <tr><td colSpan={9} className="p-8 text-center text-muted-foreground">No payments found</td></tr>
                 )}
@@ -784,13 +846,6 @@ function PaymentsTab({ search }: { search: FinanceSearchParams }) {
       )}
 
       <CreatePaymentModal open={showCreateModal} onClose={() => setShowCreateModal(false)} />
-
-      {/* Create Voucher modal (pre-filled from payment row) */}
-      <CreateInvoiceModal
-        open={!!voucherPrefill}
-        onClose={() => setVoucherPrefill(null)}
-        prefill={voucherPrefill ?? undefined}
-      />
     </div>
   );
 }
@@ -1158,7 +1213,7 @@ function BankStatusBadge({ status }: { status: string }) {
 
 // ---- Import View (3-step flow) ----
 
-type ImportStep = 'upload' | 'categorize' | 'post';
+type ImportStep = 'upload' | 'review' | 'post';
 
 interface ImportResultState {
   bank: string;
@@ -1166,12 +1221,9 @@ interface ImportResultState {
   skippedRows: number;
   totalRows: number;
   balanceMatched?: boolean;
-}
-
-interface CategorizeResultState {
-  categorized: number;
-  skipped: number;
-  breakdown: Record<string, { count: number; total: number }>;
+  partiesMatched?: number;
+  partiesUnmatched?: number;
+  batchId: string;
 }
 
 interface PostResultState {
@@ -1179,26 +1231,27 @@ interface PostResultState {
   errors: number;
 }
 
+type ReviewTxn = {
+  id: string;
+  txnDate: string | Date;
+  narration: string | null;
+  amount: number;
+  direction: string;
+  party?: { id: string; name: string } | null;
+  partyId?: string | null;
+  category: string | null;
+  debitAccountCode: string | null;
+  creditAccountCode: string | null;
+  status: string;
+};
+
 function BankImportView({ onBack }: { onBack: () => void }) {
   const [step, setStep] = useState<ImportStep>('upload');
   const [selectedBank, setSelectedBank] = useState<string>('hdfc');
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [importResult, setImportResult] = useState<ImportResultState | null>(null);
-  const [categorizing, setCategorizing] = useState(false);
-  const [categorizeResult, setCategorizeResult] = useState<CategorizeResultState | null>(null);
-  const [categorizedTxns, setCategorizedTxns] = useState<Array<{
-    id: string;
-    txnDate: string | Date;
-    narration: string | null;
-    amount: number;
-    direction: string;
-    counterpartyName: string | null;
-    category: string | null;
-    debitAccountCode: string | null;
-    creditAccountCode: string | null;
-    status: string;
-  }>>([]);
+  const [reviewTxns, setReviewTxns] = useState<ReviewTxn[]>([]);
   const [loadingTxns, setLoadingTxns] = useState(false);
   const [posting, setPosting] = useState(false);
   const [postResult, setPostResult] = useState<PostResultState | null>(null);
@@ -1206,6 +1259,25 @@ function BankImportView({ onBack }: { onBack: () => void }) {
   const [dryRun, setDryRun] = useState<{ count: number; byAccount: Record<string, { count: number; total: number }> } | null>(null);
   const queryClient = useQueryClient();
   const listTxnsFn = useServerFn(listBankTransactions);
+
+  const fetchReviewData = async (batchId: string) => {
+    setLoadingTxns(true);
+    try {
+      const txnRes = await listTxnsFn({
+        data: { batchId, limit: 200 },
+      });
+      if (txnRes.success) setReviewTxns(txnRes.transactions);
+    } finally {
+      setLoadingTxns(false);
+    }
+
+    // Fetch dry-run summary
+    const dryRes = await fetch(`/api/bank-import/dry-run?bank=${selectedBank}`, {
+      credentials: 'include',
+    });
+    const dryJson = await dryRes.json();
+    if (dryJson.success) setDryRun(dryJson.summary);
+  };
 
   const handleUpload = async () => {
     if (!file) return;
@@ -1224,53 +1296,21 @@ function BankImportView({ onBack }: { onBack: () => void }) {
       const json = await res.json();
       if (!res.ok || !json.success) throw new Error(json.error || 'Upload failed');
 
-      setImportResult(json.result);
-      setStep('categorize');
+      const result: ImportResultState = {
+        ...json.result,
+        partiesMatched: json.result.partiesMatched,
+        partiesUnmatched: json.result.partiesUnmatched,
+        batchId: json.result.batchId,
+      };
+      setImportResult(result);
+
+      // Fetch transactions for review and go directly to review step
+      await fetchReviewData(result.batchId);
+      setStep('review');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Upload failed');
     } finally {
       setUploading(false);
-    }
-  };
-
-  const handleCategorize = async () => {
-    setCategorizing(true);
-    setError(null);
-    try {
-      const res = await fetch('/api/bank-import/categorize', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ bank: selectedBank }),
-      });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.error || 'Categorization failed');
-
-      setCategorizeResult(json.result);
-
-      // Fetch categorized transactions for review
-      setLoadingTxns(true);
-      try {
-        const txnRes = await listTxnsFn({
-          data: { bank: selectedBank, status: 'categorized', limit: 200 },
-        });
-        if (txnRes.success) setCategorizedTxns(txnRes.transactions);
-      } finally {
-        setLoadingTxns(false);
-      }
-
-      // Fetch dry-run summary
-      const dryRes = await fetch(`/api/bank-import/dry-run?bank=${selectedBank}`, {
-        credentials: 'include',
-      });
-      const dryJson = await dryRes.json();
-      if (dryJson.success) setDryRun(dryJson.summary);
-
-      setStep('post');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Categorization failed');
-    } finally {
-      setCategorizing(false);
     }
   };
 
@@ -1296,8 +1336,17 @@ function BankImportView({ onBack }: { onBack: () => void }) {
     }
   };
 
+  const handlePartyAssigned = () => {
+    if (importResult?.batchId) {
+      fetchReviewData(importResult.batchId);
+    }
+  };
+
+  const matchedCount = reviewTxns.filter(t => t.partyId || (t.party && t.party.id)).length;
+  const unmatchedCount = reviewTxns.filter(t => !t.partyId && (!t.party || !t.party.id)).length;
+
   return (
-    <div className="space-y-6 max-w-2xl">
+    <div className="space-y-6 max-w-3xl">
       <div className="flex items-center gap-3">
         <Button variant="ghost" size="sm" onClick={onBack}>
           <ArrowLeft className="h-4 w-4 mr-1" /> Back to List
@@ -1355,86 +1404,86 @@ function BankImportView({ onBack }: { onBack: () => void }) {
             {importResult.balanceMatched !== undefined && (
               <p>Balance check: {importResult.balanceMatched ? <span className="text-green-600">Pass</span> : <span className="text-red-600">Fail</span>}</p>
             )}
+            {importResult.partiesMatched !== undefined && (
+              <p>
+                <span className="text-green-600">{importResult.partiesMatched} matched</span>
+                {(importResult.partiesUnmatched ?? 0) > 0 && (
+                  <>, <span className="text-amber-600">{importResult.partiesUnmatched} unmatched</span></>
+                )}
+              </p>
+            )}
           </div>
         ) : null}
       </div>
 
-      {/* Step 2: Categorize */}
-      {(step === 'categorize' || step === 'post') && (
-        <div className={`border rounded-lg p-4 space-y-3 ${step !== 'categorize' && categorizeResult ? 'opacity-60' : ''}`}>
+      {/* Step 2: Review */}
+      {(step === 'review' || step === 'post') && (
+        <div className={`border rounded-lg p-4 space-y-3 ${step === 'post' ? 'opacity-60' : ''}`}>
           <h4 className="font-medium text-sm flex items-center gap-2">
             <span className="bg-blue-100 text-blue-700 rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold">2</span>
-            Categorize Transactions
+            Review Transactions
           </h4>
 
-          {step === 'categorize' && !categorizeResult ? (
-            <Button onClick={handleCategorize} disabled={categorizing}>
-              {categorizing ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
-              Categorize
-            </Button>
-          ) : categorizeResult ? (
-            <div className="text-sm space-y-3">
-              {/* Summary stats */}
-              {(() => {
-                const matched = categorizedTxns.filter(t => t.category !== 'UNMATCHED_PAYMENTS' && t.category);
-                const unmatched = categorizedTxns.filter(t => t.category === 'UNMATCHED_PAYMENTS' || !t.category);
-                const total = categorizedTxns.reduce((sum, t) => sum + t.amount, 0);
-                return (
-                  <div className="flex flex-wrap gap-4 text-xs">
-                    <span><strong>{categorizeResult.categorized}</strong> categorized, <strong>{categorizeResult.skipped}</strong> skipped</span>
-                    {categorizedTxns.length > 0 && (
-                      <>
-                        <span className="text-green-600">{matched.length} matched</span>
-                        {unmatched.length > 0 && <span className="text-amber-600">{unmatched.length} unmatched</span>}
-                        <span className="font-mono">{formatCurrency(total)} total</span>
-                      </>
-                    )}
-                  </div>
-                );
-              })()}
+          <div className="flex flex-wrap gap-4 text-xs">
+            <span className="text-green-600">{matchedCount} matched</span>
+            {unmatchedCount > 0 && <span className="text-amber-600">{unmatchedCount} unmatched</span>}
+            <span className="font-mono">{formatCurrency(reviewTxns.reduce((sum, t) => sum + t.amount, 0))} total</span>
+          </div>
 
-              {/* Transaction review table */}
-              {loadingTxns ? (
-                <div className="flex items-center gap-2 text-muted-foreground text-xs py-4">
-                  <Loader2 className="h-3 w-3 animate-spin" /> Loading transactions...
-                </div>
-              ) : categorizedTxns.length > 0 ? (
-                <div className="border rounded overflow-hidden max-h-[400px] overflow-y-auto">
-                  <table className="w-full text-xs">
-                    <thead className="bg-muted/50 sticky top-0">
-                      <tr>
-                        <th className="text-left p-2 font-medium">Date</th>
-                        <th className="text-left p-2 font-medium">Narration</th>
-                        <th className="text-right p-2 font-medium">Amount</th>
-                        <th className="text-left p-2 font-medium">Party</th>
-                        <th className="text-left p-2 font-medium">Category</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {categorizedTxns.map((txn) => {
-                        const isUnmatched = txn.category === 'UNMATCHED_PAYMENTS' || !txn.category;
-                        return (
-                          <tr key={txn.id} className={`border-t ${isUnmatched ? 'bg-amber-50' : ''}`}>
-                            <td className="p-2 whitespace-nowrap">{new Date(txn.txnDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</td>
-                            <td className="p-2 max-w-[250px] truncate" title={txn.narration ?? ''}>{txn.narration ?? '—'}</td>
-                            <td className={`p-2 text-right font-mono whitespace-nowrap ${txn.direction === 'credit' ? 'text-green-600' : ''}`}>
-                              {txn.direction === 'credit' ? '+' : ''}{formatCurrency(txn.amount)}
-                            </td>
-                            <td className="p-2">{txn.counterpartyName ?? <span className="text-muted-foreground">—</span>}</td>
-                            <td className="p-2">
-                              {isUnmatched
-                                ? <span className="text-amber-600 font-medium">Unmatched</span>
-                                : <span>{txn.category}</span>}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              ) : null}
+          {/* Transaction review table */}
+          {loadingTxns ? (
+            <div className="flex items-center gap-2 text-muted-foreground text-xs py-4">
+              <Loader2 className="h-3 w-3 animate-spin" /> Loading transactions...
             </div>
-          ) : null}
+          ) : reviewTxns.length > 0 ? (
+            <div className="border rounded overflow-hidden max-h-[400px] overflow-y-auto">
+              <table className="w-full text-xs">
+                <thead className="bg-muted/50 sticky top-0">
+                  <tr>
+                    <th className="text-left p-2 font-medium">Date</th>
+                    <th className="text-left p-2 font-medium">Narration</th>
+                    <th className="text-right p-2 font-medium">Amount</th>
+                    <th className="text-left p-2 font-medium min-w-[180px]">Party</th>
+                    <th className="text-left p-2 font-medium">Category</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {reviewTxns.map((txn) => {
+                    const hasParty = !!(txn.partyId || txn.party?.id);
+                    return (
+                      <tr key={txn.id} className={`border-t ${!hasParty ? 'bg-amber-50' : ''}`}>
+                        <td className="p-2 whitespace-nowrap">{new Date(txn.txnDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</td>
+                        <td className="p-2 max-w-[250px] truncate" title={txn.narration ?? ''}>{txn.narration ?? '—'}</td>
+                        <td className={`p-2 text-right font-mono whitespace-nowrap ${txn.direction === 'credit' ? 'text-green-600' : ''}`}>
+                          {txn.direction === 'credit' ? '+' : ''}{formatCurrency(txn.amount)}
+                        </td>
+                        <td className="p-2">
+                          {hasParty ? (
+                            <span>{txn.party?.name ?? '—'}</span>
+                          ) : (
+                            <PartyAssignDropdown txnId={txn.id} onAssigned={handlePartyAssigned} />
+                          )}
+                        </td>
+                        <td className="p-2">
+                          {!hasParty
+                            ? <span className="text-amber-600 font-medium">Unmatched</span>
+                            : <span>{txn.category ?? '—'}</span>}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">No transactions in this batch.</p>
+          )}
+
+          {step === 'review' && (
+            <Button onClick={() => setStep('post')}>
+              Continue to Post
+            </Button>
+          )}
         </div>
       )}
 
@@ -1443,7 +1492,7 @@ function BankImportView({ onBack }: { onBack: () => void }) {
         <div className="border rounded-lg p-4 space-y-3">
           <h4 className="font-medium text-sm flex items-center gap-2">
             <span className="bg-blue-100 text-blue-700 rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold">3</span>
-            Create Payments
+            Post
           </h4>
 
           {dryRun && !postResult && (
@@ -1476,12 +1525,99 @@ function BankImportView({ onBack }: { onBack: () => void }) {
   );
 }
 
+// ---- Party Assignment Dropdown ----
+
+function PartyAssignDropdown({ txnId, onAssigned }: { txnId: string; onAssigned: () => void }) {
+  const [query, setQuery] = useState('');
+  const [open, setOpen] = useState(false);
+  const [assigning, setAssigning] = useState(false);
+  const searchFn = useServerFn(searchCounterparties);
+
+  const { data } = useQuery({
+    queryKey: ['finance', 'party-search', query],
+    queryFn: () => searchFn({ data: { query, type: 'party' } }),
+    enabled: query.length >= 2,
+  });
+
+  const results = data?.success ? data.results : [];
+
+  const handleAssign = async (partyId: string) => {
+    setAssigning(true);
+    try {
+      const res = await fetch('/api/bank-import/assign-party', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ txnId, partyId }),
+      });
+      if (res.ok) {
+        setOpen(false);
+        setQuery('');
+        onAssigned();
+      }
+    } finally {
+      setAssigning(false);
+    }
+  };
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        className="text-xs text-blue-600 hover:text-blue-800 underline"
+        onClick={() => setOpen(true)}
+      >
+        Assign party
+      </button>
+    );
+  }
+
+  return (
+    <div className="relative">
+      <Input
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        placeholder="Search party..."
+        className="h-7 text-xs w-[160px]"
+        autoFocus
+      />
+      {query.length >= 2 && results.length > 0 && (
+        <div className="absolute z-10 top-8 left-0 w-[200px] bg-white border rounded-md shadow-lg max-h-[150px] overflow-y-auto">
+          {results.map((r) => (
+            <button
+              key={r.id}
+              type="button"
+              className="block w-full text-left px-3 py-1.5 text-xs hover:bg-muted/50 disabled:opacity-50"
+              onClick={() => handleAssign(r.id)}
+              disabled={assigning}
+            >
+              {r.name}
+            </button>
+          ))}
+        </div>
+      )}
+      {query.length >= 2 && results.length === 0 && (
+        <div className="absolute z-10 top-8 left-0 w-[200px] bg-white border rounded-md shadow-lg p-2 text-xs text-muted-foreground">
+          No parties found
+        </div>
+      )}
+      <button
+        type="button"
+        className="text-xs text-muted-foreground hover:text-foreground mt-1"
+        onClick={() => { setOpen(false); setQuery(''); }}
+      >
+        Cancel
+      </button>
+    </div>
+  );
+}
+
 // ============================================
 // CONFIRM PAYABLE DIALOG (link to payment)
 // ============================================
 
 function ConfirmPayableDialog({ invoice, isPending, onConfirm, onClose }: {
-  invoice: { id: string; counterpartyName: string | null; totalAmount: number };
+  invoice: { id: string; totalAmount: number; party?: { id: string; name: string } | null };
   isPending: boolean;
   onConfirm: (linkedPaymentId?: string) => void;
   onClose: () => void;
@@ -1490,10 +1626,11 @@ function ConfirmPayableDialog({ invoice, isPending, onConfirm, onClose }: {
   const findPaymentsFn = useServerFn(findUnmatchedPayments);
 
   const { data, isLoading } = useQuery({
-    queryKey: ['finance', 'unmatched-payments', invoice.counterpartyName],
+    queryKey: ['finance', 'unmatched-payments', invoice.party?.id ?? invoice.party?.name],
     queryFn: () => findPaymentsFn({
       data: {
-        ...(invoice.counterpartyName ? { counterpartyName: invoice.counterpartyName } : {}),
+        ...(invoice.party?.id ? { partyId: invoice.party.id } : {}),
+        ...(invoice.party?.name ? { partyName: invoice.party.name } : {}),
       },
     }),
   });
@@ -1506,7 +1643,7 @@ function ConfirmPayableDialog({ invoice, isPending, onConfirm, onClose }: {
         <DialogHeader>
           <DialogTitle>Confirm Invoice</DialogTitle>
           <DialogDescription>
-            {formatCurrency(invoice.totalAmount)} to {invoice.counterpartyName ?? 'vendor'}. Was this already paid?
+            {formatCurrency(invoice.totalAmount)} to {invoice.party?.name ?? 'vendor'}. Was this already paid?
           </DialogDescription>
         </DialogHeader>
 
@@ -1537,7 +1674,7 @@ function ConfirmPayableDialog({ invoice, isPending, onConfirm, onClose }: {
                         </span>
                       </div>
                       <div className="flex items-center justify-between mt-1 text-xs text-muted-foreground">
-                        <span>{pmt.counterpartyName ?? '—'}</span>
+                        <span>{pmt.party?.name ?? '—'}</span>
                         <span>{pmt.referenceNumber ?? pmt.method.replace(/_/g, ' ')}</span>
                       </div>
                       {pmt.debitAccountCode === 'UNMATCHED_PAYMENTS' && (
@@ -1585,13 +1722,133 @@ function ConfirmPayableDialog({ invoice, isPending, onConfirm, onClose }: {
 }
 
 // ============================================
+// UPLOAD INVOICE DIALOG
+// ============================================
+
+function UploadInvoiceDialog({ open, onClose, onSuccess }: {
+  open: boolean;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const [file, setFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<{
+    invoiceNumber: string | null;
+    counterpartyName: string | null;
+    totalAmount: number;
+    aiConfidence: number;
+  } | null>(null);
+
+  const handleUpload = async () => {
+    if (!file) return;
+    setUploading(true);
+    setError(null);
+    setResult(null);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const res = await fetch('/api/finance/upload-and-parse', {
+        method: 'POST',
+        credentials: 'include',
+        body: formData,
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) throw new Error(json.error || 'Upload failed');
+
+      setResult({
+        invoiceNumber: json.invoice.invoiceNumber,
+        counterpartyName: json.invoice.counterpartyName,
+        totalAmount: json.invoice.totalAmount,
+        aiConfidence: json.aiConfidence,
+      });
+      onSuccess();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Upload failed');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleClose = () => {
+    setFile(null);
+    setError(null);
+    setResult(null);
+    onClose();
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => { if (!o) handleClose(); }}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Upload Invoice</DialogTitle>
+          <DialogDescription>Upload a PDF or image and we will extract the details automatically.</DialogDescription>
+        </DialogHeader>
+
+        {result ? (
+          <div className="space-y-3">
+            <div className="border border-green-200 bg-green-50 rounded-lg p-4 space-y-2">
+              <p className="text-sm font-medium text-green-700">Draft invoice created</p>
+              <div className="text-sm space-y-1">
+                {result.invoiceNumber && <p><span className="text-muted-foreground">Invoice #:</span> {result.invoiceNumber}</p>}
+                {result.counterpartyName && <p><span className="text-muted-foreground">Supplier:</span> {result.counterpartyName}</p>}
+                <p><span className="text-muted-foreground">Total:</span> {formatCurrency(result.totalAmount)}</p>
+                <p><span className="text-muted-foreground">AI Confidence:</span> {Math.round(result.aiConfidence * 100)}%</p>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button onClick={handleClose}>Done</Button>
+            </DialogFooter>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {error && (
+              <div className="border border-red-300 bg-red-50 text-red-700 rounded-lg p-3 text-sm flex items-center gap-2">
+                <AlertCircle className="h-4 w-4 shrink-0" /> {error}
+              </div>
+            )}
+
+            <label className="block border-2 border-dashed rounded-lg p-6 text-center cursor-pointer hover:bg-muted/30 transition-colors">
+              <input
+                type="file"
+                accept=".pdf,.jpg,.jpeg,.png,.webp"
+                className="hidden"
+                onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              />
+              {file ? (
+                <span className="text-sm">{file.name} ({(file.size / 1024).toFixed(0)} KB)</span>
+              ) : (
+                <div className="space-y-1">
+                  <Upload className="h-8 w-8 mx-auto text-muted-foreground" />
+                  <p className="text-sm text-muted-foreground">Click to select a file</p>
+                  <p className="text-xs text-muted-foreground">PDF, JPEG, PNG, or WebP</p>
+                </div>
+              )}
+            </label>
+
+            <DialogFooter>
+              <Button variant="outline" onClick={handleClose}>Cancel</Button>
+              <Button onClick={handleUpload} disabled={!file || uploading}>
+                {uploading ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Upload className="h-4 w-4 mr-1" />}
+                {uploading ? 'Parsing...' : 'Upload'}
+              </Button>
+            </DialogFooter>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ============================================
 // CREATE INVOICE MODAL
 // ============================================
 
 function CreateInvoiceModal({ open, onClose, prefill }: {
   open: boolean;
   onClose: () => void;
-  prefill?: { type: 'payable' | 'receivable'; totalAmount: number; counterpartyName: string; partyId?: string };
+  prefill?: { type: 'payable' | 'receivable'; totalAmount: number; partyId?: string };
 }) {
   const queryClient = useQueryClient();
   const createFn = useServerFn(createInvoice);
@@ -1600,7 +1857,6 @@ function CreateInvoiceModal({ open, onClose, prefill }: {
     type: 'payable' as 'payable' | 'receivable',
     category: 'other' as string,
     invoiceNumber: '',
-    counterpartyName: '',
     totalAmount: '',
     gstAmount: '',
     invoiceDate: new Date().toISOString().split('T')[0],
@@ -1617,7 +1873,6 @@ function CreateInvoiceModal({ open, onClose, prefill }: {
       type: prefill.type,
       category: 'other',
       invoiceNumber: '',
-      counterpartyName: prefill.counterpartyName,
       totalAmount: String(prefill.totalAmount),
       gstAmount: '',
       invoiceDate: new Date().toISOString().split('T')[0],
@@ -1634,7 +1889,6 @@ function CreateInvoiceModal({ open, onClose, prefill }: {
           type: form.type,
           category: form.category,
           ...(form.invoiceNumber ? { invoiceNumber: form.invoiceNumber } : {}),
-          ...(form.counterpartyName ? { counterpartyName: form.counterpartyName } : {}),
           totalAmount: Number(form.totalAmount),
           ...(form.gstAmount ? { gstAmount: Number(form.gstAmount) } : {}),
           ...(form.invoiceDate ? { invoiceDate: form.invoiceDate } : {}),
@@ -1656,7 +1910,6 @@ function CreateInvoiceModal({ open, onClose, prefill }: {
       type: 'payable',
       category: 'other',
       invoiceNumber: '',
-      counterpartyName: '',
       totalAmount: '',
       gstAmount: '',
       invoiceDate: new Date().toISOString().split('T')[0],
@@ -1700,10 +1953,6 @@ function CreateInvoiceModal({ open, onClose, prefill }: {
           <div>
             <Label>Invoice Number</Label>
             <Input value={form.invoiceNumber} onChange={(e) => setForm({ ...form, invoiceNumber: e.target.value })} placeholder="Optional" />
-          </div>
-          <div>
-            <Label>Counterparty</Label>
-            <Input value={form.counterpartyName} onChange={(e) => setForm({ ...form, counterpartyName: e.target.value })} placeholder="Vendor/customer name" />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -1758,7 +2007,6 @@ function CreatePaymentModal({ open, onClose }: { open: boolean; onClose: () => v
     method: 'bank_transfer' as string,
     amount: '',
     referenceNumber: '',
-    counterpartyName: '',
     paymentDate: new Date().toISOString().split('T')[0],
     notes: '',
   });
@@ -1771,7 +2019,6 @@ function CreatePaymentModal({ open, onClose }: { open: boolean; onClose: () => v
           method: form.method,
           amount: Number(form.amount),
           ...(form.referenceNumber ? { referenceNumber: form.referenceNumber } : {}),
-          ...(form.counterpartyName ? { counterpartyName: form.counterpartyName } : {}),
           paymentDate: form.paymentDate,
           ...(form.notes ? { notes: form.notes } : {}),
         },
@@ -1784,7 +2031,6 @@ function CreatePaymentModal({ open, onClose }: { open: boolean; onClose: () => v
         method: 'bank_transfer',
         amount: '',
         referenceNumber: '',
-        counterpartyName: '',
         paymentDate: new Date().toISOString().split('T')[0],
         notes: '',
       });
@@ -1831,10 +2077,6 @@ function CreatePaymentModal({ open, onClose }: { open: boolean; onClose: () => v
               <Label>Reference #</Label>
               <Input value={form.referenceNumber} onChange={(e) => setForm({ ...form, referenceNumber: e.target.value })} placeholder="UTR, Txn ID" />
             </div>
-          </div>
-          <div>
-            <Label>Counterparty</Label>
-            <Input value={form.counterpartyName} onChange={(e) => setForm({ ...form, counterpartyName: e.target.value })} placeholder="Name" />
           </div>
           <div>
             <Label>Payment Date</Label>

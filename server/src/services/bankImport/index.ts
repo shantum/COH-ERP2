@@ -6,8 +6,8 @@ export {
 } from './import.js';
 export type { ImportResult } from './import.js';
 
-export { categorizeTransactions } from './categorize.js';
-export type { CategorizeResult } from './categorize.js';
+export { categorizeTransactions, fetchActiveParties, categorizeSingleTxn } from './categorize.js';
+export type { CategorizeResult, CategoryInfo } from './categorize.js';
 
 export { auditExistingEntries } from './audit.js';
 export type { AuditResult } from './audit.js';

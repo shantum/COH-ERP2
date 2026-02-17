@@ -28,7 +28,7 @@ export interface CategorizeResult {
   breakdown: Record<string, { count: number; total: number }>;
 }
 
-interface CategoryInfo {
+export interface CategoryInfo {
   skip?: boolean;
   skipReason?: string;
   debitAccount: string;
@@ -244,20 +244,12 @@ function categorizeCcCharge(
 }
 
 // ============================================
-// MAIN CATEGORIZE FUNCTION
+// REUSABLE HELPERS (used by import.ts for inline categorization)
 // ============================================
 
-export async function categorizeTransactions(options?: { bank?: string }): Promise<CategorizeResult> {
-  const where: Record<string, unknown> = { status: 'imported' };
-  if (options?.bank) where.bank = options.bank;
-
-  const txns = await prisma.bankTransaction.findMany({
-    where: where as any,
-    orderBy: { txnDate: 'asc' },
-  });
-
-  // Pre-fetch ALL active parties with their TransactionType (single query)
-  const parties = await prisma.party.findMany({
+/** Fetch all active parties with TransactionType — single query, reusable */
+export async function fetchActiveParties(): Promise<PartyWithTxnType[]> {
+  return prisma.party.findMany({
     where: { isActive: true },
     select: {
       id: true,
@@ -284,6 +276,46 @@ export async function categorizeTransactions(options?: { bank?: string }): Promi
       },
     },
   });
+}
+
+/** Categorize a single transaction — returns update data (no status change) */
+export function categorizeSingleTxn(
+  txn: { bank: string; narration: string | null; direction: string; counterpartyName: string | null; rawData: unknown; legacySourceId: string | null },
+  parties: PartyWithTxnType[],
+): CategoryInfo {
+  const rawData = (txn.rawData ?? {}) as Record<string, unknown>;
+
+  if (txn.bank === 'hdfc') {
+    return categorizeHdfc(txn.narration || '', txn.direction as 'debit' | 'credit', parties);
+  } else if (txn.bank === 'razorpayx') {
+    if (txn.legacySourceId?.startsWith('pay_') || txn.legacySourceId?.startsWith('pout_')) {
+      return categorizeRazorpayxPayout(rawData, parties);
+    } else if (txn.narration === 'Bank charges (RazorpayX)') {
+      return categorizeRazorpayxCharge();
+    } else {
+      return categorizeRazorpayxPayout(rawData, parties);
+    }
+  } else if (txn.bank === 'hdfc_cc' || txn.bank === 'icici_cc') {
+    return categorizeCcCharge(txn.narration || '', txn.bank, parties);
+  }
+
+  return { debitAccount: 'UNMATCHED_PAYMENTS', creditAccount: 'UNMATCHED_PAYMENTS', description: 'Unknown bank type' };
+}
+
+// ============================================
+// MAIN CATEGORIZE FUNCTION
+// ============================================
+
+export async function categorizeTransactions(options?: { bank?: string }): Promise<CategorizeResult> {
+  const where: Record<string, unknown> = { status: 'imported' };
+  if (options?.bank) where.bank = options.bank;
+
+  const txns = await prisma.bankTransaction.findMany({
+    where: where as any,
+    orderBy: { txnDate: 'asc' },
+  });
+
+  const parties = await fetchActiveParties();
 
   // Pre-fetch open invoices for RazorpayX matching
   const openInvoices = await prisma.invoice.findMany({
@@ -303,24 +335,8 @@ export async function categorizeTransactions(options?: { bank?: string }): Promi
   const updates: { id: string; data: Record<string, unknown> }[] = [];
 
   for (const txn of txns) {
-    let cat: CategoryInfo;
+    const cat = categorizeSingleTxn(txn, parties);
     const rawData = (txn.rawData ?? {}) as Record<string, unknown>;
-
-    if (txn.bank === 'hdfc') {
-      cat = categorizeHdfc(txn.narration || '', txn.direction as 'debit' | 'credit', parties);
-    } else if (txn.bank === 'razorpayx') {
-      if (txn.legacySourceId?.startsWith('pay_') || txn.legacySourceId?.startsWith('pout_')) {
-        cat = categorizeRazorpayxPayout(rawData, parties);
-      } else if (txn.narration === 'Bank charges (RazorpayX)') {
-        cat = categorizeRazorpayxCharge();
-      } else {
-        cat = categorizeRazorpayxPayout(rawData, parties);
-      }
-    } else if (txn.bank === 'hdfc_cc' || txn.bank === 'icici_cc') {
-      cat = categorizeCcCharge(txn.narration || '', txn.bank, parties);
-    } else {
-      cat = { debitAccount: 'UNMATCHED_PAYMENTS', creditAccount: 'UNMATCHED_PAYMENTS', description: 'Unknown bank type' };
-    }
 
     if (cat.skip) {
       updates.push({

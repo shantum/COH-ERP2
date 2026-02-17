@@ -1,10 +1,11 @@
 /**
  * Invoice Parser Service
  *
- * Sends fabric invoice PDFs/photos to Claude Sonnet Vision API
+ * Sends invoice PDFs/photos to Claude Sonnet Vision API
  * and extracts structured invoice data (supplier, line items, totals, GST).
  *
- * Tuned for Indian fabric supplier invoices (DD/MM/YYYY dates, GST, INR).
+ * Handles any Indian business invoice (fabric, service, rent, etc.)
+ * with DD/MM/YYYY dates, GST, INR.
  */
 
 import Anthropic from '@anthropic-ai/sdk';
@@ -32,6 +33,8 @@ const ParsedLineSchema = z.object({
 const ParsedInvoiceSchema = z.object({
     invoiceNumber: z.string().nullable().optional(),
     invoiceDate: z.string().nullable().optional(),     // DD/MM/YYYY or ISO
+    dueDate: z.string().nullable().optional(),         // DD/MM/YYYY or ISO
+    billingPeriod: z.string().nullable().optional(),   // YYYY-MM
     supplierName: z.string().nullable().optional(),
     supplierGstin: z.string().nullable().optional(),
     subtotal: z.number().nullable().optional(),
@@ -48,14 +51,17 @@ export type ParsedLine = z.infer<typeof ParsedLineSchema>;
 // SYSTEM PROMPT
 // ============================================
 
-const SYSTEM_PROMPT = `You are an expert at reading Indian fabric supplier invoices. Extract structured data from the invoice image or PDF.
+const SYSTEM_PROMPT = `You are an expert at reading Indian business invoices. Extract structured data from the invoice image or PDF.
 
 IMPORTANT RULES:
 - Dates are typically DD/MM/YYYY format (Indian standard). Return them as DD/MM/YYYY.
 - Currency is INR (Indian Rupees). Return numbers without currency symbols.
 - GST can be SGST+CGST (intra-state) or IGST (inter-state). Sum them for total GST.
-- Fabric descriptions often include: fabric type (cotton, linen, polyester), colour, width, GSM/count.
-- "Mtr" or "Mtrs" = meters. "Kg" = kilograms. "Yds" = yards.
+- This could be any kind of Indian invoice: fabric, trims, services, rent, logistics, software, marketing, etc.
+- For fabric invoices: "Mtr" or "Mtrs" = meters, "Kg" = kilograms, "Yds" = yards.
+- For service invoices: look for SAC codes (service accounting codes) in addition to HSN codes.
+- billingPeriod: If the invoice covers a specific month (e.g. "for the month of January 2026" or "Jan 2026"), return as "YYYY-MM". For recurring services (rent, software, salaries), the billing period is usually mentioned. If not clear, derive from invoiceDate as "YYYY-MM".
+- dueDate: Extract if present ("due by", "payment due", "pay before", etc.). Return as DD/MM/YYYY.
 - If a field is not visible or you can't read it, set it to null.
 - Set confidence from 0 to 1 based on how clearly you could read the invoice.
 
@@ -63,6 +69,8 @@ Return ONLY valid JSON matching this structure (no markdown, no code fences):
 {
   "invoiceNumber": "string or null",
   "invoiceDate": "DD/MM/YYYY or null",
+  "dueDate": "DD/MM/YYYY or null",
+  "billingPeriod": "YYYY-MM or null",
   "supplierName": "string or null",
   "supplierGstin": "string or null",
   "subtotal": number or null,
@@ -71,10 +79,10 @@ Return ONLY valid JSON matching this structure (no markdown, no code fences):
   "confidence": number between 0 and 1,
   "lines": [
     {
-      "description": "fabric description",
-      "hsnCode": "HSN code or null",
+      "description": "item or service description",
+      "hsnCode": "HSN or SAC code or null",
       "qty": number or null,
-      "unit": "meter" or "kg" or "yard" or null,
+      "unit": "string or null",
       "rate": number or null,
       "amount": number or null,
       "gstPercent": number or null,
@@ -94,7 +102,7 @@ const AI_MODEL = 'claude-sonnet-4-5-20250929';
 // ============================================
 
 /**
- * Parse a fabric invoice file (PDF or image) using Claude Vision API.
+ * Parse an invoice file (PDF or image) using Claude Vision API.
  *
  * @param fileBuffer - The raw file bytes
  * @param mimeType - "application/pdf", "image/jpeg", "image/png", etc.
@@ -141,7 +149,7 @@ export async function parseInvoice(
                 role: 'user',
                 content: [
                     contentBlock,
-                    { type: 'text', text: 'Extract all invoice data from this fabric supplier invoice. Return JSON only.' },
+                    { type: 'text', text: 'Extract all invoice data from this invoice. Return JSON only.' },
                 ],
             },
         ],
@@ -169,6 +177,8 @@ export async function parseInvoice(
         parsed = {
             invoiceNumber: null,
             invoiceDate: null,
+            dueDate: null,
+            billingPeriod: null,
             supplierName: null,
             supplierGstin: null,
             subtotal: null,

@@ -105,7 +105,10 @@ function decidePosting(
 // ============================================
 
 export async function getDryRunSummary(options?: { bank?: string }): Promise<DryRunSummary> {
-  const where: Record<string, unknown> = { status: 'categorized' };
+  const where: Record<string, unknown> = {
+    status: { in: ['imported', 'categorized'] },
+    debitAccountCode: { not: null },
+  };
   if (options?.bank) where.bank = options.bank;
 
   const txns = await prisma.bankTransaction.findMany({
@@ -169,7 +172,10 @@ export async function postTransactions(options?: { bank?: string }): Promise<Pos
   const admin = await prisma.user.findFirst({ where: { role: 'admin' } });
   if (!admin) throw new Error('No admin user found — needed for payment createdById');
 
-  const where: Record<string, unknown> = { status: 'categorized' };
+  const where: Record<string, unknown> = {
+    status: { in: ['imported', 'categorized'] },
+    debitAccountCode: { not: null },
+  };
   if (options?.bank) where.bank = options.bank;
 
   const txns = await prisma.bankTransaction.findMany({
@@ -234,7 +240,6 @@ export async function postTransactions(options?: { bank?: string }): Promise<Pos
                 unmatchedAmount: txn.amount,
                 paymentDate: entryDate,
                 referenceNumber: txn.reference ?? txn.utr ?? null,
-                counterpartyName: txn.counterpartyName ?? null,
                 debitAccountCode: decision.intendedDebitAccount ?? decision.debitAccount,
                 createdById: admin.id,
                 ...(txn.partyId ? { partyId: txn.partyId } : {}),

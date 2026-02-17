@@ -15,7 +15,7 @@ import {
   CreateInvoiceSchema,
   UpdateInvoiceSchema,
   CreateFinancePaymentSchema,
-  MatchPaymentInvoiceSchema,
+  MatchAllocationSchema,
   ListInvoicesInput,
   ListPaymentsInput,
   ListBankTransactionsInput,
@@ -88,7 +88,7 @@ export const getFinanceAlerts = createServerFn({ method: 'GET' })
       total_amount: number; tds_amount: number; paid_amount: number;
     }>>`
       SELECT i.id, i."invoiceNumber" AS invoice_number,
-             COALESCE(p.name, i."counterpartyName") AS counterparty,
+             p.name AS counterparty,
              i."totalAmount"::float AS total_amount,
              COALESCE(i."tdsAmount", 0)::float AS tds_amount,
              i."paidAmount"::float AS paid_amount
@@ -111,7 +111,7 @@ export const getFinanceAlerts = createServerFn({ method: 'GET' })
       amount: number; matched_amount: number;
     }>>`
       SELECT pay.id, pay."referenceNumber" AS reference,
-             COALESCE(p.name, pay."counterpartyName") AS counterparty,
+             p.name AS counterparty,
              pay.amount::float AS amount,
              pay."matchedAmount"::float AS matched_amount
       FROM "Payment" pay
@@ -169,7 +169,7 @@ export const getFinanceAlerts = createServerFn({ method: 'GET' })
       amount: number; unmatched: number; payment_date: Date;
     }>>`
       SELECT pay.id, pay."referenceNumber" AS reference,
-             COALESCE(p.name, pay."counterpartyName") AS counterparty,
+             p.name AS counterparty,
              pay.amount::float AS amount,
              pay."unmatchedAmount"::float AS unmatched,
              pay."paymentDate" AS payment_date
@@ -227,7 +227,7 @@ export const getFinanceAlerts = createServerFn({ method: 'GET' })
       reference: string; counterparty: string; amount: number; cnt: number;
     }>>`
       SELECT pay."referenceNumber" AS reference,
-             COALESCE(p.name, pay."counterpartyName") AS counterparty,
+             p.name AS counterparty,
              pay.amount::float AS amount,
              COUNT(*)::int AS cnt
       FROM "Payment" pay
@@ -235,7 +235,7 @@ export const getFinanceAlerts = createServerFn({ method: 'GET' })
       WHERE pay.status != 'cancelled'
         AND pay."referenceNumber" IS NOT NULL
         AND pay."referenceNumber" != ''
-      GROUP BY pay."referenceNumber", COALESCE(p.name, pay."counterpartyName"), pay.amount
+      GROUP BY pay."referenceNumber", p.name, pay.amount
       HAVING COUNT(*) > 1
       ORDER BY pay.amount DESC
       LIMIT 10
@@ -248,20 +248,20 @@ export const getFinanceAlerts = createServerFn({ method: 'GET' })
       });
     }
 
-    // 10. Invoice paidAmount out of sync with actual PaymentInvoice records
+    // 10. Invoice paidAmount out of sync with actual Allocation records
     const invoiceMismatch = await prisma.$queryRaw<Array<{
       id: string; invoice_number: string | null; counterparty: string | null;
       paid_amount: number; actual_paid: number;
     }>>`
       SELECT i.id, i."invoiceNumber" AS invoice_number,
-             COALESCE(p.name, i."counterpartyName") AS counterparty,
+             p.name AS counterparty,
              i."paidAmount"::float AS paid_amount,
              COALESCE(SUM(pi.amount), 0)::float AS actual_paid
       FROM "Invoice" i
       LEFT JOIN "Party" p ON p.id = i."partyId"
-      LEFT JOIN "PaymentInvoice" pi ON pi."invoiceId" = i.id
+      LEFT JOIN "Allocation" pi ON pi."invoiceId" = i.id
       WHERE i.status != 'cancelled'
-      GROUP BY i.id, i."invoiceNumber", p.name, i."counterpartyName", i."paidAmount"
+      GROUP BY i.id, i."invoiceNumber", p.name, i."paidAmount"
       HAVING ABS(i."paidAmount" - COALESCE(SUM(pi.amount), 0)) > 1
       LIMIT 10
     `;
@@ -279,14 +279,14 @@ export const getFinanceAlerts = createServerFn({ method: 'GET' })
       matched_amount: number; actual_matched: number;
     }>>`
       SELECT pay.id, pay."referenceNumber" AS reference,
-             COALESCE(p.name, pay."counterpartyName") AS counterparty,
+             p.name AS counterparty,
              pay."matchedAmount"::float AS matched_amount,
              COALESCE(SUM(pi.amount), 0)::float AS actual_matched
       FROM "Payment" pay
       LEFT JOIN "Party" p ON p.id = pay."partyId"
-      LEFT JOIN "PaymentInvoice" pi ON pi."paymentId" = pay.id
+      LEFT JOIN "Allocation" pi ON pi."paymentId" = pay.id
       WHERE pay.status != 'cancelled'
-      GROUP BY pay.id, pay."referenceNumber", p.name, pay."counterpartyName", pay."matchedAmount"
+      GROUP BY pay.id, pay."referenceNumber", p.name, pay."matchedAmount"
       HAVING ABS(pay."matchedAmount" - COALESCE(SUM(pi.amount), 0)) > 1
       LIMIT 10
     `;
@@ -342,7 +342,7 @@ export const listInvoices = createServerFn({ method: 'POST' })
     if (search) {
       where.OR = [
         { invoiceNumber: { contains: search, mode: 'insensitive' } },
-        { counterpartyName: { contains: search, mode: 'insensitive' } },
+        { party: { name: { contains: search, mode: 'insensitive' } } },
         { notes: { contains: search, mode: 'insensitive' } },
       ];
     }
@@ -358,7 +358,6 @@ export const listInvoices = createServerFn({ method: 'POST' })
           status: true,
           invoiceDate: true,
           dueDate: true,
-          counterpartyName: true,
           totalAmount: true,
           tdsAmount: true,
           paidAmount: true,
@@ -368,7 +367,7 @@ export const listInvoices = createServerFn({ method: 'POST' })
           createdAt: true,
           party: { select: { id: true, name: true, bankAccountName: true, bankAccountNumber: true, bankIfsc: true, phone: true, email: true } },
           customer: { select: { id: true, email: true, firstName: true, lastName: true } },
-          _count: { select: { lines: true, matchedPayments: true } },
+          _count: { select: { lines: true, allocations: true } },
         },
         orderBy: [{ invoiceDate: 'desc' }, { createdAt: 'desc' }],
         skip,
@@ -396,7 +395,7 @@ export const getInvoice = createServerFn({ method: 'GET' })
       where: { id: data.id },
       include: {
         lines: true,
-        matchedPayments: {
+        allocations: {
           include: {
             payment: {
               select: { id: true, referenceNumber: true, method: true, amount: true, paymentDate: true },
@@ -439,7 +438,6 @@ export const createInvoice = createServerFn({ method: 'POST' })
         billingPeriod: data.billingPeriod ?? null,
         ...(data.partyId ? { partyId: data.partyId } : {}),
         ...(data.customerId ? { customerId: data.customerId } : {}),
-        counterpartyName: data.counterpartyName ?? null,
         subtotal: data.subtotal ?? null,
         gstAmount: data.gstAmount ?? null,
         totalAmount: data.totalAmount,
@@ -497,7 +495,6 @@ export const updateInvoice = createServerFn({ method: 'POST' })
     if (updateData.dueDate !== undefined) updates.dueDate = updateData.dueDate ? new Date(updateData.dueDate) : null;
     if (updateData.partyId !== undefined) updates.partyId = updateData.partyId;
     if (updateData.customerId !== undefined) updates.customerId = updateData.customerId;
-    if (updateData.counterpartyName !== undefined) updates.counterpartyName = updateData.counterpartyName;
     if (updateData.subtotal !== undefined) updates.subtotal = updateData.subtotal;
     if (updateData.gstAmount !== undefined) updates.gstAmount = updateData.gstAmount;
     if (updateData.totalAmount !== undefined) {
@@ -530,7 +527,7 @@ export const confirmInvoice = createServerFn({ method: 'POST' })
 
     const invoice = await prisma.invoice.findUnique({
       where: { id: data.id },
-      select: { id: true, type: true, category: true, status: true, totalAmount: true, gstAmount: true, subtotal: true, counterpartyName: true, invoiceNumber: true, partyId: true, invoiceDate: true, billingPeriod: true },
+      select: { id: true, type: true, category: true, status: true, totalAmount: true, gstAmount: true, subtotal: true, invoiceNumber: true, partyId: true, invoiceDate: true, billingPeriod: true },
     });
 
     if (!invoice) return { success: false as const, error: 'Invoice not found' };
@@ -576,7 +573,7 @@ export const confirmInvoice = createServerFn({ method: 'POST' })
 
 /**
  * Confirm an invoice and link it to an existing payment.
- * Creates PaymentInvoice match, updates payment matched/unmatched amounts,
+ * Creates Allocation (payment → invoice match), updates payment matched/unmatched amounts,
  * and marks invoice as paid.
  *
  * The match amount uses the net payable (totalAmount - tdsAmount) because TDS is withheld
@@ -606,8 +603,8 @@ async function confirmInvoiceWithLinkedPayment(
 
   // Use a transaction to keep all writes atomic
   return prisma.$transaction(async (tx) => {
-    // Create PaymentInvoice match record
-    await tx.paymentInvoice.create({
+    // Create allocation (payment → invoice match)
+    await tx.allocation.create({
       data: {
         paymentId,
         invoiceId: invoice.id,
@@ -687,8 +684,8 @@ export const cancelInvoice = createServerFn({ method: 'POST' })
     if (invoice.status === 'paid') return { success: false as const, error: 'Cannot cancel a paid invoice' };
 
     return prisma.$transaction(async (tx) => {
-      // 1. Clean up payment matches (restore unmatched amounts on linked payments)
-      const matches = await tx.paymentInvoice.findMany({
+      // 1. Clean up allocations (restore unmatched amounts on linked payments)
+      const matches = await tx.allocation.findMany({
         where: { invoiceId: data.id },
       });
       if (matches.length > 0) {
@@ -701,7 +698,7 @@ export const cancelInvoice = createServerFn({ method: 'POST' })
             },
           });
         }
-        await tx.paymentInvoice.deleteMany({ where: { invoiceId: data.id } });
+        await tx.allocation.deleteMany({ where: { invoiceId: data.id } });
       }
 
       // 2. Cancel the invoice and reset paid amounts
@@ -735,7 +732,7 @@ export const listPayments = createServerFn({ method: 'POST' })
     if (search) {
       where.OR = [
         { referenceNumber: { contains: search, mode: 'insensitive' } },
-        { counterpartyName: { contains: search, mode: 'insensitive' } },
+        { party: { name: { contains: search, mode: 'insensitive' } } },
         { notes: { contains: search, mode: 'insensitive' } },
       ];
     }
@@ -753,12 +750,41 @@ export const listPayments = createServerFn({ method: 'POST' })
           matchedAmount: true,
           unmatchedAmount: true,
           paymentDate: true,
-          counterpartyName: true,
+          debitAccountCode: true,
+          driveUrl: true,
+          fileName: true,
           notes: true,
           createdAt: true,
-          party: { select: { id: true, name: true } },
+          party: {
+            select: {
+              id: true,
+              name: true,
+              category: true,
+              gstin: true,
+              tdsApplicable: true,
+              tdsRate: true,
+              tdsSection: true,
+              transactionType: { select: { name: true, expenseCategory: true, defaultGstRate: true } },
+            },
+          },
           customer: { select: { id: true, email: true, firstName: true, lastName: true } },
-          _count: { select: { matchedInvoices: true } },
+          allocations: {
+            select: {
+              invoice: {
+                select: {
+                  id: true,
+                  invoiceNumber: true,
+                  invoiceDate: true,
+                  billingPeriod: true,
+                },
+              },
+            },
+            take: 3,
+          },
+          bankTransaction: {
+            select: { category: true, bank: true, rawData: true },
+          },
+          _count: { select: { allocations: true } },
         },
         orderBy: { paymentDate: 'desc' },
         skip,
@@ -793,7 +819,6 @@ export const createFinancePayment = createServerFn({ method: 'POST' })
         paymentDate: new Date(data.paymentDate),
         ...(data.partyId ? { partyId: data.partyId } : {}),
         ...(data.customerId ? { customerId: data.customerId } : {}),
-        counterpartyName: data.counterpartyName ?? null,
         debitAccountCode,
         notes: data.notes ?? null,
         createdById: userId,
@@ -810,7 +835,7 @@ export const createFinancePayment = createServerFn({ method: 'POST' })
 
 export const matchPaymentToInvoice = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
-  .inputValidator((input: unknown) => MatchPaymentInvoiceSchema.parse(input))
+  .inputValidator((input: unknown) => MatchAllocationSchema.parse(input))
   .handler(async ({ data, context }) => {
     const prisma = await getPrisma();
     const userId = context.user.id;
@@ -828,7 +853,7 @@ export const matchPaymentToInvoice = createServerFn({ method: 'POST' })
     if (data.amount > invoice.balanceDue + 0.01) return { success: false as const, error: 'Amount exceeds invoice balance due' };
 
     return prisma.$transaction(async (tx) => {
-      await tx.paymentInvoice.create({
+      await tx.allocation.create({
         data: {
           paymentId: data.paymentId,
           invoiceId: data.invoiceId,
@@ -872,14 +897,14 @@ export const unmatchPayment = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     const prisma = await getPrisma();
 
-    const match = await prisma.paymentInvoice.findUnique({
+    const match = await prisma.allocation.findUnique({
       where: { paymentId_invoiceId: { paymentId: data.paymentId, invoiceId: data.invoiceId } },
     });
 
     if (!match) return { success: false as const, error: 'Match not found' };
 
     return prisma.$transaction(async (tx) => {
-      await tx.paymentInvoice.delete({
+      await tx.allocation.delete({
         where: { paymentId_invoiceId: { paymentId: data.paymentId, invoiceId: data.invoiceId } },
       });
 
@@ -916,7 +941,8 @@ export const unmatchPayment = createServerFn({ method: 'POST' })
 // ============================================
 
 const findUnmatchedPaymentsInput = z.object({
-  counterpartyName: z.string().optional(),
+  partyId: z.string().uuid().optional(),
+  partyName: z.string().optional(),
   amountMin: z.number().optional(),
   amountMax: z.number().optional(),
 }).optional();
@@ -926,7 +952,7 @@ export const findUnmatchedPayments = createServerFn({ method: 'POST' })
   .inputValidator((input: unknown) => findUnmatchedPaymentsInput.parse(input))
   .handler(async ({ data }) => {
     const prisma = await getPrisma();
-    const { counterpartyName, amountMin, amountMax } = data ?? {};
+    const { partyId, partyName, amountMin, amountMax } = data ?? {};
 
     const where: Record<string, unknown> = {
       direction: 'outgoing',
@@ -934,14 +960,10 @@ export const findUnmatchedPayments = createServerFn({ method: 'POST' })
       unmatchedAmount: { gt: 0.01 },
     };
 
-    if (counterpartyName) {
-      // Look up Party aliases so we match all known names (e.g. "Google India Pvt. Ltd." + "GOOGLE INDIA DIGITAL")
-      const party = await prisma.party.findFirst({
-        where: { name: { equals: counterpartyName, mode: 'insensitive' } },
-        select: { aliases: true },
-      });
-      const allNames = [counterpartyName, ...(party?.aliases ?? [])];
-      where.OR = allNames.map((n) => ({ counterpartyName: { contains: n, mode: 'insensitive' } }));
+    if (partyId) {
+      where.partyId = partyId;
+    } else if (partyName) {
+      where.party = { name: { contains: partyName, mode: 'insensitive' } };
     }
     if (amountMin !== undefined || amountMax !== undefined) {
       where.amount = {
@@ -958,10 +980,10 @@ export const findUnmatchedPayments = createServerFn({ method: 'POST' })
         unmatchedAmount: true,
         paymentDate: true,
         referenceNumber: true,
-        counterpartyName: true,
         method: true,
         notes: true,
         debitAccountCode: true,
+        party: { select: { id: true, name: true } },
       },
       orderBy: { paymentDate: 'desc' },
       take: 20,
@@ -1151,7 +1173,6 @@ export const getPnlAccountDetail = createServerFn({ method: 'POST' })
         totalAmount: true,
         gstAmount: true,
         invoiceDate: true,
-        counterpartyName: true,
         type: true,
         party: { select: { name: true } },
       },
@@ -1166,7 +1187,7 @@ export const getPnlAccountDetail = createServerFn({ method: 'POST' })
     for (const inv of invoices) {
       const amount = Math.round((inv.totalAmount - (inv.gstAmount ?? 0)) * 100) / 100;
       const date = inv.invoiceDate ? new Date(inv.invoiceDate).toISOString().slice(0, 10) : '';
-      const counterparty = inv.party?.name ?? inv.counterpartyName;
+      const counterparty = inv.party?.name ?? null;
       const key = inv.category;
       const label = categoryToExpenseAccountName(inv.category);
 
@@ -1274,12 +1295,13 @@ export const listBankTransactions = createServerFn({ method: 'POST' })
   .inputValidator((input: unknown) => ListBankTransactionsInput.parse(input))
   .handler(async ({ data }) => {
     const prisma = await getPrisma();
-    const { bank, status, search, page = 1, limit = 50 } = data ?? {};
+    const { bank, status, batchId, search, page = 1, limit = 50 } = data ?? {};
     const skip = (page - 1) * limit;
 
     const where: Record<string, unknown> = {};
     if (bank) where.bank = bank;
     if (status) where.status = status;
+    if (batchId) where.batchId = batchId;
     if (search) {
       where.OR = [
         { narration: { contains: search, mode: 'insensitive' } },
@@ -1305,6 +1327,9 @@ export const listBankTransactions = createServerFn({ method: 'POST' })
           status: true,
           skipReason: true,
           category: true,
+          partyId: true,
+          party: { select: { id: true, name: true } },
+          batchId: true,
           createdAt: true,
         },
         orderBy: { txnDate: 'desc' },

@@ -74,7 +74,6 @@ export const CreateInvoiceSchema = z.object({
   billingPeriod: z.string().regex(/^\d{4}-\d{2}$/).optional(),
   partyId: z.string().uuid().optional(),
   customerId: z.string().uuid().optional(),
-  counterpartyName: z.string().optional(),
   subtotal: z.number().optional(),
   gstAmount: z.number().optional(),
   totalAmount: z.number().positive(),
@@ -94,7 +93,6 @@ export const UpdateInvoiceSchema = z.object({
   billingPeriod: z.string().regex(/^\d{4}-\d{2}$/).nullable().optional(),
   partyId: z.string().uuid().nullable().optional(),
   customerId: z.string().uuid().nullable().optional(),
-  counterpartyName: z.string().nullable().optional(),
   subtotal: z.number().nullable().optional(),
   gstAmount: z.number().nullable().optional(),
   totalAmount: z.number().positive().optional(),
@@ -114,7 +112,6 @@ export const CreateFinancePaymentSchema = z.object({
   paymentDate: z.string(),
   partyId: z.string().uuid().optional(),
   customerId: z.string().uuid().optional(),
-  counterpartyName: z.string().optional(),
   notes: z.string().optional(),
 });
 export type CreateFinancePaymentInput = z.infer<typeof CreateFinancePaymentSchema>;
@@ -123,13 +120,13 @@ export type CreateFinancePaymentInput = z.infer<typeof CreateFinancePaymentSchem
 // PAYMENT-INVOICE MATCHING
 // ============================================
 
-export const MatchPaymentInvoiceSchema = z.object({
+export const MatchAllocationSchema = z.object({
   paymentId: z.string().uuid(),
   invoiceId: z.string().uuid(),
   amount: z.number().positive(),
   notes: z.string().optional(),
 });
-export type MatchPaymentInvoiceInput = z.infer<typeof MatchPaymentInvoiceSchema>;
+export type MatchAllocationInput = z.infer<typeof MatchAllocationSchema>;
 
 // ============================================
 // LIST QUERY PARAMS (server function inputs)
@@ -224,6 +221,7 @@ export function getBankLabel(bank: string): string {
 export const ListBankTransactionsInput = z.object({
   bank: z.string().optional(),
   status: z.string().optional(),
+  batchId: z.string().optional(),
   search: z.string().optional(),
   page: z.coerce.number().int().positive().default(1),
   limit: z.coerce.number().int().positive().max(200).default(50),
@@ -309,6 +307,16 @@ export const UpdateTransactionTypeSchema = z.object({
   isActive: z.boolean().optional(),
 });
 export type UpdateTransactionTypeInput = z.infer<typeof UpdateTransactionTypeSchema>;
+
+// ============================================
+// BANK TRANSACTION PARTY ASSIGNMENT
+// ============================================
+
+export const AssignBankTxnPartySchema = z.object({
+  txnId: z.string().uuid(),
+  partyId: z.string().uuid(),
+});
+export type AssignBankTxnPartyInput = z.infer<typeof AssignBankTxnPartySchema>;
 
 // ============================================
 // CHART OF ACCOUNTS

@@ -10,6 +10,7 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import { createHash, randomUUID } from 'crypto';
 import fs from 'fs';
+import { fetchActiveParties, categorizeSingleTxn } from './categorize.js';
 
 type JsonValue = Prisma.InputJsonValue;
 
@@ -31,6 +32,10 @@ export interface ImportResult {
   closingBalance?: number;
   balanceMatched?: boolean;
   batchId: string;
+  /** How many new rows got a party match during inline categorization */
+  partiesMatched?: number;
+  /** How many new rows had no party match */
+  partiesUnmatched?: number;
 }
 
 interface RawRow {
@@ -45,6 +50,73 @@ interface RawRow {
   rawData: Record<string, unknown>;
   txnHash: string;
   legacySourceId: string;
+}
+
+// ============================================
+// INLINE CATEGORIZATION (runs after import)
+// ============================================
+
+/**
+ * Run party matching on newly imported transactions (by batchId).
+ * Updates partyId, counterpartyName, debitAccountCode, creditAccountCode, category
+ * but keeps status as 'imported'. This pre-fills data so the review step is useful.
+ */
+async function runInlineCategorization(batchId: string): Promise<{ matched: number; unmatched: number }> {
+  const txns = await prisma.bankTransaction.findMany({
+    where: { batchId, status: 'imported' },
+  });
+
+  if (txns.length === 0) return { matched: 0, unmatched: 0 };
+
+  const parties = await fetchActiveParties();
+
+  let matched = 0;
+  let unmatched = 0;
+  const BATCH = 50;
+  const updates: { id: string; data: Record<string, unknown> }[] = [];
+
+  for (const txn of txns) {
+    const cat = categorizeSingleTxn(txn, parties);
+
+    if (cat.skip) continue;
+
+    // Resolve partyId from categorization or fallback exact name match
+    let partyId = cat.partyId;
+    if (!partyId) {
+      const counterparty = cat.counterpartyName || txn.counterpartyName;
+      if (counterparty) {
+        const matchedParty = parties.find(p =>
+          p.name.toLowerCase() === counterparty.toLowerCase() ||
+          p.aliases.some(a => a.toLowerCase() === counterparty.toLowerCase())
+        );
+        if (matchedParty) partyId = matchedParty.id;
+      }
+    }
+
+    if (partyId) matched++;
+    else unmatched++;
+
+    updates.push({
+      id: txn.id,
+      data: {
+        debitAccountCode: cat.debitAccount,
+        creditAccountCode: cat.creditAccount,
+        category: cat.category || null,
+        counterpartyName: cat.counterpartyName || txn.counterpartyName || null,
+        ...(partyId ? { partyId } : {}),
+      },
+    });
+  }
+
+  // Batch update
+  for (let i = 0; i < updates.length; i += BATCH) {
+    const batch = updates.slice(i, i + BATCH);
+    await Promise.all(
+      batch.map(u => prisma.bankTransaction.update({ where: { id: u.id }, data: u.data as any }))
+    );
+  }
+
+  return { matched, unmatched };
 }
 
 // ============================================
@@ -238,6 +310,9 @@ export async function importHdfcStatement(filePath: string): Promise<ImportResul
     });
   }
 
+  // Inline categorization: match parties on newly imported rows
+  const catResult = txnData.length > 0 ? await runInlineCategorization(batchId) : { matched: 0, unmatched: 0 };
+
   return {
     bank: 'hdfc',
     fileName,
@@ -250,6 +325,8 @@ export async function importHdfcStatement(filePath: string): Promise<ImportResul
     closingBalance,
     balanceMatched,
     batchId,
+    partiesMatched: catResult.matched,
+    partiesUnmatched: catResult.unmatched,
   };
 }
 
@@ -340,6 +417,9 @@ export async function importRazorpayxPayouts(filePath: string): Promise<ImportRe
     });
   }
 
+  // Inline categorization: match parties on newly imported rows
+  const catResult = txnData.length > 0 ? await runInlineCategorization(batchId) : { matched: 0, unmatched: 0 };
+
   return {
     bank: 'razorpayx',
     fileName,
@@ -349,6 +429,8 @@ export async function importRazorpayxPayouts(filePath: string): Promise<ImportRe
     totalDebits,
     totalCredits,
     batchId,
+    partiesMatched: catResult.matched,
+    partiesUnmatched: catResult.unmatched,
   };
 }
 
