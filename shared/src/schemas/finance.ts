@@ -331,10 +331,10 @@ export type CreatePartyInput = z.infer<typeof CreatePartySchema>;
 
 export const CreateTransactionTypeSchema = z.object({
   name: z.string().min(1),
-  description: z.string().optional(),
-  debitAccountCode: z.string().optional(),
-  creditAccountCode: z.string().optional(),
-  defaultGstRate: z.number().min(0).max(100).optional(),
+  description: z.string().nullable().optional(),
+  debitAccountCode: z.string().nullable().optional(),
+  creditAccountCode: z.string().nullable().optional(),
+  defaultGstRate: z.number().min(0).max(100).nullable().optional(),
   defaultTdsApplicable: z.boolean().optional(),
   defaultTdsSection: z.string().nullable().optional(),
   defaultTdsRate: z.number().nullable().optional(),

@@ -4,11 +4,12 @@
  * Dashboard, Invoices, Payments, and Ledger tabs.
  */
 
-import { useState, useMemo, useCallback, useRef, Fragment } from 'react';
+import { useState, useMemo, useCallback, useRef, useEffect, Fragment } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { useNavigate } from '@tanstack/react-router';
 import { Route } from '../routes/_authenticated/finance';
+import { useDebounce } from '../hooks/useDebounce';
 import {
   getFinanceSummary,
   listInvoices,
@@ -51,6 +52,10 @@ import {
 } from 'lucide-react';
 import {
   type FinanceSearchParams,
+  type CreateTransactionTypeInput,
+  type UpdateTransactionTypeInput,
+  type UpdatePartyInput,
+  type CreatePartyInput,
   INVOICE_CATEGORIES,
   INVOICE_STATUSES,
   PAYMENT_METHODS,
@@ -63,6 +68,67 @@ import {
   isBankTxnPending,
   PARTY_CATEGORIES,
 } from '@coh/shared';
+
+// ============================================
+// TYPES (derived from server function return shapes)
+// ============================================
+
+/** Transaction type as returned by listTransactionTypes */
+interface TxnTypeListItem {
+  id: string;
+  name: string;
+  description: string | null;
+  debitAccountCode: string | null;
+  creditAccountCode: string | null;
+  defaultGstRate: number | null;
+  defaultTdsApplicable: boolean;
+  defaultTdsSection: string | null;
+  defaultTdsRate: number | null;
+  invoiceRequired: boolean;
+  expenseCategory: string | null;
+  _count: { parties: number };
+}
+
+/** Transaction type with change history (from getTransactionType) */
+interface TxnTypeDetail extends TxnTypeListItem {
+  changeLogs: Array<{
+    id: string;
+    fieldName: string;
+    oldValue: string | null;
+    newValue: string | null;
+    createdAt: Date | string;
+    changedBy: { name: string };
+  }>;
+}
+
+/** Party as returned by listFinanceParties */
+interface PartyListItem {
+  id: string;
+  name: string;
+  category: string;
+  aliases: string[];
+  tdsApplicable: boolean;
+  tdsSection: string | null;
+  tdsRate: number | null;
+  invoiceRequired: boolean;
+  isActive: boolean;
+  contactName: string | null;
+  email: string | null;
+  phone: string | null;
+  gstin: string | null;
+  pan: string | null;
+  transactionTypeId: string | null;
+  transactionType: { id: string; name: string; expenseCategory: string | null } | null;
+}
+
+/** Party balance from getPartyBalances raw query */
+interface PartyBalance {
+  id: string;
+  name: string;
+  total_invoiced: number;
+  total_paid: number;
+  outstanding: number;
+}
 
 // ============================================
 // MAIN PAGE
@@ -255,6 +321,16 @@ function InvoicesTab({ search }: { search: FinanceSearchParams }) {
     id: string; type: string; totalAmount: number;
     party?: { id: string; name: string } | null;
   } | null>(null);
+
+  // Debounced search input
+  const [searchInput, setSearchInput] = useState(search.search ?? '');
+  const debouncedSearch = useDebounce(searchInput, 300);
+  useEffect(() => {
+    if (debouncedSearch !== (search.search ?? '')) {
+      setSelectedIds(new Set());
+      navigate({ to: '/finance', search: { ...search, search: debouncedSearch || undefined, page: 1 }, replace: true });
+    }
+  }, [debouncedSearch]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const driveSyncMutation = useMutation({
     mutationFn: async () => {
@@ -470,8 +546,8 @@ function InvoicesTab({ search }: { search: FinanceSearchParams }) {
 
         <Input
           placeholder="Search invoices..."
-          value={search.search ?? ''}
-          onChange={(e) => updateSearch({ search: e.target.value || undefined, page: 1 })}
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
           className="w-[200px]"
         />
 
@@ -555,7 +631,7 @@ function InvoicesTab({ search }: { search: FinanceSearchParams }) {
                         {inv.type}
                       </span>
                     </td>
-                    <td className="p-3 text-xs">{getCategoryLabel(inv.category as any)}</td>
+                    <td className="p-3 text-xs">{getCategoryLabel(inv.category)}</td>
                     <td className="p-3">
                       {inv.party?.name ??
                         (inv.customer ? [inv.customer.firstName, inv.customer.lastName].filter(Boolean).join(' ') || inv.customer.email : null) ??
@@ -597,7 +673,11 @@ function InvoicesTab({ search }: { search: FinanceSearchParams }) {
                             <Button
                               size="sm"
                               variant="ghost"
-                              onClick={() => cancelMutation.mutate(inv.id)}
+                              onClick={() => {
+                                if (window.confirm(`Cancel invoice ${inv.invoiceNumber || inv.id.slice(0, 8)}? This will unmatch any linked payments.`)) {
+                                  cancelMutation.mutate(inv.id);
+                                }
+                              }}
                               disabled={cancelMutation.isPending}
                               title="Cancel"
                             >
@@ -701,6 +781,15 @@ function PaymentsTab({ search }: { search: FinanceSearchParams }) {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const queryClient = useQueryClient();
 
+  // Debounced search input
+  const [searchInput, setSearchInput] = useState(search.search ?? '');
+  const debouncedSearch = useDebounce(searchInput, 300);
+  useEffect(() => {
+    if (debouncedSearch !== (search.search ?? '')) {
+      navigate({ to: '/finance', search: { ...search, search: debouncedSearch || undefined, page: 1 }, replace: true });
+    }
+  }, [debouncedSearch]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const listFn = useServerFn(listPayments);
   const { data, isLoading } = useQuery({
     queryKey: ['finance', 'payments', search.direction, search.method, search.matchStatus, search.search, search.page],
@@ -758,8 +847,8 @@ function PaymentsTab({ search }: { search: FinanceSearchParams }) {
 
         <Input
           placeholder="Search payments..."
-          value={search.search ?? ''}
-          onChange={(e) => updateSearch({ search: e.target.value || undefined, page: 1 })}
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
           className="w-[200px]"
         />
 
@@ -1038,6 +1127,23 @@ function PnlTab() {
                 </Fragment>
               );
             })}
+            {months.length > 1 && (() => {
+              const totRev = months.reduce((s, m) => s + m.revenue, 0);
+              const totCogs = months.reduce((s, m) => s + m.cogs, 0);
+              const totGross = totRev - totCogs;
+              const totExp = months.reduce((s, m) => s + m.totalExpenses, 0);
+              const totNet = totGross - totExp;
+              return (
+                <tr className="border-t-2 bg-muted/40">
+                  <td className="py-2.5 px-3 font-bold">Total</td>
+                  <td className="py-2.5 px-3 text-right font-bold">{fmt(totRev)}</td>
+                  <td className="py-2.5 px-3 text-right font-bold">{fmt(totCogs)}</td>
+                  <td className={`py-2.5 px-3 text-right font-bold ${totGross >= 0 ? 'text-green-600' : 'text-red-600'}`}>{fmt(totGross)}</td>
+                  <td className="py-2.5 px-3 text-right font-bold">{fmt(totExp)}</td>
+                  <td className={`py-2.5 px-3 text-right font-bold ${totNet >= 0 ? 'text-green-600' : 'text-red-600'}`}>{fmt(totNet)}</td>
+                </tr>
+              );
+            })()}
           </tbody>
         </table>
       </div>
@@ -1153,6 +1259,15 @@ function BankTransactionList({ search, updateSearch }: {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [batchLoading, setBatchLoading] = useState(false);
+
+  // Debounced search input
+  const [searchInput, setSearchInput] = useState(search.search ?? '');
+  const debouncedSearch = useDebounce(searchInput, 300);
+  useEffect(() => {
+    if (debouncedSearch !== (search.search ?? '')) {
+      updateSearch({ search: debouncedSearch || undefined, page: 1 });
+    }
+  }, [debouncedSearch]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const bank = search.bankFilter && search.bankFilter !== 'all' ? search.bankFilter : undefined;
   const status = search.bankStatus && search.bankStatus !== 'all' ? search.bankStatus : undefined;
@@ -1302,7 +1417,7 @@ function BankTransactionList({ search, updateSearch }: {
     <div className="space-y-4">
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-2">
-        <Select value={search.bankFilter ?? 'all'} onValueChange={(v) => updateSearch({ bankFilter: v as any, page: 1 })}>
+        <Select value={search.bankFilter ?? 'all'} onValueChange={(v) => updateSearch({ bankFilter: v as FinanceSearchParams['bankFilter'], page: 1 })}>
           <SelectTrigger className="w-[150px]"><SelectValue placeholder="Bank" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Banks</SelectItem>
@@ -1312,7 +1427,7 @@ function BankTransactionList({ search, updateSearch }: {
           </SelectContent>
         </Select>
 
-        <Select value={search.bankStatus ?? 'all'} onValueChange={(v) => updateSearch({ bankStatus: v as any, page: 1 })}>
+        <Select value={search.bankStatus ?? 'all'} onValueChange={(v) => updateSearch({ bankStatus: v as FinanceSearchParams['bankStatus'], page: 1 })}>
           <SelectTrigger className="w-[160px]"><SelectValue placeholder="Status" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All</SelectItem>
@@ -1324,8 +1439,8 @@ function BankTransactionList({ search, updateSearch }: {
 
         <Input
           placeholder="Search narration..."
-          value={search.search ?? ''}
-          onChange={(e) => updateSearch({ search: e.target.value || undefined, page: 1 })}
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
           className="w-[200px]"
         />
 
@@ -1587,7 +1702,7 @@ function BankTxnEditRow({ txn, onSaved, onClose }: {
                   onFocus={() => setPartyOpen(true)}
                 />
                 {partyOpen && partyQuery.length >= 2 && parties.length > 0 && (
-                  <div className="absolute z-20 top-9 left-0 w-full bg-white border rounded-md shadow-lg max-h-[150px] overflow-y-auto">
+                  <div className="absolute z-20 top-9 left-0 w-full bg-popover border rounded-md shadow-lg max-h-[150px] overflow-y-auto">
                     {parties.map((p) => (
                       <button key={p.id} type="button" className="block w-full text-left px-3 py-1.5 text-xs hover:bg-muted/50" onClick={() => handlePartySelect(p)}>
                         {p.name}
@@ -2707,7 +2822,7 @@ function TransactionTypesTab() {
   const types = data?.success ? data.types : [];
 
   const createMutation = useMutation({
-    mutationFn: (input: any) => createTTFn({ data: input }),
+    mutationFn: (input: CreateTransactionTypeInput) => createTTFn({ data: input }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['finance', 'transactionTypes'] });
       setIsCreating(false);
@@ -2715,7 +2830,7 @@ function TransactionTypesTab() {
   });
 
   const updateMutation = useMutation({
-    mutationFn: (input: any) => updateTTFn({ data: input }),
+    mutationFn: (input: UpdateTransactionTypeInput) => updateTTFn({ data: input }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['finance', 'transactionTypes'] });
       queryClient.invalidateQueries({ queryKey: ['finance', 'transactionType'] });
@@ -2724,7 +2839,7 @@ function TransactionTypesTab() {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (input: any) => deleteTTFn({ data: input }),
+    mutationFn: (input: { id: string }) => deleteTTFn({ data: input }),
     onSuccess: (result) => {
       if (result.success) {
         queryClient.invalidateQueries({ queryKey: ['finance', 'transactionTypes'] });
@@ -2746,7 +2861,7 @@ function TransactionTypesTab() {
         <LoadingState />
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {types.map((tt: any) => (
+          {types.map((tt: TxnTypeListItem) => (
             <div
               key={tt.id}
               className="border rounded-lg p-4 hover:border-blue-300 cursor-pointer transition-colors"
@@ -2791,7 +2906,7 @@ function TransactionTypesTab() {
       {isCreating && (
         <TransactionTypeFormModal
           onClose={() => setIsCreating(false)}
-          onSave={(values) => createMutation.mutate(values)}
+          onSave={(values) => { if (!('id' in values)) createMutation.mutate(values); }}
           saving={createMutation.isPending}
         />
       )}
@@ -2801,7 +2916,7 @@ function TransactionTypesTab() {
         <EditTransactionTypeModal
           id={editingId}
           onClose={() => setEditingId(null)}
-          onSave={(values) => updateMutation.mutate(values)}
+          onSave={(values) => { if ('id' in values) updateMutation.mutate(values); }}
           onDelete={(id) => deleteMutation.mutate({ id })}
           saving={updateMutation.isPending}
           deleting={deleteMutation.isPending}
@@ -2819,9 +2934,9 @@ function TransactionTypeFormModal({
   saving,
   children,
 }: {
-  initial?: any;
+  initial?: TxnTypeDetail;
   onClose: () => void;
-  onSave: (values: any) => void;
+  onSave: (values: CreateTransactionTypeInput | UpdateTransactionTypeInput) => void;
   saving: boolean;
   children?: React.ReactNode;
 }) {
@@ -2838,8 +2953,7 @@ function TransactionTypeFormModal({
 
   const handleSubmit = () => {
     if (!name.trim()) return;
-    onSave({
-      ...(initial?.id ? { id: initial.id } : {}),
+    const fields = {
       name: name.trim(),
       ...(description.trim() ? { description: description.trim() } : {}),
       ...(debitAccountCode ? { debitAccountCode } : { debitAccountCode: null }),
@@ -2850,7 +2964,12 @@ function TransactionTypeFormModal({
       ...(defaultTdsRate !== '' ? { defaultTdsRate: parseFloat(defaultTdsRate) } : { defaultTdsRate: null }),
       invoiceRequired,
       ...(expenseCategory ? { expenseCategory } : { expenseCategory: null }),
-    });
+    };
+    if (initial) {
+      onSave({ ...fields, id: initial.id });
+    } else {
+      onSave(fields);
+    }
   };
 
   return (
@@ -2975,7 +3094,7 @@ function EditTransactionTypeModal({
 }: {
   id: string;
   onClose: () => void;
-  onSave: (values: any) => void;
+  onSave: (values: UpdateTransactionTypeInput) => void;
   onDelete: (id: string) => void;
   saving: boolean;
   deleting: boolean;
@@ -3008,7 +3127,7 @@ function EditTransactionTypeModal({
   }
 
   return (
-    <TransactionTypeFormModal initial={tt} onClose={onClose} onSave={onSave} saving={saving}>
+    <TransactionTypeFormModal initial={tt} onClose={onClose} onSave={(values) => { if ('id' in values) onSave(values); }} saving={saving}>
       {/* Changelog */}
       {tt.changeLogs && tt.changeLogs.length > 0 && (
         <div className="border-t pt-3 mt-3">
@@ -3016,7 +3135,7 @@ function EditTransactionTypeModal({
             <History className="h-4 w-4" /> Change History
           </h4>
           <div className="max-h-48 overflow-y-auto space-y-1.5">
-            {tt.changeLogs.map((log: any) => (
+            {tt.changeLogs.map((log: TxnTypeDetail['changeLogs'][number]) => (
               <div key={log.id} className="text-xs text-muted-foreground flex gap-2">
                 <span className="shrink-0">{new Date(log.createdAt).toLocaleDateString('en-IN')}</span>
                 <span className="shrink-0 font-medium text-foreground">{log.changedBy.name}</span>
@@ -3068,7 +3187,7 @@ function PartiesTab({ search }: { search: FinanceSearchParams }) {
   const createFn = useServerFn(createFinanceParty);
 
   const balancesFn = useServerFn(getPartyBalances);
-  const [editingParty, setEditingParty] = useState<any>(null);
+  const [editingParty, setEditingParty] = useState<PartyListItem | null>(null);
   const [isCreating, setIsCreating] = useState(false);
 
   const { data: ttData } = useQuery({
@@ -3082,7 +3201,7 @@ function PartiesTab({ search }: { search: FinanceSearchParams }) {
   });
   const balanceMap = useMemo(() => {
     if (!balData?.success) return new Map<string, { total_invoiced: number; total_paid: number; outstanding: number }>();
-    return new Map(balData.balances.map((b: any) => [b.id, b]));
+    return new Map(balData.balances.map((b: PartyBalance) => [b.id, b]));
   }, [balData]);
 
   const { data, isLoading } = useQuery({
@@ -3098,7 +3217,7 @@ function PartiesTab({ search }: { search: FinanceSearchParams }) {
   });
 
   const updateMutation = useMutation({
-    mutationFn: (input: any) => updateFn({ data: input }),
+    mutationFn: (input: UpdatePartyInput) => updateFn({ data: input }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['finance', 'parties'] });
       setEditingParty(null);
@@ -3106,7 +3225,7 @@ function PartiesTab({ search }: { search: FinanceSearchParams }) {
   });
 
   const createMutation = useMutation({
-    mutationFn: (input: any) => createFn({ data: input }),
+    mutationFn: (input: CreatePartyInput) => createFn({ data: input }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['finance', 'parties'] });
       setIsCreating(false);
@@ -3148,7 +3267,7 @@ function PartiesTab({ search }: { search: FinanceSearchParams }) {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Transaction Types</SelectItem>
-            {transactionTypes.map((tt: any) => (
+            {transactionTypes.map((tt: TxnTypeListItem) => (
               <SelectItem key={tt.id} value={tt.id}>
                 {tt.name} ({tt._count.parties})
               </SelectItem>
@@ -3186,7 +3305,7 @@ function PartiesTab({ search }: { search: FinanceSearchParams }) {
               </tr>
             </thead>
             <tbody>
-              {parties.map((party: any) => (
+              {parties.map((party: PartyListItem) => (
                 <tr key={party.id} className="border-b hover:bg-muted/30">
                   <td className="p-3">
                     <div className="font-medium">{party.name}</div>
@@ -3262,7 +3381,7 @@ function PartiesTab({ search }: { search: FinanceSearchParams }) {
         <PartyEditModal
           party={editingParty}
           transactionTypes={transactionTypes}
-          onSave={(data) => updateMutation.mutate(data)}
+          onSave={(data) => { if ('id' in data) updateMutation.mutate(data); }}
           onClose={() => setEditingParty(null)}
           isSaving={updateMutation.isPending}
         />
@@ -3273,7 +3392,7 @@ function PartiesTab({ search }: { search: FinanceSearchParams }) {
         <PartyEditModal
           party={null}
           transactionTypes={transactionTypes}
-          onSave={(data) => createMutation.mutate(data)}
+          onSave={(data) => { if (!('id' in data)) createMutation.mutate(data); }}
           onClose={() => setIsCreating(false)}
           isSaving={createMutation.isPending}
         />
@@ -3293,9 +3412,9 @@ function PartyEditModal({
   onClose,
   isSaving,
 }: {
-  party: any | null;
-  transactionTypes: any[];
-  onSave: (data: any) => void;
+  party: PartyListItem | null;
+  transactionTypes: TxnTypeListItem[];
+  onSave: (data: UpdatePartyInput | CreatePartyInput) => void;
   onClose: () => void;
   isSaving: boolean;
 }) {
@@ -3402,7 +3521,7 @@ function PartyEditModal({
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">— None —</SelectItem>
-                  {transactionTypes.map((tt: any) => (
+                  {transactionTypes.map((tt: TxnTypeListItem) => (
                     <SelectItem key={tt.id} value={tt.id}>{tt.name}</SelectItem>
                   ))}
                 </SelectContent>

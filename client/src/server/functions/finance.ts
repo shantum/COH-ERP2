@@ -11,6 +11,7 @@ import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth';
 import { getPrisma } from '@coh/shared/services/db';
+import type { Prisma } from '@prisma/client';
 import {
   CreateInvoiceSchema,
   UpdateInvoiceSchema,
@@ -862,6 +863,8 @@ export const updatePaymentNotes = createServerFn({ method: 'POST' })
   .inputValidator((input: unknown) => updatePaymentNotesInput.parse(input))
   .handler(async ({ data }) => {
     const prisma = await getPrisma();
+    const payment = await prisma.payment.findUnique({ where: { id: data.id }, select: { id: true } });
+    if (!payment) return { success: false as const, error: 'Payment not found' };
     await prisma.payment.update({
       where: { id: data.id },
       data: { notes: data.notes },
@@ -1195,17 +1198,17 @@ export const getPnlAccountDetail = createServerFn({ method: 'POST' })
     const periodEnd = new Date(periodStart);
     periodEnd.setMonth(periodEnd.getMonth() + 1);
 
-    const where: Record<string, unknown> = {
+    const where: Prisma.InvoiceWhereInput = {
       status: { in: ['confirmed', 'partially_paid', 'paid'] },
       OR: [
         { billingPeriod: data.period },
         { billingPeriod: null, invoiceDate: { gte: periodStart, lt: periodEnd } },
       ],
+      ...(data.category ? { category: data.category } : {}),
     };
-    if (data.category) where.category = data.category;
 
     const invoices = await prisma.invoice.findMany({
-      where: where as any,
+      where,
       select: {
         id: true,
         invoiceNumber: true,
@@ -1427,19 +1430,20 @@ export const listFinanceParties = createServerFn({ method: 'POST' })
     const { transactionTypeId, search, page = 1, limit = 200 } = input ?? {};
     const skip = (page - 1) * limit;
 
-    const where: Record<string, unknown> = {};
-    if (transactionTypeId) where.transactionTypeId = transactionTypeId;
-    if (search) {
-      where.OR = [
-        { name: { contains: search, mode: 'insensitive' } },
-        { aliases: { has: search.toUpperCase() } },
-        { contactName: { contains: search, mode: 'insensitive' } },
-      ];
-    }
+    const where: Prisma.PartyWhereInput = {
+      ...(transactionTypeId ? { transactionTypeId } : {}),
+      ...(search ? {
+        OR: [
+          { name: { contains: search, mode: 'insensitive' } },
+          { aliases: { has: search.toUpperCase() } },
+          { contactName: { contains: search, mode: 'insensitive' } },
+        ],
+      } : {}),
+    };
 
     const [parties, total] = await Promise.all([
       prisma.party.findMany({
-        where: where as any,
+        where,
         select: {
           id: true,
           name: true,
@@ -1464,7 +1468,7 @@ export const listFinanceParties = createServerFn({ method: 'POST' })
         skip,
         take: limit,
       }),
-      prisma.party.count({ where: where as any }),
+      prisma.party.count({ where }),
     ]);
 
     return { success: true as const, parties, total, page, limit };
@@ -1503,17 +1507,18 @@ export const updateFinanceParty = createServerFn({ method: 'POST' })
     const party = await prisma.$transaction(async (tx) => {
       const updated = await tx.party.update({
         where: { id },
-        data: updates as any,
+        data: updates as Prisma.PartyUpdateInput,
         include: { transactionType: { select: { id: true, name: true } } },
       });
 
       // Log changes for tracked fields
       const trackedFields = ['transactionTypeId', 'tdsApplicable', 'tdsSection', 'tdsRate', 'invoiceRequired'] as const;
+      const updatesRec = updates as Record<string, unknown>;
       const logs: { partyId: string; fieldName: string; oldValue: string | null; newValue: string | null; changedById: string }[] = [];
       for (const field of trackedFields) {
         if (field in updates) {
           const oldVal = oldParty[field];
-          const newVal = (updates as any)[field];
+          const newVal = updatesRec[field];
           if (String(oldVal ?? '') !== String(newVal ?? '')) {
             logs.push({
               partyId: id,
@@ -1641,17 +1646,19 @@ export const updateTransactionType = createServerFn({ method: 'POST' })
     const tt = await prisma.$transaction(async (tx) => {
       const updated = await tx.transactionType.update({
         where: { id },
-        data: updates as any,
+        data: updates as Prisma.TransactionTypeUpdateInput,
         include: { _count: { select: { parties: true } } },
       });
 
       // Diff and log each changed field
       const fields = ['name', 'description', 'debitAccountCode', 'creditAccountCode', 'defaultGstRate', 'defaultTdsApplicable', 'defaultTdsSection', 'defaultTdsRate', 'invoiceRequired', 'expenseCategory', 'isActive'] as const;
+      const oldRec = old as Record<string, unknown>;
+      const updatesRec = updates as Record<string, unknown>;
       const logs: { transactionTypeId: string; fieldName: string; oldValue: string | null; newValue: string | null; changedById: string }[] = [];
       for (const field of fields) {
         if (field in updates) {
-          const oldVal = (old as any)[field];
-          const newVal = (updates as any)[field];
+          const oldVal = oldRec[field];
+          const newVal = updatesRec[field];
           if (String(oldVal ?? '') !== String(newVal ?? '')) {
             logs.push({
               transactionTypeId: id,
