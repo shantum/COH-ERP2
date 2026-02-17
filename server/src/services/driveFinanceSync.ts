@@ -56,14 +56,13 @@ const folderCache = new Map<string, string>();
  */
 async function resolveFolderId(
     partyName: string | null | undefined,
-    counterpartyName: string | null | undefined,
     date: Date
 ): Promise<string> {
     const rootId = DRIVE_FINANCE_FOLDER_ID;
     if (!rootId) throw new Error('DRIVE_FINANCE_FOLDER_ID not set');
 
     // Level 0: Vendor Invoices folder (or _Unlinked at root)
-    const partyFolder = partyName || counterpartyName || DRIVE_UNLINKED_FOLDER_NAME;
+    const partyFolder = partyName || DRIVE_UNLINKED_FOLDER_NAME;
     const fyFolder = getFinancialYear(date);
 
     const isUnlinked = partyFolder === DRIVE_UNLINKED_FOLDER_NAME;
@@ -146,7 +145,6 @@ export async function uploadInvoiceFile(invoiceId: string): Promise<boolean> {
             fileData: true,
             fileName: true,
             fileMimeType: true,
-            counterpartyName: true,
             driveFileId: true,
             party: { select: { name: true } },
         },
@@ -164,14 +162,13 @@ export async function uploadInvoiceFile(invoiceId: string): Promise<boolean> {
 
     const date = invoice.invoiceDate ?? invoice.createdAt;
     const ext = getExtension(invoice.fileName, invoice.fileMimeType);
-    const party = sanitize(invoice.party?.name ?? invoice.counterpartyName ?? 'Unknown');
+    const party = sanitize(invoice.party?.name ?? 'Unknown');
     const invNum = sanitize(invoice.invoiceNumber ?? invoice.id.slice(0, 8));
     const dateStr = date.toISOString().split('T')[0];
     const driveName = `${party}_INV-${invNum}_${dateStr}${ext}`;
 
     const folderId = await resolveFolderId(
         invoice.party?.name,
-        invoice.counterpartyName,
         date
     );
 
@@ -211,7 +208,6 @@ export async function uploadPaymentFile(paymentId: string): Promise<boolean> {
             fileData: true,
             fileName: true,
             fileMimeType: true,
-            counterpartyName: true,
             driveFileId: true,
             party: { select: { name: true } },
         },
@@ -230,12 +226,11 @@ export async function uploadPaymentFile(paymentId: string): Promise<boolean> {
     const dateStr = payment.paymentDate.toISOString().split('T')[0];
     const ref = sanitize(payment.referenceNumber ?? payment.id.slice(0, 8));
     const ext = getExtension(payment.fileName, payment.fileMimeType);
-    const party = sanitize(payment.party?.name ?? payment.counterpartyName ?? 'Unknown');
+    const party = sanitize(payment.party?.name ?? 'Unknown');
     const driveName = `${party}_PAY-${ref}_${dateStr}${ext}`;
 
     const folderId = await resolveFolderId(
         payment.party?.name,
-        payment.counterpartyName,
         payment.paymentDate
     );
 

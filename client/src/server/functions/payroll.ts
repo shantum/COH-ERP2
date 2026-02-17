@@ -558,7 +558,6 @@ export const confirmPayrollRun = createServerFn({ method: 'POST' })
           billingPeriod: salaryLabel,
           totalAmount: slip.netPay,
           balanceDue: slip.netPay,
-          counterpartyName: slip.employee.name,
           ...(slip.employee.partyId ? { partyId: slip.employee.partyId } : {}),
           notes: `Salary for ${monthLabel}`,
           createdById: userId,

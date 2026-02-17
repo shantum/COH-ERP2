@@ -62,7 +62,7 @@ model User {
   // Finance relations
   financeInvoices       Invoice[]        @relation("InvoiceCreator")
   financePayments       Payment[]        @relation("PaymentCreator")
-  paymentInvoiceMatches PaymentInvoice[] @relation("PaymentInvoiceMatcher")
+  allocationMatches     Allocation[]     @relation("AllocationMatcher")
   ledgerEntries         LedgerEntry[]    @relation("LedgerEntryCreator")
   payrollRunsCreated    PayrollRun[]     @relation("PayrollRunCreator")
   payrollRunsConfirmed  PayrollRun[]     @relation("PayrollRunConfirmer")
@@ -1959,10 +1959,9 @@ model Invoice {
   dueDate          DateTime?
   billingPeriod    String?   // "YYYY-MM" — which month this bill covers (for accrual P&L)
 
-  // Counterparty (one of these)
+  // Counterparty (one of these — always required)
   partyId          String?
   customerId       String?
-  counterpartyName String?   // Fallback if no linked entity
 
   // Amounts
   subtotal         Float?
@@ -2009,7 +2008,7 @@ model Invoice {
   ledgerEntry   LedgerEntry?   @relation("InvoiceLedgerEntry", fields: [ledgerEntryId], references: [id])
   createdBy     User           @relation("InvoiceCreator", fields: [createdById], references: [id])
   lines         InvoiceLine[]
-  matchedPayments PaymentInvoice[]
+  allocations   Allocation[]
   payrollSlip   PayrollSlip?     @relation("PayrollSlipInvoice")
   bankTransactions BankTransaction[] @relation("BankTxnInvoice")
 
@@ -2056,10 +2055,9 @@ model Payment {
 
   paymentDate     DateTime
 
-  // Counterparty (one of these)
+  // Counterparty (one of these — always required)
   partyId          String?
   customerId       String?
-  counterpartyName String?
 
   // File attachment
   fileData      Bytes?
@@ -2089,7 +2087,7 @@ model Payment {
   customer    Customer?    @relation("PaymentCustomer", fields: [customerId], references: [id])
   ledgerEntry LedgerEntry? @relation("PaymentLedgerEntry", fields: [ledgerEntryId], references: [id])
   createdBy   User         @relation("PaymentCreator", fields: [createdById], references: [id])
-  matchedInvoices PaymentInvoice[]
+  allocations     Allocation[]
   bankTransaction BankTransaction? @relation("BankTxnPayment")
 
   @@index([direction])
@@ -2101,8 +2099,8 @@ model Payment {
   @@index([createdAt])
 }
 
-/// Many-to-many join: which payments cover which invoices
-model PaymentInvoice {
+/// Allocation: which payments cover which invoices (payment → invoice link)
+model Allocation {
   id         String   @id @default(uuid())
   paymentId  String
   invoiceId  String
@@ -2113,11 +2111,12 @@ model PaymentInvoice {
 
   payment   Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
   invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
-  matchedBy User    @relation("PaymentInvoiceMatcher", fields: [matchedById], references: [id])
+  matchedBy User    @relation("AllocationMatcher", fields: [matchedById], references: [id])
 
   @@unique([paymentId, invoiceId])
   @@index([paymentId])
   @@index([invoiceId])
+  @@map("Allocation")
 }
 
 // ============================================

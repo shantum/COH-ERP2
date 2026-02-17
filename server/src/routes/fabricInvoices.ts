@@ -448,7 +448,6 @@ router.post('/:id/confirm', requireAdmin, asyncHandler(async (req: Request, res:
                         ? `${invoice.invoiceDate.getFullYear()}-${String(invoice.invoiceDate.getMonth() + 1).padStart(2, '0')}`
                         : undefined,
                     ...(invoice.partyId ? { partyId: invoice.partyId } : {}),
-                    counterpartyName: invoice.supplierName ?? null,
                     subtotal: invoice.subtotal ?? null,
                     gstAmount: invoice.gstAmount ?? null,
                     totalAmount,

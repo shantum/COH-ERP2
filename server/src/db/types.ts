@@ -4,6 +4,15 @@ export type Generated<T> = T extends ColumnType<infer S, infer I, infer U>
   : ColumnType<T, T | undefined, T>;
 export type Timestamp = ColumnType<Date, Date | string, Date | string>;
 
+export type Allocation = {
+    id: Generated<string>;
+    paymentId: string;
+    invoiceId: string;
+    amount: number;
+    notes: string | null;
+    matchedAt: Generated<Timestamp>;
+    matchedById: string;
+};
 export type BankImportBatch = {
     id: Generated<string>;
     bank: string;
@@ -459,7 +468,6 @@ export type Invoice = {
     billingPeriod: string | null;
     partyId: string | null;
     customerId: string | null;
-    counterpartyName: string | null;
     subtotal: number | null;
     gstAmount: number | null;
     tdsAmount: Generated<number | null>;
@@ -731,7 +739,6 @@ export type Payment = {
     paymentDate: Timestamp;
     partyId: string | null;
     customerId: string | null;
-    counterpartyName: string | null;
     fileData: Buffer | null;
     fileName: string | null;
     fileMimeType: string | null;
@@ -740,19 +747,11 @@ export type Payment = {
     driveUrl: string | null;
     driveUploadedAt: Timestamp | null;
     ledgerEntryId: string | null;
+    debitAccountCode: string | null;
     notes: string | null;
     createdById: string;
     createdAt: Generated<Timestamp>;
     updatedAt: Timestamp;
-};
-export type PaymentInvoice = {
-    id: Generated<string>;
-    paymentId: string;
-    invoiceId: string;
-    amount: number;
-    notes: string | null;
-    matchedAt: Generated<Timestamp>;
-    matchedById: string;
 };
 export type PayrollRun = {
     id: Generated<string>;
@@ -1388,6 +1387,7 @@ export type WriteOffLog = {
     createdAt: Generated<Timestamp>;
 };
 export type DB = {
+    Allocation: Allocation;
     BankImportBatch: BankImportBatch;
     BankTransaction: BankTransaction;
     ChannelImportBatch: ChannelImportBatch;
@@ -1430,7 +1430,6 @@ export type DB = {
     Party: Party;
     PartyChangeLog: PartyChangeLog;
     Payment: Payment;
-    PaymentInvoice: PaymentInvoice;
     PayrollRun: PayrollRun;
     PayrollSlip: PayrollSlip;
     Pincode: Pincode;
