@@ -14,6 +14,7 @@ import { ProfitabilityCard } from '../components/dashboard/ProfitabilityCard';
 import { FabricCostCard } from '../components/dashboard/FabricCostCard';
 import { FabricBalanceCard } from '../components/dashboard/FabricBalanceCard';
 import { FabricStockHealthCard } from '../components/dashboard/FabricStockHealthCard';
+import { SystemStatusCard } from '../components/dashboard/SystemStatusCard';
 
 export default function Dashboard() {
     // Get SSR pre-fetched data from route loader
@@ -71,6 +72,9 @@ export default function Dashboard() {
 
                 {/* Fabric Stock Health */}
                 <FabricStockHealthCard />
+
+                {/* System Status - Worker sync timestamps */}
+                <SystemStatusCard />
             </div>
         </div>
     );

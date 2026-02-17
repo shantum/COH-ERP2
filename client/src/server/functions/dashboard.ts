@@ -523,6 +523,45 @@ export const invalidateDashboardCache = createServerFn({ method: 'POST' })
     });
 
 // ============================================
+// WORKER STATUS
+// ============================================
+
+export interface WorkerStatusItem {
+    id: string;
+    name: string;
+    interval: string;
+    isRunning: boolean;
+    schedulerActive: boolean;
+    lastSyncAt: string | null;
+    lastError: string | null;
+}
+
+export interface WorkerStatusResponse {
+    workers: WorkerStatusItem[];
+}
+
+/**
+ * Get status of all background workers for dashboard display
+ */
+export const getWorkerStatuses = createServerFn({ method: 'GET' })
+    .handler(async (): Promise<WorkerStatusResponse> => {
+        try {
+            const { getInternalApiBaseUrl } = await import('../utils');
+            const baseUrl = getInternalApiBaseUrl();
+            const response = await fetch(`${baseUrl}/api/internal/worker-status`);
+
+            if (!response.ok) {
+                throw new Error(`Worker status request failed: ${response.status}`);
+            }
+
+            return await response.json() as WorkerStatusResponse;
+        } catch (error: unknown) {
+            console.error('[Server Function] Error in getWorkerStatuses:', error);
+            throw error;
+        }
+    });
+
+// ============================================
 // HELPERS
 // ============================================
 

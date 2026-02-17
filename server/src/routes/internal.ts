@@ -15,6 +15,13 @@ import { broadcastOrderUpdate } from './sse.js';
 import type { OrderUpdateEvent } from './sse.js';
 import { deferredExecutor } from '../services/deferredExecutor.js';
 import { pushERPOrderToSheet } from '../services/sheetOrderPush.js';
+import scheduledSync from '../services/scheduledSync.js';
+import trackingSync from '../services/trackingSync.js';
+import cacheProcessor from '../services/cacheProcessor.js';
+import cacheDumpWorker from '../services/cacheDumpWorker.js';
+import driveFinanceSync from '../services/driveFinanceSync.js';
+import sheetOffloadWorker from '../services/sheetOffloadWorker.js';
+import stockSnapshotWorker from '../services/stockSnapshotWorker.js';
 
 const router: Router = Router();
 
@@ -115,6 +122,96 @@ router.post('/push-order-to-sheet', verifyInternalRequest, (req: Request, res: R
         const message = error instanceof Error ? error.message : 'Unknown error';
         console.error('[Internal API] Push order to sheet error:', message);
         res.status(500).json({ error: 'Failed to enqueue sheet push' });
+    }
+});
+
+/**
+ * GET /api/internal/worker-status
+ *
+ * Returns lightweight status for all background workers.
+ * Called by the dashboard server function to show sync timestamps.
+ */
+router.get('/worker-status', verifyInternalRequest, async (_req: Request, res: Response): Promise<void> => {
+    try {
+        const shopify = scheduledSync.getStatus();
+        const tracking = trackingSync.getStatus();
+        const processor = cacheProcessor.getStatus();
+        const drive = driveFinanceSync.getStatus();
+        const snapshot = stockSnapshotWorker.getStatus();
+        const offload = sheetOffloadWorker.getStatus();
+        const dump = await cacheDumpWorker.getStatus();
+
+        const workers = [
+            {
+                id: 'shopify_sync',
+                name: 'Shopify Sync',
+                interval: `${shopify.intervalMinutes}m`,
+                isRunning: shopify.isRunning,
+                schedulerActive: shopify.schedulerActive,
+                lastSyncAt: shopify.lastSyncAt,
+                lastError: shopify.lastSyncResult?.error ?? null,
+            },
+            {
+                id: 'tracking_sync',
+                name: 'Tracking Sync',
+                interval: `${tracking.intervalMinutes}m`,
+                isRunning: tracking.isRunning,
+                schedulerActive: tracking.schedulerActive,
+                lastSyncAt: tracking.lastSyncAt,
+                lastError: tracking.lastSyncResult?.error ?? null,
+            },
+            {
+                id: 'cache_processor',
+                name: 'Order Processor',
+                interval: `${processor.config.pollIntervalSeconds}s`,
+                isRunning: processor.isRunning,
+                schedulerActive: processor.isRunning,
+                lastSyncAt: processor.stats.lastBatchAt,
+                lastError: processor.stats.lastError,
+            },
+            {
+                id: 'drive_sync',
+                name: 'Drive Sync',
+                interval: `${drive.intervalMinutes}m`,
+                isRunning: drive.isRunning,
+                schedulerActive: drive.schedulerActive,
+                lastSyncAt: drive.lastSyncAt,
+                lastError: null,
+            },
+            {
+                id: 'cache_dump',
+                name: 'Shopify Dump',
+                interval: 'on-demand',
+                isRunning: dump.workerRunning,
+                schedulerActive: dump.workerRunning,
+                lastSyncAt: dump.recentJobs[0]?.completedAt ?? dump.recentJobs[0]?.startedAt ?? null,
+                lastError: dump.recentJobs[0]?.lastError ?? null,
+            },
+            {
+                id: 'sheet_offload',
+                name: 'Sheet Offload',
+                interval: 'on-demand',
+                isRunning: offload.ingestInward.isRunning || offload.ingestOutward.isRunning,
+                schedulerActive: offload.schedulerActive,
+                lastSyncAt: offload.ingestInward.lastRunAt ?? offload.ingestOutward.lastRunAt ?? null,
+                lastError: null,
+            },
+            {
+                id: 'stock_snapshot',
+                name: 'Stock Snapshot',
+                interval: 'manual',
+                isRunning: snapshot.isRunning,
+                schedulerActive: false,
+                lastSyncAt: snapshot.lastRunAt,
+                lastError: null,
+            },
+        ];
+
+        res.json({ workers });
+    } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        console.error('[Internal API] Worker status error:', message);
+        res.status(500).json({ error: 'Failed to get worker status' });
     }
 });
 
