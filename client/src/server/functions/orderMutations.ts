@@ -228,12 +228,9 @@ async function broadcastUpdate(event: OrderUpdateEvent, excludeUserId: string): 
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ event, excludeUserId }),
-        }).catch(() => {
-            // Silently fail - SSE broadcast is non-critical
-            console.log('[Server Function] SSE broadcast failed (non-critical)');
         });
     } catch {
-        // Silently fail
+        console.warn('[orderMutations] SSE broadcast failed (non-critical)');
     }
 }
 

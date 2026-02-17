@@ -185,7 +185,7 @@ async function invalidateAllCache(): Promise<void> {
         const { inventoryBalanceCache } = await import('@coh/shared/services/inventory');
         inventoryBalanceCache.invalidateAll();
     } catch {
-        console.log('[Server Function] Cache invalidation skipped (server module not available)');
+        console.warn('[reconciliationMutations] Cache invalidation skipped (server module not available)');
     }
 }
 

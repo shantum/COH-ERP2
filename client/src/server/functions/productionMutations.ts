@@ -242,7 +242,7 @@ async function invalidateInventoryCache(skuIds: string[]): Promise<void> {
         const { inventoryBalanceCache } = await import('@coh/shared/services/inventory');
         inventoryBalanceCache.invalidate(skuIds);
     } catch {
-        console.log('[Server Function] Cache invalidation skipped (server module not available)');
+        console.warn('[productionMutations] Cache invalidation skipped (server module not available)');
     }
 }
 
@@ -264,11 +264,9 @@ async function broadcastUpdate(event: ProductionUpdateEvent, excludeUserId: stri
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ event, excludeUserId }),
-        }).catch(() => {
-            console.log('[Server Function] SSE broadcast failed (non-critical)');
         });
     } catch {
-        // Silently fail
+        console.warn('[productionMutations] SSE broadcast failed (non-critical)');
     }
 }
 

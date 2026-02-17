@@ -31,10 +31,6 @@ export const FinanceSearchParams = z.object({
   method: z.string().optional().catch(undefined),
   /** Payment match status filter */
   matchStatus: z.enum(['all', 'unmatched', 'matched']).optional().catch(undefined),
-  /** Ledger account code filter */
-  accountCode: z.string().optional().catch(undefined),
-  /** Ledger source type filter */
-  sourceType: z.string().optional().catch(undefined),
   /** Parties tab: filter by TransactionType ID */
   partyTxnType: z.string().optional().catch(undefined),
   /** Search query */

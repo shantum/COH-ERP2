@@ -330,11 +330,9 @@ async function broadcastUpdate(event: InventoryUpdateEvent): Promise<void> {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ event, excludeUserId: null }),
-        }).catch(() => {
-            console.log('[Server Function] SSE broadcast failed (non-critical)');
         });
     } catch {
-        // Silently fail
+        console.warn('[inventoryMutations] SSE broadcast failed (non-critical)');
     }
 }
 
@@ -350,7 +348,7 @@ async function invalidateCache(skuIds: string[]): Promise<void> {
     } catch {
         // Cache invalidation is best-effort in Server Functions
         // The Express server's tRPC endpoints will still work with fresh data
-        console.log('[Server Function] Cache invalidation skipped (server module not available)');
+        console.warn('[inventoryMutations] Cache invalidation skipped (server module not available)');
     }
 }
 
