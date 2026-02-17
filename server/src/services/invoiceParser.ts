@@ -37,6 +37,15 @@ const ParsedInvoiceSchema = z.object({
     billingPeriod: z.string().nullable().optional(),   // YYYY-MM
     supplierName: z.string().nullable().optional(),
     supplierGstin: z.string().nullable().optional(),
+    supplierPan: z.string().nullable().optional(),
+    supplierAddress: z.string().nullable().optional(),
+    supplierStateCode: z.string().nullable().optional(),  // 2-digit GST state code
+    supplierEmail: z.string().nullable().optional(),
+    supplierPhone: z.string().nullable().optional(),
+    supplierBankAccountNumber: z.string().nullable().optional(),
+    supplierBankIfsc: z.string().nullable().optional(),
+    supplierBankName: z.string().nullable().optional(),
+    supplierBankAccountName: z.string().nullable().optional(),  // beneficiary name
     subtotal: z.number().nullable().optional(),
     gstAmount: z.number().nullable().optional(),
     totalAmount: z.number().nullable().optional(),
@@ -46,6 +55,7 @@ const ParsedInvoiceSchema = z.object({
 
 export type ParsedInvoice = z.infer<typeof ParsedInvoiceSchema>;
 export type ParsedLine = z.infer<typeof ParsedLineSchema>;
+export { ParsedLineSchema };
 
 // ============================================
 // SYSTEM PROMPT
@@ -62,6 +72,11 @@ IMPORTANT RULES:
 - For service invoices: look for SAC codes (service accounting codes) in addition to HSN codes.
 - billingPeriod: If the invoice covers a specific month (e.g. "for the month of January 2026" or "Jan 2026"), return as "YYYY-MM". For recurring services (rent, software, salaries), the billing period is usually mentioned. If not clear, derive from invoiceDate as "YYYY-MM".
 - dueDate: Extract if present ("due by", "payment due", "pay before", etc.). Return as DD/MM/YYYY.
+- supplierPan: PAN is a 10-character alphanumeric code (e.g. ABCDE1234F). Often printed near GSTIN or in the supplier header. Characters 3-12 of a 15-digit GSTIN are the PAN — but only return PAN if explicitly printed on the invoice.
+- supplierAddress: Full address of the supplier/seller as printed on the invoice.
+- supplierStateCode: The 2-digit GST state code (e.g. "27" for Maharashtra, "07" for Delhi). This is the first 2 digits of the supplier's GSTIN if available.
+- supplierEmail and supplierPhone: Often in the invoice header or footer.
+- Bank details: Indian invoices commonly have a "Bank Details" or "Payment Details" section. Extract account number, IFSC code, bank name, and beneficiary/account holder name.
 - If a field is not visible or you can't read it, set it to null.
 - Set confidence from 0 to 1 based on how clearly you could read the invoice.
 
@@ -73,6 +88,15 @@ Return ONLY valid JSON matching this structure (no markdown, no code fences):
   "billingPeriod": "YYYY-MM or null",
   "supplierName": "string or null",
   "supplierGstin": "string or null",
+  "supplierPan": "string or null",
+  "supplierAddress": "string or null",
+  "supplierStateCode": "string or null",
+  "supplierEmail": "string or null",
+  "supplierPhone": "string or null",
+  "supplierBankAccountNumber": "string or null",
+  "supplierBankIfsc": "string or null",
+  "supplierBankName": "string or null",
+  "supplierBankAccountName": "string or null",
   "subtotal": number or null,
   "gstAmount": number or null,
   "totalAmount": number or null,
@@ -181,6 +205,15 @@ export async function parseInvoice(
             billingPeriod: null,
             supplierName: null,
             supplierGstin: null,
+            supplierPan: null,
+            supplierAddress: null,
+            supplierStateCode: null,
+            supplierEmail: null,
+            supplierPhone: null,
+            supplierBankAccountNumber: null,
+            supplierBankIfsc: null,
+            supplierBankName: null,
+            supplierBankAccountName: null,
             subtotal: null,
             gstAmount: null,
             totalAmount: null,

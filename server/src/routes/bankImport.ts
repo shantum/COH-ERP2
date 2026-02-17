@@ -19,7 +19,14 @@ import {
   categorizeTransactions,
   getDryRunSummary,
   postTransactions,
+  parseHdfcRows,
+  parseRazorpayxRows,
+  checkDuplicateHashes,
+  validateHdfcBalance,
+  fetchActiveParties,
+  categorizeSingleTxn,
 } from '../services/bankImport/index.js';
+import type { RawRow } from '../services/bankImport/index.js';
 import {
   findPartyByNarration,
   resolveAccounting,
@@ -89,6 +96,126 @@ router.post('/upload', requireAdmin, upload.single('file'), asyncHandler(async (
     res.json({ success: true, result });
   } finally {
     // Clean up uploaded file
+    fs.unlink(filePath, () => {});
+  }
+}));
+
+// ============================================
+// POST /preview — Parse CSV + dedup + categorize in memory (NO DB write)
+// ============================================
+
+router.post('/preview', requireAdmin, upload.single('file'), asyncHandler(async (req: Request, res: Response) => {
+  if (!req.file) {
+    res.status(400).json({ error: 'No file uploaded' });
+    return;
+  }
+
+  const bank = req.body.bank as string;
+  if (!bank || !['hdfc', 'razorpayx'].includes(bank)) {
+    res.status(400).json({ error: 'bank must be "hdfc" or "razorpayx"' });
+    return;
+  }
+
+  const filePath = req.file.path;
+  log.info({ bank, fileName: req.file.originalname, filePath }, 'Bank CSV preview requested');
+
+  try {
+    let parsed: RawRow[];
+    let totalProcessed: number;
+
+    if (bank === 'hdfc') {
+      parsed = parseHdfcRows(filePath);
+      totalProcessed = parsed.length;
+    } else {
+      const result = parseRazorpayxRows(filePath);
+      parsed = result.rows;
+      totalProcessed = result.totalProcessed;
+    }
+
+    // Check duplicates (read-only DB query)
+    const allHashes = parsed.map(r => r.txnHash);
+    const existingHashes = await checkDuplicateHashes(bank, allHashes);
+
+    // Balance validation (HDFC only)
+    const balanceCheck = bank === 'hdfc' ? validateHdfcBalance(parsed) : undefined;
+
+    // Categorize in memory
+    const parties = await fetchActiveParties();
+
+    const bankAccountMap: Record<string, string> = {
+      hdfc: 'BANK_HDFC',
+      razorpayx: 'BANK_RAZORPAYX',
+    };
+    const bankAccount = bankAccountMap[bank] || 'BANK_HDFC';
+
+    let partiesMatched = 0;
+    let partiesUnmatched = 0;
+
+    const previewRows = parsed.map(row => {
+      const isDuplicate = existingHashes.has(row.txnHash);
+
+      // Categorize using same logic as import
+      const cat = categorizeSingleTxn(
+        {
+          bank,
+          narration: row.narration || null,
+          direction: row.direction,
+          counterpartyName: row.counterpartyName || null,
+          rawData: row.rawData,
+          legacySourceId: row.legacySourceId,
+        },
+        parties,
+      );
+
+      // Resolve party
+      let partyId = cat.partyId;
+      let partyName = cat.counterpartyName;
+      if (!partyId && partyName) {
+        const matched = parties.find(p =>
+          p.name.toLowerCase() === partyName!.toLowerCase() ||
+          p.aliases.some(a => a.toLowerCase() === partyName!.toLowerCase())
+        );
+        if (matched) { partyId = matched.id; partyName = matched.name; }
+      }
+
+      if (!isDuplicate) {
+        if (partyId) partiesMatched++;
+        else partiesUnmatched++;
+      }
+
+      return {
+        txnDate: row.txnDate,
+        narration: row.narration || null,
+        amount: row.amount,
+        direction: row.direction,
+        reference: row.reference || null,
+        closingBalance: row.closingBalance,
+        isDuplicate,
+        partyName: partyName || null,
+        partyId: partyId || null,
+        category: cat.category || null,
+        debitAccountCode: cat.debitAccount,
+        creditAccountCode: cat.creditAccount,
+      };
+    });
+
+    const newCount = previewRows.filter(r => !r.isDuplicate).length;
+    const dupCount = previewRows.filter(r => r.isDuplicate).length;
+
+    res.json({
+      bank,
+      totalRows: totalProcessed,
+      newRows: newCount,
+      duplicateRows: dupCount,
+      balanceMatched: balanceCheck?.balanceMatched,
+      openingBalance: balanceCheck?.openingBalance,
+      closingBalance: balanceCheck?.closingBalance,
+      partiesMatched,
+      partiesUnmatched,
+      rows: previewRows,
+    });
+  } finally {
+    // Clean up temp file
     fs.unlink(filePath, () => {});
   }
 }));

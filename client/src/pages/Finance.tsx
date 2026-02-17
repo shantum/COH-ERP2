@@ -46,7 +46,7 @@ import {
   IndianRupee, Plus, ArrowUpRight, ArrowDownLeft,
   Check, X, ChevronLeft, ChevronRight, Loader2, AlertCircle,
   ExternalLink, CloudUpload, Link2, Download, Upload, ArrowLeft,
-  Pencil, Search, Trash2, History,
+  Pencil, Search, Trash2, History, AlertTriangle, Eye,
 } from 'lucide-react';
 import {
   type FinanceSearchParams,
@@ -1213,7 +1213,7 @@ function BankStatusBadge({ status }: { status: string }) {
 
 // ---- Import View (3-step flow) ----
 
-type ImportStep = 'upload' | 'review' | 'post';
+type ImportStep = 'upload' | 'preview' | 'review' | 'post';
 
 interface ImportResultState {
   bank: string;
@@ -1245,11 +1245,39 @@ type ReviewTxn = {
   status: string;
 };
 
+type PreviewRow = {
+  txnDate: string;
+  narration: string | null;
+  amount: number;
+  direction: string;
+  reference: string | null;
+  closingBalance?: number;
+  isDuplicate: boolean;
+  partyName: string | null;
+  partyId: string | null;
+  category: string | null;
+  debitAccountCode: string;
+  creditAccountCode: string;
+};
+
+interface BankPreviewState {
+  bank: string;
+  totalRows: number;
+  newRows: number;
+  duplicateRows: number;
+  balanceMatched?: boolean;
+  partiesMatched: number;
+  partiesUnmatched: number;
+  rows: PreviewRow[];
+}
+
 function BankImportView({ onBack }: { onBack: () => void }) {
   const [step, setStep] = useState<ImportStep>('upload');
   const [selectedBank, setSelectedBank] = useState<string>('hdfc');
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [bankPreview, setBankPreview] = useState<BankPreviewState | null>(null);
+  const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<ImportResultState | null>(null);
   const [reviewTxns, setReviewTxns] = useState<ReviewTxn[]>([]);
   const [loadingTxns, setLoadingTxns] = useState(false);
@@ -1279,9 +1307,37 @@ function BankImportView({ onBack }: { onBack: () => void }) {
     if (dryJson.success) setDryRun(dryJson.summary);
   };
 
-  const handleUpload = async () => {
+  // Step 1: Upload CSV → preview (no DB write)
+  const handlePreview = async () => {
     if (!file) return;
     setUploading(true);
+    setError(null);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('bank', selectedBank);
+
+      const res = await fetch('/api/bank-import/preview', {
+        method: 'POST',
+        credentials: 'include',
+        body: formData,
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Preview failed');
+
+      setBankPreview(json);
+      setStep('preview');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Preview failed');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  // Step 2: Confirm → actually import to DB
+  const handleImport = async () => {
+    if (!file) return;
+    setImporting(true);
     setError(null);
     try {
       const formData = new FormData();
@@ -1294,7 +1350,7 @@ function BankImportView({ onBack }: { onBack: () => void }) {
         body: formData,
       });
       const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.error || 'Upload failed');
+      if (!res.ok || !json.success) throw new Error(json.error || 'Import failed');
 
       const result: ImportResultState = {
         ...json.result,
@@ -1304,13 +1360,13 @@ function BankImportView({ onBack }: { onBack: () => void }) {
       };
       setImportResult(result);
 
-      // Fetch transactions for review and go directly to review step
+      // Fetch transactions for review and go to review step
       await fetchReviewData(result.batchId);
       setStep('review');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Upload failed');
+      setError(err instanceof Error ? err.message : 'Import failed');
     } finally {
-      setUploading(false);
+      setImporting(false);
     }
   };
 
@@ -1345,6 +1401,9 @@ function BankImportView({ onBack }: { onBack: () => void }) {
   const matchedCount = reviewTxns.filter(t => t.partyId || (t.party && t.party.id)).length;
   const unmatchedCount = reviewTxns.filter(t => !t.partyId && (!t.party || !t.party.id)).length;
 
+  const previewNewRows = bankPreview?.rows.filter(r => !r.isDuplicate) ?? [];
+  const previewNewCount = previewNewRows.length;
+
   return (
     <div className="space-y-6 max-w-3xl">
       <div className="flex items-center gap-3">
@@ -1361,7 +1420,7 @@ function BankImportView({ onBack }: { onBack: () => void }) {
       )}
 
       {/* Step 1: Upload */}
-      <div className={`border rounded-lg p-4 space-y-3 ${step !== 'upload' && importResult ? 'opacity-60' : ''}`}>
+      <div className={`border rounded-lg p-4 space-y-3 ${step !== 'upload' ? 'opacity-60' : ''}`}>
         <h4 className="font-medium text-sm flex items-center gap-2">
           <span className="bg-blue-100 text-blue-700 rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold">1</span>
           Upload CSV
@@ -1393,34 +1452,104 @@ function BankImportView({ onBack }: { onBack: () => void }) {
               </label>
             </div>
 
-            <Button onClick={handleUpload} disabled={!file || uploading}>
-              {uploading ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Upload className="h-4 w-4 mr-1" />}
-              Upload
+            <Button onClick={handlePreview} disabled={!file || uploading}>
+              {uploading ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Eye className="h-4 w-4 mr-1" />}
+              {uploading ? 'Parsing...' : 'Preview'}
             </Button>
           </>
-        ) : importResult ? (
-          <div className="text-sm space-y-1">
-            <p><strong>{importResult.newRows}</strong> new rows imported, <strong>{importResult.skippedRows}</strong> duplicates skipped</p>
-            {importResult.balanceMatched !== undefined && (
-              <p>Balance check: {importResult.balanceMatched ? <span className="text-green-600">Pass</span> : <span className="text-red-600">Fail</span>}</p>
-            )}
-            {importResult.partiesMatched !== undefined && (
-              <p>
-                <span className="text-green-600">{importResult.partiesMatched} matched</span>
-                {(importResult.partiesUnmatched ?? 0) > 0 && (
-                  <>, <span className="text-amber-600">{importResult.partiesUnmatched} unmatched</span></>
-                )}
-              </p>
-            )}
-          </div>
-        ) : null}
+        ) : (
+          <p className="text-sm text-muted-foreground">{file?.name} ({selectedBank.toUpperCase()})</p>
+        )}
       </div>
 
-      {/* Step 2: Review */}
+      {/* Step 2: Preview */}
+      {(step === 'preview' || step === 'review' || step === 'post') && bankPreview && (
+        <div className={`border rounded-lg p-4 space-y-3 ${step !== 'preview' ? 'opacity-60' : ''}`}>
+          <h4 className="font-medium text-sm flex items-center gap-2">
+            <span className="bg-blue-100 text-blue-700 rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold">2</span>
+            Preview
+          </h4>
+
+          {step === 'preview' ? (
+            <>
+              {/* Summary bar */}
+              <div className="flex flex-wrap gap-3 text-xs">
+                <span className="px-2 py-1 rounded bg-green-50 text-green-700 font-medium">{bankPreview.newRows} new</span>
+                {bankPreview.duplicateRows > 0 && (
+                  <span className="px-2 py-1 rounded bg-gray-100 text-gray-500">{bankPreview.duplicateRows} duplicates</span>
+                )}
+                <span className="px-2 py-1 rounded bg-green-50 text-green-700">{bankPreview.partiesMatched} matched</span>
+                {bankPreview.partiesUnmatched > 0 && (
+                  <span className="px-2 py-1 rounded bg-amber-50 text-amber-700">{bankPreview.partiesUnmatched} unmatched</span>
+                )}
+                {bankPreview.balanceMatched !== undefined && (
+                  <span className={`px-2 py-1 rounded ${bankPreview.balanceMatched ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+                    Balance: {bankPreview.balanceMatched ? 'Pass' : 'Fail'}
+                  </span>
+                )}
+              </div>
+
+              {/* Preview table */}
+              {bankPreview.rows.length > 0 && (
+                <div className="border rounded overflow-hidden max-h-[400px] overflow-y-auto">
+                  <table className="w-full text-xs">
+                    <thead className="bg-muted/50 sticky top-0">
+                      <tr>
+                        <th className="text-left p-2 font-medium">Date</th>
+                        <th className="text-left p-2 font-medium">Narration</th>
+                        <th className="text-right p-2 font-medium">Amount</th>
+                        <th className="text-left p-2 font-medium">Party</th>
+                        <th className="text-left p-2 font-medium w-16">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {bankPreview.rows.map((row, i) => (
+                        <tr
+                          key={i}
+                          className={`border-t ${
+                            row.isDuplicate
+                              ? 'opacity-40 line-through'
+                              : !row.partyId
+                                ? 'bg-amber-50'
+                                : ''
+                          }`}
+                        >
+                          <td className="p-2 whitespace-nowrap">{new Date(row.txnDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</td>
+                          <td className="p-2 max-w-[250px] truncate" title={row.narration ?? ''}>{row.narration ?? '—'}</td>
+                          <td className={`p-2 text-right font-mono whitespace-nowrap ${row.direction === 'credit' ? 'text-green-600' : ''}`}>
+                            {row.direction === 'credit' ? '+' : ''}{formatCurrency(row.amount)}
+                          </td>
+                          <td className="p-2">{row.partyName ?? <span className="text-amber-600">—</span>}</td>
+                          <td className="p-2">
+                            {row.isDuplicate
+                              ? <span className="text-gray-400">Dup</span>
+                              : <span className="text-green-600">New</span>}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              <Button onClick={handleImport} disabled={importing || previewNewCount === 0}>
+                {importing ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Upload className="h-4 w-4 mr-1" />}
+                {importing ? 'Importing...' : previewNewCount === 0 ? 'No new transactions' : `Import ${previewNewCount} Transactions`}
+              </Button>
+            </>
+          ) : (
+            <div className="text-sm text-muted-foreground">
+              <p>{bankPreview.newRows} new, {bankPreview.duplicateRows} duplicates</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Step 3: Review */}
       {(step === 'review' || step === 'post') && (
         <div className={`border rounded-lg p-4 space-y-3 ${step === 'post' ? 'opacity-60' : ''}`}>
           <h4 className="font-medium text-sm flex items-center gap-2">
-            <span className="bg-blue-100 text-blue-700 rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold">2</span>
+            <span className="bg-blue-100 text-blue-700 rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold">3</span>
             Review Transactions
           </h4>
 
@@ -1487,11 +1616,11 @@ function BankImportView({ onBack }: { onBack: () => void }) {
         </div>
       )}
 
-      {/* Step 3: Post */}
+      {/* Step 4: Post */}
       {step === 'post' && (
         <div className="border rounded-lg p-4 space-y-3">
           <h4 className="font-medium text-sm flex items-center gap-2">
-            <span className="bg-blue-100 text-blue-700 rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold">3</span>
+            <span className="bg-blue-100 text-blue-700 rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold">4</span>
             Post
           </h4>
 
@@ -1725,6 +1854,64 @@ function ConfirmPayableDialog({ invoice, isPending, onConfirm, onClose }: {
 // UPLOAD INVOICE DIALOG
 // ============================================
 
+interface InvoicePreview {
+  previewId: string;
+  parsed: {
+    invoiceNumber?: string | null;
+    invoiceDate?: string | null;
+    dueDate?: string | null;
+    billingPeriod?: string | null;
+    supplierName?: string | null;
+    supplierGstin?: string | null;
+    supplierPan?: string | null;
+    supplierAddress?: string | null;
+    supplierEmail?: string | null;
+    supplierPhone?: string | null;
+    supplierBankAccountNumber?: string | null;
+    supplierBankIfsc?: string | null;
+    supplierBankName?: string | null;
+    supplierBankAccountName?: string | null;
+    subtotal?: number | null;
+    gstAmount?: number | null;
+    totalAmount?: number | null;
+    lines?: Array<{
+      description?: string | null;
+      hsnCode?: string | null;
+      qty?: number | null;
+      unit?: string | null;
+      rate?: number | null;
+      amount?: number | null;
+      gstPercent?: number | null;
+      gstAmount?: number | null;
+    }>;
+    confidence?: number;
+  } | null;
+  partyMatch: { partyId: string; partyName: string; category: string } | null;
+  enrichmentPreview: {
+    willCreateNewParty: boolean;
+    newPartyName?: string;
+    fieldsWillBeAdded: string[];
+    bankMismatch: boolean;
+    bankMismatchDetails?: string;
+  };
+  aiConfidence: number;
+  fileName: string;
+}
+
+interface InvoiceConfirmResult {
+  invoiceNumber: string | null;
+  counterpartyName: string | null;
+  totalAmount: number;
+  aiConfidence: number;
+  enrichment?: {
+    fieldsAdded: string[];
+    bankMismatch: boolean;
+    bankMismatchDetails?: string;
+    partyCreated: boolean;
+    partyName?: string;
+  };
+}
+
 function UploadInvoiceDialog({ open, onClose, onSuccess }: {
   open: boolean;
   onClose: () => void;
@@ -1732,38 +1919,30 @@ function UploadInvoiceDialog({ open, onClose, onSuccess }: {
 }) {
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<{
-    invoiceNumber: string | null;
-    counterpartyName: string | null;
-    totalAmount: number;
-    aiConfidence: number;
-  } | null>(null);
+  const [preview, setPreview] = useState<InvoicePreview | null>(null);
+  const [result, setResult] = useState<InvoiceConfirmResult | null>(null);
 
+  // Step 1: Upload + AI parse (no DB write)
   const handleUpload = async () => {
     if (!file) return;
     setUploading(true);
     setError(null);
-    setResult(null);
+    setPreview(null);
     try {
       const formData = new FormData();
       formData.append('file', file);
 
-      const res = await fetch('/api/finance/upload-and-parse', {
+      const res = await fetch('/api/finance/upload-preview', {
         method: 'POST',
         credentials: 'include',
         body: formData,
       });
       const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.error || 'Upload failed');
+      if (!res.ok) throw new Error(json.error || 'Upload failed');
 
-      setResult({
-        invoiceNumber: json.invoice.invoiceNumber,
-        counterpartyName: json.invoice.counterpartyName,
-        totalAmount: json.invoice.totalAmount,
-        aiConfidence: json.aiConfidence,
-      });
-      onSuccess();
+      setPreview(json);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Upload failed');
     } finally {
@@ -1771,21 +1950,69 @@ function UploadInvoiceDialog({ open, onClose, onSuccess }: {
     }
   };
 
+  // Step 2: Confirm preview → save to DB
+  const handleConfirm = async () => {
+    if (!preview) return;
+    setConfirming(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/finance/confirm-preview/${preview.previewId}`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+      const json = await res.json();
+
+      if (res.status === 410) {
+        // Preview expired
+        setError('Preview expired, please re-upload');
+        setPreview(null);
+        return;
+      }
+      if (!res.ok || !json.success) throw new Error(json.error || 'Save failed');
+
+      setResult({
+        invoiceNumber: json.invoice.invoiceNumber,
+        counterpartyName: json.invoice.party?.name ?? json.invoice.supplierName ?? null,
+        totalAmount: json.invoice.totalAmount,
+        aiConfidence: json.aiConfidence,
+        enrichment: json.enrichment,
+      });
+      onSuccess();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Save failed');
+    } finally {
+      setConfirming(false);
+    }
+  };
+
   const handleClose = () => {
     setFile(null);
     setError(null);
+    setPreview(null);
     setResult(null);
     onClose();
   };
 
+  const p = preview?.parsed;
+  const lines = p?.lines ?? [];
+
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) handleClose(); }}>
-      <DialogContent className="max-w-md">
+      <DialogContent className={preview && !result ? 'max-w-2xl' : 'max-w-md'}>
         <DialogHeader>
-          <DialogTitle>Upload Invoice</DialogTitle>
-          <DialogDescription>Upload a PDF or image and we will extract the details automatically.</DialogDescription>
+          <DialogTitle>{result ? 'Invoice Created' : preview ? 'Review Invoice' : 'Upload Invoice'}</DialogTitle>
+          <DialogDescription>
+            {result ? 'Draft saved successfully.' : preview ? 'Check the extracted details before saving.' : 'Upload a PDF or image and we will extract the details automatically.'}
+          </DialogDescription>
         </DialogHeader>
 
+        {error && (
+          <div className="border border-red-300 bg-red-50 text-red-700 rounded-lg p-3 text-sm flex items-center gap-2">
+            <AlertCircle className="h-4 w-4 shrink-0" /> {error}
+          </div>
+        )}
+
+        {/* Step 3: Result */}
         {result ? (
           <div className="space-y-3">
             <div className="border border-green-200 bg-green-50 rounded-lg p-4 space-y-2">
@@ -1797,18 +2024,167 @@ function UploadInvoiceDialog({ open, onClose, onSuccess }: {
                 <p><span className="text-muted-foreground">AI Confidence:</span> {Math.round(result.aiConfidence * 100)}%</p>
               </div>
             </div>
+
+            {result.enrichment?.partyCreated && (
+              <div className="border border-blue-200 bg-blue-50 rounded-lg p-3 text-sm text-blue-700">
+                New vendor created: <span className="font-medium">{result.enrichment.partyName}</span>
+              </div>
+            )}
+
+            {result.enrichment && result.enrichment.fieldsAdded.length > 0 && !result.enrichment.partyCreated && (
+              <div className="border border-blue-200 bg-blue-50 rounded-lg p-3 text-sm text-blue-700">
+                Updated vendor info: {result.enrichment.fieldsAdded.join(', ')}
+              </div>
+            )}
+
+            {result.enrichment?.bankMismatch && (
+              <div className="border border-amber-300 bg-amber-50 rounded-lg p-3 text-sm text-amber-700 flex items-start gap-2">
+                <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-medium">Bank details mismatch</p>
+                  <p className="text-xs mt-0.5">{result.enrichment.bankMismatchDetails}</p>
+                </div>
+              </div>
+            )}
+
             <DialogFooter>
               <Button onClick={handleClose}>Done</Button>
             </DialogFooter>
           </div>
-        ) : (
-          <div className="space-y-4">
-            {error && (
-              <div className="border border-red-300 bg-red-50 text-red-700 rounded-lg p-3 text-sm flex items-center gap-2">
-                <AlertCircle className="h-4 w-4 shrink-0" /> {error}
+
+        /* Step 2: Preview */
+        ) : preview ? (
+          <div className="space-y-4 max-h-[70vh] overflow-y-auto">
+            {/* Invoice header */}
+            <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm">
+              {p?.invoiceNumber && <div><span className="text-muted-foreground">Invoice #:</span> <span className="font-medium">{p.invoiceNumber}</span></div>}
+              {p?.invoiceDate && <div><span className="text-muted-foreground">Date:</span> {p.invoiceDate}</div>}
+              {p?.dueDate && <div><span className="text-muted-foreground">Due:</span> {p.dueDate}</div>}
+              {p?.billingPeriod && <div><span className="text-muted-foreground">Period:</span> {p.billingPeriod}</div>}
+            </div>
+
+            {/* Supplier info */}
+            <div className="border rounded-lg p-3 space-y-2">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Supplier</p>
+              <div className="text-sm space-y-1">
+                {p?.supplierName && <p className="font-medium">{p.supplierName}</p>}
+                {p?.supplierGstin && <p className="text-xs text-muted-foreground">GSTIN: {p.supplierGstin}</p>}
+                {p?.supplierPan && <p className="text-xs text-muted-foreground">PAN: {p.supplierPan}</p>}
+                {p?.supplierAddress && <p className="text-xs text-muted-foreground">{p.supplierAddress}</p>}
+                {(p?.supplierEmail || p?.supplierPhone) && (
+                  <p className="text-xs text-muted-foreground">
+                    {[p.supplierEmail, p.supplierPhone].filter(Boolean).join(' | ')}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/* Party match */}
+            <div>
+              {preview.partyMatch ? (
+                <span className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-green-100 text-green-700">
+                  <Check className="h-3 w-3" /> Matched: {preview.partyMatch.partyName}
+                </span>
+              ) : p?.supplierName ? (
+                <span className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-blue-100 text-blue-700">
+                  <Plus className="h-3 w-3" /> New vendor: {p.supplierName}
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-amber-100 text-amber-700">
+                  <AlertTriangle className="h-3 w-3" /> No supplier found
+                </span>
+              )}
+            </div>
+
+            {/* Bank details */}
+            {(p?.supplierBankAccountNumber || p?.supplierBankIfsc) && (
+              <div className="border rounded-lg p-3 space-y-1">
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Bank Details</p>
+                <div className="text-xs space-y-0.5">
+                  {p?.supplierBankAccountNumber && <p>A/C: {p.supplierBankAccountNumber}</p>}
+                  {p?.supplierBankIfsc && <p>IFSC: {p.supplierBankIfsc}</p>}
+                  {p?.supplierBankName && <p>Bank: {p.supplierBankName}</p>}
+                  {p?.supplierBankAccountName && <p>Name: {p.supplierBankAccountName}</p>}
+                </div>
               </div>
             )}
 
+            {/* Enrichment preview */}
+            {preview.enrichmentPreview.fieldsWillBeAdded.length > 0 && !preview.enrichmentPreview.willCreateNewParty && (
+              <div className="border border-blue-200 bg-blue-50 rounded-lg p-2.5 text-xs text-blue-700">
+                Will add: {preview.enrichmentPreview.fieldsWillBeAdded.join(', ')}
+              </div>
+            )}
+            {preview.enrichmentPreview.bankMismatch && (
+              <div className="border border-amber-300 bg-amber-50 rounded-lg p-2.5 text-xs text-amber-700 flex items-start gap-2">
+                <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-medium">Bank details mismatch</p>
+                  <p className="mt-0.5">{preview.enrichmentPreview.bankMismatchDetails}</p>
+                </div>
+              </div>
+            )}
+
+            {/* Line items */}
+            {lines.length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5">Line Items</p>
+                <div className="border rounded overflow-hidden">
+                  <table className="w-full text-xs">
+                    <thead className="bg-muted/50">
+                      <tr>
+                        <th className="text-left p-1.5 font-medium">Description</th>
+                        <th className="text-left p-1.5 font-medium w-16">HSN</th>
+                        <th className="text-right p-1.5 font-medium w-12">Qty</th>
+                        <th className="text-right p-1.5 font-medium w-16">Rate</th>
+                        <th className="text-right p-1.5 font-medium w-20">Amount</th>
+                        <th className="text-right p-1.5 font-medium w-14">GST%</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {lines.map((line, i) => (
+                        <tr key={i} className="border-t">
+                          <td className="p-1.5 max-w-[200px] truncate" title={line.description ?? ''}>{line.description ?? '—'}</td>
+                          <td className="p-1.5">{line.hsnCode ?? '—'}</td>
+                          <td className="p-1.5 text-right">{line.qty != null ? `${line.qty}${line.unit ? ` ${line.unit}` : ''}` : '—'}</td>
+                          <td className="p-1.5 text-right font-mono">{line.rate != null ? formatCurrency(line.rate) : '—'}</td>
+                          <td className="p-1.5 text-right font-mono">{line.amount != null ? formatCurrency(line.amount) : '—'}</td>
+                          <td className="p-1.5 text-right">{line.gstPercent != null ? `${line.gstPercent}%` : '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* Totals */}
+            <div className="flex justify-end">
+              <div className="text-sm space-y-0.5 text-right">
+                {p?.subtotal != null && <p><span className="text-muted-foreground">Subtotal:</span> <span className="font-mono">{formatCurrency(p.subtotal)}</span></p>}
+                {p?.gstAmount != null && <p><span className="text-muted-foreground">GST:</span> <span className="font-mono">{formatCurrency(p.gstAmount)}</span></p>}
+                {p?.totalAmount != null && <p className="font-medium"><span className="text-muted-foreground">Total:</span> <span className="font-mono">{formatCurrency(p.totalAmount)}</span></p>}
+              </div>
+            </div>
+
+            {/* AI confidence */}
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <div className={`w-2 h-2 rounded-full ${preview.aiConfidence >= 0.8 ? 'bg-green-500' : preview.aiConfidence >= 0.5 ? 'bg-amber-500' : 'bg-red-500'}`} />
+              AI confidence: {Math.round(preview.aiConfidence * 100)}%
+            </div>
+
+            <DialogFooter>
+              <Button variant="outline" onClick={handleClose}>Cancel</Button>
+              <Button onClick={handleConfirm} disabled={confirming}>
+                {confirming ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Check className="h-4 w-4 mr-1" />}
+                {confirming ? 'Saving...' : 'Create Draft'}
+              </Button>
+            </DialogFooter>
+          </div>
+
+        /* Step 1: Upload */
+        ) : (
+          <div className="space-y-4">
             <label className="block border-2 border-dashed rounded-lg p-6 text-center cursor-pointer hover:bg-muted/30 transition-colors">
               <input
                 type="file"

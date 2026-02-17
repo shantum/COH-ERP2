@@ -38,7 +38,7 @@ export interface ImportResult {
   partiesUnmatched?: number;
 }
 
-interface RawRow {
+export interface RawRow {
   txnDate: Date;
   amount: number;
   direction: 'debit' | 'credit';
@@ -144,7 +144,7 @@ export function parseCSVLine(line: string): string[] {
   return result;
 }
 
-function parseCSV(filePath: string): Record<string, string>[] {
+export function parseCSV(filePath: string): Record<string, string>[] {
   const content = fs.readFileSync(filePath, 'utf-8');
   const lines = content.split('\n').filter(l => l.trim());
   if (lines.length < 2) return [];
@@ -185,22 +185,12 @@ function parseRazorpayDate(dateStr: string): Date {
 }
 
 // ============================================
-// HDFC BANK IMPORT
+// PURE PARSING FUNCTIONS (no DB writes)
 // ============================================
 
-export async function importHdfcStatement(filePath: string): Promise<ImportResult> {
+/** Parse HDFC CSV into RawRow array — pure, no DB access */
+export function parseHdfcRows(filePath: string): RawRow[] {
   const rows = parseCSV(filePath);
-  const fileName = filePath.split('/').pop() || filePath;
-  const batchId = randomUUID();
-
-  // Fetch existing hashes
-  const existingHashes = new Set(
-    (await prisma.bankTransaction.findMany({
-      where: { bank: 'hdfc' },
-      select: { txnHash: true },
-    })).map(t => t.txnHash)
-  );
-
   const parsed: RawRow[] = [];
 
   for (const row of rows) {
@@ -231,32 +221,101 @@ export async function importHdfcStatement(filePath: string): Promise<ImportResul
     });
   }
 
-  // Balance validation
-  let balanceMatched: boolean | undefined;
-  let openingBalance: number | undefined;
-  let closingBalance: number | undefined;
+  return parsed;
+}
 
-  if (parsed.length > 0 && parsed[0].closingBalance !== undefined) {
-    const first = parsed[0];
-    const deposit = first.direction === 'credit' ? first.amount : 0;
-    const withdrawal = first.direction === 'debit' ? first.amount : 0;
-    openingBalance = first.closingBalance! - deposit + withdrawal;
-    closingBalance = parsed[parsed.length - 1].closingBalance;
+/** Parse RazorpayX CSV into RawRow array — pure, no DB access */
+export function parseRazorpayxRows(filePath: string): { rows: RawRow[]; totalProcessed: number } {
+  const csvRows = parseCSV(filePath);
+  const processed = csvRows.filter(r => r.status === 'processed');
+  const rows: RawRow[] = [];
 
-    // Verify each row's closing balance
-    balanceMatched = true;
-    let prevClosing = openingBalance;
-    for (const row of parsed) {
-      if (row.closingBalance === undefined) continue;
-      const dep = row.direction === 'credit' ? row.amount : 0;
-      const wd = row.direction === 'debit' ? row.amount : 0;
-      const expected = prevClosing + dep - wd;
-      if (Math.abs(expected - row.closingBalance) > 0.01) {
-        balanceMatched = false;
-      }
-      prevClosing = row.closingBalance;
-    }
+  for (const row of processed) {
+    const payoutId = row.payout_id;
+    const amount = parseFloat((row.amount ?? '').replace(/,/g, ''));
+    const contactName = row.contact_name ?? '';
+    const purpose = row.purpose ?? '';
+    const utr = row.utr ?? '';
+    const processedAt = parseRazorpayDate(row.processed_at || row.created_at);
+
+    if (!payoutId || amount === 0) continue;
+
+    const txnHash = sha256(`razorpayx_payout|${payoutId}`);
+
+    rows.push({
+      txnDate: processedAt,
+      amount,
+      direction: 'debit',
+      narration: `${purpose}: ${contactName}`,
+      reference: payoutId,
+      utr: utr || undefined,
+      counterpartyName: contactName || undefined,
+      rawData: row as unknown as Record<string, unknown>,
+      txnHash,
+      legacySourceId: payoutId,
+    });
   }
+
+  return { rows, totalProcessed: processed.length };
+}
+
+/** Check which hashes already exist in DB — read-only */
+export async function checkDuplicateHashes(bank: string, hashes: string[]): Promise<Set<string>> {
+  if (hashes.length === 0) return new Set();
+  const existing = await prisma.bankTransaction.findMany({
+    where: { bank, txnHash: { in: hashes } },
+    select: { txnHash: true },
+  });
+  return new Set(existing.map(t => t.txnHash));
+}
+
+/** Validate HDFC balance chain — pure computation */
+export function validateHdfcBalance(rows: RawRow[]): {
+  balanceMatched: boolean | undefined;
+  openingBalance: number | undefined;
+  closingBalance: number | undefined;
+} {
+  if (rows.length === 0 || rows[0].closingBalance === undefined) {
+    return { balanceMatched: undefined, openingBalance: undefined, closingBalance: undefined };
+  }
+
+  const first = rows[0];
+  const deposit = first.direction === 'credit' ? first.amount : 0;
+  const withdrawal = first.direction === 'debit' ? first.amount : 0;
+  const openingBalance = first.closingBalance! - deposit + withdrawal;
+  const closingBalance = rows[rows.length - 1].closingBalance;
+
+  let balanceMatched = true;
+  let prevClosing = openingBalance;
+  for (const row of rows) {
+    if (row.closingBalance === undefined) continue;
+    const dep = row.direction === 'credit' ? row.amount : 0;
+    const wd = row.direction === 'debit' ? row.amount : 0;
+    const expected = prevClosing + dep - wd;
+    if (Math.abs(expected - row.closingBalance) > 0.01) {
+      balanceMatched = false;
+    }
+    prevClosing = row.closingBalance;
+  }
+
+  return { balanceMatched, openingBalance, closingBalance };
+}
+
+// ============================================
+// HDFC BANK IMPORT
+// ============================================
+
+export async function importHdfcStatement(filePath: string): Promise<ImportResult> {
+  const fileName = filePath.split('/').pop() || filePath;
+  const batchId = randomUUID();
+
+  const parsed = parseHdfcRows(filePath);
+
+  // Fetch existing hashes
+  const existingHashes = await checkDuplicateHashes('hdfc', parsed.map(r => r.txnHash));
+
+  // Balance validation
+  const { balanceMatched, openingBalance, closingBalance } = validateHdfcBalance(parsed);
 
   // Filter to new only
   const newRows = parsed.filter(r => !existingHashes.has(r.txnHash));
@@ -345,65 +404,43 @@ function extractNoteDescription(notes: string): string | null {
 }
 
 export async function importRazorpayxPayouts(filePath: string): Promise<ImportResult> {
-  const rows = parseCSV(filePath);
   const fileName = filePath.split('/').pop() || filePath;
   const batchId = randomUUID();
 
-  const existingHashes = new Set(
-    (await prisma.bankTransaction.findMany({
-      where: { bank: 'razorpayx' },
-      select: { txnHash: true },
-    })).map(t => t.txnHash)
-  );
+  const { rows: parsed, totalProcessed } = parseRazorpayxRows(filePath);
+  const existingHashes = await checkDuplicateHashes('razorpayx', parsed.map(r => r.txnHash));
 
-  const processed = rows.filter(r => r.status === 'processed');
-  const newRows: typeof txnData = [];
   let totalDebits = 0;
-  let totalCredits = 0;
+  const totalCredits = 0;
 
-  const txnData = processed.map(row => {
-    const payoutId = row.payout_id;
-    const amount = parseFloat((row.amount ?? '').replace(/,/g, ''));
-    const contactName = row.contact_name ?? '';
-    const purpose = row.purpose ?? '';
-    const utr = row.utr ?? '';
-    const notes = row.notes ?? '{}';
-    const processedAt = parseRazorpayDate(row.processed_at || row.created_at);
-
-    if (!payoutId || amount === 0) return null;
-
-    const txnHash = sha256(`razorpayx_payout|${payoutId}`);
-    if (existingHashes.has(txnHash)) return null;
-    existingHashes.add(txnHash);
-
-    totalDebits += amount;
-
+  const txnData = parsed.filter(r => !existingHashes.has(r.txnHash)).map(r => {
+    totalDebits += r.amount;
     return {
       id: randomUUID(),
       bank: 'razorpayx',
-      txnHash,
-      rawData: row as unknown as JsonValue,
-      txnDate: processedAt,
-      amount,
-      direction: 'debit' as const,
-      narration: `${purpose}: ${contactName}`,
-      reference: payoutId,
-      utr: utr || undefined,
-      counterpartyName: contactName || undefined,
-      legacySourceId: payoutId,
+      txnHash: r.txnHash,
+      rawData: r.rawData as JsonValue,
+      txnDate: r.txnDate,
+      amount: r.amount,
+      direction: r.direction,
+      narration: r.narration,
+      reference: r.reference,
+      utr: r.utr,
+      counterpartyName: r.counterpartyName,
+      legacySourceId: r.legacySourceId,
       batchId,
       status: 'imported',
     };
-  }).filter((r): r is NonNullable<typeof r> => r !== null);
+  });
 
   await prisma.bankImportBatch.create({
     data: {
       id: batchId,
       bank: 'razorpayx',
       fileName,
-      rowCount: processed.length,
+      rowCount: totalProcessed,
       newCount: txnData.length,
-      skippedCount: processed.length - txnData.length,
+      skippedCount: totalProcessed - txnData.length,
       totalDebits,
       totalCredits,
     },
@@ -423,9 +460,9 @@ export async function importRazorpayxPayouts(filePath: string): Promise<ImportRe
   return {
     bank: 'razorpayx',
     fileName,
-    totalRows: processed.length,
+    totalRows: totalProcessed,
     newRows: txnData.length,
-    skippedRows: processed.length - txnData.length,
+    skippedRows: totalProcessed - txnData.length,
     totalDebits,
     totalCredits,
     batchId,
