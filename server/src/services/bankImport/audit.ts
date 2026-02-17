@@ -5,7 +5,7 @@
  * Reports: matches, mismatches, duplicates, orphans, and unmatched entries.
  */
 
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
@@ -92,13 +92,13 @@ function getSourceTypes(bank: string): string[] {
 
 export async function auditExistingEntries(options?: { bank?: string }): Promise<AuditResult> {
   // 1. Fetch categorized/imported BankTransactions (not skipped)
-  const bankWhere: Record<string, unknown> = {
+  const bankWhere: Prisma.BankTransactionWhereInput = {
     status: { in: ['categorized', 'imported', 'legacy_posted'] },
+    ...(options?.bank ? { bank: options.bank } : {}),
   };
-  if (options?.bank) bankWhere.bank = options.bank;
 
   const bankTxns = await prisma.bankTransaction.findMany({
-    where: bankWhere as any,
+    where: bankWhere,
     orderBy: { txnDate: 'asc' },
   });
 

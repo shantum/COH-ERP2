@@ -2,6 +2,7 @@ import { Router } from 'express';
 import type { Request, Response, NextFunction } from 'express';
 import type { PrismaClient } from '@prisma/client';
 import crypto from 'crypto';
+import { requireAdmin } from '../middleware/auth.js';
 import { cacheAndProcessOrder, type ProcessResult } from '../services/shopifyOrderProcessor.js';
 import { cacheAndProcessProduct, handleProductDeletion } from '../services/productSyncService.js';
 import {
@@ -485,7 +486,7 @@ router.get('/status', async (req: Request, res: Response): Promise<void> => {
 });
 
 // Update webhook secret
-router.put('/secret', async (req: Request, res: Response): Promise<void> => {
+router.put('/secret', requireAdmin, async (req: Request, res: Response): Promise<void> => {
     try {
         const { secret } = req.body as { secret?: string };
 

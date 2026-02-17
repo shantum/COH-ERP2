@@ -73,7 +73,7 @@ async function runInlineCategorization(batchId: string): Promise<{ matched: numb
   let matched = 0;
   let unmatched = 0;
   const BATCH = 50;
-  const updates: { id: string; data: Record<string, unknown> }[] = [];
+  const updates: { id: string; data: Prisma.BankTransactionUncheckedUpdateInput }[] = [];
 
   for (const txn of txns) {
     const cat = categorizeSingleTxn(txn, parties);
@@ -112,7 +112,7 @@ async function runInlineCategorization(batchId: string): Promise<{ matched: numb
   for (let i = 0; i < updates.length; i += BATCH) {
     const batch = updates.slice(i, i + BATCH);
     await Promise.all(
-      batch.map(u => prisma.bankTransaction.update({ where: { id: u.id }, data: u.data as any }))
+      batch.map(u => prisma.bankTransaction.update({ where: { id: u.id }, data: u.data }))
     );
   }
 

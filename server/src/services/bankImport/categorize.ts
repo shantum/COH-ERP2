@@ -8,7 +8,7 @@
  * To add a new vendor, create a Party record in the UI. Zero code changes.
  */
 
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import {
   findPartyByNarration,
   resolveAccounting,
@@ -307,11 +307,13 @@ export function categorizeSingleTxn(
 // ============================================
 
 export async function categorizeTransactions(options?: { bank?: string }): Promise<CategorizeResult> {
-  const where: Record<string, unknown> = { status: 'imported' };
-  if (options?.bank) where.bank = options.bank;
+  const where: Prisma.BankTransactionWhereInput = {
+    status: 'imported',
+    ...(options?.bank ? { bank: options.bank } : {}),
+  };
 
   const txns = await prisma.bankTransaction.findMany({
-    where: where as any,
+    where,
     orderBy: { txnDate: 'asc' },
   });
 
@@ -332,7 +334,7 @@ export async function categorizeTransactions(options?: { bank?: string }): Promi
   const breakdown: Record<string, { count: number; total: number }> = {};
   let categorized = 0;
   let skipped = 0;
-  const updates: { id: string; data: Record<string, unknown> }[] = [];
+  const updates: { id: string; data: Prisma.BankTransactionUncheckedUpdateInput }[] = [];
 
   for (const txn of txns) {
     const cat = categorizeSingleTxn(txn, parties);
@@ -406,7 +408,7 @@ export async function categorizeTransactions(options?: { bank?: string }): Promi
   for (let i = 0; i < updates.length; i += BATCH) {
     const batch = updates.slice(i, i + BATCH);
     await Promise.all(
-      batch.map(u => prisma.bankTransaction.update({ where: { id: u.id }, data: u.data as any }))
+      batch.map(u => prisma.bankTransaction.update({ where: { id: u.id }, data: u.data }))
     );
     process.stdout.write(`  Updated: ${Math.min(i + BATCH, updates.length)}/${updates.length}\r`);
   }

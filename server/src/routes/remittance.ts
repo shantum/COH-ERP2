@@ -28,8 +28,12 @@ import { parse } from 'csv-parse/sync';
 import shopifyClient from '../services/shopify.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { ValidationError, NotFoundError, BusinessLogicError } from '../utils/errors.js';
+import { requireAdmin } from '../middleware/auth.js';
 
 const router: Router = Router();
+
+// All remittance routes require admin access
+router.use(requireAdmin);
 
 // Tolerance for amount mismatch (in percentage) before flagging for manual review
 const AMOUNT_MISMATCH_TOLERANCE = 5; // 5%

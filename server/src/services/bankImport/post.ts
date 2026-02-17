@@ -4,7 +4,7 @@
  * Confirms BankTransactions — creates Payment records and marks as posted.
  */
 
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { AUTO_CLEAR_AMOUNT_THRESHOLD } from '../../config/finance/index.js';
 import { generatePaymentNarration } from '@coh/shared';
 
@@ -240,14 +240,14 @@ export async function postTransactions(options?: { bank?: string }): Promise<Pos
   const admin = await prisma.user.findFirst({ where: { role: 'admin' } });
   if (!admin) throw new Error('No admin user found — needed for payment createdById');
 
-  const where: Record<string, unknown> = {
+  const where: Prisma.BankTransactionWhereInput = {
     status: { in: ['imported', 'categorized'] },
     debitAccountCode: { not: null },
+    ...(options?.bank ? { bank: options.bank } : {}),
   };
-  if (options?.bank) where.bank = options.bank;
 
   const txns = await prisma.bankTransaction.findMany({
-    where: where as any,
+    where,
     orderBy: { txnDate: 'asc' },
   });
 

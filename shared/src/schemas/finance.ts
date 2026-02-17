@@ -373,6 +373,57 @@ export const AssignBankTxnPartySchema = z.object({
 });
 export type AssignBankTxnPartyInput = z.infer<typeof AssignBankTxnPartySchema>;
 
+/** Upload/preview bank CSV — bank must be hdfc or razorpayx */
+export const BankImportUploadSchema = z.object({
+  bank: z.enum(['hdfc', 'razorpayx']),
+});
+
+/** Post pending transactions — bank is optional filter */
+export const BankImportPostSchema = z.object({
+  bank: z.string().optional(),
+});
+
+/** Confirm a single bank transaction */
+export const BankImportConfirmSchema = z.object({
+  txnId: z.string().uuid(),
+});
+
+/** Confirm multiple bank transactions */
+export const BankImportConfirmBatchSchema = z.object({
+  txnIds: z.array(z.string().uuid()).min(1),
+});
+
+/** Skip multiple bank transactions */
+export const BankImportSkipBatchSchema = z.object({
+  txnIds: z.array(z.string().uuid()).min(1),
+  reason: z.string().optional(),
+});
+
+/** Update bank transaction fields */
+export const BankImportUpdateSchema = z.object({
+  txnId: z.string().uuid(),
+  partyId: z.string().uuid().nullable().optional(),
+  debitAccountCode: z.string().optional(),
+  creditAccountCode: z.string().optional(),
+  category: z.string().nullable().optional(),
+});
+
+/** Skip a single bank transaction */
+export const BankImportSkipSchema = z.object({
+  txnId: z.string().uuid(),
+  reason: z.string().optional(),
+});
+
+/** Unskip a bank transaction */
+export const BankImportUnskipSchema = z.object({
+  txnId: z.string().uuid(),
+});
+
+/** Delete bank transaction by ID (from URL param) */
+export const BankImportDeleteParamSchema = z.object({
+  id: z.string().uuid(),
+});
+
 // ============================================
 // CHART OF ACCOUNTS
 // ============================================
