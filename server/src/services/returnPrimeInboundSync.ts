@@ -13,7 +13,7 @@
 
 import { getPrisma } from '@coh/shared/services/db';
 import { Prisma } from '@prisma/client';
-import { ReturnPrimeListResponseSchema } from '@coh/shared';
+import { ReturnPrimeListResponseSchema, type ReturnPrimeRequest } from '@coh/shared';
 import { env } from '../config/env.js';
 
 const API_BASE = 'https://admin.returnprime.com/return-exchange/v2';
@@ -91,34 +91,7 @@ type ReturnPrimeRequestCreateData = {
 /**
  * Transform Zod-validated API response to database record format.
  */
-function transformRequest(apiRequest: {
-    id: string;
-    request_number: string;
-    request_type: 'return' | 'exchange';
-    status?: string;
-    created_at: string;
-    order?: { id: number; name: string; created_at?: string };
-    customer?: {
-        id?: number;
-        name?: string;
-        email?: string;
-        phone?: string;
-        address?: Record<string, unknown>;
-        bank?: Record<string, unknown>;
-    };
-    approved?: { status: boolean; created_at: string | null; comment: string | null };
-    received?: { status: boolean; created_at: string | null; comment: string | null };
-    inspected?: { status: boolean; created_at: string | null; comment: string | null };
-    rejected?: { status: boolean; created_at: string | null; comment: string | null };
-    archived?: { status: boolean; created_at: string | null; comment: string | null };
-    line_items?: Array<{
-        id: number;
-        quantity: number;
-        reason?: string;
-        refund?: { status?: string; refunded_at?: string | null };
-        shop_price?: { actual_amount?: number };
-    }>;
-}): ReturnPrimeRequestCreateData {
+function transformRequest(apiRequest: ReturnPrimeRequest): ReturnPrimeRequestCreateData {
     const lineItems = apiRequest.line_items || [];
 
     // Calculate total value
