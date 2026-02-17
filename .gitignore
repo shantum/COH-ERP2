@@ -65,10 +65,16 @@ mcp-chat/
 server/scripts/
 server/analyze-*.ts
 backups/
+*.dump
 
-# Python venv & MS365 token cache
+# Python scripts & cache
+__pycache__/
+*.py
 .venv/
 .inbox-token-cache.json
+
+# Scratch docs
+SYSTEM_OVERVIEW.md
 
 # Email attachment downloads
 downloads/
