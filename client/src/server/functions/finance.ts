@@ -778,6 +778,7 @@ export const listPayments = createServerFn({ method: 'POST' })
                   invoiceNumber: true,
                   invoiceDate: true,
                   billingPeriod: true,
+                  driveUrl: true,
                 },
               },
             },

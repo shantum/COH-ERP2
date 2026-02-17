@@ -120,8 +120,29 @@ export async function confirmSingleTransaction(txnId: string): Promise<ConfirmRe
     return { success: false, error: 'Missing account codes — edit the transaction first' };
   }
 
-  const invoiceRequired = txn.partyId
-    ? (await prisma.party.findUnique({ where: { id: txn.partyId }, select: { invoiceRequired: true } }))?.invoiceRequired ?? true
+  // Resolve partyId: use linked party, or try matching by counterpartyName
+  let partyId = txn.partyId;
+  if (!partyId && txn.counterpartyName) {
+    const matched = await prisma.party.findFirst({
+      where: {
+        isActive: true,
+        OR: [
+          { name: { equals: txn.counterpartyName, mode: 'insensitive' } },
+          { aliases: { has: txn.counterpartyName } },
+          { aliases: { has: txn.counterpartyName.toUpperCase() } },
+        ],
+      },
+      select: { id: true },
+    });
+    if (matched) {
+      partyId = matched.id;
+      // Also fix the bank transaction so it has the party link going forward
+      await prisma.bankTransaction.update({ where: { id: txn.id }, data: { partyId: matched.id } });
+    }
+  }
+
+  const invoiceRequired = partyId
+    ? (await prisma.party.findUnique({ where: { id: partyId }, select: { invoiceRequired: true } }))?.invoiceRequired ?? true
     : true;
 
   const decision = decidePosting(txn.direction, txn.amount, txn.debitAccountCode, txn.creditAccountCode, invoiceRequired);
@@ -147,7 +168,7 @@ export async function confirmSingleTransaction(txnId: string): Promise<ConfirmRe
           referenceNumber: txn.reference ?? txn.utr ?? null,
           debitAccountCode: decision.intendedDebitAccount ?? decision.debitAccount,
           createdById: admin.id,
-          ...(txn.partyId ? { partyId: txn.partyId } : {}),
+          ...(partyId ? { partyId } : {}),
         },
       });
       paymentId = payment.id;

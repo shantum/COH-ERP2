@@ -809,10 +809,17 @@ function PaymentsTab({ search }: { search: FinanceSearchParams }) {
                       </td>
                       <td className="p-3 text-xs">
                         {inv ? (
-                          <div>
-                            <div className="font-medium">{inv.invoiceNumber ?? 'Linked'}</div>
-                            {inv.invoiceDate && (
-                              <div className="text-muted-foreground text-[10px]">{new Date(inv.invoiceDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</div>
+                          <div className="flex items-center gap-1">
+                            <div>
+                              <div className="font-medium">{inv.invoiceNumber ?? 'Linked'}</div>
+                              {inv.invoiceDate && (
+                                <div className="text-muted-foreground text-[10px]">{new Date(inv.invoiceDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</div>
+                              )}
+                            </div>
+                            {inv.driveUrl && (
+                              <a href={inv.driveUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 shrink-0" title="View invoice on Drive">
+                                <ExternalLink className="h-3 w-3" />
+                              </a>
                             )}
                           </div>
                         ) : (
@@ -1196,6 +1203,26 @@ function BankTransactionList({ search, updateSearch }: {
     }
   };
 
+  const createPartyFn = useServerFn(createFinanceParty);
+  const [creatingPartyFor, setCreatingPartyFor] = useState<string | null>(null);
+
+  const handleCreateParty = async (txnId: string, name: string) => {
+    setCreatingPartyFor(txnId);
+    try {
+      const result = await createPartyFn({ data: { name, category: 'other' } });
+      if (!result.success) return;
+      // Link the new party to the bank transaction
+      await fetch('/api/bank-import/assign-party', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ txnId, partyId: result.party.id }),
+      });
+      invalidate();
+    } finally {
+      setCreatingPartyFor(null);
+    }
+  };
+
   const pendingTxns = data?.transactions?.filter((t) => isBankTxnPending(t.status)) ?? [];
   const allPendingSelected = pendingTxns.length > 0 && pendingTxns.every((t) => selectedIds.has(t.id));
 
@@ -1304,6 +1331,8 @@ function BankTransactionList({ search, updateSearch }: {
                   const isExpanded = expandedId === txn.id;
                   const isPending = isBankTxnPending(txn.status);
                   const hasAccounts = !!txn.debitAccountCode && !!txn.creditAccountCode;
+                  const hasParty = !!txn.party;
+                  const canConfirm = hasAccounts && hasParty;
                   return (
                     <Fragment key={txn.id}>
                       <tr
@@ -1328,8 +1357,26 @@ function BankTransactionList({ search, updateSearch }: {
                         <td className={`p-3 text-right font-mono text-xs ${txn.direction === 'credit' ? 'text-green-600' : ''}`}>
                           {txn.direction === 'credit' ? '+' : ''}{formatCurrency(txn.amount)}
                         </td>
-                        <td className="p-3 text-xs">
-                          {txn.party?.name ?? txn.counterpartyName ?? <span className="text-amber-600">—</span>}
+                        <td className="p-3 text-xs" onClick={(e) => e.stopPropagation()}>
+                          {txn.party?.name ? (
+                            <span>{txn.party.name}</span>
+                          ) : txn.counterpartyName ? (
+                            <span className="inline-flex items-center gap-1">
+                              <span className="text-amber-600 italic">{txn.counterpartyName}</span>
+                              {isPending && (
+                                <button
+                                  type="button"
+                                  className="text-xs text-blue-600 hover:text-blue-800 whitespace-nowrap"
+                                  onClick={() => handleCreateParty(txn.id, txn.counterpartyName!)}
+                                  disabled={creatingPartyFor === txn.id}
+                                >
+                                  {creatingPartyFor === txn.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plus className="h-3 w-3" />}
+                                </button>
+                              )}
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
                         </td>
                         <td className="p-3 text-xs">{getBankLabel(txn.bank)}</td>
                         <td className="p-3"><BankStatusBadge status={txn.status} /></td>
@@ -1344,8 +1391,8 @@ function BankTransactionList({ search, updateSearch }: {
                                   type="button"
                                   className="text-xs text-green-600 hover:text-green-800 disabled:opacity-30 disabled:cursor-not-allowed"
                                   onClick={() => handleConfirm(txn.id)}
-                                  disabled={!hasAccounts}
-                                  title={hasAccounts ? 'Confirm' : 'Set accounts first'}
+                                  disabled={!canConfirm}
+                                  title={!hasParty ? 'Link a party first' : !hasAccounts ? 'Set accounts first' : 'Confirm'}
                                 >
                                   <Check className="h-3.5 w-3.5" />
                                 </button>
