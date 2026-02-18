@@ -902,19 +902,20 @@ export const matchPaymentToInvoice = createServerFn({ method: 'POST' })
     const prisma = await getPrisma();
     const userId = context.user.id;
 
-    const [payment, invoice] = await Promise.all([
-      prisma.payment.findUnique({ where: { id: data.paymentId }, select: { id: true, unmatchedAmount: true, matchedAmount: true, status: true } }),
-      prisma.invoice.findUnique({ where: { id: data.invoiceId }, select: { id: true, balanceDue: true, paidAmount: true, status: true } }),
-    ]);
-
-    if (!payment) return { success: false as const, error: 'Payment not found' };
-    if (!invoice) return { success: false as const, error: 'Invoice not found' };
-    if (payment.status === 'cancelled') return { success: false as const, error: 'Payment is cancelled' };
-    if (invoice.status === 'cancelled') return { success: false as const, error: 'Invoice is cancelled' };
-    if (data.amount > payment.unmatchedAmount + 0.01) return { success: false as const, error: 'Amount exceeds unmatched payment balance' };
-    if (data.amount > invoice.balanceDue + 0.01) return { success: false as const, error: 'Amount exceeds invoice balance due' };
-
     return prisma.$transaction(async (tx) => {
+      // Read fresh state INSIDE transaction to prevent TOCTOU race
+      const [payment, invoice] = await Promise.all([
+        tx.payment.findUnique({ where: { id: data.paymentId }, select: { id: true, unmatchedAmount: true, status: true } }),
+        tx.invoice.findUnique({ where: { id: data.invoiceId }, select: { id: true, balanceDue: true, paidAmount: true, status: true } }),
+      ]);
+
+      if (!payment) throw new Error('Payment not found');
+      if (!invoice) throw new Error('Invoice not found');
+      if (payment.status === 'cancelled') throw new Error('Payment is cancelled');
+      if (invoice.status === 'cancelled') throw new Error('Invoice is cancelled');
+      if (data.amount > payment.unmatchedAmount + 0.01) throw new Error('Amount exceeds unmatched payment balance');
+      if (data.amount > invoice.balanceDue + 0.01) throw new Error('Amount exceeds invoice balance due');
+
       await tx.allocation.create({
         data: {
           paymentId: data.paymentId,
@@ -925,22 +926,22 @@ export const matchPaymentToInvoice = createServerFn({ method: 'POST' })
         },
       });
 
-      const newPaymentMatched = payment.matchedAmount + data.amount;
-      const newPaymentUnmatched = payment.unmatchedAmount - data.amount;
       await tx.payment.update({
         where: { id: data.paymentId },
-        data: { matchedAmount: newPaymentMatched, unmatchedAmount: Math.max(0, newPaymentUnmatched) },
+        data: { matchedAmount: { increment: data.amount }, unmatchedAmount: { decrement: data.amount } },
       });
 
-      const newInvoicePaid = invoice.paidAmount + data.amount;
       const newInvoiceBalance = invoice.balanceDue - data.amount;
       const newStatus = newInvoiceBalance <= 0.01 ? 'paid' : 'partially_paid';
       await tx.invoice.update({
         where: { id: data.invoiceId },
-        data: { paidAmount: newInvoicePaid, balanceDue: Math.max(0, newInvoiceBalance), status: newStatus },
+        data: { paidAmount: { increment: data.amount }, balanceDue: { decrement: data.amount }, status: newStatus },
       });
 
       return { success: true as const };
+    }).catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      return { success: false as const, error: message };
     });
   });
 
@@ -959,13 +960,14 @@ export const unmatchPayment = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     const prisma = await getPrisma();
 
-    const match = await prisma.allocation.findUnique({
-      where: { paymentId_invoiceId: { paymentId: data.paymentId, invoiceId: data.invoiceId } },
-    });
-
-    if (!match) return { success: false as const, error: 'Match not found' };
-
     return prisma.$transaction(async (tx) => {
+      // Read inside transaction to prevent TOCTOU race
+      const match = await tx.allocation.findUnique({
+        where: { paymentId_invoiceId: { paymentId: data.paymentId, invoiceId: data.invoiceId } },
+      });
+
+      if (!match) throw new Error('Match not found');
+
       await tx.allocation.delete({
         where: { paymentId_invoiceId: { paymentId: data.paymentId, invoiceId: data.invoiceId } },
       });
@@ -980,20 +982,26 @@ export const unmatchPayment = createServerFn({ method: 'POST' })
 
       const invoice = await tx.invoice.findUnique({
         where: { id: data.invoiceId },
-        select: { paidAmount: true, balanceDue: true, status: true },
+        select: { paidAmount: true, balanceDue: true },
       });
 
       if (invoice) {
         const newPaid = invoice.paidAmount - match.amount;
-        const newBalance = invoice.balanceDue + match.amount;
         const newStatus = newPaid <= 0.01 ? 'confirmed' : 'partially_paid';
         await tx.invoice.update({
           where: { id: data.invoiceId },
-          data: { paidAmount: Math.max(0, newPaid), balanceDue: newBalance, status: newStatus },
+          data: {
+            paidAmount: { decrement: match.amount },
+            balanceDue: { increment: match.amount },
+            status: newStatus,
+          },
         });
       }
 
       return { success: true as const };
+    }).catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      return { success: false as const, error: message };
     });
   });
 
@@ -2123,6 +2131,7 @@ export const getAutoMatchSuggestions = createServerFn({ method: 'GET' })
     const prisma = await getPrisma();
 
     // Find parties with BOTH unmatched outgoing payments AND unpaid payable invoices
+    // Capped at 500 each to prevent unbounded memory usage on large datasets
     const [payments, invoices] = await Promise.all([
       prisma.payment.findMany({
         where: {
@@ -2135,6 +2144,8 @@ export const getAutoMatchSuggestions = createServerFn({ method: 'GET' })
           id: true, amount: true, unmatchedAmount: true, paymentDate: true,
           referenceNumber: true, method: true, partyId: true,
         },
+        orderBy: { paymentDate: 'desc' },
+        take: 500,
       }),
       prisma.invoice.findMany({
         where: {
@@ -2147,6 +2158,8 @@ export const getAutoMatchSuggestions = createServerFn({ method: 'GET' })
           id: true, invoiceNumber: true, totalAmount: true, balanceDue: true,
           tdsAmount: true, invoiceDate: true, billingPeriod: true, partyId: true,
         },
+        orderBy: { invoiceDate: 'desc' },
+        take: 500,
       }),
     ]);
 

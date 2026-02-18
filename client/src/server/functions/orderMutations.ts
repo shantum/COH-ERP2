@@ -115,7 +115,7 @@ export interface MutationResult<T> {
     success: boolean;
     data?: T;
     error?: {
-        code: 'NOT_FOUND' | 'BAD_REQUEST' | 'CONFLICT' | 'FORBIDDEN';
+        code: 'NOT_FOUND' | 'BAD_REQUEST' | 'CONFLICT' | 'FORBIDDEN' | 'INTERNAL';
         message: string;
     };
 }
@@ -331,51 +331,46 @@ export const addLine = createServerFn({ method: 'POST' })
         const prisma = await getPrisma();
         const { orderId, skuId, qty, unitPrice } = data;
 
-        const order = await prisma.order.findUnique({
-            where: { id: orderId },
-        });
-
-        if (!order) {
-            return {
-                success: false,
-                error: { code: 'NOT_FOUND', message: 'Order not found' },
-            };
-        }
-
-        // Cannot add lines to shipped/cancelled orders
-        if (order.status === 'shipped' || order.status === 'cancelled') {
-            return {
-                success: false,
-                error: {
-                    code: 'BAD_REQUEST',
-                    message: `Cannot add lines to ${order.status} orders`,
-                },
-            };
-        }
-
         let newLineId: string = '';
 
-        await prisma.$transaction(async (tx: PrismaTransaction) => {
-            const newLine = await tx.orderLine.create({
-                data: {
-                    orderId,
-                    skuId,
-                    qty,
-                    unitPrice,
-                    lineStatus: 'pending',
-                },
-            });
-            newLineId = newLine.id;
+        try {
+            await prisma.$transaction(async (tx: PrismaTransaction) => {
+                // Read fresh state INSIDE transaction to prevent TOCTOU race
+                const order = await tx.order.findUnique({
+                    where: { id: orderId },
+                    select: { id: true, status: true },
+                });
 
-            const allLines = await tx.orderLine.findMany({
-                where: { orderId },
+                if (!order) throw new Error('NOT_FOUND:Order not found');
+                if (order.status === 'shipped' || order.status === 'cancelled') {
+                    throw new Error(`BAD_REQUEST:Cannot add lines to ${order.status} orders`);
+                }
+
+                const newLine = await tx.orderLine.create({
+                    data: {
+                        orderId,
+                        skuId,
+                        qty,
+                        unitPrice,
+                        lineStatus: 'pending',
+                    },
+                });
+                newLineId = newLine.id;
+
+                const allLines = await tx.orderLine.findMany({
+                    where: { orderId },
+                });
+                const newTotal = allLines.reduce((sum: number, l: { qty: number; unitPrice: number }) => sum + l.qty * l.unitPrice, 0);
+                await tx.order.update({
+                    where: { id: orderId },
+                    data: { totalAmount: newTotal },
+                });
             });
-            const newTotal = allLines.reduce((sum: number, l: { qty: number; unitPrice: number }) => sum + l.qty * l.unitPrice, 0);
-            await tx.order.update({
-                where: { id: orderId },
-                data: { totalAmount: newTotal },
-            });
-        });
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : 'Unknown error';
+            const [code, msg] = message.includes(':') ? message.split(':', 2) : ['INTERNAL', message];
+            return { success: false, error: { code: code as 'NOT_FOUND' | 'BAD_REQUEST' | 'INTERNAL', message: msg as string } };
+        }
 
         // Broadcast SSE update
         broadcastUpdate(
@@ -578,7 +573,6 @@ export const deleteOrder = createServerFn({ method: 'POST' })
             try {
                 const { inventoryBalanceCache } = await import('@coh/shared/services/inventory');
                 inventoryBalanceCache.invalidate(uniqueSkuIds);
-                console.log('[deleteOrder] Invalidated cache for SKUs:', uniqueSkuIds);
             } catch {
                 // Non-critical
             }
@@ -929,7 +923,6 @@ export const cancelOrder = createServerFn({ method: 'POST' })
             try {
                 const { inventoryBalanceCache } = await import('@coh/shared/services/inventory');
                 inventoryBalanceCache.invalidate(affectedSkuIds);
-                console.log('[cancelOrder] Invalidated cache for SKUs:', affectedSkuIds);
             } catch {
                 // Non-critical
             }
@@ -1291,7 +1284,6 @@ export const removeLineCustomization = createServerFn({ method: 'POST' })
             try {
                 const { inventoryBalanceCache } = await import('@coh/shared/services/inventory');
                 inventoryBalanceCache.invalidate([customSkuId]);
-                console.log('[removeLineCustomization] Invalidated cache for custom SKU:', customSkuId);
             } catch {
                 // Non-critical
             }

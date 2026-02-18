@@ -799,11 +799,9 @@ async function generateBatchNumber(prisma: PrismaClient, orderId: string, orderN
 export const initiateLineReturn = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown): InitiateReturnBatchInput => {
-        console.log('[initiateLineReturn] Input received:', JSON.stringify(input, null, 2));
         return InitiateReturnBatchInputSchema.parse(input);
     })
     .handler(async ({ data, context }: { data: InitiateReturnBatchInput; context: { user: AuthUser } }): Promise<ReturnResult<{ batchNumber: string; lineCount: number; orderLineIds: string[] }>> => {
-        console.log('[initiateLineReturn] Handler started with data:', JSON.stringify(data, null, 2));
         try {
         const prisma = await getPrisma();
         const { lines, returnReasonCategory, returnReasonDetail, returnResolution, returnNotes, exchangeSkuId, pickupType } = data;
@@ -906,7 +904,6 @@ export const initiateLineReturn = createServerFn({ method: 'POST' })
         });
 
         const skuCodes = orderLines.map((l: typeof orderLines[number]) => l.sku.skuCode).join(', ');
-        console.log('[initiateLineReturn] Success - batch:', batchNumber);
         return returnSuccess(
             {
                 batchNumber,

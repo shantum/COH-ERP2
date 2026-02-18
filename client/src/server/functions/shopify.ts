@@ -148,9 +148,6 @@ async function callExpressApi<T>(
 
     const authToken = getCookie('auth_token');
 
-    console.log(`[callExpressApi] Calling ${apiUrl}${path}`);
-    console.log(`[callExpressApi] Auth token present: ${!!authToken}`);
-
     try {
         const response = await fetch(`${apiUrl}${path}`, {
             ...options,
@@ -161,11 +158,8 @@ async function callExpressApi<T>(
             },
         });
 
-        console.log(`[callExpressApi] Response status: ${response.status}`);
-
         if (!response.ok) {
             const errorBody = await response.text();
-            console.log(`[callExpressApi] Error body: ${errorBody}`);
             let errorMessage: string;
             try {
                 const errorJson = JSON.parse(errorBody) as { error?: string; message?: string };
@@ -178,7 +172,6 @@ async function callExpressApi<T>(
 
         return response.json() as Promise<T>;
     } catch (error) {
-        console.log(`[callExpressApi] Fetch error: ${error instanceof Error ? error.message : error}`);
         throw error;
     }
 }

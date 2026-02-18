@@ -1064,13 +1064,6 @@ export const getInventoryList = createServerFn({ method: 'GET' })
                 };
             });
 
-            console.log(
-                '[Server Function] Query returned',
-                items.length,
-                'items, total:',
-                totalCount
-            );
-
             return {
                 items,
                 pagination: {

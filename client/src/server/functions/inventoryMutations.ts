@@ -124,7 +124,7 @@ export interface MutationResult<T> {
     success: boolean;
     data?: T;
     error?: {
-        code: 'NOT_FOUND' | 'BAD_REQUEST' | 'CONFLICT' | 'FORBIDDEN';
+        code: 'NOT_FOUND' | 'BAD_REQUEST' | 'CONFLICT' | 'FORBIDDEN' | 'INTERNAL';
         message: string;
     };
 }
@@ -683,39 +683,45 @@ export const editInward = createServerFn({ method: 'POST' })
         const prisma = await getPrisma();
         const { transactionId, quantity, notes } = data;
 
-        const existing = await prisma.inventoryTransaction.findUnique({
-            where: { id: transactionId },
-        });
+        let skuId: string;
+        let qtyChanged = false;
 
-        if (!existing) {
-            return {
-                success: false,
-                error: { code: 'NOT_FOUND', message: 'Transaction not found' },
-            };
+        try {
+            const result = await prisma.$transaction(async (tx: PrismaTransaction) => {
+                // Read inside transaction to prevent TOCTOU race
+                const existing = await tx.inventoryTransaction.findUnique({
+                    where: { id: transactionId },
+                });
+
+                if (!existing) throw new Error('NOT_FOUND:Transaction not found');
+                if (existing.txnType !== 'inward') throw new Error('BAD_REQUEST:Can only edit inward transactions');
+
+                await tx.inventoryTransaction.update({
+                    where: { id: transactionId },
+                    data: {
+                        qty: quantity !== undefined ? quantity : existing.qty,
+                        notes: notes !== undefined ? notes : existing.notes,
+                    },
+                });
+
+                return { skuId: existing.skuId, qtyChanged: quantity !== undefined && quantity !== existing.qty };
+            });
+
+            skuId = result.skuId;
+            qtyChanged = result.qtyChanged;
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : 'Unknown error';
+            const [code, msg] = message.includes(':') ? message.split(':', 2) : ['INTERNAL', message];
+            return { success: false, error: { code: code as 'NOT_FOUND' | 'BAD_REQUEST' | 'INTERNAL', message: msg as string } };
         }
 
-        if (existing.txnType !== 'inward') {
-            return {
-                success: false,
-                error: { code: 'BAD_REQUEST', message: 'Can only edit inward transactions' },
-            };
-        }
+        await invalidateCache([skuId]);
 
-        await prisma.inventoryTransaction.update({
-            where: { id: transactionId },
-            data: {
-                qty: quantity !== undefined ? quantity : existing.qty,
-                notes: notes !== undefined ? notes : existing.notes,
-            },
-        });
-
-        await invalidateCache([existing.skuId]);
-
-        if (quantity !== undefined && quantity !== existing.qty) {
-            const balance = await calculateInventoryBalance(prisma, existing.skuId);
+        if (qtyChanged) {
+            const balance = await calculateInventoryBalance(prisma, skuId);
             broadcastUpdate({
                 type: 'inventory_updated',
-                skuId: existing.skuId,
+                skuId,
                 changes: { availableBalance: balance.availableBalance, currentBalance: balance.currentBalance },
             });
         }
@@ -973,7 +979,7 @@ export const deleteTransaction = createServerFn({ method: 'POST' })
         const prisma = await getPrisma();
         const { transactionId, force } = data;
 
-        // Admin check
+        // Admin check (stateless — no TOCTOU risk)
         if (context.user.role !== 'admin') {
             return {
                 success: false,
@@ -981,93 +987,95 @@ export const deleteTransaction = createServerFn({ method: 'POST' })
             };
         }
 
-        const existing = await prisma.inventoryTransaction.findUnique({
-            where: { id: transactionId },
-            include: {
-                sku: {
+        let skuId: string;
+        let message: string;
+
+        try {
+            const result = await prisma.$transaction(async (tx: PrismaTransaction) => {
+                // Read inside transaction to prevent TOCTOU race
+                const existing = await tx.inventoryTransaction.findUnique({
+                    where: { id: transactionId },
                     include: {
-                        variation: { include: { product: true } },
-                    },
-                },
-            },
-        });
-
-        if (!existing) {
-            return {
-                success: false,
-                error: { code: 'NOT_FOUND', message: 'Transaction not found' },
-            };
-        }
-
-        let message = 'Transaction deleted';
-
-        // Handle production transaction reversion
-        if ((existing.reason === TXN_REASON.PRODUCTION || existing.reason === 'production_custom') && existing.referenceId) {
-            const productionBatch = await prisma.productionBatch.findUnique({
-                where: { id: existing.referenceId },
-                include: { sku: { include: { variation: true } } },
-            });
-
-            if (productionBatch && (productionBatch.status === 'completed' || productionBatch.status === 'in_progress')) {
-                if (!force) {
-                    return {
-                        success: false,
-                        error: {
-                            code: 'BAD_REQUEST',
-                            message: 'Transaction linked to production batch. Use force=true to override and revert batch.',
+                        sku: {
+                            include: {
+                                variation: { include: { product: true } },
+                            },
                         },
-                    };
+                    },
+                });
+
+                if (!existing) throw new Error('NOT_FOUND:Transaction not found');
+
+                let msg = 'Transaction deleted';
+
+                // Handle production transaction reversion
+                if ((existing.reason === TXN_REASON.PRODUCTION || existing.reason === 'production_custom') && existing.referenceId) {
+                    const productionBatch = await tx.productionBatch.findUnique({
+                        where: { id: existing.referenceId },
+                        include: { sku: { include: { variation: true } } },
+                    });
+
+                    if (productionBatch && (productionBatch.status === 'completed' || productionBatch.status === 'in_progress')) {
+                        if (!force) {
+                            throw new Error('BAD_REQUEST:Transaction linked to production batch. Use force=true to override and revert batch.');
+                        }
+
+                        const newQtyCompleted = Math.max(0, productionBatch.qtyCompleted - existing.qty);
+                        const newStatus = newQtyCompleted === 0 ? 'planned' : 'in_progress';
+
+                        await tx.productionBatch.update({
+                            where: { id: existing.referenceId },
+                            data: {
+                                qtyCompleted: newQtyCompleted,
+                                status: newStatus,
+                                completedAt: null,
+                            },
+                        });
+
+                        msg = 'Transaction deleted, production batch reverted';
+                    }
                 }
 
-                // Revert production batch
-                const newQtyCompleted = Math.max(0, productionBatch.qtyCompleted - existing.qty);
-                const newStatus = newQtyCompleted === 0 ? 'planned' : 'in_progress';
+                // Handle return_receipt reversion
+                if (existing.reason === 'return_receipt' && existing.referenceId) {
+                    const queueItem = await tx.repackingQueueItem.findUnique({
+                        where: { id: existing.referenceId },
+                    });
 
-                await prisma.productionBatch.update({
-                    where: { id: existing.referenceId },
-                    data: {
-                        qtyCompleted: newQtyCompleted,
-                        status: newStatus,
-                        completedAt: null,
-                    },
-                });
+                    if (queueItem && queueItem.status === 'ready') {
+                        await tx.repackingQueueItem.update({
+                            where: { id: existing.referenceId },
+                            data: {
+                                status: 'pending',
+                                qcComments: null,
+                                processedAt: null,
+                                processedById: null,
+                            },
+                        });
+                        msg = 'Transaction deleted and item returned to QC queue';
+                    }
+                }
 
-                // NOTE: FabricTransaction table removed in fabric consolidation
-                // Fabric transactions now use FabricColourTransaction
+                await tx.inventoryTransaction.delete({ where: { id: transactionId } });
 
-                message = 'Transaction deleted, production batch reverted';
-            }
-        }
-
-        // Handle return_receipt reversion
-        if (existing.reason === 'return_receipt' && existing.referenceId) {
-            const queueItem = await prisma.repackingQueueItem.findUnique({
-                where: { id: existing.referenceId },
+                return { skuId: existing.skuId, message: msg };
             });
 
-            if (queueItem && queueItem.status === 'ready') {
-                await prisma.repackingQueueItem.update({
-                    where: { id: existing.referenceId },
-                    data: {
-                        status: 'pending',
-                        qcComments: null,
-                        processedAt: null,
-                        processedById: null,
-                    },
-                });
-                message = 'Transaction deleted and item returned to QC queue';
-            }
+            skuId = result.skuId;
+            message = result.message;
+        } catch (error: unknown) {
+            const errMsg = error instanceof Error ? error.message : 'Unknown error';
+            const [code, msg] = errMsg.includes(':') ? errMsg.split(':', 2) : ['INTERNAL', errMsg];
+            return { success: false, error: { code: code as 'NOT_FOUND' | 'BAD_REQUEST' | 'INTERNAL', message: msg as string } };
         }
 
-        await prisma.inventoryTransaction.delete({ where: { id: transactionId } });
+        await invalidateCache([skuId]);
 
-        await invalidateCache([existing.skuId]);
-
-        const balance = await calculateInventoryBalance(prisma, existing.skuId);
+        const balance = await calculateInventoryBalance(prisma, skuId);
 
         broadcastUpdate({
             type: 'inventory_updated',
-            skuId: existing.skuId,
+            skuId,
             changes: { availableBalance: balance.availableBalance, currentBalance: balance.currentBalance },
         });
 

@@ -139,13 +139,6 @@ export const getCustomersList = createServerFn({ method: 'GET' })
                 createdAt: c.createdAt,
             }));
 
-            console.log(
-                '[Server Function] Query returned',
-                customers.length,
-                'customers, total:',
-                total
-            );
-
             return {
                 customers,
                 pagination: {

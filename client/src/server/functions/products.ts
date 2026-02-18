@@ -556,14 +556,6 @@ export const getProductsTree = createServerFn({ method: 'GET' })
                 };
             });
 
-            console.log(
-                '[Server Function] Query returned',
-                totalProducts,
-                'products,',
-                totalSkus,
-                'skus'
-            );
-
             return {
                 items,
                 summary: {

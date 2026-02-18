@@ -57,7 +57,7 @@ export interface MutationResult<T> {
     success: boolean;
     data?: T;
     error?: {
-        code: 'NOT_FOUND' | 'BAD_REQUEST' | 'CONFLICT' | 'FORBIDDEN';
+        code: 'NOT_FOUND' | 'BAD_REQUEST' | 'CONFLICT' | 'FORBIDDEN' | 'INTERNAL';
         message: string;
     };
 }
@@ -391,96 +391,76 @@ export const submitReconciliation = createServerFn({ method: 'POST' })
         const prisma = await getPrisma();
         const { reconciliationId, applyAdjustments } = data;
 
-        const reconciliation = await prisma.inventoryReconciliation.findUnique({
-            where: { id: reconciliationId },
-            include: {
-                items: {
-                    include: {
-                        sku: {
-                            include: {
-                                variation: { include: { product: true } },
+        try {
+            const result = await prisma.$transaction(
+                async (tx: PrismaTransaction) => {
+                    // Read fresh state INSIDE transaction to prevent TOCTOU race
+                    const reconciliation = await tx.inventoryReconciliation.findUnique({
+                        where: { id: reconciliationId },
+                        include: {
+                            items: {
+                                include: {
+                                    sku: {
+                                        include: {
+                                            variation: { include: { product: true } },
+                                        },
+                                    },
+                                },
                             },
                         },
-                    },
-                },
-            },
-        });
+                    });
 
-        if (!reconciliation) {
-            return {
-                success: false,
-                error: { code: 'NOT_FOUND', message: 'Reconciliation not found' },
-            };
-        }
+                    if (!reconciliation) throw new Error('NOT_FOUND:Reconciliation not found');
+                    if (reconciliation.status !== 'draft') throw new Error('BAD_REQUEST:Reconciliation already submitted');
 
-        if (reconciliation.status !== 'draft') {
-            return {
-                success: false,
-                error: { code: 'BAD_REQUEST', message: 'Reconciliation already submitted' },
-            };
-        }
+                    // Collect all items with variances for processing
+                    interface ItemToProcess {
+                        itemId: string;
+                        skuId: string;
+                        skuCode: string;
+                        txnType: 'inward' | 'outward';
+                        qty: number;
+                        reason: string;
+                        notes: string;
+                        adjustmentReason: string;
+                    }
 
-        // Collect all items with variances for processing
-        interface ItemToProcess {
-            itemId: string;
-            skuId: string;
-            skuCode: string;
-            txnType: 'inward' | 'outward';
-            qty: number;
-            reason: string;
-            notes: string;
-            adjustmentReason: string;
-        }
+                    const itemsToProcess: ItemToProcess[] = [];
 
-        const itemsToProcess: ItemToProcess[] = [];
+                    for (const item of reconciliation.items) {
+                        if (item.variance === null || item.variance === 0) continue;
 
-        for (const item of reconciliation.items) {
-            if (item.variance === null || item.variance === 0) continue;
+                        if (item.physicalQty === null) {
+                            throw new Error(`BAD_REQUEST:Physical quantity not entered for ${item.sku.skuCode}`);
+                        }
 
-            if (item.physicalQty === null) {
-                return {
-                    success: false,
-                    error: {
-                        code: 'BAD_REQUEST',
-                        message: `Physical quantity not entered for ${item.sku.skuCode}`,
-                    },
-                };
-            }
+                        const adjustmentReason = item.adjustmentReason || 'count_adjustment';
+                        const txnType = item.variance > 0 ? 'inward' : 'outward';
+                        const qty = Math.abs(item.variance);
 
-            const adjustmentReason = item.adjustmentReason || 'count_adjustment';
-            const txnType = item.variance > 0 ? 'inward' : 'outward';
-            const qty = Math.abs(item.variance);
+                        itemsToProcess.push({
+                            itemId: item.id,
+                            skuId: item.skuId,
+                            skuCode: item.sku.skuCode,
+                            txnType,
+                            qty,
+                            reason: `reconciliation_${adjustmentReason}`,
+                            notes: item.notes || `Reconciliation adjustment: ${adjustmentReason}`,
+                            adjustmentReason,
+                        });
+                    }
 
-            itemsToProcess.push({
-                itemId: item.id,
-                skuId: item.skuId,
-                skuCode: item.sku.skuCode,
-                txnType,
-                qty,
-                reason: `reconciliation_${adjustmentReason}`,
-                notes: item.notes || `Reconciliation adjustment: ${adjustmentReason}`,
-                adjustmentReason,
-            });
-        }
+                    const transactions: Array<{
+                        skuId: string;
+                        skuCode: string;
+                        txnType: string;
+                        qty: number;
+                        reason: string;
+                    }> = [];
 
-        const transactions: Array<{
-            skuId: string;
-            skuCode: string;
-            txnType: string;
-            qty: number;
-            reason: string;
-        }> = [];
-
-        // Create transactions if applyAdjustments is true
-        if (applyAdjustments && itemsToProcess.length > 0) {
-            const BATCH_SIZE = 100;
-
-            for (let i = 0; i < itemsToProcess.length; i += BATCH_SIZE) {
-                const batch = itemsToProcess.slice(i, i + BATCH_SIZE);
-
-                await prisma.$transaction(
-                    async (tx: PrismaTransaction) => {
-                        for (const item of batch) {
+                    // Create adjustment transactions inside the same atomic transaction
+                    if (applyAdjustments && itemsToProcess.length > 0) {
+                        for (const item of itemsToProcess) {
                             const txn = await tx.inventoryTransaction.create({
                                 data: {
                                     skuId: item.skuId,
@@ -493,7 +473,6 @@ export const submitReconciliation = createServerFn({ method: 'POST' })
                                 },
                             });
 
-                            // Link transaction to reconciliation item
                             await tx.inventoryReconciliationItem.update({
                                 where: { id: item.itemId },
                                 data: { txnId: txn.id },
@@ -507,33 +486,41 @@ export const submitReconciliation = createServerFn({ method: 'POST' })
                                 reason: item.adjustmentReason,
                             });
                         }
-                    },
-                    { timeout: 60000 }
-                );
+                    }
+
+                    // Mark reconciliation as submitted atomically
+                    await tx.inventoryReconciliation.update({
+                        where: { id: reconciliationId },
+                        data: { status: 'submitted' },
+                    });
+
+                    return transactions;
+                },
+                { timeout: 60000 }
+            );
+
+            // Invalidate cache after successful transaction
+            if (applyAdjustments && result.length > 0) {
+                await invalidateAllCache();
             }
+
+            return {
+                success: true,
+                data: {
+                    reconciliationId,
+                    status: 'submitted',
+                    adjustmentsMade: result.length,
+                    transactions: result.slice(0, 50),
+                },
+            };
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : 'Unknown error';
+            const [code, msg] = message.includes(':') ? message.split(':', 2) : ['INTERNAL', message];
+            return {
+                success: false,
+                error: { code: code as 'NOT_FOUND' | 'BAD_REQUEST' | 'INTERNAL', message: msg as string },
+            };
         }
-
-        // Mark reconciliation as submitted
-        await prisma.inventoryReconciliation.update({
-            where: { id: reconciliationId },
-            data: { status: 'submitted' },
-        });
-
-        // Invalidate all cache after reconciliation
-        if (applyAdjustments && transactions.length > 0) {
-            await invalidateAllCache();
-        }
-
-        return {
-            success: true,
-            data: {
-                reconciliationId,
-                status: 'submitted',
-                adjustmentsMade: transactions.length,
-                // Limit response size - only return first 50 transactions
-                transactions: transactions.slice(0, 50),
-            },
-        };
     });
 
 /**

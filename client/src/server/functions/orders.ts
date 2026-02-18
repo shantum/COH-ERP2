@@ -1107,12 +1107,6 @@ export const searchAllOrders = createServerFn({ method: 'GET' })
                     orders: r.orders,
                 }));
 
-            console.log(
-                '[Server Function] searchAllOrders found',
-                results.reduce((sum, r) => sum + r.count, 0),
-                'results'
-            );
-
             return {
                 query: searchTerm,
                 totalResults: results.reduce((sum, r) => sum + r.count, 0),
