@@ -27,6 +27,7 @@ describe('orderStateMachine', () => {
                 'picked',
                 'packed',
                 'shipped',
+                'delivered',
                 'cancelled',
             ]);
         });
@@ -140,8 +141,8 @@ describe('orderStateMachine', () => {
             expect(isValidTransition('pending', 'packed')).toBe(false);
         });
 
-        it('shipped can transition to packed (unship)', () => {
-            expect(getValidTargetStatuses('shipped')).toEqual(['packed']);
+        it('shipped can transition to packed or delivered', () => {
+            expect(getValidTargetStatuses('shipped')).toEqual(['packed', 'delivered']);
         });
     });
 
@@ -218,8 +219,12 @@ describe('orderStateMachine', () => {
             expect(getValidTargetStatuses('packed')).toEqual(['picked', 'shipped', 'cancelled']);
         });
 
-        it('returns packed as target for shipped (unship)', () => {
-            expect(getValidTargetStatuses('shipped')).toEqual(['packed']);
+        it('returns packed and delivered as targets for shipped', () => {
+            expect(getValidTargetStatuses('shipped')).toEqual(['packed', 'delivered']);
+        });
+
+        it('returns shipped as target for delivered (revert)', () => {
+            expect(getValidTargetStatuses('delivered')).toEqual(['shipped']);
         });
 
         it('returns correct targets for cancelled', () => {
