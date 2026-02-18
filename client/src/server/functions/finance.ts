@@ -836,7 +836,16 @@ export const createFinancePayment = createServerFn({ method: 'POST' })
     const userId = context.user.id;
     const debitAccountCode = data.direction === 'outgoing' ? 'ACCOUNTS_PAYABLE' : 'BANK_HDFC';
 
+    // Fetch party offset for period calculation
+    let periodOffset: number | null = null;
+    if (data.partyId) {
+      const party = await prisma.party.findUnique({ where: { id: data.partyId }, select: { billingPeriodOffsetMonths: true } });
+      periodOffset = party?.billingPeriodOffsetMonths ?? null;
+    }
+
     const paymentDate = new Date(data.paymentDate);
+    let period = dateToPeriod(paymentDate);
+    if (periodOffset) period = applyPeriodOffset(period, periodOffset);
     const payment = await prisma.payment.create({
       data: {
         referenceNumber: data.referenceNumber ?? null,
@@ -846,7 +855,7 @@ export const createFinancePayment = createServerFn({ method: 'POST' })
         amount: data.amount,
         unmatchedAmount: data.amount,
         paymentDate,
-        period: dateToPeriod(paymentDate),
+        period,
         ...(data.partyId ? { partyId: data.partyId } : {}),
         ...(data.customerId ? { customerId: data.customerId } : {}),
         debitAccountCode,

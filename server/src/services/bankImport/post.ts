@@ -16,6 +16,13 @@ function dateToPeriod(date: Date): string {
   return `${ist.getUTCFullYear()}-${String(ist.getUTCMonth() + 1).padStart(2, '0')}`;
 }
 
+/** Apply a month offset to a "YYYY-MM" period string. */
+function applyPeriodOffset(period: string, offsetMonths: number): string {
+  const [year, month] = period.split('-').map(Number);
+  const d = new Date(year, month - 1 + offsetMonths, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
 // ============================================
 // TYPES
 // ============================================
@@ -178,14 +185,16 @@ export async function confirmSingleTransaction(txnId: string): Promise<ConfirmRe
       }
     }
 
-    // Fetch party details for invoiceRequired flag + name for narration
+    // Fetch party details for invoiceRequired flag + name for narration + period offset
     const party = partyId
-      ? await tx.party.findUnique({ where: { id: partyId }, select: { name: true, invoiceRequired: true } })
+      ? await tx.party.findUnique({ where: { id: partyId }, select: { name: true, invoiceRequired: true, billingPeriodOffsetMonths: true } })
       : null;
     const invoiceRequired = party?.invoiceRequired ?? true;
 
     const decision = decidePosting(txn.direction, txn.amount, txn.debitAccountCode!, txn.creditAccountCode!, invoiceRequired);
     const entryDate = new Date(txn.txnDate);
+    let period = dateToPeriod(entryDate);
+    if (party?.billingPeriodOffsetMonths) period = applyPeriodOffset(period, party.billingPeriodOffsetMonths);
 
     const narration = generatePaymentNarration({
       partyName: party?.name ?? txn.counterpartyName,
@@ -220,7 +229,7 @@ export async function confirmSingleTransaction(txnId: string): Promise<ConfirmRe
               amount: txn.amount,
               unmatchedAmount: txn.amount,
               paymentDate: entryDate,
-              period: dateToPeriod(entryDate),
+              period,
               referenceNumber: ref,
               debitAccountCode: decision.intendedDebitAccount ?? decision.debitAccount,
               createdById: admin.id,
@@ -297,15 +306,15 @@ export async function postTransactions(options?: { bank?: string }): Promise<Pos
     orderBy: { txnDate: 'asc' },
   });
 
-  // Pre-fetch party invoiceRequired flags
+  // Pre-fetch party flags (invoiceRequired + period offset)
   const partyIds = [...new Set(txns.map(t => t.partyId).filter(Boolean))] as string[];
   const parties = partyIds.length > 0
     ? await prisma.party.findMany({
         where: { id: { in: partyIds } },
-        select: { id: true, invoiceRequired: true },
+        select: { id: true, invoiceRequired: true, billingPeriodOffsetMonths: true },
       })
     : [];
-  const partyMap = new Map(parties.map(p => [p.id, p.invoiceRequired]));
+  const partyMap = new Map(parties.map(p => [p.id, p]));
 
   let posted = 0;
   let errors = 0;
@@ -323,7 +332,8 @@ export async function postTransactions(options?: { bank?: string }): Promise<Pos
           throw new Error(`Missing account codes: dr=${txn.debitAccountCode} cr=${txn.creditAccountCode}`);
         }
 
-        const invoiceRequired = txn.partyId ? (partyMap.get(txn.partyId) ?? true) : true;
+        const partyData = txn.partyId ? partyMap.get(txn.partyId) : null;
+        const invoiceRequired = partyData?.invoiceRequired ?? true;
         const decision = decidePosting(
           txn.direction,
           txn.amount,
@@ -333,6 +343,8 @@ export async function postTransactions(options?: { bank?: string }): Promise<Pos
         );
 
         const entryDate = new Date(txn.txnDate);
+        let period = dateToPeriod(entryDate);
+        if (partyData?.billingPeriodOffsetMonths) period = applyPeriodOffset(period, partyData.billingPeriodOffsetMonths);
 
         // Create or re-use Payment for outgoing bank transactions
         let paymentId: string | undefined;
@@ -359,7 +371,7 @@ export async function postTransactions(options?: { bank?: string }): Promise<Pos
                   amount: txn.amount,
                   unmatchedAmount: txn.amount,
                   paymentDate: entryDate,
-                  period: dateToPeriod(entryDate),
+                  period,
                   referenceNumber: ref,
                   debitAccountCode: decision.intendedDebitAccount ?? decision.debitAccount,
                   createdById: admin.id,
