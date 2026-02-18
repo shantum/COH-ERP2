@@ -234,7 +234,7 @@ export const getRepackingQueueHistory = createServerFn({ method: 'GET' })
 export const processRepackingItem = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => processItemInputSchema.parse(input))
-    .handler(async ({ data }): Promise<{ success: boolean; message: string }> => {
+    .handler(async ({ data, context }): Promise<{ success: boolean; message: string }> => {
         const prisma = await getPrisma();
 
         const { itemId, action, qcComments, writeOffReason } = data;
@@ -274,7 +274,7 @@ export const processRepackingItem = createServerFn({ method: 'POST' })
                         txnType: 'inward',
                         reason: `QC Approved - repacking queue`,
                         notes: qcComments || `Approved from repacking queue`,
-                        createdById: 'system', // TODO: Get actual user ID from context
+                        createdById: context.user.id,
                     },
                 });
             }
@@ -288,7 +288,7 @@ export const processRepackingItem = createServerFn({ method: 'POST' })
                         txnType: 'outward',
                         reason: `Written Off - ${writeOffReason || 'QC Rejected'}`,
                         notes: qcComments || `Written off from repacking queue`,
-                        createdById: 'system', // TODO: Get actual user ID from context
+                        createdById: context.user.id,
                     },
                 });
             }
