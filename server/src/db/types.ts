@@ -712,6 +712,7 @@ export type Party = {
     bankName: string | null;
     razorpayContactId: string | null;
     paymentTermsDays: number | null;
+    billingPeriodOffsetMonths: number | null;
     aliases: Generated<string[]>;
     invoiceRequired: Generated<boolean>;
     isActive: Generated<boolean>;

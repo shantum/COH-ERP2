@@ -13,3 +13,6 @@ CREATE INDEX "BankTransaction_period_idx" ON "BankTransaction"("period");
 
 -- Invoice: index on billingPeriod (already populated on all confirmed invoices)
 CREATE INDEX "Invoice_billingPeriod_idx" ON "Invoice"("billingPeriod");
+
+-- Party: billing period offset for accrual (e.g. -1 for Facebook/Google = previous month)
+ALTER TABLE "Party" ADD COLUMN "billingPeriodOffsetMonths" INTEGER;

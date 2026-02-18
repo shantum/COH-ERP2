@@ -40,6 +40,13 @@ function dateToPeriod(date: Date): string {
   return `${ist.getUTCFullYear()}-${String(ist.getUTCMonth() + 1).padStart(2, '0')}`;
 }
 
+/** Apply a month offset to a "YYYY-MM" period string. e.g. ("2026-02", -1) → "2026-01" */
+function applyPeriodOffset(period: string, offsetMonths: number): string {
+  const [year, month] = period.split('-').map(Number);
+  const d = new Date(year, month - 1 + offsetMonths, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
 // ============================================
 // DASHBOARD / SUMMARY
 // ============================================
@@ -519,12 +526,14 @@ export const confirmInvoice = createServerFn({ method: 'POST' })
     let tdsAmount = 0;
     let expenseAccountOverride: string | null = null;
     let partyName: string | null = null;
+    let periodOffset: number | null = null;
     if (invoice.type === 'payable' && invoice.partyId) {
       const party = await prisma.party.findUnique({
         where: { id: invoice.partyId },
-        select: { name: true, tdsApplicable: true, tdsRate: true, transactionType: { select: { debitAccountCode: true } } },
+        select: { name: true, tdsApplicable: true, tdsRate: true, billingPeriodOffsetMonths: true, transactionType: { select: { debitAccountCode: true } } },
       });
       partyName = party?.name ?? null;
+      periodOffset = party?.billingPeriodOffsetMonths ?? null;
       if (party?.tdsApplicable && party.tdsRate && party.tdsRate > 0) {
         const subtotal = invoice.totalAmount - (invoice.gstAmount ?? 0);
         tdsAmount = Math.round(subtotal * (party.tdsRate / 100) * 100) / 100;
@@ -537,18 +546,20 @@ export const confirmInvoice = createServerFn({ method: 'POST' })
 
     // ---- LINKED PAYMENT PATH (already-paid bill) ----
     if (data.linkedPaymentId && invoice.type === 'payable') {
-      return confirmInvoiceWithLinkedPayment(prisma, invoice, data.linkedPaymentId, tdsAmount, userId, expenseAccountOverride, partyName);
+      return confirmInvoiceWithLinkedPayment(prisma, invoice, data.linkedPaymentId, tdsAmount, userId, expenseAccountOverride, partyName, periodOffset);
     }
 
     // ---- NORMAL AP PATH (invoice first, pay later) ----
     const invoiceEntryDate = invoice.invoiceDate ? new Date(invoice.invoiceDate) : new Date();
+    let derivedPeriod = dateToPeriod(invoiceEntryDate);
+    if (periodOffset) derivedPeriod = applyPeriodOffset(derivedPeriod, periodOffset);
     await prisma.invoice.update({
       where: { id: invoice.id },
       data: {
         status: 'confirmed',
         ...(tdsAmount > 0 ? { tdsAmount, balanceDue: invoice.totalAmount - tdsAmount } : {}),
-        // Default billingPeriod from invoiceDate if not set
-        ...(!invoice.billingPeriod ? { billingPeriod: dateToPeriod(invoiceEntryDate) } : {}),
+        // Default billingPeriod from invoiceDate (with party offset) if not set
+        ...(!invoice.billingPeriod ? { billingPeriod: derivedPeriod } : {}),
       },
     });
 
@@ -571,6 +582,7 @@ async function confirmInvoiceWithLinkedPayment(
   userId: string,
   _expenseAccountOverride: string | null = null,
   partyName: string | null = null,
+  periodOffset: number | null = null,
 ) {
   // The amount the vendor was actually paid (total minus TDS withheld)
   const matchAmount = invoice.totalAmount - tdsAmount;
@@ -628,8 +640,13 @@ async function confirmInvoiceWithLinkedPayment(
         paidAmount: matchAmount,
         balanceDue: 0,
         ...(tdsAmount > 0 ? { tdsAmount } : {}),
-        // Default billingPeriod from invoiceDate if not set
-        ...(!invoice.billingPeriod ? { billingPeriod: dateToPeriod(invoice.invoiceDate ? new Date(invoice.invoiceDate) : new Date(payment.paymentDate)) } : {}),
+        // Default billingPeriod from invoiceDate (with party offset) if not set
+        ...(!invoice.billingPeriod ? {
+          billingPeriod: (() => {
+            const base = dateToPeriod(invoice.invoiceDate ? new Date(invoice.invoiceDate) : new Date(payment.paymentDate));
+            return periodOffset ? applyPeriodOffset(base, periodOffset) : base;
+          })(),
+        } : {}),
       },
     });
 
@@ -1757,6 +1774,8 @@ export const listFinanceParties = createServerFn({ method: 'POST' })
           tdsSection: true,
           tdsRate: true,
           invoiceRequired: true,
+          paymentTermsDays: true,
+          billingPeriodOffsetMonths: true,
           isActive: true,
           contactName: true,
           email: true,
@@ -1860,6 +1879,8 @@ export const createFinanceParty = createServerFn({ method: 'POST' })
         tdsSection: data.tdsSection ?? null,
         tdsRate: data.tdsRate ?? null,
         invoiceRequired: data.invoiceRequired ?? true,
+        paymentTermsDays: data.paymentTermsDays ?? null,
+        billingPeriodOffsetMonths: data.billingPeriodOffsetMonths ?? null,
         contactName: data.contactName ?? null,
         email: data.email ?? null,
         phone: data.phone ?? null,
