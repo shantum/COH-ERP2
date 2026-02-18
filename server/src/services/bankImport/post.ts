@@ -106,18 +106,21 @@ function decidePosting(
 // ============================================
 
 /**
- * Check if a Payment already exists with the same referenceNumber and matching amount.
- * Prevents duplicate creation when bank import runs after a migration/script already created one.
+ * Check if a Payment already exists with a matching reference and amount.
+ * Checks all provided references (e.g. payout ID + UTR) to catch cross-bank duplicates:
+ *   HDFC creates Payment ref="603329011837", RazorpayX has UTR="603329011837"
+ *   → without UTR check, RazorpayX would create a duplicate.
  */
 async function findExistingPayment(
   tx: Prisma.TransactionClient,
-  referenceNumber: string | null,
+  references: (string | null | undefined)[],
   amount: number,
 ): Promise<string | null> {
-  if (!referenceNumber) return null;
+  const refs = references.filter((r): r is string => !!r);
+  if (refs.length === 0) return null;
   const existing = await tx.payment.findFirst({
     where: {
-      referenceNumber,
+      referenceNumber: { in: refs },
       amount: { gte: amount - 1, lte: amount + 1 },
       status: { not: 'cancelled' },
     },
@@ -198,8 +201,8 @@ export async function confirmSingleTransaction(txnId: string): Promise<ConfirmRe
         resultPaymentId = txn.paymentId;
       } else {
         const ref = txn.reference ?? txn.utr ?? null;
-        // Dedup: check for existing payment with same reference
-        const existingId = await findExistingPayment(tx, ref, txn.amount);
+        // Dedup: check reference + UTR (catches HDFC↔RazorpayX cross-bank duplicates)
+        const existingId = await findExistingPayment(tx, [ref, txn.utr], txn.amount);
         if (existingId) {
           resultPaymentId = existingId;
         } else {
@@ -336,8 +339,8 @@ export async function postTransactions(options?: { bank?: string }): Promise<Pos
             paymentId = txn.paymentId;
           } else {
             const ref = txn.reference ?? txn.utr ?? null;
-            // Dedup: check for existing payment with same reference
-            const existingId = await findExistingPayment(prisma, ref, txn.amount);
+            // Dedup: check reference + UTR (catches HDFC↔RazorpayX cross-bank duplicates)
+            const existingId = await findExistingPayment(prisma, [ref, txn.utr], txn.amount);
             if (existingId) {
               paymentId = existingId;
             } else {
