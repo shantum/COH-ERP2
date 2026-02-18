@@ -162,3 +162,6 @@ export const ITHINK_REMITTANCE_LOOKBACK_DAYS = 7;
 
 /** Delay before first remittance sync after server start (5 min) */
 export const ITHINK_REMITTANCE_STARTUP_DELAY_MS = 5 * 60 * 1000;
+
+/** Timeout for remittance detail endpoint (slower than summary — returns per-order data) */
+export const ITHINK_REMITTANCE_DETAIL_TIMEOUT_MS = 120_000;

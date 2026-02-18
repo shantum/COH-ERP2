@@ -238,9 +238,9 @@ export function isSuccessfulTrackingResponse(
  * All numeric fields come as strings ("0.00") — parse to Float during processing.
  */
 export interface IThinkRemittanceSummary {
-    remittance_id: string;
-    remittance_date: string;       // "20 Apr 2021"
-    cod_generated: string;         // "1234.00"
+    remittance_id: number;         // API returns number, coerce to String for DB
+    remittance_date: string;       // "15 Feb 2026"
+    cod_generated: string;         // "27399.40"
     bill_adjusted: string;
     refund_adjusted: string;
     transaction_charges: string;
@@ -248,7 +248,6 @@ export interface IThinkRemittanceSummary {
     wallet_amount: string;
     advance_hold: string;
     cod_remitted: string;          // NET amount deposited
-    order_count: string;           // "5"
 }
 
 /**
@@ -257,8 +256,10 @@ export interface IThinkRemittanceSummary {
 export interface IThinkRemittanceDetail {
     airway_bill_no: string;
     order_no: string;
-    price: string;                 // "1299.00"
-    delivered_date: string;        // "20 Apr 2021"
+    netpayment: string;            // "1299.00" — actual field name from API
+    created_date: string;          // "2026-02-09 11:29:44"
+    delivered_date: string;        // "2026-02-15 15:48:32"
+    remittance_id: string;         // "100001078"
 }
 
 /**

@@ -14,6 +14,7 @@ import {
     ITHINK_API_TIMEOUT_MS,
     ITHINK_API_RETRIES,
     ITHINK_RETRY_DELAY_MS,
+    ITHINK_REMITTANCE_DETAIL_TIMEOUT_MS,
 } from '../config/index.js';
 import type {
     IThinkRawTrackingResponse,
@@ -36,6 +37,7 @@ import { storeTrackingResponse, storeTrackingResponsesBatch } from './trackingRe
 // ============================================================================
 
 const API_TIMEOUT_MS = ITHINK_API_TIMEOUT_MS;
+const REMITTANCE_DETAIL_TIMEOUT_MS = ITHINK_REMITTANCE_DETAIL_TIMEOUT_MS;
 const MAX_RETRIES = ITHINK_API_RETRIES;
 const INITIAL_RETRY_DELAY_MS = ITHINK_RETRY_DELAY_MS;
 
@@ -1305,8 +1307,8 @@ class IThinkLogisticsClient {
         }
 
         const response = await axiosWithRetry(
-            () => axios.post<IThinkRemittanceResponse<IThinkRemittanceSummary>>(
-                `${this.orderBaseUrl}/remittance/summary.json`,
+            () => axios.post<IThinkRemittanceResponse<IThinkRemittanceSummary> | []>(
+                `${this.orderBaseUrl}/remittance/get.json`,
                 {
                     data: {
                         access_token: this.accessToken,
@@ -1321,6 +1323,9 @@ class IThinkLogisticsClient {
             ),
             `getRemittances:${remittanceDate}`
         );
+
+        // API returns [] when no data for the date
+        if (Array.isArray(response.data)) return [];
 
         if (response.data.status_code !== 200) {
             const msg = response.data.message || response.data.html_message || 'Remittance API error';
@@ -1342,23 +1347,25 @@ class IThinkLogisticsClient {
             throw new Error('iThink Logistics credentials not configured');
         }
 
-        const response = await axiosWithRetry(
-            () => axios.post<IThinkRemittanceResponse<IThinkRemittanceDetail>>(
-                `${this.orderBaseUrl}/remittance/details.json`,
-                {
-                    data: {
-                        access_token: this.accessToken,
-                        secret_key: this.secretKey,
-                        remittance_date: remittanceDate,
-                    },
+        // No retry wrapper — this endpoint is genuinely slow (returns per-order data),
+        // so retrying on timeout would just waste 2×120s more.
+        const response = await axios.post<IThinkRemittanceResponse<IThinkRemittanceDetail> | []>(
+            `${this.orderBaseUrl}/remittance/get_details.json`,
+            {
+                data: {
+                    access_token: this.accessToken,
+                    secret_key: this.secretKey,
+                    remittance_date: remittanceDate,
                 },
-                {
-                    headers: { 'Content-Type': 'application/json' },
-                    timeout: API_TIMEOUT_MS,
-                }
-            ),
-            `getRemittanceDetails:${remittanceDate}`
+            },
+            {
+                headers: { 'Content-Type': 'application/json' },
+                timeout: REMITTANCE_DETAIL_TIMEOUT_MS,
+            }
         );
+
+        // API returns [] when no data for the date
+        if (Array.isArray(response.data)) return [];
 
         if (response.data.status_code !== 200) {
             const msg = response.data.message || response.data.html_message || 'Remittance details API error';

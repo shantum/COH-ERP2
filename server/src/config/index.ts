@@ -141,6 +141,7 @@ export {
     ITHINK_REMITTANCE_SYNC_INTERVAL_MS,
     ITHINK_REMITTANCE_LOOKBACK_DAYS,
     ITHINK_REMITTANCE_STARTUP_DELAY_MS,
+    ITHINK_REMITTANCE_DETAIL_TIMEOUT_MS,
 } from './sync/index.js';
 
 // ============================================

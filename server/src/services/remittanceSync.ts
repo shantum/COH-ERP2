@@ -147,17 +147,20 @@ async function runRemittanceSync(): Promise<SyncResult> {
                         continue;
                     }
 
+                    // API returns remittance_id as number — coerce to string for DB
+                    const remittanceId = String(summary.remittance_id);
+
                     const existing = await prisma.codRemittance.findUnique({
                         where: {
                             remittanceId_remittanceDate: {
-                                remittanceId: summary.remittance_id,
+                                remittanceId,
                                 remittanceDate,
                             },
                         },
                     });
 
                     if (!existing) {
-                        newSummaries.push({ summary, remittanceDate });
+                        newSummaries.push({ summary, remittanceDate, remittanceId });
                     }
                 }
 
@@ -167,14 +170,14 @@ async function runRemittanceSync(): Promise<SyncResult> {
                 const details = await ithinkClient.getRemittanceDetails(dateStr);
 
                 // 3. Process each new summary
-                for (const { summary, remittanceDate } of newSummaries) {
+                for (const { summary, remittanceDate, remittanceId } of newSummaries) {
                     result.remittancesNew++;
 
                     let ordersProcessed = 0;
                     for (const detail of details) {
                         try {
                             const orderNumber = detail.order_no.replace(/^#/, '');
-                            const amount = parseFloat(detail.price) || 0;
+                            const amount = parseFloat(detail.netpayment) || 0;
 
                             // Find order by orderNumber (try with and without # prefix)
                             const order = await prisma.order.findFirst({
@@ -291,7 +294,7 @@ async function runRemittanceSync(): Promise<SyncResult> {
                     // 4. Create CodRemittance record
                     await prisma.codRemittance.create({
                         data: {
-                            remittanceId: summary.remittance_id,
+                            remittanceId,
                             remittanceDate,
                             codGenerated: parseFloat(summary.cod_generated) || 0,
                             billAdjusted: parseFloat(summary.bill_adjusted) || 0,
@@ -302,7 +305,7 @@ async function runRemittanceSync(): Promise<SyncResult> {
                             advanceHold: parseFloat(summary.advance_hold) || 0,
                             codRemitted: parseFloat(summary.cod_remitted) || 0,
                             orderDetails: JSON.parse(JSON.stringify(details)),
-                            orderCount: parseInt(summary.order_count, 10) || details.length,
+                            orderCount: details.length,
                             ordersProcessed,
                             source: 'api',
                         },
