@@ -22,6 +22,8 @@ import cacheDumpWorker from '../services/cacheDumpWorker.js';
 import driveFinanceSync from '../services/driveFinanceSync.js';
 import sheetOffloadWorker from '../services/sheetOffloadWorker.js';
 import stockSnapshotWorker from '../services/stockSnapshotWorker.js';
+import payuSettlementSync from '../services/payuSettlementSync.js';
+import remittanceSync from '../services/remittanceSync.js';
 
 const router: Router = Router();
 
@@ -140,6 +142,8 @@ router.get('/worker-status', verifyInternalRequest, async (_req: Request, res: R
         const snapshot = stockSnapshotWorker.getStatus();
         const offload = sheetOffloadWorker.getStatus();
         const dump = await cacheDumpWorker.getStatus();
+        const payu = payuSettlementSync.getStatus();
+        const remittance = remittanceSync.getStatus();
 
         const workers = [
             {
@@ -204,6 +208,24 @@ router.get('/worker-status', verifyInternalRequest, async (_req: Request, res: R
                 schedulerActive: false,
                 lastSyncAt: snapshot.lastRunAt,
                 lastError: null,
+            },
+            {
+                id: 'payu_settlement',
+                name: 'PayU Settlement',
+                interval: `${payu.intervalHours}h`,
+                isRunning: payu.isRunning,
+                schedulerActive: payu.schedulerActive,
+                lastSyncAt: payu.lastSyncAt,
+                lastError: payu.lastSyncResult?.error ?? null,
+            },
+            {
+                id: 'cod_remittance',
+                name: 'COD Remittance',
+                interval: `${remittance.intervalHours}h`,
+                isRunning: remittance.isRunning,
+                schedulerActive: remittance.schedulerActive,
+                lastSyncAt: remittance.lastSyncAt,
+                lastError: remittance.lastSyncResult?.error ?? null,
             },
         ];
 
