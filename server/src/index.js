@@ -54,6 +54,7 @@ import driveFinanceSync from './services/driveFinanceSync.js';
 import { pulseBroadcaster } from './services/pulseBroadcaster.js';
 import scheduledSync from './services/scheduledSync.js';
 import trackingSync from './services/trackingSync.js';
+import remittanceSync from './services/remittanceSync.js';
 import cacheProcessor from './services/cacheProcessor.js';
 import cacheDumpWorker from './services/cacheDumpWorker.js';
 import sheetOffloadWorker from './services/sheetOffloadWorker.js';
@@ -322,6 +323,9 @@ app.listen(PORT, '0.0.0.0', async () => {
     // Start Drive finance sync (on-demand only, no scheduled interval)
     driveFinanceSync.start();
 
+    // Start COD remittance sync (every 12 hours, 5 min startup delay)
+    remittanceSync.start();
+
     // Sheet order reconciler — catches orders missed due to crashes/downtime
     // Runs every 15 min, looks back 3 days for unpushed orders
     const RECONCILE_INTERVAL_MS = 15 * 60 * 1000;
@@ -363,6 +367,10 @@ app.listen(PORT, '0.0.0.0', async () => {
 
     shutdownCoordinator.register('driveFinanceSync', () => {
       driveFinanceSync.stop();
+    }, 5000);
+
+    shutdownCoordinator.register('remittanceSync', () => {
+      remittanceSync.stop();
     }, 5000);
 
     shutdownCoordinator.register('sheetReconciler', () => {

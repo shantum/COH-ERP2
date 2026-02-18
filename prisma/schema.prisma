@@ -2368,3 +2368,41 @@ model BankImportBatch {
 
   transactions    BankTransaction[]
 }
+
+/// COD remittance from iThink Logistics — links orders to bank deposits
+model CodRemittance {
+  id                    String    @id @default(uuid())
+  remittanceId          String    // iThink's remittance_id
+  remittanceDate        DateTime  // Parsed from "20 Apr 2021"
+
+  // Financial breakdown (parsed from string "0.00" to Float)
+  codGenerated          Float     @default(0) // Total COD collected from customers
+  billAdjusted          Float     @default(0) // Shipping bills deducted
+  refundAdjusted        Float     @default(0) // Customer refunds deducted
+  transactionCharges    Float     @default(0) // iThink processing fees
+  transactionGstCharges Float     @default(0) // GST on processing fees
+  walletAmount          Float     @default(0) // Wallet deductions
+  advanceHold           Float     @default(0) // Advances held
+  codRemitted           Float     @default(0) // NET amount deposited to HDFC
+
+  // Order details (JSON array of { airway_bill_no, order_no, price, delivered_date })
+  orderDetails          Json?
+  orderCount            Int       @default(0)
+  ordersProcessed       Int       @default(0)
+
+  // Source & sync
+  source                String    @default("api") // "api" | "csv"
+  syncedAt              DateTime  @default(now())
+
+  // Finance bridge: links to HDFC bank deposit when matched
+  bankTransactionId     String?   @unique
+  matchedAt             DateTime?
+  matchConfidence       String?   // "exact_amount" | "approx_date" | "manual"
+
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@unique([remittanceId, remittanceDate]) // Idempotency
+  @@index([remittanceDate])
+  @@index([codRemitted])
+}

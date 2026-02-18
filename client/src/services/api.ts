@@ -179,6 +179,10 @@ export const remittanceApi = {
     retrySync: (data: { orderIds?: string[]; all?: boolean }) => api.post('/remittance/retry-sync', data),
     approveManual: (data: { orderId: string; approvedAmount?: number }) =>
         api.post('/remittance/approve-manual', data),
+    // API sync
+    getSyncStatus: () => api.get('/remittance/sync-status'),
+    triggerSync: () => api.post('/remittance/trigger-sync'),
+    getHistory: (days?: number) => api.get('/remittance/history', { params: { days } }),
 };
 
 export default api;

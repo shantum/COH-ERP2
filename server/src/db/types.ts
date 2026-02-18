@@ -117,6 +117,29 @@ export type ChannelOrderLine = {
     importedAt: Generated<Timestamp>;
     importBatchId: string | null;
 };
+export type CodRemittance = {
+    id: Generated<string>;
+    remittanceId: string;
+    remittanceDate: Timestamp;
+    codGenerated: Generated<number>;
+    billAdjusted: Generated<number>;
+    refundAdjusted: Generated<number>;
+    transactionCharges: Generated<number>;
+    transactionGstCharges: Generated<number>;
+    walletAmount: Generated<number>;
+    advanceHold: Generated<number>;
+    codRemitted: Generated<number>;
+    orderDetails: unknown | null;
+    orderCount: Generated<number>;
+    ordersProcessed: Generated<number>;
+    source: Generated<string>;
+    syncedAt: Generated<Timestamp>;
+    bankTransactionId: string | null;
+    matchedAt: Timestamp | null;
+    matchConfidence: string | null;
+    createdAt: Generated<Timestamp>;
+    updatedAt: Timestamp;
+};
 export type ComponentRole = {
     id: Generated<string>;
     typeId: string;
@@ -1395,6 +1418,7 @@ export type DB = {
     BankTransaction: BankTransaction;
     ChannelImportBatch: ChannelImportBatch;
     ChannelOrderLine: ChannelOrderLine;
+    CodRemittance: CodRemittance;
     ComponentRole: ComponentRole;
     ComponentType: ComponentType;
     CostConfig: CostConfig;

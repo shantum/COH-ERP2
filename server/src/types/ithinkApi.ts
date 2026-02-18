@@ -228,3 +228,46 @@ export function isSuccessfulTrackingResponse(
 ): boolean {
     return response.message === 'success';
 }
+
+// ============================================================================
+// Remittance API Response Types
+// ============================================================================
+
+/**
+ * Summary record from iThink Remittance API (getRemittances)
+ * All numeric fields come as strings ("0.00") — parse to Float during processing.
+ */
+export interface IThinkRemittanceSummary {
+    remittance_id: string;
+    remittance_date: string;       // "20 Apr 2021"
+    cod_generated: string;         // "1234.00"
+    bill_adjusted: string;
+    refund_adjusted: string;
+    transaction_charges: string;
+    transaction_gst_charges: string;
+    wallet_amount: string;
+    advance_hold: string;
+    cod_remitted: string;          // NET amount deposited
+    order_count: string;           // "5"
+}
+
+/**
+ * Per-order detail from iThink Remittance API (getRemittanceDetails)
+ */
+export interface IThinkRemittanceDetail {
+    airway_bill_no: string;
+    order_no: string;
+    price: string;                 // "1299.00"
+    delivered_date: string;        // "20 Apr 2021"
+}
+
+/**
+ * API response wrapper for remittance endpoints
+ */
+export interface IThinkRemittanceResponse<T> {
+    status: string;
+    status_code: number;
+    message?: string;
+    html_message?: string;
+    data?: T[];
+}

@@ -149,3 +149,16 @@ export const ORDER_LOCK_CONFIG = {
     /** Lock timeout (ms) */
     timeoutMs: parseInt(process.env.ORDER_LOCK_TIMEOUT_MS || '90000', 10),
 } as const;
+
+// ============================================
+// REMITTANCE SYNC SETTINGS
+// ============================================
+
+/** Interval between remittance syncs (12 hours) */
+export const ITHINK_REMITTANCE_SYNC_INTERVAL_MS = 12 * 60 * 60 * 1000;
+
+/** Number of days to look back for new remittances */
+export const ITHINK_REMITTANCE_LOOKBACK_DAYS = 7;
+
+/** Delay before first remittance sync after server start (5 min) */
+export const ITHINK_REMITTANCE_STARTUP_DELAY_MS = 5 * 60 * 1000;

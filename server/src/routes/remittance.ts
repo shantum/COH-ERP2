@@ -26,6 +26,7 @@ import type { Request, Response } from 'express';
 import multer from 'multer';
 import { parse } from 'csv-parse/sync';
 import shopifyClient from '../services/shopify.js';
+import remittanceSync from '../services/remittanceSync.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { ValidationError, NotFoundError, BusinessLogicError } from '../utils/errors.js';
 import { requireAdmin } from '../middleware/auth.js';
@@ -1054,6 +1055,78 @@ router.post('/fix-payment-method', asyncHandler(async (req: Request, res: Respon
         cacheFixed: cacheResult.count,
         orders: affectedOrders.map(o => o.orderNumber),
     });
+}));
+
+// ============================================
+// API SYNC ROUTES (iThink Remittance API)
+// ============================================
+
+/**
+ * Manually trigger remittance sync (fire-and-forget)
+ * @route POST /api/remittance/trigger-sync
+ * @returns {Object} { success, message } — sync runs in background
+ */
+router.post('/trigger-sync', asyncHandler(async (_req: Request, res: Response) => {
+    // Fire-and-forget: sync can take minutes, don't block the HTTP request
+    remittanceSync.triggerSync().catch(() => {});
+    res.json({ success: true, message: 'Remittance sync triggered. Check /sync-status for progress.' });
+}));
+
+/**
+ * Get remittance sync worker status + recent CodRemittance records
+ * @route GET /api/remittance/sync-status
+ * @returns {Object} { status, recentRemittances }
+ */
+router.get('/sync-status', asyncHandler(async (req: Request, res: Response) => {
+    const status = remittanceSync.getStatus();
+
+    const recentRemittances = await req.prisma.codRemittance.findMany({
+        orderBy: { remittanceDate: 'desc' },
+        take: 10,
+    });
+
+    res.json({ status, recentRemittances });
+}));
+
+/**
+ * Get remittance history with aggregated totals
+ * @route GET /api/remittance/history?days=30
+ * @param {number} [query.days=30] - Period
+ * @returns {Object} { remittances, totals }
+ */
+router.get('/history', asyncHandler(async (req: Request, res: Response) => {
+    const days = Number(req.query.days) || 30;
+    const fromDate = new Date();
+    fromDate.setDate(fromDate.getDate() - days);
+
+    const remittances = await req.prisma.codRemittance.findMany({
+        where: { remittanceDate: { gte: fromDate } },
+        orderBy: { remittanceDate: 'desc' },
+    });
+
+    // Aggregate totals
+    const totals = remittances.reduce(
+        (acc, r) => ({
+            codGenerated: acc.codGenerated + r.codGenerated,
+            codRemitted: acc.codRemitted + r.codRemitted,
+            transactionCharges: acc.transactionCharges + r.transactionCharges,
+            transactionGstCharges: acc.transactionGstCharges + r.transactionGstCharges,
+            orderCount: acc.orderCount + r.orderCount,
+            ordersProcessed: acc.ordersProcessed + r.ordersProcessed,
+            bankMatched: acc.bankMatched + (r.bankTransactionId ? 1 : 0),
+        }),
+        {
+            codGenerated: 0,
+            codRemitted: 0,
+            transactionCharges: 0,
+            transactionGstCharges: 0,
+            orderCount: 0,
+            ordersProcessed: 0,
+            bankMatched: 0,
+        },
+    );
+
+    res.json({ remittances, totals, days });
 }));
 
 export default router;

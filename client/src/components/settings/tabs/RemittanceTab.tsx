@@ -3,10 +3,10 @@
  * COD remittance CSV upload and tracking with Shopify sync
  */
 
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { remittanceApi } from '../../../services/api';
-import { Upload, FileSpreadsheet, DollarSign, CheckCircle, AlertCircle, Clock, RefreshCw, ExternalLink, RotateCcw } from 'lucide-react';
+import { Upload, FileSpreadsheet, DollarSign, CheckCircle, AlertCircle, Clock, RefreshCw, ExternalLink, RotateCcw, Zap, Link2, ChevronDown, ChevronUp } from 'lucide-react';
 
 interface UploadResult {
     success: boolean;
@@ -38,10 +38,27 @@ interface FailedOrder {
     codShopifySyncError: string | null;
 }
 
+interface CodRemittance {
+    id: string;
+    remittanceId: string;
+    remittanceDate: string;
+    codGenerated: number;
+    codRemitted: number;
+    transactionCharges: number;
+    transactionGstCharges: number;
+    orderCount: number;
+    ordersProcessed: number;
+    bankTransactionId: string | null;
+    matchConfidence: string | null;
+    orderDetails: unknown;
+}
+
 export function RemittanceTab() {
     const [file, setFile] = useState<File | null>(null);
     const [uploadResult, setUploadResult] = useState<UploadResult | null>(null);
     const [showFailedSync, setShowFailedSync] = useState(false);
+    const [showApiSync, setShowApiSync] = useState(true);
+    const [expandedRemittance, setExpandedRemittance] = useState<string | null>(null);
     const queryClient = useQueryClient();
 
     // Fetch summary data
@@ -92,6 +109,26 @@ export function RemittanceTab() {
         },
         onError: (error: unknown) => {
             alert(error instanceof Error ? error.message : 'Approval failed');
+        },
+    });
+
+    // API Sync status query
+    const { data: syncStatusData, isLoading: syncStatusLoading } = useQuery({
+        queryKey: ['remittanceSyncStatus'],
+        queryFn: () => remittanceApi.getSyncStatus(),
+        enabled: showApiSync,
+        refetchInterval: 30000, // Refresh every 30s when visible
+    });
+
+    // Trigger sync mutation
+    const triggerSyncMutation = useMutation({
+        mutationFn: () => remittanceApi.triggerSync(),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['remittanceSyncStatus'] });
+            queryClient.invalidateQueries({ queryKey: ['remittanceSummary'] });
+        },
+        onError: (error: unknown) => {
+            alert(error instanceof Error ? error.message : 'Sync trigger failed');
         },
     });
 
@@ -201,10 +238,161 @@ export function RemittanceTab() {
                 </div>
             </div>
 
-            {/* Upload Card */}
+            {/* iThink API Sync Card */}
+            <div className="card">
+                <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-lg font-semibold flex items-center gap-2">
+                        <Zap size={20} /> iThink API Sync
+                    </h2>
+                    <div className="flex items-center gap-2">
+                        <button
+                            className="btn btn-sm btn-primary flex items-center gap-2"
+                            onClick={() => triggerSyncMutation.mutate()}
+                            disabled={triggerSyncMutation.isPending}
+                        >
+                            <RefreshCw size={14} className={triggerSyncMutation.isPending ? 'animate-spin' : ''} />
+                            {triggerSyncMutation.isPending ? 'Syncing...' : 'Sync Now'}
+                        </button>
+                        <button
+                            className="btn btn-sm"
+                            onClick={() => setShowApiSync(!showApiSync)}
+                        >
+                            {showApiSync ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                        </button>
+                    </div>
+                </div>
+
+                {showApiSync && (
+                    <div className="space-y-4">
+                        {/* Status indicator */}
+                        {syncStatusLoading ? (
+                            <p className="text-gray-500 text-sm">Loading sync status...</p>
+                        ) : syncStatusData?.data?.status ? (
+                            <div className="flex items-center gap-4 text-sm">
+                                <span className={`flex items-center gap-1.5 px-2 py-1 rounded ${
+                                    syncStatusData.data.status.schedulerActive
+                                        ? 'bg-green-100 text-green-700'
+                                        : 'bg-gray-100 text-gray-600'
+                                }`}>
+                                    <span className={`w-2 h-2 rounded-full ${
+                                        syncStatusData.data.status.isRunning
+                                            ? 'bg-blue-500 animate-pulse'
+                                            : syncStatusData.data.status.schedulerActive
+                                            ? 'bg-green-500'
+                                            : 'bg-gray-400'
+                                    }`} />
+                                    {syncStatusData.data.status.isRunning
+                                        ? 'Running'
+                                        : syncStatusData.data.status.schedulerActive
+                                        ? 'Active'
+                                        : 'Idle'}
+                                </span>
+                                {syncStatusData.data.status.lastSyncAt && (
+                                    <span className="text-gray-500">
+                                        Last sync: {formatDate(syncStatusData.data.status.lastSyncAt)}
+                                    </span>
+                                )}
+                                <span className="text-gray-400">
+                                    Every {syncStatusData.data.status.intervalHours}h
+                                </span>
+                            </div>
+                        ) : null}
+
+                        {/* Last sync result summary */}
+                        {syncStatusData?.data?.status?.lastSyncResult && (
+                            <div className="p-3 bg-gray-50 rounded-lg text-sm">
+                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                                    <div><span className="text-gray-500">Remittances:</span> <span className="font-medium">{syncStatusData.data.status.lastSyncResult.remittancesNew} new</span></div>
+                                    <div><span className="text-gray-500">Orders:</span> <span className="font-medium">{syncStatusData.data.status.lastSyncResult.ordersUpdated} updated</span></div>
+                                    <div><span className="text-gray-500">Shopify:</span> <span className="font-medium text-green-600">{syncStatusData.data.status.lastSyncResult.shopifySynced} synced</span></div>
+                                    {syncStatusData.data.status.lastSyncResult.errors > 0 && (
+                                        <div><span className="text-gray-500">Errors:</span> <span className="font-medium text-red-600">{syncStatusData.data.status.lastSyncResult.errors}</span></div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Recent remittances table */}
+                        {syncStatusData?.data?.recentRemittances?.length > 0 && (
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-sm">
+                                    <thead className="bg-gray-50 text-left">
+                                        <tr>
+                                            <th className="px-3 py-2">Date</th>
+                                            <th className="px-3 py-2 text-right">COD Generated</th>
+                                            <th className="px-3 py-2 text-right">Charges</th>
+                                            <th className="px-3 py-2 text-right">GST</th>
+                                            <th className="px-3 py-2 text-right">Net Remitted</th>
+                                            <th className="px-3 py-2 text-center">Orders</th>
+                                            <th className="px-3 py-2 text-center">Bank</th>
+                                            <th className="px-3 py-2"></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y">
+                                        {(syncStatusData!.data.recentRemittances as CodRemittance[]).map((r) => (
+                                            <React.Fragment key={r.id}>
+                                                <tr className="hover:bg-gray-50 cursor-pointer" onClick={() => setExpandedRemittance(expandedRemittance === r.id ? null : r.id)}>
+                                                    <td className="px-3 py-2">{formatDate(r.remittanceDate)}</td>
+                                                    <td className="px-3 py-2 text-right">{formatCurrency(r.codGenerated)}</td>
+                                                    <td className="px-3 py-2 text-right text-orange-600">{formatCurrency(r.transactionCharges)}</td>
+                                                    <td className="px-3 py-2 text-right text-orange-600">{formatCurrency(r.transactionGstCharges)}</td>
+                                                    <td className="px-3 py-2 text-right font-medium">{formatCurrency(r.codRemitted)}</td>
+                                                    <td className="px-3 py-2 text-center">{r.ordersProcessed}/{r.orderCount}</td>
+                                                    <td className="px-3 py-2 text-center">
+                                                        {r.bankTransactionId ? (
+                                                            <span className="inline-flex items-center gap-1 text-green-600" title={`Matched: ${r.matchConfidence}`}>
+                                                                <Link2 size={14} />
+                                                            </span>
+                                                        ) : (
+                                                            <span className="text-gray-400">-</span>
+                                                        )}
+                                                    </td>
+                                                    <td className="px-3 py-2">
+                                                        {expandedRemittance === r.id ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                                                    </td>
+                                                </tr>
+                                                {expandedRemittance === r.id && Array.isArray(r.orderDetails) && (
+                                                    <tr>
+                                                        <td colSpan={8} className="px-3 py-2 bg-blue-50">
+                                                            <div className="max-h-48 overflow-y-auto">
+                                                                <table className="w-full text-xs">
+                                                                    <thead className="text-gray-500">
+                                                                        <tr>
+                                                                            <th className="text-left py-1">AWB</th>
+                                                                            <th className="text-left py-1">Order</th>
+                                                                            <th className="text-right py-1">Amount</th>
+                                                                            <th className="text-left py-1">Delivered</th>
+                                                                        </tr>
+                                                                    </thead>
+                                                                    <tbody>
+                                                                        {(r.orderDetails as Array<{ airway_bill_no: string; order_no: string; price: string; delivered_date: string }>).slice(0, 20).map((d) => (
+                                                                            <tr key={d.airway_bill_no || d.order_no} className="border-t border-blue-100">
+                                                                                <td className="py-1 font-mono">{d.airway_bill_no}</td>
+                                                                                <td className="py-1">{d.order_no}</td>
+                                                                                <td className="py-1 text-right">{formatCurrency(parseFloat(d.price))}</td>
+                                                                                <td className="py-1">{d.delivered_date}</td>
+                                                                            </tr>
+                                                                        ))}
+                                                                    </tbody>
+                                                                </table>
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                )}
+                                            </React.Fragment>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
+                    </div>
+                )}
+            </div>
+
+            {/* Upload Card (Manual Fallback) */}
             <div className="card">
                 <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                    <Upload size={20} /> Upload COD Remittance CSV
+                    <Upload size={20} /> Manual Upload (CSV Fallback)
                 </h2>
 
                 <div className="max-w-xl space-y-4">

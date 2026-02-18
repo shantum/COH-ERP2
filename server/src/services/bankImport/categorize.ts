@@ -403,6 +403,53 @@ export async function categorizeTransactions(options?: { bank?: string }): Promi
     breakdown[key].total += txn.amount;
   }
 
+  // COD Remittance matching — match unmatched HDFC credits to CodRemittance records
+  for (const txn of txns) {
+    if (txn.bank !== 'hdfc' || txn.direction !== 'credit') continue;
+
+    // Check if already categorized to a known party
+    const existingUpdate = updates.find(u => u.id === txn.id);
+    const creditAcct = existingUpdate?.data?.creditAccountCode as string | undefined;
+    if (creditAcct && creditAcct !== 'UNMATCHED_PAYMENTS') continue;
+
+    // Try matching to CodRemittance by amount (±Rs 1) + date (±3 days)
+    const match = await prisma.codRemittance.findFirst({
+      where: {
+        bankTransactionId: null,
+        codRemitted: { gte: txn.amount - 1, lte: txn.amount + 1 },
+        remittanceDate: {
+          gte: new Date(txn.txnDate.getTime() - 3 * 86400000),
+          lte: new Date(txn.txnDate.getTime() + 3 * 86400000),
+        },
+      },
+      orderBy: { remittanceDate: 'desc' },
+    });
+
+    if (match) {
+      // Override or set categorization for this txn
+      const codData: Prisma.BankTransactionUncheckedUpdateInput = {
+        debitAccountCode: 'BANK_HDFC',
+        creditAccountCode: 'SALES_REVENUE',
+        category: 'cod_remittance',
+        counterpartyName: 'iThink Logistics COD',
+        status: 'categorized',
+      };
+
+      if (existingUpdate) {
+        existingUpdate.data = codData;
+      } else {
+        updates.push({ id: txn.id, data: codData });
+        categorized++;
+      }
+
+      // Link CodRemittance to BankTransaction
+      await prisma.codRemittance.update({
+        where: { id: match.id },
+        data: { bankTransactionId: txn.id, matchedAt: new Date(), matchConfidence: 'exact_amount' },
+      });
+    }
+  }
+
   // Batch update
   const BATCH = 50;
   for (let i = 0; i < updates.length; i += BATCH) {

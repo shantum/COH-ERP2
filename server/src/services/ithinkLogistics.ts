@@ -24,6 +24,9 @@ import type {
     IThinkRawProviderInfo,
     IThinkCancellationItem,
     IThinkLabelRequestData,
+    IThinkRemittanceSummary,
+    IThinkRemittanceDetail,
+    IThinkRemittanceResponse,
 } from '../types/ithinkApi.js';
 import { isProviderInfo } from '../types/ithinkApi.js';
 import { storeTrackingResponse, storeTrackingResponsesBatch } from './trackingResponseStorage.js';
@@ -1283,6 +1286,86 @@ class IThinkLogisticsClient {
     mapToInternalStatus(statusCode: string, statusText: string = ''): TrackingStatus {
         // Delegate to centralized config
         return resolveTrackingStatusFromConfig(statusCode, statusText);
+    }
+
+    // ========================================================================
+    // Remittance API Methods
+    // ========================================================================
+
+    /**
+     * Get remittance summaries for a given date
+     * @param remittanceDate - Date in "YYYY-MM-DD" format
+     * @returns Array of remittance summary records
+     */
+    async getRemittances(remittanceDate: string): Promise<IThinkRemittanceSummary[]> {
+        await this.loadFromDatabase();
+
+        if (!this.accessToken || !this.secretKey) {
+            throw new Error('iThink Logistics credentials not configured');
+        }
+
+        const response = await axiosWithRetry(
+            () => axios.post<IThinkRemittanceResponse<IThinkRemittanceSummary>>(
+                `${this.orderBaseUrl}/remittance/summary.json`,
+                {
+                    data: {
+                        access_token: this.accessToken,
+                        secret_key: this.secretKey,
+                        remittance_date: remittanceDate,
+                    },
+                },
+                {
+                    headers: { 'Content-Type': 'application/json' },
+                    timeout: API_TIMEOUT_MS,
+                }
+            ),
+            `getRemittances:${remittanceDate}`
+        );
+
+        if (response.data.status_code !== 200) {
+            const msg = response.data.message || response.data.html_message || 'Remittance API error';
+            throw new Error(`iThink remittance API error: ${msg}`);
+        }
+
+        return response.data.data || [];
+    }
+
+    /**
+     * Get per-order remittance details for a given date
+     * @param remittanceDate - Date in "YYYY-MM-DD" format
+     * @returns Array of per-order detail records
+     */
+    async getRemittanceDetails(remittanceDate: string): Promise<IThinkRemittanceDetail[]> {
+        await this.loadFromDatabase();
+
+        if (!this.accessToken || !this.secretKey) {
+            throw new Error('iThink Logistics credentials not configured');
+        }
+
+        const response = await axiosWithRetry(
+            () => axios.post<IThinkRemittanceResponse<IThinkRemittanceDetail>>(
+                `${this.orderBaseUrl}/remittance/details.json`,
+                {
+                    data: {
+                        access_token: this.accessToken,
+                        secret_key: this.secretKey,
+                        remittance_date: remittanceDate,
+                    },
+                },
+                {
+                    headers: { 'Content-Type': 'application/json' },
+                    timeout: API_TIMEOUT_MS,
+                }
+            ),
+            `getRemittanceDetails:${remittanceDate}`
+        );
+
+        if (response.data.status_code !== 200) {
+            const msg = response.data.message || response.data.html_message || 'Remittance details API error';
+            throw new Error(`iThink remittance details API error: ${msg}`);
+        }
+
+        return response.data.data || [];
     }
 }
 

@@ -138,6 +138,9 @@ export {
     ORDER_LOCK_CONFIG,
     shouldSyncStatus,
     isTerminalTrackingStatus,
+    ITHINK_REMITTANCE_SYNC_INTERVAL_MS,
+    ITHINK_REMITTANCE_LOOKBACK_DAYS,
+    ITHINK_REMITTANCE_STARTUP_DELAY_MS,
 } from './sync/index.js';
 
 // ============================================
