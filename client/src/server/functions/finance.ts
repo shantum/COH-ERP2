@@ -138,34 +138,9 @@ export const getFinanceAlerts = createServerFn({ method: 'GET' })
       });
     }
 
-    // 4. Same vendor double-booked from different banks in same period
-    // Uses partyId for precise matching — avoids false positives from broad name matching
-    // (e.g. "Google India Pvt. Ltd." via RazorpayX vs "Google Play" via HDFC are different entities)
-    const doubles = await prisma.$queryRaw<Array<{
-      period: string; vendor: string; source_count: number; total: number; sources: string;
-    }>>`
-      SELECT TO_CHAR(bt."txnDate" AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM') AS period,
-             p.name AS vendor,
-             COUNT(DISTINCT bt.bank)::int AS source_count,
-             SUM(bt.amount::numeric)::float AS total,
-             STRING_AGG(DISTINCT bt.bank, ' + ') AS sources
-      FROM "BankTransaction" bt
-      JOIN "Party" p ON p.id = bt."partyId"
-      WHERE bt.direction = 'debit'
-        AND bt.status IN ('posted', 'legacy_posted')
-        AND bt."partyId" IS NOT NULL
-      GROUP BY period, p.name
-      HAVING COUNT(DISTINCT bt.bank) > 1
-      ORDER BY period DESC
-    `;
-    for (const d of doubles) {
-      alerts.push({
-        severity: 'warning',
-        category: 'Double-booked Vendor',
-        message: `${d.vendor} in ${d.period}: Rs ${Math.round(d.total).toLocaleString('en-IN')} from ${d.sources}`,
-        details: 'Same vendor paid from both HDFC and RazorpayX — check if one is a duplicate',
-      });
-    }
+    // 4. (Removed) Same vendor on multiple banks — too noisy, all false positives.
+    // Vendors legitimately use multiple payment channels (bank + CC, RazorpayX + HDFC).
+    // Actual duplicate payments are caught by check #3 (reference number matching).
 
     // 5. Large unmatched payments (>50K, no invoice link)
     const unmatched = await prisma.$queryRaw<Array<{

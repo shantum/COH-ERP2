@@ -49,7 +49,7 @@ import {
   Check, X, ChevronLeft, ChevronRight, Loader2, AlertCircle,
   ExternalLink, CloudUpload, Link2, Download, Upload, ArrowLeft,
   Pencil, Search, Trash2, History, AlertTriangle, Eye,
-  FileText, CreditCard, Building2,
+  FileText, CreditCard, Building2, TrendingUp, TrendingDown,
 } from 'lucide-react';
 import { showSuccess, showError } from '../utils/toast';
 import {
@@ -216,6 +216,12 @@ function DashboardTab() {
     queryFn: () => alertsFn(),
   });
 
+  const pnlFn = useServerFn(getMonthlyPnl);
+  const { data: pnlData } = useQuery({
+    queryKey: ['finance', 'pnl', 'monthly'],
+    queryFn: () => pnlFn(),
+  });
+
   const summary = data?.success ? data.summary : null;
 
   if (isLoading) return <LoadingState />;
@@ -315,6 +321,9 @@ function DashboardTab() {
         )}
       </div>
 
+      {/* P&L Snapshot */}
+      {pnlData?.success && <PnlSnapshotCard months={pnlData.months} onNavigate={() => navigate({ to: '/finance', search: { tab: 'pnl', page: 1, limit: 25 }, replace: true })} />}
+
       {/* Needs Attention */}
       {attentionItems.length > 0 && (
         <div>
@@ -352,6 +361,85 @@ function SummaryCard({ label, value, subtitle, color = 'text-foreground' }: {
       <p className="text-sm text-muted-foreground">{label}</p>
       <p className={`text-2xl font-bold font-mono ${color}`}>{formatCurrency(value)}</p>
       {subtitle && <p className="text-xs text-muted-foreground mt-1">{subtitle}</p>}
+    </div>
+  );
+}
+
+/** Compact P&L snapshot showing current month vs previous */
+function PnlSnapshotCard({ months, onNavigate }: {
+  months: Array<{ period: string; revenue: number; cogs: number; grossProfit: number; totalExpenses: number; netProfit: number }>;
+  onNavigate: () => void;
+}) {
+  // Current month in IST
+  const now = new Date();
+  const ist = new Date(now.getTime() + (5.5 * 60 * 60 * 1000));
+  const currentPeriod = `${ist.getUTCFullYear()}-${String(ist.getUTCMonth() + 1).padStart(2, '0')}`;
+
+  // Previous month
+  const prevMonth = ist.getUTCMonth() === 0
+    ? `${ist.getUTCFullYear() - 1}-12`
+    : `${ist.getUTCFullYear()}-${String(ist.getUTCMonth()).padStart(2, '0')}`;
+
+  const current = months.find(m => m.period === currentPeriod);
+  const prev = months.find(m => m.period === prevMonth);
+
+  if (!current && !prev) return null;
+
+  const display = current ?? { period: currentPeriod, revenue: 0, cogs: 0, grossProfit: 0, totalExpenses: 0, netProfit: 0 };
+
+  const pctChange = (curr: number, previous: number) => {
+    if (previous === 0) return curr > 0 ? 100 : 0;
+    return Math.round(((curr - previous) / Math.abs(previous)) * 100);
+  };
+
+  const ChangeIndicator = ({ current: c, previous: p, invertColor = false }: { current: number; previous: number; invertColor?: boolean }) => {
+    const change = pctChange(c, p);
+    if (change === 0 || !prev) return null;
+    const isUp = change > 0;
+    // For expenses/COGS, going up is bad (red), down is good (green) — hence invertColor
+    const isPositive = invertColor ? !isUp : isUp;
+    const Icon = isUp ? TrendingUp : TrendingDown;
+    return (
+      <span className={`inline-flex items-center gap-0.5 text-xs ${isPositive ? 'text-green-600' : 'text-red-500'}`}>
+        <Icon className="h-3 w-3" />
+        {Math.abs(change)}%
+      </span>
+    );
+  };
+
+  const rows = [
+    { label: 'Revenue', value: display.revenue, prev: prev?.revenue ?? 0, color: 'text-green-700 dark:text-green-400' },
+    { label: 'COGS', value: display.cogs, prev: prev?.cogs ?? 0, color: 'text-muted-foreground', invertColor: true },
+    { label: 'Expenses', value: display.totalExpenses, prev: prev?.totalExpenses ?? 0, color: 'text-muted-foreground', invertColor: true },
+    { label: 'Net Profit', value: display.netProfit, prev: prev?.netProfit ?? 0, color: display.netProfit >= 0 ? 'text-green-700 dark:text-green-400' : 'text-red-600 dark:text-red-400' },
+  ];
+
+  return (
+    <div className="border rounded-lg p-4">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+          {formatPeriod(display.period)} at a Glance
+        </h3>
+        <button type="button" onClick={onNavigate} className="text-xs text-blue-600 hover:underline">
+          View Full P&L
+        </button>
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {rows.map(row => (
+          <div key={row.label}>
+            <p className="text-xs text-muted-foreground">{row.label}</p>
+            <p className={`text-lg font-bold font-mono ${row.color}`}>
+              {formatCurrency(row.value)}
+            </p>
+            <ChangeIndicator current={row.value} previous={row.prev} invertColor={row.invertColor} />
+          </div>
+        ))}
+      </div>
+      {prev && (
+        <p className="text-xs text-muted-foreground mt-2">
+          vs {formatPeriod(prev.period)}: Net {formatCurrency(prev.netProfit)}
+        </p>
+      )}
     </div>
   );
 }
