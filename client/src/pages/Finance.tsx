@@ -219,6 +219,7 @@ function DashboardTab() {
   const { data, isLoading } = useQuery({
     queryKey: ['finance', 'summary'],
     queryFn: () => summaryFn(),
+    staleTime: 5 * 60 * 1000,
   });
 
   const { data: alertsData } = useQuery({
@@ -228,8 +229,9 @@ function DashboardTab() {
 
   const pnlFn = useServerFn(getMonthlyPnl);
   const { data: pnlData } = useQuery({
-    queryKey: ['finance', 'pnl', 'monthly'],
+    queryKey: ['finance', 'pnl'],
     queryFn: () => pnlFn(),
+    staleTime: 5 * 60 * 1000,
   });
 
   const summary = data?.success ? data.summary : null;
@@ -1357,6 +1359,7 @@ function PnlTab() {
   const { data, isLoading } = useQuery({
     queryKey: ['finance', 'pnl'],
     queryFn: () => pnlFn(),
+    staleTime: 5 * 60 * 1000,
   });
 
   if (isLoading) return <LoadingState />;
@@ -1579,6 +1582,7 @@ function CashFlowTab() {
   const { data, isLoading } = useQuery({
     queryKey: ['finance', 'cashflow'],
     queryFn: () => cashFlowFn(),
+    staleTime: 5 * 60 * 1000,
   });
 
   const [view, setView] = useState<'monthly' | 'quarterly' | 'fy'>('monthly');

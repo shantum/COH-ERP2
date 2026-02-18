@@ -109,7 +109,19 @@ router.post('/upload', requireAdmin, upload.single('file'), asyncHandler(async (
     }
 
     log.info({ bank, newRows: result.newRows, skipped: result.skippedRows }, 'Bank import complete');
-    res.json({ success: true, result });
+
+    // Run full categorization (PayU/COD matching + auto-post) on newly imported transactions
+    let categorizeResult;
+    try {
+      categorizeResult = await categorizeTransactions({ bank });
+      if (categorizeResult.autoPosted > 0) {
+        log.info({ autoPosted: categorizeResult.autoPosted, bank }, 'Auto-posted PayU/COD matches');
+      }
+    } catch (catErr) {
+      log.error({ err: catErr }, 'Post-import categorization failed (non-fatal)');
+    }
+
+    res.json({ success: true, result, categorizeResult });
   } finally {
     // Clean up uploaded file
     fs.unlink(filePath, () => {});

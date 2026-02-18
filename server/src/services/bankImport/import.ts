@@ -7,14 +7,13 @@
  * Each row gets a SHA-256 hash for dedup and a legacySourceId for audit matching.
  */
 
-import { Prisma, PrismaClient } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import prisma from '../../lib/prisma.js';
 import { createHash, randomUUID } from 'crypto';
 import fs from 'fs';
 import { fetchActiveParties, categorizeSingleTxn } from './categorize.js';
 
 type JsonValue = Prisma.InputJsonValue;
-
-const prisma = new PrismaClient();
 
 /** Convert a Date to IST "YYYY-MM" period string. */
 function dateToPeriod(date: Date): string {

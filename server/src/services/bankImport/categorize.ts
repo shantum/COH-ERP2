@@ -8,14 +8,14 @@
  * To add a new vendor, create a Party record in the UI. Zero code changes.
  */
 
-import { Prisma, PrismaClient } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import prisma from '../../lib/prisma.js';
 import {
   findPartyByNarration,
   resolveAccounting,
   type PartyWithTxnType,
 } from '../transactionTypeResolver.js';
-
-const prisma = new PrismaClient();
+import { confirmBatch } from './post.js';
 
 // ============================================
 // TYPES
@@ -25,6 +25,7 @@ export interface CategorizeResult {
   total: number;
   categorized: number;
   skipped: number;
+  autoPosted: number;
   breakdown: Record<string, { count: number; total: number }>;
 }
 
@@ -405,6 +406,8 @@ export async function categorizeTransactions(options?: { bank?: string }): Promi
 
   // PayU Settlement matching — match HDFC credits to PayuSettlement records by UTR (exact)
   // Runs BEFORE COD remittance matching because UTR is deterministic (exact match vs fuzzy amount+date)
+  // Auto-posted after batch update since these are definitive matches
+  const autoPostIds: string[] = [];
   for (const txn of txns) {
     if (txn.bank !== 'hdfc' || txn.direction !== 'credit') continue;
 
@@ -444,6 +447,8 @@ export async function categorizeTransactions(options?: { bank?: string }): Promi
         updates.push({ id: txn.id, data: payuData });
         categorized++;
       }
+
+      autoPostIds.push(txn.id);
 
       // Link ALL settlements with this UTR to this bank transaction
       const utrValue = payuMatch.utrNumber;
@@ -493,6 +498,8 @@ export async function categorizeTransactions(options?: { bank?: string }): Promi
         categorized++;
       }
 
+      autoPostIds.push(txn.id);
+
       // Link CodRemittance to BankTransaction
       await prisma.codRemittance.update({
         where: { id: match.id },
@@ -511,5 +518,12 @@ export async function categorizeTransactions(options?: { bank?: string }): Promi
     process.stdout.write(`  Updated: ${Math.min(i + BATCH, updates.length)}/${updates.length}\r`);
   }
 
-  return { total: txns.length, categorized, skipped, breakdown };
+  // Auto-post definitive matches (PayU UTR + COD remittance) — no human review needed
+  let autoPosted = 0;
+  if (autoPostIds.length > 0) {
+    const postResult = await confirmBatch(autoPostIds);
+    autoPosted = postResult.confirmed;
+  }
+
+  return { total: txns.length, categorized, skipped, autoPosted, breakdown };
 }

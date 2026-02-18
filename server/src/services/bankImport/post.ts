@@ -4,14 +4,13 @@
  * Confirms BankTransactions — creates Payment records and marks as posted.
  */
 
-import { Prisma, PrismaClient } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import prisma from '../../lib/prisma.js';
 import { AUTO_CLEAR_AMOUNT_THRESHOLD } from '../../config/finance/index.js';
 import { generatePaymentNarration } from '@coh/shared';
 import logger from '../../utils/logger.js';
 
 const log = logger.child({ module: 'bank-post' });
-
-const prisma = new PrismaClient();
 
 /** Convert a Date to IST "YYYY-MM" period string. */
 function dateToPeriod(date: Date): string {
