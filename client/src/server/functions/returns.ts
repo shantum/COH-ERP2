@@ -154,6 +154,7 @@ export const getReturnsAll = createServerFn({ method: 'GET' })
         const prisma = await getPrisma();
 
         const requests = await prisma.returnRequest.findMany({
+            take: 500,
             include: {
                 originalOrder: {
                     select: {
@@ -301,6 +302,7 @@ export const getReturnsPending = createServerFn({ method: 'GET' })
         const prisma = await getPrisma();
 
         const requests = await prisma.returnRequest.findMany({
+            take: 200,
             where: {
                 status: {
                     notIn: ['completed', 'cancelled'],
@@ -541,8 +543,17 @@ export const getReturnsAnalyticsByProduct = createServerFn({ method: 'GET' })
     .handler(async (): Promise<ProductReturnAnalytics[]> => {
         const prisma = await getPrisma();
 
-        // Get all return lines with product details
+        // Get return lines from last 180 days with product details
+        const lookbackDate = new Date();
+        lookbackDate.setDate(lookbackDate.getDate() - 180);
+
         const returnLines = await prisma.returnRequestLine.findMany({
+            take: 2000,
+            where: {
+                request: {
+                    createdAt: { gte: lookbackDate },
+                },
+            },
             include: {
                 request: {
                     select: {

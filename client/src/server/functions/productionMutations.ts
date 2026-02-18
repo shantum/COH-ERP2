@@ -375,32 +375,38 @@ export const createBatch = createServerFn({ method: 'POST' })
         const batchCode = isSampleBatch ? null : await generateBatchCode(prisma, targetDate);
         const sampleCode = isSampleBatch ? await generateSampleCode(prisma) : null;
 
-        const batch = await prisma.productionBatch.create({
-            data: {
-                batchCode,
-                sampleCode,
-                batchDate: targetDate,
-                tailorId: tailorId || null,
-                skuId: skuId || null,
-                sampleName: sampleName || null,
-                sampleColour: sampleColour || null,
-                sampleSize: sampleSize || null,
-                qtyPlanned: quantity,
-                priority: priority || 'normal',
-                sourceOrderLineId: sourceOrderLineId || null,
-                notes: notes || null,
-                status: 'planned',
-            },
-        });
-
-        // If linked to order line, update it
-        if (sourceOrderLineId) {
-            await prisma.orderLine.update({
-                where: { id: sourceOrderLineId },
-                data: { productionBatchId: batch.id },
+        const batch = await prisma.$transaction(async (tx: PrismaTransaction) => {
+            const created = await tx.productionBatch.create({
+                data: {
+                    batchCode,
+                    sampleCode,
+                    batchDate: targetDate,
+                    tailorId: tailorId || null,
+                    skuId: skuId || null,
+                    sampleName: sampleName || null,
+                    sampleColour: sampleColour || null,
+                    sampleSize: sampleSize || null,
+                    qtyPlanned: quantity,
+                    priority: priority || 'normal',
+                    sourceOrderLineId: sourceOrderLineId || null,
+                    notes: notes || null,
+                    status: 'planned',
+                },
             });
 
-            // Broadcast SSE update
+            // If linked to order line, update it atomically
+            if (sourceOrderLineId) {
+                await tx.orderLine.update({
+                    where: { id: sourceOrderLineId },
+                    data: { productionBatchId: created.id },
+                });
+            }
+
+            return created;
+        });
+
+        // Broadcast SSE update after transaction commits
+        if (sourceOrderLineId) {
             broadcastUpdate(
                 {
                     type: 'production_batch_created',
@@ -526,45 +532,43 @@ export const deleteBatch = createServerFn({ method: 'POST' })
         const prisma = await getPrisma();
         const { batchId } = data;
 
-        const batch = await prisma.productionBatch.findUnique({
-            where: { id: batchId },
-        });
+        let linkedLineId: string | null = null;
 
-        if (!batch) {
-            return {
-                success: false,
-                error: { code: 'NOT_FOUND', message: 'Batch not found' },
-            };
-        }
+        try {
+            const result = await prisma.$transaction(async (tx: PrismaTransaction) => {
+                const batch = await tx.productionBatch.findUnique({
+                    where: { id: batchId },
+                });
 
-        // Safety check: Prevent deletion if batch has inventory transactions
-        const inventoryTxnCount = await prisma.inventoryTransaction.count({
-            where: { referenceId: batchId, reason: TXN_REASON.PRODUCTION },
-        });
+                if (!batch) throw new Error('NOT_FOUND:Batch not found');
 
-        if (inventoryTxnCount > 0) {
-            return {
-                success: false,
-                error: {
-                    code: 'BAD_REQUEST',
-                    message: 'Cannot delete batch with inventory transactions. Use uncomplete first.',
-                },
-            };
-        }
+                // Safety check: Prevent deletion if batch has inventory transactions
+                const inventoryTxnCount = await tx.inventoryTransaction.count({
+                    where: { referenceId: batchId, reason: TXN_REASON.PRODUCTION },
+                });
 
-        // NOTE: FabricTransaction check removed - table no longer exists
-        // Fabric balance is now tracked via FabricColourTransaction
+                if (inventoryTxnCount > 0) {
+                    throw new Error('BAD_REQUEST:Cannot delete batch with inventory transactions. Use uncomplete first.');
+                }
 
-        // Unlink from order line if connected
-        const linkedLineId = batch.sourceOrderLineId;
-        if (linkedLineId) {
-            await prisma.orderLine.update({
-                where: { id: linkedLineId },
-                data: { productionBatchId: null },
+                // Unlink from order line if connected
+                if (batch.sourceOrderLineId) {
+                    await tx.orderLine.update({
+                        where: { id: batch.sourceOrderLineId },
+                        data: { productionBatchId: null },
+                    });
+                }
+
+                await tx.productionBatch.delete({ where: { id: batchId } });
+                return { linkedLineId: batch.sourceOrderLineId };
             });
-        }
 
-        await prisma.productionBatch.delete({ where: { id: batchId } });
+            linkedLineId = result.linkedLineId;
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : 'Unknown error';
+            const [code, msg] = message.includes(':') ? message.split(':', 2) : ['INTERNAL', message];
+            return { success: false, error: { code: code as 'NOT_FOUND' | 'BAD_REQUEST' | 'CONFLICT' | 'FORBIDDEN', message: msg as string } };
+        }
 
         // Broadcast SSE update
         if (linkedLineId) {

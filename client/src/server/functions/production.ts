@@ -484,7 +484,12 @@ export const getProductionLockedDates = createServerFn({ method: 'GET' })
             where: { key: 'locked_production_dates' }
         });
 
-        return setting?.value ? JSON.parse(setting.value) as string[] : [];
+        if (!setting?.value) return [];
+        try {
+            return JSON.parse(setting.value) as string[];
+        } catch {
+            return [];
+        }
     });
 
 /**

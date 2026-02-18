@@ -19,7 +19,7 @@ import { getCookie } from '@tanstack/react-start/server';
 import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth';
 import { getInternalApiBaseUrl } from '../utils';
-import { getPrisma } from '@coh/shared/services/db';
+import { getPrisma, type PrismaTransaction } from '@coh/shared/services/db';
 
 
 /**
@@ -781,15 +781,20 @@ export const getUserPreferences = createServerFn({ method: 'GET' })
             return { success: true, data: null };
         }
 
-        return {
-            success: true,
-            data: {
-                visibleColumns: JSON.parse(userPref.visibleColumns),
-                columnOrder: JSON.parse(userPref.columnOrder),
-                columnWidths: JSON.parse(userPref.columnWidths),
-                adminVersion: userPref.adminVersion?.toISOString() ?? null,
-            },
-        };
+        try {
+            return {
+                success: true,
+                data: {
+                    visibleColumns: JSON.parse(userPref.visibleColumns),
+                    columnOrder: JSON.parse(userPref.columnOrder),
+                    columnWidths: JSON.parse(userPref.columnWidths),
+                    adminVersion: userPref.adminVersion?.toISOString() ?? null,
+                },
+            };
+        } catch {
+            // Corrupted preference data — return null to use defaults
+            return { success: true, data: null };
+        }
     });
 
 /**
@@ -1755,54 +1760,60 @@ export const clearTables = createServerFn({ method: 'POST' })
         }
 
         const prisma = await getPrisma();
-        const deleted: Record<string, number> = {};
 
-        // Process tables in order to respect foreign key constraints
-        if (tables.includes('all') || tables.includes('orders')) {
-            // Delete order lines first (child table)
-            const orderLinesResult = await prisma.orderLine.deleteMany();
-            deleted.orderLines = orderLinesResult.count;
+        // Wrap all deletes in a transaction for atomicity
+        const deleted = await prisma.$transaction(async (tx: PrismaTransaction) => {
+            const counts: Record<string, number> = {};
 
-            const ordersResult = await prisma.order.deleteMany();
-            deleted.orders = ordersResult.count;
-        }
+            // Process tables in order to respect foreign key constraints
+            if (tables.includes('all') || tables.includes('orders')) {
+                // Delete order lines first (child table)
+                const orderLinesResult = await tx.orderLine.deleteMany();
+                counts.orderLines = orderLinesResult.count;
 
-        if (tables.includes('all') || tables.includes('inventoryTransactions')) {
-            const txnsResult = await prisma.inventoryTransaction.deleteMany();
-            deleted.inventoryTransactions = txnsResult.count;
-        }
+                const ordersResult = await tx.order.deleteMany();
+                counts.orders = ordersResult.count;
+            }
 
-        if (tables.includes('all') || tables.includes('customers')) {
-            const customersResult = await prisma.customer.deleteMany();
-            deleted.customers = customersResult.count;
-        }
+            if (tables.includes('all') || tables.includes('inventoryTransactions')) {
+                const txnsResult = await tx.inventoryTransaction.deleteMany();
+                counts.inventoryTransactions = txnsResult.count;
+            }
 
-        if (tables.includes('all') || tables.includes('products')) {
-            // Delete in order: SKU BOM → SKU → Variation → Product
-            const skuBomResult = await prisma.skuBomLine.deleteMany();
-            deleted.skuBom = skuBomResult.count;
+            if (tables.includes('all') || tables.includes('customers')) {
+                const customersResult = await tx.customer.deleteMany();
+                counts.customers = customersResult.count;
+            }
 
-            const skusResult = await prisma.sku.deleteMany();
-            deleted.skus = skusResult.count;
+            if (tables.includes('all') || tables.includes('products')) {
+                // Delete in order: SKU BOM → SKU → Variation → Product
+                const skuBomResult = await tx.skuBomLine.deleteMany();
+                counts.skuBom = skuBomResult.count;
 
-            const variationsResult = await prisma.variation.deleteMany();
-            deleted.variations = variationsResult.count;
+                const skusResult = await tx.sku.deleteMany();
+                counts.skus = skusResult.count;
 
-            const productsResult = await prisma.product.deleteMany();
-            deleted.products = productsResult.count;
-        }
+                const variationsResult = await tx.variation.deleteMany();
+                counts.variations = variationsResult.count;
 
-        if (tables.includes('all') || tables.includes('fabrics')) {
-            // Delete in order: FabricColour → Fabric → Material
-            const coloursResult = await prisma.fabricColour.deleteMany();
-            deleted.fabricColours = coloursResult.count;
+                const productsResult = await tx.product.deleteMany();
+                counts.products = productsResult.count;
+            }
 
-            const fabricsResult = await prisma.fabric.deleteMany();
-            deleted.fabrics = fabricsResult.count;
+            if (tables.includes('all') || tables.includes('fabrics')) {
+                // Delete in order: FabricColour → Fabric → Material
+                const coloursResult = await tx.fabricColour.deleteMany();
+                counts.fabricColours = coloursResult.count;
 
-            const materialsResult = await prisma.material.deleteMany();
-            deleted.materials = materialsResult.count;
-        }
+                const fabricsResult = await tx.fabric.deleteMany();
+                counts.fabrics = fabricsResult.count;
+
+                const materialsResult = await tx.material.deleteMany();
+                counts.materials = materialsResult.count;
+            }
+
+            return counts;
+        });
 
         return { success: true, data: { deleted } };
     });

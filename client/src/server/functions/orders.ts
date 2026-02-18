@@ -1688,23 +1688,17 @@ export const getOrdersAnalytics = createServerFn({ method: 'GET' })
                     _count: true,
                 });
 
-                // Get customer breakdown (new vs returning)
-                const customerOrders = await prisma.order.findMany({
+                // Get customer breakdown (new vs returning) using count queries
+                const newCustomers = await prisma.order.count({
                     where: {
                         ...dateFilter,
                         releasedToCancelled: false,
-                    },
-                    select: {
-                        customerId: true,
-                        customer: {
-                            select: { orderCount: true },
-                        },
+                        customer: { orderCount: 1 },
                     },
                 });
-
-                const newCustomers = customerOrders.filter((o: { customer: { orderCount: number } | null }) => o.customer?.orderCount === 1).length;
-                const returningCustomers = customerOrders.length - newCustomers;
-                const total = customerOrders.length || 1;
+                const totalOrders = result._count;
+                const returningCustomers = totalOrders - newCustomers;
+                const total = totalOrders || 1;
 
                 return {
                     total: result._sum.totalAmount || 0,
