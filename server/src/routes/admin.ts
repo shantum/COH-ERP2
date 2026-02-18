@@ -41,7 +41,7 @@ import stockSnapshotWorker from '../services/stockSnapshotWorker.js';
 import remittanceSync from '../services/remittanceSync.js';
 import payuSettlementSync from '../services/payuSettlementSync.js';
 import driveFinanceSync from '../services/driveFinanceSync.js';
-import { reconcileSheetOrders, syncSheetOrderStatus } from '../services/sheetOrderPush.js';
+import { reconcileSheetOrders, syncSheetOrderStatus, syncSheetAwb } from '../services/sheetOrderPush.js';
 import { trackWorkerRun } from '../utils/workerRunTracker.js';
 import prismaClient from '../lib/prisma.js';
 import logger from '../utils/logger.js';
@@ -196,7 +196,7 @@ interface PermissionsUpdateBody {
 }
 
 /** Background job trigger params */
-type JobId = 'shopify_sync' | 'tracking_sync' | 'cache_cleanup' | 'ingest_inward' | 'ingest_outward' | 'move_shipped_to_outward' | 'preview_ingest_inward' | 'preview_ingest_outward' | 'cleanup_done_rows' | 'migrate_sheet_formulas' | 'snapshot_compute' | 'snapshot_backfill' | 'push_balances' | 'preview_push_balances' | 'push_fabric_balances' | 'import_fabric_balances' | 'preview_fabric_inward' | 'ingest_fabric_inward' | 'reconcile_sheet_orders' | 'sync_sheet_status' | 'run_inward_cycle' | 'run_outward_cycle' | 'remittance_sync' | 'payu_settlement_sync' | 'drive_finance_sync';
+type JobId = 'shopify_sync' | 'tracking_sync' | 'cache_cleanup' | 'ingest_inward' | 'ingest_outward' | 'move_shipped_to_outward' | 'preview_ingest_inward' | 'preview_ingest_outward' | 'cleanup_done_rows' | 'migrate_sheet_formulas' | 'snapshot_compute' | 'snapshot_backfill' | 'push_balances' | 'preview_push_balances' | 'push_fabric_balances' | 'import_fabric_balances' | 'preview_fabric_inward' | 'ingest_fabric_inward' | 'reconcile_sheet_orders' | 'sync_sheet_status' | 'run_inward_cycle' | 'run_outward_cycle' | 'remittance_sync' | 'payu_settlement_sync' | 'drive_finance_sync' | 'sync_sheet_awb';
 
 /** Background job update body */
 interface JobUpdateBody {
@@ -1464,6 +1464,16 @@ router.get('/background-jobs', authenticateToken, asyncHandler(async (req: Reque
             note: 'Runs automatically every 15 min — can also trigger manually',
         },
         {
+            id: 'sync_sheet_awb',
+            name: 'Sync Sheet AWBs',
+            description: 'Reads AWB numbers entered manually in the Google Sheet, validates via iThink, and links to OrderLines in the ERP database.',
+            enabled: true,
+            isRunning: false,
+            lastRunAt: null,
+            lastResult: null,
+            note: 'For offline/exchange orders where ops team enters AWB in the sheet',
+        },
+        {
             id: 'remittance_sync',
             name: 'COD Remittance Sync',
             description: 'Fetches COD remittance data from iThink Logistics API, matches to orders, marks COD as paid, and triggers Shopify payment sync.',
@@ -1645,6 +1655,11 @@ router.post('/background-jobs/:jobId/trigger', requireAdmin, asyncHandler(async 
         case 'sync_sheet_status': {
             const result = await syncSheetOrderStatus();
             res.json({ message: 'Sheet order status sync completed', result });
+            break;
+        }
+        case 'sync_sheet_awb': {
+            const result = await syncSheetAwb();
+            res.json({ message: 'Sheet AWB sync completed', result });
             break;
         }
         case 'remittance_sync': {

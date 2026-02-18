@@ -19,6 +19,9 @@ import {
     ORDERS_FROM_COH_COLS,
 } from '../config/sync/sheets.js';
 import prisma from '../lib/prisma.js';
+import iThinkService from './ithinkLogistics.js';
+import { resolveTrackingStatus } from '../config/mappings/trackingStatus.js';
+import { recomputeOrderStatus } from '../utils/orderStatus.js';
 
 const log = sheetsLogger.child({ service: 'sheetOrderPush' });
 
@@ -53,6 +56,15 @@ interface ShopifyOrder {
 export interface ReconcileResult {
     found: number;
     pushed: number;
+    failed: number;
+    errors: string[];
+    durationMs: number;
+}
+
+export interface SyncSheetAwbResult {
+    checked: number;
+    linked: number;
+    skipped: number;
     failed: number;
     errors: string[];
     durationMs: number;
@@ -633,4 +645,228 @@ export async function syncSingleOrderToSheet(orderNumber: string): Promise<void>
         const message = err instanceof Error ? err.message : String(err);
         log.error({ orderNumber, error: message }, 'Failed to sync single order to sheet');
     }
+}
+
+// ============================================
+// SYNC AWB FROM SHEET → DB (reverse sync)
+// ============================================
+
+/** Statuses where an OrderLine can be linked to an AWB */
+const LINKABLE_STATUSES = ['pending', 'allocated', 'picked', 'packed'];
+
+let awbSyncRunning = false;
+
+/**
+ * Read AWB numbers entered manually in the Google Sheet, validate them via
+ * iThink Logistics API, and link them to matching OrderLines in the database.
+ *
+ * This is the reverse of syncSheetOrderStatus: sheet→DB instead of DB→sheet.
+ * Used for offline/exchange orders where the ops team enters the AWB in the sheet.
+ */
+export async function syncSheetAwb(): Promise<SyncSheetAwbResult> {
+    if (awbSyncRunning) {
+        log.debug('Sheet AWB sync already running, skipping');
+        return { checked: 0, linked: 0, skipped: 0, failed: 0, errors: [], durationMs: 0 };
+    }
+
+    awbSyncRunning = true;
+    const start = Date.now();
+    const result: SyncSheetAwbResult = { checked: 0, linked: 0, skipped: 0, failed: 0, errors: [], durationMs: 0 };
+
+    try {
+        const tab = MASTERSHEET_TABS.ORDERS_FROM_COH;
+
+        // Read columns B through AD (need AC = AWB_SCAN where ops enters AWBs)
+        const rows = await readRange(ORDERS_MASTERSHEET_ID, `'${tab}'!B:AD`);
+        if (rows.length <= 1) {
+            result.durationMs = Date.now() - start;
+            return result;
+        }
+
+        // Collect rows that have an AWB in column AC (AWB_SCAN, index 27 in B:AD range)
+        interface SheetAwbRow {
+            rowIndex: number;   // 1-based index in rows array (for sheet row = rowIndex + 1)
+            orderNumber: string;
+            sku: string;
+            awb: string;
+        }
+
+        const awbRows: SheetAwbRow[] = [];
+        const uniqueAwbs = new Set<string>();
+
+        for (let i = 1; i < rows.length; i++) {
+            const awb = String(rows[i][27] ?? '').trim(); // AC = index 27 in B:AD
+            if (!awb) continue;
+
+            const orderNumber = String(rows[i][0] ?? '').trim();
+            const sku = String(rows[i][5] ?? '').trim();
+            if (!orderNumber || !sku) continue;
+
+            awbRows.push({ rowIndex: i, orderNumber, sku, awb });
+            uniqueAwbs.add(awb);
+        }
+
+        result.checked = awbRows.length;
+        if (awbRows.length === 0) {
+            result.durationMs = Date.now() - start;
+            return result;
+        }
+
+        // Batch validate AWBs via iThink (max 10 per call)
+        const awbList = [...uniqueAwbs];
+        const validatedAwbs = new Map<string, { logistic: string; statusCode: string; statusText: string }>();
+
+        for (let i = 0; i < awbList.length; i += 10) {
+            const batch = awbList.slice(i, i + 10);
+            try {
+                const data = await iThinkService.trackShipments(batch, true);
+                for (const awb of batch) {
+                    const tracking = data[awb];
+                    if (tracking && tracking.message === 'success') {
+                        validatedAwbs.set(awb, {
+                            logistic: tracking.logistic,
+                            statusCode: tracking.current_status_code,
+                            statusText: tracking.current_status,
+                        });
+                    }
+                }
+            } catch (err: unknown) {
+                const message = err instanceof Error ? err.message : String(err);
+                result.errors.push(`iThink batch error: ${message}`);
+                log.error({ batch, err: message }, 'iThink batch validation failed');
+            }
+        }
+
+        // Look up all relevant order numbers in one query
+        const orderNumbers = [...new Set(awbRows.map(r => r.orderNumber))];
+        const orders = await prisma.order.findMany({
+            where: { orderNumber: { in: orderNumbers } },
+            select: {
+                id: true,
+                orderNumber: true,
+                channel: true,
+                orderLines: {
+                    select: {
+                        id: true,
+                        orderId: true,
+                        lineStatus: true,
+                        awbNumber: true,
+                        trackingStatus: true,
+                        sku: { select: { skuCode: true } },
+                    },
+                },
+            },
+        });
+
+        // Build lookup: "orderNumber|skuCode" → OrderLine
+        const lineMap = new Map<string, {
+            id: string;
+            orderId: string;
+            lineStatus: string;
+            awbNumber: string | null;
+            trackingStatus: string | null;
+            channel: string;
+        }>();
+        for (const order of orders) {
+            for (const line of order.orderLines) {
+                lineMap.set(`${order.orderNumber}|${line.sku.skuCode}`, {
+                    id: line.id,
+                    orderId: line.orderId,
+                    lineStatus: line.lineStatus,
+                    awbNumber: line.awbNumber,
+                    trackingStatus: line.trackingStatus,
+                    channel: order.channel,
+                });
+            }
+        }
+
+        // Process each sheet row: update DB + collect sheet write-backs
+        const writeData: Array<{ range: string; values: (string | number)[][] }> = [];
+        const recomputeOrderIds = new Set<string>();
+
+        for (const row of awbRows) {
+            const validated = validatedAwbs.get(row.awb);
+            if (!validated) {
+                result.failed++;
+                continue;
+            }
+
+            const line = lineMap.get(`${row.orderNumber}|${row.sku}`);
+            if (!line) {
+                result.skipped++;
+                continue;
+            }
+
+            // Skip if already has an AWB
+            if (line.awbNumber) {
+                result.skipped++;
+                continue;
+            }
+
+            // Skip if not in a linkable status
+            if (!LINKABLE_STATUSES.includes(line.lineStatus)) {
+                result.skipped++;
+                continue;
+            }
+
+            const resolvedStatus = resolveTrackingStatus(validated.statusCode, validated.statusText);
+
+            try {
+                await prisma.orderLine.update({
+                    where: { id: line.id },
+                    data: {
+                        awbNumber: row.awb,
+                        courier: validated.logistic,
+                        trackingStatus: resolvedStatus,
+                        lineStatus: 'shipped',
+                        shippedAt: new Date(),
+                    },
+                });
+                recomputeOrderIds.add(line.orderId);
+                result.linked++;
+
+                // Queue sheet write-back: status (Y), courier (Z), AWB (AA)
+                const displayStatus = buildDisplayStatus(line.channel, 'shipped', resolvedStatus);
+                const sheetRowNum = row.rowIndex + 1; // 1-based
+                writeData.push({
+                    range: `'${tab}'!Y${sheetRowNum}:AA${sheetRowNum}`,
+                    values: [[displayStatus, validated.logistic, row.awb]],
+                });
+            } catch (err: unknown) {
+                result.failed++;
+                const message = err instanceof Error ? err.message : String(err);
+                result.errors.push(`#${row.orderNumber} ${row.sku}: ${message}`);
+                log.error({ orderNumber: row.orderNumber, sku: row.sku, err: message }, 'Failed to link AWB');
+            }
+        }
+
+        // Recompute order statuses
+        for (const orderId of recomputeOrderIds) {
+            try {
+                await recomputeOrderStatus(orderId);
+            } catch (err: unknown) {
+                const message = err instanceof Error ? err.message : String(err);
+                log.error({ orderId, err: message }, 'Failed to recompute order status after AWB link');
+            }
+        }
+
+        // Write back courier + status to sheet in one batch
+        if (writeData.length > 0) {
+            await batchWriteRanges(ORDERS_MASTERSHEET_ID, writeData);
+        }
+
+        log.info(
+            { checked: result.checked, linked: result.linked, skipped: result.skipped, failed: result.failed },
+            'Sheet AWB sync completed'
+        );
+    } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        result.errors.push(message);
+        log.error({ error: message }, 'Sheet AWB sync fatal error');
+    } finally {
+        awbSyncRunning = false;
+    }
+
+    result.durationMs = Date.now() - start;
+    return result;
 }
