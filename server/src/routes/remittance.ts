@@ -1073,6 +1073,39 @@ router.post('/trigger-sync', asyncHandler(async (_req: Request, res: Response) =
 }));
 
 /**
+ * Backfill remittances for a date range (fire-and-forget)
+ * @route POST /api/remittance/backfill
+ * @body { startDate: "YYYY-MM-DD", endDate: "YYYY-MM-DD", downloadOnly?: boolean }
+ * downloadOnly=true: just fetch from API and store (no order matching)
+ * downloadOnly=false (default): full processing with order matching + Shopify sync
+ * Resumable: skips dates whose remittances already exist.
+ */
+router.post('/backfill', asyncHandler(async (req: Request, res: Response) => {
+    const { startDate, endDate, downloadOnly } = req.body;
+    if (!startDate || !endDate) {
+        res.status(400).json({ error: 'startDate and endDate required (YYYY-MM-DD)' });
+        return;
+    }
+    if (isNaN(Date.parse(startDate)) || isNaN(Date.parse(endDate))) {
+        res.status(400).json({ error: 'Invalid date format. Use YYYY-MM-DD.' });
+        return;
+    }
+    const mode = downloadOnly ? 'download-only' : 'full';
+    remittanceSync.triggerBackfill(startDate, endDate, !!downloadOnly).catch(() => {});
+    res.json({ success: true, message: `Backfill (${mode}) triggered for ${startDate} to ${endDate}. Check /sync-status for progress.` });
+}));
+
+/**
+ * Match orders for previously downloaded (unprocessed) remittances
+ * @route POST /api/remittance/match-unprocessed
+ * Finds CodRemittance records with ordersProcessed=0, runs order matching + Shopify sync.
+ */
+router.post('/match-unprocessed', asyncHandler(async (_req: Request, res: Response) => {
+    remittanceSync.triggerMatchUnprocessed().catch(() => {});
+    res.json({ success: true, message: 'Match unprocessed triggered. Check /sync-status for progress.' });
+}));
+
+/**
  * Get remittance sync worker status + recent CodRemittance records
  * @route GET /api/remittance/sync-status
  * @returns {Object} { status, recentRemittances }
