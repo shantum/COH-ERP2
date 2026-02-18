@@ -7,6 +7,9 @@
 
 import prisma from '../lib/prisma.js';
 import { getReturnPrimeClient } from './returnPrime.js';
+import logger from '../utils/logger.js';
+
+const log = logger.child({ module: 'returnprime-sync-worker' });
 
 // ============================================
 // CONSTANTS
@@ -37,7 +40,7 @@ export async function retryFailedReturnPrimeSyncs(): Promise<{
     failed: number;
 }> {
     if (isRunning) {
-        console.log('[ReturnPrimeSyncWorker] Already running, skipping');
+        log.info('Already running, skipping');
         return { attempted: 0, succeeded: 0, failed: 0 };
     }
 
@@ -83,12 +86,12 @@ export async function retryFailedReturnPrimeSyncs(): Promise<{
             return results;
         }
 
-        console.log(`[ReturnPrimeSyncWorker] Found ${failedLines.length} lines to retry`);
+        log.info({ count: failedLines.length }, 'Found lines to retry');
 
         const rpClient = await getReturnPrimeClient();
 
         if (!rpClient.isConfigured()) {
-            console.warn('[ReturnPrimeSyncWorker] Return Prime client not configured, skipping');
+            log.warn('Return Prime client not configured, skipping');
             return results;
         }
 
@@ -114,7 +117,7 @@ export async function retryFailedReturnPrimeSyncs(): Promise<{
                     });
 
                     results.succeeded++;
-                    console.log(`[ReturnPrimeSyncWorker] Successfully synced line ${line.id}`);
+                    log.info({ lineId: line.id }, 'Successfully synced line');
                 }
             } catch (error) {
                 results.failed++;
@@ -129,15 +132,15 @@ export async function retryFailedReturnPrimeSyncs(): Promise<{
                     },
                 });
 
-                console.warn(`[ReturnPrimeSyncWorker] Failed to sync line ${line.id}: ${message}`);
+                log.warn({ lineId: line.id, error: message }, 'Failed to sync line');
             }
         }
 
-        console.log(`[ReturnPrimeSyncWorker] Completed: ${results.succeeded}/${results.attempted} succeeded`);
+        log.info({ succeeded: results.succeeded, attempted: results.attempted }, 'Retry batch completed');
 
     } catch (error) {
         const message = error instanceof Error ? error.message : 'Unknown error';
-        console.error('[ReturnPrimeSyncWorker] Worker error:', message);
+        log.error({ error: message }, 'Worker error');
     } finally {
         isRunning = false;
     }
@@ -154,21 +157,21 @@ export async function retryFailedReturnPrimeSyncs(): Promise<{
  */
 export function startReturnPrimeSyncWorker(): void {
     if (retryInterval) {
-        console.log('[ReturnPrimeSyncWorker] Already started');
+        log.info('Already started');
         return;
     }
 
-    console.log(`[ReturnPrimeSyncWorker] Starting with ${RETRY_INTERVAL_MS / 1000}s interval`);
+    log.info({ intervalSeconds: RETRY_INTERVAL_MS / 1000 }, 'Starting worker');
 
     // Run immediately on start
     retryFailedReturnPrimeSyncs().catch(err => {
-        console.error('[ReturnPrimeSyncWorker] Initial run error:', err);
+        log.error({ err }, 'Initial run error');
     });
 
     // Then run on interval
     retryInterval = setInterval(() => {
         retryFailedReturnPrimeSyncs().catch(err => {
-            console.error('[ReturnPrimeSyncWorker] Interval run error:', err);
+            log.error({ err }, 'Interval run error');
         });
     }, RETRY_INTERVAL_MS);
 }
@@ -180,7 +183,7 @@ export function stopReturnPrimeSyncWorker(): void {
     if (retryInterval) {
         clearInterval(retryInterval);
         retryInterval = null;
-        console.log('[ReturnPrimeSyncWorker] Stopped');
+        log.info('Stopped');
     }
 }
 

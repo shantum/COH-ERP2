@@ -27,6 +27,10 @@
  * ```
  */
 
+import logger from '../utils/logger.js';
+
+const log = logger.child({ module: 'deferred-executor' });
+
 type DeferredTask = () => Promise<void>;
 
 /**
@@ -104,9 +108,9 @@ class DeferredExecutor {
             } catch (err) {
                 this.stats.failed++;
                 if (metadata && Object.keys(metadata).length > 0) {
-                    console.error('[DeferredExecutor] Task failed:', { ...metadata, error: err });
+                    log.error({ ...metadata, err }, 'Task failed');
                 } else {
-                    console.error('[DeferredExecutor] Task failed:', err);
+                    log.error({ err }, 'Task failed');
                 }
             }
         }

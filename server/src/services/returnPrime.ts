@@ -10,6 +10,9 @@
 
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import prisma from '../lib/prisma.js';
+import logger from '../utils/logger.js';
+
+const log = logger.child({ module: 'returnprime' });
 
 // ============================================
 // CONSTANTS
@@ -99,7 +102,7 @@ class ReturnPrimeClient {
     async loadFromDatabase(): Promise<void> {
         // If env vars are set, prefer them
         if (this.apiToken) {
-            console.log('[ReturnPrime] Using credentials from environment variables');
+            log.info('Using credentials from environment variables');
             return;
         }
 
@@ -129,12 +132,12 @@ class ReturnPrimeClient {
             }
 
             if (loadedFromDb) {
-                console.log('[ReturnPrime] Loaded credentials from database');
+                log.info('Loaded credentials from database');
                 this.initializeClient();
             }
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Unknown error';
-            console.error('[ReturnPrime] Failed to load config from database:', message);
+            log.error({ error: message }, 'Failed to load config from database');
         }
     }
 
@@ -145,7 +148,7 @@ class ReturnPrimeClient {
     async updateConfig(config: ReturnPrimeConfig): Promise<void> {
         // Warn if trying to update while env vars are set
         if (process.env.RETURNPRIME_API_TOKEN) {
-            console.warn('[ReturnPrime] Credentials are set via environment variables. Database update will be ignored on restart.');
+            log.warn('Credentials are set via environment variables. Database update will be ignored on restart.');
         }
 
         const { apiToken, storeId, webhookSecret } = config;
@@ -230,7 +233,7 @@ class ReturnPrimeClient {
 
                 // Don't retry on 4xx client errors (except 429 rate limit)
                 if (isAxiosError && status && status >= 400 && status < 500 && status !== 429) {
-                    console.warn(`[ReturnPrime] ${context}: Client error ${status} - not retrying`);
+                    log.warn({ context, status }, 'Client error - not retrying');
                     throw lastError;
                 }
 
@@ -245,13 +248,13 @@ class ReturnPrimeClient {
                     axiosError.code === 'ETIMEDOUT';
 
                 if (!isRetryable || attempt === MAX_RETRIES) {
-                    console.error(`[ReturnPrime] ${context}: Failed after ${attempt + 1} attempts`);
+                    log.error({ context, attempts: attempt + 1 }, 'Failed after retries');
                     throw lastError;
                 }
 
                 // Exponential backoff
                 const delay = INITIAL_RETRY_DELAY_MS * Math.pow(2, attempt);
-                console.warn(`[ReturnPrime] ${context}: Attempt ${attempt + 1} failed, retrying in ${delay}ms`);
+                log.warn({ context, attempt: attempt + 1, retryDelayMs: delay }, 'Attempt failed, retrying');
                 await new Promise(resolve => setTimeout(resolve, delay));
             }
         }
@@ -296,7 +299,7 @@ class ReturnPrimeClient {
             `updateRequestStatus:${requestId}`
         );
 
-        console.log(`[ReturnPrime] Updated request ${requestId} to status: ${status}`);
+        log.info({ requestId, status }, 'Updated request status');
     }
 
     /**
@@ -320,7 +323,7 @@ class ReturnPrimeClient {
             `updateInspectionResults:${requestId}`
         );
 
-        console.log(`[ReturnPrime] Updated inspection for request ${requestId}`);
+        log.info({ requestId }, 'Updated inspection results');
     }
 }
 

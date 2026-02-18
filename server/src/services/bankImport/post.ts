@@ -7,6 +7,9 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import { AUTO_CLEAR_AMOUNT_THRESHOLD } from '../../config/finance/index.js';
 import { generatePaymentNarration } from '@coh/shared';
+import logger from '../../utils/logger.js';
+
+const log = logger.child({ module: 'bank-post' });
 
 const prisma = new PrismaClient();
 
@@ -401,7 +404,7 @@ export async function postTransactions(options?: { bank?: string }): Promise<Pos
         errors++;
         const msg = err instanceof Error ? err.message : String(err);
         errorDetails.push(`${txn.id}: ${msg}`);
-        console.error(`[BankPost] Error posting txn ${txn.id}:`, msg);
+        log.error({ txnId: txn.id, error: msg }, 'Error posting transaction');
       }
     }
 
@@ -410,6 +413,6 @@ export async function postTransactions(options?: { bank?: string }): Promise<Pos
     }
   }
 
-  console.log(`\n[BankPost] Done: ${posted} posted (${singleStep} single-step, ${twoStep} two-step), ${errors} errors`);
+  log.info({ posted, singleStep, twoStep, errors }, 'Posting complete');
   return { posted, errors, singleStep, twoStep, errorDetails };
 }

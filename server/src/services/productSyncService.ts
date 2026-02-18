@@ -8,6 +8,9 @@ import type { PrismaClient, Product } from '@prisma/client';
 import type { ShopifyProduct, ShopifyVariant } from './shopify.js';
 import shopifyClient from './shopify.js';
 import { resolveProductCategory } from '../config/mappings/index.js';
+import logger from '../utils/logger.js';
+
+const log = logger.child({ module: 'product-sync' });
 
 // ============================================
 // TYPES & INTERFACES
@@ -537,7 +540,7 @@ export async function cacheAndProcessProduct(
             },
         }).catch(() => { }); // Ignore error if cache entry doesn't exist
 
-        console.error(`Error processing product ${shopifyProduct.title}:`, error);
+        log.error({ product: shopifyProduct.title, err: error }, 'Error processing product');
         return {
             action: 'error',
             error: (error as Error).message,
@@ -590,9 +593,9 @@ export async function syncAllProducts(
     // Fetch products from Shopify (all statuses to keep cache up-to-date)
     let shopifyProducts: ShopifyProduct[];
     if (syncAll) {
-        console.log('Fetching ALL products from Shopify...');
+        log.info('Fetching ALL products from Shopify');
         shopifyProducts = await shopifyClient.getAllProducts();
-        console.log(`Fetched ${shopifyProducts.length} products total`);
+        log.info({ count: shopifyProducts.length }, 'Fetched all products');
     } else {
         // Use status: 'any' to fetch active, archived, and draft products
         shopifyProducts = await shopifyClient.getProducts({ limit, status: 'any' });

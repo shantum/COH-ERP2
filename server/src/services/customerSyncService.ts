@@ -7,6 +7,9 @@
 import { PrismaClient } from '@prisma/client';
 import type { ShopifyCustomer } from './shopify.js';
 import shopifyClient from './shopify.js';
+import logger from '../utils/logger.js';
+
+const log = logger.child({ module: 'customer-sync' });
 
 // ============================================
 // TYPES & INTERFACES
@@ -275,7 +278,7 @@ export async function syncAllCustomers(
 
     // Get total count first
     const totalCount = await shopifyClient.getCustomerCount();
-    console.log(`Starting bulk customer sync: ${totalCount} total customers in Shopify`);
+    log.info({ totalCount }, 'Starting bulk customer sync');
 
     let sinceId: string | null = null;
     let batchNumber = 0;
@@ -290,7 +293,7 @@ export async function syncAllCustomers(
         if (shopifyCustomers.length === 0) break;
 
         results.totalFetched += shopifyCustomers.length;
-        console.log(`Processing batch ${batchNumber}: ${shopifyCustomers.length} customers (${results.totalFetched}/${totalCount})`);
+        log.info({ batch: batchNumber, batchSize: shopifyCustomers.length, totalFetched: results.totalFetched, totalCount }, 'Processing batch');
 
         for (const shopifyCustomer of shopifyCustomers) {
             try {
@@ -335,6 +338,6 @@ export async function syncAllCustomers(
         if (shopifyCustomers.length < batchSize) break;
     }
 
-    console.log(`Bulk customer sync completed:`, results);
+    log.info({ results }, 'Bulk customer sync completed');
     return { totalCount, results };
 }

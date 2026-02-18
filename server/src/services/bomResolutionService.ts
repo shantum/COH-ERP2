@@ -21,6 +21,9 @@
  */
 
 import type { PrismaClient } from '@prisma/client';
+import logger from '../utils/logger.js';
+
+const log = logger.child({ module: 'bom-resolution' });
 
 // ============================================
 // TYPES
@@ -400,7 +403,7 @@ export async function resolveSkuBomsBatch(
     const boms = await Promise.all(
       batch.map((skuId) =>
         resolveSkuBom(prisma, skuId).catch((err) => {
-          console.error(`Failed to resolve BOM for SKU ${skuId}:`, err);
+          log.error({ skuId, err }, 'Failed to resolve BOM for SKU');
           return null;
         })
       )

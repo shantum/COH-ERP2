@@ -10,6 +10,9 @@
 
 import { Client } from 'pg';
 import type { Response } from 'express';
+import logger from '../utils/logger.js';
+
+const log = logger.child({ module: 'pulse' });
 
 export interface PulseSignal {
     table: string;
@@ -51,7 +54,7 @@ class PulseBroadcaster {
             this.client.on('notification', (msg) => this.handleNotification(msg));
             this.client.on('end', () => {
                 if (!this.isShuttingDown) {
-                    console.log('[Pulse] Connection ended unexpectedly');
+                    log.info('Connection ended unexpectedly');
                     this.isConnected = false;
                     this.broadcast({ type: 'disconnected' });
                     this.scheduleReconnect();
@@ -63,18 +66,18 @@ class PulseBroadcaster {
 
             this.isConnected = true;
             this.reconnectAttempts = 0;
-            console.log('[Pulse] Connected to Postgres, listening on coh_erp_pulse');
+            log.info('Connected to Postgres, listening on coh_erp_pulse');
 
             // Broadcast connection status to all clients
             this.broadcast({ type: 'connected' });
         } catch (err) {
-            console.error('[Pulse] Connection error:', err instanceof Error ? err.message : err);
+            log.error({ err: err instanceof Error ? err.message : err }, 'Connection error');
             this.scheduleReconnect();
         }
     }
 
     private handleError(err: Error): void {
-        console.error('[Pulse] Client error:', err.message);
+        log.error({ err: err.message }, 'Client error');
         this.isConnected = false;
         this.broadcast({ type: 'disconnected' });
         this.scheduleReconnect();
@@ -85,10 +88,10 @@ class PulseBroadcaster {
 
         try {
             const signal: PulseSignal = JSON.parse(msg.payload);
-            console.log(`[Pulse] Signal: ${signal.table} ${signal.op} ${signal.id.substring(0, 8)}...`);
+            log.info({ table: signal.table, op: signal.op, id: signal.id.substring(0, 8) }, 'Signal received');
             this.broadcast({ type: 'signal', ...signal });
         } catch (err) {
-            console.error('[Pulse] Failed to parse notification:', err);
+            log.error({ err }, 'Failed to parse notification');
         }
     }
 
@@ -99,7 +102,7 @@ class PulseBroadcaster {
         const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
         this.reconnectAttempts++;
 
-        console.log(`[Pulse] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`);
+        log.info({ delayMs: delay, attempt: this.reconnectAttempts }, 'Reconnecting');
 
         this.reconnectTimeout = setTimeout(async () => {
             this.reconnectTimeout = null;
@@ -177,7 +180,7 @@ class PulseBroadcaster {
                 await this.client.query('UNLISTEN *');
                 await this.client.end();
             } catch (err) {
-                console.error('[Pulse] Error during shutdown:', err);
+                log.error({ err }, 'Error during shutdown');
             }
             this.client = null;
         }
@@ -192,7 +195,7 @@ class PulseBroadcaster {
         });
         this.clients.clear();
 
-        console.log('[Pulse] Shutdown complete');
+        log.info('Shutdown complete');
     }
 }
 

@@ -510,7 +510,6 @@ export async function categorizeTransactions(options?: { bank?: string }): Promi
     );
     process.stdout.write(`  Updated: ${Math.min(i + BATCH, updates.length)}/${updates.length}\r`);
   }
-  console.log('');
 
   return { total: txns.length, categorized, skipped, breakdown };
 }

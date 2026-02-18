@@ -38,10 +38,16 @@ import { asyncHandler } from '../middleware/asyncHandler.js';
 import { ValidationError, NotFoundError, ConflictError, BusinessLogicError } from '../utils/errors.js';
 import sheetOffloadWorker from '../services/sheetOffloadWorker.js';
 import stockSnapshotWorker from '../services/stockSnapshotWorker.js';
+import remittanceSync from '../services/remittanceSync.js';
+import payuSettlementSync from '../services/payuSettlementSync.js';
+import driveFinanceSync from '../services/driveFinanceSync.js';
 import { reconcileSheetOrders, syncSheetOrderStatus } from '../services/sheetOrderPush.js';
 import { trackWorkerRun } from '../utils/workerRunTracker.js';
 import prismaClient from '../lib/prisma.js';
+import logger from '../utils/logger.js';
 // ENABLE_SHEET_DELETION deprecated — ingestion now marks rows as DONE
+
+const log = logger.child({ module: 'admin' });
 
 const router: Router = Router();
 
@@ -190,7 +196,7 @@ interface PermissionsUpdateBody {
 }
 
 /** Background job trigger params */
-type JobId = 'shopify_sync' | 'tracking_sync' | 'cache_cleanup' | 'ingest_inward' | 'ingest_outward' | 'move_shipped_to_outward' | 'preview_ingest_inward' | 'preview_ingest_outward' | 'cleanup_done_rows' | 'migrate_sheet_formulas' | 'snapshot_compute' | 'snapshot_backfill' | 'push_balances' | 'preview_push_balances' | 'push_fabric_balances' | 'import_fabric_balances' | 'preview_fabric_inward' | 'ingest_fabric_inward' | 'reconcile_sheet_orders' | 'sync_sheet_status' | 'run_inward_cycle' | 'run_outward_cycle';
+type JobId = 'shopify_sync' | 'tracking_sync' | 'cache_cleanup' | 'ingest_inward' | 'ingest_outward' | 'move_shipped_to_outward' | 'preview_ingest_inward' | 'preview_ingest_outward' | 'cleanup_done_rows' | 'migrate_sheet_formulas' | 'snapshot_compute' | 'snapshot_backfill' | 'push_balances' | 'preview_push_balances' | 'push_fabric_balances' | 'import_fabric_balances' | 'preview_fabric_inward' | 'ingest_fabric_inward' | 'reconcile_sheet_orders' | 'sync_sheet_status' | 'run_inward_cycle' | 'run_outward_cycle' | 'remittance_sync' | 'payu_settlement_sync' | 'drive_finance_sync';
 
 /** Background job update body */
 interface JobUpdateBody {
@@ -573,7 +579,7 @@ router.put('/users/:id/role', requireAdmin, asyncHandler(async (req: Request, re
         return result;
     });
 
-    console.log(`[Admin] Role changed for user ${user.email}: ${role.displayName}`);
+    log.info({ userEmail: user.email, newRole: role.displayName }, 'Role changed for user');
 
     res.json({
         ...updated,
@@ -721,7 +727,7 @@ router.put('/users/:id/permissions', requireAdmin, asyncHandler(async (req: Requ
         where: { userId: id },
     });
 
-    console.log(`[Admin] Permission overrides updated for user ${user.email}: ${toUpsert.length} set, ${toDelete.length} cleared`);
+    log.info({ userEmail: user.email, set: toUpsert.length, cleared: toDelete.length }, 'Permission overrides updated');
 
     res.json({
         message: 'Permission overrides updated successfully',
@@ -1456,7 +1462,39 @@ router.get('/background-jobs', authenticateToken, asyncHandler(async (req: Reque
             lastRunAt: null,
             lastResult: null,
             note: 'Runs automatically every 15 min — can also trigger manually',
-        }
+        },
+        {
+            id: 'remittance_sync',
+            name: 'COD Remittance Sync',
+            description: 'Fetches COD remittance data from iThink Logistics API, matches to orders, marks COD as paid, and triggers Shopify payment sync.',
+            enabled: remittanceSync.getStatus().schedulerActive,
+            intervalMinutes: remittanceSync.getStatus().intervalHours * 60,
+            isRunning: remittanceSync.getStatus().isRunning,
+            lastRunAt: remittanceSync.getStatus().lastSyncAt,
+            lastResult: remittanceSync.getStatus().lastSyncResult,
+        },
+        {
+            id: 'payu_settlement_sync',
+            name: 'PayU Settlement Sync',
+            description: 'Fetches prepaid payment settlement data from PayU API and matches settlements to HDFC bank deposits by UTR.',
+            enabled: payuSettlementSync.getStatus().schedulerActive,
+            intervalMinutes: payuSettlementSync.getStatus().intervalHours * 60,
+            isRunning: payuSettlementSync.getStatus().isRunning,
+            lastRunAt: payuSettlementSync.getStatus().lastSyncAt,
+            lastResult: payuSettlementSync.getStatus().lastSyncResult,
+        },
+        {
+            id: 'drive_finance_sync',
+            name: 'Drive Finance Sync',
+            description: 'Uploads invoice files to Google Drive, organized by party and financial year. On-demand only.',
+            enabled: driveFinanceSync.getStatus().schedulerActive,
+            isRunning: driveFinanceSync.getStatus().isRunning,
+            lastRunAt: driveFinanceSync.getStatus().lastSyncAt,
+            lastResult: driveFinanceSync.getStatus().lastSyncResult,
+            config: {
+                configured: driveFinanceSync.getStatus().configured,
+            },
+        },
     ];
 
     res.json({ jobs });
@@ -1607,6 +1645,21 @@ router.post('/background-jobs/:jobId/trigger', requireAdmin, asyncHandler(async 
         case 'sync_sheet_status': {
             const result = await syncSheetOrderStatus();
             res.json({ message: 'Sheet order status sync completed', result });
+            break;
+        }
+        case 'remittance_sync': {
+            remittanceSync.triggerSync().catch(() => {});
+            res.json({ message: 'COD remittance sync triggered. Check status for progress.' });
+            break;
+        }
+        case 'payu_settlement_sync': {
+            payuSettlementSync.triggerSync().catch(() => {});
+            res.json({ message: 'PayU settlement sync triggered. Check status for progress.' });
+            break;
+        }
+        case 'drive_finance_sync': {
+            driveFinanceSync.triggerSync().catch(() => {});
+            res.json({ message: 'Drive finance sync triggered. Check status for progress.' });
             break;
         }
         default:

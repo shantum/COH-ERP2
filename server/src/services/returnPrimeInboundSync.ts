@@ -15,6 +15,9 @@ import { getPrisma } from '@coh/shared/services/db';
 import { Prisma } from '@prisma/client';
 import { ReturnPrimeListResponseSchema, type ReturnPrimeRequest } from '@coh/shared';
 import { env } from '../config/env.js';
+import logger from '../utils/logger.js';
+
+const log = logger.child({ module: 'returnprime-inbound-sync' });
 
 const API_BASE = 'https://admin.returnprime.com/return-exchange/v2';
 const MAX_PAGES = 500; // Safety limit to prevent infinite loops
@@ -250,7 +253,7 @@ export async function syncReturnPrimeRequests(options: SyncOptions = {}): Promis
             dateFrom = thirtyDaysAgo.toISOString().split('T')[0];
         }
 
-        console.log(`[ReturnPrimeSync] Starting sync from ${dateFrom} to ${dateTo}`);
+        log.info({ dateFrom, dateTo }, 'Starting sync');
 
         let page = 1;
         let hasMore = true;
@@ -308,7 +311,7 @@ export async function syncReturnPrimeRequests(options: SyncOptions = {}): Promis
                 }
             }
 
-            console.log(`[ReturnPrimeSync] Page ${page}: ${result.totalFetched} total (${requests.length} on page)`);
+            log.info({ page, totalFetched: result.totalFetched, pageSize: requests.length }, 'Page synced');
 
             hasMore = hasNextPage;
             page++;
@@ -330,7 +333,7 @@ export async function syncReturnPrimeRequests(options: SyncOptions = {}): Promis
             `);
         } catch (backfillError: unknown) {
             const msg = backfillError instanceof Error ? backfillError.message : 'Unknown';
-            console.error('[ReturnPrimeSync] Backfill error (non-fatal):', msg);
+            log.error({ error: msg }, 'Backfill error (non-fatal)');
         }
 
         // Full success only when all records synced without errors; partial if some succeeded
@@ -338,14 +341,12 @@ export async function syncReturnPrimeRequests(options: SyncOptions = {}): Promis
         result.partialSuccess = result.errors.length > 0 && result.totalFetched > 0;
         result.durationMs = Date.now() - startTime;
 
-        console.log(
-            `[ReturnPrimeSync] Complete: ${result.created} created, ${result.updated} updated, ${result.errors.length} errors in ${result.durationMs}ms`
-        );
+        log.info({ created: result.created, updated: result.updated, errors: result.errors.length, durationMs: result.durationMs }, 'Sync complete');
 
         return result;
     } catch (error: unknown) {
         const msg = error instanceof Error ? error.message : 'Unknown error';
-        console.error('[ReturnPrimeSync] Fatal error:', msg);
+        log.error({ error: msg }, 'Fatal error');
         result.errors.push(msg);
         result.durationMs = Date.now() - startTime;
         return result;
