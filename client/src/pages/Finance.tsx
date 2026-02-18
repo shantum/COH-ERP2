@@ -1143,7 +1143,7 @@ function PaymentsTab({ search }: { search: FinanceSearchParams }) {
                           </span>
                         )}
                       </td>
-                      <td className="p-3 text-xs text-muted-foreground">{inv?.billingPeriod ? formatPeriod(inv.billingPeriod) : '—'}</td>
+                      <td className="p-3 text-xs text-muted-foreground">{inv?.billingPeriod ? formatPeriod(inv.billingPeriod) : pmt.period ? formatPeriod(pmt.period) : '—'}</td>
                       <td className="p-3 text-center">
                         {pmt.driveUrl ? (
                           <a href={pmt.driveUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800" title={pmt.fileName ?? 'View on Drive'}>
