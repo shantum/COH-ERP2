@@ -31,8 +31,8 @@ export const FinanceSearchParams = z.object({
   method: z.string().optional().catch(undefined),
   /** Payment match status filter */
   matchStatus: z.enum(['all', 'unmatched', 'matched']).optional().catch(undefined),
-  /** Payment account code filter (debitAccountCode) */
-  accountCode: z.string().optional().catch(undefined),
+  /** Payment category filter (party or bank txn category) */
+  paymentCategory: z.string().optional().catch(undefined),
   /** Parties tab: filter by TransactionType ID */
   partyTxnType: z.string().optional().catch(undefined),
   /** Search query */
@@ -144,22 +144,26 @@ export const ListPaymentsInput = z.object({
   method: z.string().optional(),
   status: z.string().optional(),
   matchStatus: z.enum(['all', 'unmatched', 'matched']).optional(),
-  accountCode: z.string().optional(),
+  paymentCategory: z.string().optional(),
   search: z.string().optional(),
   page: z.coerce.number().int().positive().default(1),
   limit: z.coerce.number().int().positive().max(200).default(50),
 }).optional();
 
-/** Account codes that appear on payments, with user-friendly labels */
-export const PAYMENT_ACCOUNT_FILTERS = [
-  { code: 'ACCOUNTS_PAYABLE', label: 'Vendor Payments' },
-  { code: 'MARKETPLACE_FEES', label: 'Marketplace & Bank Fees' },
-  { code: 'UNMATCHED_PAYMENTS', label: 'Unmatched / Suspense' },
-  { code: 'ADVANCES_GIVEN', label: 'Advances' },
-  { code: 'OPERATING_EXPENSES', label: 'Operating Expenses' },
-  { code: 'CASH', label: 'Cash' },
-  { code: 'SALES_REVENUE', label: 'Sales & Refunds' },
-  { code: 'TDS_PAYABLE', label: 'TDS' },
+/** Payment category filters with user-friendly labels */
+export const PAYMENT_CATEGORY_FILTERS = [
+  { code: 'fabric', label: 'Fabric' },
+  { code: 'trims', label: 'Trims' },
+  { code: 'service', label: 'Services' },
+  { code: 'logistics', label: 'Logistics' },
+  { code: 'packaging', label: 'Packaging' },
+  { code: 'marketing', label: 'Marketing' },
+  { code: 'rent', label: 'Rent' },
+  { code: 'software', label: 'Software' },
+  { code: 'statutory', label: 'Statutory & Fees' },
+  { code: 'refund', label: 'Customer Refunds' },
+  { code: 'inter_account', label: 'Inter-account' },
+  { code: 'other', label: 'Other' },
 ] as const;
 
 // ============================================
@@ -434,6 +438,23 @@ export const BankImportUnskipSchema = z.object({
 export const BankImportDeleteParamSchema = z.object({
   id: z.string().uuid(),
 });
+
+// ============================================
+// CHART OF ACCOUNTS
+// ============================================
+
+// ============================================
+// AUTO-MATCH PAYMENTS
+// ============================================
+
+export const ApplyAutoMatchesSchema = z.object({
+  matches: z.array(z.object({
+    paymentId: z.string().uuid(),
+    invoiceId: z.string().uuid(),
+    amount: z.number().positive(),
+  })),
+});
+export type ApplyAutoMatchesInput = z.infer<typeof ApplyAutoMatchesSchema>;
 
 // ============================================
 // CHART OF ACCOUNTS

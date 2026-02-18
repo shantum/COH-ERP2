@@ -36,6 +36,8 @@ import {
   deleteTransactionType,
   searchCounterparties,
   updatePaymentNotes,
+  getAutoMatchSuggestions,
+  applyAutoMatches,
 } from '../server/functions/finance';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
@@ -46,6 +48,7 @@ import {
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   IndianRupee, Plus, ArrowUpRight, ArrowDownLeft,
   Check, X, ChevronLeft, ChevronRight, Loader2, AlertCircle,
@@ -63,7 +66,7 @@ import {
   INVOICE_CATEGORIES,
   INVOICE_STATUSES,
   PAYMENT_METHODS,
-  PAYMENT_ACCOUNT_FILTERS,
+  PAYMENT_CATEGORY_FILTERS,
   CHART_OF_ACCOUNTS,
   getCategoryLabel,
   BANK_TYPES,
@@ -932,6 +935,7 @@ function InlinePaymentNotes({ paymentId, notes, onSaved }: { paymentId: string; 
 function PaymentsTab({ search }: { search: FinanceSearchParams }) {
   const navigate = useNavigate();
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showAutoMatch, setShowAutoMatch] = useState(false);
   const queryClient = useQueryClient();
 
   // Debounced search input
@@ -945,14 +949,14 @@ function PaymentsTab({ search }: { search: FinanceSearchParams }) {
 
   const listFn = useServerFn(listPayments);
   const { data, isLoading } = useQuery({
-    queryKey: ['finance', 'payments', search.direction, search.method, search.matchStatus, search.accountCode, search.search, search.page],
+    queryKey: ['finance', 'payments', search.direction, search.method, search.matchStatus, search.paymentCategory, search.search, search.page],
     queryFn: () =>
       listFn({
         data: {
           ...(search.direction ? { direction: search.direction } : {}),
           ...(search.method ? { method: search.method } : {}),
           ...(search.matchStatus && search.matchStatus !== 'all' ? { matchStatus: search.matchStatus } : {}),
-          ...(search.accountCode ? { accountCode: search.accountCode } : {}),
+          ...(search.paymentCategory ? { paymentCategory: search.paymentCategory } : {}),
           ...(search.search ? { search: search.search } : {}),
           page: search.page,
           limit: search.limit,
@@ -999,12 +1003,12 @@ function PaymentsTab({ search }: { search: FinanceSearchParams }) {
           </SelectContent>
         </Select>
 
-        <Select value={search.accountCode ?? 'all'} onValueChange={(v) => updateSearch({ accountCode: v === 'all' ? undefined : v, page: 1 })}>
-          <SelectTrigger className="w-[210px]"><SelectValue placeholder="Category" /></SelectTrigger>
+        <Select value={search.paymentCategory ?? 'all'} onValueChange={(v) => updateSearch({ paymentCategory: v === 'all' ? undefined : v, page: 1 })}>
+          <SelectTrigger className="w-[200px]"><SelectValue placeholder="Category" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Categories</SelectItem>
-            {PAYMENT_ACCOUNT_FILTERS.map((a) => (
-              <SelectItem key={a.code} value={a.code}>{a.label}</SelectItem>
+            {PAYMENT_CATEGORY_FILTERS.map((c) => (
+              <SelectItem key={c.code} value={c.code}>{c.label}</SelectItem>
             ))}
           </SelectContent>
         </Select>
@@ -1016,7 +1020,10 @@ function PaymentsTab({ search }: { search: FinanceSearchParams }) {
           className="w-[200px]"
         />
 
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-2">
+          <Button variant="outline" onClick={() => setShowAutoMatch(true)}>
+            <Link2 className="h-4 w-4 mr-1" /> Find Matches
+          </Button>
           <Button onClick={() => setShowCreateModal(true)}>
             <Plus className="h-4 w-4 mr-1" /> Record Payment
           </Button>
@@ -1163,7 +1170,177 @@ function PaymentsTab({ search }: { search: FinanceSearchParams }) {
       )}
 
       <CreatePaymentModal open={showCreateModal} onClose={() => setShowCreateModal(false)} />
+      <AutoMatchDialog open={showAutoMatch} onClose={() => setShowAutoMatch(false)} />
     </div>
+  );
+}
+
+// ============================================
+// AUTO-MATCH DIALOG
+// ============================================
+
+function AutoMatchDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const suggestFn = useServerFn(getAutoMatchSuggestions);
+  const applyFn = useServerFn(applyAutoMatches);
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['finance', 'auto-match-suggestions'],
+    queryFn: () => suggestFn(),
+    enabled: open,
+  });
+
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+
+  // Auto-select high-confidence matches when data loads
+  useEffect(() => {
+    if (!data?.suggestions) return;
+    const highKeys = new Set<string>();
+    for (const group of data.suggestions) {
+      for (const m of group.matches) {
+        if (m.confidence === 'high') {
+          highKeys.add(`${m.payment.id}:${m.invoice.id}`);
+        }
+      }
+    }
+    setSelected(highKeys);
+  }, [data]);
+
+  const toggle = useCallback((key: string) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+
+  const applyMutation = useMutation({
+    mutationFn: async () => {
+      if (!data?.suggestions) return { success: false as const, matched: 0 as number, errors: ['No data'] };
+      const matches: Array<{ paymentId: string; invoiceId: string; amount: number }> = [];
+      for (const group of data.suggestions) {
+        for (const m of group.matches) {
+          if (selected.has(`${m.payment.id}:${m.invoice.id}`)) {
+            matches.push({ paymentId: m.payment.id, invoiceId: m.invoice.id, amount: m.matchAmount });
+          }
+        }
+      }
+      return applyFn({ data: { matches } });
+    },
+    onSuccess: (result) => {
+      if (result?.success) {
+        showSuccess(`Matched ${result.matched} payment${result.matched === 1 ? '' : 's'} to invoices`);
+        queryClient.invalidateQueries({ queryKey: ['finance'] });
+        onClose();
+      } else {
+        const errors = (result as { errors?: string[] })?.errors;
+        showError('Failed to apply matches', { description: errors?.join(', ') });
+      }
+    },
+    onError: (err) => showError('Failed to apply matches', { description: err.message }),
+  });
+
+  const selectedCount = selected.size;
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Auto-Match Payments to Invoices</DialogTitle>
+          <DialogDescription>
+            Suggested matches based on amount similarity and date proximity.
+          </DialogDescription>
+        </DialogHeader>
+
+        {isLoading ? (
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          </div>
+        ) : !data?.suggestions?.length ? (
+          <div className="text-center py-8 text-muted-foreground">
+            No matching suggestions found. All payments are either matched or no invoices are available.
+          </div>
+        ) : (
+          <div className="space-y-6">
+            {data.suggestions.map((group) => (
+              <div key={group.party.id} className="border rounded-lg">
+                <div className="bg-muted/50 px-4 py-2 flex items-center justify-between rounded-t-lg">
+                  <div className="font-medium text-sm">{group.party.name}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {group.matches.length} suggestion{group.matches.length > 1 ? 's' : ''}
+                    {group.unmatchedPayments > 0 && ` · ${group.unmatchedPayments} unmatched payment${group.unmatchedPayments > 1 ? 's' : ''}`}
+                    {group.unmatchedInvoices > 0 && ` · ${group.unmatchedInvoices} unmatched invoice${group.unmatchedInvoices > 1 ? 's' : ''}`}
+                  </div>
+                </div>
+                <div className="divide-y">
+                  {group.matches.map((m) => {
+                    const key = `${m.payment.id}:${m.invoice.id}`;
+                    const isSelected = selected.has(key);
+                    return (
+                      <div key={key} className="px-4 py-3 flex items-start gap-3">
+                        <Checkbox
+                          checked={isSelected}
+                          onCheckedChange={() => toggle(key)}
+                          className="mt-1"
+                        />
+                        <div className="flex-1 min-w-0 grid grid-cols-2 gap-4">
+                          {/* Payment */}
+                          <div>
+                            <div className="text-xs text-muted-foreground mb-0.5">Payment</div>
+                            <div className="font-mono text-sm">{formatCurrency(m.payment.unmatchedAmount)}</div>
+                            <div className="text-xs text-muted-foreground">
+                              {new Date(m.payment.paymentDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: '2-digit' })}
+                              {m.payment.referenceNumber && ` · ${m.payment.referenceNumber.slice(0, 20)}`}
+                            </div>
+                          </div>
+                          {/* Invoice */}
+                          <div>
+                            <div className="text-xs text-muted-foreground mb-0.5">Invoice</div>
+                            <div className="font-mono text-sm">{formatCurrency(m.invoice.balanceDue)}</div>
+                            <div className="text-xs text-muted-foreground">
+                              {m.invoice.invoiceNumber ?? 'No #'}
+                              {m.invoice.billingPeriod && ` · ${formatPeriod(m.invoice.billingPeriod)}`}
+                            </div>
+                          </div>
+                        </div>
+                        {/* Confidence + diff */}
+                        <div className="flex flex-col items-end gap-1 shrink-0">
+                          <span className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-medium ${
+                            m.confidence === 'high'
+                              ? 'bg-green-100 text-green-700'
+                              : 'bg-yellow-100 text-yellow-700'
+                          }`}>
+                            {m.confidence === 'high' ? 'High' : 'Medium'}
+                          </span>
+                          {m.amountDiff > 1 && (
+                            <span className="text-[11px] text-muted-foreground">{formatCurrency(m.amountDiff)} off</span>
+                          )}
+                          {m.daysDiff > 0 && (
+                            <span className="text-[11px] text-muted-foreground">{m.daysDiff}d apart</span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button
+            onClick={() => applyMutation.mutate()}
+            disabled={selectedCount === 0 || applyMutation.isPending}
+          >
+            {applyMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
+            Apply {selectedCount} Match{selectedCount !== 1 ? 'es' : ''}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
