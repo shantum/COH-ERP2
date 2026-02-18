@@ -11,6 +11,9 @@ import { asyncHandler } from '../middleware/asyncHandler.js';
 
 const router: Router = Router();
 
+if (!process.env.JWT_SECRET) throw new Error('JWT_SECRET env var is required');
+const JWT_SECRET = process.env.JWT_SECRET;
+
 // ============================================
 // REQUEST BODY SCHEMAS (Zod runtime validation)
 // ============================================
@@ -91,8 +94,8 @@ router.post(
         // Generate token (expiry configurable via JWT_EXPIRY env var)
         const signOptions: SignOptions = { expiresIn: (process.env.JWT_EXPIRY || '7d') as SignOptions['expiresIn'] };
         const token = jwt.sign(
-            { id: user.id, email: user.email, role: user.role },
-            process.env.JWT_SECRET as string,
+            { id: user.id, email: user.email, role: user.role, tokenVersion: 0 },
+            JWT_SECRET,
             signOptions
         );
 
@@ -147,7 +150,7 @@ router.post(
                 roleId: user.roleId,
                 tokenVersion: user.tokenVersion, // For instant logout on permission change
             },
-            process.env.JWT_SECRET as string,
+            JWT_SECRET,
             loginSignOptions
         );
 
@@ -221,7 +224,7 @@ router.get(
 
         let decoded: DecodedToken;
         try {
-            decoded = jwt.verify(token, process.env.JWT_SECRET as string) as DecodedToken;
+            decoded = jwt.verify(token, JWT_SECRET) as DecodedToken;
         } catch {
             res.status(401).json({ error: 'Invalid token' });
             return;
@@ -298,7 +301,7 @@ router.post(
 
         let decoded: DecodedToken;
         try {
-            decoded = jwt.verify(token, process.env.JWT_SECRET as string) as DecodedToken;
+            decoded = jwt.verify(token, JWT_SECRET) as DecodedToken;
         } catch (error) {
             if (error instanceof Error && error.name === 'JsonWebTokenError') {
                 res.status(401).json({ error: 'Invalid token' });

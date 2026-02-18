@@ -1,8 +1,6 @@
 /**
  * Payment Mutations - TanStack Start Server Functions
  *
- * Phase 1 mutations - Simple CRUD with NO SSE broadcasting and NO cache invalidation.
- *
  * Mutations:
  * - createPayment: Add a new payment to an order
  */
@@ -11,7 +9,8 @@
 import { createServerFn } from '@tanstack/react-start';
 import { authMiddleware, type AuthUser } from '../middleware/auth';
 import { CreatePaymentSchema, type CreatePaymentInput } from '@coh/shared';
-import { getPrisma } from '@coh/shared/services/db';
+import { getPrisma, type PrismaTransaction } from '@coh/shared/services/db';
+import { getInternalApiBaseUrl } from '../utils';
 
 // ============================================
 // RESPONSE TYPES
@@ -74,44 +73,59 @@ export const createPayment = createServerFn({ method: 'POST' })
 
             const prisma = await getPrisma();
 
-            // Validate order exists and get current payment summary
-            const order = await prisma.order.findUnique({
-                where: { id: orderId },
-                include: { payments: true },
-            });
+            // Atomic: read order + check totals + create payment
+            const { payment, isOverpayment, orderTotal, newTotal } = await prisma.$transaction(async (tx: PrismaTransaction) => {
+                const order = await tx.order.findUnique({
+                    where: { id: orderId },
+                    include: { payments: true },
+                });
 
-            if (!order) {
-                throw new Error('Order not found');
-            }
+                if (!order) {
+                    throw new Error('Order not found');
+                }
 
-            // Calculate current total paid
-            const totalPaid = order.payments.reduce((sum: number, p: typeof order.payments[number]) => sum + p.amount, 0);
-            const newTotal = totalPaid + amount;
+                const totalPaid = order.payments.reduce((sum: number, p: { amount: number }) => sum + p.amount, 0);
+                const total = totalPaid + amount;
+                const overpaying = total > order.totalAmount;
 
-            // Allow overpayment with warning (Option B from tRPC implementation)
-            const isOverpayment = newTotal > order.totalAmount;
-
-            // Create payment transaction
-            const payment = await prisma.orderPayment.create({
-                data: {
-                    orderId,
-                    amount,
-                    paymentMethod,
-                    reference,
-                    notes,
-                    recordedById: user.id,
-                },
-                include: {
-                    recordedBy: {
-                        select: { email: true },
+                const created = await tx.orderPayment.create({
+                    data: {
+                        orderId,
+                        amount,
+                        paymentMethod,
+                        reference,
+                        notes,
+                        recordedById: user.id,
                     },
-                },
+                    include: {
+                        recordedBy: {
+                            select: { email: true },
+                        },
+                    },
+                });
+
+                return { payment: created, isOverpayment: overpaying, orderTotal: order.totalAmount, newTotal: total };
             });
+
+            // SSE broadcast after transaction (non-critical)
+            try {
+                const baseUrl = getInternalApiBaseUrl();
+                await fetch(`${baseUrl}/api/internal/sse-broadcast`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        event: { type: 'payment_created', orderId },
+                        excludeUserId: user.id,
+                    }),
+                });
+            } catch {
+                // Non-critical — UI will pick up on next query refresh
+            }
 
             return {
                 payment,
                 warning: isOverpayment
-                    ? `Payment creates overpayment. Total: ${newTotal}, Order: ${order.totalAmount}`
+                    ? `Payment creates overpayment. Total: ${newTotal}, Order: ${orderTotal}`
                     : undefined,
             };
         }

@@ -566,6 +566,7 @@ export const getProductionRequirements = createServerFn({ method: 'GET' })
         // Get all open orders with their lines (only pending)
         const openOrders = await prisma.order.findMany({
             where: { status: 'open' },
+            take: 500,
             include: {
                 orderLines: {
                     where: { lineStatus: 'pending' },

@@ -348,52 +348,51 @@ export async function postTransactions(options?: { bank?: string }): Promise<Pos
         let period = dateToPeriod(entryDate);
         if (partyData?.billingPeriodOffsetMonths) period = applyPeriodOffset(period, partyData.billingPeriodOffsetMonths);
 
-        // Create or re-use Payment for outgoing bank transactions
-        let paymentId: string | undefined;
-        if (txn.direction === 'debit' && (txn.bank === 'hdfc' || txn.bank === 'razorpayx')) {
-          if (txn.paymentId) {
-            // Re-use existing Payment (preserved from old import) — just update debitAccountCode
-            await prisma.payment.update({
-              where: { id: txn.paymentId },
-              data: { debitAccountCode: decision.intendedDebitAccount ?? decision.debitAccount },
-            });
-            paymentId = txn.paymentId;
-          } else {
-            const ref = txn.reference ?? txn.utr ?? null;
-            // Dedup: check reference + UTR (catches HDFC↔RazorpayX cross-bank duplicates)
-            const existingId = await findExistingPayment(prisma, [ref, txn.utr], txn.amount);
-            if (existingId) {
-              paymentId = existingId;
-            } else {
-              const payment = await prisma.payment.create({
-                data: {
-                  direction: 'outgoing',
-                  method: 'bank_transfer',
-                  status: 'confirmed',
-                  amount: txn.amount,
-                  unmatchedAmount: txn.amount,
-                  paymentDate: entryDate,
-                  period,
-                  referenceNumber: ref,
-                  debitAccountCode: decision.intendedDebitAccount ?? decision.debitAccount,
-                  createdById: admin.id,
-                  ...(txn.partyId ? { partyId: txn.partyId } : {}),
-                },
+        // Atomic: create/update Payment + update BankTransaction status
+        await prisma.$transaction(async (tx) => {
+          let paymentId: string | undefined;
+          if (txn.direction === 'debit' && (txn.bank === 'hdfc' || txn.bank === 'razorpayx')) {
+            if (txn.paymentId) {
+              await tx.payment.update({
+                where: { id: txn.paymentId },
+                data: { debitAccountCode: decision.intendedDebitAccount ?? decision.debitAccount },
               });
-              paymentId = payment.id;
+              paymentId = txn.paymentId;
+            } else {
+              const ref = txn.reference ?? txn.utr ?? null;
+              const existingId = await findExistingPayment(prisma, [ref, txn.utr], txn.amount);
+              if (existingId) {
+                paymentId = existingId;
+              } else {
+                const payment = await tx.payment.create({
+                  data: {
+                    direction: 'outgoing',
+                    method: 'bank_transfer',
+                    status: 'confirmed',
+                    amount: txn.amount,
+                    unmatchedAmount: txn.amount,
+                    paymentDate: entryDate,
+                    period,
+                    referenceNumber: ref,
+                    debitAccountCode: decision.intendedDebitAccount ?? decision.debitAccount,
+                    createdById: admin.id,
+                    ...(txn.partyId ? { partyId: txn.partyId } : {}),
+                  },
+                });
+                paymentId = payment.id;
+              }
             }
           }
-        }
 
-        // Update BankTransaction status + AP routing metadata
-        await prisma.bankTransaction.update({
-          where: { id: txn.id },
-          data: {
-            status: 'posted',
-            intendedDebitAccount: decision.intendedDebitAccount,
-            postingType: decision.type,
-            ...(paymentId && !txn.paymentId ? { paymentId } : {}),
-          },
+          await tx.bankTransaction.update({
+            where: { id: txn.id },
+            data: {
+              status: 'posted',
+              intendedDebitAccount: decision.intendedDebitAccount,
+              postingType: decision.type,
+              ...(paymentId && !txn.paymentId ? { paymentId } : {}),
+            },
+          });
         });
 
         if (decision.type === 'single_step') singleStep++;

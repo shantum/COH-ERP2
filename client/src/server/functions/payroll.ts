@@ -9,7 +9,7 @@
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth';
-import { getPrisma } from '@coh/shared/services/db';
+import { getPrisma, type PrismaTransaction } from '@coh/shared/services/db';
 import {
   CreateEmployeeSchema,
   UpdateEmployeeSchema,
@@ -542,44 +542,43 @@ export const confirmPayrollRun = createServerFn({ method: 'POST' })
     const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     const monthLabel = `${monthNames[run.month - 1]} ${run.year}`;
 
-    // Create salary invoice for each slip
-    for (const slip of run.slips) {
-      if (slip.netPay <= 0) continue;
+    // Create all invoices + update run status atomically
+    await prisma.$transaction(async (tx: PrismaTransaction) => {
+      for (const slip of run.slips) {
+        if (slip.netPay <= 0) continue;
 
-      const salaryLabel = `${run.year}-${String(run.month).padStart(2, '0')}`;
+        const salaryLabel = `${run.year}-${String(run.month).padStart(2, '0')}`;
 
-      // Create payable invoice (salary category) — confirmed directly, no ledger entry
-      const invoice = await prisma.invoice.create({
+        const invoice = await tx.invoice.create({
+          data: {
+            type: 'payable',
+            category: 'salary',
+            status: 'confirmed',
+            invoiceDate: new Date(run.year, run.month - 1, new Date(run.year, run.month, 0).getDate()),
+            billingPeriod: salaryLabel,
+            totalAmount: slip.netPay,
+            balanceDue: slip.netPay,
+            ...(slip.employee.partyId ? { partyId: slip.employee.partyId } : {}),
+            notes: `Salary for ${monthLabel}`,
+            createdById: userId,
+          },
+        });
+
+        await tx.payrollSlip.update({
+          where: { id: slip.id },
+          data: { invoiceId: invoice.id },
+        });
+      }
+
+      await tx.payrollRun.update({
+        where: { id: run.id },
         data: {
-          type: 'payable',
-          category: 'salary',
           status: 'confirmed',
-          invoiceDate: new Date(run.year, run.month - 1, new Date(run.year, run.month, 0).getDate()),
-          billingPeriod: salaryLabel,
-          totalAmount: slip.netPay,
-          balanceDue: slip.netPay,
-          ...(slip.employee.partyId ? { partyId: slip.employee.partyId } : {}),
-          notes: `Salary for ${monthLabel}`,
-          createdById: userId,
+          confirmedAt: new Date(),
+          confirmedById: userId,
         },
       });
-
-      // Link invoice to slip
-      await prisma.payrollSlip.update({
-        where: { id: slip.id },
-        data: { invoiceId: invoice.id },
-      });
-    }
-
-    // Update run status
-    await prisma.payrollRun.update({
-      where: { id: run.id },
-      data: {
-        status: 'confirmed',
-        confirmedAt: new Date(),
-        confirmedById: userId,
-      },
-    });
+    }, { timeout: 30000 });
 
     return { success: true as const };
   });
@@ -610,31 +609,30 @@ export const cancelPayrollRun = createServerFn({ method: 'POST' })
     if (!run) return { success: false as const, error: 'Payroll run not found' };
     if (run.status === 'cancelled') return { success: false as const, error: 'Already cancelled' };
 
-    // If confirmed, cancel the invoices
-    if (run.status === 'confirmed') {
-      for (const slip of run.slips) {
-        if (slip.invoice) {
-          // Cancel the invoice
-          await prisma.invoice.update({
-            where: { id: slip.invoice.id },
-            data: { status: 'cancelled' },
-          });
-        }
-
-        // Unlink invoice from slip
-        if (slip.invoiceId) {
-          await prisma.payrollSlip.update({
-            where: { id: slip.id },
-            data: { invoiceId: null },
-          });
+    // Cancel invoices + update run status atomically
+    await prisma.$transaction(async (tx: PrismaTransaction) => {
+      if (run.status === 'confirmed') {
+        for (const slip of run.slips) {
+          if (slip.invoice) {
+            await tx.invoice.update({
+              where: { id: slip.invoice.id },
+              data: { status: 'cancelled' },
+            });
+          }
+          if (slip.invoiceId) {
+            await tx.payrollSlip.update({
+              where: { id: slip.id },
+              data: { invoiceId: null },
+            });
+          }
         }
       }
-    }
 
-    await prisma.payrollRun.update({
-      where: { id: run.id },
-      data: { status: 'cancelled' },
-    });
+      await tx.payrollRun.update({
+        where: { id: run.id },
+        data: { status: 'cancelled' },
+      });
+    }, { timeout: 30000 });
 
     return { success: true as const };
   });

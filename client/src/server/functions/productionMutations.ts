@@ -161,7 +161,7 @@ type PrismaClientInstance = Awaited<ReturnType<typeof getPrisma>>;
  * Generate batch code atomically
  * Format: YYYYMMDD-XXX (e.g., 20260107-001)
  */
-async function generateBatchCode(prisma: PrismaClientInstance, targetDate: Date): Promise<string> {
+async function generateBatchCode(prisma: PrismaClientInstance | PrismaTransaction, targetDate: Date): Promise<string> {
     const dateStr = targetDate.toISOString().split('T')[0].replace(/-/g, '');
     const startOfDay = new Date(targetDate);
     startOfDay.setHours(0, 0, 0, 0);
@@ -191,7 +191,7 @@ async function generateBatchCode(prisma: PrismaClientInstance, targetDate: Date)
 /**
  * Generate sample code (SAMPLE-XX format)
  */
-async function generateSampleCode(prisma: PrismaClientInstance): Promise<string> {
+async function generateSampleCode(prisma: PrismaClientInstance | PrismaTransaction): Promise<string> {
     const latest = await prisma.productionBatch.findFirst({
         where: { sampleCode: { not: null } },
         orderBy: { sampleCode: 'desc' },
@@ -372,10 +372,11 @@ export const createBatch = createServerFn({ method: 'POST' })
         }
 
         const isSampleBatch = !skuId && sampleName;
-        const batchCode = isSampleBatch ? null : await generateBatchCode(prisma, targetDate);
-        const sampleCode = isSampleBatch ? await generateSampleCode(prisma) : null;
 
         const batch = await prisma.$transaction(async (tx: PrismaTransaction) => {
+            const batchCode = isSampleBatch ? null : await generateBatchCode(tx, targetDate);
+            const sampleCode = isSampleBatch ? await generateSampleCode(tx) : null;
+
             const created = await tx.productionBatch.create({
                 data: {
                     batchCode,
