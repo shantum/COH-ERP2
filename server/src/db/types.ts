@@ -855,6 +855,22 @@ export type PayrollSlip = {
     createdAt: Generated<Timestamp>;
     updatedAt: Timestamp;
 };
+export type PayuSettlement = {
+    id: Generated<string>;
+    settlementId: string;
+    utrNumber: string;
+    settlementAmount: number;
+    merchantId: string;
+    settlementCompletedDate: Timestamp;
+    transactions: unknown | null;
+    transactionCount: Generated<number>;
+    syncedAt: Generated<Timestamp>;
+    bankTransactionId: string | null;
+    matchedAt: Timestamp | null;
+    matchConfidence: string | null;
+    createdAt: Generated<Timestamp>;
+    updatedAt: Timestamp;
+};
 export type Pincode = {
     id: Generated<string>;
     pincode: string;
@@ -1459,6 +1475,7 @@ export type DB = {
     Payment: Payment;
     PayrollRun: PayrollRun;
     PayrollSlip: PayrollSlip;
+    PayuSettlement: PayuSettlement;
     Pincode: Pincode;
     Product: Product;
     ProductBomTemplate: ProductBomTemplate;

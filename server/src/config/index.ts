@@ -144,6 +144,16 @@ export {
     ITHINK_REMITTANCE_DETAIL_TIMEOUT_MS,
 } from './sync/index.js';
 
+// PayU
+export {
+    PAYU_SYNC_INTERVAL_MS,
+    PAYU_LOOKBACK_DAYS,
+    PAYU_STARTUP_DELAY_MS,
+    PAYU_MAX_DATE_RANGE_DAYS,
+    PAYU_PAGE_SIZE,
+    PAYU_API_TIMEOUT_MS,
+} from './sync/index.js';
+
 // ============================================
 // FABRIC CONFIGURATION (Material Hierarchy)
 // ============================================

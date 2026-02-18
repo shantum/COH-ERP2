@@ -403,6 +403,53 @@ export async function categorizeTransactions(options?: { bank?: string }): Promi
     breakdown[key].total += txn.amount;
   }
 
+  // PayU Settlement matching — match HDFC credits to PayuSettlement records by UTR (exact)
+  // Runs BEFORE COD remittance matching because UTR is deterministic (exact match vs fuzzy amount+date)
+  for (const txn of txns) {
+    if (txn.bank !== 'hdfc' || txn.direction !== 'credit') continue;
+
+    const existingUpdate = updates.find(u => u.id === txn.id);
+    const creditAcct = existingUpdate?.data?.creditAccountCode as string | undefined;
+    if (creditAcct && creditAcct !== 'UNMATCHED_PAYMENTS') continue;
+
+    if (!txn.utr && !txn.reference) continue;
+
+    // Find any unlinked settlement matching this UTR (multiple settlements can share one UTR)
+    const payuMatch = await prisma.payuSettlement.findFirst({
+      where: {
+        bankTransactionId: null,
+        OR: [
+          ...(txn.utr ? [{ utrNumber: txn.utr }] : []),
+          ...(txn.reference ? [{ utrNumber: txn.reference }] : []),
+        ],
+      },
+    });
+
+    if (payuMatch) {
+      const payuData: Prisma.BankTransactionUncheckedUpdateInput = {
+        debitAccountCode: 'BANK_HDFC',
+        creditAccountCode: 'SALES_REVENUE',
+        category: 'payu_settlement',
+        counterpartyName: 'PayU',
+        status: 'categorized',
+      };
+
+      if (existingUpdate) {
+        existingUpdate.data = payuData;
+      } else {
+        updates.push({ id: txn.id, data: payuData });
+        categorized++;
+      }
+
+      // Link ALL settlements with this UTR to this bank transaction
+      const utrValue = payuMatch.utrNumber;
+      await prisma.payuSettlement.updateMany({
+        where: { utrNumber: utrValue, bankTransactionId: null },
+        data: { bankTransactionId: txn.id, matchedAt: new Date(), matchConfidence: 'utr_exact' },
+      });
+    }
+  }
+
   // COD Remittance matching — match unmatched HDFC credits to CodRemittance records
   for (const txn of txns) {
     if (txn.bank !== 'hdfc' || txn.direction !== 'credit') continue;

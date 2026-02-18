@@ -2406,3 +2406,32 @@ model CodRemittance {
   @@index([remittanceDate])
   @@index([codRemitted])
 }
+
+/// PayU online payment settlements — links prepaid orders to HDFC bank deposits via UTR
+model PayuSettlement {
+  id                      String    @id @default(uuid())
+  settlementId            String    @unique           // PayU's settlement ID
+  utrNumber               String                     // Bank UTR for matching
+  settlementAmount        Float                      // NET deposited to HDFC
+  merchantId              String
+  settlementCompletedDate DateTime
+
+  // Per-order breakdown (JSON array from PayU transaction field)
+  transactions            Json?
+  transactionCount        Int       @default(0)
+
+  // Source
+  syncedAt                DateTime  @default(now())
+
+  // Finance bridge: links to HDFC bank deposit when matched
+  // NOT unique — multiple settlements can share one UTR (one bank deposit)
+  bankTransactionId       String?
+  matchedAt               DateTime?
+  matchConfidence         String?   // "utr_exact" | "manual"
+
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+
+  @@index([utrNumber])
+  @@index([settlementCompletedDate])
+}

@@ -1256,6 +1256,8 @@ const CATEGORY_DISPLAY: Record<string, string> = {
   cc_interest: 'CC Interest & Finance Charges',
   cc_fees: 'CC Fees & Markup',
   rzp_fees: 'Razorpay Fees',
+  cod_remittance: 'COD Remittance',
+  payu_settlement: 'PayU Settlement',
   other: 'Other',
   uncategorized: 'Uncategorized',
 };

@@ -36,6 +36,7 @@ import webhookRoutes from './routes/webhooks.js';
 // Repacking routes migrated to TanStack Start Server Functions
 import trackingRoutes from './routes/tracking.js';
 import remittanceRoutes from './routes/remittance.js';
+import payuSettlementRoutes from './routes/payuSettlement.js';
 import pincodeRoutes from './routes/pincodes.js';
 import sseRoutes from './routes/sse.js';
 import pulseRoutes from './routes/pulse.js';
@@ -55,6 +56,7 @@ import { pulseBroadcaster } from './services/pulseBroadcaster.js';
 import scheduledSync from './services/scheduledSync.js';
 import trackingSync from './services/trackingSync.js';
 import remittanceSync from './services/remittanceSync.js';
+import payuSettlementSync from './services/payuSettlementSync.js';
 import cacheProcessor from './services/cacheProcessor.js';
 import cacheDumpWorker from './services/cacheDumpWorker.js';
 import sheetOffloadWorker from './services/sheetOffloadWorker.js';
@@ -145,6 +147,7 @@ app.use('/api/webhooks', webhookRoutes);
 // Repacking routes migrated to TanStack Start Server Functions
 // Tracking routes migrated to TanStack Start Server Functions
 app.use('/api/remittance', remittanceRoutes);
+app.use('/api/payu-settlement', payuSettlementRoutes);
 app.use('/api/pincodes', pincodeRoutes);
 app.use('/api/events', sseRoutes);
 app.use('/api/pulse', pulseRoutes);
@@ -326,6 +329,9 @@ app.listen(PORT, '0.0.0.0', async () => {
     // Start COD remittance sync (every 12 hours, 5 min startup delay)
     remittanceSync.start();
 
+    // Start PayU settlement sync (every 12 hours, 8 min startup delay)
+    payuSettlementSync.start();
+
     // Sheet order reconciler — catches orders missed due to crashes/downtime
     // Runs every 15 min, looks back 3 days for unpushed orders
     const RECONCILE_INTERVAL_MS = 15 * 60 * 1000;
@@ -371,6 +377,10 @@ app.listen(PORT, '0.0.0.0', async () => {
 
     shutdownCoordinator.register('remittanceSync', () => {
       remittanceSync.stop();
+    }, 5000);
+
+    shutdownCoordinator.register('payuSettlementSync', () => {
+      payuSettlementSync.stop();
     }, 5000);
 
     shutdownCoordinator.register('sheetReconciler', () => {
