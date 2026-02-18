@@ -1466,7 +1466,7 @@ router.get('/background-jobs', authenticateToken, asyncHandler(async (req: Reque
         {
             id: 'sync_sheet_awb',
             name: 'Sync Sheet AWBs',
-            description: 'Reads AWB numbers entered manually in the Google Sheet, validates via iThink, and links to OrderLines in the ERP database.',
+            description: 'Reads AWB numbers from the Google Sheet, validates via iThink (Shopify/offline) or links directly (Myntra/Ajio/Nykaa), and updates OrderLines.',
             enabled: true,
             isRunning: false,
             lastRunAt: null,

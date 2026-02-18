@@ -8,7 +8,7 @@
  */
 
 import { PrismaClient } from '@prisma/client';
-import { CHART_OF_ACCOUNTS } from '../server/src/config/finance/index.js';
+import { CHART_OF_ACCOUNTS } from '@coh/shared/schemas/finance';
 
 const prisma = new PrismaClient();
 

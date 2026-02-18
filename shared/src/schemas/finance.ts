@@ -173,7 +173,7 @@ export const PAYMENT_CATEGORY_FILTERS = [
 
 export const PARTY_CATEGORIES = [
   'fabric', 'trims', 'service', 'rent', 'marketing',
-  'logistics', 'packaging', 'salary', 'statutory', 'software', 'other',
+  'logistics', 'packaging', 'salary', 'statutory', 'software', 'refund', 'other',
 ] as const;
 
 export type PartyCategory = (typeof PARTY_CATEGORIES)[number];
@@ -199,6 +199,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   software: 'Software & Technology',
   customer_order: 'Customer Order',
   statutory: 'Statutory / TDS',
+  refund: 'Refund',
   other: 'Other',
 };
 
@@ -465,26 +466,40 @@ export type ApplyAutoMatchesInput = z.infer<typeof ApplyAutoMatchesSchema>;
 // CHART OF ACCOUNTS
 // ============================================
 
+/**
+ * TO ADD A NEW ACCOUNT:
+ * 1. Add entry to CHART_OF_ACCOUNTS
+ * 2. Run seed script to sync with database
+ */
 export const CHART_OF_ACCOUNTS = [
-  { code: 'BANK_HDFC', name: 'HDFC Bank Account', type: 'asset' },
-  { code: 'BANK_RAZORPAYX', name: 'RazorpayX Account', type: 'asset' },
-  { code: 'CASH', name: 'Cash', type: 'asset' },
-  { code: 'ACCOUNTS_RECEIVABLE', name: 'Money Customers Owe Us', type: 'asset' },
-  { code: 'FABRIC_INVENTORY', name: 'Fabric Inventory', type: 'asset' },
-  { code: 'FINISHED_GOODS', name: 'Finished Goods Inventory', type: 'asset' },
-  { code: 'GST_INPUT', name: 'GST We Can Claim', type: 'asset' },
-  { code: 'ADVANCES_GIVEN', name: 'Advances We Gave', type: 'asset' },
-  { code: 'ACCOUNTS_PAYABLE', name: 'Money We Owe Vendors', type: 'liability' },
-  { code: 'GST_OUTPUT', name: 'GST We Owe Government', type: 'liability' },
-  { code: 'CUSTOMER_ADVANCES', name: 'Customer Advances', type: 'liability' },
-  { code: 'TDS_PAYABLE', name: 'TDS Payable', type: 'liability' },
-  { code: 'CREDIT_CARD', name: 'Credit Card', type: 'liability' },
-  { code: 'SALES_REVENUE', name: 'Sales Revenue', type: 'income' },
-  { code: 'COGS', name: 'Cost of Goods Sold', type: 'direct_cost' },
-  { code: 'OPERATING_EXPENSES', name: 'Operating Expenses', type: 'expense' },
-  { code: 'MARKETPLACE_FEES', name: 'Marketplace & Payment Fees', type: 'expense' },
-  { code: 'SOFTWARE_TECHNOLOGY', name: 'Software & Technology', type: 'expense' },
-  { code: 'UNMATCHED_PAYMENTS', name: 'Unmatched Payments (Suspense)', type: 'expense' },
-  { code: 'OWNER_CAPITAL', name: 'Owner Capital', type: 'equity' },
-  { code: 'RETAINED_EARNINGS', name: 'Retained Earnings', type: 'equity' },
+  // --- Assets ---
+  { code: 'BANK_HDFC', name: 'HDFC Bank Account', type: 'asset', description: 'Main business account' },
+  { code: 'BANK_RAZORPAYX', name: 'RazorpayX Account', type: 'asset', description: 'Payout account for vendor payments' },
+  { code: 'CASH', name: 'Cash', type: 'asset', description: 'Cash on hand' },
+  { code: 'ACCOUNTS_RECEIVABLE', name: 'Money Customers Owe Us', type: 'asset', description: 'Outstanding customer payments' },
+  { code: 'FABRIC_INVENTORY', name: 'Fabric Inventory', type: 'asset', description: 'Value of fabric in stock' },
+  { code: 'FINISHED_GOODS', name: 'Finished Goods Inventory', type: 'asset', description: 'Value of finished goods in stock' },
+  { code: 'GST_INPUT', name: 'GST We Can Claim', type: 'asset', description: 'Input GST credit' },
+  { code: 'ADVANCES_GIVEN', name: 'Advances We Gave', type: 'asset', description: 'Advances paid to suppliers/vendors' },
+  // --- Liabilities ---
+  { code: 'ACCOUNTS_PAYABLE', name: 'Money We Owe Vendors', type: 'liability', description: 'Outstanding vendor/supplier payments' },
+  { code: 'GST_OUTPUT', name: 'GST We Owe Government', type: 'liability', description: 'Output GST liability' },
+  { code: 'CUSTOMER_ADVANCES', name: 'Customer Advances', type: 'liability', description: 'Prepayments received from customers' },
+  { code: 'TDS_PAYABLE', name: 'TDS Payable', type: 'liability', description: 'TDS deducted at source, owed to government' },
+  { code: 'LOAN_GETVANTAGE', name: 'GetVantage Loan', type: 'liability', description: 'Revenue-based financing loan from GetVantage' },
+  { code: 'CREDIT_CARD', name: 'Credit Card', type: 'liability', description: 'Credit card balance — paid via CRED' },
+  // --- Income ---
+  { code: 'SALES_REVENUE', name: 'Sales Revenue', type: 'income', description: 'Revenue from product sales' },
+  // --- Direct Costs ---
+  { code: 'COGS', name: 'Cost of Goods Sold', type: 'direct_cost', description: 'Direct cost of products sold' },
+  // --- Expenses ---
+  { code: 'OPERATING_EXPENSES', name: 'Operating Expenses', type: 'expense', description: 'Rent, salary, marketing, etc.' },
+  { code: 'MARKETPLACE_FEES', name: 'Marketplace & Payment Fees', type: 'expense', description: 'Platform commissions, payment gateway fees' },
+  { code: 'SOFTWARE_TECHNOLOGY', name: 'Software & Technology', type: 'expense', description: 'Shopify, SaaS subscriptions, tech tools' },
+  { code: 'UNMATCHED_PAYMENTS', name: 'Unmatched Payments (Suspense)', type: 'expense', description: 'Bank payments not yet matched to an invoice' },
+  // --- Equity ---
+  { code: 'OWNER_CAPITAL', name: 'Owner Capital', type: 'equity', description: 'Capital invested by owners' },
+  { code: 'RETAINED_EARNINGS', name: 'Retained Earnings', type: 'equity', description: 'Accumulated profits/losses' },
 ] as const;
+
+export type AccountCode = (typeof CHART_OF_ACCOUNTS)[number]['code'];

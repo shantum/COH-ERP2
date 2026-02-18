@@ -654,14 +654,17 @@ export async function syncSingleOrderToSheet(orderNumber: string): Promise<void>
 /** Statuses where an OrderLine can be linked to an AWB */
 const LINKABLE_STATUSES = ['pending', 'allocated', 'picked', 'packed'];
 
+/** Channels where AWBs are managed by the marketplace (no iThink validation) */
+const NON_ITHINK_CHANNELS = ['myntra', 'ajio', 'nykaa'];
+
 let awbSyncRunning = false;
 
 /**
- * Read AWB numbers entered manually in the Google Sheet, validate them via
- * iThink Logistics API, and link them to matching OrderLines in the database.
+ * Read AWB numbers entered manually in the Google Sheet and link them to OrderLines.
+ * - Shopify/offline AWBs: validated via iThink API first
+ * - Myntra/Ajio/Nykaa AWBs: linked directly (tracking updates come via CSV)
  *
  * This is the reverse of syncSheetOrderStatus: sheet→DB instead of DB→sheet.
- * Used for offline/exchange orders where the ops team enters the AWB in the sheet.
  */
 export async function syncSheetAwb(): Promise<SyncSheetAwbResult> {
     if (awbSyncRunning) {
@@ -692,7 +695,6 @@ export async function syncSheetAwb(): Promise<SyncSheetAwbResult> {
         }
 
         const awbRows: SheetAwbRow[] = [];
-        const uniqueAwbs = new Set<string>();
 
         for (let i = 1; i < rows.length; i++) {
             const awb = String(rows[i][27] ?? '').trim(); // AC = index 27 in B:AD
@@ -703,38 +705,12 @@ export async function syncSheetAwb(): Promise<SyncSheetAwbResult> {
             if (!orderNumber || !sku) continue;
 
             awbRows.push({ rowIndex: i, orderNumber, sku, awb });
-            uniqueAwbs.add(awb);
         }
 
         result.checked = awbRows.length;
         if (awbRows.length === 0) {
             result.durationMs = Date.now() - start;
             return result;
-        }
-
-        // Batch validate AWBs via iThink (max 10 per call)
-        const awbList = [...uniqueAwbs];
-        const validatedAwbs = new Map<string, { logistic: string; statusCode: string; statusText: string }>();
-
-        for (let i = 0; i < awbList.length; i += 10) {
-            const batch = awbList.slice(i, i + 10);
-            try {
-                const data = await iThinkService.trackShipments(batch, true);
-                for (const awb of batch) {
-                    const tracking = data[awb];
-                    if (tracking && tracking.message === 'success') {
-                        validatedAwbs.set(awb, {
-                            logistic: tracking.logistic,
-                            statusCode: tracking.current_status_code,
-                            statusText: tracking.current_status,
-                        });
-                    }
-                }
-            } catch (err: unknown) {
-                const message = err instanceof Error ? err.message : String(err);
-                result.errors.push(`iThink batch error: ${message}`);
-                log.error({ batch, err: message }, 'iThink batch validation failed');
-            }
         }
 
         // Look up all relevant order numbers in one query
@@ -780,17 +756,45 @@ export async function syncSheetAwb(): Promise<SyncSheetAwbResult> {
             }
         }
 
+        // Separate AWBs into iThink-validatable vs marketplace-managed
+        const ithinkAwbs = new Set<string>();
+        for (const row of awbRows) {
+            const line = lineMap.get(`${row.orderNumber}|${row.sku}`);
+            if (line && !NON_ITHINK_CHANNELS.includes(line.channel)) {
+                ithinkAwbs.add(row.awb);
+            }
+        }
+
+        // Batch validate only iThink AWBs (max 10 per call)
+        const validatedAwbs = new Map<string, { logistic: string; statusCode: string; statusText: string }>();
+        const ithinkAwbList = [...ithinkAwbs];
+
+        for (let i = 0; i < ithinkAwbList.length; i += 10) {
+            const batch = ithinkAwbList.slice(i, i + 10);
+            try {
+                const data = await iThinkService.trackShipments(batch, true);
+                for (const awb of batch) {
+                    const tracking = data[awb];
+                    if (tracking && tracking.message === 'success') {
+                        validatedAwbs.set(awb, {
+                            logistic: tracking.logistic,
+                            statusCode: tracking.current_status_code,
+                            statusText: tracking.current_status,
+                        });
+                    }
+                }
+            } catch (err: unknown) {
+                const message = err instanceof Error ? err.message : String(err);
+                result.errors.push(`iThink batch error: ${message}`);
+                log.error({ batch, err: message }, 'iThink batch validation failed');
+            }
+        }
+
         // Process each sheet row: update DB + collect sheet write-backs
         const writeData: Array<{ range: string; values: (string | number)[][] }> = [];
         const recomputeOrderIds = new Set<string>();
 
         for (const row of awbRows) {
-            const validated = validatedAwbs.get(row.awb);
-            if (!validated) {
-                result.failed++;
-                continue;
-            }
-
             const line = lineMap.get(`${row.orderNumber}|${row.sku}`);
             if (!line) {
                 result.skipped++;
@@ -809,15 +813,27 @@ export async function syncSheetAwb(): Promise<SyncSheetAwbResult> {
                 continue;
             }
 
-            const resolvedStatus = resolveTrackingStatus(validated.statusCode, validated.statusText);
+            const isNonIthink = NON_ITHINK_CHANNELS.includes(line.channel);
+            const validated = validatedAwbs.get(row.awb);
+
+            // iThink AWBs must pass validation; non-iThink AWBs link directly
+            if (!isNonIthink && !validated) {
+                result.failed++;
+                continue;
+            }
+
+            const courier = isNonIthink ? line.channel : validated!.logistic;
+            const trackingStatus = isNonIthink
+                ? 'manifested'
+                : resolveTrackingStatus(validated!.statusCode, validated!.statusText);
 
             try {
                 await prisma.orderLine.update({
                     where: { id: line.id },
                     data: {
                         awbNumber: row.awb,
-                        courier: validated.logistic,
-                        trackingStatus: resolvedStatus,
+                        courier,
+                        trackingStatus,
                         lineStatus: 'shipped',
                         shippedAt: new Date(),
                     },
@@ -826,11 +842,11 @@ export async function syncSheetAwb(): Promise<SyncSheetAwbResult> {
                 result.linked++;
 
                 // Queue sheet write-back: status (Y), courier (Z), AWB (AA)
-                const displayStatus = buildDisplayStatus(line.channel, 'shipped', resolvedStatus);
+                const displayStatus = buildDisplayStatus(line.channel, 'shipped', trackingStatus);
                 const sheetRowNum = row.rowIndex + 1; // 1-based
                 writeData.push({
                     range: `'${tab}'!Y${sheetRowNum}:AA${sheetRowNum}`,
-                    values: [[displayStatus, validated.logistic, row.awb]],
+                    values: [[displayStatus, courier, row.awb]],
                 });
             } catch (err: unknown) {
                 result.failed++;

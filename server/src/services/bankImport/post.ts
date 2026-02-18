@@ -356,7 +356,7 @@ export async function postTransactions(options?: { bank?: string }): Promise<Pos
               paymentId = txn.paymentId;
             } else {
               const ref = txn.reference ?? txn.utr ?? null;
-              const existingId = await findExistingPayment(prisma, [ref, txn.utr], txn.amount);
+              const existingId = await findExistingPayment(tx, [ref, txn.utr], txn.amount);
               if (existingId) {
                 paymentId = existingId;
               } else {
