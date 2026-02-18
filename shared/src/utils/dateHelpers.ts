@@ -6,7 +6,26 @@
  */
 
 /** IST offset in milliseconds (5 hours 30 minutes) */
-const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+export const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+
+/**
+ * Convert a Date to IST "YYYY-MM" period string.
+ * Used for cash-basis grouping on Payment and BankTransaction.
+ */
+export function dateToPeriod(date: Date): string {
+  const ist = new Date(date.getTime() + IST_OFFSET_MS);
+  return `${ist.getUTCFullYear()}-${String(ist.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
+/**
+ * Apply a month offset to a "YYYY-MM" period string.
+ * e.g. ("2026-02", -1) → "2026-01"
+ */
+export function applyPeriodOffset(period: string, offsetMonths: number): string {
+  const [year, month] = period.split('-').map(Number);
+  const d = new Date(year, month - 1 + offsetMonths, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
 
 /**
  * Get IST midnight as UTC Date for database queries.

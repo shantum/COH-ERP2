@@ -5,6 +5,12 @@
 2. **Clarify before you build.** Ask questions until 100% clear. Never assume.
 3. **Load domain skills first.** Run `/skill-name` before touching any domain. Use Grep for specific lookups.
 
+## Model Strategy
+- **Main agent: Sonnet 4.6** (1M context) — orchestration, research, file reading, conversation
+- **Coding subagents: Opus 4.6** — always use `model: "opus"` for `elite-engineer`, `code-reviewer`, `logic-auditor` Task calls
+- **Quick lookups: Haiku** — use `model: "haiku"` for simple searches, doc lookups, and `claude-code-guide` queries
+- When spawning a Task for implementation, review, or complex analysis, **always pass `model: "opus"`**
+
 ## Principles
 1. **Simplicity above all.** Remove bloat. Reduce > Perfect > Repeat.
 2. **First principles.** Reason from fundamentals.

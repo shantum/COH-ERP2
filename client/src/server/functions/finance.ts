@@ -30,22 +30,7 @@ import {
   generatePaymentNarration,
   ApplyAutoMatchesSchema,
 } from '@coh/shared/schemas/finance';
-
-/**
- * Convert a Date to IST "YYYY-MM" period string.
- * IST = UTC + 5:30
- */
-function dateToPeriod(date: Date): string {
-  const ist = new Date(date.getTime() + (5.5 * 60 * 60 * 1000));
-  return `${ist.getUTCFullYear()}-${String(ist.getUTCMonth() + 1).padStart(2, '0')}`;
-}
-
-/** Apply a month offset to a "YYYY-MM" period string. e.g. ("2026-02", -1) → "2026-01" */
-function applyPeriodOffset(period: string, offsetMonths: number): string {
-  const [year, month] = period.split('-').map(Number);
-  const d = new Date(year, month - 1 + offsetMonths, 1);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-}
+import { dateToPeriod, applyPeriodOffset } from '@coh/shared';
 
 // ============================================
 // DASHBOARD / SUMMARY

@@ -12,14 +12,9 @@ import prisma from '../../lib/prisma.js';
 import { createHash, randomUUID } from 'crypto';
 import fs from 'fs';
 import { fetchActiveParties, categorizeSingleTxn } from './categorize.js';
+import { dateToPeriod } from '@coh/shared';
 
 type JsonValue = Prisma.InputJsonValue;
-
-/** Convert a Date to IST "YYYY-MM" period string. */
-function dateToPeriod(date: Date): string {
-  const ist = new Date(date.getTime() + (5.5 * 60 * 60 * 1000));
-  return `${ist.getUTCFullYear()}-${String(ist.getUTCMonth() + 1).padStart(2, '0')}`;
-}
 
 // ============================================
 // TYPES

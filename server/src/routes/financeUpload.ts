@@ -8,6 +8,7 @@
 
 import { Router } from 'express';
 import type { Request, Response } from 'express';
+import type { Prisma } from '@prisma/client';
 import multer from 'multer';
 import { requireAdmin } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
@@ -146,37 +147,38 @@ async function createPartyFromInvoice(
   if (!name) return null;
 
   const fieldsAdded: string[] = [];
-  const data: Record<string, unknown> = {
-    name,
-    category: 'other',
-    isActive: true,
-    aliases: [name.toUpperCase()],
-  };
 
-  // Fill in whatever the AI found
-  const optionalFields: Array<{ dbField: string; value: string | null | undefined; label: string }> = [
-    { dbField: 'gstin', value: parsed.supplierGstin, label: 'GSTIN' },
-    { dbField: 'pan', value: parsed.supplierPan ?? (parsed.supplierGstin ? panFromGstin(parsed.supplierGstin) : null), label: 'PAN' },
-    { dbField: 'email', value: parsed.supplierEmail, label: 'Email' },
-    { dbField: 'phone', value: parsed.supplierPhone, label: 'Phone' },
-    { dbField: 'address', value: parsed.supplierAddress, label: 'Address' },
-    { dbField: 'stateCode', value: parsed.supplierStateCode, label: 'State Code' },
-    { dbField: 'bankAccountNumber', value: parsed.supplierBankAccountNumber, label: 'Bank Account' },
-    { dbField: 'bankIfsc', value: parsed.supplierBankIfsc, label: 'Bank IFSC' },
-    { dbField: 'bankName', value: parsed.supplierBankName, label: 'Bank Name' },
-    { dbField: 'bankAccountName', value: parsed.supplierBankAccountName, label: 'Beneficiary Name' },
+  // Build optional fields from AI-parsed data, tracking which were found
+  const optionalFields: Array<{ key: keyof Prisma.PartyUncheckedCreateInput; value: string | null | undefined; label: string }> = [
+    { key: 'gstin', value: parsed.supplierGstin, label: 'GSTIN' },
+    { key: 'pan', value: parsed.supplierPan ?? (parsed.supplierGstin ? panFromGstin(parsed.supplierGstin) : null), label: 'PAN' },
+    { key: 'email', value: parsed.supplierEmail, label: 'Email' },
+    { key: 'phone', value: parsed.supplierPhone, label: 'Phone' },
+    { key: 'address', value: parsed.supplierAddress, label: 'Address' },
+    { key: 'stateCode', value: parsed.supplierStateCode, label: 'State Code' },
+    { key: 'bankAccountNumber', value: parsed.supplierBankAccountNumber, label: 'Bank Account' },
+    { key: 'bankIfsc', value: parsed.supplierBankIfsc, label: 'Bank IFSC' },
+    { key: 'bankName', value: parsed.supplierBankName, label: 'Bank Name' },
+    { key: 'bankAccountName', value: parsed.supplierBankAccountName, label: 'Beneficiary Name' },
   ];
 
-  for (const { dbField, value, label } of optionalFields) {
+  const extras: Partial<Prisma.PartyUncheckedCreateInput> = {};
+  for (const { key, value, label } of optionalFields) {
     if (value) {
-      data[dbField] = value;
+      (extras[key] as string) = value;
       fieldsAdded.push(label);
     }
   }
 
   try {
     const newParty = await prisma.party.create({
-      data: data as any, // fields are dynamic but all valid Party columns
+      data: {
+        name,
+        category: 'other',
+        isActive: true,
+        aliases: [name.toUpperCase()],
+        ...extras,
+      },
       select: { id: true, name: true },
     });
 

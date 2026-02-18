@@ -7,23 +7,10 @@
 import { Prisma } from '@prisma/client';
 import prisma from '../../lib/prisma.js';
 import { AUTO_CLEAR_AMOUNT_THRESHOLD } from '../../config/finance/index.js';
-import { generatePaymentNarration } from '@coh/shared';
+import { generatePaymentNarration, dateToPeriod, applyPeriodOffset } from '@coh/shared';
 import logger from '../../utils/logger.js';
 
 const log = logger.child({ module: 'bank-post' });
-
-/** Convert a Date to IST "YYYY-MM" period string. */
-function dateToPeriod(date: Date): string {
-  const ist = new Date(date.getTime() + (5.5 * 60 * 60 * 1000));
-  return `${ist.getUTCFullYear()}-${String(ist.getUTCMonth() + 1).padStart(2, '0')}`;
-}
-
-/** Apply a month offset to a "YYYY-MM" period string. */
-function applyPeriodOffset(period: string, offsetMonths: number): string {
-  const [year, month] = period.split('-').map(Number);
-  const d = new Date(year, month - 1 + offsetMonths, 1);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-}
 
 // ============================================
 // TYPES
@@ -313,7 +300,7 @@ export async function postTransactions(options?: { bank?: string }): Promise<Pos
   const parties = partyIds.length > 0
     ? await prisma.party.findMany({
         where: { id: { in: partyIds } },
-        select: { id: true, invoiceRequired: true, billingPeriodOffsetMonths: true },
+        select: { id: true, name: true, invoiceRequired: true, billingPeriodOffsetMonths: true },
       })
     : [];
   const partyMap = new Map(parties.map(p => [p.id, p]));
@@ -348,14 +335,23 @@ export async function postTransactions(options?: { bank?: string }): Promise<Pos
         let period = dateToPeriod(entryDate);
         if (partyData?.billingPeriodOffsetMonths) period = applyPeriodOffset(period, partyData.billingPeriodOffsetMonths);
 
+        const narration = txn.narration || generatePaymentNarration({
+          partyName: partyData?.name ?? txn.counterpartyName,
+          category: txn.category,
+        });
+
         // Atomic: create/update Payment + update BankTransaction status
         await prisma.$transaction(async (tx) => {
           let paymentId: string | undefined;
           if (txn.direction === 'debit' && (txn.bank === 'hdfc' || txn.bank === 'razorpayx')) {
             if (txn.paymentId) {
+              const existing = await tx.payment.findUnique({ where: { id: txn.paymentId }, select: { notes: true } });
               await tx.payment.update({
                 where: { id: txn.paymentId },
-                data: { debitAccountCode: decision.intendedDebitAccount ?? decision.debitAccount },
+                data: {
+                  debitAccountCode: decision.intendedDebitAccount ?? decision.debitAccount,
+                  ...(!existing?.notes && narration ? { notes: narration } : {}),
+                },
               });
               paymentId = txn.paymentId;
             } else {
@@ -377,6 +373,7 @@ export async function postTransactions(options?: { bank?: string }): Promise<Pos
                     debitAccountCode: decision.intendedDebitAccount ?? decision.debitAccount,
                     createdById: admin.id,
                     ...(txn.partyId ? { partyId: txn.partyId } : {}),
+                    ...(narration ? { notes: narration } : {}),
                   },
                 });
                 paymentId = payment.id;
