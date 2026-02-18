@@ -414,14 +414,18 @@ export async function categorizeTransactions(options?: { bank?: string }): Promi
 
     if (!txn.utr && !txn.reference) continue;
 
+    // HDFC stores UTR with leading zeros in reference (e.g. "0000001442998025")
+    // PayU gives bare UTR (e.g. "1442998025"). Try both stripped and original values.
+    const candidates: string[] = [];
+    if (txn.utr) { candidates.push(txn.utr); candidates.push(txn.utr.replace(/^0+/, '')); }
+    if (txn.reference) { candidates.push(txn.reference); candidates.push(txn.reference.replace(/^0+/, '')); }
+    const uniqueCandidates = [...new Set(candidates)];
+
     // Find any unlinked settlement matching this UTR (multiple settlements can share one UTR)
     const payuMatch = await prisma.payuSettlement.findFirst({
       where: {
         bankTransactionId: null,
-        OR: [
-          ...(txn.utr ? [{ utrNumber: txn.utr }] : []),
-          ...(txn.reference ? [{ utrNumber: txn.reference }] : []),
-        ],
+        utrNumber: { in: uniqueCandidates },
       },
     });
 

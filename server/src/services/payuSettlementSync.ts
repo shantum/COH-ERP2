@@ -112,13 +112,18 @@ function buildDateWindows(startDate: Date, endDate: Date): Array<{ dateFrom: str
  * Multiple settlements can share one UTR (batched bank deposit).
  */
 async function tryBankMatch(settlementDbId: string, utrNumber: string): Promise<boolean> {
+    // HDFC stores UTR with leading zeros in reference (e.g. "0000001442998025")
+    // PayU gives bare UTR (e.g. "1442998025"). Match both formats.
+    const paddedUtr = utrNumber.padStart(16, '0');
     const bankTxn = await prisma.bankTransaction.findFirst({
         where: {
             bank: 'hdfc',
             direction: 'credit',
             OR: [
                 { utr: utrNumber },
+                { utr: paddedUtr },
                 { reference: utrNumber },
+                { reference: paddedUtr },
             ],
         },
         select: { id: true },
