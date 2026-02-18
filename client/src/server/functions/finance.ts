@@ -716,7 +716,7 @@ export const listPayments = createServerFn({ method: 'POST' })
   .inputValidator((input: unknown) => ListPaymentsInput.parse(input))
   .handler(async ({ data }) => {
     const prisma = await getPrisma();
-    const { direction, method, status, matchStatus, search, page = 1, limit = 50 } = data ?? {};
+    const { direction, method, status, matchStatus, accountCode, search, page = 1, limit = 50 } = data ?? {};
     const skip = (page - 1) * limit;
 
     const where: Record<string, unknown> = {};
@@ -725,6 +725,7 @@ export const listPayments = createServerFn({ method: 'POST' })
     if (status) where.status = status;
     if (matchStatus === 'unmatched') where.unmatchedAmount = { gt: 0.01 };
     if (matchStatus === 'matched') where.unmatchedAmount = { lte: 0.01 };
+    if (accountCode) where.debitAccountCode = accountCode;
     if (search) {
       where.OR = [
         { referenceNumber: { contains: search, mode: 'insensitive' } },

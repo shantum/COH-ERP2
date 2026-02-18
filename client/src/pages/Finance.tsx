@@ -63,6 +63,7 @@ import {
   INVOICE_CATEGORIES,
   INVOICE_STATUSES,
   PAYMENT_METHODS,
+  PAYMENT_ACCOUNT_FILTERS,
   CHART_OF_ACCOUNTS,
   getCategoryLabel,
   BANK_TYPES,
@@ -944,13 +945,14 @@ function PaymentsTab({ search }: { search: FinanceSearchParams }) {
 
   const listFn = useServerFn(listPayments);
   const { data, isLoading } = useQuery({
-    queryKey: ['finance', 'payments', search.direction, search.method, search.matchStatus, search.search, search.page],
+    queryKey: ['finance', 'payments', search.direction, search.method, search.matchStatus, search.accountCode, search.search, search.page],
     queryFn: () =>
       listFn({
         data: {
           ...(search.direction ? { direction: search.direction } : {}),
           ...(search.method ? { method: search.method } : {}),
           ...(search.matchStatus && search.matchStatus !== 'all' ? { matchStatus: search.matchStatus } : {}),
+          ...(search.accountCode ? { accountCode: search.accountCode } : {}),
           ...(search.search ? { search: search.search } : {}),
           page: search.page,
           limit: search.limit,
@@ -994,6 +996,16 @@ function PaymentsTab({ search }: { search: FinanceSearchParams }) {
             <SelectItem value="all">All</SelectItem>
             <SelectItem value="unmatched">Needs Documentation</SelectItem>
             <SelectItem value="matched">Fully Matched</SelectItem>
+          </SelectContent>
+        </Select>
+
+        <Select value={search.accountCode ?? 'all'} onValueChange={(v) => updateSearch({ accountCode: v === 'all' ? undefined : v, page: 1 })}>
+          <SelectTrigger className="w-[210px]"><SelectValue placeholder="Category" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Categories</SelectItem>
+            {PAYMENT_ACCOUNT_FILTERS.map((a) => (
+              <SelectItem key={a.code} value={a.code}>{a.label}</SelectItem>
+            ))}
           </SelectContent>
         </Select>
 

@@ -31,6 +31,8 @@ export const FinanceSearchParams = z.object({
   method: z.string().optional().catch(undefined),
   /** Payment match status filter */
   matchStatus: z.enum(['all', 'unmatched', 'matched']).optional().catch(undefined),
+  /** Payment account code filter (debitAccountCode) */
+  accountCode: z.string().optional().catch(undefined),
   /** Parties tab: filter by TransactionType ID */
   partyTxnType: z.string().optional().catch(undefined),
   /** Search query */
@@ -142,10 +144,23 @@ export const ListPaymentsInput = z.object({
   method: z.string().optional(),
   status: z.string().optional(),
   matchStatus: z.enum(['all', 'unmatched', 'matched']).optional(),
+  accountCode: z.string().optional(),
   search: z.string().optional(),
   page: z.coerce.number().int().positive().default(1),
   limit: z.coerce.number().int().positive().max(200).default(50),
 }).optional();
+
+/** Account codes that appear on payments, with user-friendly labels */
+export const PAYMENT_ACCOUNT_FILTERS = [
+  { code: 'ACCOUNTS_PAYABLE', label: 'Vendor Payments' },
+  { code: 'MARKETPLACE_FEES', label: 'Marketplace & Bank Fees' },
+  { code: 'UNMATCHED_PAYMENTS', label: 'Unmatched / Suspense' },
+  { code: 'ADVANCES_GIVEN', label: 'Advances' },
+  { code: 'OPERATING_EXPENSES', label: 'Operating Expenses' },
+  { code: 'CASH', label: 'Cash' },
+  { code: 'SALES_REVENUE', label: 'Sales & Refunds' },
+  { code: 'TDS_PAYABLE', label: 'TDS' },
+] as const;
 
 // ============================================
 // DISPLAY CONSTANTS (shared between client + server)
