@@ -12,7 +12,7 @@ import { z } from 'zod';
 
 export const FinanceSearchParams = z.object({
   /** Active tab */
-  tab: z.enum(['dashboard', 'invoices', 'payments', 'pnl', 'bank-import', 'parties', 'transaction-types']).catch('dashboard'),
+  tab: z.enum(['dashboard', 'invoices', 'payments', 'pnl', 'cashflow', 'bank-import', 'parties', 'transaction-types']).catch('dashboard'),
   /** Bank import: bank filter */
   bankFilter: z.enum(['all', 'hdfc', 'razorpayx', 'hdfc_cc', 'icici_cc']).optional().catch(undefined),
   /** Bank import: status filter (simplified) */
