@@ -159,6 +159,7 @@ export const PAYMENT_CATEGORY_FILTERS = [
   { code: 'packaging', label: 'Packaging' },
   { code: 'marketing', label: 'Marketing' },
   { code: 'rent', label: 'Rent' },
+  { code: 'salary', label: 'Salary & Payroll' },
   { code: 'software', label: 'Software' },
   { code: 'statutory', label: 'Statutory & Fees' },
   { code: 'refund', label: 'Customer Refunds' },
@@ -172,7 +173,7 @@ export const PAYMENT_CATEGORY_FILTERS = [
 
 export const PARTY_CATEGORIES = [
   'fabric', 'trims', 'service', 'rent', 'marketing',
-  'logistics', 'packaging', 'statutory', 'other',
+  'logistics', 'packaging', 'salary', 'statutory', 'software', 'other',
 ] as const;
 
 export type PartyCategory = (typeof PARTY_CATEGORIES)[number];
