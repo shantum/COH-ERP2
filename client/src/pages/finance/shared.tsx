@@ -1,9 +1,70 @@
 /**
- * Shared components and helpers for Finance tab components.
+ * Shared components, types, and helpers for Finance tab components.
  */
 
 import { Button } from '@/components/ui/button';
 import { ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
+
+// ============================================
+// SHARED TYPES (derived from server function return shapes)
+// ============================================
+
+/** Transaction type as returned by listTransactionTypes */
+export interface TxnTypeListItem {
+  id: string;
+  name: string;
+  description: string | null;
+  debitAccountCode: string | null;
+  creditAccountCode: string | null;
+  defaultGstRate: number | null;
+  defaultTdsApplicable: boolean;
+  defaultTdsSection: string | null;
+  defaultTdsRate: number | null;
+  invoiceRequired: boolean;
+  expenseCategory: string | null;
+  _count: { parties: number };
+}
+
+/** Transaction type with change history (from getTransactionType) */
+export interface TxnTypeDetail extends TxnTypeListItem {
+  changeLogs: Array<{
+    id: string;
+    fieldName: string;
+    oldValue: string | null;
+    newValue: string | null;
+    createdAt: Date | string;
+    changedBy: { name: string };
+  }>;
+}
+
+/** Party as returned by listFinanceParties */
+export interface PartyListItem {
+  id: string;
+  name: string;
+  category: string;
+  aliases: string[];
+  tdsApplicable: boolean;
+  tdsSection: string | null;
+  tdsRate: number | null;
+  invoiceRequired: boolean;
+  isActive: boolean;
+  contactName: string | null;
+  email: string | null;
+  phone: string | null;
+  gstin: string | null;
+  pan: string | null;
+  transactionTypeId: string | null;
+  transactionType: { id: string; name: string; expenseCategory: string | null } | null;
+}
+
+/** Party balance from getPartyBalances raw query */
+export interface PartyBalance {
+  id: string;
+  name: string;
+  total_invoiced: number;
+  total_paid: number;
+  outstanding: number;
+}
 
 export function formatCurrency(amount: number): string {
   return new Intl.NumberFormat('en-IN', {

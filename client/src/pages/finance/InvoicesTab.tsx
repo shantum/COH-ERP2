@@ -1,0 +1,1091 @@
+import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useServerFn } from '@tanstack/react-start';
+import { useNavigate } from '@tanstack/react-router';
+import { useDebounce } from '../../hooks/useDebounce';
+import {
+  listInvoices, confirmInvoice, cancelInvoice, createInvoice,
+  findUnmatchedPayments, searchCounterparties,
+} from '../../server/functions/finance';
+import { formatCurrency, formatPeriod, formatStatus, StatusBadge, Pagination, LoadingState } from './shared';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import {
+  Plus, ArrowUpRight, ArrowDownLeft, Check, X, Loader2, AlertCircle,
+  ExternalLink, CloudUpload, Link2, Download, Upload, AlertTriangle, Building2,
+} from 'lucide-react';
+import { showSuccess, showError } from '../../utils/toast';
+import {
+  type FinanceSearchParams,
+  INVOICE_CATEGORIES, INVOICE_STATUSES,
+  getCategoryLabel,
+} from '@coh/shared';
+
+export default function InvoicesTab({ search }: { search: FinanceSearchParams }) {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showUploadDialog, setShowUploadDialog] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [confirmingInvoice, setConfirmingInvoice] = useState<{
+    id: string; type: string; totalAmount: number;
+    party?: { id: string; name: string } | null;
+  } | null>(null);
+
+  const [searchInput, setSearchInput] = useState(search.search ?? '');
+  const debouncedSearch = useDebounce(searchInput, 300);
+  useEffect(() => {
+    if (debouncedSearch !== (search.search ?? '')) {
+      setSelectedIds(new Set());
+      navigate({ to: '/finance', search: { ...search, search: debouncedSearch || undefined, page: 1 }, replace: true });
+    }
+  }, [debouncedSearch]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const driveSyncMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch('/api/finance/drive/sync', { method: 'POST', credentials: 'include' });
+      if (!res.ok) throw new Error('Drive sync failed');
+      return res.json();
+    },
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ['finance'] });
+      showSuccess('Drive sync started', { description: `${result?.synced ?? 0} file(s) queued` });
+    },
+    onError: (err) => showError('Drive sync failed', { description: err.message }),
+  });
+
+  const listFn = useServerFn(listInvoices);
+  const { data, isLoading } = useQuery({
+    queryKey: ['finance', 'invoices', search.type, search.status, search.category, search.search, search.page],
+    queryFn: () =>
+      listFn({
+        data: {
+          ...(search.type ? { type: search.type } : {}),
+          ...(search.status ? { status: search.status } : {}),
+          ...(search.category ? { category: search.category } : {}),
+          ...(search.search ? { search: search.search } : {}),
+          page: search.page,
+          limit: search.limit,
+        },
+      }),
+  });
+
+  const confirmFn = useServerFn(confirmInvoice);
+  const cancelFn = useServerFn(cancelInvoice);
+
+  const confirmMutation = useMutation({
+    mutationFn: (params: { id: string; linkedPaymentId?: string }) => confirmFn({ data: params }),
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ['finance'] });
+      setConfirmingInvoice(null);
+      if (result?.success) showSuccess('Invoice confirmed');
+      else showError('Confirm failed', { description: (result as { error?: string })?.error });
+    },
+    onError: (err) => showError('Confirm failed', { description: err.message }),
+  });
+
+  const cancelMutation = useMutation({
+    mutationFn: (id: string) => cancelFn({ data: { id } }),
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ['finance'] });
+      if (result?.success) showSuccess('Invoice cancelled');
+      else showError('Cancel failed', { description: (result as { error?: string })?.error });
+    },
+    onError: (err) => showError('Cancel failed', { description: err.message }),
+  });
+
+  const updateSearch = useCallback(
+    (updates: Partial<FinanceSearchParams>) => {
+      setSelectedIds(new Set());
+      navigate({ to: '/finance', search: { ...search, ...updates }, replace: true });
+    },
+    [navigate, search]
+  );
+
+  const selectableInvoices = useMemo(
+    () =>
+      (data?.invoices ?? []).filter(
+        (inv) =>
+          inv.type === 'payable' &&
+          (inv.status === 'confirmed' || inv.status === 'partially_paid') &&
+          inv.balanceDue > 0
+      ),
+    [data?.invoices]
+  );
+
+  const allSelectableSelected =
+    selectableInvoices.length > 0 && selectableInvoices.every((inv) => selectedIds.has(inv.id));
+
+  const toggleSelectAll = useCallback(() => {
+    if (allSelectableSelected) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(selectableInvoices.map((inv) => inv.id)));
+    }
+  }, [allSelectableSelected, selectableInvoices]);
+
+  const toggleSelect = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const handleDownloadPayoutCsv = useCallback(() => {
+    if (selectedIds.size === 0 || !data?.invoices) return;
+    const selected = data.invoices.filter((inv) => selectedIds.has(inv.id));
+
+    const missingBank = selected.filter(
+      (inv) => !inv.party?.bankAccountNumber || !inv.party?.bankIfsc
+    );
+    const valid = selected.filter(
+      (inv) => inv.party?.bankAccountNumber && inv.party?.bankIfsc
+    );
+
+    if (missingBank.length > 0) {
+      const names = missingBank.map((inv) => inv.party?.name ?? 'Unknown').join(', ');
+      if (valid.length === 0) {
+        window.alert(`All selected invoices are missing bank details: ${names}`);
+        return;
+      }
+      if (!window.confirm(`${missingBank.length} invoice(s) missing bank details will be skipped: ${names}.\n\nContinue with the remaining ${valid.length}?`)) {
+        return;
+      }
+    }
+
+    const header = [
+      'Beneficiary Name (Mandatory) Special characters not supported',
+      "Beneficiary's Account Number (Mandatory) Typically 9-18 digits",
+      "IFSC Code (Mandatory) 11 digit code of the beneficiary\u2019s bank account. Eg. HDFC0004277",
+      'Payout Amount (Mandatory) Amount should be in rupees',
+      'Payout Mode (Mandatory) Select IMPS/NEFT/RTGS',
+      'Payout Narration (Optional) Will appear on bank statement (max 30 char with no special characters)',
+      'Notes (Optional) A note for internal reference',
+      'Phone Number (Optional)',
+      'Email ID (Optional)',
+      'Contact Reference ID (Optional) Eg: Employee ID or Customer ID',
+      'Payout Reference ID (Optional) Eg: Bill no or Invoice No or Pay ID',
+    ].join(',');
+
+    const csvEscape = (v: string) =>
+      v.includes(',') || v.includes('"') || v.includes('\n')
+        ? '"' + v.replace(/"/g, '""') + '"'
+        : v;
+    const sanitizeNarration = (text: string) =>
+      text.replace(/[^a-zA-Z0-9 ]/g, '').trim().slice(0, 30);
+
+    const rows = valid.map((inv) => {
+      const party = inv.party!;
+      const amount = Math.round(inv.balanceDue * 100) / 100;
+      const mode = amount >= 500000 ? 'NEFT' : 'IMPS';
+      const beneficiary = party.bankAccountName || party.name;
+      const narration = sanitizeNarration(party.name);
+      const notes = (inv.invoiceNumber || inv.id) + ' ' + inv.category;
+      const refId = inv.invoiceNumber || inv.id;
+
+      return [
+        csvEscape(beneficiary),
+        party.bankAccountNumber!,
+        party.bankIfsc!,
+        String(amount),
+        mode,
+        csvEscape(narration),
+        csvEscape(notes),
+        (party.phone || '').replace(/^\+91/, ''),
+        party.email || '',
+        party.id,
+        csvEscape(refId),
+      ].join(',');
+    });
+
+    const csv = [header, ...rows].join('\n') + '\n';
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `razorpayx-payout-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [selectedIds, data?.invoices]);
+
+  const handleConfirmClick = useCallback((inv: NonNullable<typeof data>['invoices'][number]) => {
+    if (inv.type === 'payable') {
+      setConfirmingInvoice({
+        id: inv.id,
+        type: inv.type,
+        totalAmount: inv.totalAmount,
+        party: inv.party,
+      });
+    } else {
+      confirmMutation.mutate({ id: inv.id });
+    }
+  }, [confirmMutation]);
+
+  return (
+    <div className="space-y-4">
+      {/* Filters */}
+      <div className="flex flex-wrap items-center gap-2">
+        <Select value={search.type ?? 'all'} onValueChange={(v) => updateSearch({ type: v === 'all' ? undefined : v as 'payable' | 'receivable', page: 1 })}>
+          <SelectTrigger className="w-[140px]"><SelectValue placeholder="Type" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Types</SelectItem>
+            <SelectItem value="payable">Payable</SelectItem>
+            <SelectItem value="receivable">Receivable</SelectItem>
+          </SelectContent>
+        </Select>
+
+        <Select value={search.status ?? 'all'} onValueChange={(v) => updateSearch({ status: v === 'all' ? undefined : v, page: 1 })}>
+          <SelectTrigger className="w-[160px]"><SelectValue placeholder="Status" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Statuses</SelectItem>
+            {INVOICE_STATUSES.map((s) => (
+              <SelectItem key={s} value={s}>{formatStatus(s)}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        <Select value={search.category ?? 'all'} onValueChange={(v) => updateSearch({ category: v === 'all' ? undefined : v, page: 1 })}>
+          <SelectTrigger className="w-[180px]"><SelectValue placeholder="Category" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Categories</SelectItem>
+            {INVOICE_CATEGORIES.map((c) => (
+              <SelectItem key={c} value={c}>{getCategoryLabel(c)}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        <Input
+          placeholder="Search invoices..."
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
+          className="w-[200px]"
+        />
+
+        <div className="ml-auto flex items-center gap-2">
+          {selectedIds.size > 0 && (
+            <Button variant="outline" onClick={handleDownloadPayoutCsv}>
+              <Download className="h-4 w-4 mr-1" /> Download Payout CSV ({selectedIds.size})
+            </Button>
+          )}
+          <Button
+            variant="outline"
+            onClick={() => driveSyncMutation.mutate()}
+            disabled={driveSyncMutation.isPending}
+            title="Upload pending files to Google Drive"
+          >
+            {driveSyncMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <CloudUpload className="h-4 w-4 mr-1" />}
+            Sync to Drive
+          </Button>
+          <Button variant="outline" onClick={() => setShowUploadDialog(true)}>
+            <Upload className="h-4 w-4 mr-1" /> Upload Invoice
+          </Button>
+          <Button onClick={() => setShowCreateModal(true)}>
+            <Plus className="h-4 w-4 mr-1" /> New Invoice
+          </Button>
+        </div>
+      </div>
+
+      {/* Table */}
+      {isLoading ? (
+        <LoadingState />
+      ) : (
+        <>
+          <div className="border rounded-lg overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/50">
+                <tr>
+                  <th className="p-3 w-10">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 rounded border-gray-300 accent-blue-600"
+                      checked={allSelectableSelected && selectableInvoices.length > 0}
+                      onChange={toggleSelectAll}
+                      disabled={selectableInvoices.length === 0}
+                    />
+                  </th>
+                  <th className="text-left p-3 font-medium">Invoice #</th>
+                  <th className="text-left p-3 font-medium">Type</th>
+                  <th className="text-left p-3 font-medium">Category</th>
+                  <th className="text-left p-3 font-medium">Counterparty</th>
+                  <th className="text-right p-3 font-medium">Total</th>
+                  <th className="text-right p-3 font-medium">Balance Due</th>
+                  <th className="text-left p-3 font-medium">Status</th>
+                  <th className="text-left p-3 font-medium">Date</th>
+                  <th className="text-right p-3 font-medium">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data?.invoices?.map((inv) => {
+                  const isSelectable =
+                    inv.type === 'payable' &&
+                    (inv.status === 'confirmed' || inv.status === 'partially_paid') &&
+                    inv.balanceDue > 0;
+                  return (
+                  <tr key={inv.id} className="border-t hover:bg-muted/30">
+                    <td className="p-3">
+                      {isSelectable ? (
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 rounded border-gray-300 accent-blue-600"
+                          checked={selectedIds.has(inv.id)}
+                          onChange={() => toggleSelect(inv.id)}
+                        />
+                      ) : (
+                        <span className="block h-4 w-4" />
+                      )}
+                    </td>
+                    <td className="p-3 font-mono text-xs">{inv.invoiceNumber ?? '—'}</td>
+                    <td className="p-3">
+                      <span className={`inline-flex items-center gap-1 text-xs ${inv.type === 'payable' ? 'text-red-600' : 'text-green-600'}`}>
+                        {inv.type === 'payable' ? <ArrowUpRight className="h-3 w-3" /> : <ArrowDownLeft className="h-3 w-3" />}
+                        {inv.type}
+                      </span>
+                    </td>
+                    <td className="p-3 text-xs">{getCategoryLabel(inv.category)}</td>
+                    <td className="p-3">
+                      {inv.party?.name ??
+                        (inv.customer ? [inv.customer.firstName, inv.customer.lastName].filter(Boolean).join(' ') || inv.customer.email : null) ??
+                        '—'}
+                    </td>
+                    <td className="p-3 text-right font-mono">{formatCurrency(inv.totalAmount)}</td>
+                    <td className="p-3 text-right">
+                      <span className="font-mono">{formatCurrency(inv.balanceDue)}</span>
+                      {inv.tdsAmount != null && inv.tdsAmount > 0 && (
+                        <span className="block text-[10px] text-muted-foreground">TDS: {formatCurrency(inv.tdsAmount)}</span>
+                      )}
+                    </td>
+                    <td className="p-3"><StatusBadge status={inv.status} /></td>
+                    <td className="p-3 text-xs text-muted-foreground">{inv.invoiceDate ? new Date(inv.invoiceDate).toLocaleDateString('en-IN') : '—'}</td>
+                    <td className="p-3 text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        {inv.driveUrl && (
+                          <a
+                            href={inv.driveUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title="Open in Google Drive"
+                            className="inline-flex items-center justify-center h-8 w-8 rounded-md hover:bg-muted"
+                          >
+                            <ExternalLink className="h-3.5 w-3.5 text-blue-600" />
+                          </a>
+                        )}
+                        {inv.status === 'draft' && (
+                          <>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => handleConfirmClick(inv)}
+                              disabled={confirmMutation.isPending}
+                              title="Confirm"
+                            >
+                              <Check className="h-3.5 w-3.5 text-green-600" />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => {
+                                if (window.confirm(`Cancel invoice ${inv.invoiceNumber || inv.id.slice(0, 8)}? This will unmatch any linked payments.`)) {
+                                  cancelMutation.mutate(inv.id);
+                                }
+                              }}
+                              disabled={cancelMutation.isPending}
+                              title="Cancel"
+                            >
+                              <X className="h-3.5 w-3.5 text-red-600" />
+                            </Button>
+                          </>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                  );
+                })}
+                {(!data?.invoices || data.invoices.length === 0) && (
+                  <tr><td colSpan={10} className="p-8 text-center text-muted-foreground">No invoices found</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          <Pagination page={search.page} total={data?.total ?? 0} limit={search.limit} onPageChange={(p) => updateSearch({ page: p })} />
+        </>
+      )}
+
+      <CreateInvoiceModal open={showCreateModal} onClose={() => setShowCreateModal(false)} />
+      <UploadInvoiceDialog
+        open={showUploadDialog}
+        onClose={() => setShowUploadDialog(false)}
+        onSuccess={() => queryClient.invalidateQueries({ queryKey: ['finance'] })}
+      />
+      {confirmingInvoice && (
+        <ConfirmPayableDialog
+          invoice={confirmingInvoice}
+          isPending={confirmMutation.isPending}
+          onConfirm={(linkedPaymentId) => confirmMutation.mutate({ id: confirmingInvoice.id, linkedPaymentId })}
+          onClose={() => setConfirmingInvoice(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ============================================
+// CONFIRM PAYABLE DIALOG
+// ============================================
+
+function ConfirmPayableDialog({ invoice, isPending, onConfirm, onClose }: {
+  invoice: { id: string; totalAmount: number; party?: { id: string; name: string } | null };
+  isPending: boolean;
+  onConfirm: (linkedPaymentId?: string) => void;
+  onClose: () => void;
+}) {
+  const [selectedPaymentId, setSelectedPaymentId] = useState<string | null>(null);
+  const findPaymentsFn = useServerFn(findUnmatchedPayments);
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['finance', 'unmatched-payments', invoice.party?.id ?? invoice.party?.name],
+    queryFn: () => findPaymentsFn({
+      data: {
+        ...(invoice.party?.id ? { partyId: invoice.party.id } : {}),
+        ...(invoice.party?.name ? { partyName: invoice.party.name } : {}),
+      },
+    }),
+  });
+
+  const payments = data?.success ? data.payments : [];
+
+  return (
+    <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Confirm Invoice</DialogTitle>
+          <DialogDescription>
+            {formatCurrency(invoice.totalAmount)} to {invoice.party?.name ?? 'vendor'}. Was this already paid?
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-3">
+          {isLoading ? (
+            <div className="flex items-center justify-center py-4 text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin mr-2" /> Finding matching payments...
+            </div>
+          ) : payments.length > 0 ? (
+            <div className="space-y-2">
+              <p className="text-sm text-muted-foreground">Found {payments.length} unmatched payment{payments.length !== 1 ? 's' : ''}:</p>
+              <div className="max-h-[240px] overflow-y-auto space-y-1.5">
+                {payments.map((pmt) => (
+                    <button
+                      key={pmt.id}
+                      type="button"
+                      className={`w-full text-left p-3 rounded-lg border text-sm transition-colors ${
+                        selectedPaymentId === pmt.id
+                          ? 'border-blue-500 bg-blue-50 dark:bg-blue-950'
+                          : 'hover:bg-muted/50'
+                      }`}
+                      onClick={() => setSelectedPaymentId(selectedPaymentId === pmt.id ? null : pmt.id)}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-medium">{formatCurrency(pmt.amount)}</span>
+                        <span className="text-xs text-muted-foreground">
+                          {new Date(pmt.paymentDate).toLocaleDateString('en-IN')}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between mt-1 text-xs text-muted-foreground">
+                        <span>{pmt.party?.name ?? '—'}</span>
+                        <span>{pmt.referenceNumber ?? formatStatus(pmt.method)}</span>
+                      </div>
+                      {pmt.debitAccountCode === 'UNMATCHED_PAYMENTS' && (
+                        <span className="inline-flex items-center mt-1 text-[10px] text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded">
+                          suspense — will be reclassified
+                        </span>
+                      )}
+                      {pmt.unmatchedAmount < pmt.amount && (
+                        <span className="text-[10px] text-muted-foreground mt-0.5 block">
+                          Unmatched: {formatCurrency(pmt.unmatchedAmount)}
+                        </span>
+                      )}
+                    </button>
+                  ))}
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground py-2">No unmatched payments found for this vendor.</p>
+          )}
+        </div>
+
+        <DialogFooter className="flex-col sm:flex-row gap-2">
+          <Button variant="outline" onClick={onClose} disabled={isPending}>Cancel</Button>
+          <Button
+            variant="outline"
+            onClick={() => onConfirm(undefined)}
+            disabled={isPending}
+          >
+            {isPending && !selectedPaymentId ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
+            Confirm (no link)
+          </Button>
+          {selectedPaymentId && (
+            <Button
+              onClick={() => onConfirm(selectedPaymentId)}
+              disabled={isPending}
+            >
+              {isPending ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Link2 className="h-4 w-4 mr-1" />}
+              Confirm + Link Payment
+            </Button>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ============================================
+// UPLOAD INVOICE DIALOG
+// ============================================
+
+interface InvoicePreview {
+  previewId: string;
+  parsed: {
+    invoiceNumber?: string | null;
+    invoiceDate?: string | null;
+    dueDate?: string | null;
+    billingPeriod?: string | null;
+    supplierName?: string | null;
+    supplierGstin?: string | null;
+    supplierPan?: string | null;
+    supplierAddress?: string | null;
+    supplierEmail?: string | null;
+    supplierPhone?: string | null;
+    supplierBankAccountNumber?: string | null;
+    supplierBankIfsc?: string | null;
+    supplierBankName?: string | null;
+    supplierBankAccountName?: string | null;
+    subtotal?: number | null;
+    gstAmount?: number | null;
+    totalAmount?: number | null;
+    lines?: Array<{
+      description?: string | null;
+      hsnCode?: string | null;
+      qty?: number | null;
+      unit?: string | null;
+      rate?: number | null;
+      amount?: number | null;
+      gstPercent?: number | null;
+      gstAmount?: number | null;
+    }>;
+    confidence?: number;
+  } | null;
+  partyMatch: { partyId: string; partyName: string; category: string } | null;
+  enrichmentPreview: {
+    willCreateNewParty: boolean;
+    newPartyName?: string;
+    fieldsWillBeAdded: string[];
+    bankMismatch: boolean;
+    bankMismatchDetails?: string;
+  };
+  aiConfidence: number;
+  fileName: string;
+}
+
+interface InvoiceConfirmResult {
+  invoiceNumber: string | null;
+  counterpartyName: string | null;
+  totalAmount: number;
+  aiConfidence: number;
+  enrichment?: {
+    fieldsAdded: string[];
+    bankMismatch: boolean;
+    bankMismatchDetails?: string;
+    partyCreated: boolean;
+    partyName?: string;
+  };
+}
+
+function UploadInvoiceDialog({ open, onClose, onSuccess }: {
+  open: boolean;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const [file, setFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [preview, setPreview] = useState<InvoicePreview | null>(null);
+  const [result, setResult] = useState<InvoiceConfirmResult | null>(null);
+
+  const handleUpload = async () => {
+    if (!file) return;
+    setUploading(true);
+    setError(null);
+    setPreview(null);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await fetch('/api/finance/upload-preview', { method: 'POST', credentials: 'include', body: formData });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Upload failed');
+      setPreview(json);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Upload failed');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleConfirm = async () => {
+    if (!preview) return;
+    setConfirming(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/finance/confirm-preview/${preview.previewId}`, { method: 'POST', credentials: 'include' });
+      const json = await res.json();
+      if (res.status === 410) { setError('Preview expired, please re-upload'); setPreview(null); return; }
+      if (!res.ok || !json.success) throw new Error(json.error || 'Save failed');
+      setResult({
+        invoiceNumber: json.invoice.invoiceNumber,
+        counterpartyName: json.invoice.party?.name ?? json.invoice.supplierName ?? null,
+        totalAmount: json.invoice.totalAmount,
+        aiConfidence: json.aiConfidence,
+        enrichment: json.enrichment,
+      });
+      onSuccess();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Save failed');
+    } finally {
+      setConfirming(false);
+    }
+  };
+
+  const handleClose = () => { setFile(null); setError(null); setPreview(null); setResult(null); onClose(); };
+
+  const p = preview?.parsed;
+  const lines = p?.lines ?? [];
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => { if (!o) handleClose(); }}>
+      <DialogContent className={preview && !result ? 'max-w-2xl' : 'max-w-md'}>
+        <DialogHeader>
+          <DialogTitle>{result ? 'Invoice Created' : preview ? 'Review Invoice' : 'Upload Invoice'}</DialogTitle>
+          <DialogDescription>
+            {result ? 'Draft saved successfully.' : preview ? 'Check the extracted details before saving.' : 'Upload a PDF or image and we will extract the details automatically.'}
+          </DialogDescription>
+        </DialogHeader>
+
+        {error && (
+          <div className="border border-red-300 bg-red-50 text-red-700 rounded-lg p-3 text-sm flex items-center gap-2">
+            <AlertCircle className="h-4 w-4 shrink-0" /> {error}
+          </div>
+        )}
+
+        {/* Step 3: Result */}
+        {result ? (
+          <div className="space-y-3">
+            <div className="border border-green-200 bg-green-50 rounded-lg p-4 space-y-2">
+              <p className="text-sm font-medium text-green-700">Draft invoice created</p>
+              <div className="text-sm space-y-1">
+                {result.invoiceNumber && <p><span className="text-muted-foreground">Invoice #:</span> {result.invoiceNumber}</p>}
+                {result.counterpartyName && <p><span className="text-muted-foreground">Supplier:</span> {result.counterpartyName}</p>}
+                <p><span className="text-muted-foreground">Total:</span> {formatCurrency(result.totalAmount)}</p>
+                <p><span className="text-muted-foreground">AI Confidence:</span> {Math.round(result.aiConfidence * 100)}%</p>
+              </div>
+            </div>
+            {result.enrichment?.partyCreated && (
+              <div className="border border-blue-200 bg-blue-50 rounded-lg p-3 text-sm text-blue-700">
+                New vendor created: <span className="font-medium">{result.enrichment.partyName}</span>
+              </div>
+            )}
+            {result.enrichment && result.enrichment.fieldsAdded.length > 0 && !result.enrichment.partyCreated && (
+              <div className="border border-blue-200 bg-blue-50 rounded-lg p-3 text-sm text-blue-700">
+                Updated vendor info: {result.enrichment.fieldsAdded.join(', ')}
+              </div>
+            )}
+            {result.enrichment?.bankMismatch && (
+              <div className="border border-amber-300 bg-amber-50 rounded-lg p-3 text-sm text-amber-700 flex items-start gap-2">
+                <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-medium">Bank details mismatch</p>
+                  <p className="text-xs mt-0.5">{result.enrichment.bankMismatchDetails}</p>
+                </div>
+              </div>
+            )}
+            <DialogFooter>
+              <Button onClick={handleClose}>Done</Button>
+            </DialogFooter>
+          </div>
+
+        /* Step 2: Preview */
+        ) : preview ? (
+          <div className="space-y-4 max-h-[70vh] overflow-y-auto">
+            <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm">
+              {p?.invoiceNumber && <div><span className="text-muted-foreground">Invoice #:</span> <span className="font-medium">{p.invoiceNumber}</span></div>}
+              {p?.invoiceDate && <div><span className="text-muted-foreground">Date:</span> {p.invoiceDate}</div>}
+              {p?.dueDate && <div><span className="text-muted-foreground">Due:</span> {p.dueDate}</div>}
+              {p?.billingPeriod && <div><span className="text-muted-foreground">Period:</span> {formatPeriod(p.billingPeriod)}</div>}
+            </div>
+
+            <div className="border rounded-lg p-3 space-y-2">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Supplier</p>
+              <div className="text-sm space-y-1">
+                {p?.supplierName && <p className="font-medium">{p.supplierName}</p>}
+                {p?.supplierGstin && <p className="text-xs text-muted-foreground">GSTIN: {p.supplierGstin}</p>}
+                {p?.supplierPan && <p className="text-xs text-muted-foreground">PAN: {p.supplierPan}</p>}
+                {p?.supplierAddress && <p className="text-xs text-muted-foreground">{p.supplierAddress}</p>}
+                {(p?.supplierEmail || p?.supplierPhone) && (
+                  <p className="text-xs text-muted-foreground">
+                    {[p.supplierEmail, p.supplierPhone].filter(Boolean).join(' | ')}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div>
+              {preview.partyMatch ? (
+                <span className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-green-100 text-green-700">
+                  <Check className="h-3 w-3" /> Matched: {preview.partyMatch.partyName}
+                </span>
+              ) : p?.supplierName ? (
+                <span className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-blue-100 text-blue-700">
+                  <Plus className="h-3 w-3" /> New vendor: {p.supplierName}
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-amber-100 text-amber-700">
+                  <AlertTriangle className="h-3 w-3" /> No supplier found
+                </span>
+              )}
+            </div>
+
+            {(p?.supplierBankAccountNumber || p?.supplierBankIfsc) && (
+              <div className="border rounded-lg p-3 space-y-1">
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Bank Details</p>
+                <div className="text-xs space-y-0.5">
+                  {p?.supplierBankAccountNumber && <p>A/C: {p.supplierBankAccountNumber}</p>}
+                  {p?.supplierBankIfsc && <p>IFSC: {p.supplierBankIfsc}</p>}
+                  {p?.supplierBankName && <p>Bank: {p.supplierBankName}</p>}
+                  {p?.supplierBankAccountName && <p>Name: {p.supplierBankAccountName}</p>}
+                </div>
+              </div>
+            )}
+
+            {preview.enrichmentPreview.fieldsWillBeAdded.length > 0 && !preview.enrichmentPreview.willCreateNewParty && (
+              <div className="border border-blue-200 bg-blue-50 rounded-lg p-2.5 text-xs text-blue-700">
+                Will add: {preview.enrichmentPreview.fieldsWillBeAdded.join(', ')}
+              </div>
+            )}
+            {preview.enrichmentPreview.bankMismatch && (
+              <div className="border border-amber-300 bg-amber-50 rounded-lg p-2.5 text-xs text-amber-700 flex items-start gap-2">
+                <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-medium">Bank details mismatch</p>
+                  <p className="mt-0.5">{preview.enrichmentPreview.bankMismatchDetails}</p>
+                </div>
+              </div>
+            )}
+
+            {lines.length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5">Line Items</p>
+                <div className="border rounded overflow-hidden">
+                  <table className="w-full text-xs">
+                    <thead className="bg-muted/50">
+                      <tr>
+                        <th className="text-left p-1.5 font-medium">Description</th>
+                        <th className="text-left p-1.5 font-medium w-16">HSN</th>
+                        <th className="text-right p-1.5 font-medium w-12">Qty</th>
+                        <th className="text-right p-1.5 font-medium w-16">Rate</th>
+                        <th className="text-right p-1.5 font-medium w-20">Amount</th>
+                        <th className="text-right p-1.5 font-medium w-14">GST%</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {lines.map((line, i) => (
+                        <tr key={i} className="border-t">
+                          <td className="p-1.5 max-w-[200px] truncate" title={line.description ?? ''}>{line.description ?? '—'}</td>
+                          <td className="p-1.5">{line.hsnCode ?? '—'}</td>
+                          <td className="p-1.5 text-right">{line.qty != null ? `${line.qty}${line.unit ? ` ${line.unit}` : ''}` : '—'}</td>
+                          <td className="p-1.5 text-right font-mono">{line.rate != null ? formatCurrency(line.rate) : '—'}</td>
+                          <td className="p-1.5 text-right font-mono">{line.amount != null ? formatCurrency(line.amount) : '—'}</td>
+                          <td className="p-1.5 text-right">{line.gstPercent != null ? `${line.gstPercent}%` : '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            <div className="flex justify-end">
+              <div className="text-sm space-y-0.5 text-right">
+                {p?.subtotal != null && <p><span className="text-muted-foreground">Subtotal:</span> <span className="font-mono">{formatCurrency(p.subtotal)}</span></p>}
+                {p?.gstAmount != null && <p><span className="text-muted-foreground">GST:</span> <span className="font-mono">{formatCurrency(p.gstAmount)}</span></p>}
+                {p?.totalAmount != null && <p className="font-medium"><span className="text-muted-foreground">Total:</span> <span className="font-mono">{formatCurrency(p.totalAmount)}</span></p>}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <div className={`w-2 h-2 rounded-full ${preview.aiConfidence >= 0.8 ? 'bg-green-500' : preview.aiConfidence >= 0.5 ? 'bg-amber-500' : 'bg-red-500'}`} />
+              AI confidence: {Math.round(preview.aiConfidence * 100)}%
+            </div>
+
+            <DialogFooter>
+              <Button variant="outline" onClick={handleClose}>Cancel</Button>
+              <Button onClick={handleConfirm} disabled={confirming}>
+                {confirming ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Check className="h-4 w-4 mr-1" />}
+                {confirming ? 'Saving...' : 'Create Draft'}
+              </Button>
+            </DialogFooter>
+          </div>
+
+        /* Step 1: Upload */
+        ) : (
+          <div className="space-y-4">
+            <label className="block border-2 border-dashed rounded-lg p-6 text-center cursor-pointer hover:bg-muted/30 transition-colors">
+              <input
+                type="file"
+                accept=".pdf,.jpg,.jpeg,.png,.webp"
+                className="hidden"
+                onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              />
+              {file ? (
+                <span className="text-sm">{file.name} ({(file.size / 1024).toFixed(0)} KB)</span>
+              ) : (
+                <div className="space-y-1">
+                  <Upload className="h-8 w-8 mx-auto text-muted-foreground" />
+                  <p className="text-sm text-muted-foreground">Click to select a file</p>
+                  <p className="text-xs text-muted-foreground">PDF, JPEG, PNG, or WebP</p>
+                </div>
+              )}
+            </label>
+
+            <DialogFooter>
+              <Button variant="outline" onClick={handleClose}>Cancel</Button>
+              <Button onClick={handleUpload} disabled={!file || uploading}>
+                {uploading ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Upload className="h-4 w-4 mr-1" />}
+                {uploading ? 'Parsing...' : 'Upload'}
+              </Button>
+            </DialogFooter>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ============================================
+// CREATE INVOICE MODAL
+// ============================================
+
+function CreateInvoiceModal({ open, onClose, prefill }: {
+  open: boolean;
+  onClose: () => void;
+  prefill?: { type: 'payable' | 'receivable'; totalAmount: number; partyId?: string };
+}) {
+  const queryClient = useQueryClient();
+  const createFn = useServerFn(createInvoice);
+  const searchFn = useServerFn(searchCounterparties);
+
+  const [form, setForm] = useState({
+    type: 'payable' as 'payable' | 'receivable',
+    category: 'other' as string,
+    invoiceNumber: '',
+    totalAmount: '',
+    gstAmount: '',
+    invoiceDate: new Date().toISOString().split('T')[0],
+    billingPeriod: '',
+    notes: '',
+    partyId: undefined as string | undefined,
+  });
+
+  const [partyQuery, setPartyQuery] = useState('');
+  const [partyOpen, setPartyOpen] = useState(false);
+  const [selectedParty, setSelectedParty] = useState<{ id: string; name: string } | null>(null);
+
+  const { data: partyResults } = useQuery({
+    queryKey: ['finance', 'party-search', partyQuery],
+    queryFn: () => searchFn({ data: { query: partyQuery, type: 'party' } }),
+    enabled: partyQuery.length >= 2,
+  });
+  const parties = partyResults?.success ? partyResults.results : [];
+
+  const prevPrefillRef = useRef<typeof prefill>(undefined);
+  if (prefill && prefill !== prevPrefillRef.current) {
+    prevPrefillRef.current = prefill;
+    setForm({
+      type: prefill.type,
+      category: 'other',
+      invoiceNumber: '',
+      totalAmount: String(prefill.totalAmount),
+      gstAmount: '',
+      invoiceDate: new Date().toISOString().split('T')[0],
+      billingPeriod: '',
+      notes: '',
+      partyId: prefill.partyId,
+    });
+  }
+
+  const mutation = useMutation({
+    mutationFn: () =>
+      createFn({
+        data: {
+          type: form.type,
+          category: form.category,
+          ...(form.invoiceNumber ? { invoiceNumber: form.invoiceNumber } : {}),
+          totalAmount: Number(form.totalAmount),
+          ...(form.gstAmount ? { gstAmount: Number(form.gstAmount) } : {}),
+          ...(form.invoiceDate ? { invoiceDate: form.invoiceDate } : {}),
+          ...(form.billingPeriod ? { billingPeriod: form.billingPeriod } : {}),
+          ...(form.notes ? { notes: form.notes } : {}),
+          ...(form.partyId ? { partyId: form.partyId } : {}),
+        },
+      }),
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ['finance'] });
+      if (result?.success) {
+        showSuccess('Invoice created');
+        onClose();
+        resetForm();
+      } else {
+        showError('Failed to create invoice', { description: (result as { error?: string })?.error });
+      }
+    },
+    onError: (err) => showError('Failed to create invoice', { description: err.message }),
+  });
+
+  const resetForm = () => {
+    prevPrefillRef.current = undefined;
+    setForm({
+      type: 'payable',
+      category: 'other',
+      invoiceNumber: '',
+      totalAmount: '',
+      gstAmount: '',
+      invoiceDate: new Date().toISOString().split('T')[0],
+      billingPeriod: '',
+      notes: '',
+      partyId: undefined,
+    });
+    setSelectedParty(null);
+    setPartyQuery('');
+  };
+
+  const handlePartySelect = (party: { id: string; name: string; category?: string }) => {
+    setSelectedParty(party);
+    setForm((prev) => ({
+      ...prev,
+      partyId: party.id,
+      ...(party.category && prev.category === 'other' ? { category: party.category } : {}),
+    }));
+    setPartyOpen(false);
+    setPartyQuery('');
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>New Invoice</DialogTitle>
+          <DialogDescription>Create a draft invoice. Confirm it later to book the expense.</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label>Type</Label>
+              <Select value={form.type} onValueChange={(v) => setForm({ ...form, type: v as 'payable' | 'receivable' })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="payable">Payable (we owe)</SelectItem>
+                  <SelectItem value="receivable">Receivable (owed to us)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Category</Label>
+              <Select value={form.category} onValueChange={(v) => setForm({ ...form, category: v })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {INVOICE_CATEGORIES.map((c) => (
+                    <SelectItem key={c} value={c}>{getCategoryLabel(c)}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div className="relative">
+            <Label>Party / Vendor</Label>
+            {selectedParty ? (
+              <div className="flex items-center gap-2 mt-1 p-2 border rounded-md bg-muted/30">
+                <Building2 className="h-4 w-4 text-muted-foreground shrink-0" />
+                <span className="text-sm font-medium flex-1">{selectedParty.name}</span>
+                <button type="button" className="text-muted-foreground hover:text-red-500" onClick={() => { setSelectedParty(null); setForm((f) => ({ ...f, partyId: undefined })); }}>
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ) : (
+              <>
+                <Input
+                  value={partyQuery}
+                  onChange={(e) => { setPartyQuery(e.target.value); setPartyOpen(true); }}
+                  placeholder="Search vendor..."
+                  className="mt-1"
+                  onFocus={() => { if (partyQuery.length >= 2) setPartyOpen(true); }}
+                  onBlur={() => setTimeout(() => setPartyOpen(false), 200)}
+                />
+                {partyOpen && partyQuery.length >= 2 && parties.length > 0 && (
+                  <div className="absolute z-20 left-0 right-0 mt-1 bg-popover border rounded-md shadow-lg max-h-[180px] overflow-y-auto">
+                    {parties.map((p) => (
+                      <button key={p.id} type="button" className="block w-full text-left px-3 py-2 text-sm hover:bg-muted/50" onMouseDown={() => handlePartySelect(p)}>
+                        {p.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+          <div>
+            <Label>Invoice Number</Label>
+            <Input value={form.invoiceNumber} onChange={(e) => setForm({ ...form, invoiceNumber: e.target.value })} placeholder="Optional" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label>Total Amount</Label>
+              <Input type="number" value={form.totalAmount} onChange={(e) => setForm({ ...form, totalAmount: e.target.value })} placeholder="0.00" />
+            </div>
+            <div>
+              <Label>GST Amount</Label>
+              <Input type="number" value={form.gstAmount} onChange={(e) => setForm({ ...form, gstAmount: e.target.value })} placeholder="0.00" />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label>Invoice Date</Label>
+              <Input type="date" value={form.invoiceDate} onChange={(e) => setForm({ ...form, invoiceDate: e.target.value })} />
+            </div>
+            <div>
+              <Label>Billing Period</Label>
+              <Input type="month" value={form.billingPeriod} onChange={(e) => setForm({ ...form, billingPeriod: e.target.value })} placeholder="Optional" />
+            </div>
+          </div>
+          <div>
+            <Label>Notes</Label>
+            <Textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} rows={2} />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button
+            onClick={() => mutation.mutate()}
+            disabled={!form.totalAmount || Number(form.totalAmount) <= 0 || mutation.isPending}
+          >
+            {mutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
+            Create Draft
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
