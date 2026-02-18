@@ -39,6 +39,7 @@ export type BankTransaction = {
     reference: string | null;
     utr: string | null;
     closingBalance: number | null;
+    period: string | null;
     counterpartyName: string | null;
     debitAccountCode: string | null;
     creditAccountCode: string | null;
@@ -748,6 +749,7 @@ export type Payment = {
     driveUploadedAt: Timestamp | null;
     ledgerEntryId: string | null;
     debitAccountCode: string | null;
+    period: string | null;
     notes: string | null;
     createdById: string;
     createdAt: Generated<Timestamp>;

@@ -16,6 +16,12 @@ type JsonValue = Prisma.InputJsonValue;
 
 const prisma = new PrismaClient();
 
+/** Convert a Date to IST "YYYY-MM" period string. */
+function dateToPeriod(date: Date): string {
+  const ist = new Date(date.getTime() + (5.5 * 60 * 60 * 1000));
+  return `${ist.getUTCFullYear()}-${String(ist.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
 // ============================================
 // TYPES
 // ============================================
@@ -339,6 +345,7 @@ export async function importHdfcStatement(filePath: string): Promise<ImportResul
       narration: r.narration,
       reference: r.reference,
       closingBalance: r.closingBalance,
+      period: dateToPeriod(r.txnDate),
       legacySourceId: r.legacySourceId,
       batchId,
       status: 'imported',
@@ -427,6 +434,7 @@ export async function importRazorpayxPayouts(filePath: string): Promise<ImportRe
       reference: r.reference,
       utr: r.utr,
       counterpartyName: r.counterpartyName,
+      period: dateToPeriod(r.txnDate),
       legacySourceId: r.legacySourceId,
       batchId,
       status: 'imported',
@@ -514,6 +522,7 @@ export async function importRazorpayxStatement(filePath: string): Promise<Import
       direction: 'debit' as const,
       narration: 'Bank charges (RazorpayX)',
       reference: txnId,
+      period: dateToPeriod(txnDate),
       legacySourceId: txnId,
       batchId,
       status: 'imported',
@@ -632,16 +641,18 @@ export async function importCcCharges(): Promise<ImportResult> {
     totalDebits += txn.amount;
     const legacySourceId = makeCcSourceId(txn, idx);
 
+    const txnDate = new Date(txn.date + 'T00:00:00+05:30');
     return {
       id: randomUUID(),
       bank,
       txnHash,
       rawData: txn as unknown as JsonValue,
-      txnDate: new Date(txn.date + 'T00:00:00+05:30'),
+      txnDate,
       amount: txn.amount,
       direction: 'debit' as const,
       narration: txn.description,
       reference: txn.source,
+      period: dateToPeriod(txnDate),
       legacySourceId,
       batchId,
       status: 'imported',

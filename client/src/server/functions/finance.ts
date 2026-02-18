@@ -759,6 +759,7 @@ export const listPayments = createServerFn({ method: 'POST' })
           matchedAmount: true,
           unmatchedAmount: true,
           paymentDate: true,
+          period: true,
           debitAccountCode: true,
           driveUrl: true,
           fileName: true,
@@ -818,6 +819,7 @@ export const createFinancePayment = createServerFn({ method: 'POST' })
     const userId = context.user.id;
     const debitAccountCode = data.direction === 'outgoing' ? 'ACCOUNTS_PAYABLE' : 'BANK_HDFC';
 
+    const paymentDate = new Date(data.paymentDate);
     const payment = await prisma.payment.create({
       data: {
         referenceNumber: data.referenceNumber ?? null,
@@ -826,7 +828,8 @@ export const createFinancePayment = createServerFn({ method: 'POST' })
         status: 'confirmed',
         amount: data.amount,
         unmatchedAmount: data.amount,
-        paymentDate: new Date(data.paymentDate),
+        paymentDate,
+        period: dateToPeriod(paymentDate),
         ...(data.partyId ? { partyId: data.partyId } : {}),
         ...(data.customerId ? { customerId: data.customerId } : {}),
         debitAccountCode,
@@ -1249,7 +1252,7 @@ export const getMonthlyCashFlow = createServerFn({ method: 'GET' })
       cnt: number;
       total: number;
     }>>`
-      SELECT TO_CHAR(bt."txnDate" AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM') AS period,
+      SELECT COALESCE(bt.period, TO_CHAR(bt."txnDate" AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM')) AS period,
              bt.direction,
              CASE WHEN bt.direction = 'credit' THEN bt."creditAccountCode"
                   ELSE bt."debitAccountCode" END AS account,
@@ -1386,15 +1389,18 @@ export const getCashFlowDetail = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     const prisma = await getPrisma();
 
+    // Build where — use stored period column (falls back to date range for any un-backfilled rows)
     const periodStart = new Date(`${data.period}-01T00:00:00+05:30`);
     const periodEnd = new Date(periodStart);
     periodEnd.setMonth(periodEnd.getMonth() + 1);
 
-    // Build where — account code filter + inter-bank exclusion must not clobber each other
     const where: Record<string, unknown> = {
       status: { in: ['posted', 'legacy_posted'] },
       direction: data.direction,
-      txnDate: { gte: periodStart, lt: periodEnd },
+      OR: [
+        { period: data.period },
+        { period: null, txnDate: { gte: periodStart, lt: periodEnd } },
+      ],
     };
 
     // Handle OPEX_* composite codes (e.g. OPEX_MARKETING → account=OPERATING_EXPENSES, category=marketing)
@@ -1675,6 +1681,7 @@ export const listBankTransactions = createServerFn({ method: 'POST' })
           status: true,
           skipReason: true,
           category: true,
+          period: true,
           partyId: true,
           party: { select: { id: true, name: true } },
           batchId: true,

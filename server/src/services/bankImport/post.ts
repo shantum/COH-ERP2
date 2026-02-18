@@ -10,6 +10,12 @@ import { generatePaymentNarration } from '@coh/shared';
 
 const prisma = new PrismaClient();
 
+/** Convert a Date to IST "YYYY-MM" period string. */
+function dateToPeriod(date: Date): string {
+  const ist = new Date(date.getTime() + (5.5 * 60 * 60 * 1000));
+  return `${ist.getUTCFullYear()}-${String(ist.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
 // ============================================
 // TYPES
 // ============================================
@@ -214,6 +220,7 @@ export async function confirmSingleTransaction(txnId: string): Promise<ConfirmRe
               amount: txn.amount,
               unmatchedAmount: txn.amount,
               paymentDate: entryDate,
+              period: dateToPeriod(entryDate),
               referenceNumber: ref,
               debitAccountCode: decision.intendedDebitAccount ?? decision.debitAccount,
               createdById: admin.id,
@@ -352,6 +359,7 @@ export async function postTransactions(options?: { bank?: string }): Promise<Pos
                   amount: txn.amount,
                   unmatchedAmount: txn.amount,
                   paymentDate: entryDate,
+                  period: dateToPeriod(entryDate),
                   referenceNumber: ref,
                   debitAccountCode: decision.intendedDebitAccount ?? decision.debitAccount,
                   createdById: admin.id,
