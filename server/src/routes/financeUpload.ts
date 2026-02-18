@@ -21,6 +21,8 @@ import { findPartyByNarration } from '../services/transactionTypeResolver.js';
 import { randomUUID } from 'crypto';
 import * as previewCache from '../services/invoicePreviewCache.js';
 import type { EnrichmentPreview } from '../services/invoicePreviewCache.js';
+import { computeFileHash, checkExactDuplicate, checkNearDuplicates } from '../services/invoiceDuplicateCheck.js';
+import type { DuplicateResult, NearDuplicate } from '../services/invoiceDuplicateCheck.js';
 
 // ============================================
 // PARTY ENRICHMENT
@@ -245,6 +247,14 @@ router.post('/upload', requireAdmin, upload.single('file'), asyncHandler(async (
 
   const { buffer, originalname, mimetype, size } = req.file;
 
+  // Duplicate check: file hash
+  const fileHash = computeFileHash(buffer);
+  const duplicate = await checkExactDuplicate(req.prisma as any, fileHash);
+  if (duplicate) {
+    res.status(409).json({ duplicate: true, ...duplicate });
+    return;
+  }
+
   log.info({ fileName: originalname, mimeType: mimetype, size, invoiceId }, 'Finance file upload received');
 
   // Attach file to invoice
@@ -255,6 +265,7 @@ router.post('/upload', requireAdmin, upload.single('file'), asyncHandler(async (
       fileName: originalname,
       fileMimeType: mimetype,
       fileSizeBytes: size,
+      fileHash,
     },
     select: { id: true, fileName: true, fileSizeBytes: true },
   });
@@ -286,6 +297,14 @@ router.post('/upload-and-parse', requireAdmin, upload.single('file'), asyncHandl
 
   const { buffer, originalname, mimetype, size } = req.file;
   log.info({ fileName: originalname, mimeType: mimetype, size }, 'Upload-and-parse invoice received');
+
+  // 0. File hash duplicate check
+  const fileHash = computeFileHash(buffer);
+  const hashDuplicate = await checkExactDuplicate(req.prisma as any, fileHash);
+  if (hashDuplicate) {
+    res.status(409).json({ duplicate: true, ...hashDuplicate });
+    return;
+  }
 
   // 1. Parse with AI
   let parsed;
@@ -347,6 +366,15 @@ router.post('/upload-and-parse', requireAdmin, upload.single('file'), asyncHandl
   const invoiceDate = parsed ? parseIndianDate(parsed.invoiceDate) : null;
   const dueDate = parsed ? parseIndianDate(parsed.dueDate) : null;
 
+  // 3b. Invoice number + party duplicate check
+  if (parsed?.invoiceNumber && partyId) {
+    const numberDuplicate = await checkExactDuplicate(req.prisma as any, '', partyId, parsed.invoiceNumber);
+    if (numberDuplicate) {
+      res.status(409).json({ duplicate: true, ...numberDuplicate });
+      return;
+    }
+  }
+
   // 4. Derive billingPeriod
   let billingPeriod = parsed?.billingPeriod ?? null;
   if (!billingPeriod && invoiceDate) {
@@ -371,6 +399,7 @@ router.post('/upload-and-parse', requireAdmin, upload.single('file'), asyncHandl
       balanceDue: parsed?.totalAmount ?? 0,
       ...(partyId ? { partyId } : {}),
       fileData: buffer,
+      fileHash,
       fileName: originalname,
       fileMimeType: mimetype,
       fileSizeBytes: size,
@@ -551,6 +580,14 @@ router.post('/upload-preview', requireAdmin, upload.single('file'), asyncHandler
   const { buffer, originalname, mimetype, size } = req.file;
   log.info({ fileName: originalname, mimeType: mimetype, size }, 'Upload-preview received');
 
+  // 0. File hash duplicate check (before expensive AI parse)
+  const fileHash = computeFileHash(buffer);
+  const hashDuplicate = await checkExactDuplicate(req.prisma as any, fileHash);
+  if (hashDuplicate) {
+    res.status(409).json({ duplicate: true, ...hashDuplicate });
+    return;
+  }
+
   // 1. Parse with AI
   let parsed: ParsedInvoice | null = null;
   let rawResponse = '';
@@ -587,15 +624,33 @@ router.post('/upload-preview', requireAdmin, upload.single('file'), asyncHandler
     }
   }
 
-  // 3. Preview enrichment (read-only)
+  // 3. Invoice number + party duplicate check (after AI parse)
+  if (parsed?.invoiceNumber && partyMatch?.partyId) {
+    const numberDuplicate = await checkExactDuplicate(
+      req.prisma as any, '', partyMatch.partyId, parsed.invoiceNumber,
+    );
+    if (numberDuplicate) {
+      res.status(409).json({ duplicate: true, ...numberDuplicate });
+      return;
+    }
+  }
+
+  // 4. Near-duplicate check (soft warning)
+  const invoiceDate = parsed ? parseIndianDate(parsed.invoiceDate) : null;
+  const nearDuplicates = await checkNearDuplicates(
+    req.prisma as any, partyMatch?.partyId, parsed?.totalAmount, invoiceDate,
+  );
+
+  // 5. Preview enrichment (read-only)
   const enrichmentPreview = parsed
     ? await previewEnrichment(req.prisma, partyMatch?.partyId, parsed)
     : { willCreateNewParty: false, fieldsWillBeAdded: [] as string[], bankMismatch: false };
 
-  // 4. Cache for later confirm
+  // 6. Cache for later confirm
   const previewId = randomUUID();
   previewCache.set(previewId, {
     fileBuffer: buffer,
+    fileHash,
     originalname,
     mimetype,
     size,
@@ -608,12 +663,13 @@ router.post('/upload-preview', requireAdmin, upload.single('file'), asyncHandler
     createdAt: Date.now(),
   });
 
-  // 5. Return preview data (no lines field — add parsed lines for display)
+  // 7. Return preview data
   res.json({
     previewId,
     parsed,
     partyMatch,
     enrichmentPreview,
+    nearDuplicates,
     aiConfidence,
     aiModel,
     fileName: originalname,
@@ -639,7 +695,17 @@ router.post('/confirm-preview/:previewId', requireAdmin, asyncHandler(async (req
     return;
   }
 
-  const { fileBuffer: buffer, originalname, mimetype, size, parsed, rawResponse, aiModel, aiConfidence, partyMatch } = cached;
+  const { fileBuffer: buffer, fileHash, originalname, mimetype, size, parsed, rawResponse, aiModel, aiConfidence, partyMatch } = cached;
+
+  // Re-check for duplicates (race condition guard — someone may have uploaded between preview and confirm)
+  if (fileHash) {
+    const duplicate = await checkExactDuplicate(req.prisma as any, fileHash, partyMatch?.partyId, parsed?.invoiceNumber);
+    if (duplicate) {
+      previewCache.remove(previewId as string);
+      res.status(409).json({ duplicate: true, ...duplicate });
+      return;
+    }
+  }
 
   // Re-fetch parties for enrichment (data may have changed since preview)
   let partyId = partyMatch?.partyId;
@@ -700,6 +766,7 @@ router.post('/confirm-preview/:previewId', requireAdmin, asyncHandler(async (req
       balanceDue: parsed?.totalAmount ?? 0,
       ...(partyId ? { partyId } : {}),
       fileData: buffer,
+      fileHash: fileHash ?? undefined,
       fileName: originalname,
       fileMimeType: mimetype,
       fileSizeBytes: size,

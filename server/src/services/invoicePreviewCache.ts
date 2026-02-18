@@ -10,6 +10,7 @@ import type { ParsedInvoice } from './invoiceParser.js';
 
 export interface CachedPreview {
   fileBuffer: Buffer;
+  fileHash: string;
   originalname: string;
   mimetype: string;
   size: number;

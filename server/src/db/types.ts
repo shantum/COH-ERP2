@@ -504,6 +504,7 @@ export type Invoice = {
     fileName: string | null;
     fileMimeType: string | null;
     fileSizeBytes: number | null;
+    fileHash: string | null;
     aiRawResponse: unknown | null;
     aiModel: string | null;
     aiConfidence: number | null;

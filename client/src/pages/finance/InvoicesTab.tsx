@@ -548,8 +548,25 @@ function ConfirmPayableDialog({ invoice, isPending, onConfirm, onClose }: {
 // UPLOAD INVOICE DIALOG
 // ============================================
 
+interface DuplicateInfo {
+  reason: 'file_hash' | 'invoice_number';
+  existingInvoiceId: string;
+  existingInvoiceNumber: string | null;
+  partyName: string | null;
+  fileName: string | null;
+}
+
+interface NearDuplicate {
+  invoiceId: string;
+  invoiceNumber: string | null;
+  totalAmount: number;
+  invoiceDate: string | null;
+  partyName: string | null;
+}
+
 interface InvoicePreview {
   previewId: string;
+  nearDuplicates?: NearDuplicate[];
   parsed: {
     invoiceNumber?: string | null;
     invoiceDate?: string | null;
@@ -615,6 +632,7 @@ function UploadInvoiceDialog({ open, onClose, onSuccess }: {
   const [uploading, setUploading] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [duplicate, setDuplicate] = useState<DuplicateInfo | null>(null);
   const [preview, setPreview] = useState<InvoicePreview | null>(null);
   const [result, setResult] = useState<InvoiceConfirmResult | null>(null);
 
@@ -623,11 +641,16 @@ function UploadInvoiceDialog({ open, onClose, onSuccess }: {
     setUploading(true);
     setError(null);
     setPreview(null);
+    setDuplicate(null);
     try {
       const formData = new FormData();
       formData.append('file', file);
       const res = await fetch('/api/finance/upload-preview', { method: 'POST', credentials: 'include', body: formData });
       const json = await res.json();
+      if (res.status === 409 && json.duplicate) {
+        setDuplicate(json);
+        return;
+      }
       if (!res.ok) throw new Error(json.error || 'Upload failed');
       setPreview(json);
     } catch (err) {
@@ -645,6 +668,7 @@ function UploadInvoiceDialog({ open, onClose, onSuccess }: {
       const res = await fetch(`/api/finance/confirm-preview/${preview.previewId}`, { method: 'POST', credentials: 'include' });
       const json = await res.json();
       if (res.status === 410) { setError('Preview expired, please re-upload'); setPreview(null); return; }
+      if (res.status === 409 && json.duplicate) { setPreview(null); setDuplicate(json); return; }
       if (!res.ok || !json.success) throw new Error(json.error || 'Save failed');
       setResult({
         invoiceNumber: json.invoice.invoiceNumber,
@@ -661,7 +685,7 @@ function UploadInvoiceDialog({ open, onClose, onSuccess }: {
     }
   };
 
-  const handleClose = () => { setFile(null); setError(null); setPreview(null); setResult(null); onClose(); };
+  const handleClose = () => { setFile(null); setError(null); setDuplicate(null); setPreview(null); setResult(null); onClose(); };
 
   const p = preview?.parsed;
   const lines = p?.lines ?? [];
@@ -670,9 +694,9 @@ function UploadInvoiceDialog({ open, onClose, onSuccess }: {
     <Dialog open={open} onOpenChange={(o) => { if (!o) handleClose(); }}>
       <DialogContent className={preview && !result ? 'max-w-2xl' : 'max-w-md'}>
         <DialogHeader>
-          <DialogTitle>{result ? 'Invoice Created' : preview ? 'Review Invoice' : 'Upload Invoice'}</DialogTitle>
+          <DialogTitle>{duplicate ? 'Duplicate Detected' : result ? 'Invoice Created' : preview ? 'Review Invoice' : 'Upload Invoice'}</DialogTitle>
           <DialogDescription>
-            {result ? 'Draft saved successfully.' : preview ? 'Check the extracted details before saving.' : 'Upload a PDF or image and we will extract the details automatically.'}
+            {duplicate ? 'This invoice already exists in the system.' : result ? 'Draft saved successfully.' : preview ? 'Check the extracted details before saving.' : 'Upload a PDF or image and we will extract the details automatically.'}
           </DialogDescription>
         </DialogHeader>
 
@@ -682,8 +706,37 @@ function UploadInvoiceDialog({ open, onClose, onSuccess }: {
           </div>
         )}
 
+        {/* Duplicate block */}
+        {duplicate && (
+          <div className="space-y-3">
+            <div className="border border-red-300 bg-red-50 rounded-lg p-4 space-y-2">
+              <div className="flex items-start gap-2 text-red-700">
+                <AlertCircle className="h-5 w-5 shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-medium">Duplicate invoice detected</p>
+                  <p className="text-sm mt-1">
+                    {duplicate.reason === 'file_hash'
+                      ? 'This exact file has already been uploaded.'
+                      : `Invoice #${duplicate.existingInvoiceNumber} from ${duplicate.partyName ?? 'this vendor'} already exists.`}
+                  </p>
+                  {duplicate.existingInvoiceNumber && (
+                    <p className="text-xs mt-2 text-red-600">
+                      Existing: Invoice #{duplicate.existingInvoiceNumber}
+                      {duplicate.partyName ? ` — ${duplicate.partyName}` : ''}
+                      {duplicate.fileName ? ` (${duplicate.fileName})` : ''}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={handleClose}>Close</Button>
+            </DialogFooter>
+          </div>
+        )}
+
         {/* Step 3: Result */}
-        {result ? (
+        {duplicate ? null : result ? (
           <div className="space-y-3">
             <div className="border border-green-200 bg-green-50 rounded-lg p-4 space-y-2">
               <p className="text-sm font-medium text-green-700">Draft invoice created</p>
@@ -830,6 +883,26 @@ function UploadInvoiceDialog({ open, onClose, onSuccess }: {
               <div className={`w-2 h-2 rounded-full ${preview.aiConfidence >= 0.8 ? 'bg-green-500' : preview.aiConfidence >= 0.5 ? 'bg-amber-500' : 'bg-red-500'}`} />
               AI confidence: {Math.round(preview.aiConfidence * 100)}%
             </div>
+
+            {preview.nearDuplicates && preview.nearDuplicates.length > 0 && (
+              <div className="border border-amber-300 bg-amber-50 rounded-lg p-3 space-y-2">
+                <div className="flex items-start gap-2 text-amber-700">
+                  <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-medium">Similar invoice{preview.nearDuplicates.length > 1 ? 's' : ''} found</p>
+                    {preview.nearDuplicates.map((nd) => (
+                      <p key={nd.invoiceId} className="text-xs mt-1">
+                        {nd.invoiceNumber ? `#${nd.invoiceNumber}` : 'No number'}
+                        {nd.partyName ? ` — ${nd.partyName}` : ''}
+                        {' — '}{formatCurrency(nd.totalAmount)}
+                        {nd.invoiceDate ? ` (${nd.invoiceDate})` : ''}
+                      </p>
+                    ))}
+                    <p className="text-xs mt-1.5 text-amber-600">You can still proceed if this is a different invoice.</p>
+                  </div>
+                </div>
+              </div>
+            )}
 
             <DialogFooter>
               <Button variant="outline" onClick={handleClose}>Cancel</Button>

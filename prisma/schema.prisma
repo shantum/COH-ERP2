@@ -1981,6 +1981,7 @@ model Invoice {
   fileName         String?
   fileMimeType     String?
   fileSizeBytes    Int?
+  fileHash         String?   // SHA-256 of file content for duplicate detection
 
   // AI parsing metadata (for future AI upload)
   aiRawResponse    Json?
@@ -2023,6 +2024,7 @@ model Invoice {
   @@index([createdAt])
   @@index([invoiceNumber])
   @@index([partyId, invoiceNumber, invoiceDate])
+  @@index([fileHash])
 }
 
 /// Line item on an invoice
