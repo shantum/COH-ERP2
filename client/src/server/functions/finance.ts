@@ -48,7 +48,7 @@ export const getFinanceSummary = createServerFn({ method: 'GET' })
   .handler(async () => {
     const prisma = await getPrisma();
 
-    const [apResult, arResult, hdfcBalance, rpxBalance, suspenseResult, payableCount, receivableCount] = await Promise.all([
+    const [apResult, arResult, hdfcBalance, rpxBalance, suspenseResult, payableCount, receivableCount, draftInvoices, pendingBankTxns, unmatchedPayments] = await Promise.all([
       prisma.invoice.aggregate({ where: { type: 'payable', status: { in: ['confirmed', 'partially_paid'] } }, _sum: { balanceDue: true } }),
       prisma.invoice.aggregate({ where: { type: 'receivable', status: { in: ['confirmed', 'partially_paid'] } }, _sum: { balanceDue: true } }),
       prisma.bankTransaction.findFirst({ where: { bank: 'hdfc', closingBalance: { not: null } }, orderBy: { txnDate: 'desc' }, select: { closingBalance: true, txnDate: true } }),
@@ -56,6 +56,10 @@ export const getFinanceSummary = createServerFn({ method: 'GET' })
       prisma.payment.aggregate({ where: { direction: 'outgoing', status: 'confirmed', debitAccountCode: 'UNMATCHED_PAYMENTS', unmatchedAmount: { gt: 0.01 } }, _sum: { unmatchedAmount: true } }),
       prisma.invoice.count({ where: { type: 'payable', status: { in: ['confirmed', 'partially_paid'] } } }),
       prisma.invoice.count({ where: { type: 'receivable', status: { in: ['confirmed', 'partially_paid'] } } }),
+      // Attention counts
+      prisma.invoice.count({ where: { status: 'draft' } }),
+      prisma.bankTransaction.count({ where: { status: { in: ['imported', 'categorized'] } } }),
+      prisma.payment.count({ where: { status: 'confirmed', unmatchedAmount: { gt: 0.01 } } }),
     ]);
 
     return {
@@ -70,6 +74,9 @@ export const getFinanceSummary = createServerFn({ method: 'GET' })
         suspenseBalance: suspenseResult._sum.unmatchedAmount ?? 0,
         openPayableInvoices: payableCount,
         openReceivableInvoices: receivableCount,
+        draftInvoices,
+        pendingBankTxns,
+        unmatchedPayments,
       },
     };
   });
@@ -132,30 +139,23 @@ export const getFinanceAlerts = createServerFn({ method: 'GET' })
     }
 
     // 4. Same vendor double-booked from different banks in same period
+    // Uses partyId for precise matching — avoids false positives from broad name matching
+    // (e.g. "Google India Pvt. Ltd." via RazorpayX vs "Google Play" via HDFC are different entities)
     const doubles = await prisma.$queryRaw<Array<{
       period: string; vendor: string; source_count: number; total: number; sources: string;
     }>>`
-      WITH tagged AS (
-        SELECT TO_CHAR(bt."txnDate" AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM') AS period,
-               bt.bank,
-               bt.amount::numeric AS amount,
-               CASE
-                 WHEN bt."counterpartyName" ILIKE '%facebook%' OR bt."counterpartyName" ILIKE '%meta%' THEN 'Facebook'
-                 WHEN bt."counterpartyName" ILIKE '%google india%' OR bt."counterpartyName" ILIKE '%google ads%' THEN 'Google Ads'
-                 ELSE NULL
-               END AS vendor
-        FROM "BankTransaction" bt
-        WHERE bt.direction = 'debit'
-          AND bt.status IN ('posted', 'legacy_posted')
-      )
-      SELECT period, vendor,
-             COUNT(DISTINCT bank)::int AS source_count,
-             SUM(amount)::float AS total,
-             STRING_AGG(DISTINCT bank, ' + ') AS sources
-      FROM tagged
-      WHERE vendor IS NOT NULL
-      GROUP BY period, vendor
-      HAVING COUNT(DISTINCT bank) > 1
+      SELECT TO_CHAR(bt."txnDate" AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM') AS period,
+             p.name AS vendor,
+             COUNT(DISTINCT bt.bank)::int AS source_count,
+             SUM(bt.amount::numeric)::float AS total,
+             STRING_AGG(DISTINCT bt.bank, ' + ') AS sources
+      FROM "BankTransaction" bt
+      JOIN "Party" p ON p.id = bt."partyId"
+      WHERE bt.direction = 'debit'
+        AND bt.status IN ('posted', 'legacy_posted')
+        AND bt."partyId" IS NOT NULL
+      GROUP BY period, p.name
+      HAVING COUNT(DISTINCT bt.bank) > 1
       ORDER BY period DESC
     `;
     for (const d of doubles) {
@@ -227,6 +227,7 @@ export const getFinanceAlerts = createServerFn({ method: 'GET' })
     }
 
     // 9. Duplicate payments (same ref + similar amount + same counterparty)
+    // Excludes small amounts (<100) — recurring bank charges share batch-style references (CDT*)
     const dupes = await prisma.$queryRaw<Array<{
       reference: string; counterparty: string; amount: number; cnt: number;
     }>>`
@@ -239,6 +240,7 @@ export const getFinanceAlerts = createServerFn({ method: 'GET' })
       WHERE pay.status != 'cancelled'
         AND pay."referenceNumber" IS NOT NULL
         AND pay."referenceNumber" != ''
+        AND pay.amount > 100
       GROUP BY pay."referenceNumber", p.name, pay.amount
       HAVING COUNT(*) > 1
       ORDER BY pay.amount DESC

@@ -49,7 +49,9 @@ import {
   Check, X, ChevronLeft, ChevronRight, Loader2, AlertCircle,
   ExternalLink, CloudUpload, Link2, Download, Upload, ArrowLeft,
   Pencil, Search, Trash2, History, AlertTriangle, Eye,
+  FileText, CreditCard, Building2,
 } from 'lucide-react';
+import { showSuccess, showError } from '../utils/toast';
 import {
   type FinanceSearchParams,
   type CreateTransactionTypeInput,
@@ -200,6 +202,7 @@ export default function Finance() {
 // ============================================
 
 function DashboardTab() {
+  const navigate = useNavigate();
   const summaryFn = useServerFn(getFinanceSummary);
   const alertsFn = useServerFn(getFinanceAlerts);
 
@@ -226,6 +229,30 @@ function DashboardTab() {
     if (!d) return '';
     return `as of ${new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}`;
   };
+
+  const attentionItems = [
+    ...(summary.draftInvoices > 0 ? [{
+      icon: FileText,
+      label: `${summary.draftInvoices} draft invoice${summary.draftInvoices !== 1 ? 's' : ''}`,
+      description: 'Need review & confirmation',
+      onClick: () => navigate({ to: '/finance', search: { tab: 'invoices', status: 'draft', page: 1, limit: 25 }, replace: true }),
+      color: 'text-amber-600',
+    }] : []),
+    ...(summary.pendingBankTxns > 0 ? [{
+      icon: CreditCard,
+      label: `${summary.pendingBankTxns} pending bank txn${summary.pendingBankTxns !== 1 ? 's' : ''}`,
+      description: 'Imported, awaiting confirmation',
+      onClick: () => navigate({ to: '/finance', search: { tab: 'bank-import', bankStatus: 'pending', page: 1, limit: 25 }, replace: true }),
+      color: 'text-blue-600',
+    }] : []),
+    ...(summary.unmatchedPayments > 0 ? [{
+      icon: AlertCircle,
+      label: `${summary.unmatchedPayments} unmatched payment${summary.unmatchedPayments !== 1 ? 's' : ''}`,
+      description: 'Need invoices or documentation',
+      onClick: () => navigate({ to: '/finance', search: { tab: 'payments', matchStatus: 'unmatched', page: 1, limit: 25 }, replace: true }),
+      color: 'text-red-500',
+    }] : []),
+  ];
 
   return (
     <div className="space-y-6">
@@ -287,6 +314,29 @@ function DashboardTab() {
           />
         )}
       </div>
+
+      {/* Needs Attention */}
+      {attentionItems.length > 0 && (
+        <div>
+          <h3 className="text-sm font-semibold mb-3 text-muted-foreground uppercase tracking-wide">Needs Attention</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {attentionItems.map((item) => (
+              <button
+                key={item.label}
+                type="button"
+                onClick={item.onClick}
+                className="flex items-start gap-3 p-4 border rounded-lg text-left hover:bg-muted/50 transition-colors group"
+              >
+                <item.icon className={`h-5 w-5 mt-0.5 shrink-0 ${item.color}`} />
+                <div>
+                  <div className="font-medium text-sm group-hover:underline">{item.label}</div>
+                  <div className="text-xs text-muted-foreground mt-0.5">{item.description}</div>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -338,9 +388,11 @@ function InvoicesTab({ search }: { search: FinanceSearchParams }) {
       if (!res.ok) throw new Error('Drive sync failed');
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ['finance'] });
+      showSuccess('Drive sync started', { description: `${result?.synced ?? 0} file(s) queued` });
     },
+    onError: (err) => showError('Drive sync failed', { description: err.message }),
   });
 
   const listFn = useServerFn(listInvoices);
@@ -364,17 +416,23 @@ function InvoicesTab({ search }: { search: FinanceSearchParams }) {
 
   const confirmMutation = useMutation({
     mutationFn: (params: { id: string; linkedPaymentId?: string }) => confirmFn({ data: params }),
-    onSuccess: () => {
+    onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ['finance'] });
       setConfirmingInvoice(null);
+      if (result?.success) showSuccess('Invoice confirmed');
+      else showError('Confirm failed', { description: (result as { error?: string })?.error });
     },
+    onError: (err) => showError('Confirm failed', { description: err.message }),
   });
 
   const cancelMutation = useMutation({
     mutationFn: (id: string) => cancelFn({ data: { id } }),
-    onSuccess: () => {
+    onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ['finance'] });
+      if (result?.success) showSuccess('Invoice cancelled');
+      else showError('Cancel failed', { description: (result as { error?: string })?.error });
     },
+    onError: (err) => showError('Cancel failed', { description: err.message }),
   });
 
   const updateSearch = useCallback(
@@ -529,7 +587,7 @@ function InvoicesTab({ search }: { search: FinanceSearchParams }) {
           <SelectContent>
             <SelectItem value="all">All Statuses</SelectItem>
             {INVOICE_STATUSES.map((s) => (
-              <SelectItem key={s} value={s}>{s.replace('_', ' ')}</SelectItem>
+              <SelectItem key={s} value={s}>{formatStatus(s)}</SelectItem>
             ))}
           </SelectContent>
         </Select>
@@ -831,7 +889,7 @@ function PaymentsTab({ search }: { search: FinanceSearchParams }) {
           <SelectContent>
             <SelectItem value="all">All Methods</SelectItem>
             {PAYMENT_METHODS.map((m) => (
-              <SelectItem key={m} value={m}>{m.replace(/_/g, ' ')}</SelectItem>
+              <SelectItem key={m} value={m}>{formatStatus(m)}</SelectItem>
             ))}
           </SelectContent>
         </Select>
@@ -912,7 +970,7 @@ function PaymentsTab({ search }: { search: FinanceSearchParams }) {
                           <span className={pmt.direction === 'incoming' ? 'text-green-600' : 'text-red-500'}>
                             {pmt.direction === 'incoming' ? <ArrowDownLeft className="h-3.5 w-3.5" /> : <ArrowUpRight className="h-3.5 w-3.5" />}
                           </span>
-                          <span className="text-xs">{pmt.method.replace(/_/g, ' ')}</span>
+                          <span className="text-xs">{formatStatus(pmt.method)}</span>
                         </div>
                         {pmt.referenceNumber && (
                           <div className="font-mono text-[10px] text-muted-foreground mt-0.5 max-w-[180px] truncate" title={pmt.referenceNumber}>{pmt.referenceNumber}</div>
@@ -972,7 +1030,7 @@ function PaymentsTab({ search }: { search: FinanceSearchParams }) {
                           </span>
                         )}
                       </td>
-                      <td className="p-3 text-xs text-muted-foreground">{inv?.billingPeriod ?? '—'}</td>
+                      <td className="p-3 text-xs text-muted-foreground">{inv?.billingPeriod ? formatPeriod(inv.billingPeriod) : '—'}</td>
                       <td className="p-3 text-center">
                         {pmt.driveUrl ? (
                           <a href={pmt.driveUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800" title={pmt.fileName ?? 'View on Drive'}>
@@ -1105,7 +1163,7 @@ function PnlTab() {
                   >
                     <td className="py-2 px-3 font-medium">
                       <span className="inline-block w-4 mr-1 text-muted-foreground">{isExpanded ? '▾' : '▸'}</span>
-                      {m.period}
+                      {formatPeriod(m.period)}
                     </td>
                     <td className="py-2 px-3 text-right">{fmt(m.revenue)}</td>
                     <td className="py-2 px-3 text-right">{fmt(m.cogs)}</td>
@@ -1307,6 +1365,7 @@ function BankTransactionList({ search, updateSearch }: {
     });
     invalidate();
     setExpandedId(null);
+    showSuccess('Transaction skipped');
   };
 
   const handleUnskip = async (txnId: string) => {
@@ -1317,6 +1376,7 @@ function BankTransactionList({ search, updateSearch }: {
     });
     invalidate();
     setExpandedId(null);
+    showSuccess('Transaction restored');
   };
 
   const handleDelete = async (txnId: string) => {
@@ -1326,6 +1386,7 @@ function BankTransactionList({ search, updateSearch }: {
     });
     invalidate();
     setExpandedId(null);
+    showSuccess('Transaction deleted');
   };
 
   const handleConfirm = async (txnId: string) => {
@@ -1336,15 +1397,17 @@ function BankTransactionList({ search, updateSearch }: {
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: 'Failed to confirm' }));
-      alert(err.error || 'Failed to confirm');
+      showError('Failed to confirm', { description: err.error || 'Unknown error' });
       return;
     }
     invalidate();
     setExpandedId(null);
+    showSuccess('Transaction confirmed');
   };
 
   const handleBatchConfirm = async () => {
     if (selectedIds.size === 0) return;
+    const count = selectedIds.size;
     setBatchLoading(true);
     try {
       await fetch('/api/bank-import/confirm-batch', {
@@ -1353,6 +1416,9 @@ function BankTransactionList({ search, updateSearch }: {
         body: JSON.stringify({ txnIds: [...selectedIds] }),
       });
       invalidate();
+      showSuccess(`${count} transaction${count !== 1 ? 's' : ''} confirmed`);
+    } catch {
+      showError('Batch confirm failed');
     } finally {
       setBatchLoading(false);
     }
@@ -1360,6 +1426,7 @@ function BankTransactionList({ search, updateSearch }: {
 
   const handleBatchSkip = async () => {
     if (selectedIds.size === 0) return;
+    const count = selectedIds.size;
     setBatchLoading(true);
     try {
       await fetch('/api/bank-import/skip-batch', {
@@ -1368,6 +1435,9 @@ function BankTransactionList({ search, updateSearch }: {
         body: JSON.stringify({ txnIds: [...selectedIds] }),
       });
       invalidate();
+      showSuccess(`${count} transaction${count !== 1 ? 's' : ''} skipped`);
+    } catch {
+      showError('Batch skip failed');
     } finally {
       setBatchLoading(false);
     }
@@ -1453,7 +1523,7 @@ function BankTransactionList({ search, updateSearch }: {
 
       {/* Batch action bar */}
       {selectedIds.size > 0 && (
-        <div className="flex items-center gap-3 p-2 px-3 bg-blue-50 border border-blue-200 rounded-lg text-sm">
+        <div className="flex items-center gap-3 p-2 px-3 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg text-sm">
           <span className="font-medium">{selectedIds.size} selected</span>
           <Button size="sm" onClick={handleBatchConfirm} disabled={batchLoading}>
             {batchLoading ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Check className="h-3 w-3 mr-1" />}
@@ -2065,7 +2135,7 @@ function ConfirmPayableDialog({ invoice, isPending, onConfirm, onClose }: {
                       </div>
                       <div className="flex items-center justify-between mt-1 text-xs text-muted-foreground">
                         <span>{pmt.party?.name ?? '—'}</span>
-                        <span>{pmt.referenceNumber ?? pmt.method.replace(/_/g, ' ')}</span>
+                        <span>{pmt.referenceNumber ?? formatStatus(pmt.method)}</span>
                       </div>
                       {pmt.debitAccountCode === 'UNMATCHED_PAYMENTS' && (
                         <span className="inline-flex items-center mt-1 text-[10px] text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded">
@@ -2321,7 +2391,7 @@ function UploadInvoiceDialog({ open, onClose, onSuccess }: {
               {p?.invoiceNumber && <div><span className="text-muted-foreground">Invoice #:</span> <span className="font-medium">{p.invoiceNumber}</span></div>}
               {p?.invoiceDate && <div><span className="text-muted-foreground">Date:</span> {p.invoiceDate}</div>}
               {p?.dueDate && <div><span className="text-muted-foreground">Due:</span> {p.dueDate}</div>}
-              {p?.billingPeriod && <div><span className="text-muted-foreground">Period:</span> {p.billingPeriod}</div>}
+              {p?.billingPeriod && <div><span className="text-muted-foreground">Period:</span> {formatPeriod(p.billingPeriod)}</div>}
             </div>
 
             {/* Supplier info */}
@@ -2489,6 +2559,7 @@ function CreateInvoiceModal({ open, onClose, prefill }: {
 }) {
   const queryClient = useQueryClient();
   const createFn = useServerFn(createInvoice);
+  const searchFn = useServerFn(searchCounterparties);
 
   const [form, setForm] = useState({
     type: 'payable' as 'payable' | 'receivable',
@@ -2501,6 +2572,18 @@ function CreateInvoiceModal({ open, onClose, prefill }: {
     notes: '',
     partyId: undefined as string | undefined,
   });
+
+  // Party search state
+  const [partyQuery, setPartyQuery] = useState('');
+  const [partyOpen, setPartyOpen] = useState(false);
+  const [selectedParty, setSelectedParty] = useState<{ id: string; name: string } | null>(null);
+
+  const { data: partyResults } = useQuery({
+    queryKey: ['finance', 'party-search', partyQuery],
+    queryFn: () => searchFn({ data: { query: partyQuery, type: 'party' } }),
+    enabled: partyQuery.length >= 2,
+  });
+  const parties = partyResults?.success ? partyResults.results : [];
 
   // When prefill changes (voucher button clicked), reset form with prefilled values
   const prevPrefillRef = useRef<typeof prefill>(undefined);
@@ -2534,11 +2617,17 @@ function CreateInvoiceModal({ open, onClose, prefill }: {
           ...(form.partyId ? { partyId: form.partyId } : {}),
         },
       }),
-    onSuccess: () => {
+    onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ['finance'] });
-      onClose();
-      resetForm();
+      if (result?.success) {
+        showSuccess('Invoice created');
+        onClose();
+        resetForm();
+      } else {
+        showError('Failed to create invoice', { description: (result as { error?: string })?.error });
+      }
     },
+    onError: (err) => showError('Failed to create invoice', { description: err.message }),
   });
 
   const resetForm = () => {
@@ -2554,6 +2643,20 @@ function CreateInvoiceModal({ open, onClose, prefill }: {
       notes: '',
       partyId: undefined,
     });
+    setSelectedParty(null);
+    setPartyQuery('');
+  };
+
+  const handlePartySelect = (party: { id: string; name: string; category?: string }) => {
+    setSelectedParty(party);
+    setForm((prev) => ({
+      ...prev,
+      partyId: party.id,
+      // Only auto-fill category if user hasn't changed it from default
+      ...(party.category && prev.category === 'other' ? { category: party.category } : {}),
+    }));
+    setPartyOpen(false);
+    setPartyQuery('');
   };
 
   return (
@@ -2586,6 +2689,39 @@ function CreateInvoiceModal({ open, onClose, prefill }: {
                 </SelectContent>
               </Select>
             </div>
+          </div>
+          {/* Party selector */}
+          <div className="relative">
+            <Label>Party / Vendor</Label>
+            {selectedParty ? (
+              <div className="flex items-center gap-2 mt-1 p-2 border rounded-md bg-muted/30">
+                <Building2 className="h-4 w-4 text-muted-foreground shrink-0" />
+                <span className="text-sm font-medium flex-1">{selectedParty.name}</span>
+                <button type="button" className="text-muted-foreground hover:text-red-500" onClick={() => { setSelectedParty(null); setForm((f) => ({ ...f, partyId: undefined })); }}>
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ) : (
+              <>
+                <Input
+                  value={partyQuery}
+                  onChange={(e) => { setPartyQuery(e.target.value); setPartyOpen(true); }}
+                  placeholder="Search vendor..."
+                  className="mt-1"
+                  onFocus={() => { if (partyQuery.length >= 2) setPartyOpen(true); }}
+                  onBlur={() => setTimeout(() => setPartyOpen(false), 200)}
+                />
+                {partyOpen && partyQuery.length >= 2 && parties.length > 0 && (
+                  <div className="absolute z-20 left-0 right-0 mt-1 bg-popover border rounded-md shadow-lg max-h-[180px] overflow-y-auto">
+                    {parties.map((p) => (
+                      <button key={p.id} type="button" className="block w-full text-left px-3 py-2 text-sm hover:bg-muted/50" onMouseDown={() => handlePartySelect(p)}>
+                        {p.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
           </div>
           <div>
             <Label>Invoice Number</Label>
@@ -2638,6 +2774,7 @@ function CreateInvoiceModal({ open, onClose, prefill }: {
 function CreatePaymentModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const queryClient = useQueryClient();
   const createFn = useServerFn(createFinancePayment);
+  const searchFn = useServerFn(searchCounterparties);
 
   const [form, setForm] = useState({
     direction: 'outgoing' as 'outgoing' | 'incoming',
@@ -2646,7 +2783,34 @@ function CreatePaymentModal({ open, onClose }: { open: boolean; onClose: () => v
     referenceNumber: '',
     paymentDate: new Date().toISOString().split('T')[0],
     notes: '',
+    partyId: undefined as string | undefined,
   });
+
+  // Party search state
+  const [partyQuery, setPartyQuery] = useState('');
+  const [partyOpen, setPartyOpen] = useState(false);
+  const [selectedParty, setSelectedParty] = useState<{ id: string; name: string } | null>(null);
+
+  const { data: partyResults } = useQuery({
+    queryKey: ['finance', 'party-search', partyQuery],
+    queryFn: () => searchFn({ data: { query: partyQuery, type: 'party' } }),
+    enabled: partyQuery.length >= 2,
+  });
+  const parties = partyResults?.success ? partyResults.results : [];
+
+  const resetForm = () => {
+    setForm({
+      direction: 'outgoing',
+      method: 'bank_transfer',
+      amount: '',
+      referenceNumber: '',
+      paymentDate: new Date().toISOString().split('T')[0],
+      notes: '',
+      partyId: undefined,
+    });
+    setSelectedParty(null);
+    setPartyQuery('');
+  };
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -2658,20 +2822,20 @@ function CreatePaymentModal({ open, onClose }: { open: boolean; onClose: () => v
           ...(form.referenceNumber ? { referenceNumber: form.referenceNumber } : {}),
           paymentDate: form.paymentDate,
           ...(form.notes ? { notes: form.notes } : {}),
+          ...(form.partyId ? { partyId: form.partyId } : {}),
         },
       }),
-    onSuccess: () => {
+    onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ['finance'] });
-      onClose();
-      setForm({
-        direction: 'outgoing',
-        method: 'bank_transfer',
-        amount: '',
-        referenceNumber: '',
-        paymentDate: new Date().toISOString().split('T')[0],
-        notes: '',
-      });
+      if (result?.success) {
+        showSuccess('Payment recorded');
+        onClose();
+        resetForm();
+      } else {
+        showError('Failed to record payment', { description: (result as { error?: string })?.error });
+      }
     },
+    onError: (err) => showError('Failed to record payment', { description: err.message }),
   });
 
   return (
@@ -2699,11 +2863,44 @@ function CreatePaymentModal({ open, onClose }: { open: boolean; onClose: () => v
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {PAYMENT_METHODS.map((m) => (
-                    <SelectItem key={m} value={m}>{m.replace(/_/g, ' ')}</SelectItem>
+                    <SelectItem key={m} value={m}>{formatStatus(m)}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
+          </div>
+          {/* Party selector */}
+          <div className="relative">
+            <Label>Party / Vendor</Label>
+            {selectedParty ? (
+              <div className="flex items-center gap-2 mt-1 p-2 border rounded-md bg-muted/30">
+                <Building2 className="h-4 w-4 text-muted-foreground shrink-0" />
+                <span className="text-sm font-medium flex-1">{selectedParty.name}</span>
+                <button type="button" className="text-muted-foreground hover:text-red-500" onClick={() => { setSelectedParty(null); setForm((f) => ({ ...f, partyId: undefined })); }}>
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ) : (
+              <>
+                <Input
+                  value={partyQuery}
+                  onChange={(e) => { setPartyQuery(e.target.value); setPartyOpen(true); }}
+                  placeholder="Search vendor..."
+                  className="mt-1"
+                  onFocus={() => { if (partyQuery.length >= 2) setPartyOpen(true); }}
+                  onBlur={() => setTimeout(() => setPartyOpen(false), 200)}
+                />
+                {partyOpen && partyQuery.length >= 2 && parties.length > 0 && (
+                  <div className="absolute z-20 left-0 right-0 mt-1 bg-popover border rounded-md shadow-lg max-h-[180px] overflow-y-auto">
+                    {parties.map((p) => (
+                      <button key={p.id} type="button" className="block w-full text-left px-3 py-2 text-sm hover:bg-muted/50" onMouseDown={() => { setSelectedParty(p); setForm((f) => ({ ...f, partyId: p.id })); setPartyOpen(false); setPartyQuery(''); }}>
+                        {p.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -2745,15 +2942,15 @@ function CreatePaymentModal({ open, onClose }: { open: boolean; onClose: () => v
 
 function StatusBadge({ status }: { status: string }) {
   const colors: Record<string, string> = {
-    draft: 'bg-gray-100 text-gray-700',
-    confirmed: 'bg-blue-100 text-blue-700',
-    partially_paid: 'bg-amber-100 text-amber-700',
-    paid: 'bg-green-100 text-green-700',
-    cancelled: 'bg-red-100 text-red-700',
+    draft: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300',
+    confirmed: 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300',
+    partially_paid: 'bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300',
+    paid: 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300',
+    cancelled: 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300',
   };
   return (
     <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${colors[status] ?? 'bg-gray-100 text-gray-700'}`}>
-      {status.replace(/_/g, ' ')}
+      {formatStatus(status)}
     </span>
   );
 }
@@ -2826,7 +3023,9 @@ function TransactionTypesTab() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['finance', 'transactionTypes'] });
       setIsCreating(false);
+      showSuccess('Transaction type created');
     },
+    onError: (err) => showError('Failed to create type', { description: err.message }),
   });
 
   const updateMutation = useMutation({
@@ -2835,7 +3034,9 @@ function TransactionTypesTab() {
       queryClient.invalidateQueries({ queryKey: ['finance', 'transactionTypes'] });
       queryClient.invalidateQueries({ queryKey: ['finance', 'transactionType'] });
       setEditingId(null);
+      showSuccess('Transaction type updated');
     },
+    onError: (err) => showError('Failed to update type', { description: err.message }),
   });
 
   const deleteMutation = useMutation({
@@ -2844,8 +3045,10 @@ function TransactionTypesTab() {
       if (result.success) {
         queryClient.invalidateQueries({ queryKey: ['finance', 'transactionTypes'] });
         setEditingId(null);
+        showSuccess('Transaction type deleted');
       }
     },
+    onError: (err) => showError('Failed to delete type', { description: err.message }),
   });
 
   return (
@@ -3221,7 +3424,9 @@ function PartiesTab({ search }: { search: FinanceSearchParams }) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['finance', 'parties'] });
       setEditingParty(null);
+      showSuccess('Party updated');
     },
+    onError: (err) => showError('Failed to update party', { description: err.message }),
   });
 
   const createMutation = useMutation({
@@ -3229,7 +3434,9 @@ function PartiesTab({ search }: { search: FinanceSearchParams }) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['finance', 'parties'] });
       setIsCreating(false);
+      showSuccess('Party created');
     },
+    onError: (err) => showError('Failed to create party', { description: err.message }),
   });
 
   const updateSearch = useCallback((updates: Partial<FinanceSearchParams>) => {
@@ -3651,4 +3858,17 @@ function formatCurrency(amount: number): string {
     minimumFractionDigits: 0,
     maximumFractionDigits: 2,
   }).format(amount);
+}
+
+/** "2026-01" → "Jan 2026" */
+function formatPeriod(period: string): string {
+  const [year, month] = period.split('-');
+  if (!year || !month) return period;
+  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return `${monthNames[parseInt(month, 10) - 1] ?? month} ${year}`;
+}
+
+/** "draft" → "Draft", "partially_paid" → "Partially Paid" */
+function formatStatus(status: string): string {
+  return status.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
