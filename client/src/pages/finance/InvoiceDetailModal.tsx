@@ -5,6 +5,7 @@ import { formatCurrency, formatPeriod, formatStatus, StatusBadge, LoadingState }
 import { getCategoryLabel } from '@coh/shared';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ArrowUpRight, ArrowDownLeft, ExternalLink, Download } from 'lucide-react';
+import InlineFabricPicker from './InlineFabricPicker';
 import { Button } from '@/components/ui/button';
 
 export default function InvoiceDetailModal({
@@ -183,10 +184,20 @@ export default function InvoiceDetailModal({
                               {line.description ?? '---'}
                             </td>
                             {isFabric && (
-                              <td className="p-2 max-w-[160px] truncate">
-                                {line.fabricColour
-                                  ? `${line.fabricColour.fabric.name} — ${line.fabricColour.colourName}`
-                                  : <span className="text-muted-foreground">Not matched</span>}
+                              <td className="p-2 max-w-[160px]">
+                                {invoice.status === 'draft' ? (
+                                  <InlineFabricPicker
+                                    lineId={line.id}
+                                    invoiceId={invoice.id}
+                                    currentFabricColour={line.fabricColour ?? null}
+                                  />
+                                ) : (
+                                  <span className="truncate text-xs">
+                                    {line.fabricColour
+                                      ? `${line.fabricColour.fabric.name} — ${line.fabricColour.colourName}`
+                                      : <span className="text-muted-foreground">Not matched</span>}
+                                  </span>
+                                )}
                               </td>
                             )}
                             <td className="p-2">{line.hsnCode ?? '---'}</td>
