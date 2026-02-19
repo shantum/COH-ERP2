@@ -459,6 +459,10 @@ export type Invoice = {
     subtotal: number | null;
     gstRate: number | null;
     gstAmount: number | null;
+    gstType: string | null;
+    cgstAmount: number | null;
+    sgstAmount: number | null;
+    igstAmount: number | null;
     tdsRate: number | null;
     tdsSection: string | null;
     tdsAmount: Generated<number | null>;
@@ -494,9 +498,16 @@ export type InvoiceLine = {
     amount: number | null;
     gstPercent: number | null;
     gstAmount: number | null;
+    orderLineId: string | null;
     fabricColourId: string | null;
     matchedTxnId: string | null;
     matchType: string | null;
+};
+export type InvoiceSequence = {
+    id: Generated<string>;
+    prefix: string;
+    currentNumber: Generated<number>;
+    fiscalYear: string;
 };
 export type LedgerAccount = {
     id: Generated<string>;
@@ -529,6 +540,35 @@ export type LedgerEntryLine = {
     debit: Generated<number>;
     credit: Generated<number>;
     description: string | null;
+};
+export type MarketplacePayoutReport = {
+    id: Generated<string>;
+    marketplace: string;
+    fileName: string;
+    fileHash: string;
+    reportPeriod: string;
+    grossRevenue: Generated<number>;
+    totalCommission: Generated<number>;
+    bannerDeduction: Generated<number>;
+    shippingCharges: Generated<number>;
+    returnCharges: Generated<number>;
+    tdsAmount: Generated<number>;
+    otherIncome: Generated<number>;
+    netPayout: Generated<number>;
+    orderCount: Generated<number>;
+    deliveredCount: Generated<number>;
+    returnCount: Generated<number>;
+    cancelledCount: Generated<number>;
+    orderLines: unknown | null;
+    matchedOrders: unknown | null;
+    bankMatchResult: unknown | null;
+    revenueInvoiceId: string | null;
+    commissionInvoiceId: string | null;
+    promoInvoiceId: string | null;
+    bankTransactionId: string | null;
+    status: Generated<string>;
+    createdAt: Generated<Timestamp>;
+    updatedAt: Timestamp;
 };
 export type Material = {
     id: Generated<string>;
@@ -581,6 +621,7 @@ export type Order = {
     originalOrderId: string | null;
     shipByDate: Timestamp | null;
     sheetPushedAt: Timestamp | null;
+    customerState: string | null;
     partiallyCancelled: Generated<boolean>;
     paymentConfirmedAt: Timestamp | null;
     paymentConfirmedBy: string | null;
@@ -870,6 +911,7 @@ export type Product = {
     exchangeCount: Generated<number>;
     returnCount: Generated<number>;
     writeOffCount: Generated<number>;
+    hsnCode: string | null;
     packagingCost: number | null;
     shopifyProductIds: Generated<string[]>;
 };
@@ -1430,9 +1472,11 @@ export type DB = {
     InventoryTransaction: InventoryTransaction;
     Invoice: Invoice;
     InvoiceLine: InvoiceLine;
+    InvoiceSequence: InvoiceSequence;
     LedgerAccount: LedgerAccount;
     LedgerEntry: LedgerEntry;
     LedgerEntryLine: LedgerEntryLine;
+    MarketplacePayoutReport: MarketplacePayoutReport;
     Material: Material;
     MonthlyStockSnapshot: MonthlyStockSnapshot;
     Order: Order;

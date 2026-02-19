@@ -9,9 +9,9 @@
  * Tax Constants
  * GST rates for apparel in India based on MRP threshold
  */
-export const GST_THRESHOLD = 2500;
-export const GST_RATE_BELOW_THRESHOLD = 5;  // 5% for MRP < 2500
-export const GST_RATE_ABOVE_THRESHOLD = 18; // 18% for MRP >= 2500
+export const GST_THRESHOLD = 1000;
+export const GST_RATE_BELOW_THRESHOLD = 5;  // 5% for MRP < ₹1000
+export const GST_RATE_ABOVE_THRESHOLD = 12; // 12% for MRP >= ₹1000
 
 /**
  * Calculate GST rate based on MRP

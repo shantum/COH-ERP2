@@ -34,6 +34,8 @@ import { detectPaymentMethod, extractInternalNote, calculateEffectiveUnitPrice }
 import { updateCustomerTier, incrementCustomerOrderCount } from '../utils/tierUtils.js';
 import { syncLogger } from '../utils/logger.js';
 import { recomputeOrderStatus } from '../utils/orderStatus.js';
+import { generateDraftInvoice } from './orderInvoiceGenerator.js';
+import { deferredExecutor } from './deferredExecutor.js';
 
 // ============================================
 // TYPE DEFINITIONS
@@ -195,6 +197,7 @@ interface OrderDataPayload {
     customerEmail: string | null;
     customerPhone: string | null;
     shippingAddress: string | null;
+    customerState: string | null;
     totalAmount: number;
     orderDate: Date;
     internalNotes: string | null;
@@ -652,6 +655,7 @@ function buildOrderData(
         customerEmail: customer?.email || shopifyOrder.email || null,
         customerPhone: shippingAddress?.phone || customer?.phone || shopifyOrder.phone || null,
         shippingAddress: shippingAddress ? JSON.stringify(shippingAddress) : null,
+        customerState: shippingAddress?.province || null,
         totalAmount: parseFloat(shopifyOrder.total_price) || 0,
         orderDate: shopifyOrder.created_at ? new Date(shopifyOrder.created_at) : new Date(),
         internalNotes,
@@ -824,6 +828,21 @@ async function createNewOrderWithLines(
             }, 'Failed to sync fulfillments for new order - order was created successfully');
         }
     }
+
+    // Defer draft invoice generation (non-critical, shouldn't block order creation)
+    deferredExecutor.enqueue(
+        async () => {
+            try {
+                await generateDraftInvoice(prisma, newOrder.id);
+            } catch (err: unknown) {
+                syncLogger.warn({
+                    orderId: newOrder.id,
+                    error: err instanceof Error ? err.message : 'Unknown error',
+                }, 'Failed to generate draft invoice — can be retried via backfill');
+            }
+        },
+        { orderId: newOrder.id, action: 'generate_draft_invoice' },
+    );
 
     // Update customer stats: increment orderCount and update tier
     if (orderData.customerId) {

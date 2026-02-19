@@ -41,6 +41,14 @@ export {
     GST_RATE_BELOW_THRESHOLD,
     GST_RATE_ABOVE_THRESHOLD,
     getGstRate,
+    // gst calculator
+    computeOrderGst,
+    getGstRateForMrp,
+    determineGstType,
+    type GstLineInput,
+    type GstLineResult,
+    type GstType,
+    type OrderGstResult,
     // customers
     calculateTierFromLtv,
     compareTiers,

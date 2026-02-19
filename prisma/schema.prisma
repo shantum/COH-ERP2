@@ -122,6 +122,7 @@ model Product {
   exchangeCount            Int         @default(0)
   returnCount              Int         @default(0)
   writeOffCount            Int         @default(0)
+  hsnCode                  String?     // HSN/SAC code for GST (default '6109' for knitted apparel)
   packagingCost            Float?
   shopifyProductIds        String[]    @default([])
   variations               Variation[]
@@ -530,6 +531,7 @@ model Order {
   originalOrderId      String?
   shipByDate           DateTime?
   sheetPushedAt        DateTime?          // When order was pushed to "Orders from COH" sheet
+  customerState        String?            // Customer's state for GST type determination (from shipping address)
   partiallyCancelled   Boolean            @default(false)
   paymentConfirmedAt   DateTime?
   paymentConfirmedBy   String?
@@ -721,6 +723,7 @@ model OrderLine {
   returnClosedManuallyBy User?             @relation("ReturnClosedManuallyBy", fields: [returnClosedManuallyById], references: [id])
   returnExchangeOrder  Order?              @relation("ExchangeOrderLine", fields: [returnExchangeOrderId], references: [id])
   channelOrderLines    ChannelOrderLine[] // BT report analytics lines linked to this order line
+  invoiceLines         InvoiceLine[]       @relation("InvoiceLineOrderLine")
 
   @@index([orderId])
   @@index([skuId])
@@ -1890,6 +1893,10 @@ model Invoice {
   subtotal         Float?
   gstRate          Float?    // GST % snapshot (e.g. 18.0) — recorded at creation/confirm
   gstAmount        Float?
+  gstType          String?   // 'igst' or 'cgst_sgst' — determined by customer state vs company state
+  cgstAmount       Float?    // Central GST (intra-state: 50% of GST)
+  sgstAmount       Float?    // State GST (intra-state: 50% of GST)
+  igstAmount       Float?    // Integrated GST (inter-state: 100% of GST)
   tdsRate          Float?    // TDS % snapshot (e.g. 2.0) — recorded at confirm from Party config
   tdsSection       String?   // TDS section snapshot (e.g. "194C") — recorded at confirm
   tdsAmount        Float?    @default(0)
@@ -1963,6 +1970,9 @@ model InvoiceLine {
   gstPercent  Float?
   gstAmount   Float?
 
+  // Order line link (for customer_order invoices)
+  orderLineId String?                // FK to OrderLine — links invoice line to order line
+
   // Fabric matching (only populated for category='fabric' invoices)
   fabricColourId String?              // Matched FabricColour
   matchedTxnId   String?  @unique    // Matched existing FabricColourTransaction (1:1)
@@ -1970,11 +1980,23 @@ model InvoiceLine {
 
   // Relations
   invoice      Invoice                @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  orderLine    OrderLine?             @relation("InvoiceLineOrderLine", fields: [orderLineId], references: [id])
   fabricColour FabricColour?          @relation("FinanceInvoiceLineFabricColour", fields: [fabricColourId], references: [id])
   matchedTxn   FabricColourTransaction? @relation("FinanceInvoiceLineTxn", fields: [matchedTxnId], references: [id])
 
   @@index([invoiceId])
+  @@index([orderLineId])
   @@index([fabricColourId])
+}
+
+/// Sequential invoice numbering — gap-free, concurrency-safe
+model InvoiceSequence {
+  id            String @id @default(uuid())
+  prefix        String @unique  // e.g. "COH" — one row per prefix
+  currentNumber Int    @default(0) // Last assigned number
+  fiscalYear    String // e.g. "25-26" — current fiscal year
+
+  @@index([prefix, fiscalYear])
 }
 
 /// Record of actual money moving
@@ -2370,4 +2392,55 @@ model PayuSettlement {
 
   @@index([utrNumber])
   @@index([settlementCompletedDate])
+}
+
+// ============================================
+// MARKETPLACE PAYOUT RECONCILIATION
+// ============================================
+
+/// Stores parsed Nykaa (or other marketplace) payout reports for reconciliation
+model MarketplacePayoutReport {
+  id                    String    @id @default(uuid())
+  marketplace           String    // "nykaa_nf" | "nykaa_popup"
+  fileName              String
+  fileHash              String    // SHA-256 of file content for dedup
+  reportPeriod          String    // "YYYY-MM"
+
+  // Summary financials
+  grossRevenue          Float     @default(0)
+  totalCommission       Float     @default(0)
+  bannerDeduction       Float     @default(0)
+  shippingCharges       Float     @default(0)
+  returnCharges         Float     @default(0)
+  tdsAmount             Float     @default(0)
+  otherIncome           Float     @default(0)
+  netPayout             Float     @default(0)
+
+  // Order stats
+  orderCount            Int       @default(0)
+  deliveredCount        Int       @default(0)
+  returnCount           Int       @default(0)
+  cancelledCount        Int       @default(0)
+
+  // Reconciliation details (JSON)
+  orderLines            Json?     // Parsed order lines from xlsx
+  matchedOrders         Json?     // { matched: [...], unmatched: [...] }
+  bankMatchResult       Json?     // { bankTxnId, amount, narration } or null
+
+  // Linked finance records (populated on confirm)
+  revenueInvoiceId      String?
+  commissionInvoiceId   String?
+  promoInvoiceId        String?
+  bankTransactionId     String?
+
+  // Status: draft → confirmed → cancelled
+  status                String    @default("draft")
+
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@unique([marketplace, fileHash])
+  @@index([marketplace])
+  @@index([reportPeriod])
+  @@index([status])
 }
