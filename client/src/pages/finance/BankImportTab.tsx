@@ -9,7 +9,8 @@ import { useState, useCallback, useRef, useEffect, Fragment } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { useNavigate } from '@tanstack/react-router';
-import { listBankTransactions, createFinanceParty, searchCounterparties } from '../../server/functions/finance';
+import { listBankTransactions, createFinanceParty } from '../../server/functions/finance';
+import { PartySearch } from '../../components/finance/PartySearch';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -525,24 +526,7 @@ function BankTxnEditRow({ txn, onSaved, onClose }: {
   const [creditAccount, setCreditAccount] = useState(txn.creditAccountCode ?? '');
   const [category, setCategory] = useState(txn.category ?? '');
   const [saving, setSaving] = useState(false);
-  const searchFn = useServerFn(searchCounterparties);
-  const [partyQuery, setPartyQuery] = useState('');
-  const [partyOpen, setPartyOpen] = useState(false);
   const [selectedParty, setSelectedParty] = useState<{ id: string; name: string } | null>(txn.party ?? null);
-
-  const { data: partyResults } = useQuery({
-    queryKey: ['finance', 'party-search', partyQuery],
-    queryFn: () => searchFn({ data: { query: partyQuery, type: 'party' } }),
-    enabled: partyQuery.length >= 2,
-  });
-
-  const parties = partyResults?.success ? partyResults.results : [];
-
-  const handlePartySelect = (party: { id: string; name: string }) => {
-    setSelectedParty(party);
-    setPartyOpen(false);
-    setPartyQuery('');
-  };
 
   const handleSave = async () => {
     setSaving(true);
@@ -593,33 +577,11 @@ function BankTxnEditRow({ txn, onSaved, onClose }: {
         <div>
           <Label className="text-xs">Party</Label>
           <div className="relative mt-1">
-            {selectedParty ? (
-              <div className="flex items-center gap-2">
-                <span className="text-sm">{selectedParty.name}</span>
-                <button type="button" className="text-xs text-red-500 hover:text-red-700" onClick={() => setSelectedParty(null)}>
-                  <X className="h-3 w-3" />
-                </button>
-              </div>
-            ) : (
-              <>
-                <Input
-                  value={partyQuery}
-                  onChange={(e) => { setPartyQuery(e.target.value); setPartyOpen(true); }}
-                  placeholder="Search party..."
-                  className="h-8 text-xs"
-                  onFocus={() => setPartyOpen(true)}
-                />
-                {partyOpen && partyQuery.length >= 2 && parties.length > 0 && (
-                  <div className="absolute z-20 top-9 left-0 w-full bg-popover border rounded-md shadow-lg max-h-[150px] overflow-y-auto">
-                    {parties.map((p) => (
-                      <button key={p.id} type="button" className="block w-full text-left px-3 py-1.5 text-xs hover:bg-muted/50" onClick={() => handlePartySelect(p)}>
-                        {p.name}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </>
-            )}
+            <PartySearch
+              value={selectedParty}
+              onChange={setSelectedParty}
+              compact
+            />
           </div>
         </div>
 

@@ -5,7 +5,7 @@ import { useNavigate } from '@tanstack/react-router';
 import { useDebounce } from '../../hooks/useDebounce';
 import {
   listPayments, createFinancePayment, updatePaymentNotes,
-  getAutoMatchSuggestions, applyAutoMatches, searchCounterparties,
+  getAutoMatchSuggestions, applyAutoMatches,
   findUnpaidInvoices,
 } from '../../server/functions/finance';
 import { formatCurrency, formatPeriod, formatStatus, Pagination, LoadingState, downloadCsv } from './shared';
@@ -17,9 +17,10 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
-  Plus, ArrowUpRight, ArrowDownLeft, X, Loader2, Download,
-  ExternalLink, Link2, Building2, Pencil,
+  Plus, ArrowUpRight, ArrowDownLeft, Loader2, Download,
+  ExternalLink, Link2, Pencil,
 } from 'lucide-react';
+import { PartySearch } from '../../components/finance/PartySearch';
 import { showSuccess, showError } from '../../utils/toast';
 import {
   type FinanceSearchParams,
@@ -734,7 +735,6 @@ function AutoMatchDialog({ open, onClose }: { open: boolean; onClose: () => void
 function CreatePaymentModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const queryClient = useQueryClient();
   const createFn = useServerFn(createFinancePayment);
-  const searchFn = useServerFn(searchCounterparties);
 
   const [form, setForm] = useState({
     direction: 'outgoing' as 'outgoing' | 'incoming',
@@ -746,16 +746,7 @@ function CreatePaymentModal({ open, onClose }: { open: boolean; onClose: () => v
     partyId: undefined as string | undefined,
   });
 
-  const [partyQuery, setPartyQuery] = useState('');
-  const [partyOpen, setPartyOpen] = useState(false);
   const [selectedParty, setSelectedParty] = useState<{ id: string; name: string } | null>(null);
-
-  const { data: partyResults } = useQuery({
-    queryKey: ['finance', 'party-search', partyQuery],
-    queryFn: () => searchFn({ data: { query: partyQuery, type: 'party' } }),
-    enabled: partyQuery.length >= 2,
-  });
-  const parties = partyResults?.success ? partyResults.results : [];
 
   const resetForm = () => {
     setForm({
@@ -768,7 +759,6 @@ function CreatePaymentModal({ open, onClose }: { open: boolean; onClose: () => v
       partyId: undefined,
     });
     setSelectedParty(null);
-    setPartyQuery('');
   };
 
   const mutation = useMutation({
@@ -837,35 +827,11 @@ function CreatePaymentModal({ open, onClose }: { open: boolean; onClose: () => v
           </div>
           <div className="relative">
             <Label>Party / Vendor</Label>
-            {selectedParty ? (
-              <div className="flex items-center gap-2 mt-1 p-2 border rounded-md bg-muted/30">
-                <Building2 className="h-4 w-4 text-muted-foreground shrink-0" />
-                <span className="text-sm font-medium flex-1">{selectedParty.name}</span>
-                <button type="button" className="text-muted-foreground hover:text-red-500" onClick={() => { setSelectedParty(null); setForm((f) => ({ ...f, partyId: undefined })); }}>
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            ) : (
-              <>
-                <Input
-                  value={partyQuery}
-                  onChange={(e) => { setPartyQuery(e.target.value); setPartyOpen(true); }}
-                  placeholder="Search vendor..."
-                  className="mt-1"
-                  onFocus={() => { if (partyQuery.length >= 2) setPartyOpen(true); }}
-                  onBlur={() => setTimeout(() => setPartyOpen(false), 200)}
-                />
-                {partyOpen && partyQuery.length >= 2 && parties.length > 0 && (
-                  <div className="absolute z-20 left-0 right-0 mt-1 bg-popover border rounded-md shadow-lg max-h-[180px] overflow-y-auto">
-                    {parties.map((p) => (
-                      <button key={p.id} type="button" className="block w-full text-left px-3 py-2 text-sm hover:bg-muted/50" onMouseDown={() => { setSelectedParty(p); setForm((f) => ({ ...f, partyId: p.id })); setPartyOpen(false); setPartyQuery(''); }}>
-                        {p.name}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </>
-            )}
+            <PartySearch
+              value={selectedParty}
+              onChange={(p) => { setSelectedParty(p); setForm((f) => ({ ...f, partyId: p?.id })); }}
+              placeholder="Search vendor..."
+            />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>

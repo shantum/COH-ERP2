@@ -6,7 +6,7 @@ import { useNavigate } from '@tanstack/react-router';
 import { useDebounce } from '../../hooks/useDebounce';
 import {
   listInvoices, confirmInvoice, cancelInvoice, createInvoice, updateInvoice,
-  findUnmatchedPayments, searchCounterparties,
+  findUnmatchedPayments,
 } from '../../server/functions/finance';
 import { formatCurrency, formatStatus, StatusBadge, Pagination, LoadingState, downloadCsv } from './shared';
 import { Button } from '@/components/ui/button';
@@ -17,8 +17,9 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import {
   Plus, ArrowUpRight, ArrowDownLeft, Check, X, Loader2, AlertCircle,
-  ExternalLink, CloudUpload, Link2, Download, Upload, AlertTriangle, Building2, Pencil,
+  ExternalLink, CloudUpload, Link2, Download, Upload, AlertTriangle, Pencil,
 } from 'lucide-react';
+import { PartySearch } from '../../components/finance/PartySearch';
 import { showSuccess, showError } from '../../utils/toast';
 import {
   type FinanceSearchParams,
@@ -1229,8 +1230,6 @@ function CreateInvoiceModal({ open, onClose, prefill, editInvoice }: {
   const queryClient = useQueryClient();
   const createFn = useServerFn(createInvoice);
   const updateFn = useServerFn(updateInvoice);
-  const searchFn = useServerFn(searchCounterparties);
-
   const [form, setForm] = useState({
     type: 'payable' as 'payable' | 'receivable',
     category: 'other' as string,
@@ -1244,16 +1243,7 @@ function CreateInvoiceModal({ open, onClose, prefill, editInvoice }: {
     partyId: undefined as string | undefined,
   });
 
-  const [partyQuery, setPartyQuery] = useState('');
-  const [partyOpen, setPartyOpen] = useState(false);
   const [selectedParty, setSelectedParty] = useState<{ id: string; name: string } | null>(null);
-
-  const { data: partyResults } = useQuery({
-    queryKey: ['finance', 'party-search', partyQuery],
-    queryFn: () => searchFn({ data: { query: partyQuery, type: 'party' } }),
-    enabled: partyQuery.length >= 2,
-  });
-  const parties = partyResults?.success ? partyResults.results : [];
 
   // Prefill for edit mode
   const prevEditRef = useRef<string | undefined>(undefined);
@@ -1355,18 +1345,14 @@ function CreateInvoiceModal({ open, onClose, prefill, editInvoice }: {
       partyId: undefined,
     });
     setSelectedParty(null);
-    setPartyQuery('');
   };
 
-  const handlePartySelect = (party: { id: string; name: string; category?: string }) => {
+  const handlePartySelect = (party: { id: string; name: string } | null) => {
     setSelectedParty(party);
     setForm((prev) => ({
       ...prev,
-      partyId: party.id,
-      ...(party.category && prev.category === 'other' ? { category: party.category } : {}),
+      partyId: party?.id,
     }));
-    setPartyOpen(false);
-    setPartyQuery('');
   };
 
   const isFormDirty = () => {
@@ -1418,35 +1404,11 @@ function CreateInvoiceModal({ open, onClose, prefill, editInvoice }: {
           </div>
           <div className="relative">
             <Label>Party / Vendor</Label>
-            {selectedParty ? (
-              <div className="flex items-center gap-2 mt-1 p-2 border rounded-md bg-muted/30">
-                <Building2 className="h-4 w-4 text-muted-foreground shrink-0" />
-                <span className="text-sm font-medium flex-1">{selectedParty.name}</span>
-                <button type="button" className="text-muted-foreground hover:text-red-500" onClick={() => { setSelectedParty(null); setForm((f) => ({ ...f, partyId: undefined })); }}>
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            ) : (
-              <>
-                <Input
-                  value={partyQuery}
-                  onChange={(e) => { setPartyQuery(e.target.value); setPartyOpen(true); }}
-                  placeholder="Search vendor..."
-                  className="mt-1"
-                  onFocus={() => { if (partyQuery.length >= 2) setPartyOpen(true); }}
-                  onBlur={() => setTimeout(() => setPartyOpen(false), 200)}
-                />
-                {partyOpen && partyQuery.length >= 2 && parties.length > 0 && (
-                  <div className="absolute z-20 left-0 right-0 mt-1 bg-popover border rounded-md shadow-lg max-h-[180px] overflow-y-auto">
-                    {parties.map((p) => (
-                      <button key={p.id} type="button" className="block w-full text-left px-3 py-2 text-sm hover:bg-muted/50" onMouseDown={() => handlePartySelect(p)}>
-                        {p.name}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </>
-            )}
+            <PartySearch
+              value={selectedParty}
+              onChange={handlePartySelect}
+              placeholder="Search vendor..."
+            />
           </div>
           <div>
             <Label>Invoice Number</Label>
