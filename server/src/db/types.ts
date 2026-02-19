@@ -6,7 +6,8 @@ export type Timestamp = ColumnType<Date, Date | string, Date | string>;
 
 export type Allocation = {
     id: Generated<string>;
-    paymentId: string;
+    paymentId: string | null;
+    bankTransactionId: string | null;
     invoiceId: string;
     amount: number;
     notes: string | null;
@@ -48,6 +49,16 @@ export type BankTransaction = {
     matchedInvoiceId: string | null;
     intendedDebitAccount: string | null;
     postingType: string | null;
+    matchedAmount: Generated<number>;
+    unmatchedAmount: Generated<number>;
+    notes: string | null;
+    fileData: Buffer | null;
+    fileName: string | null;
+    fileMimeType: string | null;
+    fileSizeBytes: number | null;
+    driveFileId: string | null;
+    driveUrl: string | null;
+    driveUploadedAt: Timestamp | null;
     status: Generated<string>;
     skipReason: string | null;
     ledgerEntryId: string | null;

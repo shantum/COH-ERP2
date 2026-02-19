@@ -102,7 +102,7 @@ export const getOrderInvoice = createServerFn({ method: 'GET' })
 
 const confirmOrderInvoiceInput = z.object({
   invoiceId: z.string().uuid(),
-  paymentId: z.string().uuid().optional(),
+  bankTransactionId: z.string().uuid().optional(),
 });
 
 export const confirmOrderInvoice = createServerFn({ method: 'POST' })
@@ -142,17 +142,17 @@ export const confirmOrderInvoice = createServerFn({ method: 'POST' })
         },
       });
 
-      // If payment provided, create allocation
-      if (data.paymentId) {
-        const payment = await tx.payment.findUnique({
-          where: { id: data.paymentId },
+      // If bank transaction provided, create allocation
+      if (data.bankTransactionId) {
+        const bankTxn = await tx.bankTransaction.findUnique({
+          where: { id: data.bankTransactionId },
           select: { id: true, matchedAmount: true, unmatchedAmount: true },
         });
 
-        if (payment) {
+        if (bankTxn) {
           await tx.allocation.create({
             data: {
-              paymentId: data.paymentId,
+              bankTransactionId: data.bankTransactionId,
               invoiceId: invoice.id,
               amount: invoice.totalAmount,
               notes: 'Order payment — auto-linked on confirm',
@@ -160,11 +160,11 @@ export const confirmOrderInvoice = createServerFn({ method: 'POST' })
             },
           });
 
-          await tx.payment.update({
-            where: { id: data.paymentId },
+          await tx.bankTransaction.update({
+            where: { id: data.bankTransactionId },
             data: {
-              matchedAmount: payment.matchedAmount + invoice.totalAmount,
-              unmatchedAmount: Math.max(0, payment.unmatchedAmount - invoice.totalAmount),
+              matchedAmount: bankTxn.matchedAmount + invoice.totalAmount,
+              unmatchedAmount: Math.max(0, bankTxn.unmatchedAmount - invoice.totalAmount),
             },
           });
         }

@@ -196,15 +196,15 @@ export async function uploadInvoiceFile(invoiceId: string): Promise<boolean> {
 }
 
 /**
- * Upload a payment's file attachment to Drive.
+ * Upload a bank transaction's file attachment to Drive.
  */
-export async function uploadPaymentFile(paymentId: string): Promise<boolean> {
-    const payment = await prisma.payment.findUnique({
-        where: { id: paymentId },
+export async function uploadBankTxnFile(bankTxnId: string): Promise<boolean> {
+    const bankTxn = await prisma.bankTransaction.findUnique({
+        where: { id: bankTxnId },
         select: {
             id: true,
-            referenceNumber: true,
-            paymentDate: true,
+            reference: true,
+            txnDate: true,
             fileData: true,
             fileName: true,
             fileMimeType: true,
@@ -213,36 +213,36 @@ export async function uploadPaymentFile(paymentId: string): Promise<boolean> {
         },
     });
 
-    if (!payment || !payment.fileData) {
-        driveLogger.debug({ paymentId }, 'No file data — skipping');
+    if (!bankTxn || !bankTxn.fileData) {
+        driveLogger.debug({ bankTxnId }, 'No file data — skipping');
         return false;
     }
 
-    if (payment.driveFileId) {
-        driveLogger.debug({ paymentId }, 'Already uploaded — skipping');
+    if (bankTxn.driveFileId) {
+        driveLogger.debug({ bankTxnId }, 'Already uploaded — skipping');
         return false;
     }
 
-    const dateStr = payment.paymentDate.toISOString().split('T')[0];
-    const ref = sanitize(payment.referenceNumber ?? payment.id.slice(0, 8));
-    const ext = getExtension(payment.fileName, payment.fileMimeType);
-    const party = sanitize(payment.party?.name ?? 'Unknown');
+    const dateStr = bankTxn.txnDate.toISOString().split('T')[0];
+    const ref = sanitize(bankTxn.reference ?? bankTxn.id.slice(0, 8));
+    const ext = getExtension(bankTxn.fileName, bankTxn.fileMimeType);
+    const party = sanitize(bankTxn.party?.name ?? 'Unknown');
     const driveName = `${party}_PAY-${ref}_${dateStr}${ext}`;
 
     const folderId = await resolveFolderId(
-        payment.party?.name,
-        payment.paymentDate
+        bankTxn.party?.name,
+        bankTxn.txnDate
     );
 
     const result = await uploadFile(
         folderId,
         driveName,
-        payment.fileMimeType ?? 'application/octet-stream',
-        Buffer.from(payment.fileData)
+        bankTxn.fileMimeType ?? 'application/octet-stream',
+        Buffer.from(bankTxn.fileData)
     );
 
-    await prisma.payment.update({
-        where: { id: paymentId },
+    await prisma.bankTransaction.update({
+        where: { id: bankTxnId },
         data: {
             driveFileId: result.fileId,
             driveUrl: result.webViewLink,
@@ -251,8 +251,8 @@ export async function uploadPaymentFile(paymentId: string): Promise<boolean> {
     });
 
     driveLogger.info(
-        { paymentId, driveFileId: result.fileId, driveName },
-        'Payment file uploaded to Drive'
+        { bankTxnId, driveFileId: result.fileId, driveName },
+        'Bank transaction file uploaded to Drive'
     );
     return true;
 }
@@ -305,8 +305,8 @@ export async function syncAllPendingFiles(): Promise<{ uploaded: number; errors:
             }
         }
 
-        // Pending payments
-        const pendingPayments = await prisma.payment.findMany({
+        // Pending bank transaction files
+        const pendingBankTxns = await prisma.bankTransaction.findMany({
             where: {
                 fileData: { not: null },
                 driveFileId: null,
@@ -315,17 +315,17 @@ export async function syncAllPendingFiles(): Promise<{ uploaded: number; errors:
             take: DRIVE_SYNC_BATCH_SIZE * 10,
         });
 
-        driveLogger.info({ count: pendingPayments.length }, 'Pending payment files to upload');
+        driveLogger.info({ count: pendingBankTxns.length }, 'Pending bank txn files to upload');
 
-        for (const pmt of pendingPayments) {
+        for (const bt of pendingBankTxns) {
             try {
-                const ok = await uploadPaymentFile(pmt.id);
+                const ok = await uploadBankTxnFile(bt.id);
                 if (ok) uploaded++;
             } catch (err: unknown) {
                 errors++;
                 driveLogger.error(
-                    { paymentId: pmt.id, error: err instanceof Error ? err.message : String(err) },
-                    'Failed to upload payment file'
+                    { bankTxnId: bt.id, error: err instanceof Error ? err.message : String(err) },
+                    'Failed to upload bank txn file'
                 );
             }
         }

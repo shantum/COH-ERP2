@@ -1,5 +1,5 @@
 /**
- * Finance Auto-Match — Suggest and apply payment-invoice matches
+ * Finance Auto-Match — Suggest and apply bank transaction-invoice matches
  */
 
 'use server';
@@ -45,20 +45,20 @@ export const getPartyInvoiceDefaults = createServerFn({ method: 'GET' })
   });
 
 // ============================================
-// AUTO-MATCH PAYMENTS TO INVOICES
+// AUTO-MATCH BANK TRANSACTIONS TO INVOICES
 // ============================================
 
 /**
- * Score a payment-invoice pair for auto-matching.
+ * Score a bank transaction-invoice pair for auto-matching.
  * Amount score (0-100) + Date score (0-30) = total confidence.
  */
 function scoreMatch(
-  paymentAmount: number,
+  txnAmount: number,
   invoiceBalance: number,
-  paymentDate: Date,
+  txnDate: Date,
   invoiceDate: Date,
 ): { score: number; confidence: 'high' | 'medium' | null; amountDiff: number; daysDiff: number } {
-  const amountDiff = Math.abs(paymentAmount - invoiceBalance);
+  const amountDiff = Math.abs(txnAmount - invoiceBalance);
   const pctDiff = amountDiff / Math.max(invoiceBalance, 0.01);
 
   // Amount score
@@ -71,7 +71,7 @@ function scoreMatch(
 
   // Date score
   const daysDiff = Math.abs(
-    Math.floor((paymentDate.getTime() - invoiceDate.getTime()) / (1000 * 60 * 60 * 24))
+    Math.floor((txnDate.getTime() - invoiceDate.getTime()) / (1000 * 60 * 60 * 24))
   );
   let dateScore = 0;
   if (daysDiff <= 31) dateScore = 30;
@@ -88,21 +88,20 @@ export const getAutoMatchSuggestions = createServerFn({ method: 'GET' })
   .handler(async () => {
     const prisma = await getPrisma();
 
-    // Find parties with BOTH unmatched outgoing payments AND unpaid payable invoices
-    // Capped at 500 each to prevent unbounded memory usage on large datasets
-    const [payments, invoices] = await Promise.all([
-      prisma.payment.findMany({
+    // Find parties with BOTH unmatched outgoing bank txns AND unpaid payable invoices
+    const [bankTxns, invoices] = await Promise.all([
+      prisma.bankTransaction.findMany({
         where: {
-          direction: 'outgoing',
-          status: 'confirmed',
+          direction: 'debit',
+          status: { in: ['posted', 'legacy_posted'] },
           unmatchedAmount: { gt: 0.01 },
           partyId: { not: null },
         },
         select: {
-          id: true, amount: true, unmatchedAmount: true, paymentDate: true,
-          referenceNumber: true, method: true, partyId: true,
+          id: true, amount: true, unmatchedAmount: true, txnDate: true,
+          reference: true, utr: true, bank: true, partyId: true,
         },
-        orderBy: { paymentDate: 'desc' },
+        orderBy: { txnDate: 'desc' },
         take: 500,
       }),
       prisma.invoice.findMany({
@@ -122,12 +121,12 @@ export const getAutoMatchSuggestions = createServerFn({ method: 'GET' })
     ]);
 
     // Group by partyId
-    const paymentsByParty = new Map<string, typeof payments>();
-    for (const p of payments) {
-      if (!p.partyId) continue;
-      const arr = paymentsByParty.get(p.partyId) ?? [];
-      arr.push(p);
-      paymentsByParty.set(p.partyId, arr);
+    const txnsByParty = new Map<string, typeof bankTxns>();
+    for (const t of bankTxns) {
+      if (!t.partyId) continue;
+      const arr = txnsByParty.get(t.partyId) ?? [];
+      arr.push(t);
+      txnsByParty.set(t.partyId, arr);
     }
 
     const invoicesByParty = new Map<string, typeof invoices>();
@@ -139,7 +138,7 @@ export const getAutoMatchSuggestions = createServerFn({ method: 'GET' })
     }
 
     // Find parties that appear in both maps
-    const commonPartyIds = [...paymentsByParty.keys()].filter(id => invoicesByParty.has(id));
+    const commonPartyIds = [...txnsByParty.keys()].filter(id => invoicesByParty.has(id));
     if (commonPartyIds.length === 0) {
       return { suggestions: [], totalSuggestions: 0 };
     }
@@ -155,7 +154,7 @@ export const getAutoMatchSuggestions = createServerFn({ method: 'GET' })
     const suggestions: Array<{
       party: { id: string; name: string };
       matches: Array<{
-        payment: { id: string; amount: number; unmatchedAmount: number; paymentDate: string; referenceNumber: string | null; method: string };
+        bankTransaction: { id: string; amount: number; unmatchedAmount: number; txnDate: string; reference: string | null; utr: string | null; bank: string };
         invoice: { id: string; invoiceNumber: string | null; totalAmount: number; balanceDue: number; tdsAmount: number; invoiceDate: string; billingPeriod: string | null };
         matchAmount: number;
         confidence: 'high' | 'medium';
@@ -163,17 +162,17 @@ export const getAutoMatchSuggestions = createServerFn({ method: 'GET' })
         amountDiff: number;
         daysDiff: number;
       }>;
-      unmatchedPayments: number;
+      unmatchedTxns: number;
       unmatchedInvoices: number;
     }> = [];
 
     for (const partyId of commonPartyIds) {
-      const partyPayments = paymentsByParty.get(partyId)!;
+      const partyTxns = txnsByParty.get(partyId)!;
       const partyInvoices = invoicesByParty.get(partyId)!;
 
       // Score all pairs
       const scoredPairs: Array<{
-        paymentIdx: number;
+        txnIdx: number;
         invoiceIdx: number;
         score: number;
         confidence: 'high' | 'medium';
@@ -182,23 +181,23 @@ export const getAutoMatchSuggestions = createServerFn({ method: 'GET' })
         matchAmount: number;
       }> = [];
 
-      for (let pi = 0; pi < partyPayments.length; pi++) {
-        const pay = partyPayments[pi];
+      for (let ti = 0; ti < partyTxns.length; ti++) {
+        const txn = partyTxns[ti];
         for (let ii = 0; ii < partyInvoices.length; ii++) {
           const inv = partyInvoices[ii];
           const result = scoreMatch(
-            pay.unmatchedAmount, inv.balanceDue,
-            pay.paymentDate, inv.invoiceDate ?? new Date(),
+            txn.unmatchedAmount, inv.balanceDue,
+            txn.txnDate, inv.invoiceDate ?? new Date(),
           );
           if (result.confidence) {
             scoredPairs.push({
-              paymentIdx: pi,
+              txnIdx: ti,
               invoiceIdx: ii,
               score: result.score,
               confidence: result.confidence,
               amountDiff: result.amountDiff,
               daysDiff: result.daysDiff,
-              matchAmount: Math.min(pay.unmatchedAmount, inv.balanceDue),
+              matchAmount: Math.min(txn.unmatchedAmount, inv.balanceDue),
             });
           }
         }
@@ -206,25 +205,26 @@ export const getAutoMatchSuggestions = createServerFn({ method: 'GET' })
 
       // Greedy 1-to-1 assignment (highest score first)
       scoredPairs.sort((a, b) => b.score - a.score);
-      const usedPayments = new Set<number>();
+      const usedTxns = new Set<number>();
       const usedInvoices = new Set<number>();
       const matches: typeof suggestions[number]['matches'] = [];
 
       for (const pair of scoredPairs) {
-        if (usedPayments.has(pair.paymentIdx) || usedInvoices.has(pair.invoiceIdx)) continue;
-        usedPayments.add(pair.paymentIdx);
+        if (usedTxns.has(pair.txnIdx) || usedInvoices.has(pair.invoiceIdx)) continue;
+        usedTxns.add(pair.txnIdx);
         usedInvoices.add(pair.invoiceIdx);
 
-        const pay = partyPayments[pair.paymentIdx];
+        const txn = partyTxns[pair.txnIdx];
         const inv = partyInvoices[pair.invoiceIdx];
         matches.push({
-          payment: {
-            id: pay.id,
-            amount: pay.amount,
-            unmatchedAmount: pay.unmatchedAmount,
-            paymentDate: pay.paymentDate.toISOString(),
-            referenceNumber: pay.referenceNumber,
-            method: pay.method,
+          bankTransaction: {
+            id: txn.id,
+            amount: txn.amount,
+            unmatchedAmount: txn.unmatchedAmount,
+            txnDate: txn.txnDate.toISOString(),
+            reference: txn.reference,
+            utr: txn.utr,
+            bank: txn.bank,
           },
           invoice: {
             id: inv.id,
@@ -247,7 +247,7 @@ export const getAutoMatchSuggestions = createServerFn({ method: 'GET' })
         suggestions.push({
           party: { id: partyId, name: partyMap.get(partyId) ?? 'Unknown' },
           matches,
-          unmatchedPayments: partyPayments.length - usedPayments.size,
+          unmatchedTxns: partyTxns.length - usedTxns.size,
           unmatchedInvoices: partyInvoices.length - usedInvoices.size,
         });
       }
@@ -274,13 +274,13 @@ export const applyAutoMatches = createServerFn({ method: 'POST' })
     const userId = context.user.id;
     const errors: string[] = [];
 
-    // Pre-validate all payments and invoices exist with sufficient balances
-    const paymentIds = data.matches.map(m => m.paymentId);
+    // Pre-validate all bank txns and invoices exist with sufficient balances
+    const txnIds = data.matches.map(m => m.bankTransactionId);
     const invoiceIds = data.matches.map(m => m.invoiceId);
 
-    const [paymentsData, invoicesData] = await Promise.all([
-      prisma.payment.findMany({
-        where: { id: { in: paymentIds } },
+    const [txnsData, invoicesData] = await Promise.all([
+      prisma.bankTransaction.findMany({
+        where: { id: { in: txnIds } },
         select: { id: true, unmatchedAmount: true, matchedAmount: true, status: true },
       }),
       prisma.invoice.findMany({
@@ -289,18 +289,17 @@ export const applyAutoMatches = createServerFn({ method: 'POST' })
       }),
     ]);
 
-    const paymentMap = new Map(paymentsData.map(p => [p.id, p]));
+    const txnMap = new Map(txnsData.map(t => [t.id, t]));
     const invoiceMap = new Map(invoicesData.map(i => [i.id, i]));
 
     // Filter to valid matches only
     const validMatches = data.matches.filter(m => {
-      const payment = paymentMap.get(m.paymentId);
+      const txn = txnMap.get(m.bankTransactionId);
       const invoice = invoiceMap.get(m.invoiceId);
-      if (!payment) { errors.push(`Payment ${m.paymentId.slice(0, 8)} not found`); return false; }
+      if (!txn) { errors.push(`Bank txn ${m.bankTransactionId.slice(0, 8)} not found`); return false; }
       if (!invoice) { errors.push(`Invoice ${m.invoiceId.slice(0, 8)} not found`); return false; }
-      if (payment.status === 'cancelled') { errors.push(`Payment ${m.paymentId.slice(0, 8)} is cancelled`); return false; }
       if (invoice.status === 'cancelled') { errors.push(`Invoice ${invoice.invoiceNumber ?? m.invoiceId.slice(0, 8)} is cancelled`); return false; }
-      if (m.amount > payment.unmatchedAmount + 0.01) { errors.push(`Amount exceeds unmatched balance for payment ${m.paymentId.slice(0, 8)}`); return false; }
+      if (m.amount > txn.unmatchedAmount + 0.01) { errors.push(`Amount exceeds unmatched balance for txn ${m.bankTransactionId.slice(0, 8)}`); return false; }
       if (m.amount > invoice.balanceDue + 0.01) { errors.push(`Amount exceeds balance due for invoice ${invoice.invoiceNumber ?? m.invoiceId.slice(0, 8)}`); return false; }
       return true;
     });
@@ -312,12 +311,12 @@ export const applyAutoMatches = createServerFn({ method: 'POST' })
     // Apply all in one transaction
     await prisma.$transaction(async (tx) => {
       for (const match of validMatches) {
-        const payment = paymentMap.get(match.paymentId)!;
+        const txn = txnMap.get(match.bankTransactionId)!;
         const invoice = invoiceMap.get(match.invoiceId)!;
 
         await tx.allocation.create({
           data: {
-            paymentId: match.paymentId,
+            bankTransactionId: match.bankTransactionId,
             invoiceId: match.invoiceId,
             amount: match.amount,
             notes: 'Auto-matched',
@@ -325,16 +324,16 @@ export const applyAutoMatches = createServerFn({ method: 'POST' })
           },
         });
 
-        const newPaymentMatched = payment.matchedAmount + match.amount;
-        const newPaymentUnmatched = payment.unmatchedAmount - match.amount;
-        await tx.payment.update({
-          where: { id: match.paymentId },
-          data: { matchedAmount: newPaymentMatched, unmatchedAmount: Math.max(0, newPaymentUnmatched) },
+        const newTxnMatched = txn.matchedAmount + match.amount;
+        const newTxnUnmatched = txn.unmatchedAmount - match.amount;
+        await tx.bankTransaction.update({
+          where: { id: match.bankTransactionId },
+          data: { matchedAmount: newTxnMatched, unmatchedAmount: Math.max(0, newTxnUnmatched) },
         });
 
-        // Update in-memory for subsequent matches referencing same payment/invoice
-        payment.matchedAmount = newPaymentMatched;
-        payment.unmatchedAmount = Math.max(0, newPaymentUnmatched);
+        // Update in-memory for subsequent matches referencing same txn/invoice
+        txn.matchedAmount = newTxnMatched;
+        txn.unmatchedAmount = Math.max(0, newTxnUnmatched);
 
         const newInvoicePaid = invoice.paidAmount + match.amount;
         const newInvoiceBalance = invoice.balanceDue - match.amount;

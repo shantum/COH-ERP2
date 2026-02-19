@@ -290,7 +290,7 @@ router.post('/confirm', requireAdmin, asyncHandler(async (req: Request, res: Res
     return;
   }
 
-  res.json({ success: true, paymentId: result.paymentId });
+  res.json({ success: true });
 }));
 
 // ============================================

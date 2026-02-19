@@ -951,23 +951,23 @@ router.get('/:id/file', requireAdmin, asyncHandler(async (req: Request, res: Res
 }));
 
 // ============================================
-// GET /payment/:id/file — Download payment file
+// GET /bank-transaction/:id/file — Download bank transaction file
 // ============================================
 
-router.get('/payment/:id/file', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
-  const payment = await req.prisma.payment.findUnique({
+router.get('/bank-transaction/:id/file', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
+  const bankTxn = await req.prisma.bankTransaction.findUnique({
     where: { id: req.params.id as string },
     select: { fileData: true, fileName: true, fileMimeType: true },
   });
 
-  if (!payment || !payment.fileData) {
+  if (!bankTxn || !bankTxn.fileData) {
     res.status(404).json({ error: 'File not found' });
     return;
   }
 
-  res.setHeader('Content-Type', payment.fileMimeType!);
-  res.setHeader('Content-Disposition', `inline; filename="${payment.fileName}"`);
-  res.send(Buffer.from(payment.fileData));
+  res.setHeader('Content-Type', bankTxn.fileMimeType!);
+  res.setHeader('Content-Disposition', `inline; filename="${bankTxn.fileName}"`);
+  res.send(Buffer.from(bankTxn.fileData));
 }));
 
 // ============================================

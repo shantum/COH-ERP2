@@ -86,7 +86,7 @@ export default function InvoicesTab({ search: rawSearch }: { search: FinanceSear
   const cancelFn = useServerFn(cancelInvoice);
 
   const confirmMutation = useMutation({
-    mutationFn: (params: { id: string; linkedPaymentId?: string }) => confirmFn({ data: params }),
+    mutationFn: (params: { id: string; linkedBankTransactionId?: string }) => confirmFn({ data: params }),
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ['finance'] });
       if (result?.success) {
@@ -563,7 +563,7 @@ export default function InvoicesTab({ search: rawSearch }: { search: FinanceSear
         <ConfirmPayableDialog
           invoice={confirmingInvoice}
           isPending={confirmMutation.isPending}
-          onConfirm={(linkedPaymentId) => confirmMutation.mutate({ id: confirmingInvoice.id, linkedPaymentId })}
+          onConfirm={(linkedBankTransactionId) => confirmMutation.mutate({ id: confirmingInvoice.id, linkedBankTransactionId })}
           onClose={() => setConfirmingInvoice(null)}
         />
       )}
@@ -608,10 +608,10 @@ export default function InvoicesTab({ search: rawSearch }: { search: FinanceSear
 function ConfirmPayableDialog({ invoice, isPending, onConfirm, onClose }: {
   invoice: { id: string; totalAmount: number; party?: { id: string; name: string } | null };
   isPending: boolean;
-  onConfirm: (linkedPaymentId?: string) => void;
+  onConfirm: (linkedBankTransactionId?: string) => void;
   onClose: () => void;
 }) {
-  const [selectedPaymentId, setSelectedPaymentId] = useState<string | null>(null);
+  const [selectedTxnId, setSelectedTxnId] = useState<string | null>(null);
   const findPaymentsFn = useServerFn(findUnmatchedPayments);
 
   const { data, isLoading } = useQuery({
@@ -650,21 +650,21 @@ function ConfirmPayableDialog({ invoice, isPending, onConfirm, onClose }: {
                       key={pmt.id}
                       type="button"
                       className={`w-full text-left p-3 rounded-lg border text-sm transition-colors ${
-                        selectedPaymentId === pmt.id
+                        selectedTxnId === pmt.id
                           ? 'border-blue-500 bg-blue-50 dark:bg-blue-950'
                           : 'hover:bg-muted/50'
                       }`}
-                      onClick={() => setSelectedPaymentId(selectedPaymentId === pmt.id ? null : pmt.id)}
+                      onClick={() => setSelectedTxnId(selectedTxnId === pmt.id ? null : pmt.id)}
                     >
                       <div className="flex items-center justify-between">
                         <span className="font-medium">{formatCurrency(pmt.amount)}</span>
                         <span className="text-xs text-muted-foreground">
-                          {new Date(pmt.paymentDate).toLocaleDateString('en-IN')}
+                          {new Date(pmt.txnDate).toLocaleDateString('en-IN')}
                         </span>
                       </div>
                       <div className="flex items-center justify-between mt-1 text-xs text-muted-foreground">
                         <span>{pmt.party?.name ?? '—'}</span>
-                        <span>{pmt.referenceNumber ?? formatStatus(pmt.method)}</span>
+                        <span>{pmt.reference ?? pmt.utr ?? pmt.bank}</span>
                       </div>
                       {pmt.debitAccountCode === 'UNMATCHED_PAYMENTS' && (
                         <span className="inline-flex items-center mt-1 text-[10px] text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded">
@@ -692,12 +692,12 @@ function ConfirmPayableDialog({ invoice, isPending, onConfirm, onClose }: {
             onClick={() => onConfirm(undefined)}
             disabled={isPending}
           >
-            {isPending && !selectedPaymentId ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
+            {isPending && !selectedTxnId ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
             Confirm (no link)
           </Button>
-          {selectedPaymentId && (
+          {selectedTxnId && (
             <Button
-              onClick={() => onConfirm(selectedPaymentId)}
+              onClick={() => onConfirm(selectedTxnId)}
               disabled={isPending}
             >
               {isPending ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Link2 className="h-4 w-4 mr-1" />}

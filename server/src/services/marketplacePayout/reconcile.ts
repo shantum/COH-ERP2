@@ -53,7 +53,7 @@ export interface ConfirmResult {
   revenueInvoiceId: string;
   commissionInvoiceId: string;
   promoInvoiceId?: string;
-  paymentId: string;
+  bankTransactionId?: string;
 }
 
 interface MatchedOrder {
@@ -413,39 +413,30 @@ export async function confirmReport(
       });
     }
 
-    // 7. Payment for net payout (incoming)
-    const payment = await tx.payment.create({
-      data: {
-        direction: 'incoming',
-        method: 'marketplace_payout',
-        status: 'confirmed',
-        amount: round2(report.netPayout),
-        matchedAmount: round2(report.netPayout),
-        unmatchedAmount: 0,
-        paymentDate: new Date(),
-        partyId: nykaaParty.id,
-        period: report.reportPeriod,
-        notes: `Nykaa ${report.marketplace} net payout for ${report.reportPeriod}`,
-        createdById: userId,
-      },
-    });
-
-    // 8. Allocation: link payment to revenue invoice
-    await tx.allocation.create({
-      data: {
-        paymentId: payment.id,
-        invoiceId: revenueInvoice.id,
-        amount: round2(report.netPayout),
-        notes: `Marketplace net payout allocation`,
-        matchedById: userId,
-      },
-    });
-
-    // 10. Link bank transaction if matched
+    // 7. Set matchedAmount on bank transaction (if matched) and create allocation
+    let bankTxnId: string | undefined;
     if (bankMatch?.bankTxnId) {
       await tx.bankTransaction.update({
         where: { id: bankMatch.bankTxnId },
-        data: { paymentId: payment.id },
+        data: {
+          matchedAmount: round2(report.netPayout),
+          unmatchedAmount: 0,
+          notes: `Nykaa ${report.marketplace} net payout for ${report.reportPeriod}`,
+        },
+      });
+      bankTxnId = bankMatch.bankTxnId;
+    }
+
+    // 8. Allocation: link bank transaction to revenue invoice
+    if (bankTxnId) {
+      await tx.allocation.create({
+        data: {
+          bankTransactionId: bankTxnId,
+          invoiceId: revenueInvoice.id,
+          amount: round2(report.netPayout),
+          notes: `Marketplace net payout allocation`,
+          matchedById: userId,
+        },
       });
     }
 
@@ -457,9 +448,7 @@ export async function confirmReport(
         revenueInvoiceId: revenueInvoice.id,
         commissionInvoiceId: commissionInvoice.id,
         ...(promoInvoice ? { promoInvoiceId: promoInvoice.id } : {}),
-        ...(bankMatch?.bankTxnId
-          ? { bankTransactionId: bankMatch.bankTxnId }
-          : {}),
+        ...(bankTxnId ? { bankTransactionId: bankTxnId } : {}),
       },
     });
 
@@ -468,7 +457,7 @@ export async function confirmReport(
       revenueInvoiceId: revenueInvoice.id,
       commissionInvoiceId: commissionInvoice.id,
       ...(promoInvoice ? { promoInvoiceId: promoInvoice.id } : {}),
-      paymentId: payment.id,
+      ...(bankTxnId ? { bankTransactionId: bankTxnId } : {}),
     };
   });
 
@@ -477,9 +466,9 @@ export async function confirmReport(
       reportId,
       revenueInvoiceId: result.revenueInvoiceId,
       commissionInvoiceId: result.commissionInvoiceId,
-      paymentId: result.paymentId,
+      bankTransactionId: result.bankTransactionId,
     },
-    'Report confirmed with invoices and payment',
+    'Report confirmed with invoices',
   );
 
   return result;

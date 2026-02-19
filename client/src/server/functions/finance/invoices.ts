@@ -14,6 +14,7 @@ import {
   ListInvoicesInput,
   generatePaymentNarration,
 } from '@coh/shared/schemas/finance';
+// linkedPaymentId is now linkedBankTransactionId (BankTransaction replaces Payment)
 import { dateToPeriod, applyPeriodOffset } from '@coh/shared';
 
 // ============================================
@@ -104,8 +105,8 @@ export const getInvoice = createServerFn({ method: 'GET' })
         },
         allocations: {
           include: {
-            payment: {
-              select: { id: true, referenceNumber: true, method: true, amount: true, paymentDate: true },
+            bankTransaction: {
+              select: { id: true, reference: true, utr: true, bank: true, amount: true, txnDate: true },
             },
             matchedBy: { select: { id: true, name: true } },
           },
@@ -226,7 +227,7 @@ export const updateInvoice = createServerFn({ method: 'POST' })
 
 const confirmInvoiceInput = z.object({
   id: z.string().uuid(),
-  linkedPaymentId: z.string().uuid().optional(),
+  linkedBankTransactionId: z.string().uuid().optional(),
 });
 
 export const confirmInvoice = createServerFn({ method: 'POST' })
@@ -267,9 +268,9 @@ export const confirmInvoice = createServerFn({ method: 'POST' })
       }
     }
 
-    // ---- LINKED PAYMENT PATH (already-paid bill) ----
-    if (data.linkedPaymentId && invoice.type === 'payable') {
-      return confirmInvoiceWithLinkedPayment(prisma, invoice, data.linkedPaymentId, tdsAmount, userId, expenseAccountOverride, partyName, periodOffset, party);
+    // ---- LINKED BANK TXN PATH (already-paid bill) ----
+    if (data.linkedBankTransactionId && invoice.type === 'payable') {
+      return confirmInvoiceWithLinkedBankTxn(prisma, invoice, data.linkedBankTransactionId, tdsAmount, userId, expenseAccountOverride, partyName, periodOffset, party);
     }
 
     // ---- FABRIC: Create FabricColourTransactions for matched lines ----
@@ -324,17 +325,17 @@ export const confirmInvoice = createServerFn({ method: 'POST' })
   });
 
 /**
- * Confirm an invoice and link it to an existing payment.
- * Creates Allocation (payment -> invoice match), updates payment matched/unmatched amounts,
+ * Confirm an invoice and link it to an existing bank transaction.
+ * Creates Allocation (bankTxn -> invoice match), updates bankTxn matched/unmatched amounts,
  * and marks invoice as paid.
  *
  * The match amount uses the net payable (totalAmount - tdsAmount) because TDS is withheld
- * and never paid to the vendor. So payment.amount should roughly equal matchAmount.
+ * and never paid to the vendor.
  */
-async function confirmInvoiceWithLinkedPayment(
+async function confirmInvoiceWithLinkedBankTxn(
   prisma: Awaited<ReturnType<typeof getPrisma>>,
   invoice: { id: string; category: string; totalAmount: number; gstRate: number | null; gstAmount: number | null; subtotal: number | null; invoiceNumber: string | null; partyId: string | null; invoiceDate: Date | null; billingPeriod: string | null },
-  paymentId: string,
+  bankTransactionId: string,
   tdsAmount: number,
   userId: string,
   _expenseAccountOverride: string | null = null,
@@ -345,20 +346,19 @@ async function confirmInvoiceWithLinkedPayment(
   // The amount the vendor was actually paid (total minus TDS withheld)
   const matchAmount = invoice.totalAmount - tdsAmount;
 
-  const payment = await prisma.payment.findUnique({
-    where: { id: paymentId },
+  const bankTxn = await prisma.bankTransaction.findUnique({
+    where: { id: bankTransactionId },
     select: {
       id: true, amount: true, unmatchedAmount: true, matchedAmount: true,
-      status: true, paymentDate: true, debitAccountCode: true, notes: true,
+      status: true, txnDate: true, debitAccountCode: true, notes: true,
     },
   });
-  if (!payment) throw new Error('Payment not found');
-  if (payment.status === 'cancelled') throw new Error('Payment is cancelled');
-  if (payment.unmatchedAmount < matchAmount - 0.01) throw new Error('Payment unmatched amount is less than invoice net payable');
+  if (!bankTxn) throw new Error('Bank transaction not found');
+  if (bankTxn.unmatchedAmount < matchAmount - 0.01) throw new Error('Bank transaction unmatched amount is less than invoice net payable');
 
-  // Auto-generate narration if payment doesn't have one
+  // Auto-generate narration if bank txn doesn't have notes
   let narration: string | null = null;
-  if (!payment.notes) {
+  if (!bankTxn.notes) {
     narration = generatePaymentNarration({
       partyName,
       category: invoice.category,
@@ -369,10 +369,10 @@ async function confirmInvoiceWithLinkedPayment(
 
   // Use a transaction to keep all writes atomic
   return prisma.$transaction(async (tx) => {
-    // Create allocation (payment -> invoice match)
+    // Create allocation (bankTxn -> invoice match)
     await tx.allocation.create({
       data: {
-        paymentId,
+        bankTransactionId,
         invoiceId: invoice.id,
         amount: matchAmount,
         notes: 'Auto-linked on invoice confirm',
@@ -380,12 +380,12 @@ async function confirmInvoiceWithLinkedPayment(
       },
     });
 
-    // Update Payment: matched/unmatched amounts + narration
-    await tx.payment.update({
-      where: { id: paymentId },
+    // Update BankTransaction: matched/unmatched amounts + narration
+    await tx.bankTransaction.update({
+      where: { id: bankTransactionId },
       data: {
-        matchedAmount: payment.matchedAmount + matchAmount,
-        unmatchedAmount: Math.max(0, payment.unmatchedAmount - matchAmount),
+        matchedAmount: bankTxn.matchedAmount + matchAmount,
+        unmatchedAmount: Math.max(0, bankTxn.unmatchedAmount - matchAmount),
         ...(narration ? { notes: narration } : {}),
       },
     });
@@ -405,7 +405,7 @@ async function confirmInvoiceWithLinkedPayment(
         // Default billingPeriod from invoiceDate (with party offset) if not set
         ...(!invoice.billingPeriod ? {
           billingPeriod: (() => {
-            const base = dateToPeriod(invoice.invoiceDate ? new Date(invoice.invoiceDate) : new Date(payment.paymentDate));
+            const base = dateToPeriod(invoice.invoiceDate ? new Date(invoice.invoiceDate) : new Date(bankTxn.txnDate));
             return periodOffset ? applyPeriodOffset(base, periodOffset) : base;
           })(),
         } : {}),
@@ -518,19 +518,21 @@ export const cancelInvoice = createServerFn({ method: 'POST' })
     if (invoice.status === 'paid') return { success: false as const, error: 'Cannot cancel a paid invoice' };
 
     return prisma.$transaction(async (tx) => {
-      // 1. Clean up allocations (restore unmatched amounts on linked payments)
+      // 1. Clean up allocations (restore unmatched amounts on linked bank transactions)
       const matches = await tx.allocation.findMany({
         where: { invoiceId: data.id },
       });
       if (matches.length > 0) {
         for (const match of matches) {
-          await tx.payment.update({
-            where: { id: match.paymentId },
-            data: {
-              matchedAmount: { decrement: match.amount },
-              unmatchedAmount: { increment: match.amount },
-            },
-          });
+          if (match.bankTransactionId) {
+            await tx.bankTransaction.update({
+              where: { id: match.bankTransactionId },
+              data: {
+                matchedAmount: { decrement: match.amount },
+                unmatchedAmount: { increment: match.amount },
+              },
+            });
+          }
         }
         await tx.allocation.deleteMany({ where: { invoiceId: data.id } });
       }

@@ -2062,22 +2062,26 @@ model Payment {
   @@index([createdAt])
 }
 
-/// Allocation: which payments cover which invoices (payment → invoice link)
+/// Allocation: which bank transactions cover which invoices (bank txn → invoice link)
 model Allocation {
-  id         String   @id @default(uuid())
-  paymentId  String
-  invoiceId  String
-  amount     Float    // How much of this payment goes to this invoice
-  notes      String?
-  matchedAt  DateTime @default(now())
-  matchedById String
+  id                String   @id @default(uuid())
+  paymentId         String?  // Legacy — will be dropped in Phase 4
+  bankTransactionId String?  // New FK — will become required in Phase 4
+  invoiceId         String
+  amount            Float    // How much of this bank txn goes to this invoice
+  notes             String?
+  matchedAt         DateTime @default(now())
+  matchedById       String
 
-  payment   Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
-  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
-  matchedBy User    @relation("AllocationMatcher", fields: [matchedById], references: [id])
+  payment         Payment?         @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  bankTransaction BankTransaction? @relation("BankTxnAllocation", fields: [bankTransactionId], references: [id], onDelete: Cascade)
+  invoice         Invoice          @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  matchedBy       User             @relation("AllocationMatcher", fields: [matchedById], references: [id])
 
   @@unique([paymentId, invoiceId])
+  @@unique([bankTransactionId, invoiceId])
   @@index([paymentId])
+  @@index([bankTransactionId])
   @@index([invoiceId])
   @@map("Allocation")
 }
@@ -2278,6 +2282,22 @@ model BankTransaction {
   intendedDebitAccount String?  // The expense account from categorization
   postingType          String?  // 'single_step' or 'two_step'
 
+  // Payment matching (migrated from Payment model)
+  matchedAmount     Float     @default(0)
+  unmatchedAmount   Float     @default(0)
+  notes             String?
+
+  // File attachment (migrated from Payment model)
+  fileData          Bytes?
+  fileName          String?
+  fileMimeType      String?
+  fileSizeBytes     Int?
+
+  // Google Drive sync (migrated from Payment model)
+  driveFileId       String?
+  driveUrl          String?
+  driveUploadedAt   DateTime?
+
   // Status: imported → categorized → posted | skipped | legacy_posted
   status            String    @default("imported")
   skipReason        String?
@@ -2299,6 +2319,7 @@ model BankTransaction {
   ledgerEntry       LedgerEntry?  @relation("BankTxnLedgerEntry", fields: [ledgerEntryId], references: [id])
   payment           Payment?      @relation("BankTxnPayment", fields: [paymentId], references: [id])
   batch             BankImportBatch? @relation(fields: [batchId], references: [id])
+  allocations       Allocation[]  @relation("BankTxnAllocation")
 
   @@index([bank, status])
   @@index([txnDate])

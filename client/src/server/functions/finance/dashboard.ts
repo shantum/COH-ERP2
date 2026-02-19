@@ -22,13 +22,13 @@ export const getFinanceSummary = createServerFn({ method: 'GET' })
       prisma.invoice.aggregate({ where: { type: 'receivable', status: { in: ['confirmed', 'partially_paid'] } }, _sum: { balanceDue: true } }),
       prisma.bankTransaction.findFirst({ where: { bank: 'hdfc', closingBalance: { not: null } }, orderBy: { txnDate: 'desc' }, select: { closingBalance: true, txnDate: true } }),
       prisma.bankTransaction.findFirst({ where: { bank: 'razorpayx', closingBalance: { not: null } }, orderBy: { txnDate: 'desc' }, select: { closingBalance: true, txnDate: true } }),
-      prisma.payment.aggregate({ where: { direction: 'outgoing', status: 'confirmed', debitAccountCode: 'UNMATCHED_PAYMENTS', unmatchedAmount: { gt: 0.01 } }, _sum: { unmatchedAmount: true } }),
+      prisma.bankTransaction.aggregate({ where: { direction: 'debit', status: { in: ['posted', 'legacy_posted'] }, debitAccountCode: 'UNMATCHED_PAYMENTS', unmatchedAmount: { gt: 0.01 } }, _sum: { unmatchedAmount: true } }),
       prisma.invoice.count({ where: { type: 'payable', status: { in: ['confirmed', 'partially_paid'] } } }),
       prisma.invoice.count({ where: { type: 'receivable', status: { in: ['confirmed', 'partially_paid'] } } }),
       // Attention counts
       prisma.invoice.count({ where: { status: 'draft' } }),
       prisma.bankTransaction.count({ where: { status: { in: ['imported', 'categorized'] } } }),
-      prisma.payment.count({ where: { status: 'confirmed', unmatchedAmount: { gt: 0.01 } } }),
+      prisma.bankTransaction.count({ where: { status: { in: ['posted', 'legacy_posted'] }, unmatchedAmount: { gt: 0.01 } } }),
     ]);
 
     return {
@@ -85,25 +85,25 @@ export const getFinanceAlerts = createServerFn({ method: 'GET' })
       });
     }
 
-    // 2. Over-allocated payments: matched amount > payment amount
+    // 2. Over-allocated bank transactions: matched amount > txn amount
     const overallocated = await prisma.$queryRaw<Array<{
       id: string; reference: string | null; counterparty: string | null;
       amount: number; matched_amount: number;
     }>>`
-      SELECT pay.id, pay."referenceNumber" AS reference,
-             p.name AS counterparty,
-             pay.amount::float AS amount,
-             pay."matchedAmount"::float AS matched_amount
-      FROM "Payment" pay
-      LEFT JOIN "Party" p ON p.id = pay."partyId"
-      WHERE pay.status != 'cancelled'
-        AND pay."matchedAmount" > pay.amount + 1
+      SELECT bt.id, bt.reference AS reference,
+             COALESCE(p.name, bt."counterpartyName") AS counterparty,
+             bt.amount::float AS amount,
+             bt."matchedAmount"::float AS matched_amount
+      FROM "BankTransaction" bt
+      LEFT JOIN "Party" p ON p.id = bt."partyId"
+      WHERE bt.status IN ('posted', 'legacy_posted')
+        AND bt."matchedAmount" > bt.amount + 1
     `;
-    for (const pay of overallocated) {
+    for (const bt of overallocated) {
       alerts.push({
         severity: 'error',
         category: 'Over-allocated Payment',
-        message: `${pay.reference || pay.id.slice(0, 8)} — ${pay.counterparty || 'Unknown'}: allocated Rs ${Math.round(pay.matched_amount).toLocaleString('en-IN')} but payment was only Rs ${Math.round(pay.amount).toLocaleString('en-IN')}`,
+        message: `${bt.reference || bt.id.slice(0, 8)} — ${bt.counterparty || 'Unknown'}: allocated Rs ${Math.round(bt.matched_amount).toLocaleString('en-IN')} but txn was only Rs ${Math.round(bt.amount).toLocaleString('en-IN')}`,
       });
     }
 
@@ -111,30 +111,30 @@ export const getFinanceAlerts = createServerFn({ method: 'GET' })
     // Vendors legitimately use multiple payment channels (bank + CC, RazorpayX + HDFC).
     // Actual duplicate payments are caught by check #3 (reference number matching).
 
-    // 5. Large unmatched payments (>50K, no invoice link)
+    // 5. Large unmatched bank transactions (>50K, no invoice link)
     const unmatched = await prisma.$queryRaw<Array<{
       id: string; reference: string | null; counterparty: string | null;
-      amount: number; unmatched: number; payment_date: Date;
+      amount: number; unmatched: number; txn_date: Date;
     }>>`
-      SELECT pay.id, pay."referenceNumber" AS reference,
-             p.name AS counterparty,
-             pay.amount::float AS amount,
-             pay."unmatchedAmount"::float AS unmatched,
-             pay."paymentDate" AS payment_date
-      FROM "Payment" pay
-      LEFT JOIN "Party" p ON p.id = pay."partyId"
-      WHERE pay.status = 'confirmed'
-        AND pay.direction = 'outgoing'
-        AND pay."unmatchedAmount" > 50000
-      ORDER BY pay."unmatchedAmount" DESC
+      SELECT bt.id, bt.reference AS reference,
+             COALESCE(p.name, bt."counterpartyName") AS counterparty,
+             bt.amount::float AS amount,
+             bt."unmatchedAmount"::float AS unmatched,
+             bt."txnDate" AS txn_date
+      FROM "BankTransaction" bt
+      LEFT JOIN "Party" p ON p.id = bt."partyId"
+      WHERE bt.status IN ('posted', 'legacy_posted')
+        AND bt.direction = 'debit'
+        AND bt."unmatchedAmount" > 50000
+      ORDER BY bt."unmatchedAmount" DESC
       LIMIT 20
     `;
-    for (const pay of unmatched) {
+    for (const bt of unmatched) {
       alerts.push({
         severity: 'warning',
         category: 'Large Unmatched Payment',
-        message: `${pay.counterparty || 'Unknown'}: Rs ${Math.round(pay.unmatched).toLocaleString('en-IN')} unmatched (${pay.reference || 'no ref'})`,
-        details: `Paid ${new Date(pay.payment_date).toISOString().slice(0, 10)} — needs invoice link to split GST`,
+        message: `${bt.counterparty || 'Unknown'}: Rs ${Math.round(bt.unmatched).toLocaleString('en-IN')} unmatched (${bt.reference || 'no ref'})`,
+        details: `Paid ${new Date(bt.txn_date).toISOString().slice(0, 10)} — needs invoice link to split GST`,
       });
     }
 
@@ -155,9 +155,9 @@ export const getFinanceAlerts = createServerFn({ method: 'GET' })
       });
     }
 
-    // 8. Suspense balance (unmatched payments in suspense)
-    const suspenseTotal = await prisma.payment.aggregate({
-      where: { direction: 'outgoing', status: 'confirmed', debitAccountCode: 'UNMATCHED_PAYMENTS', unmatchedAmount: { gt: 0.01 } },
+    // 8. Suspense balance (unmatched bank txns in suspense)
+    const suspenseTotal = await prisma.bankTransaction.aggregate({
+      where: { direction: 'debit', status: { in: ['posted', 'legacy_posted'] }, debitAccountCode: 'UNMATCHED_PAYMENTS', unmatchedAmount: { gt: 0.01 } },
       _sum: { unmatchedAmount: true },
     });
     const suspenseAmt = suspenseTotal._sum.unmatchedAmount ?? 0;
@@ -170,24 +170,24 @@ export const getFinanceAlerts = createServerFn({ method: 'GET' })
       });
     }
 
-    // 9. Duplicate payments (same ref + similar amount + same counterparty)
+    // 9. Duplicate bank transactions (same ref + similar amount + same counterparty)
     // Excludes small amounts (<100) — recurring bank charges share batch-style references (CDT*)
     const dupes = await prisma.$queryRaw<Array<{
       reference: string; counterparty: string; amount: number; cnt: number;
     }>>`
-      SELECT pay."referenceNumber" AS reference,
-             p.name AS counterparty,
-             pay.amount::float AS amount,
+      SELECT bt.reference AS reference,
+             COALESCE(p.name, bt."counterpartyName") AS counterparty,
+             bt.amount::float AS amount,
              COUNT(*)::int AS cnt
-      FROM "Payment" pay
-      LEFT JOIN "Party" p ON p.id = pay."partyId"
-      WHERE pay.status != 'cancelled'
-        AND pay."referenceNumber" IS NOT NULL
-        AND pay."referenceNumber" != ''
-        AND pay.amount > 100
-      GROUP BY pay."referenceNumber", p.name, pay.amount
+      FROM "BankTransaction" bt
+      LEFT JOIN "Party" p ON p.id = bt."partyId"
+      WHERE bt.status IN ('posted', 'legacy_posted')
+        AND bt.reference IS NOT NULL
+        AND bt.reference != ''
+        AND bt.amount > 100
+      GROUP BY bt.reference, COALESCE(p.name, bt."counterpartyName"), bt.amount
       HAVING COUNT(*) > 1
-      ORDER BY pay.amount DESC
+      ORDER BY bt.amount DESC
       LIMIT 10
     `;
     for (const d of dupes) {
@@ -223,24 +223,24 @@ export const getFinanceAlerts = createServerFn({ method: 'GET' })
       });
     }
 
-    // 11. Payment matchedAmount out of sync
-    const paymentMismatch = await prisma.$queryRaw<Array<{
+    // 11. Bank transaction matchedAmount out of sync
+    const btMismatch = await prisma.$queryRaw<Array<{
       id: string; reference: string | null; counterparty: string | null;
       matched_amount: number; actual_matched: number;
     }>>`
-      SELECT pay.id, pay."referenceNumber" AS reference,
-             p.name AS counterparty,
-             pay."matchedAmount"::float AS matched_amount,
-             COALESCE(SUM(pi.amount), 0)::float AS actual_matched
-      FROM "Payment" pay
-      LEFT JOIN "Party" p ON p.id = pay."partyId"
-      LEFT JOIN "Allocation" pi ON pi."paymentId" = pay.id
-      WHERE pay.status != 'cancelled'
-      GROUP BY pay.id, pay."referenceNumber", p.name, pay."matchedAmount"
-      HAVING ABS(pay."matchedAmount" - COALESCE(SUM(pi.amount), 0)) > 1
+      SELECT bt.id, bt.reference AS reference,
+             COALESCE(p.name, bt."counterpartyName") AS counterparty,
+             bt."matchedAmount"::float AS matched_amount,
+             COALESCE(SUM(a.amount), 0)::float AS actual_matched
+      FROM "BankTransaction" bt
+      LEFT JOIN "Party" p ON p.id = bt."partyId"
+      LEFT JOIN "Allocation" a ON a."bankTransactionId" = bt.id
+      WHERE bt.status IN ('posted', 'legacy_posted')
+      GROUP BY bt.id, bt.reference, COALESCE(p.name, bt."counterpartyName"), bt."matchedAmount"
+      HAVING ABS(bt."matchedAmount" - COALESCE(SUM(a.amount), 0)) > 1
       LIMIT 10
     `;
-    for (const m of paymentMismatch) {
+    for (const m of btMismatch) {
       alerts.push({
         severity: 'error',
         category: 'Payment Amount Mismatch',

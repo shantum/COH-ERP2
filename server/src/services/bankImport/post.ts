@@ -1,7 +1,8 @@
 /**
  * Bank Import V2 — Post Service
  *
- * Confirms BankTransactions — creates Payment records and marks as posted.
+ * Confirms BankTransactions — sets unmatchedAmount and marks as posted.
+ * No longer creates Payment records (Payment model is being retired).
  */
 
 import { Prisma } from '@prisma/client';
@@ -26,7 +27,6 @@ export interface PostResult {
 
 export interface ConfirmResult {
   success: boolean;
-  paymentId?: string;
   error?: string;
 }
 
@@ -108,9 +108,6 @@ export function decidePosting(
 // ============================================
 
 export async function confirmSingleTransaction(txnId: string): Promise<ConfirmResult> {
-  const admin = await prisma.user.findFirst({ where: { role: 'admin' } });
-  if (!admin) throw new Error('No admin user found — needed for payment createdById');
-
   // Pre-flight checks outside transaction (read-only)
   const txn = await prisma.bankTransaction.findUnique({ where: { id: txnId } });
   if (!txn) return { success: false, error: 'Transaction not found' };
@@ -125,7 +122,7 @@ export async function confirmSingleTransaction(txnId: string): Promise<ConfirmRe
   }
 
   // All mutations in a single transaction for atomicity
-  const paymentId = await prisma.$transaction(async (tx) => {
+  await prisma.$transaction(async (tx) => {
     // Resolve partyId: use linked party, or try matching by counterpartyName
     let partyId = txn.partyId;
     if (!partyId && txn.counterpartyName) {
@@ -142,7 +139,6 @@ export async function confirmSingleTransaction(txnId: string): Promise<ConfirmRe
       });
       if (matched) {
         partyId = matched.id;
-        await tx.bankTransaction.update({ where: { id: txn.id }, data: { partyId: matched.id } });
       }
     }
 
@@ -162,55 +158,21 @@ export async function confirmSingleTransaction(txnId: string): Promise<ConfirmRe
       category: txn.category,
     });
 
-    let resultPaymentId: string | undefined;
-    if (txn.direction === 'debit' && (txn.bank === 'hdfc' || txn.bank === 'razorpayx')) {
-      if (txn.paymentId) {
-        // Update existing linked payment
-        const existing = await tx.payment.findUnique({ where: { id: txn.paymentId }, select: { notes: true } });
-        await tx.payment.update({
-          where: { id: txn.paymentId },
-          data: {
-            debitAccountCode: decision.intendedDebitAccount ?? decision.debitAccount,
-            ...(!existing?.notes && narration ? { notes: narration } : {}),
-          },
-        });
-        resultPaymentId = txn.paymentId;
-      } else {
-        const ref = txn.reference ?? txn.utr ?? null;
-        const payment = await tx.payment.create({
-          data: {
-            direction: 'outgoing',
-            method: 'bank_transfer',
-            status: 'confirmed',
-            amount: txn.amount,
-            unmatchedAmount: txn.amount,
-            paymentDate: entryDate,
-            period,
-            referenceNumber: ref,
-            debitAccountCode: decision.intendedDebitAccount ?? decision.debitAccount,
-            createdById: admin.id,
-            ...(partyId ? { partyId } : {}),
-            ...(narration ? { notes: narration } : {}),
-          },
-        });
-        resultPaymentId = payment.id;
-      }
-    }
-
     await tx.bankTransaction.update({
       where: { id: txn.id },
       data: {
         status: 'posted',
+        unmatchedAmount: txn.amount,
         intendedDebitAccount: decision.intendedDebitAccount,
         postingType: decision.type,
-        ...(resultPaymentId && !txn.paymentId ? { paymentId: resultPaymentId } : {}),
+        period,
+        ...(!txn.notes && narration ? { notes: narration } : {}),
+        ...(partyId && !txn.partyId ? { partyId } : {}),
       },
     });
-
-    return resultPaymentId;
   });
 
-  return { success: true, paymentId };
+  return { success: true };
 }
 
 // ============================================
@@ -246,10 +208,6 @@ export async function confirmBatch(txnIds: string[]): Promise<BatchConfirmResult
 // ============================================
 
 export async function postTransactions(options?: { bank?: string }): Promise<PostResult> {
-  // Get admin user for createdById
-  const admin = await prisma.user.findFirst({ where: { role: 'admin' } });
-  if (!admin) throw new Error('No admin user found — needed for payment createdById');
-
   const where: Prisma.BankTransactionWhereInput = {
     status: { in: ['imported', 'categorized'] },
     debitAccountCode: { not: null },
@@ -306,51 +264,16 @@ export async function postTransactions(options?: { bank?: string }): Promise<Pos
           category: txn.category,
         });
 
-        // Atomic: create/update Payment + update BankTransaction status
-        await prisma.$transaction(async (tx) => {
-          let paymentId: string | undefined;
-          if (txn.direction === 'debit' && (txn.bank === 'hdfc' || txn.bank === 'razorpayx')) {
-            if (txn.paymentId) {
-              const existing = await tx.payment.findUnique({ where: { id: txn.paymentId }, select: { notes: true } });
-              await tx.payment.update({
-                where: { id: txn.paymentId },
-                data: {
-                  debitAccountCode: decision.intendedDebitAccount ?? decision.debitAccount,
-                  ...(!existing?.notes && narration ? { notes: narration } : {}),
-                },
-              });
-              paymentId = txn.paymentId;
-            } else {
-              const ref = txn.reference ?? txn.utr ?? null;
-              const payment = await tx.payment.create({
-                data: {
-                  direction: 'outgoing',
-                  method: 'bank_transfer',
-                  status: 'confirmed',
-                  amount: txn.amount,
-                  unmatchedAmount: txn.amount,
-                  paymentDate: entryDate,
-                  period,
-                  referenceNumber: ref,
-                  debitAccountCode: decision.intendedDebitAccount ?? decision.debitAccount,
-                  createdById: admin.id,
-                  ...(txn.partyId ? { partyId: txn.partyId } : {}),
-                  ...(narration ? { notes: narration } : {}),
-                },
-              });
-              paymentId = payment.id;
-            }
-          }
-
-          await tx.bankTransaction.update({
-            where: { id: txn.id },
-            data: {
-              status: 'posted',
-              intendedDebitAccount: decision.intendedDebitAccount,
-              postingType: decision.type,
-              ...(paymentId && !txn.paymentId ? { paymentId } : {}),
-            },
-          });
+        await prisma.bankTransaction.update({
+          where: { id: txn.id },
+          data: {
+            status: 'posted',
+            unmatchedAmount: txn.amount,
+            intendedDebitAccount: decision.intendedDebitAccount,
+            postingType: decision.type,
+            period,
+            ...(!txn.notes && narration ? { notes: narration } : {}),
+          },
         });
 
         if (decision.type === 'single_step') singleStep++;

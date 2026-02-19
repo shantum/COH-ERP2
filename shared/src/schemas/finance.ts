@@ -25,10 +25,10 @@ export const FinanceSearchParams = z.object({
   status: z.string().optional().catch(undefined),
   /** Invoice category filter */
   category: z.string().optional().catch(undefined),
-  /** Payment direction filter */
-  direction: z.enum(['outgoing', 'incoming']).optional().catch(undefined),
-  /** Payment method filter */
-  method: z.string().optional().catch(undefined),
+  /** Payment direction filter (bank perspective: debit = money out, credit = money in) */
+  direction: z.enum(['debit', 'credit']).optional().catch(undefined),
+  /** Payment bank filter */
+  bank: z.string().optional().catch(undefined),
   /** Payment match status filter */
   matchStatus: z.enum(['all', 'unmatched', 'matched']).optional().catch(undefined),
   /** Payment category filter (party or bank txn category) */
@@ -42,7 +42,7 @@ export const FinanceSearchParams = z.object({
   /** Items per page */
   limit: z.coerce.number().int().positive().max(200).catch(50),
   /** Modal state */
-  modal: z.enum(['create-invoice', 'create-payment', 'view-invoice', 'view-payment']).optional().catch(undefined),
+  modal: z.enum(['create-invoice', 'view-invoice']).optional().catch(undefined),
   /** Record ID for modals */
   modalId: z.string().optional().catch(undefined),
   /** Date range filter — from */
@@ -108,27 +108,11 @@ export const UpdateInvoiceSchema = z.object({
 export type UpdateInvoiceInput = z.infer<typeof UpdateInvoiceSchema>;
 
 // ============================================
-// PAYMENT SCHEMAS
-// ============================================
-
-export const CreateFinancePaymentSchema = z.object({
-  referenceNumber: z.string().optional(),
-  direction: z.enum(['outgoing', 'incoming']),
-  method: z.string(),
-  amount: z.number().positive(),
-  paymentDate: z.string(),
-  partyId: z.string().uuid().optional(),
-  customerId: z.string().uuid().optional(),
-  notes: z.string().optional(),
-});
-export type CreateFinancePaymentInput = z.infer<typeof CreateFinancePaymentSchema>;
-
-// ============================================
-// PAYMENT-INVOICE MATCHING
+// BANK TRANSACTION-INVOICE MATCHING
 // ============================================
 
 export const MatchAllocationSchema = z.object({
-  paymentId: z.string().uuid(),
+  bankTransactionId: z.string().uuid(),
   invoiceId: z.string().uuid(),
   amount: z.number().positive(),
   notes: z.string().optional(),
@@ -151,9 +135,8 @@ export const ListInvoicesInput = z.object({
 }).optional();
 
 export const ListPaymentsInput = z.object({
-  direction: z.enum(['outgoing', 'incoming']).optional(),
-  method: z.string().optional(),
-  status: z.string().optional(),
+  direction: z.enum(['debit', 'credit']).optional(),
+  bank: z.string().optional(),
   matchStatus: z.enum(['all', 'unmatched', 'matched']).optional(),
   paymentCategory: z.string().optional(),
   search: z.string().optional(),
@@ -473,7 +456,7 @@ export const BankImportDeleteParamSchema = z.object({
 
 export const ApplyAutoMatchesSchema = z.object({
   matches: z.array(z.object({
-    paymentId: z.string().uuid(),
+    bankTransactionId: z.string().uuid(),
     invoiceId: z.string().uuid(),
     amount: z.number().positive(),
   })),

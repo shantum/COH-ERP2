@@ -268,22 +268,22 @@ export default function InvoiceDetailModal({
                   <table className="w-full text-xs">
                     <thead className="bg-muted/50">
                       <tr>
-                        <th className="text-left p-2 font-medium">Reference #</th>
-                        <th className="text-left p-2 font-medium">Method</th>
+                        <th className="text-left p-2 font-medium">Reference</th>
+                        <th className="text-left p-2 font-medium">Bank</th>
                         <th className="text-right p-2 font-medium">Amount</th>
-                        <th className="text-left p-2 font-medium">Payment Date</th>
+                        <th className="text-left p-2 font-medium">Txn Date</th>
                         <th className="text-left p-2 font-medium">Matched By</th>
                       </tr>
                     </thead>
                     <tbody>
                       {invoice.allocations.map((alloc) => (
                         <tr key={alloc.id} className="border-t">
-                          <td className="p-2 font-mono">{alloc.payment.referenceNumber ?? '---'}</td>
-                          <td className="p-2">{formatStatus(alloc.payment.method)}</td>
+                          <td className="p-2 font-mono">{alloc.bankTransaction?.reference ?? alloc.bankTransaction?.utr ?? '---'}</td>
+                          <td className="p-2">{alloc.bankTransaction?.bank?.toUpperCase() ?? '---'}</td>
                           <td className="p-2 text-right font-mono">{formatCurrency(Number(alloc.amount))}</td>
                           <td className="p-2">
-                            {alloc.payment.paymentDate
-                              ? new Date(alloc.payment.paymentDate).toLocaleDateString('en-IN')
+                            {alloc.bankTransaction?.txnDate
+                              ? new Date(alloc.bankTransaction.txnDate).toLocaleDateString('en-IN')
                               : '---'}
                           </td>
                           <td className="p-2">{alloc.matchedBy?.name ?? '---'}</td>

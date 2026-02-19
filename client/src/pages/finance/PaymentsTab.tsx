@@ -4,28 +4,27 @@ import { useServerFn } from '@tanstack/react-start';
 import { useNavigate } from '@tanstack/react-router';
 import { useDebounce } from '../../hooks/useDebounce';
 import {
-  listPayments, createFinancePayment, updatePaymentNotes,
+  listPayments, updatePaymentNotes,
   getAutoMatchSuggestions, applyAutoMatches,
   findUnpaidInvoices,
 } from '../../server/functions/finance';
-import { formatCurrency, formatPeriod, formatStatus, Pagination, LoadingState, downloadCsv } from './shared';
+import { formatCurrency, formatPeriod, Pagination, LoadingState, downloadCsv } from './shared';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
-  Plus, ArrowUpRight, ArrowDownLeft, Loader2, Download,
+  ArrowUpRight, ArrowDownLeft, Loader2, Download,
   ExternalLink, Link2, Pencil,
 } from 'lucide-react';
-import { PartySearch } from '../../components/finance/PartySearch';
 import { showSuccess, showError } from '../../utils/toast';
 import {
   type FinanceSearchParams,
-  PAYMENT_METHODS, PAYMENT_CATEGORY_FILTERS,
+  PAYMENT_CATEGORY_FILTERS,
   getCategoryLabel,
+  getBankLabel,
 } from '@coh/shared';
 
 function InlinePaymentNotes({ paymentId, notes, onSaved }: { paymentId: string; notes: string | null; onSaved: () => void }) {
@@ -87,7 +86,6 @@ function InlinePaymentNotes({ paymentId, notes, onSaved }: { paymentId: string; 
 
 export default function PaymentsTab({ search }: { search: FinanceSearchParams }) {
   const navigate = useNavigate();
-  const [showCreateModal, setShowCreateModal] = useState(false);
   const [showAutoMatch, setShowAutoMatch] = useState(false);
   const [linkingPayment, setLinkingPayment] = useState<{
     id: string; amount: number; unmatchedAmount: number;
@@ -105,12 +103,12 @@ export default function PaymentsTab({ search }: { search: FinanceSearchParams })
 
   const listFn = useServerFn(listPayments);
   const { data, isLoading } = useQuery({
-    queryKey: ['finance', 'payments', search.direction, search.method, search.matchStatus, search.paymentCategory, search.search, search.dateFrom, search.dateTo, search.page],
+    queryKey: ['finance', 'payments', search.direction, search.bank, search.matchStatus, search.paymentCategory, search.search, search.dateFrom, search.dateTo, search.page],
     queryFn: () =>
       listFn({
         data: {
           ...(search.direction ? { direction: search.direction } : {}),
-          ...(search.method ? { method: search.method } : {}),
+          ...(search.bank ? { bank: search.bank } : {}),
           ...(search.matchStatus && search.matchStatus !== 'all' ? { matchStatus: search.matchStatus } : {}),
           ...(search.paymentCategory ? { paymentCategory: search.paymentCategory } : {}),
           ...(search.search ? { search: search.search } : {}),
@@ -133,22 +131,23 @@ export default function PaymentsTab({ search }: { search: FinanceSearchParams })
     <div className="space-y-4">
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-2">
-        <Select value={search.direction ?? 'all'} onValueChange={(v) => updateSearch({ direction: v === 'all' ? undefined : v as 'outgoing' | 'incoming', page: 1 })}>
+        <Select value={search.direction ?? 'all'} onValueChange={(v) => updateSearch({ direction: v === 'all' ? undefined : v as 'debit' | 'credit', page: 1 })}>
           <SelectTrigger className="w-[140px]"><SelectValue placeholder="Direction" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All</SelectItem>
-            <SelectItem value="outgoing">Outgoing</SelectItem>
-            <SelectItem value="incoming">Incoming</SelectItem>
+            <SelectItem value="debit">Outgoing</SelectItem>
+            <SelectItem value="credit">Incoming</SelectItem>
           </SelectContent>
         </Select>
 
-        <Select value={search.method ?? 'all'} onValueChange={(v) => updateSearch({ method: v === 'all' ? undefined : v, page: 1 })}>
-          <SelectTrigger className="w-[160px]"><SelectValue placeholder="Method" /></SelectTrigger>
+        <Select value={search.bank ?? 'all'} onValueChange={(v) => updateSearch({ bank: v === 'all' ? undefined : v, page: 1 })}>
+          <SelectTrigger className="w-[160px]"><SelectValue placeholder="Bank" /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All Methods</SelectItem>
-            {PAYMENT_METHODS.map((m) => (
-              <SelectItem key={m} value={m}>{formatStatus(m)}</SelectItem>
-            ))}
+            <SelectItem value="all">All Banks</SelectItem>
+            <SelectItem value="hdfc">HDFC Bank</SelectItem>
+            <SelectItem value="razorpayx">RazorpayX</SelectItem>
+            <SelectItem value="hdfc_cc">HDFC CC</SelectItem>
+            <SelectItem value="icici_cc">ICICI CC</SelectItem>
           </SelectContent>
         </Select>
 
@@ -201,16 +200,16 @@ export default function PaymentsTab({ search }: { search: FinanceSearchParams })
             onClick={() => {
               if (!data?.payments?.length) return;
               const rows: string[][] = [
-                ['Date', 'Direction', 'Method', 'Party', 'Amount', 'Reference', 'Match Status', 'Period', 'Notes'],
+                ['Date', 'Direction', 'Bank', 'Party', 'Amount', 'Reference', 'Match Status', 'Period', 'Notes'],
               ];
               for (const pmt of data.payments) {
                 rows.push([
-                  new Date(pmt.paymentDate).toLocaleDateString('en-IN'),
+                  new Date(pmt.txnDate).toLocaleDateString('en-IN'),
                   pmt.direction,
-                  pmt.method,
-                  pmt.party?.name ?? '',
+                  pmt.bank,
+                  pmt.party?.name ?? pmt.counterpartyName ?? '',
                   String(pmt.amount),
-                  pmt.referenceNumber ?? '',
+                  pmt.reference ?? pmt.utr ?? '',
                   pmt.unmatchedAmount > 0.01 ? 'Unmatched' : 'Matched',
                   pmt.period ?? '',
                   pmt.notes ?? '',
@@ -224,9 +223,6 @@ export default function PaymentsTab({ search }: { search: FinanceSearchParams })
           </Button>
           <Button variant="outline" onClick={() => setShowAutoMatch(true)}>
             <Link2 className="h-4 w-4 mr-1" /> Find Matches
-          </Button>
-          <Button onClick={() => setShowCreateModal(true)}>
-            <Plus className="h-4 w-4 mr-1" /> Record Payment
           </Button>
         </div>
       </div>
@@ -253,10 +249,8 @@ export default function PaymentsTab({ search }: { search: FinanceSearchParams })
               </thead>
               <tbody>
                 {data?.payments?.map((pmt) => {
-                  const partyName = pmt.party?.name ??
-                    (pmt.customer ? [pmt.customer.firstName, pmt.customer.lastName].filter(Boolean).join(' ') || pmt.customer.email : null) ??
-                    '—';
-                  const category = pmt.party?.category ?? pmt.bankTransaction?.category ?? null;
+                  const partyName = pmt.party?.name ?? pmt.counterpartyName ?? '—';
+                  const category = pmt.party?.category ?? pmt.category ?? null;
                   const inv = pmt.allocations?.[0]?.invoice;
                   const gstRate = pmt.party?.transactionType?.defaultGstRate;
                   const gstAmt = gstRate ? Math.round(pmt.amount * gstRate / (100 + gstRate)) : null;
@@ -264,36 +258,22 @@ export default function PaymentsTab({ search }: { search: FinanceSearchParams })
                   const tdsRate = pmt.party?.tdsRate;
                   const tdsAmt = hasTds && tdsRate ? Math.round(pmt.amount * tdsRate / 100) : null;
 
-                  let refundOrderInfo: string | null = null;
-                  if (pmt.bankTransaction?.category === 'refund' && pmt.bankTransaction.rawData) {
-                    try {
-                      const raw = pmt.bankTransaction.rawData as Record<string, unknown>;
-                      const notes = (raw.notes ?? raw.Notes) as Record<string, string> | string | undefined;
-                      const notesStr = typeof notes === 'string' ? notes : notes ? Object.values(notes).join(' ') : '';
-                      const orderMatch = notesStr.match(/(COH\d+|#\d{4,})/i);
-                      if (orderMatch) refundOrderInfo = orderMatch[0];
-                    } catch { /* ignore parse errors */ }
-                  }
-
                   return (
                     <tr key={pmt.id} className="border-t hover:bg-muted/30">
-                      <td className="p-3 text-xs whitespace-nowrap">{new Date(pmt.paymentDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: '2-digit' })}</td>
+                      <td className="p-3 text-xs whitespace-nowrap">{new Date(pmt.txnDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: '2-digit' })}</td>
                       <td className="p-3">
                         <div className="flex items-center gap-1.5">
-                          <span className={pmt.direction === 'incoming' ? 'text-green-600' : 'text-red-500'}>
-                            {pmt.direction === 'incoming' ? <ArrowDownLeft className="h-3.5 w-3.5" /> : <ArrowUpRight className="h-3.5 w-3.5" />}
+                          <span className={pmt.direction === 'credit' ? 'text-green-600' : 'text-red-500'}>
+                            {pmt.direction === 'credit' ? <ArrowDownLeft className="h-3.5 w-3.5" /> : <ArrowUpRight className="h-3.5 w-3.5" />}
                           </span>
-                          <span className="text-xs">{formatStatus(pmt.method)}</span>
+                          <span className="text-xs">{getBankLabel(pmt.bank)}</span>
                         </div>
-                        {pmt.referenceNumber && (
-                          <div className="font-mono text-[10px] text-muted-foreground mt-0.5 max-w-[180px] truncate" title={pmt.referenceNumber}>{pmt.referenceNumber}</div>
+                        {(pmt.reference || pmt.utr) && (
+                          <div className="font-mono text-[10px] text-muted-foreground mt-0.5 max-w-[180px] truncate" title={pmt.reference ?? pmt.utr ?? ''}>{pmt.reference ?? pmt.utr}</div>
                         )}
                       </td>
                       <td className="p-3 max-w-[220px]">
                         <div className="truncate font-medium text-xs" title={typeof partyName === 'string' ? partyName : ''}>{partyName}</div>
-                        {refundOrderInfo && (
-                          <div className="text-[10px] text-muted-foreground mt-0.5">Order {refundOrderInfo}</div>
-                        )}
                         <InlinePaymentNotes
                           paymentId={pmt.id}
                           notes={pmt.notes}
@@ -378,12 +358,7 @@ export default function PaymentsTab({ search }: { search: FinanceSearchParams })
                 {(!data?.payments || data.payments.length === 0) && (
                   <tr><td colSpan={9} className="p-8 text-center">
                     <div className="text-muted-foreground space-y-2">
-                      <p>{search.search || search.direction || search.method || search.matchStatus || search.paymentCategory || search.dateFrom ? 'No payments match your filters' : 'No payments yet'}</p>
-                      {!(search.search || search.direction || search.method || search.matchStatus || search.paymentCategory || search.dateFrom) && (
-                        <Button variant="outline" size="sm" onClick={() => setShowCreateModal(true)} className="mt-2">
-                          <Plus className="h-3.5 w-3.5 mr-1" /> Record Payment
-                        </Button>
-                      )}
+                      <p>{search.search || search.direction || search.bank || search.matchStatus || search.paymentCategory || search.dateFrom ? 'No payments match your filters' : 'No payments yet'}</p>
                     </div>
                   </td></tr>
                 )}
@@ -395,7 +370,6 @@ export default function PaymentsTab({ search }: { search: FinanceSearchParams })
         </>
       )}
 
-      <CreatePaymentModal open={showCreateModal} onClose={() => setShowCreateModal(false)} />
       <AutoMatchDialog open={showAutoMatch} onClose={() => setShowAutoMatch(false)} />
       {linkingPayment && (
         <ManualLinkDialog payment={linkingPayment} onClose={() => setLinkingPayment(null)} />
@@ -444,7 +418,7 @@ function ManualLinkDialog({ payment, onClose }: {
       if (!selectedInvoice || !matchAmount) throw new Error('Select an invoice');
       return applyFn({
         data: {
-          matches: [{ paymentId: payment.id, invoiceId: selectedInvoice, amount: Number(matchAmount) }],
+          matches: [{ bankTransactionId: payment.id, invoiceId: selectedInvoice, amount: Number(matchAmount) }],
         },
       });
     },
@@ -586,7 +560,7 @@ function AutoMatchDialog({ open, onClose }: { open: boolean; onClose: () => void
     for (const group of data.suggestions) {
       for (const m of group.matches) {
         if (m.confidence === 'high') {
-          highKeys.add(`${m.payment.id}:${m.invoice.id}`);
+          highKeys.add(`${m.bankTransaction.id}:${m.invoice.id}`);
         }
       }
     }
@@ -605,11 +579,11 @@ function AutoMatchDialog({ open, onClose }: { open: boolean; onClose: () => void
   const applyMutation = useMutation({
     mutationFn: async () => {
       if (!data?.suggestions) return { success: false as const, matched: 0 as number, errors: ['No data'] };
-      const matches: Array<{ paymentId: string; invoiceId: string; amount: number }> = [];
+      const matches: Array<{ bankTransactionId: string; invoiceId: string; amount: number }> = [];
       for (const group of data.suggestions) {
         for (const m of group.matches) {
-          if (selected.has(`${m.payment.id}:${m.invoice.id}`)) {
-            matches.push({ paymentId: m.payment.id, invoiceId: m.invoice.id, amount: m.matchAmount });
+          if (selected.has(`${m.bankTransaction.id}:${m.invoice.id}`)) {
+            matches.push({ bankTransactionId: m.bankTransaction.id, invoiceId: m.invoice.id, amount: m.matchAmount });
           }
         }
       }
@@ -656,13 +630,13 @@ function AutoMatchDialog({ open, onClose }: { open: boolean; onClose: () => void
                   <div className="font-medium text-sm">{group.party.name}</div>
                   <div className="text-xs text-muted-foreground">
                     {group.matches.length} suggestion{group.matches.length > 1 ? 's' : ''}
-                    {group.unmatchedPayments > 0 && ` · ${group.unmatchedPayments} unmatched payment${group.unmatchedPayments > 1 ? 's' : ''}`}
+                    {group.unmatchedTxns > 0 && ` · ${group.unmatchedTxns} unmatched txn${group.unmatchedTxns > 1 ? 's' : ''}`}
                     {group.unmatchedInvoices > 0 && ` · ${group.unmatchedInvoices} unmatched invoice${group.unmatchedInvoices > 1 ? 's' : ''}`}
                   </div>
                 </div>
                 <div className="divide-y">
                   {group.matches.map((m) => {
-                    const key = `${m.payment.id}:${m.invoice.id}`;
+                    const key = `${m.bankTransaction.id}:${m.invoice.id}`;
                     const isSelected = selected.has(key);
                     return (
                       <div key={key} className="px-4 py-3 flex items-start gap-3">
@@ -674,10 +648,10 @@ function AutoMatchDialog({ open, onClose }: { open: boolean; onClose: () => void
                         <div className="flex-1 min-w-0 grid grid-cols-2 gap-4">
                           <div>
                             <div className="text-xs text-muted-foreground mb-0.5">Payment</div>
-                            <div className="font-mono text-sm">{formatCurrency(m.payment.unmatchedAmount)}</div>
+                            <div className="font-mono text-sm">{formatCurrency(m.bankTransaction.unmatchedAmount)}</div>
                             <div className="text-xs text-muted-foreground">
-                              {new Date(m.payment.paymentDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: '2-digit' })}
-                              {m.payment.referenceNumber && ` · ${m.payment.referenceNumber.slice(0, 20)}`}
+                              {new Date(m.bankTransaction.txnDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: '2-digit' })}
+                              {m.bankTransaction.reference && ` · ${m.bankTransaction.reference.slice(0, 20)}`}
                             </div>
                           </div>
                           <div>
@@ -721,145 +695,6 @@ function AutoMatchDialog({ open, onClose }: { open: boolean; onClose: () => void
           >
             {applyMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
             Apply {selectedCount} Match{selectedCount !== 1 ? 'es' : ''}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// ============================================
-// CREATE PAYMENT MODAL
-// ============================================
-
-function CreatePaymentModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const queryClient = useQueryClient();
-  const createFn = useServerFn(createFinancePayment);
-
-  const [form, setForm] = useState({
-    direction: 'outgoing' as 'outgoing' | 'incoming',
-    method: 'bank_transfer' as string,
-    amount: '',
-    referenceNumber: '',
-    paymentDate: new Date().toISOString().split('T')[0],
-    notes: '',
-    partyId: undefined as string | undefined,
-  });
-
-  const [selectedParty, setSelectedParty] = useState<{ id: string; name: string } | null>(null);
-
-  const resetForm = () => {
-    setForm({
-      direction: 'outgoing',
-      method: 'bank_transfer',
-      amount: '',
-      referenceNumber: '',
-      paymentDate: new Date().toISOString().split('T')[0],
-      notes: '',
-      partyId: undefined,
-    });
-    setSelectedParty(null);
-  };
-
-  const mutation = useMutation({
-    mutationFn: () =>
-      createFn({
-        data: {
-          direction: form.direction,
-          method: form.method,
-          amount: Number(form.amount),
-          ...(form.referenceNumber ? { referenceNumber: form.referenceNumber } : {}),
-          paymentDate: form.paymentDate,
-          ...(form.notes ? { notes: form.notes } : {}),
-          ...(form.partyId ? { partyId: form.partyId } : {}),
-        },
-      }),
-    onSuccess: (result) => {
-      queryClient.invalidateQueries({ queryKey: ['finance'] });
-      if (result?.success) {
-        showSuccess('Payment recorded');
-        onClose();
-        resetForm();
-      } else {
-        showError('Failed to record payment', { description: (result as { error?: string })?.error });
-      }
-    },
-    onError: (err) => showError('Failed to record payment', { description: err.message }),
-  });
-
-  const isFormDirty = () => form.amount !== '' || form.referenceNumber !== '' || form.notes !== '' || form.partyId !== undefined;
-
-  return (
-    <Dialog open={open} onOpenChange={(o) => {
-      if (!o && isFormDirty()) {
-        if (!window.confirm('You have unsaved changes. Discard?')) return;
-      }
-      if (!o) onClose();
-    }}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle>Record Payment</DialogTitle>
-          <DialogDescription>Record a payment transaction.</DialogDescription>
-        </DialogHeader>
-        <div className="space-y-3">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label>Direction</Label>
-              <Select value={form.direction} onValueChange={(v) => setForm({ ...form, direction: v as 'outgoing' | 'incoming' })}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="outgoing">Outgoing (we paid)</SelectItem>
-                  <SelectItem value="incoming">Incoming (we received)</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label>Method</Label>
-              <Select value={form.method} onValueChange={(v) => setForm({ ...form, method: v })}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {PAYMENT_METHODS.map((m) => (
-                    <SelectItem key={m} value={m}>{formatStatus(m)}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          <div className="relative">
-            <Label>Party / Vendor</Label>
-            <PartySearch
-              value={selectedParty}
-              onChange={(p) => { setSelectedParty(p); setForm((f) => ({ ...f, partyId: p?.id })); }}
-              placeholder="Search vendor..."
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label>Amount</Label>
-              <Input type="number" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} placeholder="0.00" />
-            </div>
-            <div>
-              <Label>Reference #</Label>
-              <Input value={form.referenceNumber} onChange={(e) => setForm({ ...form, referenceNumber: e.target.value })} placeholder="UTR, Txn ID" />
-            </div>
-          </div>
-          <div>
-            <Label>Payment Date</Label>
-            <Input type="date" value={form.paymentDate} onChange={(e) => setForm({ ...form, paymentDate: e.target.value })} />
-          </div>
-          <div>
-            <Label>Notes</Label>
-            <Textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} rows={2} />
-          </div>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button
-            onClick={() => mutation.mutate()}
-            disabled={!form.amount || Number(form.amount) <= 0 || mutation.isPending}
-          >
-            {mutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
-            Record Payment
           </Button>
         </DialogFooter>
       </DialogContent>
