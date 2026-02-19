@@ -1,3 +1,4 @@
+import InvoiceDetailModal from './InvoiceDetailModal';
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
@@ -414,8 +415,12 @@ export default function InvoicesTab({ search }: { search: FinanceSearchParams })
                     (inv.status === 'draft' || inv.status === 'confirmed' || inv.status === 'partially_paid') &&
                     (inv.status === 'draft' || inv.balanceDue > 0);
                   return (
-                  <tr key={inv.id} className="border-t hover:bg-muted/30">
-                    <td className="p-3">
+                  <tr
+                    key={inv.id}
+                    className="border-t hover:bg-muted/30 cursor-pointer"
+                    onClick={() => navigate({ to: '/finance', search: { ...search, modal: 'view-invoice', modalId: inv.id }, replace: true })}
+                  >
+                    <td className="p-3" onClick={(e) => e.stopPropagation()}>
                       {isSelectable ? (
                         <input
                           type="checkbox"
@@ -449,7 +454,7 @@ export default function InvoicesTab({ search }: { search: FinanceSearchParams })
                     </td>
                     <td className="p-3"><StatusBadge status={inv.status} /></td>
                     <td className="p-3 text-xs text-muted-foreground">{inv.invoiceDate ? new Date(inv.invoiceDate).toLocaleDateString('en-IN') : '—'}</td>
-                    <td className="p-3 text-right">
+                    <td className="p-3 text-right" onClick={(e) => e.stopPropagation()}>
                       <div className="flex items-center justify-end gap-1">
                         {inv.driveUrl && (
                           <a
@@ -565,6 +570,13 @@ export default function InvoicesTab({ search }: { search: FinanceSearchParams })
             </DialogFooter>
           </DialogContent>
         </Dialog>
+      )}
+      {search.modal === 'view-invoice' && search.modalId && (
+        <InvoiceDetailModal
+          invoiceId={search.modalId}
+          open
+          onClose={() => navigate({ to: '/finance', search: { ...search, modal: undefined, modalId: undefined }, replace: true })}
+        />
       )}
     </div>
   );

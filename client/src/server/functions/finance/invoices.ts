@@ -101,7 +101,7 @@ export const getInvoice = createServerFn({ method: 'GET' })
             matchedBy: { select: { id: true, name: true } },
           },
         },
-        party: { select: { id: true, name: true, tdsApplicable: true, tdsSection: true, tdsRate: true } },
+        party: { select: { id: true, name: true, tdsApplicable: true, tdsSection: true, tdsRate: true, bankAccountName: true, bankAccountNumber: true, bankIfsc: true } },
         customer: { select: { id: true, email: true, firstName: true, lastName: true } },
         createdBy: { select: { id: true, name: true } },
       },
