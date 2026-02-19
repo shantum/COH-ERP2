@@ -26,6 +26,7 @@ import { matchInvoiceLines } from '../services/invoiceMatcher.js';
 import { findPartyByNarration } from '../services/transactionTypeResolver.js';
 import { deferredExecutor } from '../services/deferredExecutor.js';
 import { uploadInvoiceFile } from '../services/driveFinanceSync.js';
+import { sendEmail } from '../services/emailService.js';
 
 const log = logger.child({ module: 'resendWebhook' });
 const router = Router();
@@ -245,6 +246,10 @@ interface AttachmentResult {
   attachmentId: string;
   filename: string | null;
   invoiceId: string | null;
+  invoiceNumber: string | null;
+  supplierName: string | null;
+  totalAmount: number | null;
+  aiConfidence: number;
   error: string | null;
   duplicate: boolean;
 }
@@ -263,6 +268,10 @@ async function processAttachment(
     attachmentId,
     filename: filename ?? null,
     invoiceId: null,
+    invoiceNumber: null,
+    supplierName: null,
+    totalAmount: null,
+    aiConfidence: 0,
     error: null,
     duplicate: false,
   };
@@ -432,10 +441,18 @@ async function processAttachment(
           }),
         },
       },
-      select: { id: true, invoiceNumber: true, partyId: true },
+      select: {
+        id: true, invoiceNumber: true, partyId: true, totalAmount: true, aiConfidence: true,
+        party: { select: { name: true } },
+      },
     });
 
     log.info({ invoiceId: invoice.id, aiConfidence, partyMatched: !!partyId, emailFrom }, 'Draft invoice created from email');
+
+    result.invoiceNumber = invoice.invoiceNumber;
+    result.supplierName = invoice.party?.name ?? supplierName;
+    result.totalAmount = invoice.totalAmount ? Number(invoice.totalAmount) : null;
+    result.aiConfidence = aiConfidence;
 
     // 9. Enrich party or create new party
     if (parsed) {
@@ -616,6 +633,57 @@ router.post('/inbound', asyncHandler(async (req: Request, res: Response) => {
     { emailId, emailFrom, created, duplicates, errors, total: supported.length },
     'Inbound email processing complete',
   );
+
+  // 8. Send confirmation email back to sender
+  if (results.length > 0) {
+    deferredExecutor.enqueue(async () => {
+      try {
+        const successResults = results.filter(r => r.invoiceId && !r.duplicate && !r.error);
+        const dupResults = results.filter(r => r.duplicate);
+        const errResults = results.filter(r => r.error);
+
+        const rows = successResults.map(r => {
+          const inv = r.invoiceNumber ?? '—';
+          const supplier = r.supplierName ?? 'Unknown';
+          const amount = r.totalAmount != null ? `₹${r.totalAmount.toLocaleString('en-IN')}` : '—';
+          const confidence = `${Math.round(r.aiConfidence * 100)}%`;
+          return `<tr><td style="padding:6px 12px;border:1px solid #e5e7eb">${r.filename ?? '—'}</td><td style="padding:6px 12px;border:1px solid #e5e7eb">${inv}</td><td style="padding:6px 12px;border:1px solid #e5e7eb">${supplier}</td><td style="padding:6px 12px;border:1px solid #e5e7eb">${amount}</td><td style="padding:6px 12px;border:1px solid #e5e7eb">${confidence}</td></tr>`;
+        }).join('');
+
+        const warnings: string[] = [];
+        if (dupResults.length > 0) warnings.push(`${dupResults.length} duplicate(s) skipped`);
+        if (errResults.length > 0) warnings.push(`${errResults.length} failed: ${errResults.map(r => r.error).join(', ')}`);
+
+        const html = `
+<div style="font-family:system-ui,sans-serif;max-width:600px">
+  <h2 style="color:#16a34a;margin-bottom:4px">Invoice${successResults.length !== 1 ? 's' : ''} received</h2>
+  <p style="color:#6b7280;margin-top:0">${successResults.length} draft invoice${successResults.length !== 1 ? 's' : ''} created from your email "<strong>${emailSubject ?? '(no subject)'}</strong>"</p>
+  ${successResults.length > 0 ? `
+  <table style="border-collapse:collapse;width:100%;font-size:14px;margin:16px 0">
+    <thead><tr style="background:#f9fafb">
+      <th style="padding:6px 12px;border:1px solid #e5e7eb;text-align:left">File</th>
+      <th style="padding:6px 12px;border:1px solid #e5e7eb;text-align:left">Invoice #</th>
+      <th style="padding:6px 12px;border:1px solid #e5e7eb;text-align:left">Supplier</th>
+      <th style="padding:6px 12px;border:1px solid #e5e7eb;text-align:left">Amount</th>
+      <th style="padding:6px 12px;border:1px solid #e5e7eb;text-align:left">Confidence</th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table>` : ''}
+  ${warnings.length > 0 ? `<p style="color:#d97706;font-size:13px">⚠ ${warnings.join('. ')}</p>` : ''}
+  <p style="color:#6b7280;font-size:13px">These invoices are saved as <strong>drafts</strong> — please review and confirm in the ERP.</p>
+</div>`;
+
+        await sendEmail({
+          to: emailFrom,
+          subject: `✓ ${successResults.length} draft invoice${successResults.length !== 1 ? 's' : ''} created — ${emailSubject ?? '(no subject)'}`,
+          html,
+        });
+        log.info({ emailFrom, created: successResults.length }, 'Confirmation email sent');
+      } catch (err: unknown) {
+        log.error({ error: err instanceof Error ? err.message : err }, 'Failed to send confirmation email');
+      }
+    }, { action: 'sendInvoiceConfirmationEmail' });
+  }
 
   respond();
 }));
