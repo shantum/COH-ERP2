@@ -286,17 +286,43 @@ const RECONCILE_LOOKBACK_DAYS = 3;
 /** Max orders to push per reconciliation run */
 const RECONCILE_BATCH_LIMIT = 20;
 
+// ============================================
+// RECONCILER STATE (for UI status reporting)
+// ============================================
+
+let reconcilerRunning = false;
+let reconcilerLastRunAt: Date | null = null;
+let reconcilerLastResult: ReconcileResult | null = null;
+
+export function getReconcilerStatus() {
+    return {
+        isRunning: reconcilerRunning,
+        lastRunAt: reconcilerLastRunAt?.toISOString() ?? null,
+        lastResult: reconcilerLastResult,
+    };
+}
+
 /**
  * Find orders that were never pushed to the sheet and push them.
  * Looks back 3 days and pushes up to 20 at a time (oldest first).
+ * Cross-checks against the sheet to avoid duplicates (handles the case where
+ * the sheet push succeeded but the DB stamp failed, e.g. due to a crash).
  * Uses pushERPOrderToSheet which handles all the mapping + stamping.
  */
 export async function reconcileSheetOrders(): Promise<ReconcileResult> {
+    if (reconcilerRunning) {
+        log.debug('Sheet reconciler already running, skipping');
+        return { found: 0, pushed: 0, failed: 0, errors: ['Already running'], durationMs: 0 };
+    }
+
+    reconcilerRunning = true;
     const start = Date.now();
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - RECONCILE_LOOKBACK_DAYS);
 
-    const result: ReconcileResult = { found: 0, pushed: 0, failed: 0, errors: [], durationMs: 0 };
+    const result: ReconcileResult & { alreadyOnSheet: number } = {
+        found: 0, pushed: 0, failed: 0, errors: [], durationMs: 0, alreadyOnSheet: 0,
+    };
 
     try {
         // Find recent orders that were never pushed
@@ -318,16 +344,32 @@ export async function reconcileSheetOrders(): Promise<ReconcileResult> {
             return result;
         }
 
+        // Read order numbers already on the sheet (column B) to prevent duplicates
+        const tab = MASTERSHEET_TABS.ORDERS_FROM_COH;
+        const sheetRows = await readRange(ORDERS_MASTERSHEET_ID, `'${tab}'!B:B`);
+        const sheetOrderNumbers = new Set<string>();
+        for (let i = 1; i < sheetRows.length; i++) {
+            const orderNo = String(sheetRows[i]?.[0] ?? '').trim();
+            if (orderNo) sheetOrderNumbers.add(orderNo);
+        }
+
         log.info(
-            { count: unpushed.length, orders: unpushed.map(o => o.orderNumber) },
-            'Sheet reconciler: found unpushed orders'
+            { count: unpushed.length, orders: unpushed.map(o => o.orderNumber), sheetRows: sheetOrderNumbers.size },
+            'Sheet reconciler: found unpushed orders, cross-checking sheet'
         );
 
-        // Push each one using the ERP push function (it handles stamping)
+        // Push each one, but skip if already on the sheet (just stamp it)
         for (const order of unpushed) {
             try {
-                await pushERPOrderToSheet(order.id);
-                result.pushed++;
+                if (sheetOrderNumbers.has(order.orderNumber)) {
+                    // Already on the sheet — just stamp the DB so we don't re-process
+                    await stampSheetPushed(order.id);
+                    result.alreadyOnSheet++;
+                    log.info({ orderNumber: order.orderNumber }, 'Reconciler: order already on sheet, stamped only');
+                } else {
+                    await pushERPOrderToSheet(order.id);
+                    result.pushed++;
+                }
             } catch (err: unknown) {
                 result.failed++;
                 const message = err instanceof Error ? err.message : String(err);
@@ -337,16 +379,20 @@ export async function reconcileSheetOrders(): Promise<ReconcileResult> {
         }
 
         log.info(
-            { found: result.found, pushed: result.pushed, failed: result.failed },
+            { found: result.found, pushed: result.pushed, alreadyOnSheet: result.alreadyOnSheet, failed: result.failed },
             'Sheet reconciler: done'
         );
     } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
         result.errors.push(message);
         log.error({ err: message }, 'Sheet reconciler: fatal error');
+    } finally {
+        reconcilerRunning = false;
+        reconcilerLastRunAt = new Date();
     }
 
     result.durationMs = Date.now() - start;
+    reconcilerLastResult = result;
     return result;
 }
 

@@ -331,8 +331,12 @@ app.listen(PORT, '0.0.0.0', async () => {
     payuSettlementSync.start();
 
     // Sheet order reconciler — catches orders missed due to crashes/downtime
-    // Runs every 15 min, looks back 3 days for unpushed orders
+    // Runs immediately on startup (with delay), then every 15 min
     const RECONCILE_INTERVAL_MS = 15 * 60 * 1000;
+    setTimeout(() => {
+      console.log('[SheetReconciler] Running startup reconciliation...');
+      reconcileSheetOrders().catch(() => {});
+    }, 15000); // 15 seconds after startup
     const reconcileInterval = setInterval(() => {
       reconcileSheetOrders().catch(() => {}); // errors logged internally
     }, RECONCILE_INTERVAL_MS);

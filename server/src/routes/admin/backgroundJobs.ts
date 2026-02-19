@@ -11,7 +11,7 @@ import stockSnapshotWorker from '../../services/stockSnapshotWorker.js';
 import remittanceSync from '../../services/remittanceSync.js';
 import payuSettlementSync from '../../services/payuSettlementSync.js';
 import driveFinanceSync from '../../services/driveFinanceSync.js';
-import { reconcileSheetOrders, syncSheetOrderStatus, syncSheetAwb } from '../../services/sheetOrderPush.js';
+import { reconcileSheetOrders, syncSheetOrderStatus, syncSheetAwb, getReconcilerStatus } from '../../services/sheetOrderPush.js';
 import { trackWorkerRun } from '../../utils/workerRunTracker.js';
 import type { BackgroundJob, JobId, CleanupResult, JobUpdateBody } from './types.js';
 
@@ -209,10 +209,10 @@ router.get('/background-jobs', authenticateToken, asyncHandler(async (req: Reque
             name: 'Reconcile Sheet Orders',
             description: 'Finds orders that never got pushed to the Google Sheet (e.g. due to a crash) and pushes them. Looks back 3 days, up to 20 orders per run.',
             enabled: true,
-            isRunning: false,
-            lastRunAt: null,
-            lastResult: null,
-            note: 'Runs automatically every 15 min — can also trigger manually',
+            isRunning: getReconcilerStatus().isRunning,
+            lastRunAt: getReconcilerStatus().lastRunAt,
+            lastResult: getReconcilerStatus().lastResult,
+            note: 'Runs on startup + every 15 min — can also trigger manually',
         },
         {
             id: 'sync_sheet_awb',
