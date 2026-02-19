@@ -27,7 +27,9 @@ import {
   getCategoryLabel,
 } from '@coh/shared';
 
-export default function InvoicesTab({ search }: { search: FinanceSearchParams }) {
+export default function InvoicesTab({ search: rawSearch }: { search: FinanceSearchParams }) {
+  // Default to payable if no type selected
+  const search = { ...rawSearch, type: rawSearch.type ?? 'payable' as const };
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -264,17 +266,38 @@ export default function InvoicesTab({ search }: { search: FinanceSearchParams })
 
   return (
     <div className="space-y-4">
+      {/* Payable / Receivable sub-tabs */}
+      <div className="flex items-center gap-1 border-b">
+        <button
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            search.type === 'payable'
+              ? 'border-red-500 text-red-600'
+              : 'border-transparent text-muted-foreground hover:text-foreground'
+          }`}
+          onClick={() => updateSearch({ type: 'payable', page: 1 })}
+        >
+          <span className="inline-flex items-center gap-1.5">
+            <ArrowUpRight className="h-3.5 w-3.5" />
+            Payable
+          </span>
+        </button>
+        <button
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            search.type === 'receivable'
+              ? 'border-green-500 text-green-600'
+              : 'border-transparent text-muted-foreground hover:text-foreground'
+          }`}
+          onClick={() => updateSearch({ type: 'receivable', page: 1 })}
+        >
+          <span className="inline-flex items-center gap-1.5">
+            <ArrowDownLeft className="h-3.5 w-3.5" />
+            Receivable
+          </span>
+        </button>
+      </div>
+
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-2">
-        <Select value={search.type ?? 'all'} onValueChange={(v) => updateSearch({ type: v === 'all' ? undefined : v as 'payable' | 'receivable', page: 1 })}>
-          <SelectTrigger className="w-[140px]"><SelectValue placeholder="Type" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Types</SelectItem>
-            <SelectItem value="payable">Payable</SelectItem>
-            <SelectItem value="receivable">Receivable</SelectItem>
-          </SelectContent>
-        </Select>
-
         <Select value={search.status ?? 'all'} onValueChange={(v) => updateSearch({ status: v === 'all' ? undefined : v, page: 1 })}>
           <SelectTrigger className="w-[160px]"><SelectValue placeholder="Status" /></SelectTrigger>
           <SelectContent>
@@ -399,7 +422,6 @@ export default function InvoicesTab({ search }: { search: FinanceSearchParams })
                     />
                   </th>
                   <th className="text-left p-3 font-medium">Invoice #</th>
-                  <th className="text-left p-3 font-medium">Type</th>
                   <th className="text-left p-3 font-medium">Category</th>
                   <th className="text-left p-3 font-medium">Counterparty</th>
                   <th className="text-right p-3 font-medium">Total</th>
@@ -434,12 +456,6 @@ export default function InvoicesTab({ search }: { search: FinanceSearchParams })
                       )}
                     </td>
                     <td className="p-3 font-mono text-xs">{inv.invoiceNumber ?? '—'}</td>
-                    <td className="p-3">
-                      <span className={`inline-flex items-center gap-1 text-xs ${inv.type === 'payable' ? 'text-red-600' : 'text-green-600'}`}>
-                        {inv.type === 'payable' ? <ArrowUpRight className="h-3 w-3" /> : <ArrowDownLeft className="h-3 w-3" />}
-                        {inv.type}
-                      </span>
-                    </td>
                     <td className="p-3 text-xs">{getCategoryLabel(inv.category)}</td>
                     <td className="p-3">
                       {inv.party?.name ??
@@ -504,10 +520,10 @@ export default function InvoicesTab({ search }: { search: FinanceSearchParams })
                   );
                 })}
                 {(!data?.invoices || data.invoices.length === 0) && (
-                  <tr><td colSpan={10} className="p-8 text-center">
+                  <tr><td colSpan={9} className="p-8 text-center">
                     <div className="text-muted-foreground space-y-2">
-                      <p>{search.search || search.type || search.status || search.category || search.dateFrom ? 'No invoices match your filters' : 'No invoices yet'}</p>
-                      {!(search.search || search.type || search.status || search.category || search.dateFrom) && (
+                      <p>{search.search || search.status || search.category || search.dateFrom ? 'No invoices match your filters' : `No ${search.type} invoices yet`}</p>
+                      {!(search.search || search.status || search.category || search.dateFrom) && (
                         <div className="flex items-center justify-center gap-2 mt-2">
                           <Button variant="outline" size="sm" onClick={() => setShowUploadDialog(true)}>
                             <Upload className="h-3.5 w-3.5 mr-1" /> Upload Invoice
