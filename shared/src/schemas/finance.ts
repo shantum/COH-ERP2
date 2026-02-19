@@ -518,3 +518,78 @@ export const CHART_OF_ACCOUNTS = [
 ] as const;
 
 export type AccountCode = (typeof CHART_OF_ACCOUNTS)[number]['code'];
+
+// ============================================
+// ACCOUNT REPORT NAMES (for P&L / cash flow display)
+// ============================================
+
+/**
+ * Overrides for account display names in financial reports.
+ * CHART_OF_ACCOUNTS has business-friendly names (e.g. "Money Customers Owe Us");
+ * reports use standard accounting names (e.g. "Accounts Receivable").
+ * Only accounts that differ need an entry here.
+ */
+const ACCOUNT_REPORT_NAME_OVERRIDES: Partial<Record<AccountCode, string>> = {
+  ACCOUNTS_RECEIVABLE: 'Accounts Receivable',
+  ACCOUNTS_PAYABLE: 'Accounts Payable',
+  GST_INPUT: 'GST Input',
+  GST_OUTPUT: 'GST Output',
+  ADVANCES_GIVEN: 'Advances Given',
+  FINISHED_GOODS: 'Finished Goods',
+  UNMATCHED_PAYMENTS: 'Unmatched Payments',
+  LOAN_GETVANTAGE: 'Loan (GetVantage)',
+};
+
+/** Lookup map built once from CHART_OF_ACCOUNTS + overrides */
+const _accountReportNameMap: Record<string, string> = {};
+for (const acct of CHART_OF_ACCOUNTS) {
+  _accountReportNameMap[acct.code] = ACCOUNT_REPORT_NAME_OVERRIDES[acct.code as AccountCode] ?? acct.name;
+}
+
+/** Get the report-friendly display name for an account code. Falls back to title-casing. */
+export function getAccountReportName(code: string): string {
+  return _accountReportNameMap[code] ?? code.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+// ============================================
+// BANK ACCOUNT CODES (derived from chart)
+// ============================================
+
+/** Set of account codes that represent bank accounts (for filtering inter-bank transfers) */
+export const BANK_ACCOUNT_CODES: Set<string> = new Set(
+  CHART_OF_ACCOUNTS
+    .filter((a) => a.type === 'asset' && a.code.startsWith('BANK_'))
+    .map((a) => a.code),
+);
+
+// ============================================
+// CASH FLOW CATEGORY LABELS (bank txn sub-categories)
+// ============================================
+
+/**
+ * Bank-transaction-specific sub-categories not in the main CATEGORY_LABELS.
+ * These appear in cash flow reports from bank transaction categorization.
+ */
+const BANK_TXN_CATEGORY_LABELS: Record<string, string> = {
+  facebook_ads: 'Facebook Ads',
+  google_ads: 'Google Ads',
+  agency: 'Agencies',
+  photoshoot: 'Photoshoot',
+  cc_interest: 'CC Interest & Finance Charges',
+  cc_fees: 'CC Fees & Markup',
+  rzp_fees: 'Razorpay Fees',
+  cod_remittance: 'COD Remittance',
+  payu_settlement: 'PayU Settlement',
+  uncategorized: 'Uncategorized',
+};
+
+/**
+ * Get display label for a cash flow category.
+ * Checks main CATEGORY_LABELS first, then bank-txn-specific labels, then title-cases.
+ */
+export function getCashFlowCategoryLabel(category: string | null): string {
+  if (!category) return 'Uncategorized';
+  return CATEGORY_LABELS[category]
+    ?? BANK_TXN_CATEGORY_LABELS[category]
+    ?? category.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}

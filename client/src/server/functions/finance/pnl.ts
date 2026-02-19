@@ -10,6 +10,7 @@ import { authMiddleware } from '../../middleware/auth';
 import { getPrisma } from '@coh/shared/services/db';
 import type { Prisma } from '@prisma/client';
 import { categoryToExpenseAccountName } from './invoices';
+import { getAccountReportName, getCashFlowCategoryLabel, BANK_ACCOUNT_CODES } from '@coh/shared/schemas/finance';
 
 // ============================================
 // MONTHLY P&L (invoice-based + inventory cost)
@@ -158,71 +159,10 @@ export const getMonthlyPnl = createServerFn({ method: 'GET' })
 // CASH FLOW (bank-transaction-based)
 // ============================================
 
-/** Display-name map for account codes (supplements CHART_OF_ACCOUNTS for gaps) */
-const ACCOUNT_DISPLAY_NAMES: Record<string, string> = {};
-// Populate from CHART_OF_ACCOUNTS at module level
-for (const acct of [
-  { code: 'BANK_HDFC', name: 'HDFC Bank Account' },
-  { code: 'BANK_RAZORPAYX', name: 'RazorpayX Account' },
-  { code: 'CASH', name: 'Cash' },
-  { code: 'ACCOUNTS_RECEIVABLE', name: 'Accounts Receivable' },
-  { code: 'FABRIC_INVENTORY', name: 'Fabric Inventory' },
-  { code: 'FINISHED_GOODS', name: 'Finished Goods' },
-  { code: 'GST_INPUT', name: 'GST Input' },
-  { code: 'ADVANCES_GIVEN', name: 'Advances Given' },
-  { code: 'ACCOUNTS_PAYABLE', name: 'Accounts Payable' },
-  { code: 'GST_OUTPUT', name: 'GST Output' },
-  { code: 'CUSTOMER_ADVANCES', name: 'Customer Advances' },
-  { code: 'TDS_PAYABLE', name: 'TDS Payable' },
-  { code: 'CREDIT_CARD', name: 'Credit Card' },
-  { code: 'SALES_REVENUE', name: 'Sales Revenue' },
-  { code: 'COGS', name: 'Cost of Goods Sold' },
-  { code: 'OPERATING_EXPENSES', name: 'Operating Expenses' },
-  { code: 'MARKETPLACE_FEES', name: 'Marketplace Fees' },
-  { code: 'SOFTWARE_TECHNOLOGY', name: 'Software & Technology' },
-  { code: 'UNMATCHED_PAYMENTS', name: 'Unmatched Payments' },
-  { code: 'OWNER_CAPITAL', name: 'Owner Capital' },
-  { code: 'RETAINED_EARNINGS', name: 'Retained Earnings' },
-  { code: 'LOAN_GETVANTAGE', name: 'Loan (GetVantage)' },
-]) {
-  ACCOUNT_DISPLAY_NAMES[acct.code] = acct.name;
-}
-
-function accountDisplayName(code: string): string {
-  return ACCOUNT_DISPLAY_NAMES[code] ?? code.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
-const CATEGORY_DISPLAY: Record<string, string> = {
-  marketing: 'Marketing & Ads',
-  facebook_ads: 'Facebook Ads',
-  google_ads: 'Google Ads',
-  agency: 'Agencies',
-  photoshoot: 'Photoshoot',
-  salary: 'Salary & Wages',
-  fabric: 'Fabric',
-  trims: 'Trims & Accessories',
-  service: 'Service (Print, Wash, etc.)',
-  rent: 'Rent',
-  logistics: 'Logistics & Shipping',
-  packaging: 'Packaging',
-  equipment: 'Equipment & Tools',
-  marketplace: 'Marketplace Fees',
-  statutory: 'Statutory / TDS',
-  refund: 'Refunds',
-  software: 'Software & Technology',
-  cc_interest: 'CC Interest & Finance Charges',
-  cc_fees: 'CC Fees & Markup',
-  rzp_fees: 'Razorpay Fees',
-  cod_remittance: 'COD Remittance',
-  payu_settlement: 'PayU Settlement',
-  other: 'Other',
-  uncategorized: 'Uncategorized',
-};
-
-function categoryDisplayName(cat: string | null): string {
-  if (!cat) return 'Uncategorized';
-  return CATEGORY_DISPLAY[cat] ?? cat.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-}
+// Account + category display names are now shared from @coh/shared/schemas/finance
+// - getAccountReportName(code) for account display names
+// - getCashFlowCategoryLabel(cat) for cash flow category labels
+// - BANK_ACCOUNT_CODES for bank account filtering
 
 export const getMonthlyCashFlow = createServerFn({ method: 'GET' })
   .middleware([authMiddleware])
@@ -282,12 +222,9 @@ export const getMonthlyCashFlow = createServerFn({ method: 'GET' })
       return monthMap.get(period)!;
     };
 
-    // Bank account codes are the "other side" of double-entry — skip them as categories
-    const BANK_ACCOUNTS = new Set(['BANK_HDFC', 'BANK_RAZORPAYX']);
-
     for (const row of rows) {
       if (!row.period || !row.account) continue;
-      if (BANK_ACCOUNTS.has(row.account)) continue; // skip bank-side entries
+      if (BANK_ACCOUNT_CODES.has(row.account)) continue; // skip bank-side entries
       const month = getMonth(row.period);
 
       if (row.direction === 'credit') {
@@ -301,7 +238,7 @@ export const getMonthlyCashFlow = createServerFn({ method: 'GET' })
             existing.amount += row.total;
             existing.count += row.cnt;
           } else {
-            month.incomeLines.push({ code: row.account, name: accountDisplayName(row.account), amount: row.total, count: row.cnt });
+            month.incomeLines.push({ code: row.account, name: getAccountReportName(row.account), amount: row.total, count: row.cnt });
           }
         }
       } else {
@@ -316,8 +253,8 @@ export const getMonthlyCashFlow = createServerFn({ method: 'GET' })
             ? `OPEX_${row.category.toUpperCase()}`
             : row.account;
           const lineName = row.account === 'OPERATING_EXPENSES' && row.category
-            ? categoryDisplayName(row.category)
-            : accountDisplayName(row.account);
+            ? getCashFlowCategoryLabel(row.category)
+            : getAccountReportName(row.account);
 
           const existing = month.expenseLines.find((l) => l.code === lineCode);
           if (existing) {
@@ -401,9 +338,10 @@ export const getCashFlowDetail = createServerFn({ method: 'POST' })
       where.debitAccountCode = actualAccount;
     }
     // Exclude inter-bank transfers (both sides are bank accounts)
+    const bankCodes = Array.from(BANK_ACCOUNT_CODES);
     where.NOT = {
-      debitAccountCode: { in: ['BANK_HDFC', 'BANK_RAZORPAYX'] },
-      creditAccountCode: { in: ['BANK_HDFC', 'BANK_RAZORPAYX'] },
+      debitAccountCode: { in: bankCodes },
+      creditAccountCode: { in: bankCodes },
     };
 
     const transactions = await prisma.bankTransaction.findMany({
@@ -445,7 +383,7 @@ export const getCashFlowDetail = createServerFn({ method: 'POST' })
         : (t.category || 'uncategorized');
       const label = data.direction === 'credit'
         ? (t.counterpartyName || 'Unknown')
-        : categoryDisplayName(t.category);
+        : getCashFlowCategoryLabel(t.category);
       if (!groupMap.has(key)) {
         groupMap.set(key, { label, count: 0, total: 0, transactions: [] });
       }
