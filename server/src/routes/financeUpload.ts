@@ -24,6 +24,7 @@ import * as previewCache from '../services/invoicePreviewCache.js';
 import type { EnrichmentPreview } from '../services/invoicePreviewCache.js';
 import { computeFileHash, checkExactDuplicate, checkNearDuplicates } from '../services/invoiceDuplicateCheck.js';
 import type { DuplicateResult, NearDuplicate } from '../services/invoiceDuplicateCheck.js';
+import { validateInvoice } from '../services/invoiceValidator.js';
 
 // ============================================
 // PARTY ENRICHMENT
@@ -673,7 +674,10 @@ router.post('/upload-preview', requireAdmin, upload.single('file'), asyncHandler
     ? await matchInvoiceLines(parsed.lines, partyMatch?.partyId ?? null, req.prisma as any)
     : [];
 
-  // 6. Cache for later confirm
+  // 6. Validate invoice (buyer checks, GST checks)
+  const validationWarnings = parsed ? validateInvoice(parsed) : [];
+
+  // 7. Cache for later confirm
   const previewId = randomUUID();
   previewCache.set(previewId, {
     fileBuffer: buffer,
@@ -690,13 +694,14 @@ router.post('/upload-preview', requireAdmin, upload.single('file'), asyncHandler
     createdAt: Date.now(),
   });
 
-  // 7. Return preview data
+  // 8. Return preview data
   res.json({
     previewId,
     parsed,
     partyMatch,
     enrichmentPreview,
     nearDuplicates,
+    validationWarnings,
     fabricMatches: fabricMatchPreview,
     aiConfidence,
     aiModel,

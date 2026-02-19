@@ -712,9 +712,17 @@ interface NearDuplicate {
   partyName: string | null;
 }
 
+interface InvoiceValidationWarning {
+  type: 'company_name' | 'gst_number' | 'gst_calculation';
+  severity: 'error' | 'warning';
+  message: string;
+  details?: string;
+}
+
 interface InvoicePreview {
   previewId: string;
   nearDuplicates?: NearDuplicate[];
+  validationWarnings?: InvoiceValidationWarning[];
   parsed: {
     invoiceNumber?: string | null;
     invoiceDate?: string | null;
@@ -965,6 +973,30 @@ function UploadInvoiceDialog({ open, onClose, onSuccess }: {
               <div className="border border-amber-300 bg-amber-50 text-amber-700 rounded-lg p-2.5 text-xs flex items-center gap-2">
                 <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
                 Low AI confidence — please verify all fields before saving.
+              </div>
+            )}
+            {preview.validationWarnings && preview.validationWarnings.length > 0 && (
+              <div className="space-y-1.5">
+                {preview.validationWarnings.map((w, i) => (
+                  <div
+                    key={i}
+                    className={`rounded-lg p-2.5 text-xs flex items-start gap-2 ${
+                      w.severity === 'error'
+                        ? 'border border-red-300 bg-red-50 text-red-700'
+                        : 'border border-amber-300 bg-amber-50 text-amber-700'
+                    }`}
+                  >
+                    {w.severity === 'error' ? (
+                      <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                    ) : (
+                      <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                    )}
+                    <div>
+                      <p className="font-medium">{w.message}</p>
+                      {w.details && <p className="mt-0.5 opacity-80">{w.details}</p>}
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
             <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">

@@ -46,6 +46,10 @@ const ParsedInvoiceSchema = z.object({
     supplierBankIfsc: z.string().nullable().optional(),
     supplierBankName: z.string().nullable().optional(),
     supplierBankAccountName: z.string().nullable().optional(),  // beneficiary name
+    buyerName: z.string().nullable().optional(),
+    buyerGstin: z.string().nullable().optional(),
+    buyerStateCode: z.string().nullable().optional(),       // 2-digit GST state code
+    gstType: z.enum(['igst', 'cgst_sgst']).nullable().optional(),  // GST type on invoice
     subtotal: z.number().nullable().optional(),
     gstAmount: z.number().nullable().optional(),
     totalAmount: z.number().nullable().optional(),
@@ -77,6 +81,9 @@ IMPORTANT RULES:
 - supplierStateCode: The 2-digit GST state code (e.g. "27" for Maharashtra, "07" for Delhi). This is the first 2 digits of the supplier's GSTIN if available.
 - supplierEmail and supplierPhone: Often in the invoice header or footer.
 - Bank details: Indian invoices commonly have a "Bank Details" or "Payment Details" section. Extract account number, IFSC code, bank name, and beneficiary/account holder name.
+- Buyer/Bill-To: Extract the buyer/recipient/bill-to details (name, GSTIN, state code). This is the party the invoice is addressed TO (not the supplier).
+- buyerStateCode: The 2-digit GST state code of the buyer. First 2 digits of the buyer's GSTIN if available.
+- gstType: Identify whether the invoice uses IGST (inter-state) or CGST+SGST (intra-state). Return "igst" if IGST is shown, "cgst_sgst" if CGST and SGST are shown, or null if unclear.
 - If a field is not visible or you can't read it, set it to null.
 - Set confidence from 0 to 1 based on how clearly you could read the invoice.
 
@@ -97,6 +104,10 @@ Return ONLY valid JSON matching this structure (no markdown, no code fences):
   "supplierBankIfsc": "string or null",
   "supplierBankName": "string or null",
   "supplierBankAccountName": "string or null",
+  "buyerName": "string or null",
+  "buyerGstin": "string or null",
+  "buyerStateCode": "string or null",
+  "gstType": "igst" or "cgst_sgst" or null,
   "subtotal": number or null,
   "gstAmount": number or null,
   "totalAmount": number or null,
@@ -214,6 +225,10 @@ export async function parseInvoice(
             supplierBankIfsc: null,
             supplierBankName: null,
             supplierBankAccountName: null,
+            buyerName: null,
+            buyerGstin: null,
+            buyerStateCode: null,
+            gstType: null,
             subtotal: null,
             gstAmount: null,
             totalAmount: null,
