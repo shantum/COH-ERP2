@@ -12,7 +12,7 @@ import { z } from 'zod';
 
 export const FinanceSearchParams = z.object({
   /** Active tab */
-  tab: z.enum(['dashboard', 'invoices', 'payments', 'pnl', 'cashflow', 'bank-import', 'parties', 'transaction-types']).catch('dashboard'),
+  tab: z.enum(['dashboard', 'invoices', 'payments', 'pnl', 'cashflow', 'bank-import', 'marketplace', 'parties', 'transaction-types']).catch('dashboard'),
   /** Bank import: bank filter */
   bankFilter: z.enum(['all', 'hdfc', 'razorpayx', 'hdfc_cc', 'icici_cc']).optional().catch(undefined),
   /** Bank import: status filter (simplified) */
@@ -193,7 +193,8 @@ export type PartyCategory = (typeof PARTY_CATEGORIES)[number];
 
 export const INVOICE_CATEGORIES = [
   'fabric', 'trims', 'service', 'logistics', 'rent', 'salary',
-  'marketing', 'packaging', 'equipment', 'marketplace', 'software', 'customer_order', 'statutory', 'other',
+  'marketing', 'packaging', 'equipment', 'marketplace', 'marketplace_commission', 'marketplace_promo',
+  'software', 'customer_order', 'statutory', 'other',
 ] as const;
 
 export type InvoiceCategory = (typeof INVOICE_CATEGORIES)[number];
@@ -209,6 +210,8 @@ const CATEGORY_LABELS: Record<string, string> = {
   packaging: 'Packaging',
   equipment: 'Equipment & Tools',
   marketplace: 'Marketplace Fees',
+  marketplace_commission: 'Marketplace Commission',
+  marketplace_promo: 'Promotional & Banner',
   software: 'Software & Technology',
   customer_order: 'Customer Order',
   statutory: 'Statutory / TDS',

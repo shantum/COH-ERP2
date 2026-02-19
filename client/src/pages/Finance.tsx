@@ -17,6 +17,7 @@ import CashFlowTab from './finance/CashFlowTab';
 import BankImportTab from './finance/BankImportTab';
 import PartiesTab from './finance/PartiesTab';
 import TransactionTypesTab from './finance/TransactionTypesTab';
+import { MarketplacePayoutTab } from '../components/finance/MarketplacePayoutTab';
 
 export default function Finance() {
   const search = Route.useSearch();
@@ -50,6 +51,7 @@ export default function Finance() {
           <TabsTrigger value="pnl">P&L</TabsTrigger>
           <TabsTrigger value="cashflow">Cash Flow</TabsTrigger>
           <TabsTrigger value="bank-import">Bank Import</TabsTrigger>
+          <TabsTrigger value="marketplace">Marketplace</TabsTrigger>
           <TabsTrigger value="parties">Parties</TabsTrigger>
           <TabsTrigger value="transaction-types">Txn Types</TabsTrigger>
         </TabsList>
@@ -71,6 +73,9 @@ export default function Finance() {
         </TabsContent>
         <TabsContent value="bank-import" className="mt-4">
           <BankImportTab search={search} />
+        </TabsContent>
+        <TabsContent value="marketplace" className="mt-4">
+          <MarketplacePayoutTab />
         </TabsContent>
         <TabsContent value="parties" className="mt-4">
           <PartiesTab search={search} />

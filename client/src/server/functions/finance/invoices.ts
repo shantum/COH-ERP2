@@ -425,6 +425,10 @@ function categoryToExpenseAccountName(category: string): string {
       return 'Fabric & Materials';
     case 'marketplace':
       return 'Marketplace Fees';
+    case 'marketplace_commission':
+      return 'Marketplace Commission';
+    case 'marketplace_promo':
+      return 'Promotional & Banner';
     case 'software':
       return 'Software & Technology';
     case 'statutory':

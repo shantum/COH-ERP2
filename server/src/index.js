@@ -46,6 +46,7 @@ import sheetSyncRoutes from './routes/sheetSync.js';
 import channelsRoutes from './routes/channels.js';
 import financeUploadRoutes from './routes/financeUpload.js';
 import bankImportRoutes from './routes/bankImport.js';
+import marketplacePayoutRoutes from './routes/marketplacePayout.js';
 import chatRoutes from './routes/chat.js';
 import returnPrimeWebhooks from './routes/returnPrimeWebhooks.js';
 import returnPrimeSync from './routes/returnPrimeSync.js';
@@ -157,6 +158,7 @@ app.use('/api/admin/sheet-sync', sheetSyncRoutes);
 app.use('/api/channels', channelsRoutes);
 app.use('/api/finance', financeUploadRoutes);
 app.use('/api/bank-import', bankImportRoutes);
+app.use('/api/marketplace-payout', marketplacePayoutRoutes);
 app.use('/api/chat', chatRoutes);
 
 // Return Prime integration
