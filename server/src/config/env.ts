@@ -109,6 +109,16 @@ const envSchema = z.object({
     RETURNPRIME_WEBHOOK_SECRET: z.string().optional(),
 
     // ----------------------------------------
+    // RESEND
+    // ----------------------------------------
+
+    /** Resend API key for sending emails */
+    RESEND_API_KEY: z.string().optional(),
+
+    /** Resend webhook signing secret for inbound email verification (from Resend dashboard, starts with whsec_) */
+    RESEND_WEBHOOK_SECRET: z.string().optional(),
+
+    // ----------------------------------------
     // AI / ANTHROPIC
     // ----------------------------------------
 

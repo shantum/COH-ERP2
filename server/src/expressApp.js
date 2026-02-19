@@ -45,6 +45,7 @@ import chatRoutes from './routes/chat.js';
 import returnPrimeWebhooks from './routes/returnPrimeWebhooks.js';
 import returnPrimeSync from './routes/returnPrimeSync.js';
 import returnPrimeAdminRoutes from './routes/returnPrimeAdminRoutes.js';
+import resendWebhookRoutes from './routes/resendWebhook.js';
 import { pulseBroadcaster } from './services/pulseBroadcaster.js';
 import scheduledSync from './services/scheduledSync.js';
 import trackingSync from './services/trackingSync.js';
@@ -160,6 +161,9 @@ export async function createExpressApp() {
   app.use('/api/finance', financeUploadRoutes);
   app.use('/api/bank-import', bankImportRoutes);
   app.use('/api/chat', chatRoutes);
+
+  // Resend inbound email webhook
+  app.use('/api/webhooks/resend', resendWebhookRoutes);
 
   // Return Prime integration
   app.use('/api/webhooks/returnprime', returnPrimeWebhooks);
