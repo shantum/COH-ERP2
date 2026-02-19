@@ -51,7 +51,7 @@ import scheduledSync from './services/scheduledSync.js';
 import trackingSync from './services/trackingSync.js';
 import cacheProcessor from './services/cacheProcessor.js';
 import cacheDumpWorker from './services/cacheDumpWorker.js';
-import sheetOffloadWorker from './services/sheetOffloadWorker.js';
+import sheetOffloadWorker from './services/sheetOffload/index.js';
 import driveFinanceSync from './services/driveFinanceSync.js';
 import { runAllCleanup } from './utils/cacheCleanup.js';
 import { errorHandler } from './middleware/errorHandler.js';

@@ -59,7 +59,7 @@ import remittanceSync from './services/remittanceSync.js';
 import payuSettlementSync from './services/payuSettlementSync.js';
 import cacheProcessor from './services/cacheProcessor.js';
 import cacheDumpWorker from './services/cacheDumpWorker.js';
-import sheetOffloadWorker from './services/sheetOffloadWorker.js';
+import sheetOffloadWorker from './services/sheetOffload/index.js';
 import stockSnapshotWorker from './services/stockSnapshotWorker.js';
 import { reconcileSheetOrders, syncSheetOrderStatus } from './services/sheetOrderPush.js';
 import { runAllCleanup } from './utils/cacheCleanup.js';

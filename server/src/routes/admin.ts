@@ -36,7 +36,7 @@ import { runAllCleanup, getCacheStats } from '../utils/cacheCleanup.js';
 import { invalidateUserTokens } from '../middleware/permissions.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { ValidationError, NotFoundError, ConflictError, BusinessLogicError } from '../utils/errors.js';
-import sheetOffloadWorker from '../services/sheetOffloadWorker.js';
+import sheetOffloadWorker from '../services/sheetOffload/index.js';
 import stockSnapshotWorker from '../services/stockSnapshotWorker.js';
 import remittanceSync from '../services/remittanceSync.js';
 import payuSettlementSync from '../services/payuSettlementSync.js';
