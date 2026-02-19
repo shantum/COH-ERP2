@@ -52,6 +52,9 @@ const ParsedInvoiceSchema = z.object({
     gstType: z.enum(['igst', 'cgst_sgst']).nullable().optional(),  // GST type on invoice
     subtotal: z.number().nullable().optional(),
     gstAmount: z.number().nullable().optional(),
+    cgstAmount: z.number().nullable().optional(),   // Central GST amount
+    sgstAmount: z.number().nullable().optional(),   // State GST amount
+    igstAmount: z.number().nullable().optional(),   // Integrated GST amount
     totalAmount: z.number().nullable().optional(),
     lines: z.array(ParsedLineSchema).default([]),
     confidence: z.number().min(0).max(1).default(0.5),
@@ -84,6 +87,7 @@ IMPORTANT RULES:
 - Buyer/Bill-To: Extract the buyer/recipient/bill-to details (name, GSTIN, state code). This is the party the invoice is addressed TO (not the supplier).
 - buyerStateCode: The 2-digit GST state code of the buyer. First 2 digits of the buyer's GSTIN if available.
 - gstType: Identify whether the invoice uses IGST (inter-state) or CGST+SGST (intra-state). Return "igst" if IGST is shown, "cgst_sgst" if CGST and SGST are shown, or null if unclear.
+- Extract CGST, SGST, and IGST amounts separately if shown on the invoice. For CGST+SGST invoices, both cgstAmount and sgstAmount should be filled. For IGST invoices, igstAmount should be filled.
 - If a field is not visible or you can't read it, set it to null.
 - Set confidence from 0 to 1 based on how clearly you could read the invoice.
 
@@ -110,6 +114,9 @@ Return ONLY valid JSON matching this structure (no markdown, no code fences):
   "gstType": "igst" or "cgst_sgst" or null,
   "subtotal": number or null,
   "gstAmount": number or null,
+  "cgstAmount": number or null,
+  "sgstAmount": number or null,
+  "igstAmount": number or null,
   "totalAmount": number or null,
   "confidence": number between 0 and 1,
   "lines": [
@@ -231,6 +238,9 @@ export async function parseInvoice(
             gstType: null,
             subtotal: null,
             gstAmount: null,
+            cgstAmount: null,
+            sgstAmount: null,
+            igstAmount: null,
             totalAmount: null,
             lines: [],
             confidence: 0,

@@ -154,6 +154,51 @@ function checkGstCalculation(parsed: ParsedInvoice): InvoiceValidationWarning[] 
     }
   }
 
+  // --- CGST/SGST/IGST split consistency ---
+  if (parsed.cgstAmount != null && parsed.sgstAmount != null && parsed.gstAmount != null) {
+    const splitSum = parsed.cgstAmount + parsed.sgstAmount;
+    const splitDiff = Math.abs(splitSum - parsed.gstAmount);
+    if (splitDiff > MATH_TOLERANCE) {
+      warnings.push({
+        type: 'gst_calculation',
+        severity: 'warning',
+        message: 'CGST + SGST does not match total GST',
+        details: `CGST (${parsed.cgstAmount}) + SGST (${parsed.sgstAmount}) = ${splitSum}, but total GST is ${parsed.gstAmount} (off by Rs ${splitDiff.toFixed(2)}).`,
+      });
+    }
+  }
+
+  if (parsed.igstAmount != null && parsed.gstAmount != null) {
+    const igstDiff = Math.abs(parsed.igstAmount - parsed.gstAmount);
+    if (igstDiff > MATH_TOLERANCE) {
+      warnings.push({
+        type: 'gst_calculation',
+        severity: 'warning',
+        message: 'IGST does not match total GST',
+        details: `IGST (${parsed.igstAmount}) but total GST is ${parsed.gstAmount} (off by Rs ${igstDiff.toFixed(2)}).`,
+      });
+    }
+  }
+
+  // --- GST type vs split field mismatch ---
+  if (parsed.gstType === 'cgst_sgst' && parsed.igstAmount != null && parsed.igstAmount > 0 && parsed.cgstAmount == null) {
+    warnings.push({
+      type: 'gst_calculation',
+      severity: 'warning',
+      message: 'GST type is CGST/SGST but only IGST amount found',
+      details: `Invoice shows CGST/SGST type but has IGST amount of ${parsed.igstAmount} with no CGST/SGST amounts.`,
+    });
+  }
+
+  if (parsed.gstType === 'igst' && parsed.cgstAmount != null && parsed.cgstAmount > 0 && parsed.igstAmount == null) {
+    warnings.push({
+      type: 'gst_calculation',
+      severity: 'warning',
+      message: 'GST type is IGST but CGST/SGST amounts found',
+      details: `Invoice shows IGST type but has CGST amount of ${parsed.cgstAmount} with no IGST amount.`,
+    });
+  }
+
   // --- GST type check (IGST vs CGST/SGST based on state codes) ---
   const supplierState = parsed.supplierStateCode?.trim();
   const gstType = parsed.gstType;

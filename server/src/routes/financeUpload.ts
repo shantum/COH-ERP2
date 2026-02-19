@@ -411,6 +411,10 @@ router.post('/upload-and-parse', requireAdmin, upload.single('file'), asyncHandl
         return [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
       })(),
       gstAmount: parsed?.gstAmount ?? null,
+      gstType: parsed?.gstType ?? null,
+      cgstAmount: parsed?.cgstAmount ?? null,
+      sgstAmount: parsed?.sgstAmount ?? null,
+      igstAmount: parsed?.igstAmount ?? null,
       totalAmount: parsed?.totalAmount ?? 0,
       balanceDue: parsed?.totalAmount ?? 0,
       ...(partyId ? { partyId } : {}),
@@ -456,6 +460,10 @@ router.post('/upload-and-parse', requireAdmin, upload.single('file'), asyncHandl
       category: true,
       subtotal: true,
       gstAmount: true,
+      gstType: true,
+      cgstAmount: true,
+      sgstAmount: true,
+      igstAmount: true,
       totalAmount: true,
       aiConfidence: true,
       status: true,
@@ -742,6 +750,7 @@ router.post('/confirm-preview/:previewId', requireAdmin, asyncHandler(async (req
     ...(overrides.totalAmount !== undefined ? { totalAmount: overrides.totalAmount } : {}),
     ...(overrides.billingPeriod !== undefined ? { billingPeriod: overrides.billingPeriod } : {}),
     ...(overrides.category !== undefined ? { category: overrides.category } : {}),
+    ...(overrides.gstType !== undefined ? { gstType: overrides.gstType } : {}),
   };
 
   // Re-check for duplicates (race condition guard — someone may have uploaded between preview and confirm)
@@ -827,6 +836,10 @@ router.post('/confirm-preview/:previewId', requireAdmin, asyncHandler(async (req
         return [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
       })(),
       gstAmount: mergedParsed?.gstAmount ?? null,
+      gstType: mergedParsed?.gstType ?? parsed?.gstType ?? null,
+      cgstAmount: parsed?.cgstAmount ?? null,
+      sgstAmount: parsed?.sgstAmount ?? null,
+      igstAmount: parsed?.igstAmount ?? null,
       totalAmount: mergedParsed?.totalAmount ?? 0,
       balanceDue: mergedParsed?.totalAmount ?? 0,
       ...(partyId ? { partyId } : {}),
@@ -872,6 +885,10 @@ router.post('/confirm-preview/:previewId', requireAdmin, asyncHandler(async (req
       category: true,
       subtotal: true,
       gstAmount: true,
+      gstType: true,
+      cgstAmount: true,
+      sgstAmount: true,
+      igstAmount: true,
       totalAmount: true,
       aiConfidence: true,
       status: true,

@@ -73,16 +73,48 @@ export default function InvoiceDetailModal({
 
             {/* Amount Summary */}
             <div className="grid grid-cols-3 gap-3 mt-4">
-              {[
-                { label: 'Subtotal', value: invoice.subtotal != null ? formatCurrency(invoice.subtotal) : null },
-                { label: `GST${invoice.gstRate ? ` @${invoice.gstRate}%` : ''}`, value: invoice.gstAmount != null && invoice.gstAmount > 0 ? formatCurrency(invoice.gstAmount) : null },
-                { label: `TDS${invoice.tdsRate ? ` @${invoice.tdsRate}%` : ''}${invoice.tdsSection ? ` (${invoice.tdsSection})` : ''}`, value: invoice.tdsAmount != null && invoice.tdsAmount > 0 ? formatCurrency(invoice.tdsAmount) : null },
-              ].filter(item => item.value != null).map(item => (
-                <div key={item.label} className="border rounded-lg p-3 text-center">
-                  <p className="text-xs text-muted-foreground">{item.label}</p>
-                  <p className="text-sm font-mono font-medium mt-0.5">{item.value}</p>
-                </div>
-              ))}
+              {(() => {
+                const items: Array<{ label: string; value: string }> = [];
+                if (invoice.subtotal != null) {
+                  items.push({ label: 'Subtotal', value: formatCurrency(invoice.subtotal) });
+                }
+                // Show CGST/SGST or IGST split if available, otherwise show total GST
+                const hasCgstSgst = invoice.cgstAmount != null && invoice.sgstAmount != null &&
+                  (invoice.cgstAmount > 0 || invoice.sgstAmount > 0);
+                const hasIgst = invoice.igstAmount != null && invoice.igstAmount > 0;
+                if (hasCgstSgst) {
+                  items.push({
+                    label: `CGST${invoice.gstRate ? ` @${invoice.gstRate / 2}%` : ''}`,
+                    value: formatCurrency(invoice.cgstAmount!),
+                  });
+                  items.push({
+                    label: `SGST${invoice.gstRate ? ` @${invoice.gstRate / 2}%` : ''}`,
+                    value: formatCurrency(invoice.sgstAmount!),
+                  });
+                } else if (hasIgst) {
+                  items.push({
+                    label: `IGST${invoice.gstRate ? ` @${invoice.gstRate}%` : ''}`,
+                    value: formatCurrency(invoice.igstAmount!),
+                  });
+                } else if (invoice.gstAmount != null && invoice.gstAmount > 0) {
+                  items.push({
+                    label: `GST${invoice.gstRate ? ` @${invoice.gstRate}%` : ''}`,
+                    value: formatCurrency(invoice.gstAmount),
+                  });
+                }
+                if (invoice.tdsAmount != null && invoice.tdsAmount > 0) {
+                  items.push({
+                    label: `TDS${invoice.tdsRate ? ` @${invoice.tdsRate}%` : ''}${invoice.tdsSection ? ` (${invoice.tdsSection})` : ''}`,
+                    value: formatCurrency(invoice.tdsAmount),
+                  });
+                }
+                return items.map(item => (
+                  <div key={item.label} className="border rounded-lg p-3 text-center">
+                    <p className="text-xs text-muted-foreground">{item.label}</p>
+                    <p className="text-sm font-mono font-medium mt-0.5">{item.value}</p>
+                  </div>
+                ));
+              })()}
             </div>
             <div className="grid grid-cols-3 gap-3">
               <div className="border rounded-lg p-3 text-center bg-muted/30">

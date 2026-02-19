@@ -738,8 +738,12 @@ interface InvoicePreview {
     supplierBankIfsc?: string | null;
     supplierBankName?: string | null;
     supplierBankAccountName?: string | null;
+    gstType?: 'igst' | 'cgst_sgst' | null;
     subtotal?: number | null;
     gstAmount?: number | null;
+    cgstAmount?: number | null;
+    sgstAmount?: number | null;
+    igstAmount?: number | null;
     totalAmount?: number | null;
     lines?: Array<{
       description?: string | null;
@@ -1181,6 +1185,21 @@ function UploadInvoiceDialog({ open, onClose, onSuccess }: {
                     placeholder="—"
                   />
                 </div>
+                {/* GST split display (read-only from AI) */}
+                {p?.gstType === 'cgst_sgst' && p.cgstAmount != null && p.sgstAmount != null && (
+                  <div className="flex items-center gap-2 pl-16">
+                    <span className="text-muted-foreground text-[10px] font-mono">
+                      CGST: {formatCurrency(p.cgstAmount)} | SGST: {formatCurrency(p.sgstAmount)}
+                    </span>
+                  </div>
+                )}
+                {p?.gstType === 'igst' && p.igstAmount != null && (
+                  <div className="flex items-center gap-2 pl-16">
+                    <span className="text-muted-foreground text-[10px] font-mono">
+                      IGST: {formatCurrency(p.igstAmount)}
+                    </span>
+                  </div>
+                )}
                 <div className="flex items-center gap-2">
                   <span className="text-muted-foreground text-xs w-14 text-right shrink-0 font-medium">Total</span>
                   <Input
