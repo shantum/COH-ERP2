@@ -98,6 +98,8 @@ function BankTransactionList({ search, updateSearch }: {
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ['finance', 'bank-transactions'] });
+    queryClient.invalidateQueries({ queryKey: ['finance', 'summary'] });
+    queryClient.invalidateQueries({ queryKey: ['finance', 'alerts'] });
     setSelectedIds(new Set());
   };
 
@@ -674,6 +676,8 @@ function BankImportView({ onBack }: { onBack: () => void }) {
       setImportResult({ newRows: json.result.newRows, skippedRows: json.result.skippedRows });
       setStep('done');
       queryClient.invalidateQueries({ queryKey: ['finance', 'bank-transactions'] });
+      queryClient.invalidateQueries({ queryKey: ['finance', 'summary'] });
+      queryClient.invalidateQueries({ queryKey: ['finance', 'alerts'] });
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Import failed');
     } finally {

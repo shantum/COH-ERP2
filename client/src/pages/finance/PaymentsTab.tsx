@@ -38,8 +38,16 @@ function InlinePaymentNotes({ paymentId, notes, onSaved }: { paymentId: string; 
     if (trimmed === (notes ?? '')) { setEditing(false); return; }
     setSaving(true);
     try {
-      await updateFn({ data: { id: paymentId, notes: trimmed || null } });
-      onSaved();
+      const result = await updateFn({ data: { id: paymentId, notes: trimmed || null } });
+      if (result?.success) {
+        onSaved();
+      } else {
+        showError('Failed to save note');
+        setValue(notes ?? '');
+      }
+    } catch {
+      showError('Failed to save note');
+      setValue(notes ?? '');
     } finally {
       setSaving(false);
       setEditing(false);

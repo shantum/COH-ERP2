@@ -63,7 +63,7 @@ export default function PartiesTab({ search }: { search: FinanceSearchParams }) 
   const updateMutation = useMutation({
     mutationFn: (input: UpdatePartyInput) => updateFn({ data: input }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['finance', 'parties'] });
+      queryClient.invalidateQueries({ queryKey: ['finance'] });
       setEditingParty(null);
       showSuccess('Party updated');
     },
@@ -73,7 +73,7 @@ export default function PartiesTab({ search }: { search: FinanceSearchParams }) 
   const createMutation = useMutation({
     mutationFn: (input: CreatePartyInput) => createFn({ data: input }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['finance', 'parties'] });
+      queryClient.invalidateQueries({ queryKey: ['finance'] });
       setIsCreating(false);
       showSuccess('Party created');
     },

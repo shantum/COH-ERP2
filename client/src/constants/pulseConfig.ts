@@ -53,4 +53,24 @@ export const TABLE_INVALIDATION_MAP: Record<string, string[][]> = {
         ['productsTree'],
         ['allSkus'],
     ],
+
+    // Finance domain
+    BankTransaction: [
+        ['finance', 'bank-transactions'],
+        ['finance', 'summary'],
+        ['finance', 'alerts'],
+    ],
+    Payment: [
+        ['finance', 'payments'],
+        ['finance', 'summary'],
+        ['finance', 'alerts'],
+        ['finance', 'pnl'],
+        ['finance', 'cashflow'],
+    ],
+    Invoice: [
+        ['finance', 'invoices'],
+        ['finance', 'summary'],
+        ['finance', 'alerts'],
+        ['finance', 'pnl'],
+    ],
 };

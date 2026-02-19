@@ -231,30 +231,44 @@ export const updateFinanceParty = createServerFn({ method: 'POST' })
 export const createFinanceParty = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
   .inputValidator((input: unknown) => CreatePartySchema.parse(input))
-  .handler(async ({ data }) => {
+  .handler(async ({ data, context }) => {
     const prisma = await getPrisma();
+    const userId = context.user.id;
 
-    const party = await prisma.party.create({
-      data: {
-        name: data.name,
-        category: data.category,
-        ...(data.transactionTypeId ? { transactionTypeId: data.transactionTypeId } : {}),
-        aliases: data.aliases ?? [],
-        tdsApplicable: data.tdsApplicable ?? false,
-        tdsSection: data.tdsSection ?? null,
-        tdsRate: data.tdsRate ?? null,
-        invoiceRequired: data.invoiceRequired ?? true,
-        paymentTermsDays: data.paymentTermsDays ?? null,
-        billingPeriodOffsetMonths: data.billingPeriodOffsetMonths ?? null,
-        contactName: data.contactName ?? null,
-        email: data.email ?? null,
-        phone: data.phone ?? null,
-        gstin: data.gstin ?? null,
-        pan: data.pan ?? null,
-      },
-      include: {
-        transactionType: { select: { id: true, name: true } },
-      },
+    const party = await prisma.$transaction(async (tx) => {
+      const created = await tx.party.create({
+        data: {
+          name: data.name,
+          category: data.category,
+          ...(data.transactionTypeId ? { transactionTypeId: data.transactionTypeId } : {}),
+          aliases: data.aliases ?? [],
+          tdsApplicable: data.tdsApplicable ?? false,
+          tdsSection: data.tdsSection ?? null,
+          tdsRate: data.tdsRate ?? null,
+          invoiceRequired: data.invoiceRequired ?? true,
+          paymentTermsDays: data.paymentTermsDays ?? null,
+          billingPeriodOffsetMonths: data.billingPeriodOffsetMonths ?? null,
+          contactName: data.contactName ?? null,
+          email: data.email ?? null,
+          phone: data.phone ?? null,
+          gstin: data.gstin ?? null,
+          pan: data.pan ?? null,
+        },
+        include: {
+          transactionType: { select: { id: true, name: true } },
+        },
+      });
+
+      await tx.partyChangeLog.create({
+        data: {
+          partyId: created.id,
+          fieldName: '__created',
+          newValue: created.name,
+          changedById: userId,
+        },
+      });
+
+      return created;
     });
 
     return { success: true as const, party };

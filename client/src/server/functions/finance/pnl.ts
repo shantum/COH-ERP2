@@ -482,7 +482,7 @@ export const getPnlAccountDetail = createServerFn({ method: 'POST' })
     const prisma = await getPrisma();
 
     // Invoice-based drill-down by category + period
-    const periodStart = new Date(`${data.period}-01`);
+    const periodStart = new Date(`${data.period}-01T00:00:00+05:30`);
     const periodEnd = new Date(periodStart);
     periodEnd.setMonth(periodEnd.getMonth() + 1);
 
