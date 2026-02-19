@@ -51,7 +51,7 @@ router.post('/upload-preview', requireAdmin, upload.single('file'), asyncHandler
   const preview = await previewReport(parsed, req.file.originalname);
 
   log.info({ fileName: req.file.originalname, lineItems: parsed.orderLines.length }, 'Marketplace report parsed');
-  res.json(preview);
+  res.json({ success: true, ...preview });
 }));
 
 // ============================================
@@ -72,7 +72,7 @@ router.post('/confirm/:reportId', requireAdmin, asyncHandler(async (req: Request
   const result = await confirmReport(reportId as string, userId);
 
   log.info({ reportId, revenueInvoiceId: result.revenueInvoiceId }, 'Marketplace payout report confirmed');
-  res.json(result);
+  res.json({ success: true, ...result });
 }));
 
 // ============================================
