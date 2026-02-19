@@ -219,10 +219,11 @@ router.get('/background-jobs', authenticateToken, asyncHandler(async (req: Reque
             name: 'Sync Sheet AWBs',
             description: 'Reads AWB numbers from the Google Sheet, validates via iThink (Shopify/offline) or links directly (Myntra/Ajio/Nykaa), and updates OrderLines.',
             enabled: true,
+            intervalMinutes: 30,
             isRunning: false,
             lastRunAt: null,
             lastResult: null,
-            note: 'For offline/exchange orders where ops team enters AWB in the sheet',
+            note: 'Runs every 30 min — can also trigger manually',
         },
         {
             id: 'remittance_sync',
@@ -409,7 +410,7 @@ router.post('/background-jobs/:jobId/trigger', requireAdmin, asyncHandler(async 
             break;
         }
         case 'sync_sheet_awb': {
-            const result = await syncSheetAwb();
+            const result = await trackWorkerRun('sync_sheet_awb', syncSheetAwb, 'manual');
             res.json({ message: 'Sheet AWB sync completed', result });
             break;
         }

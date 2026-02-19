@@ -60,7 +60,7 @@ import cacheProcessor from './services/cacheProcessor.js';
 import cacheDumpWorker from './services/cacheDumpWorker.js';
 import sheetOffloadWorker from './services/sheetOffload/index.js';
 import stockSnapshotWorker from './services/stockSnapshotWorker.js';
-import { reconcileSheetOrders, syncSheetOrderStatus } from './services/sheetOrderPush.js';
+import { reconcileSheetOrders, syncSheetOrderStatus, syncSheetAwb } from './services/sheetOrderPush.js';
 import { runAllCleanup } from './utils/cacheCleanup.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import shutdownCoordinator from './utils/shutdownCoordinator.js';
@@ -344,6 +344,13 @@ app.listen(PORT, '0.0.0.0', async () => {
       syncSheetOrderStatus().catch(() => {});
     }, STATUS_SYNC_INTERVAL_MS);
 
+    // Sheet AWB sync — reads AWBs from sheet, validates/links to order lines
+    // Runs every 30 min (ops team enters AWBs periodically)
+    const AWB_SYNC_INTERVAL_MS = 30 * 60 * 1000;
+    const awbSyncInterval = setInterval(() => {
+      trackWorkerRun('sync_sheet_awb', syncSheetAwb, 'scheduled').catch(() => {});
+    }, AWB_SYNC_INTERVAL_MS);
+
     // Register shutdown handlers for graceful shutdown
     shutdownCoordinator.register('scheduledSync', () => {
       scheduledSync.stop();
@@ -387,6 +394,10 @@ app.listen(PORT, '0.0.0.0', async () => {
 
     shutdownCoordinator.register('sheetStatusSync', () => {
       clearInterval(statusSyncInterval);
+    }, 1000);
+
+    shutdownCoordinator.register('sheetAwbSync', () => {
+      clearInterval(awbSyncInterval);
     }, 1000);
   }
 
