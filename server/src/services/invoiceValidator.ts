@@ -28,7 +28,7 @@ export interface InvoiceValidationWarning {
 // COMPANY NAME CHECK
 // ============================================
 
-/** Check if buyer name matches "Cream on Hudson" / "COH" */
+/** Check if buyer name matches "Canoe Design Pvt Ltd" */
 function checkCompanyName(parsed: ParsedInvoice): InvoiceValidationWarning[] {
   const warnings: InvoiceValidationWarning[] = [];
   const buyerName = parsed.buyerName?.trim();
@@ -44,19 +44,15 @@ function checkCompanyName(parsed: ParsedInvoice): InvoiceValidationWarning[] {
   }
 
   const lower = buyerName.toLowerCase();
-  const matches = lower.includes('cream') && (lower.includes('hudson') || lower.includes('coh'));
+  const matches = lower.includes('canoe') && lower.includes('design');
 
   if (!matches) {
-    // Also check for just "coh" as a standalone word
-    const cohMatch = /\bcoh\b/.test(lower);
-    if (!cohMatch) {
-      warnings.push({
-        type: 'company_name',
-        severity: 'error',
-        message: "Invoice buyer name doesn't match our company",
-        details: `Found: "${buyerName}". Expected: "Cream on Hudson" or "COH".`,
-      });
-    }
+    warnings.push({
+      type: 'company_name',
+      severity: 'error',
+      message: "Invoice buyer name doesn't match our company",
+      details: `Found: "${buyerName}". Expected: "Canoe Design Pvt Ltd".`,
+    });
   }
 
   return warnings;
