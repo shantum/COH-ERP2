@@ -57,7 +57,7 @@ interface PostingDecision {
  * 3. Outgoing, party invoiceRequired = false → single-step
  * 4. Everything else → two-step (Dr AP, Cr BANK)
  */
-function decidePosting(
+export function decidePosting(
   direction: string,
   amount: number,
   debitAccountCode: string,

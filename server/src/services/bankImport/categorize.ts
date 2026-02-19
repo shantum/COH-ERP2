@@ -16,6 +16,7 @@ import {
   type PartyWithTxnType,
 } from '../transactionTypeResolver.js';
 import { confirmBatch } from './post.js';
+import { AUTO_CLEAR_AMOUNT_THRESHOLD } from '../../config/finance/index.js';
 
 // ============================================
 // TYPES
@@ -404,10 +405,35 @@ export async function categorizeTransactions(options?: { bank?: string }): Promi
     breakdown[key].total += txn.amount;
   }
 
+  // Auto-post: party-matched single-step transactions need no human review
+  const autoPostIds: string[] = [];
+  const partyCache = new Map(parties.map(p => [p.id, p]));
+
+  for (const u of updates) {
+    const data = u.data;
+    if (data.status !== 'categorized') continue;
+    if (!data.partyId) continue;
+
+    const debit = data.debitAccountCode as string | undefined;
+    const credit = data.creditAccountCode as string | undefined;
+    if (!debit || !credit || debit === 'UNMATCHED_PAYMENTS' || credit === 'UNMATCHED_PAYMENTS') continue;
+
+    const txn = txns.find(t => t.id === u.id)!;
+    const party = partyCache.get(data.partyId as string);
+
+    const wouldBeSingleStep =
+      txn.direction === 'credit' ||
+      party?.invoiceRequired === false ||
+      txn.amount < AUTO_CLEAR_AMOUNT_THRESHOLD;
+
+    if (wouldBeSingleStep) {
+      autoPostIds.push(txn.id);
+    }
+  }
+
   // PayU Settlement matching — match HDFC credits to PayuSettlement records by UTR (exact)
   // Runs BEFORE COD remittance matching because UTR is deterministic (exact match vs fuzzy amount+date)
   // Auto-posted after batch update since these are definitive matches
-  const autoPostIds: string[] = [];
   for (const txn of txns) {
     if (txn.bank !== 'hdfc' || txn.direction !== 'credit') continue;
 
