@@ -124,7 +124,7 @@ export default function InvoiceDetailModal({
               <div className="border rounded-lg p-3 text-center bg-green-50 dark:bg-green-950">
                 <p className="text-xs text-muted-foreground">Paid</p>
                 <p className="text-base font-mono font-semibold text-green-700 dark:text-green-400 mt-0.5">
-                  {formatCurrency(invoice.totalAmount - invoice.balanceDue)}
+                  {formatCurrency(invoice.paidAmount ?? 0)}
                 </p>
               </div>
               <div className="border rounded-lg p-3 text-center bg-amber-50 dark:bg-amber-950">

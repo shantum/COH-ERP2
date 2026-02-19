@@ -104,34 +104,6 @@ export function decidePosting(
 }
 
 // ============================================
-// DEDUP HELPER
-// ============================================
-
-/**
- * Check if a Payment already exists with a matching reference and amount.
- * Checks all provided references (e.g. payout ID + UTR) to catch cross-bank duplicates:
- *   HDFC creates Payment ref="603329011837", RazorpayX has UTR="603329011837"
- *   → without UTR check, RazorpayX would create a duplicate.
- */
-async function findExistingPayment(
-  tx: Prisma.TransactionClient,
-  references: (string | null | undefined)[],
-  amount: number,
-): Promise<string | null> {
-  const refs = references.filter((r): r is string => !!r);
-  if (refs.length === 0) return null;
-  const existing = await tx.payment.findFirst({
-    where: {
-      referenceNumber: { in: refs },
-      amount: { gte: amount - 1, lte: amount + 1 },
-      status: { not: 'cancelled' },
-    },
-    select: { id: true },
-  });
-  return existing?.id ?? null;
-}
-
-// ============================================
 // CONFIRM SINGLE TRANSACTION
 // ============================================
 
@@ -205,29 +177,23 @@ export async function confirmSingleTransaction(txnId: string): Promise<ConfirmRe
         resultPaymentId = txn.paymentId;
       } else {
         const ref = txn.reference ?? txn.utr ?? null;
-        // Dedup: check reference + UTR (catches HDFC↔RazorpayX cross-bank duplicates)
-        const existingId = await findExistingPayment(tx, [ref, txn.utr], txn.amount);
-        if (existingId) {
-          resultPaymentId = existingId;
-        } else {
-          const payment = await tx.payment.create({
-            data: {
-              direction: 'outgoing',
-              method: 'bank_transfer',
-              status: 'confirmed',
-              amount: txn.amount,
-              unmatchedAmount: txn.amount,
-              paymentDate: entryDate,
-              period,
-              referenceNumber: ref,
-              debitAccountCode: decision.intendedDebitAccount ?? decision.debitAccount,
-              createdById: admin.id,
-              ...(partyId ? { partyId } : {}),
-              ...(narration ? { notes: narration } : {}),
-            },
-          });
-          resultPaymentId = payment.id;
-        }
+        const payment = await tx.payment.create({
+          data: {
+            direction: 'outgoing',
+            method: 'bank_transfer',
+            status: 'confirmed',
+            amount: txn.amount,
+            unmatchedAmount: txn.amount,
+            paymentDate: entryDate,
+            period,
+            referenceNumber: ref,
+            debitAccountCode: decision.intendedDebitAccount ?? decision.debitAccount,
+            createdById: admin.id,
+            ...(partyId ? { partyId } : {}),
+            ...(narration ? { notes: narration } : {}),
+          },
+        });
+        resultPaymentId = payment.id;
       }
     }
 
@@ -356,28 +322,23 @@ export async function postTransactions(options?: { bank?: string }): Promise<Pos
               paymentId = txn.paymentId;
             } else {
               const ref = txn.reference ?? txn.utr ?? null;
-              const existingId = await findExistingPayment(tx, [ref, txn.utr], txn.amount);
-              if (existingId) {
-                paymentId = existingId;
-              } else {
-                const payment = await tx.payment.create({
-                  data: {
-                    direction: 'outgoing',
-                    method: 'bank_transfer',
-                    status: 'confirmed',
-                    amount: txn.amount,
-                    unmatchedAmount: txn.amount,
-                    paymentDate: entryDate,
-                    period,
-                    referenceNumber: ref,
-                    debitAccountCode: decision.intendedDebitAccount ?? decision.debitAccount,
-                    createdById: admin.id,
-                    ...(txn.partyId ? { partyId: txn.partyId } : {}),
-                    ...(narration ? { notes: narration } : {}),
-                  },
-                });
-                paymentId = payment.id;
-              }
+              const payment = await tx.payment.create({
+                data: {
+                  direction: 'outgoing',
+                  method: 'bank_transfer',
+                  status: 'confirmed',
+                  amount: txn.amount,
+                  unmatchedAmount: txn.amount,
+                  paymentDate: entryDate,
+                  period,
+                  referenceNumber: ref,
+                  debitAccountCode: decision.intendedDebitAccount ?? decision.debitAccount,
+                  createdById: admin.id,
+                  ...(txn.partyId ? { partyId: txn.partyId } : {}),
+                  ...(narration ? { notes: narration } : {}),
+                },
+              });
+              paymentId = payment.id;
             }
           }
 

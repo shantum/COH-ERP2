@@ -421,13 +421,14 @@ export default function InvoicesTab({ search: rawSearch }: { search: FinanceSear
                       disabled={selectableInvoices.length === 0}
                     />
                   </th>
-                  <th className="text-left p-3 font-medium">Invoice #</th>
+                  <th className="text-left p-3 font-medium">Party</th>
                   <th className="text-left p-3 font-medium">Category</th>
-                  <th className="text-left p-3 font-medium">Counterparty</th>
-                  <th className="text-right p-3 font-medium">Total</th>
-                  <th className="text-right p-3 font-medium">Balance Due</th>
+                  <th className="text-left p-3 font-medium">Invoice #</th>
+                  <th className="text-left p-3 font-medium">Invoice Date</th>
+                  <th className="text-left p-3 font-medium">Period</th>
+                  <th className="text-right p-3 font-medium">Amount</th>
                   <th className="text-left p-3 font-medium">Status</th>
-                  <th className="text-left p-3 font-medium">Date</th>
+                  <th className="text-right p-3 font-medium">Balance Due</th>
                   <th className="text-right p-3 font-medium">Actions</th>
                 </tr>
               </thead>
@@ -455,22 +456,23 @@ export default function InvoicesTab({ search: rawSearch }: { search: FinanceSear
                         <span className="block h-4 w-4" />
                       )}
                     </td>
-                    <td className="p-3 font-mono text-xs">{inv.invoiceNumber ?? '—'}</td>
-                    <td className="p-3 text-xs">{getCategoryLabel(inv.category)}</td>
                     <td className="p-3">
                       {inv.party?.name ??
                         (inv.customer ? [inv.customer.firstName, inv.customer.lastName].filter(Boolean).join(' ') || inv.customer.email : null) ??
                         '—'}
                     </td>
+                    <td className="p-3 text-xs">{getCategoryLabel(inv.category)}</td>
+                    <td className="p-3 font-mono text-xs">{inv.invoiceNumber ?? '—'}</td>
+                    <td className="p-3 text-xs text-muted-foreground">{inv.invoiceDate ? new Date(inv.invoiceDate).toLocaleDateString('en-IN') : '—'}</td>
+                    <td className="p-3 text-xs text-muted-foreground">{inv.billingPeriod ?? '—'}</td>
                     <td className="p-3 text-right font-mono">{formatCurrency(inv.totalAmount)}</td>
+                    <td className="p-3"><StatusBadge status={inv.status} /></td>
                     <td className="p-3 text-right">
                       <span className="font-mono">{formatCurrency(inv.balanceDue)}</span>
                       {inv.tdsAmount != null && inv.tdsAmount > 0 && (
                         <span className="block text-[10px] text-muted-foreground">TDS: {formatCurrency(inv.tdsAmount)}</span>
                       )}
                     </td>
-                    <td className="p-3"><StatusBadge status={inv.status} /></td>
-                    <td className="p-3 text-xs text-muted-foreground">{inv.invoiceDate ? new Date(inv.invoiceDate).toLocaleDateString('en-IN') : '—'}</td>
                     <td className="p-3 text-right" onClick={(e) => e.stopPropagation()}>
                       <div className="flex items-center justify-end gap-1">
                         {inv.driveUrl && (
@@ -520,7 +522,7 @@ export default function InvoicesTab({ search: rawSearch }: { search: FinanceSear
                   );
                 })}
                 {(!data?.invoices || data.invoices.length === 0) && (
-                  <tr><td colSpan={9} className="p-8 text-center">
+                  <tr><td colSpan={10} className="p-8 text-center">
                     <div className="text-muted-foreground space-y-2">
                       <p>{search.search || search.status || search.category || search.dateFrom ? 'No invoices match your filters' : `No ${search.type} invoices yet`}</p>
                       {!(search.search || search.status || search.category || search.dateFrom) && (
