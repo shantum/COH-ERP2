@@ -28,7 +28,7 @@ import { backfillLtvsIfNeeded } from './utils/tierUtils.js';
 import authRoutes from './routes/auth.js';
 import importExportRoutes from './routes/import-export.js';
 import shopifyRoutes from './routes/shopify/index.js';
-import adminRoutes from './routes/admin.js';
+import adminRoutes from './routes/admin/index.js';
 import webhookRoutes from './routes/webhooks.js';
 import remittanceRoutes from './routes/remittance.js';
 import pincodeRoutes from './routes/pincodes.js';
