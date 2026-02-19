@@ -839,20 +839,28 @@ router.post('/execute-import', authenticateToken, async (req: Request, res: Resp
               });
               const lineIdMap = new Map(createdLines.filter(l => l.channelItemId).map(l => [l.channelItemId!, l.id]));
 
-              for (const line of matchedLines) {
-                const orderLineId = lineIdMap.get(line.channelItemId) || null;
-                await tx.channelOrderLine.updateMany({
+              // Batch: set orderId for all lines at once
+              await tx.channelOrderLine.updateMany({
+                where: {
+                  channel: previewOrder.channel,
+                  channelOrderId: previewOrder.channelOrderId,
+                  channelItemId: { in: matchedLines.map(l => l.channelItemId) },
+                },
+                data: { orderId: order.id },
+              });
+
+              // Parallel: set orderLineId for lines that have a mapping
+              const orderLineUpdates = matchedLines
+                .filter(l => lineIdMap.has(l.channelItemId))
+                .map(l => tx.channelOrderLine.updateMany({
                   where: {
                     channel: previewOrder.channel,
                     channelOrderId: previewOrder.channelOrderId,
-                    channelItemId: line.channelItemId,
+                    channelItemId: l.channelItemId,
                   },
-                  data: {
-                    orderId: order.id,
-                    ...(orderLineId ? { orderLineId } : {}),
-                  },
-                });
-              }
+                  data: { orderLineId: lineIdMap.get(l.channelItemId)! },
+                }));
+              await Promise.all(orderLineUpdates);
 
               // Recompute order status inside transaction
               await recomputeOrderStatus(order.id, tx);
@@ -917,10 +925,11 @@ router.post('/execute-import', authenticateToken, async (req: Request, res: Resp
               });
               const existingLineMap = new Map(existingLines.map(l => [l.channelItemId, { id: l.id, lineStatus: l.lineStatus }]));
 
-              for (const line of previewOrder.lines) {
-                const existing = existingLineMap.get(line.channelItemId);
-
-                if (existing) {
+              // Parallel: update existing order lines
+              const existingLineUpdates = previewOrder.lines
+                .filter(line => existingLineMap.has(line.channelItemId))
+                .map(line => {
+                  const existing = existingLineMap.get(line.channelItemId)!;
                   const status = line.fulfillmentStatus?.toLowerCase() || '';
                   const isShipped = status === 'shipped' || status === 'delivered' || status === 'manifested';
                   const isDelivered = status === 'delivered';
@@ -935,7 +944,7 @@ router.post('/execute-import', authenticateToken, async (req: Request, res: Resp
                     newLineStatus = 'delivered';
                   }
 
-                  await tx.orderLine.update({
+                  return tx.orderLine.update({
                     where: { id: existing.id },
                     data: {
                       channelFulfillmentStatus: line.fulfillmentStatus || null,
@@ -946,53 +955,87 @@ router.post('/execute-import', authenticateToken, async (req: Request, res: Resp
                       ...(newLineStatus ? { lineStatus: newLineStatus } : {}),
                     },
                   });
+                });
+              await Promise.all(existingLineUpdates);
 
-                  await tx.channelOrderLine.updateMany({
+              // Batch: link channelOrderLines for existing lines
+              const existingChannelItemIds = previewOrder.lines
+                .filter(line => existingLineMap.has(line.channelItemId))
+                .map(line => line.channelItemId);
+              if (existingChannelItemIds.length > 0) {
+                // Set orderId for all at once
+                await tx.channelOrderLine.updateMany({
+                  where: {
+                    channel: previewOrder.channel,
+                    channelOrderId: previewOrder.channelOrderId,
+                    channelItemId: { in: existingChannelItemIds },
+                  },
+                  data: { orderId: previewOrder.existingOrderId },
+                });
+                // Set orderLineId in parallel
+                const channelLineUpdates = existingChannelItemIds.map(channelItemId => {
+                  const existing = existingLineMap.get(channelItemId)!;
+                  return tx.channelOrderLine.updateMany({
                     where: {
                       channel: previewOrder.channel,
                       channelOrderId: previewOrder.channelOrderId,
-                      channelItemId: line.channelItemId,
+                      channelItemId,
                     },
-                    data: {
-                      orderId: previewOrder.existingOrderId,
-                      orderLineId: existing.id,
-                    },
+                    data: { orderLineId: existing.id },
                   });
-                } else if (line.skuId) {
-                  const status = line.fulfillmentStatus?.toLowerCase() || '';
-                  const isShipped = status === 'shipped' || status === 'delivered' || status === 'manifested';
-                  const isDelivered = status === 'delivered';
-                  const isCancelled = status === 'cancelled';
-                  const initialLineStatus = isDelivered ? 'delivered' : isShipped ? 'shipped' : isCancelled ? 'cancelled' : 'pending';
+                });
+                await Promise.all(channelLineUpdates);
+              }
 
-                  const newLine = await tx.orderLine.create({
-                    data: {
-                      orderId: previewOrder.existingOrderId!,
-                      skuId: line.skuId,
-                      qty: line.qty,
-                      unitPrice: line.unitPrice,
-                      lineStatus: initialLineStatus,
-                      channelFulfillmentStatus: line.fulfillmentStatus || null,
-                      channelItemId: line.channelItemId,
-                      courier: line.courierName || null,
-                      awbNumber: line.awbNumber || null,
-                      ...(isShipped ? { shippedAt: line.dispatchDate ? new Date(line.dispatchDate) : new Date() } : {}),
-                      ...(isDelivered ? { deliveredAt: line.deliveryDate ? new Date(line.deliveryDate) : new Date() } : {}),
-                    },
-                  });
+              // New lines: must create sequentially (need newLine.id), but link in parallel after
+              const newLines = previewOrder.lines.filter(line => !existingLineMap.has(line.channelItemId) && line.skuId);
+              const newLineResults: Array<{ channelItemId: string; orderLineId: string }> = [];
+              for (const line of newLines) {
+                const status = line.fulfillmentStatus?.toLowerCase() || '';
+                const isShipped = status === 'shipped' || status === 'delivered' || status === 'manifested';
+                const isDelivered = status === 'delivered';
+                const isCancelled = status === 'cancelled';
+                const initialLineStatus = isDelivered ? 'delivered' : isShipped ? 'shipped' : isCancelled ? 'cancelled' : 'pending';
 
-                  await tx.channelOrderLine.updateMany({
+                const newLine = await tx.orderLine.create({
+                  data: {
+                    orderId: previewOrder.existingOrderId!,
+                    skuId: line.skuId!,
+                    qty: line.qty,
+                    unitPrice: line.unitPrice,
+                    lineStatus: initialLineStatus,
+                    channelFulfillmentStatus: line.fulfillmentStatus || null,
+                    channelItemId: line.channelItemId,
+                    courier: line.courierName || null,
+                    awbNumber: line.awbNumber || null,
+                    ...(isShipped ? { shippedAt: line.dispatchDate ? new Date(line.dispatchDate) : new Date() } : {}),
+                    ...(isDelivered ? { deliveredAt: line.deliveryDate ? new Date(line.deliveryDate) : new Date() } : {}),
+                  },
+                });
+                newLineResults.push({ channelItemId: line.channelItemId, orderLineId: newLine.id });
+              }
+
+              // Batch link new channelOrderLines
+              if (newLineResults.length > 0) {
+                await tx.channelOrderLine.updateMany({
+                  where: {
+                    channel: previewOrder.channel,
+                    channelOrderId: previewOrder.channelOrderId,
+                    channelItemId: { in: newLineResults.map(r => r.channelItemId) },
+                  },
+                  data: { orderId: previewOrder.existingOrderId },
+                });
+                const newChannelLineUpdates = newLineResults.map(r =>
+                  tx.channelOrderLine.updateMany({
                     where: {
                       channel: previewOrder.channel,
                       channelOrderId: previewOrder.channelOrderId,
-                      channelItemId: line.channelItemId,
+                      channelItemId: r.channelItemId,
                     },
-                    data: {
-                      orderId: previewOrder.existingOrderId,
-                      orderLineId: newLine.id,
-                    },
-                  });
-                }
+                    data: { orderLineId: r.orderLineId },
+                  })
+                );
+                await Promise.all(newChannelLineUpdates);
               }
 
               await recomputeOrderStatus(previewOrder.existingOrderId!, tx);

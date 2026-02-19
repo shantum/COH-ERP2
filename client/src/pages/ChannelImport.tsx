@@ -11,6 +11,7 @@ import {
   AlertCircle,
   ArrowRight,
   X,
+  RefreshCw,
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
@@ -713,7 +714,7 @@ export default function ChannelImport() {
               <CardContent className="py-4">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-sm font-medium">
-                    Importing orders: {importProgress.completed} / {importProgress.total}
+                    Creating orders in database: {importProgress.completed} / {importProgress.total}
                   </span>
                   <span className="text-xs text-muted-foreground">
                     {importProgress.created} created, {importProgress.updated} updated
@@ -783,8 +784,13 @@ export default function ChannelImport() {
                 <p className="text-xl font-semibold text-blue-700">{executeResult.ordersUpdated}</p>
               </div>
             </div>
-            <div className="mt-4 text-sm text-muted-foreground">
-              Google Sheet updates are being processed in the background.
+            <div className="mt-4 flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2.5 text-sm text-blue-700">
+              <span className="relative flex h-2.5 w-2.5 shrink-0">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-400 opacity-75" />
+                <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-blue-500" />
+              </span>
+              <RefreshCw className="h-4 w-4 shrink-0" />
+              <span>Syncing orders to Google Sheet in the background...</span>
             </div>
             {executeResult.errors.length > 0 && (
               <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
