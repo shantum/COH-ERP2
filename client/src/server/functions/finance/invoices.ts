@@ -137,6 +137,7 @@ export const createInvoice = createServerFn({ method: 'POST' })
         ...(data.partyId ? { partyId: data.partyId } : {}),
         ...(data.customerId ? { customerId: data.customerId } : {}),
         subtotal: data.subtotal ?? null,
+        gstRate: data.gstRate ?? null,
         gstAmount: data.gstAmount ?? null,
         totalAmount: data.totalAmount,
         balanceDue: data.totalAmount,
@@ -194,6 +195,7 @@ export const updateInvoice = createServerFn({ method: 'POST' })
     if (updateData.partyId !== undefined) updates.partyId = updateData.partyId;
     if (updateData.customerId !== undefined) updates.customerId = updateData.customerId;
     if (updateData.subtotal !== undefined) updates.subtotal = updateData.subtotal;
+    if (updateData.gstRate !== undefined) updates.gstRate = updateData.gstRate;
     if (updateData.gstAmount !== undefined) updates.gstAmount = updateData.gstAmount;
     if (updateData.totalAmount !== undefined) {
       updates.totalAmount = updateData.totalAmount;
@@ -225,7 +227,7 @@ export const confirmInvoice = createServerFn({ method: 'POST' })
 
     const invoice = await prisma.invoice.findUnique({
       where: { id: data.id },
-      select: { id: true, type: true, category: true, status: true, totalAmount: true, gstAmount: true, subtotal: true, invoiceNumber: true, partyId: true, invoiceDate: true, billingPeriod: true },
+      select: { id: true, type: true, category: true, status: true, totalAmount: true, gstRate: true, gstAmount: true, subtotal: true, invoiceNumber: true, partyId: true, invoiceDate: true, billingPeriod: true },
     });
 
     if (!invoice) return { success: false as const, error: 'Invoice not found' };
@@ -236,10 +238,11 @@ export const confirmInvoice = createServerFn({ method: 'POST' })
     let expenseAccountOverride: string | null = null;
     let partyName: string | null = null;
     let periodOffset: number | null = null;
+    let party: { name: string; tdsApplicable: boolean; tdsRate: number | null; tdsSection: string | null; billingPeriodOffsetMonths: number | null; transactionType: { debitAccountCode: string | null } | null } | null = null;
     if (invoice.type === 'payable' && invoice.partyId) {
-      const party = await prisma.party.findUnique({
+      party = await prisma.party.findUnique({
         where: { id: invoice.partyId },
-        select: { name: true, tdsApplicable: true, tdsRate: true, billingPeriodOffsetMonths: true, transactionType: { select: { debitAccountCode: true } } },
+        select: { name: true, tdsApplicable: true, tdsRate: true, tdsSection: true, billingPeriodOffsetMonths: true, transactionType: { select: { debitAccountCode: true } } },
       });
       partyName = party?.name ?? null;
       periodOffset = party?.billingPeriodOffsetMonths ?? null;
@@ -255,7 +258,7 @@ export const confirmInvoice = createServerFn({ method: 'POST' })
 
     // ---- LINKED PAYMENT PATH (already-paid bill) ----
     if (data.linkedPaymentId && invoice.type === 'payable') {
-      return confirmInvoiceWithLinkedPayment(prisma, invoice, data.linkedPaymentId, tdsAmount, userId, expenseAccountOverride, partyName, periodOffset);
+      return confirmInvoiceWithLinkedPayment(prisma, invoice, data.linkedPaymentId, tdsAmount, userId, expenseAccountOverride, partyName, periodOffset, party);
     }
 
     // ---- NORMAL AP PATH (invoice first, pay later) ----
@@ -266,7 +269,11 @@ export const confirmInvoice = createServerFn({ method: 'POST' })
       where: { id: invoice.id },
       data: {
         status: 'confirmed',
-        ...(tdsAmount > 0 ? { tdsAmount, balanceDue: invoice.totalAmount - tdsAmount } : {}),
+        ...(tdsAmount > 0 ? { tdsAmount, tdsRate: party?.tdsRate ?? null, tdsSection: party?.tdsSection ?? null, balanceDue: invoice.totalAmount - tdsAmount } : {}),
+        // Derive gstRate if not already set and we have the amounts to compute it
+        ...(!invoice.gstRate && invoice.gstAmount && invoice.gstAmount > 0 && invoice.totalAmount > invoice.gstAmount
+          ? { gstRate: Math.round((invoice.gstAmount / (invoice.totalAmount - invoice.gstAmount)) * 10000) / 100 }
+          : {}),
         // Default billingPeriod from invoiceDate (with party offset) if not set
         ...(!invoice.billingPeriod ? { billingPeriod: derivedPeriod } : {}),
       },
@@ -285,13 +292,14 @@ export const confirmInvoice = createServerFn({ method: 'POST' })
  */
 async function confirmInvoiceWithLinkedPayment(
   prisma: Awaited<ReturnType<typeof getPrisma>>,
-  invoice: { id: string; category: string; totalAmount: number; gstAmount: number | null; subtotal: number | null; invoiceNumber: string | null; partyId: string | null; invoiceDate: Date | null; billingPeriod: string | null },
+  invoice: { id: string; category: string; totalAmount: number; gstRate: number | null; gstAmount: number | null; subtotal: number | null; invoiceNumber: string | null; partyId: string | null; invoiceDate: Date | null; billingPeriod: string | null },
   paymentId: string,
   tdsAmount: number,
   userId: string,
   _expenseAccountOverride: string | null = null,
   partyName: string | null = null,
   periodOffset: number | null = null,
+  party: { tdsRate: number | null; tdsSection: string | null } | null = null,
 ) {
   // The amount the vendor was actually paid (total minus TDS withheld)
   const matchAmount = invoice.totalAmount - tdsAmount;
@@ -348,7 +356,11 @@ async function confirmInvoiceWithLinkedPayment(
         status: 'paid',
         paidAmount: matchAmount,
         balanceDue: 0,
-        ...(tdsAmount > 0 ? { tdsAmount } : {}),
+        ...(tdsAmount > 0 ? { tdsAmount, tdsRate: party?.tdsRate ?? null, tdsSection: party?.tdsSection ?? null } : {}),
+        // Derive gstRate if not already set
+        ...(!invoice.gstRate && invoice.gstAmount && invoice.gstAmount > 0 && invoice.totalAmount > invoice.gstAmount
+          ? { gstRate: Math.round((invoice.gstAmount / (invoice.totalAmount - invoice.gstAmount)) * 10000) / 100 }
+          : {}),
         // Default billingPeriod from invoiceDate (with party offset) if not set
         ...(!invoice.billingPeriod ? {
           billingPeriod: (() => {

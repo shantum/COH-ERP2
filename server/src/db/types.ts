@@ -493,7 +493,10 @@ export type Invoice = {
     partyId: string | null;
     customerId: string | null;
     subtotal: number | null;
+    gstRate: number | null;
     gstAmount: number | null;
+    tdsRate: number | null;
+    tdsSection: string | null;
     tdsAmount: Generated<number | null>;
     totalAmount: number;
     paidAmount: Generated<number>;

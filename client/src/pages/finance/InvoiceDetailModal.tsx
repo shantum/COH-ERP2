@@ -74,8 +74,8 @@ export default function InvoiceDetailModal({
             <div className="grid grid-cols-3 gap-3 mt-4">
               {[
                 { label: 'Subtotal', value: invoice.subtotal != null ? formatCurrency(invoice.subtotal) : null },
-                { label: 'GST', value: invoice.gstAmount != null && invoice.gstAmount > 0 ? formatCurrency(invoice.gstAmount) : null },
-                { label: 'TDS', value: invoice.tdsAmount != null && invoice.tdsAmount > 0 ? formatCurrency(invoice.tdsAmount) : null },
+                { label: `GST${invoice.gstRate ? ` @${invoice.gstRate}%` : ''}`, value: invoice.gstAmount != null && invoice.gstAmount > 0 ? formatCurrency(invoice.gstAmount) : null },
+                { label: `TDS${invoice.tdsRate ? ` @${invoice.tdsRate}%` : ''}${invoice.tdsSection ? ` (${invoice.tdsSection})` : ''}`, value: invoice.tdsAmount != null && invoice.tdsAmount > 0 ? formatCurrency(invoice.tdsAmount) : null },
               ].filter(item => item.value != null).map(item => (
                 <div key={item.label} className="border rounded-lg p-3 text-center">
                   <p className="text-xs text-muted-foreground">{item.label}</p>

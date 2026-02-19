@@ -1236,6 +1236,7 @@ function CreateInvoiceModal({ open, onClose, prefill, editInvoice }: {
     category: 'other' as string,
     invoiceNumber: '',
     totalAmount: '',
+    gstRate: '' as string,
     gstAmount: '',
     invoiceDate: new Date().toISOString().split('T')[0],
     billingPeriod: '',
@@ -1263,6 +1264,7 @@ function CreateInvoiceModal({ open, onClose, prefill, editInvoice }: {
       category: editInvoice.category,
       invoiceNumber: editInvoice.invoiceNumber ?? '',
       totalAmount: String(editInvoice.totalAmount),
+      gstRate: '',
       gstAmount: editInvoice.gstAmount != null ? String(editInvoice.gstAmount) : '',
       invoiceDate: editInvoice.invoiceDate ? (editInvoice.invoiceDate instanceof Date ? editInvoice.invoiceDate.toISOString() : editInvoice.invoiceDate).split('T')[0] : '',
       billingPeriod: editInvoice.billingPeriod ?? '',
@@ -1282,6 +1284,7 @@ function CreateInvoiceModal({ open, onClose, prefill, editInvoice }: {
       category: 'other',
       invoiceNumber: '',
       totalAmount: String(prefill.totalAmount),
+      gstRate: '',
       gstAmount: '',
       invoiceDate: new Date().toISOString().split('T')[0],
       billingPeriod: '',
@@ -1315,6 +1318,7 @@ function CreateInvoiceModal({ open, onClose, prefill, editInvoice }: {
           category: form.category,
           ...(form.invoiceNumber ? { invoiceNumber: form.invoiceNumber } : {}),
           totalAmount: Number(form.totalAmount),
+          ...(form.gstRate ? { gstRate: Number(form.gstRate) } : {}),
           ...(form.gstAmount ? { gstAmount: Number(form.gstAmount) } : {}),
           ...(form.invoiceDate ? { invoiceDate: form.invoiceDate } : {}),
           ...(form.billingPeriod ? { billingPeriod: form.billingPeriod } : {}),
@@ -1343,6 +1347,7 @@ function CreateInvoiceModal({ open, onClose, prefill, editInvoice }: {
       category: 'other',
       invoiceNumber: '',
       totalAmount: '',
+      gstRate: '',
       gstAmount: '',
       invoiceDate: new Date().toISOString().split('T')[0],
       billingPeriod: '',
@@ -1447,14 +1452,34 @@ function CreateInvoiceModal({ open, onClose, prefill, editInvoice }: {
             <Label>Invoice Number</Label>
             <Input value={form.invoiceNumber} onChange={(e) => setForm({ ...form, invoiceNumber: e.target.value })} placeholder="Optional" />
           </div>
+          <div>
+            <Label>Total Amount (incl. GST)</Label>
+            <Input type="number" value={form.totalAmount} onChange={(e) => setForm({ ...form, totalAmount: e.target.value })} placeholder="0.00" />
+          </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label>Total Amount</Label>
-              <Input type="number" value={form.totalAmount} onChange={(e) => setForm({ ...form, totalAmount: e.target.value })} placeholder="0.00" />
+              <Label>GST %</Label>
+              <Select value={form.gstRate} onValueChange={(v) => {
+                const rate = Number(v);
+                const total = Number(form.totalAmount);
+                if (rate > 0 && total > 0) {
+                  const gst = Math.round((total * rate / (100 + rate)) * 100) / 100;
+                  setForm({ ...form, gstRate: v, gstAmount: String(gst) });
+                } else {
+                  setForm({ ...form, gstRate: v, gstAmount: '' });
+                }
+              }}>
+                <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
+                <SelectContent>
+                  {[0, 5, 12, 18, 28].map((r) => (
+                    <SelectItem key={r} value={String(r)}>{r}%</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div>
               <Label>GST Amount</Label>
-              <Input type="number" value={form.gstAmount} onChange={(e) => setForm({ ...form, gstAmount: e.target.value })} placeholder="0.00" />
+              <Input type="number" value={form.gstAmount} onChange={(e) => setForm({ ...form, gstAmount: e.target.value, gstRate: '' })} placeholder="0.00" />
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">

@@ -1966,7 +1966,10 @@ model Invoice {
 
   // Amounts
   subtotal         Float?
+  gstRate          Float?    // GST % snapshot (e.g. 18.0) — recorded at creation/confirm
   gstAmount        Float?
+  tdsRate          Float?    // TDS % snapshot (e.g. 2.0) — recorded at confirm from Party config
+  tdsSection       String?   // TDS section snapshot (e.g. "194C") — recorded at confirm
   tdsAmount        Float?    @default(0)
   totalAmount      Float
   paidAmount       Float     @default(0)

@@ -394,6 +394,14 @@ router.post('/upload-and-parse', requireAdmin, upload.single('file'), asyncHandl
       dueDate,
       billingPeriod,
       subtotal: parsed?.subtotal ?? null,
+      gstRate: (() => {
+        const lines = parsed?.lines ?? [];
+        const rates = lines.map(l => l.gstPercent).filter((r): r is number => r != null && r > 0);
+        if (rates.length === 0) return null;
+        const counts = new Map<number, number>();
+        for (const r of rates) counts.set(r, (counts.get(r) ?? 0) + 1);
+        return [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
+      })(),
       gstAmount: parsed?.gstAmount ?? null,
       totalAmount: parsed?.totalAmount ?? 0,
       balanceDue: parsed?.totalAmount ?? 0,
@@ -776,6 +784,16 @@ router.post('/confirm-preview/:previewId', requireAdmin, asyncHandler(async (req
       dueDate,
       billingPeriod,
       subtotal: mergedParsed?.subtotal ?? null,
+      // Derive gstRate from line items (most common gstPercent)
+      gstRate: (() => {
+        const lines = parsed?.lines ?? [];
+        const rates = lines.map(l => l.gstPercent).filter((r): r is number => r != null && r > 0);
+        if (rates.length === 0) return null;
+        // Use most common rate
+        const counts = new Map<number, number>();
+        for (const r of rates) counts.set(r, (counts.get(r) ?? 0) + 1);
+        return [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
+      })(),
       gstAmount: mergedParsed?.gstAmount ?? null,
       totalAmount: mergedParsed?.totalAmount ?? 0,
       balanceDue: mergedParsed?.totalAmount ?? 0,
