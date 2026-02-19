@@ -57,8 +57,6 @@ model User {
   returnClosedManuallyLines OrderLine[]          @relation("ReturnClosedManuallyBy")
   // Settings updates
   returnSettingsUpdates ReturnSettings[]
-  // Fabric invoices
-  fabricInvoices        FabricInvoice[]  @relation("FabricInvoiceCreator")
   // Finance relations
   financeInvoices       Invoice[]        @relation("InvoiceCreator")
   financePayments       Payment[]        @relation("PaymentCreator")
@@ -270,7 +268,7 @@ model FabricColour {
   // NOTE: Direct variation link removed - use variationBomLines for fabric->variation
   transactions             FabricColourTransaction[]
   reconciliationItems      FabricColourReconciliationItem[]
-  invoiceLines             FabricInvoiceLine[] @relation("InvoiceLineFabricColour")
+  invoiceLines             InvoiceLine[]       @relation("FinanceInvoiceLineFabricColour")
 
   @@unique([fabricId, colourName])
   @@index([fabricId])
@@ -371,7 +369,6 @@ model Party {
   fabricColours              FabricColour[]      @relation("FabricColourParty")
   trimItems                  TrimItem[]          @relation("TrimParty")
   serviceItems               ServiceItem[]
-  fabricInvoices             FabricInvoice[]     @relation("FabricInvoiceParty")
   financeInvoices            Invoice[]           @relation("InvoiceParty")
   financePayments            Payment[]           @relation("PaymentParty")
   employee                   Employee?
@@ -1549,7 +1546,7 @@ model FabricColourTransaction {
   fabricColour    FabricColour  @relation(fields: [fabricColourId], references: [id])
   createdBy       User          @relation("FabricColourTxnCreator", fields: [createdById], references: [id])
   party           Party?        @relation("FabricColourTxnParty", fields: [partyId], references: [id])
-  invoiceLine     FabricInvoiceLine? @relation("InvoiceLineTxn")
+  invoiceLine     InvoiceLine?   @relation("FinanceInvoiceLineTxn")
 
   @@index([fabricColourId])
   @@index([txnType])
@@ -1807,81 +1804,6 @@ model MonthlyStockSnapshot {
 // FABRIC INVOICES (AI-parsed supplier invoices)
 // ============================================
 
-/// Stores a supplier fabric invoice (PDF/photo) with AI-extracted data
-model FabricInvoice {
-  id              String   @id @default(uuid())
-
-  // Invoice details (AI-extracted + user-corrected)
-  invoiceNumber   String?
-  invoiceDate     DateTime?
-  partyId         String?
-  supplierName    String?              // Raw name from invoice (before matching)
-
-  // Totals
-  subtotal        Float?
-  gstAmount       Float?
-  totalAmount     Float?
-
-  // Original file stored as binary (invoices are small, no S3 needed)
-  fileData        Bytes
-  fileName        String
-  fileMimeType    String               // "application/pdf", "image/jpeg", etc.
-  fileSizeBytes   Int
-
-  // Status: draft → confirmed → cancelled
-  status          String   @default("draft")
-
-  // AI metadata
-  aiRawResponse   Json?                // Full AI response for debugging
-  aiModel         String?              // e.g. "claude-sonnet-4-5-20250929"
-  aiConfidence    Float?               // 0-1 overall confidence score
-
-  // Tracking
-  createdById     String
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  // Relations
-  party           Party?    @relation("FabricInvoiceParty", fields: [partyId], references: [id])
-  createdBy       User      @relation("FabricInvoiceCreator", fields: [createdById], references: [id])
-  lines           FabricInvoiceLine[]
-  financeInvoice  Invoice?  @relation("FabricInvoiceBridge")
-
-  @@index([status])
-  @@index([partyId])
-  @@index([createdAt])
-  @@index([invoiceNumber])
-}
-
-/// Individual line item on a fabric invoice
-model FabricInvoiceLine {
-  id              String   @id @default(uuid())
-  invoiceId       String
-
-  // Parsed data
-  description     String?              // Raw description from invoice
-  hsnCode         String?
-  qty             Float?
-  unit            String?              // "meter", "kg", "yard"
-  rate            Float?               // Per-unit rate
-  amount          Float?               // qty * rate
-  gstPercent      Float?
-  gstAmount       Float?
-
-  // Matching
-  fabricColourId  String?              // Matched FabricColour
-  matchedTxnId    String?  @unique     // Matched existing FabricColourTransaction (1:1)
-  matchType       String?              // "auto_matched" | "manual_matched" | "new_entry"
-
-  // Relations
-  invoice         FabricInvoice         @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
-  fabricColour    FabricColour?         @relation("InvoiceLineFabricColour", fields: [fabricColourId], references: [id])
-  matchedTxn      FabricColourTransaction? @relation("InvoiceLineTxn", fields: [matchedTxnId], references: [id])
-
-  @@index([invoiceId])
-  @@index([fabricColourId])
-}
-
 // ============================================
 // FINANCE: LEDGER, INVOICES, PAYMENTS
 // ============================================
@@ -1977,9 +1899,8 @@ model Invoice {
 
   // Linked records
   orderId          String?
-  fabricInvoiceId  String?   @unique // Optional 1:1 bridge to FabricInvoice
 
-  // File attachment (stored as binary, same pattern as FabricInvoice)
+  // File attachment
   fileData         Bytes?
   fileName         String?
   fileMimeType     String?
@@ -2009,7 +1930,6 @@ model Invoice {
   party         Party?         @relation("InvoiceParty", fields: [partyId], references: [id])
   customer      Customer?      @relation("InvoiceCustomer", fields: [customerId], references: [id])
   order         Order?         @relation("InvoiceOrder", fields: [orderId], references: [id])
-  fabricInvoice FabricInvoice? @relation("FabricInvoiceBridge", fields: [fabricInvoiceId], references: [id])
   ledgerEntry   LedgerEntry?   @relation("InvoiceLedgerEntry", fields: [ledgerEntryId], references: [id])
   createdBy     User           @relation("InvoiceCreator", fields: [createdById], references: [id])
   lines         InvoiceLine[]
@@ -2043,9 +1963,18 @@ model InvoiceLine {
   gstPercent  Float?
   gstAmount   Float?
 
-  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  // Fabric matching (only populated for category='fabric' invoices)
+  fabricColourId String?              // Matched FabricColour
+  matchedTxnId   String?  @unique    // Matched existing FabricColourTransaction (1:1)
+  matchType      String?             // "auto_matched" | "manual_matched" | "new_entry"
+
+  // Relations
+  invoice      Invoice                @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  fabricColour FabricColour?          @relation("FinanceInvoiceLineFabricColour", fields: [fabricColourId], references: [id])
+  matchedTxn   FabricColourTransaction? @relation("FinanceInvoiceLineTxn", fields: [matchedTxnId], references: [id])
 
   @@index([invoiceId])
+  @@index([fabricColourId])
 }
 
 /// Record of actual money moving

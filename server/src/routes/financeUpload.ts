@@ -2,7 +2,7 @@
  * Finance Upload Routes
  *
  * File upload for invoices/receipts and file download.
- * Same pattern as fabricInvoices.ts but for the general finance system.
+ * Handles all invoice types including fabric invoices with colour matching.
  * Auto-pushes uploaded files to Google Drive for CA access.
  */
 
@@ -17,6 +17,7 @@ import { deferredExecutor } from '../services/deferredExecutor.js';
 import { uploadInvoiceFile } from '../services/driveFinanceSync.js';
 import driveFinanceSync from '../services/driveFinanceSync.js';
 import { parseInvoice, parseIndianDate, type ParsedInvoice } from '../services/invoiceParser.js';
+import { matchInvoiceLines } from '../services/invoiceMatcher.js';
 import { findPartyByNarration } from '../services/transactionTypeResolver.js';
 import { randomUUID } from 'crypto';
 import * as previewCache from '../services/invoicePreviewCache.js';
@@ -382,6 +383,12 @@ router.post('/upload-and-parse', requireAdmin, upload.single('file'), asyncHandl
     billingPeriod = `${ist.getUTCFullYear()}-${String(ist.getUTCMonth() + 1).padStart(2, '0')}`;
   }
 
+  // 4b. Fabric matching: if category is 'fabric', match lines to fabric colours
+  const isFabric = matchedCategory === 'fabric';
+  const fabricMatches = isFabric && parsed?.lines?.length
+    ? await matchInvoiceLines(parsed.lines, partyId ?? null, req.prisma as any)
+    : [];
+
   // 5. Create draft Invoice + lines
   const supplierName = parsed?.supplierName ?? null;
   let invoice = await req.prisma.invoice.create({
@@ -419,16 +426,22 @@ router.post('/upload-and-parse', requireAdmin, upload.single('file'), asyncHandl
         : 'AI parsing failed — fill in manually',
       createdById: userId,
       lines: {
-        create: (parsed?.lines ?? []).map(line => ({
-          description: line.description ?? null,
-          hsnCode: line.hsnCode ?? null,
-          qty: line.qty ?? null,
-          unit: line.unit ?? null,
-          rate: line.rate ?? null,
-          amount: line.amount ?? null,
-          gstPercent: line.gstPercent ?? null,
-          gstAmount: line.gstAmount ?? null,
-        })),
+        create: (parsed?.lines ?? []).map((line, i) => {
+          const match = fabricMatches[i];
+          return {
+            description: line.description ?? null,
+            hsnCode: line.hsnCode ?? null,
+            qty: line.qty ?? null,
+            unit: line.unit ?? null,
+            rate: line.rate ?? null,
+            amount: line.amount ?? null,
+            gstPercent: line.gstPercent ?? null,
+            gstAmount: line.gstAmount ?? null,
+            ...(match?.fabricColourId ? { fabricColourId: match.fabricColourId } : {}),
+            ...(match?.matchedTxnId ? { matchedTxnId: match.matchedTxnId } : {}),
+            ...(match?.matchType ? { matchType: match.matchType } : {}),
+          };
+        }),
       },
     },
     select: {
@@ -654,6 +667,12 @@ router.post('/upload-preview', requireAdmin, upload.single('file'), asyncHandler
     ? await previewEnrichment(req.prisma, partyMatch?.partyId, parsed)
     : { willCreateNewParty: false, fieldsWillBeAdded: [] as string[], bankMismatch: false };
 
+  // 5b. Fabric matching preview (read-only)
+  const isFabricPreview = partyMatch?.category === 'fabric';
+  const fabricMatchPreview = isFabricPreview && parsed?.lines?.length
+    ? await matchInvoiceLines(parsed.lines, partyMatch?.partyId ?? null, req.prisma as any)
+    : [];
+
   // 6. Cache for later confirm
   const previewId = randomUUID();
   previewCache.set(previewId, {
@@ -678,6 +697,7 @@ router.post('/upload-preview', requireAdmin, upload.single('file'), asyncHandler
     partyMatch,
     enrichmentPreview,
     nearDuplicates,
+    fabricMatches: fabricMatchPreview,
     aiConfidence,
     aiModel,
     fileName: originalname,
@@ -774,6 +794,13 @@ router.post('/confirm-preview/:previewId', requireAdmin, asyncHandler(async (req
   // Create draft Invoice + lines (same logic as upload-and-parse)
   const supplierName = parsed?.supplierName ?? null;
   const finalCategory = overrides.category ?? matchedCategory;
+
+  // Fabric matching if category is 'fabric'
+  const isFabricConfirm = finalCategory === 'fabric';
+  const fabricMatchesConfirm = isFabricConfirm && parsed?.lines?.length
+    ? await matchInvoiceLines(parsed.lines, partyId ?? null, req.prisma as any)
+    : [];
+
   let invoice = await req.prisma.invoice.create({
     data: {
       type: 'payable',
@@ -811,16 +838,22 @@ router.post('/confirm-preview/:previewId', requireAdmin, asyncHandler(async (req
         : 'AI parsing failed — fill in manually',
       createdById: userId,
       lines: {
-        create: (parsed?.lines ?? []).map(line => ({
-          description: line.description ?? null,
-          hsnCode: line.hsnCode ?? null,
-          qty: line.qty ?? null,
-          unit: line.unit ?? null,
-          rate: line.rate ?? null,
-          amount: line.amount ?? null,
-          gstPercent: line.gstPercent ?? null,
-          gstAmount: line.gstAmount ?? null,
-        })),
+        create: (parsed?.lines ?? []).map((line, i) => {
+          const match = fabricMatchesConfirm[i];
+          return {
+            description: line.description ?? null,
+            hsnCode: line.hsnCode ?? null,
+            qty: line.qty ?? null,
+            unit: line.unit ?? null,
+            rate: line.rate ?? null,
+            amount: line.amount ?? null,
+            gstPercent: line.gstPercent ?? null,
+            gstAmount: line.gstAmount ?? null,
+            ...(match?.fabricColourId ? { fabricColourId: match.fabricColourId } : {}),
+            ...(match?.matchedTxnId ? { matchedTxnId: match.matchedTxnId } : {}),
+            ...(match?.matchType ? { matchType: match.matchType } : {}),
+          };
+        }),
       },
     },
     select: {

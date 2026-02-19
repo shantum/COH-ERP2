@@ -65,6 +65,10 @@ export const CreateInvoiceLineSchema = z.object({
   amount: z.number().optional(),
   gstPercent: z.number().min(0).max(100).optional(),
   gstAmount: z.number().optional(),
+  // Fabric matching (only for category='fabric' invoices)
+  fabricColourId: z.string().uuid().optional(),
+  matchedTxnId: z.string().uuid().optional(),
+  matchType: z.enum(['auto_matched', 'manual_matched', 'new_entry']).optional(),
 });
 
 export const CreateInvoiceSchema = z.object({
@@ -81,7 +85,6 @@ export const CreateInvoiceSchema = z.object({
   gstAmount: z.number().optional(),
   totalAmount: z.number().positive(),
   orderId: z.string().uuid().optional(),
-  fabricInvoiceId: z.string().uuid().optional(),
   notes: z.string().optional(),
   lines: z.array(CreateInvoiceLineSchema).optional(),
 });

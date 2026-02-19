@@ -45,7 +45,6 @@ import { Route as AuthenticatedFinanceRouteImport } from './routes/_authenticate
 import { Route as AuthenticatedFacebookFeedHealthRouteImport } from './routes/_authenticated/facebook-feed-health'
 import { Route as AuthenticatedFabricReconciliationRouteImport } from './routes/_authenticated/fabric-reconciliation'
 import { Route as AuthenticatedFabricReceiptRouteImport } from './routes/_authenticated/fabric-receipt'
-import { Route as AuthenticatedFabricInvoicesRouteImport } from './routes/_authenticated/fabric-invoices'
 import { Route as AuthenticatedCustomersRouteImport } from './routes/_authenticated/customers'
 import { Route as AuthenticatedCostingRouteImport } from './routes/_authenticated/costing'
 import { Route as AuthenticatedChannelsRouteImport } from './routes/_authenticated/channels'
@@ -244,12 +243,6 @@ const AuthenticatedFabricReceiptRoute =
     path: '/fabric-receipt',
     getParentRoute: () => AuthenticatedRoute,
   } as any)
-const AuthenticatedFabricInvoicesRoute =
-  AuthenticatedFabricInvoicesRouteImport.update({
-    id: '/fabric-invoices',
-    path: '/fabric-invoices',
-    getParentRoute: () => AuthenticatedRoute,
-  } as any)
 const AuthenticatedCustomersRoute = AuthenticatedCustomersRouteImport.update({
   id: '/customers',
   path: '/customers',
@@ -291,7 +284,6 @@ export interface FileRoutesByFullPath {
   '/channels': typeof AuthenticatedChannelsRoute
   '/costing': typeof AuthenticatedCostingRoute
   '/customers': typeof AuthenticatedCustomersRoute
-  '/fabric-invoices': typeof AuthenticatedFabricInvoicesRoute
   '/fabric-receipt': typeof AuthenticatedFabricReceiptRoute
   '/fabric-reconciliation': typeof AuthenticatedFabricReconciliationRoute
   '/facebook-feed-health': typeof AuthenticatedFacebookFeedHealthRoute
@@ -333,7 +325,6 @@ export interface FileRoutesByTo {
   '/channels': typeof AuthenticatedChannelsRoute
   '/costing': typeof AuthenticatedCostingRoute
   '/customers': typeof AuthenticatedCustomersRoute
-  '/fabric-invoices': typeof AuthenticatedFabricInvoicesRoute
   '/fabric-receipt': typeof AuthenticatedFabricReceiptRoute
   '/fabric-reconciliation': typeof AuthenticatedFabricReconciliationRoute
   '/facebook-feed-health': typeof AuthenticatedFacebookFeedHealthRoute
@@ -378,7 +369,6 @@ export interface FileRoutesById {
   '/_authenticated/channels': typeof AuthenticatedChannelsRoute
   '/_authenticated/costing': typeof AuthenticatedCostingRoute
   '/_authenticated/customers': typeof AuthenticatedCustomersRoute
-  '/_authenticated/fabric-invoices': typeof AuthenticatedFabricInvoicesRoute
   '/_authenticated/fabric-receipt': typeof AuthenticatedFabricReceiptRoute
   '/_authenticated/fabric-reconciliation': typeof AuthenticatedFabricReconciliationRoute
   '/_authenticated/facebook-feed-health': typeof AuthenticatedFacebookFeedHealthRoute
@@ -424,7 +414,6 @@ export interface FileRouteTypes {
     | '/channels'
     | '/costing'
     | '/customers'
-    | '/fabric-invoices'
     | '/fabric-receipt'
     | '/fabric-reconciliation'
     | '/facebook-feed-health'
@@ -466,7 +455,6 @@ export interface FileRouteTypes {
     | '/channels'
     | '/costing'
     | '/customers'
-    | '/fabric-invoices'
     | '/fabric-receipt'
     | '/fabric-reconciliation'
     | '/facebook-feed-health'
@@ -510,7 +498,6 @@ export interface FileRouteTypes {
     | '/_authenticated/channels'
     | '/_authenticated/costing'
     | '/_authenticated/customers'
-    | '/_authenticated/fabric-invoices'
     | '/_authenticated/fabric-receipt'
     | '/_authenticated/fabric-reconciliation'
     | '/_authenticated/facebook-feed-health'
@@ -806,13 +793,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedFabricReceiptRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
-    '/_authenticated/fabric-invoices': {
-      id: '/_authenticated/fabric-invoices'
-      path: '/fabric-invoices'
-      fullPath: '/fabric-invoices'
-      preLoaderRoute: typeof AuthenticatedFabricInvoicesRouteImport
-      parentRoute: typeof AuthenticatedRoute
-    }
     '/_authenticated/customers': {
       id: '/_authenticated/customers'
       path: '/customers'
@@ -857,7 +837,6 @@ interface AuthenticatedRouteChildren {
   AuthenticatedChannelsRoute: typeof AuthenticatedChannelsRoute
   AuthenticatedCostingRoute: typeof AuthenticatedCostingRoute
   AuthenticatedCustomersRoute: typeof AuthenticatedCustomersRoute
-  AuthenticatedFabricInvoicesRoute: typeof AuthenticatedFabricInvoicesRoute
   AuthenticatedFabricReceiptRoute: typeof AuthenticatedFabricReceiptRoute
   AuthenticatedFabricReconciliationRoute: typeof AuthenticatedFabricReconciliationRoute
   AuthenticatedFacebookFeedHealthRoute: typeof AuthenticatedFacebookFeedHealthRoute
@@ -894,7 +873,6 @@ const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedChannelsRoute: AuthenticatedChannelsRoute,
   AuthenticatedCostingRoute: AuthenticatedCostingRoute,
   AuthenticatedCustomersRoute: AuthenticatedCustomersRoute,
-  AuthenticatedFabricInvoicesRoute: AuthenticatedFabricInvoicesRoute,
   AuthenticatedFabricReceiptRoute: AuthenticatedFabricReceiptRoute,
   AuthenticatedFabricReconciliationRoute:
     AuthenticatedFabricReconciliationRoute,

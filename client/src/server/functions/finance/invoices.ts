@@ -92,7 +92,16 @@ export const getInvoice = createServerFn({ method: 'GET' })
     const invoice = await prisma.invoice.findUnique({
       where: { id: data.id },
       include: {
-        lines: true,
+        lines: {
+          include: {
+            fabricColour: {
+              select: { id: true, colourName: true, code: true, fabric: { select: { id: true, name: true } } },
+            },
+            matchedTxn: {
+              select: { id: true, qty: true, unit: true, costPerUnit: true, createdAt: true },
+            },
+          },
+        },
         allocations: {
           include: {
             payment: {
@@ -142,7 +151,6 @@ export const createInvoice = createServerFn({ method: 'POST' })
         totalAmount: data.totalAmount,
         balanceDue: data.totalAmount,
         ...(data.orderId ? { orderId: data.orderId } : {}),
-        ...(data.fabricInvoiceId ? { fabricInvoiceId: data.fabricInvoiceId } : {}),
         notes: data.notes ?? null,
         createdById: userId,
         ...(data.lines && data.lines.length > 0
@@ -157,6 +165,9 @@ export const createInvoice = createServerFn({ method: 'POST' })
                   amount: l.amount ?? null,
                   gstPercent: l.gstPercent ?? null,
                   gstAmount: l.gstAmount ?? null,
+                  ...(l.fabricColourId ? { fabricColourId: l.fabricColourId } : {}),
+                  ...(l.matchedTxnId ? { matchedTxnId: l.matchedTxnId } : {}),
+                  ...(l.matchType ? { matchType: l.matchType } : {}),
                 })),
               },
             }
@@ -227,7 +238,7 @@ export const confirmInvoice = createServerFn({ method: 'POST' })
 
     const invoice = await prisma.invoice.findUnique({
       where: { id: data.id },
-      select: { id: true, type: true, category: true, status: true, totalAmount: true, gstRate: true, gstAmount: true, subtotal: true, invoiceNumber: true, partyId: true, invoiceDate: true, billingPeriod: true },
+      select: { id: true, type: true, category: true, status: true, totalAmount: true, gstRate: true, gstAmount: true, subtotal: true, invoiceNumber: true, partyId: true, invoiceDate: true, billingPeriod: true, lines: true },
     });
 
     if (!invoice) return { success: false as const, error: 'Invoice not found' };
@@ -259,6 +270,36 @@ export const confirmInvoice = createServerFn({ method: 'POST' })
     // ---- LINKED PAYMENT PATH (already-paid bill) ----
     if (data.linkedPaymentId && invoice.type === 'payable') {
       return confirmInvoiceWithLinkedPayment(prisma, invoice, data.linkedPaymentId, tdsAmount, userId, expenseAccountOverride, partyName, periodOffset, party);
+    }
+
+    // ---- FABRIC: Create FabricColourTransactions for matched lines ----
+    if (invoice.category === 'fabric' && invoice.lines) {
+      for (const line of invoice.lines) {
+        if (!line.fabricColourId) continue;
+        if (line.matchedTxnId) continue; // Already linked to an existing transaction
+
+        // Create new inward transaction for unmatched fabric lines
+        const newTxn = await prisma.fabricColourTransaction.create({
+          data: {
+            fabricColourId: line.fabricColourId,
+            txnType: 'inward',
+            qty: line.qty ?? 0,
+            unit: line.unit ?? 'meter',
+            reason: 'supplier_receipt',
+            costPerUnit: line.rate ?? undefined,
+            ...(invoice.partyId ? { partyId: invoice.partyId } : {}),
+            referenceId: `invoice:${invoice.id}`,
+            notes: `From invoice ${invoice.invoiceNumber ?? invoice.id}${line.description ? ` — ${line.description}` : ''}`,
+            createdById: userId,
+          },
+        });
+
+        // Link the transaction to the invoice line
+        await prisma.invoiceLine.update({
+          where: { id: line.id },
+          data: { matchedTxnId: newTxn.id, matchType: 'new_entry' },
+        });
+      }
     }
 
     // ---- NORMAL AP PATH (invoice first, pay later) ----
@@ -399,6 +440,57 @@ function categoryToExpenseAccountName(category: string): string {
 
 // Re-export for use by pnl module
 export { categoryToExpenseAccountName };
+
+// ============================================
+// INVOICE LINES — UPDATE (draft only, for fabric matching)
+// ============================================
+
+const UpdateInvoiceLineSchema = z.object({
+  id: z.string().uuid(),
+  description: z.string().nullable().optional(),
+  hsnCode: z.string().nullable().optional(),
+  qty: z.number().nullable().optional(),
+  unit: z.string().nullable().optional(),
+  rate: z.number().nullable().optional(),
+  amount: z.number().nullable().optional(),
+  gstPercent: z.number().nullable().optional(),
+  gstAmount: z.number().nullable().optional(),
+  fabricColourId: z.string().uuid().nullable().optional(),
+  matchedTxnId: z.string().uuid().nullable().optional(),
+  matchType: z.enum(['auto_matched', 'manual_matched', 'new_entry']).nullable().optional(),
+});
+
+const updateInvoiceLinesInput = z.object({
+  invoiceId: z.string().uuid(),
+  lines: z.array(UpdateInvoiceLineSchema).min(1),
+});
+
+export const updateInvoiceLines = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
+  .inputValidator((input: unknown) => updateInvoiceLinesInput.parse(input))
+  .handler(async ({ data }) => {
+    const prisma = await getPrisma();
+
+    const invoice = await prisma.invoice.findUnique({
+      where: { id: data.invoiceId },
+      select: { status: true },
+    });
+    if (!invoice) return { success: false as const, error: 'Invoice not found' };
+    if (invoice.status !== 'draft') return { success: false as const, error: 'Can only edit draft invoice lines' };
+
+    for (const line of data.lines) {
+      const { id: lineId, ...updates } = line;
+      const lineData: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(updates)) {
+        if (value !== undefined) lineData[key] = value;
+      }
+      if (Object.keys(lineData).length > 0) {
+        await prisma.invoiceLine.update({ where: { id: lineId }, data: lineData });
+      }
+    }
+
+    return { success: true as const };
+  });
 
 // ============================================
 // INVOICE — CANCEL

@@ -310,42 +310,6 @@ export type FabricColourTransaction = {
     createdById: string;
     createdAt: Generated<Timestamp>;
 };
-export type FabricInvoice = {
-    id: Generated<string>;
-    invoiceNumber: string | null;
-    invoiceDate: Timestamp | null;
-    partyId: string | null;
-    supplierName: string | null;
-    subtotal: number | null;
-    gstAmount: number | null;
-    totalAmount: number | null;
-    fileData: Buffer;
-    fileName: string;
-    fileMimeType: string;
-    fileSizeBytes: number;
-    status: Generated<string>;
-    aiRawResponse: unknown | null;
-    aiModel: string | null;
-    aiConfidence: number | null;
-    createdById: string;
-    createdAt: Generated<Timestamp>;
-    updatedAt: Timestamp;
-};
-export type FabricInvoiceLine = {
-    id: Generated<string>;
-    invoiceId: string;
-    description: string | null;
-    hsnCode: string | null;
-    qty: number | null;
-    unit: string | null;
-    rate: number | null;
-    amount: number | null;
-    gstPercent: number | null;
-    gstAmount: number | null;
-    fabricColourId: string | null;
-    matchedTxnId: string | null;
-    matchType: string | null;
-};
 export type FabricOrder = {
     id: Generated<string>;
     fabricId: string;
@@ -502,7 +466,6 @@ export type Invoice = {
     paidAmount: Generated<number>;
     balanceDue: Generated<number>;
     orderId: string | null;
-    fabricInvoiceId: string | null;
     fileData: Buffer | null;
     fileName: string | null;
     fileMimeType: string | null;
@@ -531,6 +494,9 @@ export type InvoiceLine = {
     amount: number | null;
     gstPercent: number | null;
     gstAmount: number | null;
+    fabricColourId: string | null;
+    matchedTxnId: string | null;
+    matchType: string | null;
 };
 export type LedgerAccount = {
     id: Generated<string>;
@@ -1449,8 +1415,6 @@ export type DB = {
     FabricColourReconciliation: FabricColourReconciliation;
     FabricColourReconciliationItem: FabricColourReconciliationItem;
     FabricColourTransaction: FabricColourTransaction;
-    FabricInvoice: FabricInvoice;
-    FabricInvoiceLine: FabricInvoiceLine;
     FabricOrder: FabricOrder;
     FabricReconciliation: FabricReconciliation;
     FabricReconciliationItem: FabricReconciliationItem;

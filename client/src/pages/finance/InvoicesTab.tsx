@@ -753,6 +753,13 @@ interface InvoicePreview {
     bankMismatch: boolean;
     bankMismatchDetails?: string;
   };
+  fabricMatches?: Array<{
+    lineIndex: number;
+    fabricColourId: string | null;
+    matchedTxnId: string | null;
+    matchType: 'auto_matched' | null;
+    fabricMatchScore: number;
+  }>;
   aiConfidence: number;
   fileName: string;
 }
@@ -1062,37 +1069,61 @@ function UploadInvoiceDialog({ open, onClose, onSuccess }: {
               </div>
             )}
 
-            {lines.length > 0 && (
-              <div>
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5">Line Items</p>
-                <div className="border rounded overflow-hidden">
-                  <table className="w-full text-xs">
-                    <thead className="bg-muted/50">
-                      <tr>
-                        <th className="text-left p-1.5 font-medium">Description</th>
-                        <th className="text-left p-1.5 font-medium w-16">HSN</th>
-                        <th className="text-right p-1.5 font-medium w-12">Qty</th>
-                        <th className="text-right p-1.5 font-medium w-16">Rate</th>
-                        <th className="text-right p-1.5 font-medium w-20">Amount</th>
-                        <th className="text-right p-1.5 font-medium w-14">GST%</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {lines.map((line, i) => (
-                        <tr key={i} className="border-t">
-                          <td className="p-1.5 max-w-[200px] truncate" title={line.description ?? ''}>{line.description ?? '—'}</td>
-                          <td className="p-1.5">{line.hsnCode ?? '—'}</td>
-                          <td className="p-1.5 text-right">{line.qty != null ? `${line.qty}${line.unit ? ` ${line.unit}` : ''}` : '—'}</td>
-                          <td className="p-1.5 text-right font-mono">{line.rate != null ? formatCurrency(line.rate) : '—'}</td>
-                          <td className="p-1.5 text-right font-mono">{line.amount != null ? formatCurrency(line.amount) : '—'}</td>
-                          <td className="p-1.5 text-right">{line.gstPercent != null ? `${line.gstPercent}%` : '—'}</td>
+            {lines.length > 0 && (() => {
+              const isFabricPreview = edits.category === 'fabric' && (preview.fabricMatches?.length ?? 0) > 0;
+              const matchedCount = preview.fabricMatches?.filter(m => m.fabricColourId).length ?? 0;
+              return (
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Line Items</p>
+                    {isFabricPreview && (
+                      <span className="text-[10px] text-muted-foreground">
+                        {matchedCount}/{lines.length} fabric matched
+                      </span>
+                    )}
+                  </div>
+                  <div className="border rounded overflow-hidden">
+                    <table className="w-full text-xs">
+                      <thead className="bg-muted/50">
+                        <tr>
+                          <th className="text-left p-1.5 font-medium">Description</th>
+                          <th className="text-left p-1.5 font-medium w-16">HSN</th>
+                          <th className="text-right p-1.5 font-medium w-12">Qty</th>
+                          <th className="text-right p-1.5 font-medium w-16">Rate</th>
+                          <th className="text-right p-1.5 font-medium w-20">Amount</th>
+                          <th className="text-right p-1.5 font-medium w-14">GST%</th>
+                          {isFabricPreview && <th className="text-center p-1.5 font-medium w-10">Match</th>}
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {lines.map((line, i) => {
+                          const fm = preview.fabricMatches?.[i];
+                          return (
+                            <tr key={i} className="border-t">
+                              <td className="p-1.5 max-w-[200px] truncate" title={line.description ?? ''}>{line.description ?? '—'}</td>
+                              <td className="p-1.5">{line.hsnCode ?? '—'}</td>
+                              <td className="p-1.5 text-right">{line.qty != null ? `${line.qty}${line.unit ? ` ${line.unit}` : ''}` : '—'}</td>
+                              <td className="p-1.5 text-right font-mono">{line.rate != null ? formatCurrency(line.rate) : '—'}</td>
+                              <td className="p-1.5 text-right font-mono">{line.amount != null ? formatCurrency(line.amount) : '—'}</td>
+                              <td className="p-1.5 text-right">{line.gstPercent != null ? `${line.gstPercent}%` : '—'}</td>
+                              {isFabricPreview && (
+                                <td className="p-1.5 text-center">
+                                  {fm?.fabricColourId ? (
+                                    <span className="inline-block w-2 h-2 rounded-full bg-green-500" title={`Match score: ${Math.round((fm.fabricMatchScore ?? 0) * 100)}%`} />
+                                  ) : (
+                                    <span className="inline-block w-2 h-2 rounded-full bg-gray-300" title="No match" />
+                                  )}
+                                </td>
+                              )}
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             <div className="flex justify-end">
               <div className="text-sm space-y-1.5 w-48">

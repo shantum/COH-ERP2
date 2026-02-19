@@ -17,7 +17,6 @@ export * from './customers.js';
 export * from './inventory.js';
 export * from './products.js';
 export * from './fabricReceipt.js';
-export * from './fabricInvoice.js';
 export * from './returnPrime.js';
 export * from './finance.js';
 export * from './payroll.js';

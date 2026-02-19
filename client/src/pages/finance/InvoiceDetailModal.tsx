@@ -156,41 +156,66 @@ export default function InvoiceDetailModal({
             </div>
 
             {/* Line Items */}
-            {invoice.lines.length > 0 && (
-              <div>
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Line Items</p>
-                <div className="border rounded-lg overflow-hidden">
-                  <table className="w-full text-xs">
-                    <thead className="bg-muted/50">
-                      <tr>
-                        <th className="text-left p-2 font-medium">Description</th>
-                        <th className="text-left p-2 font-medium w-16">HSN</th>
-                        <th className="text-right p-2 font-medium w-12">Qty</th>
-                        <th className="text-left p-2 font-medium w-12">Unit</th>
-                        <th className="text-right p-2 font-medium w-20">Rate</th>
-                        <th className="text-right p-2 font-medium w-20">Amount</th>
-                        <th className="text-right p-2 font-medium w-14">GST%</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {invoice.lines.map((line) => (
-                        <tr key={line.id} className="border-t">
-                          <td className="p-2 max-w-[200px] truncate" title={line.description ?? ''}>
-                            {line.description ?? '---'}
-                          </td>
-                          <td className="p-2">{line.hsnCode ?? '---'}</td>
-                          <td className="p-2 text-right">{line.qty != null ? String(line.qty) : '---'}</td>
-                          <td className="p-2">{line.unit ?? '---'}</td>
-                          <td className="p-2 text-right font-mono">{line.rate != null ? formatCurrency(Number(line.rate)) : '---'}</td>
-                          <td className="p-2 text-right font-mono">{line.amount != null ? formatCurrency(Number(line.amount)) : '---'}</td>
-                          <td className="p-2 text-right">{line.gstPercent != null ? `${line.gstPercent}%` : '---'}</td>
+            {invoice.lines.length > 0 && (() => {
+              const isFabric = invoice.category === 'fabric';
+              return (
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Line Items</p>
+                  <div className="border rounded-lg overflow-hidden">
+                    <table className="w-full text-xs">
+                      <thead className="bg-muted/50">
+                        <tr>
+                          <th className="text-left p-2 font-medium">Description</th>
+                          {isFabric && <th className="text-left p-2 font-medium">Fabric Colour</th>}
+                          <th className="text-left p-2 font-medium w-16">HSN</th>
+                          <th className="text-right p-2 font-medium w-12">Qty</th>
+                          <th className="text-left p-2 font-medium w-12">Unit</th>
+                          <th className="text-right p-2 font-medium w-20">Rate</th>
+                          <th className="text-right p-2 font-medium w-20">Amount</th>
+                          <th className="text-right p-2 font-medium w-14">GST%</th>
+                          {isFabric && <th className="text-left p-2 font-medium w-20">Match</th>}
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {invoice.lines.map((line) => (
+                          <tr key={line.id} className="border-t">
+                            <td className="p-2 max-w-[200px] truncate" title={line.description ?? ''}>
+                              {line.description ?? '---'}
+                            </td>
+                            {isFabric && (
+                              <td className="p-2 max-w-[160px] truncate">
+                                {line.fabricColour
+                                  ? `${line.fabricColour.fabric.name} — ${line.fabricColour.colourName}`
+                                  : <span className="text-muted-foreground">Not matched</span>}
+                              </td>
+                            )}
+                            <td className="p-2">{line.hsnCode ?? '---'}</td>
+                            <td className="p-2 text-right">{line.qty != null ? String(line.qty) : '---'}</td>
+                            <td className="p-2">{line.unit ?? '---'}</td>
+                            <td className="p-2 text-right font-mono">{line.rate != null ? formatCurrency(Number(line.rate)) : '---'}</td>
+                            <td className="p-2 text-right font-mono">{line.amount != null ? formatCurrency(Number(line.amount)) : '---'}</td>
+                            <td className="p-2 text-right">{line.gstPercent != null ? `${line.gstPercent}%` : '---'}</td>
+                            {isFabric && (
+                              <td className="p-2">
+                                {line.matchType === 'auto_matched' && (
+                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-green-100 text-green-700">Auto</span>
+                                )}
+                                {line.matchType === 'manual_matched' && (
+                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-100 text-blue-700">Manual</span>
+                                )}
+                                {line.matchType === 'new_entry' && (
+                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-purple-100 text-purple-700">New</span>
+                                )}
+                              </td>
+                            )}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             {/* Linked Payments */}
             {invoice.allocations.length > 0 && (

@@ -39,7 +39,6 @@ import returnsRoutes from './routes/returns.js';
 import trackingRoutes from './routes/tracking.js';
 import sheetSyncRoutes from './routes/sheetSync.js';
 import channelsRoutes from './routes/channels.js';
-import fabricInvoicesRoutes from './routes/fabricInvoices.js';
 import financeUploadRoutes from './routes/financeUpload.js';
 import bankImportRoutes from './routes/bankImport.js';
 import chatRoutes from './routes/chat.js';
@@ -158,7 +157,6 @@ export async function createExpressApp() {
   app.use('/api/tracking', trackingRoutes);
   app.use('/api/channels', channelsRoutes);
   app.use('/api/admin/sheet-sync', sheetSyncRoutes);
-  app.use('/api/fabric-invoices', fabricInvoicesRoutes);
   app.use('/api/finance', financeUploadRoutes);
   app.use('/api/bank-import', bankImportRoutes);
   app.use('/api/chat', chatRoutes);
