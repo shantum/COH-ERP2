@@ -4,13 +4,14 @@ import { useNavigate } from '@tanstack/react-router';
 import { FileText, CreditCard, AlertCircle, TrendingUp, TrendingDown } from 'lucide-react';
 import { getFinanceSummary, getFinanceAlerts, getMonthlyPnl } from '../../server/functions/finance';
 import { formatCurrency, formatPeriod, LoadingState } from './shared';
+import { Button } from '@/components/ui/button';
 
 export default function DashboardTab() {
   const navigate = useNavigate();
   const summaryFn = useServerFn(getFinanceSummary);
   const alertsFn = useServerFn(getFinanceAlerts);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, refetch } = useQuery({
     queryKey: ['finance', 'summary'],
     queryFn: () => summaryFn(),
     staleTime: 5 * 60 * 1000,
@@ -31,7 +32,13 @@ export default function DashboardTab() {
   const summary = data?.success ? data.summary : null;
 
   if (isLoading) return <LoadingState />;
-  if (!data?.success || !summary) return <div className="text-muted-foreground">Failed to load summary</div>;
+  if (!data?.success || !summary) return (
+    <div className="flex flex-col items-center justify-center py-12 text-muted-foreground gap-3">
+      <AlertCircle className="h-8 w-8" />
+      <p>Failed to load finance summary</p>
+      <Button variant="outline" size="sm" onClick={() => refetch()}>Try Again</Button>
+    </div>
+  );
 
   const alerts = alertsData?.success ? alertsData.alerts : [];
   const errorCount = alertsData?.success ? alertsData.counts.errors : 0;
@@ -40,6 +47,22 @@ export default function DashboardTab() {
   const fmtDate = (d: string | Date | null) => {
     if (!d) return '';
     return `as of ${new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}`;
+  };
+
+  const getAlertAction = (alert: { category: string; message: string }) => {
+    if (alert.category.toLowerCase().includes('invoice')) {
+      return () => navigate({ to: '/finance', search: { tab: 'invoices', page: 1, limit: 25 }, replace: true });
+    }
+    if (alert.category.toLowerCase().includes('payment') || alert.category.toLowerCase().includes('match')) {
+      return () => navigate({ to: '/finance', search: { tab: 'payments', page: 1, limit: 25 }, replace: true });
+    }
+    if (alert.category.toLowerCase().includes('bank')) {
+      return () => navigate({ to: '/finance', search: { tab: 'bank-import', page: 1, limit: 25 }, replace: true });
+    }
+    if (alert.category.toLowerCase().includes('party')) {
+      return () => navigate({ to: '/finance', search: { tab: 'parties', page: 1, limit: 25 }, replace: true });
+    }
+    return null;
   };
 
   const attentionItems = [
@@ -77,16 +100,24 @@ export default function DashboardTab() {
             {warningCount > 0 && <span className="ml-2 text-xs bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300 px-2 py-0.5 rounded-full">{warningCount} warnings</span>}
           </h3>
           <div className="space-y-2 max-h-[300px] overflow-y-auto">
-            {alerts.map((alert: { severity: string; category: string; message: string; details?: string }, i: number) => (
-              <div key={i} className={`text-sm flex gap-2 ${alert.severity === 'error' ? 'text-red-700 dark:text-red-400' : 'text-amber-700 dark:text-amber-400'}`}>
-                <span className="shrink-0">{alert.severity === 'error' ? '!!' : '!'}</span>
-                <div>
-                  <span className="font-medium">{alert.category}:</span>{' '}
-                  <span>{alert.message}</span>
-                  {alert.details && <div className="text-xs text-muted-foreground mt-0.5">{alert.details}</div>}
+            {alerts.map((alert: { severity: string; category: string; message: string; details?: string }, i: number) => {
+              const action = getAlertAction(alert);
+              return (
+                <div
+                  key={i}
+                  className={`text-sm flex gap-2 ${alert.severity === 'error' ? 'text-red-700 dark:text-red-400' : 'text-amber-700 dark:text-amber-400'} ${action ? 'cursor-pointer hover:underline' : ''}`}
+                  onClick={action ?? undefined}
+                  role={action ? 'button' : undefined}
+                >
+                  <span className="shrink-0">{alert.severity === 'error' ? '!!' : '!'}</span>
+                  <div>
+                    <span className="font-medium">{alert.category}:</span>{' '}
+                    <span>{alert.message}</span>
+                    {alert.details && <div className="text-xs text-muted-foreground mt-0.5">{alert.details}</div>}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
@@ -98,24 +129,28 @@ export default function DashboardTab() {
           value={summary.totalPayable}
           subtitle={`${summary.openPayableInvoices} open invoices`}
           color="text-red-700"
+          onClick={() => navigate({ to: '/finance', search: { tab: 'invoices', type: 'payable', status: 'confirmed', page: 1, limit: 25 }, replace: true })}
         />
         <SummaryCard
           label="Accounts Receivable"
           value={summary.totalReceivable}
           subtitle={`${summary.openReceivableInvoices} open invoices`}
           color="text-green-700"
+          onClick={() => navigate({ to: '/finance', search: { tab: 'invoices', type: 'receivable', status: 'confirmed', page: 1, limit: 25 }, replace: true })}
         />
         <SummaryCard
           label="HDFC Bank"
           value={summary.hdfcBalance}
           subtitle={fmtDate(summary.hdfcBalanceDate)}
           color="text-blue-700"
+          onClick={() => navigate({ to: '/finance', search: { tab: 'bank-import', bankFilter: 'hdfc', page: 1, limit: 25 }, replace: true })}
         />
         <SummaryCard
           label="RazorpayX"
           value={summary.rpxBalance}
           subtitle={fmtDate(summary.rpxBalanceDate)}
           color="text-blue-600"
+          onClick={() => navigate({ to: '/finance', search: { tab: 'bank-import', bankFilter: 'razorpayx', page: 1, limit: 25 }, replace: true })}
         />
         {summary.suspenseBalance > 0 && (
           <SummaryCard
@@ -123,6 +158,7 @@ export default function DashboardTab() {
             value={summary.suspenseBalance}
             subtitle="needs reclassifying"
             color="text-amber-700"
+            onClick={() => navigate({ to: '/finance', search: { tab: 'payments', matchStatus: 'unmatched', page: 1, limit: 25 }, replace: true })}
           />
         )}
       </div>
@@ -156,18 +192,24 @@ export default function DashboardTab() {
   );
 }
 
-function SummaryCard({ label, value, subtitle, color = 'text-foreground' }: {
+function SummaryCard({ label, value, subtitle, color = 'text-foreground', onClick }: {
   label: string;
   value: number;
   subtitle?: string;
   color?: string;
+  onClick?: () => void;
 }) {
+  const Comp = onClick ? 'button' : 'div';
   return (
-    <div className="border rounded-lg p-4">
+    <Comp
+      type={onClick ? 'button' : undefined}
+      onClick={onClick}
+      className={`border rounded-lg p-4 text-left ${onClick ? 'hover:bg-muted/50 transition-colors cursor-pointer' : ''}`}
+    >
       <p className="text-sm text-muted-foreground">{label}</p>
       <p className={`text-2xl font-bold font-mono ${color}`}>{formatCurrency(value)}</p>
       {subtitle && <p className="text-xs text-muted-foreground mt-1">{subtitle}</p>}
-    </div>
+    </Comp>
   );
 }
 

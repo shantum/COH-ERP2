@@ -14,17 +14,19 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
-import { Plus, Check, X, Loader2, AlertCircle, Upload, ArrowLeft, Pencil, Trash2, History, Eye } from 'lucide-react';
+import { Plus, Check, X, Loader2, AlertCircle, Upload, ArrowLeft, Pencil, Trash2, History, Eye, Download } from 'lucide-react';
 import {
   type FinanceSearchParams,
   CHART_OF_ACCOUNTS,
   BANK_TYPES,
   BANK_TXN_FILTER_OPTIONS,
+  INVOICE_CATEGORIES,
   getBankLabel,
   getBankStatusLabel,
+  getCategoryLabel,
   isBankTxnPending,
 } from '@coh/shared';
-import { formatCurrency, LoadingState, Pagination } from './shared';
+import { formatCurrency, LoadingState, Pagination, downloadCsv } from './shared';
 import { showSuccess, showError } from '../../utils/toast';
 import { useDebounce } from '../../hooks/useDebounce';
 
@@ -75,13 +77,15 @@ function BankTransactionList({ search, updateSearch }: {
   const status = search.bankStatus && search.bankStatus !== 'all' ? search.bankStatus : undefined;
 
   const { data, isLoading } = useQuery({
-    queryKey: ['finance', 'bank-transactions', bank, status, search.search, search.page],
+    queryKey: ['finance', 'bank-transactions', bank, status, search.search, search.dateFrom, search.dateTo, search.page],
     queryFn: () =>
       listFn({
         data: {
           ...(bank ? { bank } : {}),
           ...(status ? { status } : {}),
           ...(search.search ? { search: search.search } : {}),
+          ...(search.dateFrom ? { dateFrom: search.dateFrom } : {}),
+          ...(search.dateTo ? { dateTo: search.dateTo } : {}),
           page: search.page,
           limit: search.limit,
         },
@@ -104,35 +108,50 @@ function BankTransactionList({ search, updateSearch }: {
   };
 
   const handleSkip = async (txnId: string) => {
-    await fetch('/api/bank-import/skip', {
-      method: 'POST', credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ txnId }),
-    });
-    invalidate();
-    setExpandedId(null);
-    showSuccess('Transaction skipped');
+    try {
+      const res = await fetch('/api/bank-import/skip', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ txnId }),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Failed to skip');
+      invalidate();
+      setExpandedId(null);
+      showSuccess('Transaction skipped');
+    } catch (err) {
+      showError('Failed to skip transaction', { description: err instanceof Error ? err.message : undefined });
+    }
   };
 
   const handleUnskip = async (txnId: string) => {
-    await fetch('/api/bank-import/unskip', {
-      method: 'POST', credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ txnId }),
-    });
-    invalidate();
-    setExpandedId(null);
-    showSuccess('Transaction restored');
+    try {
+      const res = await fetch('/api/bank-import/unskip', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ txnId }),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Failed to restore');
+      invalidate();
+      setExpandedId(null);
+      showSuccess('Transaction restored');
+    } catch (err) {
+      showError('Failed to restore transaction', { description: err instanceof Error ? err.message : undefined });
+    }
   };
 
   const handleDelete = async (txnId: string) => {
     if (!confirm('Delete this transaction?')) return;
-    await fetch(`/api/bank-import/${txnId}`, {
-      method: 'DELETE', credentials: 'include',
-    });
-    invalidate();
-    setExpandedId(null);
-    showSuccess('Transaction deleted');
+    try {
+      const res = await fetch(`/api/bank-import/${txnId}`, {
+        method: 'DELETE', credentials: 'include',
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Failed to delete');
+      invalidate();
+      setExpandedId(null);
+      showSuccess('Transaction deleted');
+    } catch (err) {
+      showError('Failed to delete transaction', { description: err instanceof Error ? err.message : undefined });
+    }
   };
 
   const handleConfirm = async (txnId: string) => {
@@ -156,15 +175,19 @@ function BankTransactionList({ search, updateSearch }: {
     const count = selectedIds.size;
     setBatchLoading(true);
     try {
-      await fetch('/api/bank-import/confirm-batch', {
+      const res = await fetch('/api/bank-import/confirm-batch', {
         method: 'POST', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ txnIds: [...selectedIds] }),
       });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error((err as { error?: string }).error || 'Failed to confirm batch');
+      }
       invalidate();
       showSuccess(`${count} transaction${count !== 1 ? 's' : ''} confirmed`);
-    } catch {
-      showError('Batch confirm failed');
+    } catch (err) {
+      showError('Batch confirm failed', { description: err instanceof Error ? err.message : undefined });
     } finally {
       setBatchLoading(false);
     }
@@ -175,15 +198,19 @@ function BankTransactionList({ search, updateSearch }: {
     const count = selectedIds.size;
     setBatchLoading(true);
     try {
-      await fetch('/api/bank-import/skip-batch', {
+      const res = await fetch('/api/bank-import/skip-batch', {
         method: 'POST', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ txnIds: [...selectedIds] }),
       });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error((err as { error?: string }).error || 'Failed to skip batch');
+      }
       invalidate();
       showSuccess(`${count} transaction${count !== 1 ? 's' : ''} skipped`);
-    } catch {
-      showError('Batch skip failed');
+    } catch (err) {
+      showError('Batch skip failed', { description: err instanceof Error ? err.message : undefined });
     } finally {
       setBatchLoading(false);
     }
@@ -198,12 +225,18 @@ function BankTransactionList({ search, updateSearch }: {
       const result = await createPartyFn({ data: { name, category: 'other' } });
       if (!result.success) return;
       // Link the new party to the bank transaction
-      await fetch('/api/bank-import/assign-party', {
+      const assignRes = await fetch('/api/bank-import/assign-party', {
         method: 'POST', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ txnId, partyId: result.party.id }),
       });
+      if (!assignRes.ok) {
+        showError('Party created but failed to link to transaction');
+        invalidate();
+        return;
+      }
       invalidate();
+      showSuccess('Party created and linked');
     } finally {
       setCreatingPartyFor(null);
     }
@@ -253,6 +286,22 @@ function BankTransactionList({ search, updateSearch }: {
           </SelectContent>
         </Select>
 
+        <div className="flex items-center gap-1">
+          <Input
+            type="date"
+            value={search.dateFrom ?? ''}
+            onChange={(e) => updateSearch({ dateFrom: e.target.value || undefined, page: 1 })}
+            className="w-[130px] h-9"
+          />
+          <span className="text-muted-foreground text-xs">&ndash;</span>
+          <Input
+            type="date"
+            value={search.dateTo ?? ''}
+            onChange={(e) => updateSearch({ dateTo: e.target.value || undefined, page: 1 })}
+            className="w-[130px] h-9"
+          />
+        </div>
+
         <Input
           placeholder="Search narration..."
           value={searchInput}
@@ -260,7 +309,34 @@ function BankTransactionList({ search, updateSearch }: {
           className="w-[200px]"
         />
 
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              if (!data?.transactions?.length) return;
+              const rows: string[][] = [
+                ['Date', 'Narration', 'Amount', 'Direction', 'Party', 'Bank', 'Status', 'Category', 'Reference'],
+              ];
+              for (const txn of data.transactions) {
+                rows.push([
+                  new Date(txn.txnDate).toLocaleDateString('en-IN'),
+                  txn.narration ?? '',
+                  String(txn.amount),
+                  txn.direction,
+                  txn.party?.name ?? txn.counterpartyName ?? '',
+                  txn.bank,
+                  txn.status,
+                  txn.category ?? '',
+                  txn.reference ?? '',
+                ]);
+              }
+              downloadCsv(rows, `bank-transactions-${new Date().toISOString().split('T')[0]}.csv`);
+            }}
+            disabled={!data?.transactions?.length}
+          >
+            <Download className="h-4 w-4 mr-1" /> Export
+          </Button>
           <Button onClick={() => updateSearch({ bankView: 'import' })}>
             <Upload className="h-4 w-4 mr-1" /> Import New
           </Button>
@@ -416,7 +492,16 @@ function BankTransactionList({ search, updateSearch }: {
                   );
                 })}
                 {(!data?.transactions || data.transactions.length === 0) && (
-                  <tr><td colSpan={8} className="p-8 text-center text-muted-foreground">No transactions found</td></tr>
+                  <tr><td colSpan={8} className="p-8 text-center">
+                    <div className="text-muted-foreground space-y-2">
+                      <p>{search.search || bank || status || search.dateFrom ? 'No transactions match your filters' : 'No bank transactions yet'}</p>
+                      {!(search.search || bank || status || search.dateFrom) && (
+                        <Button variant="outline" size="sm" onClick={() => updateSearch({ bankView: 'import' })} className="mt-2">
+                          <Upload className="h-3.5 w-3.5 mr-1" /> Import Bank CSV
+                        </Button>
+                      )}
+                    </div>
+                  </td></tr>
                 )}
               </tbody>
             </table>
@@ -481,7 +566,14 @@ function BankTxnEditRow({ txn, onSaved, onClose }: {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
-      if (res.ok) onSaved();
+      if (res.ok) {
+        onSaved();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        showError('Failed to save', { description: (err as { error?: string }).error || 'Unknown error' });
+      }
+    } catch (err) {
+      showError('Failed to save', { description: err instanceof Error ? err.message : undefined });
     } finally {
       setSaving(false);
     }
@@ -534,7 +626,17 @@ function BankTxnEditRow({ txn, onSaved, onClose }: {
         {/* Category */}
         <div>
           <Label className="text-xs">Category</Label>
-          <Input value={category} onChange={(e) => setCategory(e.target.value)} className="h-8 text-xs mt-1" placeholder="e.g. vendor, service" />
+          <Select value={category} onValueChange={setCategory}>
+            <SelectTrigger className="h-8 text-xs mt-1">
+              <SelectValue placeholder="Select category" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="">None</SelectItem>
+              {INVOICE_CATEGORIES.map((c) => (
+                <SelectItem key={c} value={c}>{getCategoryLabel(c)}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
 
         {/* Debit Account */}

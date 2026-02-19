@@ -4,10 +4,10 @@ import { useServerFn } from '@tanstack/react-start';
 import { useNavigate } from '@tanstack/react-router';
 import { useDebounce } from '../../hooks/useDebounce';
 import {
-  listInvoices, confirmInvoice, cancelInvoice, createInvoice,
+  listInvoices, confirmInvoice, cancelInvoice, createInvoice, updateInvoice,
   findUnmatchedPayments, searchCounterparties,
 } from '../../server/functions/finance';
-import { formatCurrency, formatPeriod, formatStatus, StatusBadge, Pagination, LoadingState } from './shared';
+import { formatCurrency, formatStatus, StatusBadge, Pagination, LoadingState, downloadCsv } from './shared';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -16,7 +16,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import {
   Plus, ArrowUpRight, ArrowDownLeft, Check, X, Loader2, AlertCircle,
-  ExternalLink, CloudUpload, Link2, Download, Upload, AlertTriangle, Building2,
+  ExternalLink, CloudUpload, Link2, Download, Upload, AlertTriangle, Building2, Pencil,
 } from 'lucide-react';
 import { showSuccess, showError } from '../../utils/toast';
 import {
@@ -31,10 +31,12 @@ export default function InvoicesTab({ search }: { search: FinanceSearchParams })
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showUploadDialog, setShowUploadDialog] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [cancellingInvoice, setCancellingInvoice] = useState<{ id: string; invoiceNumber: string | null } | null>(null);
   const [confirmingInvoice, setConfirmingInvoice] = useState<{
     id: string; type: string; totalAmount: number;
     party?: { id: string; name: string } | null;
   } | null>(null);
+  const [editingInvoice, setEditingInvoice] = useState<NonNullable<typeof data>['invoices'][number] | null>(null);
 
   const [searchInput, setSearchInput] = useState(search.search ?? '');
   const debouncedSearch = useDebounce(searchInput, 300);
@@ -60,7 +62,7 @@ export default function InvoicesTab({ search }: { search: FinanceSearchParams })
 
   const listFn = useServerFn(listInvoices);
   const { data, isLoading } = useQuery({
-    queryKey: ['finance', 'invoices', search.type, search.status, search.category, search.search, search.page],
+    queryKey: ['finance', 'invoices', search.type, search.status, search.category, search.search, search.dateFrom, search.dateTo, search.page],
     queryFn: () =>
       listFn({
         data: {
@@ -68,6 +70,8 @@ export default function InvoicesTab({ search }: { search: FinanceSearchParams })
           ...(search.status ? { status: search.status } : {}),
           ...(search.category ? { category: search.category } : {}),
           ...(search.search ? { search: search.search } : {}),
+          ...(search.dateFrom ? { dateFrom: search.dateFrom } : {}),
+          ...(search.dateTo ? { dateTo: search.dateTo } : {}),
           page: search.page,
           limit: search.limit,
         },
@@ -81,9 +85,12 @@ export default function InvoicesTab({ search }: { search: FinanceSearchParams })
     mutationFn: (params: { id: string; linkedPaymentId?: string }) => confirmFn({ data: params }),
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ['finance'] });
-      setConfirmingInvoice(null);
-      if (result?.success) showSuccess('Invoice confirmed');
-      else showError('Confirm failed', { description: (result as { error?: string })?.error });
+      if (result?.success) {
+        setConfirmingInvoice(null);
+        showSuccess('Invoice confirmed');
+      } else {
+        showError('Confirm failed', { description: (result as { error?: string })?.error });
+      }
     },
     onError: (err) => showError('Confirm failed', { description: err.message }),
   });
@@ -106,13 +113,39 @@ export default function InvoicesTab({ search }: { search: FinanceSearchParams })
     [navigate, search]
   );
 
+  const [bulkConfirming, setBulkConfirming] = useState(false);
+
+  const handleBulkConfirm = useCallback(async () => {
+    if (selectedIds.size === 0 || !data?.invoices) return;
+    const drafts = data.invoices.filter((inv) => selectedIds.has(inv.id) && inv.status === 'draft');
+    if (drafts.length === 0) {
+      showError('No draft invoices selected');
+      return;
+    }
+    setBulkConfirming(true);
+    let successCount = 0;
+    for (const inv of drafts) {
+      try {
+        const result = await confirmFn({ data: { id: inv.id } });
+        if (result?.success) successCount++;
+      } catch {
+        // continue with remaining
+      }
+    }
+    queryClient.invalidateQueries({ queryKey: ['finance'] });
+    setBulkConfirming(false);
+    setSelectedIds(new Set());
+    if (successCount > 0) showSuccess(`${successCount} invoice${successCount !== 1 ? 's' : ''} confirmed`);
+    if (successCount < drafts.length) showError(`${drafts.length - successCount} failed to confirm`);
+  }, [selectedIds, data?.invoices, confirmFn, queryClient]);
+
   const selectableInvoices = useMemo(
     () =>
       (data?.invoices ?? []).filter(
         (inv) =>
           inv.type === 'payable' &&
-          (inv.status === 'confirmed' || inv.status === 'partially_paid') &&
-          inv.balanceDue > 0
+          (inv.status === 'draft' || inv.status === 'confirmed' || inv.status === 'partially_paid') &&
+          (inv.status === 'draft' || inv.balanceDue > 0)
       ),
     [data?.invoices]
   );
@@ -260,6 +293,22 @@ export default function InvoicesTab({ search }: { search: FinanceSearchParams })
           </SelectContent>
         </Select>
 
+        <div className="flex items-center gap-1">
+          <Input
+            type="date"
+            value={search.dateFrom ?? ''}
+            onChange={(e) => updateSearch({ dateFrom: e.target.value || undefined, page: 1 })}
+            className="w-[130px] h-9"
+          />
+          <span className="text-muted-foreground text-xs">&ndash;</span>
+          <Input
+            type="date"
+            value={search.dateTo ?? ''}
+            onChange={(e) => updateSearch({ dateTo: e.target.value || undefined, page: 1 })}
+            className="w-[130px] h-9"
+          />
+        </div>
+
         <Input
           placeholder="Search invoices..."
           value={searchInput}
@@ -269,10 +318,48 @@ export default function InvoicesTab({ search }: { search: FinanceSearchParams })
 
         <div className="ml-auto flex items-center gap-2">
           {selectedIds.size > 0 && (
-            <Button variant="outline" onClick={handleDownloadPayoutCsv}>
-              <Download className="h-4 w-4 mr-1" /> Download Payout CSV ({selectedIds.size})
-            </Button>
+            <>
+              <Button
+                variant="outline"
+                onClick={handleBulkConfirm}
+                disabled={bulkConfirming || !data?.invoices?.some((inv) => selectedIds.has(inv.id) && inv.status === 'draft')}
+              >
+                {bulkConfirming ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Check className="h-4 w-4 mr-1" />}
+                Confirm Selected
+              </Button>
+              <Button variant="outline" onClick={handleDownloadPayoutCsv}>
+                <Download className="h-4 w-4 mr-1" /> Download Payout CSV ({selectedIds.size})
+              </Button>
+            </>
           )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              if (!data?.invoices?.length) return;
+              const rows: string[][] = [
+                ['Invoice #', 'Type', 'Category', 'Party', 'Total', 'Balance Due', 'TDS', 'Status', 'Invoice Date', 'Billing Period'],
+              ];
+              for (const inv of data.invoices) {
+                rows.push([
+                  inv.invoiceNumber ?? '',
+                  inv.type,
+                  inv.category,
+                  inv.party?.name ?? '',
+                  String(inv.totalAmount),
+                  String(inv.balanceDue),
+                  String(inv.tdsAmount ?? 0),
+                  inv.status,
+                  inv.invoiceDate ? new Date(inv.invoiceDate).toLocaleDateString('en-IN') : '',
+                  inv.billingPeriod ?? '',
+                ]);
+              }
+              downloadCsv(rows, `invoices-${new Date().toISOString().split('T')[0]}.csv`);
+            }}
+            disabled={!data?.invoices?.length}
+          >
+            <Download className="h-4 w-4 mr-1" /> Export
+          </Button>
           <Button
             variant="outline"
             onClick={() => driveSyncMutation.mutate()}
@@ -324,8 +411,8 @@ export default function InvoicesTab({ search }: { search: FinanceSearchParams })
                 {data?.invoices?.map((inv) => {
                   const isSelectable =
                     inv.type === 'payable' &&
-                    (inv.status === 'confirmed' || inv.status === 'partially_paid') &&
-                    inv.balanceDue > 0;
+                    (inv.status === 'draft' || inv.status === 'confirmed' || inv.status === 'partially_paid') &&
+                    (inv.status === 'draft' || inv.balanceDue > 0);
                   return (
                   <tr key={inv.id} className="border-t hover:bg-muted/30">
                     <td className="p-3">
@@ -380,6 +467,14 @@ export default function InvoicesTab({ search }: { search: FinanceSearchParams })
                             <Button
                               size="sm"
                               variant="ghost"
+                              onClick={() => setEditingInvoice(inv)}
+                              title="Edit"
+                            >
+                              <Pencil className="h-3.5 w-3.5 text-blue-600" />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
                               onClick={() => handleConfirmClick(inv)}
                               disabled={confirmMutation.isPending}
                               title="Confirm"
@@ -389,11 +484,7 @@ export default function InvoicesTab({ search }: { search: FinanceSearchParams })
                             <Button
                               size="sm"
                               variant="ghost"
-                              onClick={() => {
-                                if (window.confirm(`Cancel invoice ${inv.invoiceNumber || inv.id.slice(0, 8)}? This will unmatch any linked payments.`)) {
-                                  cancelMutation.mutate(inv.id);
-                                }
-                              }}
+                              onClick={() => setCancellingInvoice({ id: inv.id, invoiceNumber: inv.invoiceNumber })}
                               disabled={cancelMutation.isPending}
                               title="Cancel"
                             >
@@ -407,7 +498,21 @@ export default function InvoicesTab({ search }: { search: FinanceSearchParams })
                   );
                 })}
                 {(!data?.invoices || data.invoices.length === 0) && (
-                  <tr><td colSpan={10} className="p-8 text-center text-muted-foreground">No invoices found</td></tr>
+                  <tr><td colSpan={10} className="p-8 text-center">
+                    <div className="text-muted-foreground space-y-2">
+                      <p>{search.search || search.type || search.status || search.category || search.dateFrom ? 'No invoices match your filters' : 'No invoices yet'}</p>
+                      {!(search.search || search.type || search.status || search.category || search.dateFrom) && (
+                        <div className="flex items-center justify-center gap-2 mt-2">
+                          <Button variant="outline" size="sm" onClick={() => setShowUploadDialog(true)}>
+                            <Upload className="h-3.5 w-3.5 mr-1" /> Upload Invoice
+                          </Button>
+                          <Button variant="outline" size="sm" onClick={() => setShowCreateModal(true)}>
+                            <Plus className="h-3.5 w-3.5 mr-1" /> Create Invoice
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  </td></tr>
                 )}
               </tbody>
             </table>
@@ -418,6 +523,13 @@ export default function InvoicesTab({ search }: { search: FinanceSearchParams })
       )}
 
       <CreateInvoiceModal open={showCreateModal} onClose={() => setShowCreateModal(false)} />
+      {editingInvoice && (
+        <CreateInvoiceModal
+          open={!!editingInvoice}
+          onClose={() => setEditingInvoice(null)}
+          editInvoice={editingInvoice}
+        />
+      )}
       <UploadInvoiceDialog
         open={showUploadDialog}
         onClose={() => setShowUploadDialog(false)}
@@ -430,6 +542,29 @@ export default function InvoicesTab({ search }: { search: FinanceSearchParams })
           onConfirm={(linkedPaymentId) => confirmMutation.mutate({ id: confirmingInvoice.id, linkedPaymentId })}
           onClose={() => setConfirmingInvoice(null)}
         />
+      )}
+      {cancellingInvoice && (
+        <Dialog open={!!cancellingInvoice} onOpenChange={(o) => { if (!o) setCancellingInvoice(null); }}>
+          <DialogContent className="max-w-sm">
+            <DialogHeader>
+              <DialogTitle>Cancel Invoice</DialogTitle>
+              <DialogDescription>
+                Cancel invoice {cancellingInvoice.invoiceNumber || cancellingInvoice.id.slice(0, 8)}? This will unmatch any linked payments.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setCancellingInvoice(null)}>Keep Invoice</Button>
+              <Button
+                variant="destructive"
+                onClick={() => { cancelMutation.mutate(cancellingInvoice.id); setCancellingInvoice(null); }}
+                disabled={cancelMutation.isPending}
+              >
+                {cancelMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
+                Cancel Invoice
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       )}
     </div>
   );
@@ -629,12 +764,22 @@ function UploadInvoiceDialog({ open, onClose, onSuccess }: {
   onSuccess: () => void;
 }) {
   const [file, setFile] = useState<File | null>(null);
+  const [dragOver, setDragOver] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [duplicate, setDuplicate] = useState<DuplicateInfo | null>(null);
   const [preview, setPreview] = useState<InvoicePreview | null>(null);
   const [result, setResult] = useState<InvoiceConfirmResult | null>(null);
+  const [edits, setEdits] = useState<{
+    invoiceNumber: string;
+    invoiceDate: string;
+    totalAmount: string;
+    gstAmount: string;
+    subtotal: string;
+    billingPeriod: string;
+    category: string;
+  }>({ invoiceNumber: '', invoiceDate: '', totalAmount: '', gstAmount: '', subtotal: '', billingPeriod: '', category: '' });
 
   const handleUpload = async () => {
     if (!file) return;
@@ -653,6 +798,15 @@ function UploadInvoiceDialog({ open, onClose, onSuccess }: {
       }
       if (!res.ok) throw new Error(json.error || 'Upload failed');
       setPreview(json);
+      setEdits({
+        invoiceNumber: json.parsed?.invoiceNumber ?? '',
+        invoiceDate: json.parsed?.invoiceDate ?? '',
+        totalAmount: json.parsed?.totalAmount != null ? String(json.parsed.totalAmount) : '',
+        gstAmount: json.parsed?.gstAmount != null ? String(json.parsed.gstAmount) : '',
+        subtotal: json.parsed?.subtotal != null ? String(json.parsed.subtotal) : '',
+        billingPeriod: json.parsed?.billingPeriod ?? '',
+        category: json.partyMatch?.category ?? 'other',
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Upload failed');
     } finally {
@@ -665,7 +819,20 @@ function UploadInvoiceDialog({ open, onClose, onSuccess }: {
     setConfirming(true);
     setError(null);
     try {
-      const res = await fetch(`/api/finance/confirm-preview/${preview.previewId}`, { method: 'POST', credentials: 'include' });
+      const res = await fetch(`/api/finance/confirm-preview/${preview.previewId}`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...(edits.invoiceNumber ? { invoiceNumber: edits.invoiceNumber } : {}),
+          ...(edits.invoiceDate ? { invoiceDate: edits.invoiceDate } : {}),
+          ...(edits.totalAmount ? { totalAmount: Number(edits.totalAmount) } : {}),
+          ...(edits.gstAmount ? { gstAmount: Number(edits.gstAmount) } : {}),
+          ...(edits.subtotal ? { subtotal: Number(edits.subtotal) } : {}),
+          ...(edits.billingPeriod ? { billingPeriod: edits.billingPeriod } : {}),
+          ...(edits.category ? { category: edits.category } : {}),
+        }),
+      });
       const json = await res.json();
       if (res.status === 410) { setError('Preview expired, please re-upload'); setPreview(null); return; }
       if (res.status === 409 && json.duplicate) { setPreview(null); setDuplicate(json); return; }
@@ -685,7 +852,7 @@ function UploadInvoiceDialog({ open, onClose, onSuccess }: {
     }
   };
 
-  const handleClose = () => { setFile(null); setError(null); setDuplicate(null); setPreview(null); setResult(null); onClose(); };
+  const handleClose = () => { setFile(null); setError(null); setDuplicate(null); setPreview(null); setResult(null); setEdits({ invoiceNumber: '', invoiceDate: '', totalAmount: '', gstAmount: '', subtotal: '', billingPeriod: '', category: '' }); onClose(); };
 
   const p = preview?.parsed;
   const lines = p?.lines ?? [];
@@ -774,11 +941,54 @@ function UploadInvoiceDialog({ open, onClose, onSuccess }: {
         /* Step 2: Preview */
         ) : preview ? (
           <div className="space-y-4 max-h-[70vh] overflow-y-auto">
-            <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm">
-              {p?.invoiceNumber && <div><span className="text-muted-foreground">Invoice #:</span> <span className="font-medium">{p.invoiceNumber}</span></div>}
-              {p?.invoiceDate && <div><span className="text-muted-foreground">Date:</span> {p.invoiceDate}</div>}
-              {p?.dueDate && <div><span className="text-muted-foreground">Due:</span> {p.dueDate}</div>}
-              {p?.billingPeriod && <div><span className="text-muted-foreground">Period:</span> {formatPeriod(p.billingPeriod)}</div>}
+            {preview.aiConfidence < 0.5 && (
+              <div className="border border-amber-300 bg-amber-50 text-amber-700 rounded-lg p-2.5 text-xs flex items-center gap-2">
+                <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                Low AI confidence — please verify all fields before saving.
+              </div>
+            )}
+            <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+              <div>
+                <label className="text-xs text-muted-foreground">Invoice #</label>
+                <Input
+                  value={edits.invoiceNumber}
+                  onChange={(e) => setEdits(prev => ({ ...prev, invoiceNumber: e.target.value }))}
+                  className={`h-7 text-sm ${edits.invoiceNumber !== (p?.invoiceNumber ?? '') ? 'border-blue-300 bg-blue-50/50' : ''}`}
+                  placeholder="—"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground">Date</label>
+                <Input
+                  value={edits.invoiceDate}
+                  onChange={(e) => setEdits(prev => ({ ...prev, invoiceDate: e.target.value }))}
+                  className={`h-7 text-sm ${edits.invoiceDate !== (p?.invoiceDate ?? '') ? 'border-blue-300 bg-blue-50/50' : ''}`}
+                  placeholder="DD/MM/YYYY"
+                />
+              </div>
+              {p?.dueDate && <div><span className="text-xs text-muted-foreground">Due:</span> <span className="text-sm">{p.dueDate}</span></div>}
+              <div>
+                <label className="text-xs text-muted-foreground">Billing Period</label>
+                <Input
+                  type="month"
+                  value={edits.billingPeriod}
+                  onChange={(e) => setEdits(prev => ({ ...prev, billingPeriod: e.target.value }))}
+                  className={`h-7 text-sm ${edits.billingPeriod !== (p?.billingPeriod ?? '') ? 'border-blue-300 bg-blue-50/50' : ''}`}
+                />
+              </div>
+              <div className="col-span-2">
+                <label className="text-xs text-muted-foreground">Category</label>
+                <Select value={edits.category} onValueChange={(v) => setEdits(prev => ({ ...prev, category: v }))}>
+                  <SelectTrigger className={`h-7 text-sm ${edits.category !== (preview.partyMatch?.category ?? 'other') ? 'border-blue-300 bg-blue-50/50' : ''}`}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {INVOICE_CATEGORIES.map((c) => (
+                      <SelectItem key={c} value={c}>{getCategoryLabel(c)}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
             <div className="border rounded-lg p-3 space-y-2">
@@ -872,10 +1082,40 @@ function UploadInvoiceDialog({ open, onClose, onSuccess }: {
             )}
 
             <div className="flex justify-end">
-              <div className="text-sm space-y-0.5 text-right">
-                {p?.subtotal != null && <p><span className="text-muted-foreground">Subtotal:</span> <span className="font-mono">{formatCurrency(p.subtotal)}</span></p>}
-                {p?.gstAmount != null && <p><span className="text-muted-foreground">GST:</span> <span className="font-mono">{formatCurrency(p.gstAmount)}</span></p>}
-                {p?.totalAmount != null && <p className="font-medium"><span className="text-muted-foreground">Total:</span> <span className="font-mono">{formatCurrency(p.totalAmount)}</span></p>}
+              <div className="text-sm space-y-1.5 w-48">
+                <div className="flex items-center gap-2">
+                  <span className="text-muted-foreground text-xs w-14 text-right shrink-0">Subtotal</span>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    value={edits.subtotal}
+                    onChange={(e) => setEdits(prev => ({ ...prev, subtotal: e.target.value }))}
+                    className={`h-7 text-sm font-mono text-right ${edits.subtotal !== (p?.subtotal != null ? String(p.subtotal) : '') ? 'border-blue-300 bg-blue-50/50' : ''}`}
+                    placeholder="—"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-muted-foreground text-xs w-14 text-right shrink-0">GST</span>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    value={edits.gstAmount}
+                    onChange={(e) => setEdits(prev => ({ ...prev, gstAmount: e.target.value }))}
+                    className={`h-7 text-sm font-mono text-right ${edits.gstAmount !== (p?.gstAmount != null ? String(p.gstAmount) : '') ? 'border-blue-300 bg-blue-50/50' : ''}`}
+                    placeholder="—"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-muted-foreground text-xs w-14 text-right shrink-0 font-medium">Total</span>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    value={edits.totalAmount}
+                    onChange={(e) => setEdits(prev => ({ ...prev, totalAmount: e.target.value }))}
+                    className={`h-7 text-sm font-mono text-right font-medium ${edits.totalAmount !== (p?.totalAmount != null ? String(p.totalAmount) : '') ? 'border-blue-300 bg-blue-50/50' : ''}`}
+                    placeholder="—"
+                  />
+                </div>
               </div>
             </div>
 
@@ -916,7 +1156,17 @@ function UploadInvoiceDialog({ open, onClose, onSuccess }: {
         /* Step 1: Upload */
         ) : (
           <div className="space-y-4">
-            <label className="block border-2 border-dashed rounded-lg p-6 text-center cursor-pointer hover:bg-muted/30 transition-colors">
+            <label
+              className={`block border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors ${dragOver ? 'border-blue-400 bg-blue-50/50' : 'hover:bg-muted/30'}`}
+              onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setDragOver(false);
+                const droppedFile = e.dataTransfer.files?.[0];
+                if (droppedFile) setFile(droppedFile);
+              }}
+            >
               <input
                 type="file"
                 accept=".pdf,.jpg,.jpeg,.png,.webp"
@@ -928,7 +1178,7 @@ function UploadInvoiceDialog({ open, onClose, onSuccess }: {
               ) : (
                 <div className="space-y-1">
                   <Upload className="h-8 w-8 mx-auto text-muted-foreground" />
-                  <p className="text-sm text-muted-foreground">Click to select a file</p>
+                  <p className="text-sm text-muted-foreground">Drop a file here or click to select</p>
                   <p className="text-xs text-muted-foreground">PDF, JPEG, PNG, or WebP</p>
                 </div>
               )}
@@ -952,13 +1202,21 @@ function UploadInvoiceDialog({ open, onClose, onSuccess }: {
 // CREATE INVOICE MODAL
 // ============================================
 
-function CreateInvoiceModal({ open, onClose, prefill }: {
+function CreateInvoiceModal({ open, onClose, prefill, editInvoice }: {
   open: boolean;
   onClose: () => void;
   prefill?: { type: 'payable' | 'receivable'; totalAmount: number; partyId?: string };
+  editInvoice?: {
+    id: string; type: string; category: string; invoiceNumber: string | null;
+    totalAmount: number; gstAmount?: number | null; subtotal?: number | null;
+    invoiceDate: Date | string | null; billingPeriod?: string | null;
+    notes: string | null; party?: { id: string; name: string } | null;
+  };
 }) {
+  const isEdit = !!editInvoice;
   const queryClient = useQueryClient();
   const createFn = useServerFn(createInvoice);
+  const updateFn = useServerFn(updateInvoice);
   const searchFn = useServerFn(searchCounterparties);
 
   const [form, setForm] = useState({
@@ -984,6 +1242,26 @@ function CreateInvoiceModal({ open, onClose, prefill }: {
   });
   const parties = partyResults?.success ? partyResults.results : [];
 
+  // Prefill for edit mode
+  const prevEditRef = useRef<string | undefined>(undefined);
+  if (editInvoice && editInvoice.id !== prevEditRef.current) {
+    prevEditRef.current = editInvoice.id;
+    setForm({
+      type: editInvoice.type as 'payable' | 'receivable',
+      category: editInvoice.category,
+      invoiceNumber: editInvoice.invoiceNumber ?? '',
+      totalAmount: String(editInvoice.totalAmount),
+      gstAmount: editInvoice.gstAmount != null ? String(editInvoice.gstAmount) : '',
+      invoiceDate: editInvoice.invoiceDate ? (editInvoice.invoiceDate instanceof Date ? editInvoice.invoiceDate.toISOString() : editInvoice.invoiceDate).split('T')[0] : '',
+      billingPeriod: editInvoice.billingPeriod ?? '',
+      notes: editInvoice.notes ?? '',
+      partyId: editInvoice.party?.id,
+    });
+    if (editInvoice.party) {
+      setSelectedParty({ id: editInvoice.party.id, name: editInvoice.party.name });
+    }
+  }
+
   const prevPrefillRef = useRef<typeof prefill>(undefined);
   if (prefill && prefill !== prevPrefillRef.current) {
     prevPrefillRef.current = prefill;
@@ -1001,8 +1279,25 @@ function CreateInvoiceModal({ open, onClose, prefill }: {
   }
 
   const mutation = useMutation({
-    mutationFn: () =>
-      createFn({
+    mutationFn: async () => {
+      if (isEdit) {
+        const res = await updateFn({
+          data: {
+            id: editInvoice.id,
+            ...(form.invoiceNumber !== (editInvoice.invoiceNumber ?? '') ? { invoiceNumber: form.invoiceNumber } : {}),
+            ...(form.category !== editInvoice.category ? { category: form.category } : {}),
+            ...(Number(form.totalAmount) !== editInvoice.totalAmount ? { totalAmount: Number(form.totalAmount) } : {}),
+            ...(form.gstAmount && Number(form.gstAmount) !== (editInvoice.gstAmount ?? 0) ? { gstAmount: Number(form.gstAmount) } : {}),
+            ...(!form.gstAmount && editInvoice.gstAmount ? { gstAmount: null } : {}),
+            ...(form.invoiceDate !== (editInvoice.invoiceDate ? (editInvoice.invoiceDate instanceof Date ? editInvoice.invoiceDate.toISOString() : editInvoice.invoiceDate).split('T')[0] : '') ? { invoiceDate: form.invoiceDate || undefined } : {}),
+            ...(form.billingPeriod !== (editInvoice.billingPeriod ?? '') ? { billingPeriod: form.billingPeriod || null } : {}),
+            ...(form.notes !== (editInvoice.notes ?? '') ? { notes: form.notes || null } : {}),
+            ...(form.partyId !== editInvoice.party?.id ? { partyId: form.partyId ?? null } : {}),
+          },
+        });
+        return { success: res.success } as { success: boolean; error?: string };
+      }
+      return createFn({
         data: {
           type: form.type,
           category: form.category,
@@ -1014,18 +1309,19 @@ function CreateInvoiceModal({ open, onClose, prefill }: {
           ...(form.notes ? { notes: form.notes } : {}),
           ...(form.partyId ? { partyId: form.partyId } : {}),
         },
-      }),
+      });
+    },
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ['finance'] });
       if (result?.success) {
-        showSuccess('Invoice created');
+        showSuccess(isEdit ? 'Invoice updated' : 'Invoice created');
         onClose();
         resetForm();
       } else {
-        showError('Failed to create invoice', { description: (result as { error?: string })?.error });
+        showError(isEdit ? 'Failed to update invoice' : 'Failed to create invoice', { description: (result as { error?: string })?.error });
       }
     },
-    onError: (err) => showError('Failed to create invoice', { description: err.message }),
+    onError: (err) => showError(isEdit ? 'Failed to update invoice' : 'Failed to create invoice', { description: err.message }),
   });
 
   const resetForm = () => {
@@ -1056,18 +1352,34 @@ function CreateInvoiceModal({ open, onClose, prefill }: {
     setPartyQuery('');
   };
 
+  const isFormDirty = () => {
+    if (isEdit) {
+      return form.invoiceNumber !== (editInvoice?.invoiceNumber ?? '') ||
+        form.category !== (editInvoice?.category ?? 'other') ||
+        form.totalAmount !== String(editInvoice?.totalAmount ?? '') ||
+        form.gstAmount !== (editInvoice?.gstAmount != null ? String(editInvoice.gstAmount) : '') ||
+        form.notes !== (editInvoice?.notes ?? '');
+    }
+    return form.invoiceNumber !== '' || form.totalAmount !== '' || form.gstAmount !== '' || form.notes !== '' || form.partyId !== undefined;
+  };
+
   return (
-    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
+    <Dialog open={open} onOpenChange={(o) => {
+      if (!o && isFormDirty()) {
+        if (!window.confirm('You have unsaved changes. Discard?')) return;
+      }
+      if (!o) onClose();
+    }}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>New Invoice</DialogTitle>
-          <DialogDescription>Create a draft invoice. Confirm it later to book the expense.</DialogDescription>
+          <DialogTitle>{isEdit ? 'Edit Invoice' : 'New Invoice'}</DialogTitle>
+          <DialogDescription>{isEdit ? 'Edit this draft invoice.' : 'Create a draft invoice. Confirm it later to book the expense.'}</DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label>Type</Label>
-              <Select value={form.type} onValueChange={(v) => setForm({ ...form, type: v as 'payable' | 'receivable' })}>
+              <Select value={form.type} onValueChange={(v) => setForm({ ...form, type: v as 'payable' | 'receivable' })} disabled={isEdit}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="payable">Payable (we owe)</SelectItem>
@@ -1155,7 +1467,7 @@ function CreateInvoiceModal({ open, onClose, prefill }: {
             disabled={!form.totalAmount || Number(form.totalAmount) <= 0 || mutation.isPending}
           >
             {mutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
-            Create Draft
+            {isEdit ? 'Save Changes' : 'Create Draft'}
           </Button>
         </DialogFooter>
       </DialogContent>

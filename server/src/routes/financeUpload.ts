@@ -697,9 +697,23 @@ router.post('/confirm-preview/:previewId', requireAdmin, asyncHandler(async (req
 
   const { fileBuffer: buffer, fileHash, originalname, mimetype, size, parsed, rawResponse, aiModel, aiConfidence, partyMatch } = cached;
 
+  // Merge user overrides from request body (editable preview fields)
+  const overrides = req.body ?? {};
+  const mergedParsed = {
+    ...parsed,
+    ...(overrides.invoiceNumber !== undefined ? { invoiceNumber: overrides.invoiceNumber } : {}),
+    ...(overrides.invoiceDate !== undefined ? { invoiceDate: overrides.invoiceDate } : {}),
+    ...(overrides.dueDate !== undefined ? { dueDate: overrides.dueDate } : {}),
+    ...(overrides.subtotal !== undefined ? { subtotal: overrides.subtotal } : {}),
+    ...(overrides.gstAmount !== undefined ? { gstAmount: overrides.gstAmount } : {}),
+    ...(overrides.totalAmount !== undefined ? { totalAmount: overrides.totalAmount } : {}),
+    ...(overrides.billingPeriod !== undefined ? { billingPeriod: overrides.billingPeriod } : {}),
+    ...(overrides.category !== undefined ? { category: overrides.category } : {}),
+  };
+
   // Re-check for duplicates (race condition guard — someone may have uploaded between preview and confirm)
   if (fileHash) {
-    const duplicate = await checkExactDuplicate(req.prisma as any, fileHash, partyMatch?.partyId, parsed?.invoiceNumber);
+    const duplicate = await checkExactDuplicate(req.prisma as any, fileHash, partyMatch?.partyId, mergedParsed?.invoiceNumber);
     if (duplicate) {
       previewCache.remove(previewId as string);
       res.status(409).json({ duplicate: true, ...duplicate });
@@ -738,12 +752,12 @@ router.post('/confirm-preview/:previewId', requireAdmin, asyncHandler(async (req
     }
   }
 
-  // Parse dates
-  const invoiceDate = parsed ? parseIndianDate(parsed.invoiceDate) : null;
-  const dueDate = parsed ? parseIndianDate(parsed.dueDate) : null;
+  // Parse dates (use mergedParsed for user-editable fields)
+  const invoiceDate = mergedParsed ? parseIndianDate(mergedParsed.invoiceDate) : null;
+  const dueDate = mergedParsed ? parseIndianDate(mergedParsed.dueDate) : null;
 
   // Derive billingPeriod
-  let billingPeriod = parsed?.billingPeriod ?? null;
+  let billingPeriod = mergedParsed?.billingPeriod ?? null;
   if (!billingPeriod && invoiceDate) {
     const ist = new Date(invoiceDate.getTime() + (5.5 * 60 * 60 * 1000));
     billingPeriod = `${ist.getUTCFullYear()}-${String(ist.getUTCMonth() + 1).padStart(2, '0')}`;
@@ -751,19 +765,20 @@ router.post('/confirm-preview/:previewId', requireAdmin, asyncHandler(async (req
 
   // Create draft Invoice + lines (same logic as upload-and-parse)
   const supplierName = parsed?.supplierName ?? null;
+  const finalCategory = overrides.category ?? matchedCategory;
   let invoice = await req.prisma.invoice.create({
     data: {
       type: 'payable',
-      category: matchedCategory,
+      category: finalCategory,
       status: 'draft',
-      invoiceNumber: parsed?.invoiceNumber ?? null,
+      invoiceNumber: mergedParsed?.invoiceNumber ?? null,
       invoiceDate,
       dueDate,
       billingPeriod,
-      subtotal: parsed?.subtotal ?? null,
-      gstAmount: parsed?.gstAmount ?? null,
-      totalAmount: parsed?.totalAmount ?? 0,
-      balanceDue: parsed?.totalAmount ?? 0,
+      subtotal: mergedParsed?.subtotal ?? null,
+      gstAmount: mergedParsed?.gstAmount ?? null,
+      totalAmount: mergedParsed?.totalAmount ?? 0,
+      balanceDue: mergedParsed?.totalAmount ?? 0,
       ...(partyId ? { partyId } : {}),
       fileData: buffer,
       fileHash: fileHash ?? undefined,

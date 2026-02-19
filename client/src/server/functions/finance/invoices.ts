@@ -39,6 +39,8 @@ export const listInvoices = createServerFn({ method: 'POST' })
         { notes: { contains: search, mode: 'insensitive' } },
       ];
     }
+    if (data?.dateFrom) where.invoiceDate = { ...(where.invoiceDate as object ?? {}), gte: new Date(data.dateFrom) };
+    if (data?.dateTo) where.invoiceDate = { ...(where.invoiceDate as object ?? {}), lte: new Date(data.dateTo + 'T23:59:59') };
 
     const [invoices, total] = await Promise.all([
       prisma.invoice.findMany({
@@ -52,9 +54,12 @@ export const listInvoices = createServerFn({ method: 'POST' })
           invoiceDate: true,
           dueDate: true,
           totalAmount: true,
+          subtotal: true,
+          gstAmount: true,
           tdsAmount: true,
           paidAmount: true,
           balanceDue: true,
+          billingPeriod: true,
           notes: true,
           driveUrl: true,
           createdAt: true,

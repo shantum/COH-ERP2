@@ -6,8 +6,9 @@ import { useDebounce } from '../../hooks/useDebounce';
 import {
   listPayments, createFinancePayment, updatePaymentNotes,
   getAutoMatchSuggestions, applyAutoMatches, searchCounterparties,
+  findUnpaidInvoices,
 } from '../../server/functions/finance';
-import { formatCurrency, formatPeriod, formatStatus, Pagination, LoadingState } from './shared';
+import { formatCurrency, formatPeriod, formatStatus, Pagination, LoadingState, downloadCsv } from './shared';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -16,8 +17,8 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
-  Plus, ArrowUpRight, ArrowDownLeft, X, Loader2,
-  ExternalLink, Link2, Building2,
+  Plus, ArrowUpRight, ArrowDownLeft, X, Loader2, Download,
+  ExternalLink, Link2, Building2, Pencil,
 } from 'lucide-react';
 import { showSuccess, showError } from '../../utils/toast';
 import {
@@ -73,11 +74,12 @@ function InlinePaymentNotes({ paymentId, notes, onSaved }: { paymentId: string; 
   return (
     <button
       type="button"
-      className={`text-[11px] text-left w-full truncate ${notes ? 'text-muted-foreground' : 'text-muted-foreground/50 italic'} hover:text-foreground`}
+      className={`text-[11px] text-left w-full truncate flex items-center gap-1 group ${notes ? 'text-muted-foreground' : 'text-muted-foreground/50 italic'} hover:text-foreground`}
       onClick={() => { setEditing(true); setValue(notes ?? ''); }}
       title={notes || 'Click to add narration'}
     >
-      {notes || 'Add narration...'}
+      <span className="truncate">{notes || 'Add narration...'}</span>
+      <Pencil className="h-2.5 w-2.5 shrink-0 opacity-0 group-hover:opacity-50" />
     </button>
   );
 }
@@ -86,6 +88,10 @@ export default function PaymentsTab({ search }: { search: FinanceSearchParams })
   const navigate = useNavigate();
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showAutoMatch, setShowAutoMatch] = useState(false);
+  const [linkingPayment, setLinkingPayment] = useState<{
+    id: string; amount: number; unmatchedAmount: number;
+    partyId: string | null; partyName: string;
+  } | null>(null);
   const queryClient = useQueryClient();
 
   const [searchInput, setSearchInput] = useState(search.search ?? '');
@@ -98,7 +104,7 @@ export default function PaymentsTab({ search }: { search: FinanceSearchParams })
 
   const listFn = useServerFn(listPayments);
   const { data, isLoading } = useQuery({
-    queryKey: ['finance', 'payments', search.direction, search.method, search.matchStatus, search.paymentCategory, search.search, search.page],
+    queryKey: ['finance', 'payments', search.direction, search.method, search.matchStatus, search.paymentCategory, search.search, search.dateFrom, search.dateTo, search.page],
     queryFn: () =>
       listFn({
         data: {
@@ -107,6 +113,8 @@ export default function PaymentsTab({ search }: { search: FinanceSearchParams })
           ...(search.matchStatus && search.matchStatus !== 'all' ? { matchStatus: search.matchStatus } : {}),
           ...(search.paymentCategory ? { paymentCategory: search.paymentCategory } : {}),
           ...(search.search ? { search: search.search } : {}),
+          ...(search.dateFrom ? { dateFrom: search.dateFrom } : {}),
+          ...(search.dateTo ? { dateTo: search.dateTo } : {}),
           page: search.page,
           limit: search.limit,
         },
@@ -162,6 +170,22 @@ export default function PaymentsTab({ search }: { search: FinanceSearchParams })
           </SelectContent>
         </Select>
 
+        <div className="flex items-center gap-1">
+          <Input
+            type="date"
+            value={search.dateFrom ?? ''}
+            onChange={(e) => updateSearch({ dateFrom: e.target.value || undefined, page: 1 })}
+            className="w-[130px] h-9"
+          />
+          <span className="text-muted-foreground text-xs">&ndash;</span>
+          <Input
+            type="date"
+            value={search.dateTo ?? ''}
+            onChange={(e) => updateSearch({ dateTo: e.target.value || undefined, page: 1 })}
+            className="w-[130px] h-9"
+          />
+        </div>
+
         <Input
           placeholder="Search payments..."
           value={searchInput}
@@ -170,6 +194,33 @@ export default function PaymentsTab({ search }: { search: FinanceSearchParams })
         />
 
         <div className="ml-auto flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              if (!data?.payments?.length) return;
+              const rows: string[][] = [
+                ['Date', 'Direction', 'Method', 'Party', 'Amount', 'Reference', 'Match Status', 'Period', 'Notes'],
+              ];
+              for (const pmt of data.payments) {
+                rows.push([
+                  new Date(pmt.paymentDate).toLocaleDateString('en-IN'),
+                  pmt.direction,
+                  pmt.method,
+                  pmt.party?.name ?? '',
+                  String(pmt.amount),
+                  pmt.referenceNumber ?? '',
+                  pmt.unmatchedAmount > 0.01 ? 'Unmatched' : 'Matched',
+                  pmt.period ?? '',
+                  pmt.notes ?? '',
+                ]);
+              }
+              downloadCsv(rows, `payments-${new Date().toISOString().split('T')[0]}.csv`);
+            }}
+            disabled={!data?.payments?.length}
+          >
+            <Download className="h-4 w-4 mr-1" /> Export
+          </Button>
           <Button variant="outline" onClick={() => setShowAutoMatch(true)}>
             <Link2 className="h-4 w-4 mr-1" /> Find Matches
           </Button>
@@ -285,10 +336,27 @@ export default function PaymentsTab({ search }: { search: FinanceSearchParams })
                               </a>
                             )}
                           </div>
+                        ) : pmt.unmatchedAmount > 0.01 ? (
+                          <div className="flex items-center gap-1">
+                            <span className="text-amber-500">None</span>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-5 w-5 p-0"
+                              onClick={() => setLinkingPayment({
+                                id: pmt.id,
+                                amount: pmt.amount,
+                                unmatchedAmount: pmt.unmatchedAmount,
+                                partyId: pmt.party?.id ?? null,
+                                partyName: partyName as string,
+                              })}
+                              title="Link to invoice"
+                            >
+                              <Link2 className="h-3 w-3 text-blue-600" />
+                            </Button>
+                          </div>
                         ) : (
-                          <span className={pmt.unmatchedAmount > 0.01 ? 'text-amber-500' : 'text-muted-foreground'}>
-                            {pmt.unmatchedAmount > 0.01 ? 'None' : '—'}
-                          </span>
+                          <span className="text-muted-foreground">—</span>
                         )}
                       </td>
                       <td className="p-3 text-xs text-muted-foreground">{inv?.billingPeriod ? formatPeriod(inv.billingPeriod) : pmt.period ? formatPeriod(pmt.period) : '—'}</td>
@@ -307,7 +375,16 @@ export default function PaymentsTab({ search }: { search: FinanceSearchParams })
                   );
                 })}
                 {(!data?.payments || data.payments.length === 0) && (
-                  <tr><td colSpan={9} className="p-8 text-center text-muted-foreground">No payments found</td></tr>
+                  <tr><td colSpan={9} className="p-8 text-center">
+                    <div className="text-muted-foreground space-y-2">
+                      <p>{search.search || search.direction || search.method || search.matchStatus || search.paymentCategory || search.dateFrom ? 'No payments match your filters' : 'No payments yet'}</p>
+                      {!(search.search || search.direction || search.method || search.matchStatus || search.paymentCategory || search.dateFrom) && (
+                        <Button variant="outline" size="sm" onClick={() => setShowCreateModal(true)} className="mt-2">
+                          <Plus className="h-3.5 w-3.5 mr-1" /> Record Payment
+                        </Button>
+                      )}
+                    </div>
+                  </td></tr>
                 )}
               </tbody>
             </table>
@@ -319,7 +396,169 @@ export default function PaymentsTab({ search }: { search: FinanceSearchParams })
 
       <CreatePaymentModal open={showCreateModal} onClose={() => setShowCreateModal(false)} />
       <AutoMatchDialog open={showAutoMatch} onClose={() => setShowAutoMatch(false)} />
+      {linkingPayment && (
+        <ManualLinkDialog payment={linkingPayment} onClose={() => setLinkingPayment(null)} />
+      )}
     </div>
+  );
+}
+
+// ============================================
+// MANUAL LINK DIALOG
+// ============================================
+
+function ManualLinkDialog({ payment, onClose }: {
+  payment: { id: string; amount: number; unmatchedAmount: number; partyId: string | null; partyName: string };
+  onClose: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const searchInvoicesFn = useServerFn(findUnpaidInvoices);
+  const applyFn = useServerFn(applyAutoMatches);
+
+  const [search, setSearch] = useState('');
+  const debouncedSearch = useDebounce(search, 300);
+  const [selectedInvoice, setSelectedInvoice] = useState<string | null>(null);
+  const [matchAmount, setMatchAmount] = useState('');
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['finance', 'unpaid-invoices', payment.partyId, debouncedSearch],
+    queryFn: () => searchInvoicesFn({
+      data: {
+        ...(payment.partyId && !debouncedSearch ? { partyId: payment.partyId } : {}),
+        ...(debouncedSearch ? { search: debouncedSearch } : {}),
+      },
+    }),
+  });
+
+  const invoices = data?.invoices ?? [];
+  const selectedInv = invoices.find(i => i.id === selectedInvoice);
+
+  const handleSelect = (inv: typeof invoices[number]) => {
+    setSelectedInvoice(inv.id);
+    setMatchAmount(String(Math.min(payment.unmatchedAmount, Number(inv.balanceDue))));
+  };
+
+  const applyMutation = useMutation({
+    mutationFn: () => {
+      if (!selectedInvoice || !matchAmount) throw new Error('Select an invoice');
+      return applyFn({
+        data: {
+          matches: [{ paymentId: payment.id, invoiceId: selectedInvoice, amount: Number(matchAmount) }],
+        },
+      });
+    },
+    onSuccess: (result) => {
+      if (result?.success) {
+        showSuccess('Payment linked to invoice');
+        queryClient.invalidateQueries({ queryKey: ['finance'] });
+        onClose();
+      } else {
+        const errors = (result as { errors?: string[] })?.errors;
+        showError('Failed to link', { description: errors?.join(', ') });
+      }
+    },
+    onError: (err: unknown) => {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      showError('Failed to link', { description: message });
+    },
+  });
+
+  return (
+    <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="max-w-lg max-h-[80vh] flex flex-col">
+        <DialogHeader>
+          <DialogTitle>Link Payment to Invoice</DialogTitle>
+          <DialogDescription>
+            Select an invoice to link this payment to.
+          </DialogDescription>
+        </DialogHeader>
+
+        {/* Payment summary */}
+        <div className="bg-muted/50 rounded-md px-3 py-2 text-sm flex items-center justify-between">
+          <div>
+            <span className="font-medium">{payment.partyName}</span>
+            <span className="text-muted-foreground ml-2">Unmatched: {formatCurrency(payment.unmatchedAmount)}</span>
+          </div>
+          <span className="font-mono">{formatCurrency(payment.amount)} total</span>
+        </div>
+
+        {/* Search */}
+        <Input
+          placeholder="Search invoices by number or party..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+
+        {/* Invoice list */}
+        <div className="flex-1 overflow-y-auto max-h-[300px] border rounded-md divide-y">
+          {isLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : invoices.length === 0 ? (
+            <div className="text-center py-8 text-sm text-muted-foreground">
+              No unpaid invoices found
+            </div>
+          ) : (
+            invoices.map((inv) => {
+              const isSelected = selectedInvoice === inv.id;
+              return (
+                <button
+                  key={inv.id}
+                  type="button"
+                  className={`w-full text-left px-3 py-2.5 text-sm hover:bg-muted/30 transition-colors ${
+                    isSelected ? 'bg-blue-50 ring-1 ring-inset ring-blue-200' : ''
+                  }`}
+                  onClick={() => handleSelect(inv)}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="min-w-0">
+                      <span className="font-medium">{inv.invoiceNumber ?? 'No #'}</span>
+                      <span className="text-muted-foreground ml-2 text-xs">{inv.party?.name}</span>
+                    </div>
+                    <span className="font-mono text-xs shrink-0 ml-2">{formatCurrency(Number(inv.balanceDue))} due</span>
+                  </div>
+                  <div className="text-xs text-muted-foreground mt-0.5">
+                    {inv.invoiceDate ? new Date(inv.invoiceDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: '2-digit' }) : ''}
+                    {inv.billingPeriod ? ` · ${formatPeriod(inv.billingPeriod)}` : ''}
+                  </div>
+                </button>
+              );
+            })
+          )}
+        </div>
+
+        {/* Match amount */}
+        {selectedInv && (
+          <div className="flex items-center gap-3">
+            <Label className="shrink-0">Match Amount</Label>
+            <Input
+              type="number"
+              value={matchAmount}
+              onChange={(e) => setMatchAmount(e.target.value)}
+              className="w-[160px] font-mono"
+              step="0.01"
+              min="0.01"
+              max={Math.min(payment.unmatchedAmount, Number(selectedInv.balanceDue))}
+            />
+            <span className="text-xs text-muted-foreground">
+              max {formatCurrency(Math.min(payment.unmatchedAmount, Number(selectedInv.balanceDue)))}
+            </span>
+          </div>
+        )}
+
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button
+            onClick={() => applyMutation.mutate()}
+            disabled={!selectedInvoice || !matchAmount || Number(matchAmount) <= 0 || applyMutation.isPending}
+          >
+            {applyMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
+            Link Payment
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -558,8 +797,15 @@ function CreatePaymentModal({ open, onClose }: { open: boolean; onClose: () => v
     onError: (err) => showError('Failed to record payment', { description: err.message }),
   });
 
+  const isFormDirty = () => form.amount !== '' || form.referenceNumber !== '' || form.notes !== '' || form.partyId !== undefined;
+
   return (
-    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
+    <Dialog open={open} onOpenChange={(o) => {
+      if (!o && isFormDirty()) {
+        if (!window.confirm('You have unsaved changes. Discard?')) return;
+      }
+      if (!o) onClose();
+    }}>
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>Record Payment</DialogTitle>

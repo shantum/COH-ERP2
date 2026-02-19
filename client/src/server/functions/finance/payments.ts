@@ -51,6 +51,8 @@ export const listPayments = createServerFn({ method: 'POST' })
         ],
       });
     }
+    if (data?.dateFrom) where.paymentDate = { ...(where.paymentDate as object ?? {}), gte: new Date(data.dateFrom) };
+    if (data?.dateTo) where.paymentDate = { ...(where.paymentDate as object ?? {}), lte: new Date(data.dateTo + 'T23:59:59') };
     if (andClauses.length) where.AND = andClauses;
 
     const [payments, total] = await Promise.all([
@@ -350,4 +352,48 @@ export const findUnmatchedPayments = createServerFn({ method: 'POST' })
     });
 
     return { success: true as const, payments };
+  });
+
+// ============================================
+// FIND UNPAID INVOICES (for manual payment linking)
+// ============================================
+
+const findUnpaidInvoicesInput = z.object({
+  partyId: z.string().uuid().optional(),
+  search: z.string().optional(),
+}).optional();
+
+export const findUnpaidInvoices = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
+  .inputValidator((input: unknown) => findUnpaidInvoicesInput.parse(input))
+  .handler(async ({ data }) => {
+    const prisma = await getPrisma();
+    const { partyId, search } = data ?? {};
+
+    const where: Record<string, unknown> = {
+      status: { in: ['confirmed', 'partially_paid'] },
+      balanceDue: { gt: 0.01 },
+    };
+
+    if (partyId) where.partyId = partyId;
+    if (search) {
+      where.OR = [
+        { invoiceNumber: { contains: search, mode: 'insensitive' } },
+        { party: { name: { contains: search, mode: 'insensitive' } } },
+      ];
+    }
+
+    const invoices = await prisma.invoice.findMany({
+      where,
+      select: {
+        id: true, invoiceNumber: true, type: true, category: true,
+        totalAmount: true, balanceDue: true, tdsAmount: true,
+        invoiceDate: true, billingPeriod: true,
+        party: { select: { id: true, name: true } },
+      },
+      orderBy: [{ invoiceDate: 'desc' }],
+      take: 50,
+    });
+
+    return { success: true as const, invoices };
   });

@@ -45,6 +45,10 @@ export const FinanceSearchParams = z.object({
   modal: z.enum(['create-invoice', 'create-payment', 'view-invoice', 'view-payment']).optional().catch(undefined),
   /** Record ID for modals */
   modalId: z.string().optional().catch(undefined),
+  /** Date range filter — from */
+  dateFrom: z.string().optional().catch(undefined),
+  /** Date range filter — to */
+  dateTo: z.string().optional().catch(undefined),
 });
 export type FinanceSearchParams = z.infer<typeof FinanceSearchParams>;
 
@@ -135,6 +139,8 @@ export const ListInvoicesInput = z.object({
   status: z.string().optional(),
   category: z.string().optional(),
   search: z.string().optional(),
+  dateFrom: z.string().optional(),
+  dateTo: z.string().optional(),
   page: z.coerce.number().int().positive().default(1),
   limit: z.coerce.number().int().positive().max(200).default(50),
 }).optional();
@@ -146,6 +152,8 @@ export const ListPaymentsInput = z.object({
   matchStatus: z.enum(['all', 'unmatched', 'matched']).optional(),
   paymentCategory: z.string().optional(),
   search: z.string().optional(),
+  dateFrom: z.string().optional(),
+  dateTo: z.string().optional(),
   page: z.coerce.number().int().positive().default(1),
   limit: z.coerce.number().int().positive().max(200).default(50),
 }).optional();
@@ -295,6 +303,8 @@ export const ListBankTransactionsInput = z.object({
   status: z.string().optional(),
   batchId: z.string().optional(),
   search: z.string().optional(),
+  dateFrom: z.string().optional(),
+  dateTo: z.string().optional(),
   page: z.coerce.number().int().positive().default(1),
   limit: z.coerce.number().int().positive().max(200).default(50),
 }).optional();

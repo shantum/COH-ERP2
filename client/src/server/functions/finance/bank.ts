@@ -44,6 +44,8 @@ export const listBankTransactions = createServerFn({ method: 'POST' })
         { reference: { contains: search, mode: 'insensitive' } },
       ];
     }
+    if (data?.dateFrom) where.txnDate = { ...(where.txnDate as object ?? {}), gte: new Date(data.dateFrom) };
+    if (data?.dateTo) where.txnDate = { ...(where.txnDate as object ?? {}), lte: new Date(data.dateTo + 'T23:59:59') };
 
     const [transactions, total] = await Promise.all([
       prisma.bankTransaction.findMany({
