@@ -1,5 +1,9 @@
 /**
  * Unit tests for GST Calculator (shared domain)
+ *
+ * Current GST slabs (apparel):
+ *   MRP ≤ ₹2500 → 5%
+ *   MRP > ₹2500 → 18%
  */
 
 import {
@@ -10,18 +14,17 @@ import {
 } from '../gst.js';
 
 describe('getGstRateForMrp', () => {
-    it('returns 5% for MRP below ₹1000', () => {
+    it('returns 5% for MRP up to ₹2500', () => {
         expect(getGstRateForMrp(0)).toBe(5);
         expect(getGstRateForMrp(500)).toBe(5);
         expect(getGstRateForMrp(999)).toBe(5);
-        expect(getGstRateForMrp(999.99)).toBe(5);
+        expect(getGstRateForMrp(2500)).toBe(5);
     });
 
-    it('returns 12% for MRP at or above ₹1000', () => {
-        expect(getGstRateForMrp(1000)).toBe(12);
-        expect(getGstRateForMrp(1001)).toBe(12);
-        expect(getGstRateForMrp(2500)).toBe(12);
-        expect(getGstRateForMrp(5000)).toBe(12);
+    it('returns 18% for MRP above ₹2500', () => {
+        expect(getGstRateForMrp(2501)).toBe(18);
+        expect(getGstRateForMrp(3000)).toBe(18);
+        expect(getGstRateForMrp(5000)).toBe(18);
     });
 });
 
@@ -52,7 +55,7 @@ describe('determineGstType', () => {
 
 describe('computeOrderGst', () => {
     describe('basic computation', () => {
-        it('computes GST for a single line below threshold (5%)', () => {
+        it('computes GST for a single line at 5% (MRP ≤ ₹2500)', () => {
             const lines: GstLineInput[] = [
                 { amount: 525, mrp: 800, qty: 1 },
             ];
@@ -69,34 +72,34 @@ describe('computeOrderGst', () => {
             expect(result.total).toBe(525);
         });
 
-        it('computes GST for a single line at/above threshold (12%)', () => {
+        it('computes GST for a single line at 18% (MRP > ₹2500)', () => {
             const lines: GstLineInput[] = [
-                { amount: 1120, mrp: 1500, qty: 1 },
+                { amount: 2950, mrp: 3500, qty: 1 },
             ];
             const result = computeOrderGst(lines, 'Maharashtra');
 
-            // B2C: ₹1120 inclusive of 12% GST
-            // taxableValue = 1120 / 1.12 = 1000
-            // gstAmount = 1120 - 1000 = 120
-            expect(result.lines[0].gstRate).toBe(12);
-            expect(result.lines[0].taxableValue).toBe(1000);
-            expect(result.lines[0].gstAmount).toBe(120);
-            expect(result.subtotal).toBe(1000);
-            expect(result.gstAmount).toBe(120);
-            expect(result.total).toBe(1120);
+            // B2C: ₹2950 inclusive of 18% GST
+            // taxableValue = 2950 / 1.18 = 2500
+            // gstAmount = 2950 - 2500 = 450
+            expect(result.lines[0].gstRate).toBe(18);
+            expect(result.lines[0].taxableValue).toBe(2500);
+            expect(result.lines[0].gstAmount).toBe(450);
+            expect(result.subtotal).toBe(2500);
+            expect(result.gstAmount).toBe(450);
+            expect(result.total).toBe(2950);
         });
     });
 
     describe('intra-state (Maharashtra → CGST + SGST)', () => {
         it('splits GST 50/50 into CGST and SGST', () => {
             const lines: GstLineInput[] = [
-                { amount: 1120, mrp: 1500, qty: 1 },
+                { amount: 2950, mrp: 3500, qty: 1 },
             ];
             const result = computeOrderGst(lines, 'Maharashtra');
 
             expect(result.gstType).toBe('cgst_sgst');
-            expect(result.cgstAmount).toBe(60);
-            expect(result.sgstAmount).toBe(60);
+            expect(result.cgstAmount).toBe(225);
+            expect(result.sgstAmount).toBe(225);
             expect(result.igstAmount).toBe(0);
             expect(result.cgstAmount + result.sgstAmount).toBe(result.gstAmount);
         });
@@ -105,34 +108,34 @@ describe('computeOrderGst', () => {
     describe('inter-state (other state → IGST)', () => {
         it('puts full GST into IGST', () => {
             const lines: GstLineInput[] = [
-                { amount: 1120, mrp: 1500, qty: 1 },
+                { amount: 2950, mrp: 3500, qty: 1 },
             ];
             const result = computeOrderGst(lines, 'Karnataka');
 
             expect(result.gstType).toBe('igst');
             expect(result.cgstAmount).toBe(0);
             expect(result.sgstAmount).toBe(0);
-            expect(result.igstAmount).toBe(120);
+            expect(result.igstAmount).toBe(450);
         });
     });
 
     describe('multiple lines with mixed rates', () => {
         it('handles lines with different GST rates', () => {
             const lines: GstLineInput[] = [
-                { amount: 525, mrp: 800, qty: 1, hsnCode: '6109' },   // 5% GST
-                { amount: 1120, mrp: 1500, qty: 1, hsnCode: '6109' }, // 12% GST
+                { amount: 525, mrp: 800, qty: 1, hsnCode: '6109' },    // 5% GST
+                { amount: 2950, mrp: 3500, qty: 1, hsnCode: '6109' },  // 18% GST
             ];
             const result = computeOrderGst(lines, 'Delhi');
 
             expect(result.lines[0].gstRate).toBe(5);
-            expect(result.lines[1].gstRate).toBe(12);
+            expect(result.lines[1].gstRate).toBe(18);
             expect(result.lines[0].taxableValue).toBe(500);
-            expect(result.lines[1].taxableValue).toBe(1000);
-            expect(result.subtotal).toBe(1500);
-            expect(result.gstAmount).toBe(145); // 25 + 120
-            expect(result.total).toBe(1645);
+            expect(result.lines[1].taxableValue).toBe(2500);
+            expect(result.subtotal).toBe(3000);
+            expect(result.gstAmount).toBe(475); // 25 + 450
+            expect(result.total).toBe(3475);
             expect(result.gstType).toBe('igst');
-            expect(result.igstAmount).toBe(145);
+            expect(result.igstAmount).toBe(475);
         });
     });
 
@@ -208,32 +211,40 @@ describe('computeOrderGst', () => {
             expect(result.cgstAmount + result.sgstAmount).toBe(result.gstAmount);
         });
 
-        it('handles MRP exactly at threshold boundary', () => {
+        it('handles MRP exactly at threshold boundary (₹2500 → 5%)', () => {
             const lines: GstLineInput[] = [
-                { amount: 1000, mrp: 1000, qty: 1 }, // MRP = 1000, should be 12%
+                { amount: 2500, mrp: 2500, qty: 1 },
             ];
             const result = computeOrderGst(lines, 'Maharashtra');
-            expect(result.lines[0].gstRate).toBe(12);
+            expect(result.lines[0].gstRate).toBe(5);
+        });
+
+        it('handles MRP just above threshold (₹2501 → 18%)', () => {
+            const lines: GstLineInput[] = [
+                { amount: 2501, mrp: 2501, qty: 1 },
+            ];
+            const result = computeOrderGst(lines, 'Maharashtra');
+            expect(result.lines[0].gstRate).toBe(18);
         });
     });
 
     describe('effectiveGstRate', () => {
         it('calculates weighted average rate correctly for single rate', () => {
             const lines: GstLineInput[] = [
-                { amount: 1120, mrp: 1500, qty: 1 },
+                { amount: 2950, mrp: 3500, qty: 1 },
             ];
             const result = computeOrderGst(lines, 'Maharashtra');
-            expect(result.effectiveGstRate).toBe(12);
+            expect(result.effectiveGstRate).toBe(18);
         });
 
         it('calculates weighted average for mixed rates', () => {
             const lines: GstLineInput[] = [
-                { amount: 525, mrp: 800, qty: 1 },   // 5% → taxable=500, gst=25
-                { amount: 1120, mrp: 1500, qty: 1 }, // 12% → taxable=1000, gst=120
+                { amount: 525, mrp: 800, qty: 1 },    // 5% → taxable=500, gst=25
+                { amount: 2950, mrp: 3500, qty: 1 },  // 18% → taxable=2500, gst=450
             ];
             const result = computeOrderGst(lines, 'Maharashtra');
-            // weighted avg = 145/1500 * 100 = 9.67%
-            expect(result.effectiveGstRate).toBeCloseTo(9.67, 1);
+            // weighted avg = 475/3000 * 100 = 15.83%
+            expect(result.effectiveGstRate).toBeCloseTo(15.83, 1);
         });
     });
 
@@ -256,18 +267,18 @@ describe('computeOrderGst', () => {
             expect(result.cgstAmount + result.sgstAmount).toBeCloseTo(result.gstAmount, 2);
         });
 
-        it('typical COH order: premium tee MRP ₹1299, shipped to Delhi', () => {
+        it('premium tee MRP ₹2999, shipped to Delhi (18% IGST)', () => {
             const lines: GstLineInput[] = [
-                { amount: 1099, mrp: 1299, qty: 1, hsnCode: '6109' },
+                { amount: 2599, mrp: 2999, qty: 1, hsnCode: '6109' },
             ];
             const result = computeOrderGst(lines, 'Delhi');
 
             expect(result.gstType).toBe('igst');
-            expect(result.lines[0].gstRate).toBe(12);
-            // taxableValue = 1099/1.12 = 981.25
-            // gstAmount = 1099 - 981.25 = 117.75
-            expect(result.lines[0].taxableValue).toBeCloseTo(981.25, 1);
-            expect(result.igstAmount).toBeCloseTo(117.75, 1);
+            expect(result.lines[0].gstRate).toBe(18);
+            // taxableValue = 2599/1.18 = 2202.54
+            // gstAmount = 2599 - 2202.54 = 396.46
+            expect(result.lines[0].taxableValue).toBeCloseTo(2202.54, 1);
+            expect(result.igstAmount).toBeCloseTo(396.46, 1);
             expect(result.cgstAmount).toBe(0);
             expect(result.sgstAmount).toBe(0);
         });

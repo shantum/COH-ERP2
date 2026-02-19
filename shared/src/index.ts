@@ -37,6 +37,7 @@ export * from './utils/index.js';
 // - InventoryBalance, InventoryBalanceWithSkuId (use from types/)
 export {
     // constants
+    GST_CONFIG,
     GST_THRESHOLD,
     GST_RATE_BELOW_THRESHOLD,
     GST_RATE_ABOVE_THRESHOLD,

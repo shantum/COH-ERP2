@@ -5,14 +5,14 @@
  * Shared between client (display) and server (invoice generation).
  *
  * Rules:
- * - MRP < ₹1000 → 5% GST
- * - MRP >= ₹1000 → 12% GST
+ * - MRP ≤ ₹2500 → 5% GST
+ * - MRP > ₹2500 → 18% GST
  * - Intra-state (same state as company) → CGST + SGST (50/50 split)
  * - Inter-state (different state) → IGST (full amount)
- * - Company state: Maharashtra (27)
+ * - All rates/thresholds configured in shared/domain/constants.ts → GST_CONFIG
  */
 
-import { GST_THRESHOLD, GST_RATE_BELOW_THRESHOLD, GST_RATE_ABOVE_THRESHOLD } from './constants.js';
+import { GST_CONFIG } from './constants.js';
 
 // ============================================
 // TYPES
@@ -63,11 +63,11 @@ export interface OrderGstResult {
 }
 
 // ============================================
-// CONSTANTS
+// CONSTANTS (from GST_CONFIG — single source of truth)
 // ============================================
 
-const COMPANY_STATE = 'Maharashtra';
-const DEFAULT_HSN = '6109';
+const COMPANY_STATE = GST_CONFIG.companyState;
+const DEFAULT_HSN = GST_CONFIG.defaultHsn;
 
 // ============================================
 // CORE FUNCTIONS
@@ -78,7 +78,7 @@ const DEFAULT_HSN = '6109';
  * Apparel: 5% below ₹1000, 12% at/above ₹1000.
  */
 export function getGstRateForMrp(mrp: number): number {
-  return mrp >= GST_THRESHOLD ? GST_RATE_ABOVE_THRESHOLD : GST_RATE_BELOW_THRESHOLD;
+  return mrp > GST_CONFIG.threshold ? GST_CONFIG.rateAboveThreshold : GST_CONFIG.rateBelowThreshold;
 }
 
 /**

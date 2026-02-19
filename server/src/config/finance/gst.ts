@@ -1,20 +1,23 @@
 /**
  * Company GST Configuration
  *
- * Centralized GST identity and defaults for invoice generation.
+ * Re-exports shared GST_CONFIG + adds server-only fields (GSTIN, state codes).
+ * Rates/thresholds live in shared/domain/constants.ts → GST_CONFIG.
  */
+
+import { GST_CONFIG } from '@coh/shared/domain';
 
 export const COMPANY_GST = {
   /** Company registered state */
-  state: 'Maharashtra',
+  state: GST_CONFIG.companyState,
   /** GSTIN state code (first 2 digits of GSTIN) */
   stateCode: '27',
   /** Company GSTIN — loaded from env */
   gstin: process.env.COMPANY_GSTIN ?? '',
-  /** Default HSN code for knitted apparel (T-shirts, tops) */
-  DEFAULT_HSN: '6109',
+  /** Default HSN code for knitted apparel */
+  DEFAULT_HSN: GST_CONFIG.defaultHsn,
   /** Alternative HSN for knitted sweaters/pullovers */
-  ALT_HSN_KNITTED: '6110',
+  ALT_HSN_KNITTED: GST_CONFIG.altHsnKnitted,
 } as const;
 
 /**
