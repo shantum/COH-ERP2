@@ -911,15 +911,15 @@ export function ShopifyTab() {
                                 <div className="space-y-3">
                                     <div className="grid grid-cols-3 gap-2 text-center">
                                         <div className="bg-white rounded-lg p-2">
-                                            <p className="text-lg font-bold text-gray-900">{webhookActivity.stats?.total || 0}</p>
+                                            <p className="text-lg font-bold text-gray-900">{webhookActivity.summary?.total || 0}</p>
                                             <p className="text-xs text-gray-500">Total</p>
                                         </div>
                                         <div className="bg-white rounded-lg p-2">
-                                            <p className="text-lg font-bold text-green-600">{webhookActivity.stats?.success || 0}</p>
+                                            <p className="text-lg font-bold text-green-600">{webhookActivity.summary?.processed || 0}</p>
                                             <p className="text-xs text-gray-500">Success</p>
                                         </div>
                                         <div className="bg-white rounded-lg p-2">
-                                            <p className="text-lg font-bold text-red-600">{webhookActivity.stats?.failed || 0}</p>
+                                            <p className="text-lg font-bold text-red-600">{webhookActivity.summary?.failed || 0}</p>
                                             <p className="text-xs text-gray-500">Failed</p>
                                         </div>
                                     </div>
@@ -940,7 +940,7 @@ export function ShopifyTab() {
                                                         ) : (
                                                             <ChevronRight size={12} className="text-gray-400" />
                                                         )}
-                                                        <span className={`w-2 h-2 rounded-full ${log.processedSuccessfully ? 'bg-green-500' : 'bg-red-500'}`}></span>
+                                                        <span className={`w-2 h-2 rounded-full ${log.status === 'processed' ? 'bg-green-500' : 'bg-red-500'}`}></span>
                                                         <span className="font-mono text-gray-700">{log.topic}</span>
                                                         <span className="text-gray-400 ml-auto">
                                                             {new Date(log.receivedAt).toLocaleTimeString()}
@@ -1001,8 +1001,8 @@ export function ShopifyTab() {
                                                 </div>
                                                 <div>
                                                     <span className="text-gray-500">Status:</span>
-                                                    <span className={`ml-2 ${webhookDetail.processedSuccessfully ? 'text-green-600' : 'text-red-600'}`}>
-                                                        {webhookDetail.processedSuccessfully ? 'Success' : 'Failed'}
+                                                    <span className={`ml-2 ${webhookDetail.status === 'processed' ? 'text-green-600' : 'text-red-600'}`}>
+                                                        {webhookDetail.status === 'processed' ? 'Success' : webhookDetail.status === 'failed' ? 'Failed' : webhookDetail.status}
                                                     </span>
                                                 </div>
                                             </div>
