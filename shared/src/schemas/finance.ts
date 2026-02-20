@@ -49,6 +49,10 @@ export const FinanceSearchParams = z.object({
   dateFrom: z.string().optional().catch(undefined),
   /** Date range filter — to */
   dateTo: z.string().optional().catch(undefined),
+  /** Invoice sort column */
+  sortBy: z.enum(['createdAt', 'invoiceDate', 'billingPeriod', 'dueDate']).optional().catch(undefined),
+  /** Sort direction */
+  sortDir: z.enum(['asc', 'desc']).optional().catch(undefined),
 });
 export type FinanceSearchParams = z.infer<typeof FinanceSearchParams>;
 
@@ -130,6 +134,8 @@ export const ListInvoicesInput = z.object({
   search: z.string().optional(),
   dateFrom: z.string().optional(),
   dateTo: z.string().optional(),
+  sortBy: z.enum(['createdAt', 'invoiceDate', 'billingPeriod', 'dueDate']).optional(),
+  sortDir: z.enum(['asc', 'desc']).optional(),
   page: z.coerce.number().int().positive().default(1),
   limit: z.coerce.number().int().positive().max(200).default(50),
 }).optional();

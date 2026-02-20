@@ -6,7 +6,7 @@ import { useNavigate } from '@tanstack/react-router';
 import { useDebounce } from '../../hooks/useDebounce';
 import {
   listInvoices, confirmInvoice, cancelInvoice, createInvoice, updateInvoice,
-  findUnmatchedPayments,
+  updateInvoiceDueDate, findUnmatchedPayments,
 } from '../../server/functions/finance';
 import { formatCurrency, formatStatus, StatusBadge, Pagination, LoadingState, downloadCsv } from './shared';
 import { Button } from '@/components/ui/button';
@@ -18,6 +18,7 @@ import { Textarea } from '@/components/ui/textarea';
 import {
   Plus, ArrowUpRight, ArrowDownLeft, Check, X, Loader2, AlertCircle,
   ExternalLink, CloudUpload, Link2, Download, Upload, AlertTriangle, Pencil,
+  ArrowUpDown, ArrowUp, ArrowDown, RotateCcw,
 } from 'lucide-react';
 import { PartySearch } from '../../components/finance/PartySearch';
 import { showSuccess, showError } from '../../utils/toast';
@@ -66,7 +67,7 @@ export default function InvoicesTab({ search: rawSearch }: { search: FinanceSear
 
   const listFn = useServerFn(listInvoices);
   const { data, isLoading } = useQuery({
-    queryKey: ['finance', 'invoices', search.type, search.status, search.category, search.search, search.dateFrom, search.dateTo, search.page],
+    queryKey: ['finance', 'invoices', search.type, search.status, search.category, search.search, search.dateFrom, search.dateTo, search.sortBy, search.sortDir, search.page],
     queryFn: () =>
       listFn({
         data: {
@@ -76,6 +77,8 @@ export default function InvoicesTab({ search: rawSearch }: { search: FinanceSear
           ...(search.search ? { search: search.search } : {}),
           ...(search.dateFrom ? { dateFrom: search.dateFrom } : {}),
           ...(search.dateTo ? { dateTo: search.dateTo } : {}),
+          ...(search.sortBy ? { sortBy: search.sortBy } : {}),
+          ...(search.sortDir ? { sortDir: search.sortDir } : {}),
           page: search.page,
           limit: search.limit,
         },
@@ -109,6 +112,17 @@ export default function InvoicesTab({ search: rawSearch }: { search: FinanceSear
     onError: (err) => showError('Cancel failed', { description: err.message }),
   });
 
+  const dueDateFn = useServerFn(updateInvoiceDueDate);
+  const dueDateMutation = useMutation({
+    mutationFn: (params: { id: string; dueDate: string | null }) => dueDateFn({ data: params }),
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ['finance'] });
+      if (result?.success) showSuccess('Due date updated');
+      else showError('Failed', { description: (result as { error?: string })?.error });
+    },
+    onError: (err) => showError('Failed to update due date', { description: err.message }),
+  });
+
   const updateSearch = useCallback(
     (updates: Partial<FinanceSearchParams>) => {
       setSelectedIds(new Set());
@@ -116,6 +130,25 @@ export default function InvoicesTab({ search: rawSearch }: { search: FinanceSear
     },
     [navigate, search]
   );
+
+  const toggleSort = useCallback(
+    (col: 'createdAt' | 'invoiceDate' | 'billingPeriod' | 'dueDate') => {
+      if (search.sortBy === col) {
+        if (search.sortDir === 'desc') updateSearch({ sortBy: col, sortDir: 'asc', page: 1 });
+        else updateSearch({ sortBy: undefined, sortDir: undefined, page: 1 }); // reset
+      } else {
+        updateSearch({ sortBy: col, sortDir: 'desc', page: 1 });
+      }
+    },
+    [search.sortBy, search.sortDir, updateSearch]
+  );
+
+  const SortIcon = ({ col }: { col: string }) => {
+    if (search.sortBy !== col) return <ArrowUpDown className="h-3 w-3 ml-1 opacity-30" />;
+    return search.sortDir === 'asc'
+      ? <ArrowUp className="h-3 w-3 ml-1 text-blue-600" />
+      : <ArrowDown className="h-3 w-3 ml-1 text-blue-600" />;
+  };
 
   const [bulkConfirming, setBulkConfirming] = useState(false);
 
@@ -341,6 +374,17 @@ export default function InvoicesTab({ search: rawSearch }: { search: FinanceSear
           className="w-[200px]"
         />
 
+        {search.sortBy && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-xs text-muted-foreground"
+            onClick={() => updateSearch({ sortBy: undefined, sortDir: undefined, page: 1 })}
+          >
+            <RotateCcw className="h-3 w-3 mr-1" /> Reset Sort
+          </Button>
+        )}
+
         <div className="ml-auto flex items-center gap-2">
           {selectedIds.size > 0 && (
             <>
@@ -363,10 +407,11 @@ export default function InvoicesTab({ search: rawSearch }: { search: FinanceSear
             onClick={() => {
               if (!data?.invoices?.length) return;
               const rows: string[][] = [
-                ['Invoice #', 'Type', 'Category', 'Party', 'Total', 'Balance Due', 'TDS', 'Status', 'Invoice Date', 'Billing Period'],
+                ['Date Added', 'Invoice #', 'Type', 'Category', 'Party', 'Total', 'Balance Due', 'TDS', 'Status', 'Invoice Date', 'Billing Period', 'Due Date'],
               ];
               for (const inv of data.invoices) {
                 rows.push([
+                  new Date(inv.createdAt).toLocaleDateString('en-IN'),
                   inv.invoiceNumber ?? '',
                   inv.type,
                   inv.category,
@@ -377,6 +422,7 @@ export default function InvoicesTab({ search: rawSearch }: { search: FinanceSear
                   inv.status,
                   inv.invoiceDate ? new Date(inv.invoiceDate).toLocaleDateString('en-IN') : '',
                   inv.billingPeriod ?? '',
+                  inv.dueDate ? new Date(inv.dueDate).toLocaleDateString('en-IN') : '',
                 ]);
               }
               downloadCsv(rows, `invoices-${new Date().toISOString().split('T')[0]}.csv`);
@@ -421,11 +467,21 @@ export default function InvoicesTab({ search: rawSearch }: { search: FinanceSear
                       disabled={selectableInvoices.length === 0}
                     />
                   </th>
+                  <th className="text-left p-3 font-medium cursor-pointer select-none hover:text-blue-600" onClick={() => toggleSort('createdAt')}>
+                    <span className="inline-flex items-center">Date Added<SortIcon col="createdAt" /></span>
+                  </th>
                   <th className="text-left p-3 font-medium">Party</th>
                   <th className="text-left p-3 font-medium">Category</th>
                   <th className="text-left p-3 font-medium">Invoice #</th>
-                  <th className="text-left p-3 font-medium">Invoice Date</th>
-                  <th className="text-left p-3 font-medium">Period</th>
+                  <th className="text-left p-3 font-medium cursor-pointer select-none hover:text-blue-600" onClick={() => toggleSort('invoiceDate')}>
+                    <span className="inline-flex items-center">Invoice Date<SortIcon col="invoiceDate" /></span>
+                  </th>
+                  <th className="text-left p-3 font-medium cursor-pointer select-none hover:text-blue-600" onClick={() => toggleSort('billingPeriod')}>
+                    <span className="inline-flex items-center">Period<SortIcon col="billingPeriod" /></span>
+                  </th>
+                  <th className="text-left p-3 font-medium cursor-pointer select-none hover:text-blue-600" onClick={() => toggleSort('dueDate')}>
+                    <span className="inline-flex items-center">Due Date<SortIcon col="dueDate" /></span>
+                  </th>
                   <th className="text-right p-3 font-medium">Amount</th>
                   <th className="text-left p-3 font-medium">Status</th>
                   <th className="text-right p-3 font-medium">Balance Due</th>
@@ -456,6 +512,7 @@ export default function InvoicesTab({ search: rawSearch }: { search: FinanceSear
                         <span className="block h-4 w-4" />
                       )}
                     </td>
+                    <td className="p-3 text-xs text-muted-foreground">{new Date(inv.createdAt).toLocaleDateString('en-IN')}</td>
                     <td className="p-3">
                       {inv.party?.name ??
                         (inv.customer ? [inv.customer.firstName, inv.customer.lastName].filter(Boolean).join(' ') || inv.customer.email : null) ??
@@ -465,6 +522,31 @@ export default function InvoicesTab({ search: rawSearch }: { search: FinanceSear
                     <td className="p-3 font-mono text-xs">{inv.invoiceNumber ?? '—'}</td>
                     <td className="p-3 text-xs text-muted-foreground">{inv.invoiceDate ? new Date(inv.invoiceDate).toLocaleDateString('en-IN') : '—'}</td>
                     <td className="p-3 text-xs text-muted-foreground">{inv.billingPeriod ?? '—'}</td>
+                    <td className="p-3" onClick={(e) => e.stopPropagation()}>
+                      {inv.status !== 'cancelled' ? (
+                        <div className="flex flex-col gap-0.5">
+                          <input
+                            type="date"
+                            className="text-xs text-muted-foreground bg-transparent border-0 border-b border-transparent hover:border-muted-foreground/30 focus:border-blue-500 focus:outline-none cursor-pointer px-0 py-0.5 w-[110px]"
+                            value={inv.dueDate ? new Date(inv.dueDate).toISOString().split('T')[0] : ''}
+                            onChange={(e) => {
+                              dueDateMutation.mutate({ id: inv.id, dueDate: e.target.value || null });
+                            }}
+                          />
+                          {inv.dueDate && inv.status !== 'paid' && (() => {
+                            const today = new Date(); today.setHours(0, 0, 0, 0);
+                            const due = new Date(inv.dueDate); due.setHours(0, 0, 0, 0);
+                            const diffDays = Math.round((due.getTime() - today.getTime()) / 86400000);
+                            if (diffDays < 0) return <span className="text-[10px] text-red-500 font-medium">overdue by {Math.abs(diffDays)}d</span>;
+                            if (diffDays === 0) return <span className="text-[10px] text-amber-500 font-medium">due today</span>;
+                            if (diffDays <= 7) return <span className="text-[10px] text-amber-500">in {diffDays}d</span>;
+                            return <span className="text-[10px] text-muted-foreground">in {diffDays}d</span>;
+                          })()}
+                        </div>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">{inv.dueDate ? new Date(inv.dueDate).toLocaleDateString('en-IN') : '—'}</span>
+                      )}
+                    </td>
                     <td className="p-3 text-right font-mono">{formatCurrency(inv.totalAmount)}</td>
                     <td className="p-3"><StatusBadge status={inv.status} /></td>
                     <td className="p-3 text-right">
@@ -522,7 +604,7 @@ export default function InvoicesTab({ search: rawSearch }: { search: FinanceSear
                   );
                 })}
                 {(!data?.invoices || data.invoices.length === 0) && (
-                  <tr><td colSpan={10} className="p-8 text-center">
+                  <tr><td colSpan={12} className="p-8 text-center">
                     <div className="text-muted-foreground space-y-2">
                       <p>{search.search || search.status || search.category || search.dateFrom ? 'No invoices match your filters' : `No ${search.type} invoices yet`}</p>
                       {!(search.search || search.status || search.category || search.dateFrom) && (

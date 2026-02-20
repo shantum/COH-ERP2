@@ -26,7 +26,7 @@ export const listInvoices = createServerFn({ method: 'POST' })
   .inputValidator((input: unknown) => ListInvoicesInput.parse(input))
   .handler(async ({ data }) => {
     const prisma = await getPrisma();
-    const { type, status, category, search, page = 1, limit = 50 } = data ?? {};
+    const { type, status, category, search, sortBy, sortDir, page = 1, limit = 50 } = data ?? {};
     const skip = (page - 1) * limit;
 
     const where: Record<string, unknown> = {};
@@ -68,7 +68,9 @@ export const listInvoices = createServerFn({ method: 'POST' })
           customer: { select: { id: true, email: true, firstName: true, lastName: true } },
           _count: { select: { lines: true, allocations: true } },
         },
-        orderBy: [{ invoiceDate: 'desc' }, { createdAt: 'desc' }],
+        orderBy: sortBy
+          ? [{ [sortBy]: sortDir ?? 'desc' }, { createdAt: 'desc' }]
+          : [{ createdAt: 'desc' }],
         skip,
         take: limit,
       }),
@@ -218,6 +220,31 @@ export const updateInvoice = createServerFn({ method: 'POST' })
 
     await prisma.invoice.update({ where: { id }, data: updates });
 
+    return { success: true as const };
+  });
+
+// ============================================
+// INVOICE — UPDATE DUE DATE (any non-cancelled)
+// ============================================
+
+export const updateInvoiceDueDate = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
+  .inputValidator((input: unknown) =>
+    z.object({ id: z.string().uuid(), dueDate: z.string().nullable() }).parse(input)
+  )
+  .handler(async ({ data }) => {
+    const prisma = await getPrisma();
+    const existing = await prisma.invoice.findUnique({
+      where: { id: data.id },
+      select: { status: true },
+    });
+    if (!existing) return { success: false as const, error: 'Invoice not found' };
+    if (existing.status === 'cancelled') return { success: false as const, error: 'Cannot edit cancelled invoice' };
+
+    await prisma.invoice.update({
+      where: { id: data.id },
+      data: { dueDate: data.dueDate ? new Date(data.dueDate) : null },
+    });
     return { success: true as const };
   });
 
