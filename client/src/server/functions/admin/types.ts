@@ -90,7 +90,7 @@ export interface BackgroundJob {
 export function getApiBaseUrl(): string {
     const port = process.env.PORT || '3001';
     return process.env.NODE_ENV === 'production'
-        ? `http://127.0.0.1:${port}` // Same server on Railway
+        ? `http://127.0.0.1:${port}` // Same server in production
         : 'http://localhost:3001'; // Separate dev server
 }
 

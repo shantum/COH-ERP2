@@ -65,7 +65,7 @@ export async function getPrisma(): Promise<PrismaInstance> {
     }
 
     // Create new instance with connection pooling configured
-    // Railway's shared Postgres has limited connections, so we limit the pool
+    // Limit connection pool to avoid exhausting Postgres connections
     const prisma = new PrismaClient({
         log: process.env.NODE_ENV === 'development' ? ['warn', 'error'] : ['error'],
     });

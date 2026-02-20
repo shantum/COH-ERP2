@@ -128,16 +128,14 @@ interface CustomerProcessResult {
 
 const router = Router();
 
-// Store for webhook secret (loaded from database)
-let webhookSecret: string | null = null;
-
-// Load webhook secret from database
-async function loadWebhookSecret(prisma: PrismaClient): Promise<void> {
+// Load webhook secret from database (always fresh — supports rotation without restart)
+async function loadWebhookSecret(prisma: PrismaClient): Promise<string | null> {
     try {
         const setting = await prisma.systemSetting.findUnique({ where: { key: 'shopify_webhook_secret' } });
-        webhookSecret = setting?.value || null;
+        return setting?.value || null;
     } catch (e) {
         log.error({ err: e }, 'Failed to load webhook secret');
+        return null;
     }
 }
 
@@ -167,19 +165,16 @@ function verifyShopifyWebhook(req: WebhookRequest, secret: string): boolean {
 
 // Middleware to verify webhook (optional - can be disabled for testing)
 const verifyWebhook = async (req: WebhookRequest, res: Response, next: NextFunction): Promise<void> => {
-    // Load secret if not loaded
-    if (webhookSecret === null) {
-        await loadWebhookSecret(req.prisma);
-    }
+    const secret = await loadWebhookSecret(req.prisma);
 
     // Skip verification if no secret configured (development mode)
-    if (!webhookSecret) {
+    if (!secret) {
         log.warn('Webhook secret not configured - accepting unverified webhook');
         next();
         return;
     }
 
-    if (!verifyShopifyWebhook(req, webhookSecret)) {
+    if (!verifyShopifyWebhook(req, secret)) {
         log.error('Webhook verification failed');
         res.status(401).json({ error: 'Webhook verification failed' });
         return;
@@ -452,9 +447,9 @@ router.post('/shopify/inventory_levels/update', verifyWebhook, async (req: Webho
 // ============================================
 
 // Get webhook status
-router.get('/status', async (req: Request, res: Response): Promise<void> => {
+router.get('/status', requireAdmin, async (req: Request, res: Response): Promise<void> => {
     try {
-        await loadWebhookSecret(req.prisma);
+        const secret = await loadWebhookSecret(req.prisma);
 
         // Get recent webhook logs
         const logs = await req.prisma.webhookLog.findMany({
@@ -463,7 +458,7 @@ router.get('/status', async (req: Request, res: Response): Promise<void> => {
         }).catch(() => []);
 
         res.json({
-            configured: !!webhookSecret,
+            configured: !!secret,
             endpoints: {
                 // Unified endpoints - use X-Shopify-Topic header to determine action
                 orders: '/api/webhooks/shopify/orders',
@@ -495,8 +490,6 @@ router.put('/secret', requireAdmin, async (req: Request, res: Response): Promise
             update: { value: secret ?? '' },
             create: { key: 'shopify_webhook_secret', value: secret ?? '' }
         });
-
-        webhookSecret = secret ?? null;
 
         res.json({ success: true });
     } catch (error) {

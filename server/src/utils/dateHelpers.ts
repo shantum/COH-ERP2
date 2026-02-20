@@ -58,7 +58,7 @@ export function toBatchDateCode(date: Date | string | null | undefined): string 
  * All functions return UTC Date objects representing IST boundaries
  *
  * IMPORTANT: All functions are server-timezone agnostic. They use UTC methods
- * to ensure correct behavior regardless of server locale (Railway runs UTC).
+ * to ensure correct behavior regardless of server locale (server runs UTC).
  */
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000; // 5 hours 30 minutes in milliseconds
 

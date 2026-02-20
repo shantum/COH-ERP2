@@ -56,7 +56,7 @@ Ingested rows marked `DONE:{referenceId}` in Import Errors column. V2 SUMIFS exc
 - **Error `code` is STRING** — use `Number(error.code)` for comparison
 - **Sheet data types mixed** — always `String(cell ?? '')`
 - **API quota 300/min** — rate limiter at 250ms. Use batchRead/Write
-- **Credentials (Sheets)**: env `GOOGLE_SERVICE_ACCOUNT_JSON` (Railway) -> fallback `server/config/google-service-account.json` (local)
+- **Credentials (Sheets)**: env `GOOGLE_SERVICE_ACCOUNT_JSON` (production) -> fallback `server/config/google-service-account.json` (local)
 - **Credentials (Drive)**: OAuth2, NOT service account (zero storage quota). Needs `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_OAUTH_REFRESH_TOKEN`
 - **Two auth methods**: Sheets=service account JWT, Drive=OAuth2 refresh token. Don't mix
 - **Date serial numbers** — Sheets stores as serials (days since Dec 30, 1899). Use `readRangeWithSerials()` + `serialToDate()`

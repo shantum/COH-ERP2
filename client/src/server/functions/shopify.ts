@@ -143,7 +143,7 @@ async function callExpressApi<T>(
     const port = process.env.PORT || '3001';
     const apiUrl =
         process.env.NODE_ENV === 'production'
-            ? `http://127.0.0.1:${port}` // Same server on Railway
+            ? `http://127.0.0.1:${port}` // Same server in production
             : 'http://localhost:3001'; // Separate dev server
 
     const authToken = getCookie('auth_token');

@@ -940,7 +940,7 @@ export function ShopifyTab() {
                                                         ) : (
                                                             <ChevronRight size={12} className="text-gray-400" />
                                                         )}
-                                                        <span className={`w-2 h-2 rounded-full ${log.status === 'processed' ? 'bg-green-500' : 'bg-red-500'}`}></span>
+                                                        <span className={`w-2 h-2 rounded-full ${log.status === 'processed' ? 'bg-green-500' : log.status === 'processing' || log.status === 'received' ? 'bg-yellow-500' : 'bg-red-500'}`}></span>
                                                         <span className="font-mono text-gray-700">{log.topic}</span>
                                                         <span className="text-gray-400 ml-auto">
                                                             {new Date(log.receivedAt).toLocaleTimeString()}
@@ -993,7 +993,7 @@ export function ShopifyTab() {
                                                 </div>
                                                 <div>
                                                     <span className="text-gray-500">Order:</span>
-                                                    <span className="ml-2">{webhookDetail.orderNumber || 'N/A'}</span>
+                                                    <span className="ml-2">{webhookDetail.relatedData?.order?.orderNumber || 'N/A'}</span>
                                                 </div>
                                                 <div>
                                                     <span className="text-gray-500">Received:</span>
@@ -1001,15 +1001,15 @@ export function ShopifyTab() {
                                                 </div>
                                                 <div>
                                                     <span className="text-gray-500">Status:</span>
-                                                    <span className={`ml-2 ${webhookDetail.status === 'processed' ? 'text-green-600' : 'text-red-600'}`}>
+                                                    <span className={`ml-2 ${webhookDetail.status === 'processed' ? 'text-green-600' : webhookDetail.status === 'processing' || webhookDetail.status === 'received' ? 'text-yellow-600' : 'text-red-600'}`}>
                                                         {webhookDetail.status === 'processed' ? 'Success' : webhookDetail.status === 'failed' ? 'Failed' : webhookDetail.status}
                                                     </span>
                                                 </div>
                                             </div>
 
-                                            {webhookDetail.processingError && (
+                                            {webhookDetail.error && (
                                                 <div className="p-2 bg-red-50 rounded text-sm text-red-700">
-                                                    <span className="font-medium">Error:</span> {webhookDetail.processingError}
+                                                    <span className="font-medium">Error:</span> {webhookDetail.error}
                                                 </div>
                                             )}
 
@@ -1020,10 +1020,10 @@ export function ShopifyTab() {
                                                 </div>
                                             )}
 
-                                            {webhookDetail.processingResult && (
+                                            {webhookDetail.resultData && (
                                                 <div>
                                                     <p className="text-xs font-medium text-gray-600 mb-1">Processing Result:</p>
-                                                    <JsonViewer data={webhookDetail.processingResult} rootName="result" />
+                                                    <JsonViewer data={webhookDetail.resultData} rootName="result" />
                                                 </div>
                                             )}
                                         </>

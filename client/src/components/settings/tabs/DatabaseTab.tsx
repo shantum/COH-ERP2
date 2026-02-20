@@ -187,8 +187,8 @@ export function DatabaseTab() {
                         <p className="font-medium text-blue-800 mb-2">For Production Deployment:</p>
                         <ol className="list-decimal list-inside text-sm text-blue-700 space-y-2">
                             <li><strong>Switch to PostgreSQL</strong> - Update <code>schema.prisma</code> provider and <code>DATABASE_URL</code></li>
-                            <li><strong>Use a cloud database</strong> - Supabase, Neon, Railway, or PlanetScale</li>
-                            <li><strong>Deploy backend</strong> - Railway, Render, or Fly.io</li>
+                            <li><strong>Use a cloud database</strong> - Supabase, Neon, or PlanetScale</li>
+                            <li><strong>Deploy backend</strong> - Hetzner, Render, or Fly.io</li>
                             <li><strong>Deploy frontend</strong> - Vercel, Netlify, or Cloudflare Pages</li>
                         </ol>
                     </div>

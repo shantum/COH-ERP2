@@ -1,5 +1,5 @@
 /**
- * Production Server - Unified entry point for Railway deployment
+ * Production Server - Unified entry point for deployment
  *
  * This server integrates:
  * 1. TanStack Start SSR server (for frontend + Server Functions)

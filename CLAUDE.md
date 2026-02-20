@@ -16,7 +16,7 @@
 3. **Living memory.** Update memory files with learnings as you work.
 4. **Use agents liberally.** Spawn sub-agents for parallel/complex work.
 5. **TypeCheck before committing:** `cd client && npx tsc -p tsconfig.app.json --noEmit && cd ../server && npx tsc --noEmit`
-6. **Branch:** Always `main`. Local and prod share the same Railway DB.
+6. **Branch:** Always `main`. Local and prod share the same DB (Hetzner).
 7. **Config > code.** Magic numbers, thresholds, mappings go in `/config/`.
 8. **Type-safe.** Strict TypeScript, Zod validation. No `any`.
 
@@ -37,7 +37,7 @@ cd server && pnpm dev       # Port 3001
 cd client && pnpm dev       # Port 5173
 pnpm db:generate && pnpm db:push  # From root
 ```
-Root uses pnpm workspace. Railway builds use npm (`nixpacks.toml`).
+Root uses pnpm workspace. Production deploys via `./deploy.sh` to Hetzner.
 
 ## Gotchas
 - Server Functions live in `client/src/server/functions/`. No tRPC.
@@ -62,6 +62,6 @@ Root uses pnpm workspace. Railway builds use npm (`nixpacks.toml`).
 ## Database
 - Local and production share the same database. Migrations apply immediately.
 - `pnpm db:migrate --name description` — NEVER run directly against production.
-- Railway auto-migrates on `main` push.
+- Deploy runs `prisma migrate deploy` automatically on Hetzner.
 - Connect: `psql "$DATABASE_URL"` (from `server/` with `.env` loaded)
 - Full details: `/database` skill

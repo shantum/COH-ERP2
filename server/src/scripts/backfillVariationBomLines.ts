@@ -13,8 +13,8 @@
  * Usage:
  *   npx ts-node server/src/scripts/backfillVariationBomLines.ts
  *
- * Or on Railway:
- *   railway run npx ts-node server/src/scripts/backfillVariationBomLines.ts
+ * Or on server:
+ *   ssh root@128.140.98.253 "cd /opt/coh-erp && npx ts-node server/src/scripts/backfillVariationBomLines.ts"
  */
 
 import * as dotenv from 'dotenv';

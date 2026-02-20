@@ -47,7 +47,7 @@ let lastCallAt = 0;
  * Lazy: first call reads the service account key and creates the JWT.
  *
  * Credential sources (checked in order):
- *   1. GOOGLE_SERVICE_ACCOUNT_JSON env var (JSON string — ideal for Railway/CI)
+ *   1. GOOGLE_SERVICE_ACCOUNT_JSON env var (JSON string — ideal for CI/production)
  *   2. JSON key file at GOOGLE_SERVICE_ACCOUNT_PATH (local dev)
  */
 function getClient(): sheets_v4.Sheets {

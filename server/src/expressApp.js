@@ -69,7 +69,7 @@ export async function createExpressApp() {
 
   const app = express();
 
-  // Trust reverse proxy (Caddy/Railway) for correct IP, cookies, and rate limiting
+  // Trust reverse proxy (Caddy) for correct IP, cookies, and rate limiting
   app.set('trust proxy', 1);
 
   // Security middleware - relaxed CSP for SSR

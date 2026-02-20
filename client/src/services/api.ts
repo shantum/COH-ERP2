@@ -116,10 +116,10 @@ export const shopifyApi = {
     resumeSyncJob: (jobId: string) => api.post(`/shopify/sync/jobs/${jobId}/resume`),
     cancelSyncJob: (jobId: string) => api.post(`/shopify/sync/jobs/${jobId}/cancel`),
     // Scheduler
-    getSchedulerStatus: () => api.get('/shopify/sync/scheduler/status'),
-    triggerSchedulerSync: () => api.post('/shopify/sync/scheduler/trigger'),
-    startScheduler: () => api.post('/shopify/sync/scheduler/start'),
-    stopScheduler: () => api.post('/shopify/sync/scheduler/stop'),
+    getSchedulerStatus: () => api.get('/shopify/sync/jobs/scheduler/status'),
+    triggerSchedulerSync: () => api.post('/shopify/sync/jobs/scheduler/trigger'),
+    startScheduler: () => api.post('/shopify/sync/jobs/scheduler/start'),
+    stopScheduler: () => api.post('/shopify/sync/jobs/scheduler/stop'),
     // Webhook activity
     getWebhookActivity: (params?: { hours?: number; limit?: number }) =>
         api.get('/shopify/webhooks/activity', { params }),

@@ -67,7 +67,7 @@ export const getAuthUser = createServerFn({ method: 'GET' }).handler(
             }
 
             // Verify token with Express backend
-            // In production (Railway), Express runs on same server at PORT
+            // In production, Express runs on same server at PORT
             // In development, Express runs separately on port 3001
             const port = process.env.PORT || '3001';
             const apiUrl = process.env.NODE_ENV === 'production'

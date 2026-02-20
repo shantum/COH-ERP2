@@ -47,25 +47,6 @@ export const RTO_URGENT_DAYS = 7;
 export const DELIVERY_DELAYED_DAYS = 7;
 
 // ============================================
-// SHOPIFY SYNC CONSTANTS
-// ============================================
-
-/**
- * Number of items to fetch per batch from Shopify
- */
-export const SHOPIFY_BATCH_SIZE = 50;
-
-/**
- * Maximum concurrent requests to Shopify API
- */
-export const SHOPIFY_CONCURRENCY_LIMIT = 5;
-
-/**
- * Maximum products to fetch with metafields in preview
- */
-export const SHOPIFY_PREVIEW_METAFIELD_LIMIT = 20;
-
-// ============================================
 // TRACKING CONSTANTS
 // ============================================
 

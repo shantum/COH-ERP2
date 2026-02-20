@@ -179,7 +179,7 @@ app.get('/privacy', (req, res) => {
 <h2>How We Use Data</h2>
 <ul><li>To insert, read, and manage order rows in COH business spreadsheets</li><li>To run internal business operations through our ERP system</li><li>We do not sell, share, or transfer data to third parties</li></ul>
 <h2>Data Storage</h2>
-<p>Data remains within Google Sheets and our secure ERP database hosted on Railway. We do not copy your Google account data to external services.</p>
+<p>Data remains within Google Sheets and our secure ERP database. We do not copy your Google account data to external services.</p>
 <h2>Who Can Access</h2>
 <p>Only authorised COH team members and business partners with explicit access to our shared spreadsheets.</p>
 <h2>Data Retention</h2>
@@ -287,7 +287,7 @@ app.use(errorHandler);
 
 const PORT = process.env.PORT || 3001;
 
-// Bind to 0.0.0.0 for Railway/Docker compatibility
+// Bind to 0.0.0.0 for Docker/production compatibility
 app.listen(PORT, '0.0.0.0', async () => {
   console.log(`🚀 COH ERP Server running on port ${PORT}`);
 
