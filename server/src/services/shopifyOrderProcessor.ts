@@ -35,6 +35,8 @@ import { updateCustomerTier, incrementCustomerOrderCount } from '../utils/tierUt
 import { syncLogger } from '../utils/logger.js';
 import { recomputeOrderStatus } from '../utils/orderStatus.js';
 import { deferredExecutor } from './deferredExecutor.js';
+import { generateDraftInvoice } from './orderInvoiceGenerator.js';
+import { settleOrderInvoice } from './orderSettlement.js';
 
 // ============================================
 // TYPE DEFINITIONS
@@ -201,7 +203,14 @@ interface OrderDataPayload {
     orderDate: Date;
     internalNotes: string | null;
     paymentMethod: string;
+    paymentGateway: string | null;
     syncedAt: Date;
+    // Prepaid settlement fields (set at import for prepaid orders)
+    paymentStatus?: string;
+    paymentConfirmedAt?: Date | null;
+    settledAt?: Date | null;
+    settlementAmount?: number | null;
+    settlementRef?: string | null;
 }
 
 // ============================================
@@ -644,6 +653,9 @@ function buildOrderData(
             : `Cancelled via Shopify at ${shopifyOrder.cancelled_at}`;
     }
 
+    const totalAmount = parseFloat(shopifyOrder.total_price) || 0;
+    const isPrepaid = paymentMethod === 'Prepaid';
+
     return {
         shopifyOrderId,
         orderNumber: orderNumber || `SHOP-${shopifyOrderId.slice(-8)}`,
@@ -655,11 +667,20 @@ function buildOrderData(
         customerPhone: shippingAddress?.phone || customer?.phone || shopifyOrder.phone || null,
         shippingAddress: shippingAddress ? JSON.stringify(shippingAddress) : null,
         customerState: shippingAddress?.province || null,
-        totalAmount: parseFloat(shopifyOrder.total_price) || 0,
+        totalAmount,
         orderDate: shopifyOrder.created_at ? new Date(shopifyOrder.created_at) : new Date(),
         internalNotes,
         paymentMethod,
+        paymentGateway: shopifyOrder.payment_gateway_names?.join(', ') || null,
         syncedAt: new Date(),
+        // Prepaid: customer already paid at checkout
+        ...(isPrepaid ? {
+            paymentStatus: 'paid',
+            paymentConfirmedAt: new Date(),
+            settledAt: new Date(),
+            settlementAmount: totalAmount,
+            settlementRef: `PREPAID-${orderNumber || shopifyOrderId}`,
+        } : {}),
     };
 }
 
@@ -828,10 +849,29 @@ async function createNewOrderWithLines(
         }
     }
 
-    // No automatic invoice creation at import time.
-    // Invoices are created only when payment is confirmed:
-    // - Prepaid: via backfill or explicit settlement
-    // - COD: when remittance CSV is uploaded (remittance.ts)
+    // Prepaid: payment confirmed at checkout → create + confirm invoice
+    // COD: invoice created when remittance CSV is uploaded (remittance.ts)
+    if (orderData.paymentMethod === 'Prepaid') {
+        deferredExecutor.enqueue(async () => {
+            try {
+                await generateDraftInvoice(prisma, newOrder.id);
+                const admin = await prisma.user.findFirst({ where: { role: 'admin' } });
+                if (admin) {
+                    await prisma.$transaction(async (tx) => {
+                        await settleOrderInvoice(tx, {
+                            orderId: newOrder.id,
+                            amount: orderData.totalAmount,
+                            userId: admin.id,
+                            settlementRef: `PREPAID-${orderData.orderNumber}`,
+                        });
+                    });
+                }
+            } catch (err: unknown) {
+                syncLogger.warn({ orderId: newOrder.id, error: err instanceof Error ? err.message : String(err) },
+                    'Failed to create prepaid invoice');
+            }
+        });
+    }
 
     // Update customer stats: increment orderCount and update tier
     if (orderData.customerId) {

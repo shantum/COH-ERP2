@@ -527,6 +527,11 @@ model Order {
   codShopifySyncError  String?
   codShopifySyncStatus String?
   codShopifySyncedAt   DateTime?
+  // Generic settlement (works for both COD and Prepaid)
+  settledAt            DateTime?          // When settlement confirmed (COD: remittance date, Prepaid: import time)
+  settlementAmount     Float?             // Amount settled
+  settlementRef        String?            // Reference (UTR, PayU settlementId, etc.)
+  paymentGateway       String?            // Gateway name from Shopify (e.g., "Credit Card/Debit Card/NetBanking/UPI")
   isExchange           Boolean            @default(false)
   originalOrderId      String?
   shipByDate           DateTime?
@@ -568,6 +573,7 @@ model Order {
   @@index([isArchived, releasedToShipped, orderDate])
   @@index([customerId, paymentStatus])
   @@index([paymentMethod, codRemittedAt])
+  @@index([paymentMethod, settledAt])
   @@index([channelOrderId])
 }
 

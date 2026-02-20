@@ -629,6 +629,10 @@ export type Order = {
     codShopifySyncError: string | null;
     codShopifySyncStatus: string | null;
     codShopifySyncedAt: Timestamp | null;
+    settledAt: Timestamp | null;
+    settlementAmount: number | null;
+    settlementRef: string | null;
+    paymentGateway: string | null;
     isExchange: Generated<boolean>;
     originalOrderId: string | null;
     shipByDate: Timestamp | null;

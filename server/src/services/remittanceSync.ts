@@ -263,6 +263,9 @@ async function matchOrdersForDetails(
                         codRemittedAmount: amount || null,
                         codShopifySyncStatus: syncStatus,
                         codShopifySyncError: syncError,
+                        settledAt: remittanceDate,
+                        settlementAmount: amount || null,
+                        settlementRef: `COD-REM-${detail.remittance_id}`,
                     },
                 });
 

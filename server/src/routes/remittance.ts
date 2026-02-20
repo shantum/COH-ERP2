@@ -290,6 +290,9 @@ router.post('/upload', upload.single('file'), asyncHandler(async (req: Request, 
                         codRemittedAmount: amount,
                         codShopifySyncStatus: syncStatus,
                         codShopifySyncError: syncError,
+                        settledAt: remittanceDate || new Date(),
+                        settlementAmount: amount,
+                        settlementRef: utr ? `COD-CSV-${utr}` : null,
                     }
                 });
 
