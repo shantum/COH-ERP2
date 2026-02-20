@@ -6,3 +6,4 @@ export * from './parties';
 export * from './bank';
 export * from './transactionTypes';
 export * from './autoMatch';
+export * from './channelReconciliation';

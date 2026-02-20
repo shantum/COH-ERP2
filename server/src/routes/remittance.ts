@@ -27,6 +27,7 @@ import multer from 'multer';
 import { parse } from 'csv-parse/sync';
 import shopifyClient from '../services/shopify.js';
 import remittanceSync from '../services/remittanceSync.js';
+import { settleOrderInvoice } from '../services/orderSettlement.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { ValidationError, NotFoundError, BusinessLogicError } from '../utils/errors.js';
 import { requireAdmin } from '../middleware/auth.js';
@@ -290,6 +291,16 @@ router.post('/upload', upload.single('file'), asyncHandler(async (req: Request, 
                 }
 
                 results.updated++;
+
+                // Settle order invoice (confirm draft, allocate if bank txn available)
+                if (req.user) {
+                    await settleOrderInvoice(tx, {
+                        orderId: order.id,
+                        amount: amount || order.totalAmount,
+                        userId: req.user.id,
+                        settlementRef: utr ? `COD-CSV-${utr}` : undefined,
+                    });
+                }
 
                 // Attempt Shopify sync if order has shopifyOrderId and not flagged for manual review
                 if (order.shopifyOrderId && syncStatus === 'pending') {

@@ -494,6 +494,7 @@ export type Invoice = {
     driveUploadedAt: Timestamp | null;
     ledgerEntryId: string | null;
     notes: string | null;
+    settlementBatchRef: string | null;
     createdById: string;
     createdAt: Generated<Timestamp>;
     updatedAt: Timestamp;

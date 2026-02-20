@@ -1928,7 +1928,8 @@ model Invoice {
   ledgerEntryId    String?   @unique
 
   // Tracking
-  notes            String?
+  notes               String?
+  settlementBatchRef   String?  // e.g. "RZPY-SET-abc123", "COD-REM-456"
   createdById      String
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt

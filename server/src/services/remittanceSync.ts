@@ -13,6 +13,7 @@
 import prisma from '../lib/prisma.js';
 import ithinkClient from './ithinkLogistics.js';
 import shopifyClient from './shopify.js';
+import { settleOrderInvoice } from './orderSettlement.js';
 import { remittanceLogger } from '../utils/logger.js';
 import { trackWorkerRun } from '../utils/workerRunTracker.js';
 import {
@@ -196,8 +197,13 @@ async function matchOrdersForDetails(
     remittanceDate: Date,
     result: SyncResult,
     shopifyReady: boolean,
+    bankTransactionId?: string | null,
 ): Promise<number> {
     let ordersProcessed = 0;
+
+    // Look up admin user for invoice settlement (critical rule: role = 'admin', lowercase)
+    const admin = await prisma.user.findFirst({ where: { role: 'admin' } });
+    const adminId = admin?.id;
 
     // Phase 1: Match orders in DB, collect Shopify-eligible ones
     interface ShopifyJob { orderId: string; shopifyOrderId: string; amount: number }
@@ -248,14 +254,29 @@ async function matchOrdersForDetails(
                 }
             }
 
-            const updated = await prisma.order.updateMany({
-                where: { id: order.id, codRemittedAt: null },
-                data: {
-                    codRemittedAt: remittanceDate,
-                    codRemittedAmount: amount || null,
-                    codShopifySyncStatus: syncStatus,
-                    codShopifySyncError: syncError,
-                },
+            // Wrap order update + invoice settlement in a transaction
+            const updated = await prisma.$transaction(async (tx) => {
+                const upd = await tx.order.updateMany({
+                    where: { id: order.id, codRemittedAt: null },
+                    data: {
+                        codRemittedAt: remittanceDate,
+                        codRemittedAmount: amount || null,
+                        codShopifySyncStatus: syncStatus,
+                        codShopifySyncError: syncError,
+                    },
+                });
+
+                if (upd.count > 0 && adminId) {
+                    await settleOrderInvoice(tx, {
+                        orderId: order.id,
+                        bankTransactionId: bankTransactionId ?? undefined,
+                        amount: amount || order.totalAmount,
+                        userId: adminId,
+                        settlementRef: `COD-REM-${detail.remittance_id}`,
+                    });
+                }
+
+                return upd;
             });
 
             if (updated.count === 0) {
@@ -513,6 +534,7 @@ async function runMatchUnprocessed(): Promise<SyncResult> {
 
                 const ordersProcessed = await matchOrdersForDetails(
                     details, record.remittanceDate, result, shopifyReady,
+                    record.bankTransactionId,
                 );
 
                 // Update the record with match results
