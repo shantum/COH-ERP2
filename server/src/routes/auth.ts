@@ -172,7 +172,7 @@ router.post(
         // Set auth token as HttpOnly cookie for Server Functions
         res.cookie('auth_token', token, {
             httpOnly: true,
-            secure: false, // TODO: re-enable after HTTPS setup on Hetzner
+            secure: process.env.NODE_ENV === 'production',
             sameSite: 'lax',
             maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
             path: '/',
