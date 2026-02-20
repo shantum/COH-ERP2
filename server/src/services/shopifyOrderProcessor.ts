@@ -34,7 +34,6 @@ import { detectPaymentMethod, extractInternalNote, calculateEffectiveUnitPrice }
 import { updateCustomerTier, incrementCustomerOrderCount } from '../utils/tierUtils.js';
 import { syncLogger } from '../utils/logger.js';
 import { recomputeOrderStatus } from '../utils/orderStatus.js';
-import { generateDraftInvoice } from './orderInvoiceGenerator.js';
 import { deferredExecutor } from './deferredExecutor.js';
 
 // ============================================
@@ -829,23 +828,10 @@ async function createNewOrderWithLines(
         }
     }
 
-    // Defer draft invoice generation for prepaid orders only
-    // COD orders get invoices when remittance is received (remittance.ts)
-    if (orderData.paymentMethod !== 'COD') {
-        deferredExecutor.enqueue(
-            async () => {
-                try {
-                    await generateDraftInvoice(prisma, newOrder.id);
-                } catch (err: unknown) {
-                    syncLogger.warn({
-                        orderId: newOrder.id,
-                        error: err instanceof Error ? err.message : 'Unknown error',
-                    }, 'Failed to generate draft invoice — can be retried via backfill');
-                }
-            },
-            { orderId: newOrder.id, action: 'generate_draft_invoice' },
-        );
-    }
+    // No automatic invoice creation at import time.
+    // Invoices are created only when payment is confirmed:
+    // - Prepaid: via backfill or explicit settlement
+    // - COD: when remittance CSV is uploaded (remittance.ts)
 
     // Update customer stats: increment orderCount and update tier
     if (orderData.customerId) {
