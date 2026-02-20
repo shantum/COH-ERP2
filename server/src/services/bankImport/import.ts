@@ -11,6 +11,7 @@ import { Prisma } from '@prisma/client';
 import prisma from '../../lib/prisma.js';
 import { createHash, randomUUID } from 'crypto';
 import fs from 'fs';
+import XLSX from 'xlsx';
 import { fetchActiveParties, categorizeSingleTxn } from './categorize.js';
 import { dateToPeriod } from '@coh/shared';
 
@@ -185,12 +186,82 @@ function parseRazorpayDate(dateStr: string): Date {
 }
 
 // ============================================
+// XLS/XLSX PARSER FOR HDFC
+// ============================================
+
+/**
+ * Parse HDFC XLS/XLSX into the same Record<string, string>[] format as CSV.
+ * HDFC XLS has header metadata rows, then a row like:
+ *   ["Date","Narration","Chq./Ref.No.","Value Dt","Withdrawal Amt.","Deposit Amt.","Closing Balance"]
+ * followed by asterisk separator, then data rows.
+ */
+function parseHdfcXls(filePath: string): Record<string, string>[] {
+  const wb = XLSX.readFile(filePath);
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const allRows = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1 });
+
+  // Find header row by looking for "Date" + "Narration"
+  let headerIdx = -1;
+  for (let i = 0; i < allRows.length; i++) {
+    const row = allRows[i];
+    if (
+      Array.isArray(row) &&
+      row.length >= 5 &&
+      String(row[0]).trim().toLowerCase() === 'date' &&
+      String(row[1]).trim().toLowerCase() === 'narration'
+    ) {
+      headerIdx = i;
+      break;
+    }
+  }
+
+  if (headerIdx === -1) return [];
+
+  // Map XLS column names to our normalized keys
+  const xlsHeaders = (allRows[headerIdx] as unknown[]).map(h => String(h ?? '').trim());
+  const keyMap: Record<string, string> = {
+    'date': 'date',
+    'narration': 'narration',
+    'chq./ref.no.': 'ref',
+    'value dt': 'value_dt',
+    'withdrawal amt.': 'withdrawal',
+    'deposit amt.': 'deposit',
+    'closing balance': 'closing_balance',
+  };
+
+  const results: Record<string, string>[] = [];
+
+  // Data rows start after header; skip asterisk separator rows
+  for (let i = headerIdx + 1; i < allRows.length; i++) {
+    const row = allRows[i];
+    if (!Array.isArray(row) || row.length < 5) continue;
+
+    const firstCell = String(row[0] ?? '').trim();
+    // Skip separator rows (asterisks), empty rows, and footer text
+    if (!firstCell || firstCell.startsWith('*') || firstCell.startsWith('---') || firstCell.startsWith('Registered')) continue;
+    // Must look like a date (DD/MM/YY)
+    if (!/^\d{2}\/\d{2}\/\d{2,4}$/.test(firstCell)) continue;
+
+    const record: Record<string, string> = {};
+    for (let c = 0; c < xlsHeaders.length; c++) {
+      const normalizedKey = keyMap[xlsHeaders[c].toLowerCase()] || xlsHeaders[c].toLowerCase();
+      const val = row[c];
+      record[normalizedKey] = val == null ? '' : String(val);
+    }
+    results.push(record);
+  }
+
+  return results;
+}
+
+// ============================================
 // PURE PARSING FUNCTIONS (no DB writes)
 // ============================================
 
-/** Parse HDFC CSV into RawRow array — pure, no DB access */
+/** Parse HDFC CSV/XLS/XLSX into RawRow array — pure, no DB access */
 export function parseHdfcRows(filePath: string): RawRow[] {
-  const rows = parseCSV(filePath);
+  const ext = filePath.split('.').pop()?.toLowerCase();
+  const rows = (ext === 'xls' || ext === 'xlsx') ? parseHdfcXls(filePath) : parseCSV(filePath);
   const parsed: RawRow[] = [];
 
   for (const row of rows) {

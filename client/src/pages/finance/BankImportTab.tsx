@@ -498,7 +498,7 @@ function BankTransactionList({ search, updateSearch }: {
                       <p>{search.search || bank || status || search.dateFrom ? 'No transactions match your filters' : 'No bank transactions yet'}</p>
                       {!(search.search || bank || status || search.dateFrom) && (
                         <Button variant="outline" size="sm" onClick={() => updateSearch({ bankView: 'import' })} className="mt-2">
-                          <Upload className="h-3.5 w-3.5 mr-1" /> Import Bank CSV
+                          <Upload className="h-3.5 w-3.5 mr-1" /> Import Bank Statement
                         </Button>
                       )}
                     </div>
@@ -781,14 +781,14 @@ function BankImportView({ onBack }: { onBack: () => void }) {
             <label className="flex-1 border-2 border-dashed rounded-lg p-4 text-center cursor-pointer hover:bg-muted/30 transition-colors">
               <input
                 type="file"
-                accept=".csv"
+                accept=".csv,.xls,.xlsx"
                 className="hidden"
                 onChange={(e) => setFile(e.target.files?.[0] ?? null)}
               />
               {file ? (
                 <span className="text-sm">{file.name} ({(file.size / 1024).toFixed(0)} KB)</span>
               ) : (
-                <span className="text-sm text-muted-foreground">Click to select CSV file</span>
+                <span className="text-sm text-muted-foreground">Click to select CSV, XLS, or XLSX file</span>
               )}
             </label>
           </div>
