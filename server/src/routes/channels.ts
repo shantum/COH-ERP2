@@ -21,9 +21,7 @@ import { parse } from 'fast-csv';
 import multer from 'multer';
 import { Readable } from 'stream';
 import { randomUUID } from 'crypto';
-import { pushERPOrderToSheet, updateSheetChannelDetails } from '../services/sheetOrderPush.js';
-import { readRange } from '../services/googleSheetsClient.js';
-import { ORDERS_MASTERSHEET_ID, MASTERSHEET_TABS } from '../config/sync/sheets.js';
+import { batchPushOrdersToSheet, updateSheetChannelDetails } from '../services/sheetOrderPush.js';
 import { recomputeOrderStatus } from '../utils/orderStatus.js';
 import { deferredExecutor } from '../services/deferredExecutor.js';
 import prisma from '../lib/prisma.js';
@@ -1087,40 +1085,25 @@ router.post('/execute-import', authenticateToken, async (req: Request, res: Resp
         }))
     );
 
-    // ---- Deferred: Sheet pushes (sequential, rate-limited) ----
+    // ---- Inline: Batched sheet push (single API call) ----
+    let sheetResult: { pushed: number; failed: number; errors: string[] } | null = null;
     if (processingOrders.length > 0) {
-      const ordersToPush = [...processingOrders];
-      deferredExecutor.enqueue(async () => {
-        try {
-          const sheetRange = `'${MASTERSHEET_TABS.ORDERS_FROM_COH}'!B:B`;
-          const sheetRows = await readRange(ORDERS_MASTERSHEET_ID, sheetRange);
-          const sheetOrderNums = new Set<string>();
-          for (const row of sheetRows) {
-            const val = String(row[0] ?? '').trim();
-            if (val) sheetOrderNums.add(val);
-          }
-
-          const toPush = ordersToPush.filter(o => {
-            const ref = o.orderNumber;
-            if (sheetOrderNums.has(ref)) return false;
-            if (ref.includes('-') && ref.length > 20) {
-              const short = ref.split('-')[0];
-              if (sheetOrderNums.has(short)) return false;
-            }
-            if (ref.endsWith('--1')) {
-              const trimmed = ref.slice(0, -3);
-              if (sheetOrderNums.has(trimmed)) return false;
-            }
-            return true;
-          });
-
-          for (const order of toPush) {
-            await pushERPOrderToSheet(order.id); // sequential, rate-limited
-          }
-        } catch (err) {
-          console.error('Deferred sheet push failed:', err);
-        }
-      }, { action: 'channel_sheet_push' });
+      sendProgress({ type: 'sheet_sync', status: 'started', total: processingOrders.length });
+      try {
+        const batchResult = await batchPushOrdersToSheet(processingOrders.map(o => o.id));
+        sheetResult = { pushed: batchResult.pushed + batchResult.alreadyOnSheet, failed: batchResult.failed, errors: batchResult.errors };
+        sendProgress({
+          type: 'sheet_sync',
+          status: batchResult.failed > 0 ? 'partial' : 'done',
+          pushed: sheetResult.pushed,
+          failed: batchResult.failed,
+          total: processingOrders.length,
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Sheet sync failed';
+        sheetResult = { pushed: 0, failed: processingOrders.length, errors: [msg] };
+        sendProgress({ type: 'sheet_sync', status: 'failed', error: msg });
+      }
     }
 
     // ---- Deferred: Sheet detail updates (runs after pushes — FIFO) ----
@@ -1170,6 +1153,7 @@ router.post('/execute-import', authenticateToken, async (req: Request, res: Resp
       ordersCreated,
       ordersUpdated,
       errors: errors.slice(0, 20),
+      ...(sheetResult ? { sheetSync: sheetResult } : {}),
     });
     res.end();
   } catch (error) {

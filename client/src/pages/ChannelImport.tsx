@@ -11,7 +11,6 @@ import {
   AlertCircle,
   ArrowRight,
   X,
-  RefreshCw,
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
@@ -77,6 +76,7 @@ interface ExecuteResult {
   ordersCreated: number;
   ordersUpdated: number;
   errors: Array<{ order: string; error: string }>;
+  sheetSync?: SheetSyncResult;
 }
 
 interface ImportBatch {
@@ -146,19 +146,36 @@ interface ProgressEvent {
   errors: number;
 }
 
+interface SheetSyncEvent {
+  type: 'sheet_sync';
+  status: 'started' | 'done' | 'partial' | 'failed';
+  pushed?: number;
+  failed?: number;
+  total?: number;
+  error?: string;
+}
+
+interface SheetSyncResult {
+  pushed: number;
+  failed: number;
+  errors: string[];
+}
+
 interface CompleteEvent {
   type: 'complete';
   batchId: string;
   ordersCreated: number;
   ordersUpdated: number;
   errors: Array<{ order: string; error: string }>;
+  sheetSync?: SheetSyncResult;
 }
 
-type SSEEvent = ProgressEvent | CompleteEvent;
+type SSEEvent = ProgressEvent | SheetSyncEvent | CompleteEvent;
 
 async function executeImportStreaming(
   data: { selectedOrders: PreviewOrder[]; cacheKey: string; filename: string },
   onProgress: (event: ProgressEvent) => void,
+  onSheetSync?: (event: SheetSyncEvent) => void,
 ): Promise<ExecuteResult> {
   const res = await fetch('/api/channels/execute-import', {
     method: 'POST',
@@ -194,11 +211,14 @@ async function executeImportStreaming(
         const event = JSON.parse(json) as SSEEvent;
         if (event.type === 'progress') {
           onProgress(event);
+        } else if (event.type === 'sheet_sync') {
+          onSheetSync?.(event);
         } else if (event.type === 'complete') {
           result = {
             ordersCreated: event.ordersCreated,
             ordersUpdated: event.ordersUpdated,
             errors: event.errors,
+            sheetSync: event.sheetSync,
           };
         }
       } catch { /* skip malformed events */ }
@@ -277,6 +297,7 @@ export default function ChannelImport() {
 
   // Execute — uses streaming, not a simple mutation
   const [executeError, setExecuteError] = useState<string | null>(null);
+  const [sheetSyncStatus, setSheetSyncStatus] = useState<SheetSyncEvent | null>(null);
 
   // ============================================
   // FILE HANDLERS
@@ -319,6 +340,7 @@ export default function ChannelImport() {
     setPageState('importing');
     setImportProgress(null);
     setExecuteError(null);
+    setSheetSyncStatus(null);
     try {
       const result = await executeImportStreaming(
         {
@@ -327,6 +349,7 @@ export default function ChannelImport() {
           filename: selectedFile?.name || 'import.csv',
         },
         (progress) => setImportProgress(progress),
+        (sheetEvent) => setSheetSyncStatus(sheetEvent),
       );
       setExecuteResult(result);
       setPageState('complete');
@@ -346,6 +369,7 @@ export default function ChannelImport() {
     setExecuteResult(null);
     setImportProgress(null);
     setExecuteError(null);
+    setSheetSyncStatus(null);
     previewMutation.reset();
   }, [previewMutation]);
 
@@ -709,24 +733,34 @@ export default function ChannelImport() {
           </div>
 
           {/* Progress Bar */}
-          {pageState === 'importing' && importProgress && (
+          {pageState === 'importing' && (
             <Card className="border-blue-200">
-              <CardContent className="py-4">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm font-medium">
-                    Creating orders in database: {importProgress.completed} / {importProgress.total}
-                  </span>
-                  <span className="text-xs text-muted-foreground">
-                    {importProgress.created} created, {importProgress.updated} updated
-                    {importProgress.errors > 0 && `, ${importProgress.errors} errors`}
-                  </span>
-                </div>
-                <div className="w-full bg-gray-200 rounded-full h-2">
-                  <div
-                    className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-                    style={{ width: `${importProgress.total > 0 ? (importProgress.completed / importProgress.total) * 100 : 0}%` }}
-                  />
-                </div>
+              <CardContent className="py-4 space-y-3">
+                {importProgress && (
+                  <>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-medium">
+                        Creating orders: {importProgress.completed} / {importProgress.total}
+                      </span>
+                      <span className="text-xs text-muted-foreground">
+                        {importProgress.created} created, {importProgress.updated} updated
+                        {importProgress.errors > 0 && `, ${importProgress.errors} errors`}
+                      </span>
+                    </div>
+                    <div className="w-full bg-gray-200 rounded-full h-2">
+                      <div
+                        className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                        style={{ width: `${importProgress.total > 0 ? (importProgress.completed / importProgress.total) * 100 : 0}%` }}
+                      />
+                    </div>
+                  </>
+                )}
+                {sheetSyncStatus?.status === 'started' && (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Pushing {sheetSyncStatus.total} order{sheetSyncStatus.total !== 1 ? 's' : ''} to Google Sheet...
+                  </div>
+                )}
               </CardContent>
             </Card>
           )}
@@ -784,14 +818,27 @@ export default function ChannelImport() {
                 <p className="text-xl font-semibold text-blue-700">{executeResult.ordersUpdated}</p>
               </div>
             </div>
-            <div className="mt-4 flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2.5 text-sm text-blue-700">
-              <span className="relative flex h-2.5 w-2.5 shrink-0">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-400 opacity-75" />
-                <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-blue-500" />
-              </span>
-              <RefreshCw className="h-4 w-4 shrink-0" />
-              <span>Syncing orders to Google Sheet in the background...</span>
-            </div>
+            {executeResult.sheetSync && (
+              <div className={`mt-4 flex items-center gap-2 rounded-md border px-3 py-2.5 text-sm ${
+                executeResult.sheetSync.failed > 0
+                  ? 'border-amber-200 bg-amber-50 text-amber-700'
+                  : 'border-green-200 bg-green-50 text-green-700'
+              }`}>
+                {executeResult.sheetSync.failed > 0 ? (
+                  <AlertCircle className="h-4 w-4 shrink-0" />
+                ) : (
+                  <CheckCircle className="h-4 w-4 shrink-0" />
+                )}
+                <span>
+                  {executeResult.sheetSync.pushed > 0 && executeResult.sheetSync.failed === 0
+                    ? `${executeResult.sheetSync.pushed} order${executeResult.sheetSync.pushed !== 1 ? 's' : ''} synced to Google Sheet`
+                    : executeResult.sheetSync.pushed > 0
+                      ? `${executeResult.sheetSync.pushed} of ${executeResult.sheetSync.pushed + executeResult.sheetSync.failed} orders synced to Google Sheet (${executeResult.sheetSync.failed} failed)`
+                      : `Sheet sync failed: ${executeResult.sheetSync.errors[0] || 'unknown error'}`
+                  }
+                </span>
+              </div>
+            )}
             {executeResult.errors.length > 0 && (
               <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
                 <p className="text-sm font-medium text-amber-700">

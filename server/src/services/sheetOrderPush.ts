@@ -278,6 +278,166 @@ export async function pushERPOrderToSheet(orderId: string): Promise<void> {
 }
 
 // ============================================
+// BATCH PUSH (for channel import)
+// ============================================
+
+export interface BatchPushResult {
+    pushed: number;
+    alreadyOnSheet: number;
+    failed: number;
+    errors: string[];
+}
+
+/**
+ * Push multiple ERP orders to the sheet in a single batched API call.
+ * Used by channel import for inline (non-deferred) sheet push.
+ *
+ * Steps:
+ * 1. Single DB query for all orders + lines
+ * 2. Single readRange for dedup (column B)
+ * 3. Build all rows in memory
+ * 4. Single appendRows call
+ * 5. Single addBottomBorders call
+ * 6. Single updateMany to stamp sheetPushedAt
+ */
+export async function batchPushOrdersToSheet(orderIds: string[]): Promise<BatchPushResult> {
+    const result: BatchPushResult = { pushed: 0, alreadyOnSheet: 0, failed: 0, errors: [] };
+    if (orderIds.length === 0) return result;
+
+    try {
+        // 1. Single DB query — fetch all orders + lines
+        const orders = await prisma.order.findMany({
+            where: { id: { in: orderIds } },
+            include: {
+                orderLines: {
+                    include: { sku: { select: { skuCode: true } } },
+                },
+            },
+        });
+
+        if (orders.length === 0) {
+            result.errors.push('No orders found for given IDs');
+            return result;
+        }
+
+        // 2. Single readRange — read column B for dedup
+        const tab = MASTERSHEET_TABS.ORDERS_FROM_COH;
+        const sheetRows = await readRange(ORDERS_MASTERSHEET_ID, `'${tab}'!B:B`);
+        const sheetOrderNumbers = new Set<string>();
+        for (let i = 1; i < sheetRows.length; i++) {
+            const orderNo = String(sheetRows[i]?.[0] ?? '').trim();
+            if (orderNo) sheetOrderNumbers.add(orderNo);
+        }
+
+        // Separate orders into "needs push" vs "already on sheet"
+        const toPush: typeof orders = [];
+        const alreadyOnSheetIds: string[] = [];
+
+        for (const order of orders) {
+            const ref = order.orderNumber;
+            let onSheet = sheetOrderNumbers.has(ref);
+            if (!onSheet && ref.includes('-') && ref.length > 20) {
+                onSheet = sheetOrderNumbers.has(ref.split('-')[0]);
+            }
+            if (!onSheet && ref.endsWith('--1')) {
+                onSheet = sheetOrderNumbers.has(ref.slice(0, -3));
+            }
+
+            if (onSheet) {
+                alreadyOnSheetIds.push(order.id);
+                result.alreadyOnSheet++;
+            } else if (order.orderLines.length > 0) {
+                toPush.push(order);
+            }
+        }
+
+        // Stamp orders already on sheet (just mark DB, no sheet write)
+        if (alreadyOnSheetIds.length > 0) {
+            await prisma.order.updateMany({
+                where: { id: { in: alreadyOnSheetIds } },
+                data: { sheetPushedAt: new Date() },
+            });
+        }
+
+        if (toPush.length === 0) {
+            log.info({ total: orderIds.length, alreadyOnSheet: result.alreadyOnSheet }, 'Batch push: all orders already on sheet');
+            return result;
+        }
+
+        // 3. Build ALL rows for ALL orders in memory
+        const allRows: (string | number)[][] = [];
+        // Track where each order's last row lands (for borders)
+        const borderOffsets: number[] = []; // offsets within allRows where each order ends
+
+        for (const order of toPush) {
+            let city = '';
+            if (order.shippingAddress) {
+                try {
+                    const addr = JSON.parse(order.shippingAddress);
+                    city = addr.city ?? '';
+                } catch { /* not JSON */ }
+            }
+
+            const orderDate = formatDate(order.orderDate.toISOString());
+
+            for (const line of order.orderLines) {
+                const row: (string | number)[] = new Array(TOTAL_COLS).fill('');
+                row[0] = orderDate;
+                row[1] = order.orderNumber;
+                row[2] = order.customerName;
+                row[3] = city;
+                row[4] = order.customerPhone ?? '';
+                row[5] = order.channel;
+                row[6] = line.sku.skuCode;
+                row[8] = line.qty;
+                row[10] = order.internalNotes ?? '';
+                if (order.shipByDate) {
+                    row[11] = `SHIP BY ${order.shipByDate.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' })}`;
+                }
+                row[24] = buildDisplayStatus(order.channel, line.lineStatus, line.trackingStatus);
+                row[25] = line.courier ?? '';
+                row[26] = line.awbNumber ?? '';
+                allRows.push(row);
+            }
+
+            // Last row of this order
+            borderOffsets.push(allRows.length - 1);
+        }
+
+        // 4. Single appendRows call
+        const range = `'${tab}'!A:AD`;
+        const startRow = await appendRows(ORDERS_MASTERSHEET_ID, range, allRows);
+
+        // 5. Single addBottomBorders call
+        if (startRow >= 0 && borderOffsets.length > 0) {
+            const sheetId = await getSheetId(ORDERS_MASTERSHEET_ID, tab);
+            const borderRowIndices = borderOffsets.map(offset => startRow + offset);
+            await addBottomBorders(ORDERS_MASTERSHEET_ID, sheetId, borderRowIndices);
+        }
+
+        // 6. Single updateMany to stamp sheetPushedAt
+        const pushedIds = toPush.map(o => o.id);
+        await prisma.order.updateMany({
+            where: { id: { in: pushedIds } },
+            data: { sheetPushedAt: new Date() },
+        });
+
+        result.pushed = toPush.length;
+        log.info(
+            { pushed: result.pushed, alreadyOnSheet: result.alreadyOnSheet, totalRows: allRows.length },
+            'Batch pushed orders to Orders from COH sheet'
+        );
+    } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        result.failed = orderIds.length - result.alreadyOnSheet;
+        result.errors.push(message);
+        log.error({ err: message, orderCount: orderIds.length }, 'Batch push to sheet failed');
+    }
+
+    return result;
+}
+
+// ============================================
 // RECONCILER
 // ============================================
 
