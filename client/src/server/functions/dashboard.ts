@@ -457,7 +457,7 @@ export const getTopMaterials = createServerFn({ method: 'GET' })
             const endDate = days === -1 ? getISTMidnightAsUTC(0) : null;
 
             // Import queries
-            const { getTopMaterialsKysely, getTopFabricColoursKysely } = await import('@coh/shared/services/db/queries');
+            const { getTopMaterialsKysely, getTopFabricsKysely, getTopFabricColoursKysely } = await import('@coh/shared/services/db/queries');
 
             if (level === 'colour') {
                 const colours = await getTopFabricColoursKysely(startDate, endDate, limit);
@@ -481,11 +481,31 @@ export const getTopMaterials = createServerFn({ method: 'GET' })
                 return result;
             }
 
-            // Material level (fabric level uses same query for now)
+            if (level === 'fabric') {
+                const fabrics = await getTopFabricsKysely(startDate, endDate, limit);
+                const result: DashboardTopMaterialsResponse = {
+                    success: true,
+                    level: 'fabric',
+                    days,
+                    data: fabrics.map((f) => ({
+                        id: f.id,
+                        name: f.name,
+                        materialName: f.materialName,
+                        units: f.units,
+                        revenue: f.revenue,
+                        orderCount: f.orderCount,
+                        productCount: f.productCount,
+                    })),
+                };
+                cache.set(cacheKey, result);
+                return result;
+            }
+
+            // Material level
             const materials = await getTopMaterialsKysely(startDate, endDate, limit);
             const result: DashboardTopMaterialsResponse = {
                 success: true,
-                level: level as 'material' | 'fabric',
+                level: 'material',
                 days,
                 data: materials.map((m) => ({
                     id: m.id,

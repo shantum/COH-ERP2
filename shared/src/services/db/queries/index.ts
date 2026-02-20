@@ -34,6 +34,7 @@ export {
     getTopVariationsKysely,
     getTopCustomersKysely,
     getTopMaterialsKysely,
+    getTopFabricsKysely,
     getTopFabricColoursKysely,
     getDashboardAnalytics,
     // Sales analytics breakdown queries

@@ -23,13 +23,13 @@ const TIME_PERIODS = [
 ];
 
 const LEVELS = [
-    { value: 'material', label: 'Material', icon: Layers },
+    { value: 'fabric', label: 'Fabric', icon: Layers },
     { value: 'colour', label: 'Colour', icon: Palette },
 ] as const;
 
 export function TopFabricsCard() {
     const [days, setDays] = useState(0);
-    const [level, setLevel] = useState<'material' | 'colour'>('material');
+    const [level, setLevel] = useState<'fabric' | 'colour'>('colour');
 
     const { data, isLoading, error, refetch } = useQuery({
         queryKey: ['dashboard', 'topMaterials', days, level],
@@ -145,12 +145,10 @@ export function TopFabricsCard() {
                                     <span>{item.productCount} products</span>
                                     <span>·</span>
                                     <span>{item.orderCount} orders</span>
-                                    {level === 'material' && item.topColours && item.topColours.length > 0 && (
+                                    {level === 'fabric' && item.materialName && (
                                         <>
-                                            <span className="hidden sm:inline">·</span>
-                                            <span className="truncate hidden sm:inline text-purple-400">
-                                                {item.topColours.slice(0, 2).join(', ')}
-                                            </span>
+                                            <span>·</span>
+                                            <span className="text-purple-400">{item.materialName}</span>
                                         </>
                                     )}
                                 </div>

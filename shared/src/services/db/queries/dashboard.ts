@@ -513,6 +513,63 @@ export async function getTopMaterialsKysely(
 }
 
 /**
+ * Get top fabrics by revenue (mid-tier: e.g. "Linen 60 Lea")
+ */
+export async function getTopFabricsKysely(
+    startDate: Date,
+    endDate: Date | null,
+    limit = 15
+): Promise<Array<TopMaterialData & { materialName: string }>> {
+    const db = await getKysely();
+    const { sql } = await import('kysely');
+
+    let query = db
+        .selectFrom('OrderLine')
+        .innerJoin('Order', 'Order.id', 'OrderLine.orderId')
+        .innerJoin('Sku', 'Sku.id', 'OrderLine.skuId')
+        .innerJoin('Variation', 'Variation.id', 'Sku.variationId')
+        .innerJoin('VariationBomLine', (join) =>
+            join
+                .onRef('VariationBomLine.variationId', '=', 'Variation.id')
+                .on('VariationBomLine.fabricColourId', 'is not', null)
+        )
+        .innerJoin('FabricColour', 'FabricColour.id', 'VariationBomLine.fabricColourId')
+        .innerJoin('Fabric', 'Fabric.id', 'FabricColour.fabricId')
+        .innerJoin('Material', 'Material.id', 'Fabric.materialId')
+        .select([
+            'Fabric.id',
+            'Fabric.name',
+            'Material.name as materialName',
+            sql<number>`SUM("OrderLine"."qty")::int`.as('units'),
+            sql<number>`SUM("OrderLine"."qty" * "OrderLine"."unitPrice")::numeric`.as('revenue'),
+            sql<number>`COUNT(DISTINCT "OrderLine"."orderId")::int`.as('orderCount'),
+            sql<number>`COUNT(DISTINCT "Variation"."productId")::int`.as('productCount'),
+        ])
+        .where('Order.orderDate', '>=', startDate)
+        .where('OrderLine.lineStatus', '!=', 'cancelled');
+
+    if (endDate) {
+        query = query.where('Order.orderDate', '<', endDate);
+    }
+
+    const rows = await query
+        .groupBy(['Fabric.id', 'Fabric.name', 'Material.name'])
+        .orderBy(sql`SUM("OrderLine"."qty" * "OrderLine"."unitPrice")`, 'desc')
+        .limit(limit)
+        .execute();
+
+    return rows.map((r) => ({
+        id: r.id,
+        name: r.name,
+        materialName: r.materialName,
+        units: r.units ?? 0,
+        revenue: Number(r.revenue ?? 0),
+        orderCount: r.orderCount ?? 0,
+        productCount: r.productCount ?? 0,
+    }));
+}
+
+/**
  * Get top fabric colours by revenue
  */
 export async function getTopFabricColoursKysely(
