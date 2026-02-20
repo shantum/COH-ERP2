@@ -281,11 +281,11 @@ export const applyAutoMatches = createServerFn({ method: 'POST' })
     const [txnsData, invoicesData] = await Promise.all([
       prisma.bankTransaction.findMany({
         where: { id: { in: txnIds } },
-        select: { id: true, unmatchedAmount: true, matchedAmount: true, status: true },
+        select: { id: true, unmatchedAmount: true, matchedAmount: true, status: true, notes: true },
       }),
       prisma.invoice.findMany({
         where: { id: { in: invoiceIds } },
-        select: { id: true, balanceDue: true, paidAmount: true, status: true, invoiceNumber: true },
+        select: { id: true, balanceDue: true, paidAmount: true, status: true, invoiceNumber: true, notes: true },
       }),
     ]);
 
@@ -342,6 +342,15 @@ export const applyAutoMatches = createServerFn({ method: 'POST' })
           where: { id: match.invoiceId },
           data: { paidAmount: newInvoicePaid, balanceDue: Math.max(0, newInvoiceBalance), status: newStatus },
         });
+
+        // Inherit invoice notes to bank txn if bank txn has no notes
+        if (!txn.notes && invoice.notes) {
+          await tx.bankTransaction.update({
+            where: { id: match.bankTransactionId },
+            data: { notes: invoice.notes },
+          });
+          txn.notes = invoice.notes;
+        }
 
         invoice.paidAmount = newInvoicePaid;
         invoice.balanceDue = Math.max(0, newInvoiceBalance);

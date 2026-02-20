@@ -279,6 +279,19 @@ export default function PaymentsTab({ search }: { search: FinanceSearchParams })
                           notes={pmt.notes}
                           onSaved={() => queryClient.invalidateQueries({ queryKey: ['finance', 'payments'] })}
                         />
+                        {(() => {
+                          if (pmt.notes) return null;
+                          const invoiceNotes = pmt.allocations
+                            ?.map((a: { invoice: { notes?: string | null } }) => a.invoice?.notes)
+                            .filter(Boolean)
+                            .join('; ');
+                          if (!invoiceNotes) return null;
+                          return (
+                            <div className="text-[10px] text-blue-500/70 italic truncate mt-0.5" title={invoiceNotes}>
+                              via invoice: {invoiceNotes}
+                            </div>
+                          );
+                        })()}
                       </td>
                       <td className="p-3 text-right font-mono whitespace-nowrap">{formatCurrency(pmt.amount)}</td>
                       <td className="p-3">

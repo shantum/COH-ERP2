@@ -100,6 +100,7 @@ export const listPayments = createServerFn({ method: 'POST' })
                   invoiceDate: true,
                   billingPeriod: true,
                   driveUrl: true,
+                  notes: true,
                 },
               },
             },
@@ -154,8 +155,8 @@ export const matchPaymentToInvoice = createServerFn({ method: 'POST' })
     return prisma.$transaction(async (tx) => {
       // Read fresh state INSIDE transaction to prevent TOCTOU race
       const [bankTxn, invoice] = await Promise.all([
-        tx.bankTransaction.findUnique({ where: { id: data.bankTransactionId }, select: { id: true, unmatchedAmount: true, status: true } }),
-        tx.invoice.findUnique({ where: { id: data.invoiceId }, select: { id: true, balanceDue: true, paidAmount: true, status: true } }),
+        tx.bankTransaction.findUnique({ where: { id: data.bankTransactionId }, select: { id: true, unmatchedAmount: true, status: true, notes: true } }),
+        tx.invoice.findUnique({ where: { id: data.invoiceId }, select: { id: true, balanceDue: true, paidAmount: true, status: true, notes: true } }),
       ]);
 
       if (!bankTxn) throw new Error('Bank transaction not found');
@@ -185,6 +186,14 @@ export const matchPaymentToInvoice = createServerFn({ method: 'POST' })
         where: { id: data.invoiceId },
         data: { paidAmount: { increment: data.amount }, balanceDue: { decrement: data.amount }, status: newStatus },
       });
+
+      // Inherit invoice notes to bank txn if bank txn has no notes
+      if (!bankTxn.notes && invoice.notes) {
+        await tx.bankTransaction.update({
+          where: { id: data.bankTransactionId },
+          data: { notes: invoice.notes },
+        });
+      }
 
       return { success: true as const };
     }).catch((error: unknown) => {

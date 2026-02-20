@@ -6,7 +6,7 @@ import { useNavigate } from '@tanstack/react-router';
 import { useDebounce } from '../../hooks/useDebounce';
 import {
   listInvoices, confirmInvoice, cancelInvoice, createInvoice, updateInvoice,
-  updateInvoiceDueDate, findUnmatchedPayments,
+  updateInvoiceDueDate, updateInvoiceNotes, findUnmatchedPayments,
 } from '../../server/functions/finance';
 import { formatCurrency, formatStatus, StatusBadge, Pagination, LoadingState, downloadCsv } from './shared';
 import { Button } from '@/components/ui/button';
@@ -27,6 +27,67 @@ import {
   INVOICE_CATEGORIES, INVOICE_STATUSES,
   getCategoryLabel,
 } from '@coh/shared';
+
+// ============================================
+// INLINE INVOICE NOTES
+// ============================================
+
+function InlineInvoiceNotes({ invoiceId, notes, onSaved }: { invoiceId: string; notes: string | null; onSaved: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(notes ?? '');
+  const [saving, setSaving] = useState(false);
+  const updateFn = useServerFn(updateInvoiceNotes);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const save = async () => {
+    const trimmed = value.trim();
+    if (trimmed === (notes ?? '')) { setEditing(false); return; }
+    setSaving(true);
+    try {
+      const result = await updateFn({ data: { id: invoiceId, notes: trimmed || null } });
+      if (result?.success) {
+        onSaved();
+      } else {
+        showError('Failed to save note');
+        setValue(notes ?? '');
+      }
+    } catch {
+      showError('Failed to save note');
+      setValue(notes ?? '');
+    } finally {
+      setSaving(false);
+      setEditing(false);
+    }
+  };
+
+  if (editing) {
+    return (
+      <input
+        ref={inputRef}
+        className="w-full text-[11px] border-b border-blue-300 bg-transparent outline-none py-0.5 text-muted-foreground"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onBlur={save}
+        onKeyDown={(e) => { if (e.key === 'Enter') save(); if (e.key === 'Escape') setEditing(false); }}
+        placeholder="Add note..."
+        autoFocus
+        disabled={saving}
+      />
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      className={`text-[11px] text-left w-full truncate flex items-center gap-1 group ${notes ? 'text-muted-foreground' : 'text-muted-foreground/50 italic'} hover:text-foreground`}
+      onClick={() => { setEditing(true); setValue(notes ?? ''); }}
+      title={notes || 'Click to add note'}
+    >
+      <span className="truncate">{notes || 'Add note...'}</span>
+      <Pencil className="h-2.5 w-2.5 shrink-0 opacity-0 group-hover:opacity-50" />
+    </button>
+  );
+}
 
 export default function InvoicesTab({ search: rawSearch }: { search: FinanceSearchParams }) {
   // Default to payable if no type selected
@@ -407,7 +468,7 @@ export default function InvoicesTab({ search: rawSearch }: { search: FinanceSear
             onClick={() => {
               if (!data?.invoices?.length) return;
               const rows: string[][] = [
-                ['Date Added', 'Invoice #', 'Type', 'Category', 'Party', 'Total', 'Balance Due', 'TDS', 'Status', 'Invoice Date', 'Billing Period', 'Due Date'],
+                ['Date Added', 'Invoice #', 'Type', 'Category', 'Party', 'Notes', 'Total', 'Balance Due', 'TDS', 'Status', 'Invoice Date', 'Billing Period', 'Due Date'],
               ];
               for (const inv of data.invoices) {
                 rows.push([
@@ -416,6 +477,7 @@ export default function InvoicesTab({ search: rawSearch }: { search: FinanceSear
                   inv.type,
                   inv.category,
                   inv.party?.name ?? '',
+                  inv.notes ?? '',
                   String(inv.totalAmount),
                   String(inv.balanceDue),
                   String(inv.tdsAmount ?? 0),
@@ -471,6 +533,7 @@ export default function InvoicesTab({ search: rawSearch }: { search: FinanceSear
                     <span className="inline-flex items-center">Date Added<SortIcon col="createdAt" /></span>
                   </th>
                   <th className="text-left p-3 font-medium">Party</th>
+                  <th className="text-left p-3 font-medium max-w-[180px]">Notes</th>
                   <th className="text-left p-3 font-medium">Category</th>
                   <th className="text-left p-3 font-medium">Invoice #</th>
                   <th className="text-left p-3 font-medium cursor-pointer select-none hover:text-blue-600" onClick={() => toggleSort('invoiceDate')}>
@@ -517,6 +580,17 @@ export default function InvoicesTab({ search: rawSearch }: { search: FinanceSear
                       {inv.party?.name ??
                         (inv.customer ? [inv.customer.firstName, inv.customer.lastName].filter(Boolean).join(' ') || inv.customer.email : null) ??
                         '—'}
+                    </td>
+                    <td className="p-3 max-w-[180px]" onClick={(e) => e.stopPropagation()}>
+                      {inv.status !== 'cancelled' ? (
+                        <InlineInvoiceNotes
+                          invoiceId={inv.id}
+                          notes={inv.notes}
+                          onSaved={() => queryClient.invalidateQueries({ queryKey: ['finance'] })}
+                        />
+                      ) : (
+                        <span className="text-[11px] text-muted-foreground truncate block">{inv.notes || '—'}</span>
+                      )}
                     </td>
                     <td className="p-3 text-xs">{getCategoryLabel(inv.category)}</td>
                     <td className="p-3 font-mono text-xs">{inv.invoiceNumber ?? '—'}</td>
@@ -604,7 +678,7 @@ export default function InvoicesTab({ search: rawSearch }: { search: FinanceSear
                   );
                 })}
                 {(!data?.invoices || data.invoices.length === 0) && (
-                  <tr><td colSpan={12} className="p-8 text-center">
+                  <tr><td colSpan={13} className="p-8 text-center">
                     <div className="text-muted-foreground space-y-2">
                       <p>{search.search || search.status || search.category || search.dateFrom ? 'No invoices match your filters' : `No ${search.type} invoices yet`}</p>
                       {!(search.search || search.status || search.category || search.dateFrom) && (

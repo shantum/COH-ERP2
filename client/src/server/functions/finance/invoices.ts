@@ -224,6 +224,34 @@ export const updateInvoice = createServerFn({ method: 'POST' })
   });
 
 // ============================================
+// INVOICE — UPDATE NOTES (any non-cancelled)
+// ============================================
+
+const updateInvoiceNotesInput = z.object({
+  id: z.string().uuid(),
+  notes: z.string().nullable(),
+});
+
+export const updateInvoiceNotes = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
+  .inputValidator((input: unknown) => updateInvoiceNotesInput.parse(input))
+  .handler(async ({ data }) => {
+    const prisma = await getPrisma();
+    const existing = await prisma.invoice.findUnique({
+      where: { id: data.id },
+      select: { status: true },
+    });
+    if (!existing) return { success: false as const, error: 'Invoice not found' };
+    if (existing.status === 'cancelled') return { success: false as const, error: 'Cannot edit cancelled invoice' };
+
+    await prisma.invoice.update({
+      where: { id: data.id },
+      data: { notes: data.notes },
+    });
+    return { success: true as const };
+  });
+
+// ============================================
 // INVOICE — UPDATE DUE DATE (any non-cancelled)
 // ============================================
 
@@ -266,7 +294,7 @@ export const confirmInvoice = createServerFn({ method: 'POST' })
 
     const invoice = await prisma.invoice.findUnique({
       where: { id: data.id },
-      select: { id: true, type: true, category: true, status: true, totalAmount: true, gstRate: true, gstAmount: true, subtotal: true, invoiceNumber: true, partyId: true, invoiceDate: true, billingPeriod: true, lines: true },
+      select: { id: true, type: true, category: true, status: true, totalAmount: true, gstRate: true, gstAmount: true, subtotal: true, invoiceNumber: true, partyId: true, invoiceDate: true, billingPeriod: true, notes: true, lines: true },
     });
 
     if (!invoice) return { success: false as const, error: 'Invoice not found' };
@@ -361,7 +389,7 @@ export const confirmInvoice = createServerFn({ method: 'POST' })
  */
 async function confirmInvoiceWithLinkedBankTxn(
   prisma: Awaited<ReturnType<typeof getPrisma>>,
-  invoice: { id: string; category: string; totalAmount: number; gstRate: number | null; gstAmount: number | null; subtotal: number | null; invoiceNumber: string | null; partyId: string | null; invoiceDate: Date | null; billingPeriod: string | null },
+  invoice: { id: string; category: string; totalAmount: number; gstRate: number | null; gstAmount: number | null; subtotal: number | null; invoiceNumber: string | null; partyId: string | null; invoiceDate: Date | null; billingPeriod: string | null; notes: string | null },
   bankTransactionId: string,
   tdsAmount: number,
   userId: string,
@@ -383,10 +411,10 @@ async function confirmInvoiceWithLinkedBankTxn(
   if (!bankTxn) throw new Error('Bank transaction not found');
   if (bankTxn.unmatchedAmount < matchAmount - 0.01) throw new Error('Bank transaction unmatched amount is less than invoice net payable');
 
-  // Auto-generate narration if bank txn doesn't have notes
+  // Inherit invoice notes or auto-generate narration if bank txn doesn't have notes
   let narration: string | null = null;
   if (!bankTxn.notes) {
-    narration = generatePaymentNarration({
+    narration = invoice.notes || generatePaymentNarration({
       partyName,
       category: invoice.category,
       invoiceNumber: invoice.invoiceNumber,
