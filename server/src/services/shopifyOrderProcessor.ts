@@ -829,20 +829,23 @@ async function createNewOrderWithLines(
         }
     }
 
-    // Defer draft invoice generation (non-critical, shouldn't block order creation)
-    deferredExecutor.enqueue(
-        async () => {
-            try {
-                await generateDraftInvoice(prisma, newOrder.id);
-            } catch (err: unknown) {
-                syncLogger.warn({
-                    orderId: newOrder.id,
-                    error: err instanceof Error ? err.message : 'Unknown error',
-                }, 'Failed to generate draft invoice — can be retried via backfill');
-            }
-        },
-        { orderId: newOrder.id, action: 'generate_draft_invoice' },
-    );
+    // Defer draft invoice generation for prepaid orders only
+    // COD orders get invoices when remittance is received (remittance.ts)
+    if (orderData.paymentMethod !== 'COD') {
+        deferredExecutor.enqueue(
+            async () => {
+                try {
+                    await generateDraftInvoice(prisma, newOrder.id);
+                } catch (err: unknown) {
+                    syncLogger.warn({
+                        orderId: newOrder.id,
+                        error: err instanceof Error ? err.message : 'Unknown error',
+                    }, 'Failed to generate draft invoice — can be retried via backfill');
+                }
+            },
+            { orderId: newOrder.id, action: 'generate_draft_invoice' },
+        );
+    }
 
     // Update customer stats: increment orderCount and update tier
     if (orderData.customerId) {

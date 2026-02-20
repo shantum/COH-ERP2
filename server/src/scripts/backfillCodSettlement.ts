@@ -1,14 +1,15 @@
 /**
  * Backfill COD Settlement
  *
- * Finds all orders where codRemittedAt IS NOT NULL but the linked
- * customer_order invoice is still unpaid, then calls settleOrderInvoice
- * to confirm drafts and mark invoices appropriately.
+ * Finds all orders where codRemittedAt IS NOT NULL but either:
+ * - No customer_order invoice exists (creates one via generateDraftInvoice)
+ * - Invoice exists but is not yet paid (confirms via settleOrderInvoice)
  *
  * Usage: npx tsx server/src/scripts/backfillCodSettlement.ts
  */
 
 import prisma from '../lib/prisma.js';
+import { generateDraftInvoice } from '../services/orderInvoiceGenerator.js';
 import { settleOrderInvoice, type SettleResult } from '../services/orderSettlement.js';
 
 const BATCH_SIZE = 50;
@@ -21,35 +22,41 @@ async function main() {
   }
   console.log(`Using admin user: ${admin.name ?? admin.email} (${admin.id})`);
 
-  // 2. Find orders where COD was remitted but invoice is not yet paid
+  // 2. Find ALL orders where COD was remitted (regardless of invoice state)
   const orders = await prisma.order.findMany({
     where: {
       codRemittedAt: { not: null },
-      financeInvoices: {
-        some: {
-          category: 'customer_order',
-          status: { not: 'paid' },
-        },
-      },
     },
     select: {
       id: true,
       orderNumber: true,
       codRemittedAmount: true,
       totalAmount: true,
+      financeInvoices: {
+        where: { category: 'customer_order' },
+        select: { id: true, status: true },
+        take: 1,
+      },
     },
     orderBy: { createdAt: 'asc' },
   });
 
-  console.log(`Found ${orders.length} orders to process\n`);
+  // Filter: skip orders whose invoice is already paid
+  const toProcess = orders.filter((o) => {
+    const inv = o.financeInvoices[0];
+    return !inv || inv.status !== 'paid';
+  });
 
-  if (orders.length === 0) {
+  console.log(`Found ${orders.length} remitted orders, ${toProcess.length} need processing\n`);
+
+  if (toProcess.length === 0) {
     console.log('Nothing to do — all COD-remitted orders are already settled.');
     return;
   }
 
   // 3. Process in batches
-  const summary: Record<SettleResult['action'], number> = {
+  const summary: Record<SettleResult['action'] | 'invoice_created', number> = {
+    invoice_created: 0,
     confirmed: 0,
     allocated: 0,
     confirmed_and_allocated: 0,
@@ -58,14 +65,24 @@ async function main() {
   };
   let errorCount = 0;
 
-  for (let i = 0; i < orders.length; i += BATCH_SIZE) {
-    const batch = orders.slice(i, i + BATCH_SIZE);
+  for (let i = 0; i < toProcess.length; i += BATCH_SIZE) {
+    const batch = toProcess.slice(i, i + BATCH_SIZE);
 
     for (const order of batch) {
-      const index = orders.indexOf(order) + 1;
+      const index = i + batch.indexOf(order) + 1;
       const amount = order.codRemittedAmount ?? order.totalAmount;
+      const hasInvoice = order.financeInvoices.length > 0;
 
       try {
+        // Step 1: Create invoice if missing
+        if (!hasInvoice) {
+          const generated = await generateDraftInvoice(prisma, order.id);
+          if (generated) {
+            summary.invoice_created++;
+          }
+        }
+
+        // Step 2: Settle (confirm draft → confirmed)
         const result = await prisma.$transaction(async (tx) => {
           return settleOrderInvoice(tx, {
             orderId: order.id,
@@ -77,13 +94,13 @@ async function main() {
 
         summary[result.action]++;
         console.log(
-          `Processing order ${index}/${orders.length}: #${order.orderNumber} → ${result.action}`,
+          `[${index}/${toProcess.length}] #${order.orderNumber} → ${!hasInvoice ? 'created + ' : ''}${result.action}`,
         );
       } catch (error: unknown) {
         errorCount++;
         const message = error instanceof Error ? error.message : String(error);
         console.error(
-          `Processing order ${index}/${orders.length}: #${order.orderNumber} → ERROR: ${message}`,
+          `[${index}/${toProcess.length}] #${order.orderNumber} → ERROR: ${message}`,
         );
       }
     }
@@ -91,7 +108,8 @@ async function main() {
 
   // 4. Print summary
   console.log('\n--- Summary ---');
-  console.log(`Total processed: ${orders.length}`);
+  console.log(`Total processed: ${toProcess.length}`);
+  console.log(`  Invoices created: ${summary.invoice_created}`);
   console.log(`  Confirmed (draft → confirmed): ${summary.confirmed}`);
   console.log(`  Allocated: ${summary.allocated}`);
   console.log(`  Confirmed & Allocated: ${summary.confirmed_and_allocated}`);

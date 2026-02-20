@@ -28,6 +28,7 @@ import { parse } from 'csv-parse/sync';
 import shopifyClient from '../services/shopify.js';
 import remittanceSync from '../services/remittanceSync.js';
 import { settleOrderInvoice } from '../services/orderSettlement.js';
+import { generateDraftInvoice } from '../services/orderInvoiceGenerator.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { ValidationError, NotFoundError, BusinessLogicError } from '../utils/errors.js';
 import { requireAdmin } from '../middleware/auth.js';
@@ -264,6 +265,14 @@ router.post('/upload', upload.single('file'), asyncHandler(async (req: Request, 
                 syncStatus = 'manual_review';
                 syncError = `Amount mismatch: CSV=${amount}, Order=${order.totalAmount} (${percentDiff.toFixed(1)}% diff)`;
             }
+        }
+
+        // Generate draft invoice for COD order (idempotent, skips if exists)
+        try {
+            await generateDraftInvoice(req.prisma, order.id);
+        } catch (invoiceErr: unknown) {
+            console.warn(`[remittance] Failed to generate invoice for order ${order.id}:`,
+                invoiceErr instanceof Error ? invoiceErr.message : 'Unknown');
         }
 
         // Update order with remittance details using transaction for atomic check
