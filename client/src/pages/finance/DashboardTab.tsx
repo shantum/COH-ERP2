@@ -54,10 +54,10 @@ export default function DashboardTab() {
       return () => navigate({ to: '/finance', search: { tab: 'invoices', page: 1, limit: 25 }, replace: true });
     }
     if (alert.category.toLowerCase().includes('payment') || alert.category.toLowerCase().includes('match')) {
-      return () => navigate({ to: '/finance', search: { tab: 'payments', page: 1, limit: 25 }, replace: true });
+      return () => navigate({ to: '/finance', search: { tab: 'bank-transactions', bankStatus: 'confirmed', page: 1, limit: 25 }, replace: true });
     }
     if (alert.category.toLowerCase().includes('bank')) {
-      return () => navigate({ to: '/finance', search: { tab: 'bank-import', page: 1, limit: 25 }, replace: true });
+      return () => navigate({ to: '/finance', search: { tab: 'bank-transactions', page: 1, limit: 25 }, replace: true });
     }
     if (alert.category.toLowerCase().includes('party')) {
       return () => navigate({ to: '/finance', search: { tab: 'parties', page: 1, limit: 25 }, replace: true });
@@ -77,14 +77,14 @@ export default function DashboardTab() {
       icon: CreditCard,
       label: `${summary.pendingBankTxns} pending bank txn${summary.pendingBankTxns !== 1 ? 's' : ''}`,
       description: 'Imported, awaiting confirmation',
-      onClick: () => navigate({ to: '/finance', search: { tab: 'bank-import', bankStatus: 'pending', page: 1, limit: 25 }, replace: true }),
+      onClick: () => navigate({ to: '/finance', search: { tab: 'bank-transactions', bankStatus: 'pending', page: 1, limit: 25 }, replace: true }),
       color: 'text-blue-600',
     }] : []),
     ...(summary.unmatchedPayments > 0 ? [{
       icon: AlertCircle,
       label: `${summary.unmatchedPayments} unmatched payment${summary.unmatchedPayments !== 1 ? 's' : ''}`,
       description: 'Need invoices or documentation',
-      onClick: () => navigate({ to: '/finance', search: { tab: 'payments', matchStatus: 'unmatched', page: 1, limit: 25 }, replace: true }),
+      onClick: () => navigate({ to: '/finance', search: { tab: 'bank-transactions', bankStatus: 'confirmed', matchStatus: 'unmatched', page: 1, limit: 25 }, replace: true }),
       color: 'text-red-500',
     }] : []),
   ];
@@ -143,14 +143,14 @@ export default function DashboardTab() {
           value={summary.hdfcBalance}
           subtitle={fmtDate(summary.hdfcBalanceDate)}
           color="text-blue-700"
-          onClick={() => navigate({ to: '/finance', search: { tab: 'bank-import', bankFilter: 'hdfc', page: 1, limit: 25 }, replace: true })}
+          onClick={() => navigate({ to: '/finance', search: { tab: 'bank-transactions', bankTab: 'hdfc', page: 1, limit: 25 }, replace: true })}
         />
         <SummaryCard
           label="RazorpayX"
           value={summary.rpxBalance}
           subtitle={fmtDate(summary.rpxBalanceDate)}
           color="text-blue-600"
-          onClick={() => navigate({ to: '/finance', search: { tab: 'bank-import', bankFilter: 'razorpayx', page: 1, limit: 25 }, replace: true })}
+          onClick={() => navigate({ to: '/finance', search: { tab: 'bank-transactions', bankTab: 'razorpayx', page: 1, limit: 25 }, replace: true })}
         />
         {summary.suspenseBalance > 0 && (
           <SummaryCard
@@ -158,7 +158,7 @@ export default function DashboardTab() {
             value={summary.suspenseBalance}
             subtitle="needs reclassifying"
             color="text-amber-700"
-            onClick={() => navigate({ to: '/finance', search: { tab: 'payments', matchStatus: 'unmatched', page: 1, limit: 25 }, replace: true })}
+            onClick={() => navigate({ to: '/finance', search: { tab: 'bank-transactions', bankStatus: 'confirmed', matchStatus: 'unmatched', page: 1, limit: 25 }, replace: true })}
           />
         )}
       </div>

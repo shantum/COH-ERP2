@@ -25,13 +25,16 @@ export const listPayments = createServerFn({ method: 'POST' })
     const { direction, bank, matchStatus, paymentCategory, search, page = 1, limit = 50 } = data ?? {};
     const skip = (page - 1) * limit;
 
-    const where: Record<string, unknown> = {
-      status: { in: ['posted', 'legacy_posted'] },
-    };
+    const where: Record<string, unknown> = {};
+    if (matchStatus === 'skipped') {
+      where.status = 'skipped';
+    } else {
+      where.status = { in: ['posted', 'legacy_posted'] };
+      if (matchStatus === 'unmatched') where.unmatchedAmount = { gt: 0.01 };
+      if (matchStatus === 'matched') where.unmatchedAmount = { lte: 0.01 };
+    }
     if (direction) where.direction = direction;
     if (bank) where.bank = bank;
-    if (matchStatus === 'unmatched') where.unmatchedAmount = { gt: 0.01 };
-    if (matchStatus === 'matched') where.unmatchedAmount = { lte: 0.01 };
     const andClauses: Record<string, unknown>[] = [];
     if (paymentCategory) {
       andClauses.push({
@@ -78,6 +81,8 @@ export const listPayments = createServerFn({ method: 'POST' })
           narration: true,
           counterpartyName: true,
           category: true,
+          status: true,
+          skipReason: true,
           createdAt: true,
           party: {
             select: {

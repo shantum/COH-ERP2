@@ -11,10 +11,9 @@ import type { FinanceSearchParams } from '@coh/shared';
 
 import DashboardTab from './finance/DashboardTab';
 import InvoicesTab from './finance/InvoicesTab';
-import PaymentsTab from './finance/PaymentsTab';
+import BankTransactionsTab from './finance/BankTransactionsTab';
 import PnlTab from './finance/PnlTab';
 import CashFlowTab from './finance/CashFlowTab';
-import BankImportTab from './finance/BankImportTab';
 import PartiesTab from './finance/PartiesTab';
 import TransactionTypesTab from './finance/TransactionTypesTab';
 import { MarketplacePayoutTab } from '../components/finance/MarketplacePayoutTab';
@@ -48,10 +47,9 @@ export default function Finance() {
         <TabsList>
           <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
           <TabsTrigger value="invoices">Invoices</TabsTrigger>
-          <TabsTrigger value="payments">Payments</TabsTrigger>
+          <TabsTrigger value="bank-transactions">Bank Transactions</TabsTrigger>
           <TabsTrigger value="pnl">P&L</TabsTrigger>
           <TabsTrigger value="cashflow">Cash Flow</TabsTrigger>
-          <TabsTrigger value="bank-import">Bank Import</TabsTrigger>
           <TabsTrigger value="marketplace">Marketplace</TabsTrigger>
           <TabsTrigger value="channels">Channels</TabsTrigger>
           <TabsTrigger value="parties">Parties</TabsTrigger>
@@ -64,17 +62,14 @@ export default function Finance() {
         <TabsContent value="invoices" className="mt-4">
           <InvoicesTab search={search} />
         </TabsContent>
-        <TabsContent value="payments" className="mt-4">
-          <PaymentsTab search={search} />
+        <TabsContent value="bank-transactions" className="mt-4">
+          <BankTransactionsTab search={search} />
         </TabsContent>
         <TabsContent value="pnl" className="mt-4">
           <PnlTab />
         </TabsContent>
         <TabsContent value="cashflow" className="mt-4">
           <CashFlowTab />
-        </TabsContent>
-        <TabsContent value="bank-import" className="mt-4">
-          <BankImportTab search={search} />
         </TabsContent>
         <TabsContent value="marketplace" className="mt-4">
           <MarketplacePayoutTab />

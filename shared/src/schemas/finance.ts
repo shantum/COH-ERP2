@@ -11,13 +11,16 @@ import { z } from 'zod';
 // ============================================
 
 export const FinanceSearchParams = z.object({
-  /** Active tab */
-  tab: z.enum(['dashboard', 'invoices', 'payments', 'pnl', 'cashflow', 'bank-import', 'marketplace', 'channels', 'parties', 'transaction-types']).catch('dashboard'),
-  /** Bank import: bank filter */
-  bankFilter: z.enum(['all', 'hdfc', 'razorpayx', 'hdfc_cc', 'icici_cc']).optional().catch(undefined),
-  /** Bank import: status filter (simplified) */
+  /** Active tab — backward compat: payments / bank-import → bank-transactions */
+  tab: z.preprocess(
+    (v) => (v === 'payments' || v === 'bank-import' ? 'bank-transactions' : v),
+    z.enum(['dashboard', 'invoices', 'bank-transactions', 'pnl', 'cashflow', 'marketplace', 'channels', 'parties', 'transaction-types']).catch('dashboard'),
+  ),
+  /** Bank transactions: sub-tab per bank account */
+  bankTab: z.enum(['hdfc', 'razorpayx', 'hdfc_cc', 'icici_cc']).optional().catch(undefined),
+  /** Bank transactions: status filter (simplified) */
   bankStatus: z.enum(['all', 'pending', 'confirmed', 'skipped']).optional().catch(undefined),
-  /** Bank import: sub-view */
+  /** Bank transactions: sub-view (list or import wizard) */
   bankView: z.enum(['list', 'import']).optional().catch(undefined),
   /** Invoice type filter */
   type: z.enum(['payable', 'receivable']).optional().catch(undefined),
@@ -25,13 +28,11 @@ export const FinanceSearchParams = z.object({
   status: z.string().optional().catch(undefined),
   /** Invoice category filter */
   category: z.string().optional().catch(undefined),
-  /** Payment direction filter (bank perspective: debit = money out, credit = money in) */
+  /** Bank txn direction filter (bank perspective: debit = money out, credit = money in) */
   direction: z.enum(['debit', 'credit']).optional().catch(undefined),
-  /** Payment bank filter */
-  bank: z.string().optional().catch(undefined),
-  /** Payment match status filter */
+  /** Bank txn match status filter (only for confirmed) */
   matchStatus: z.enum(['all', 'unmatched', 'matched']).optional().catch(undefined),
-  /** Payment category filter (party or bank txn category) */
+  /** Bank txn category filter (party or bank txn category) */
   paymentCategory: z.string().optional().catch(undefined),
   /** Parties tab: filter by TransactionType ID */
   partyTxnType: z.string().optional().catch(undefined),
@@ -143,8 +144,21 @@ export const ListInvoicesInput = z.object({
 export const ListPaymentsInput = z.object({
   direction: z.enum(['debit', 'credit']).optional(),
   bank: z.string().optional(),
-  matchStatus: z.enum(['all', 'unmatched', 'matched']).optional(),
+  matchStatus: z.enum(['all', 'unmatched', 'matched', 'skipped']).optional(),
   paymentCategory: z.string().optional(),
+  search: z.string().optional(),
+  dateFrom: z.string().optional(),
+  dateTo: z.string().optional(),
+  page: z.coerce.number().int().positive().default(1),
+  limit: z.coerce.number().int().positive().max(200).default(50),
+}).optional();
+
+export const ListBankTransactionsUnifiedInput = z.object({
+  bank: z.string().optional(),
+  status: z.enum(['all', 'pending', 'confirmed', 'skipped']).optional(),
+  direction: z.enum(['debit', 'credit']).optional(),
+  matchStatus: z.enum(['all', 'unmatched', 'matched']).optional(),
+  category: z.string().optional(),
   search: z.string().optional(),
   dateFrom: z.string().optional(),
   dateTo: z.string().optional(),
