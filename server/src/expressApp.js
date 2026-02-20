@@ -89,12 +89,16 @@ export async function createExpressApp() {
   }));
 
   // Rate limiting - general API
+  // validate: false because Express is used as a sub-handler of http.createServer
+  // in production.js, which can cause false positives on X-Forwarded-For validation
+  // even though trust proxy is correctly set above.
   const apiLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
     max: 1000,
     message: { error: 'Too many requests, please try again later' },
     standardHeaders: true,
     legacyHeaders: false,
+    validate: { xForwardedForHeader: false },
   });
 
   // Stricter rate limiting for auth endpoints
@@ -104,6 +108,7 @@ export async function createExpressApp() {
     message: { error: 'Too many login attempts, please try again later' },
     standardHeaders: true,
     legacyHeaders: false,
+    validate: { xForwardedForHeader: false },
   });
 
   // Apply rate limiting
