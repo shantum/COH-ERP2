@@ -335,13 +335,7 @@ export async function batchPushOrdersToSheet(orderIds: string[]): Promise<BatchP
 
         for (const order of orders) {
             const ref = order.orderNumber;
-            let onSheet = sheetOrderNumbers.has(ref);
-            if (!onSheet && ref.includes('-') && ref.length > 20) {
-                onSheet = sheetOrderNumbers.has(ref.split('-')[0]);
-            }
-            if (!onSheet && ref.endsWith('--1')) {
-                onSheet = sheetOrderNumbers.has(ref.slice(0, -3));
-            }
+            const onSheet = sheetOrderNumbers.has(ref);
 
             if (onSheet) {
                 alreadyOnSheetIds.push(order.id);
@@ -442,9 +436,11 @@ export async function batchPushOrdersToSheet(orderIds: string[]): Promise<BatchP
 // ============================================
 
 /** How far back to look for unpushed orders (prevents pushing ancient orders on first run) */
-const RECONCILE_LOOKBACK_DAYS = 3;
+const RECONCILE_LOOKBACK_DAYS = 7;
 /** Max orders to push per reconciliation run */
-const RECONCILE_BATCH_LIMIT = 20;
+const RECONCILE_BATCH_LIMIT = 100;
+/** Orders older than this (ms) without sheetPushedAt trigger a WARN log */
+const STALE_UNPUSHED_THRESHOLD_MS = 5 * 60 * 1000;
 
 // ============================================
 // RECONCILER STATE (for UI status reporting)
@@ -464,10 +460,10 @@ export function getReconcilerStatus() {
 
 /**
  * Find orders that were never pushed to the sheet and push them.
- * Looks back 3 days and pushes up to 20 at a time (oldest first).
- * Cross-checks against the sheet to avoid duplicates (handles the case where
- * the sheet push succeeded but the DB stamp failed, e.g. due to a crash).
- * Uses pushERPOrderToSheet which handles all the mapping + stamping.
+ * Looks back 7 days and pushes up to 100 at a time (oldest first).
+ * Cross-checks against the sheet to avoid duplicates (exact match on orderNumber).
+ * Uses batchPushOrdersToSheet for efficiency (single append + single border call).
+ * Logs WARN for stale unpushed orders (> 5 min old) to surface primary push failures.
  */
 export async function reconcileSheetOrders(): Promise<ReconcileResult> {
     if (reconcilerRunning) {
@@ -491,7 +487,7 @@ export async function reconcileSheetOrders(): Promise<ReconcileResult> {
                 sheetPushedAt: null,
                 createdAt: { gte: cutoff },
             },
-            select: { id: true, orderNumber: true },
+            select: { id: true, orderNumber: true, createdAt: true },
             orderBy: { createdAt: 'asc' },
             take: RECONCILE_BATCH_LIMIT,
         });
@@ -504,7 +500,19 @@ export async function reconcileSheetOrders(): Promise<ReconcileResult> {
             return result;
         }
 
-        // Read order numbers already on the sheet (column B) to prevent duplicates
+        // Warn about stale unpushed orders (> 5 min old = primary push likely failed)
+        const now = Date.now();
+        for (const order of unpushed) {
+            const ageMs = now - order.createdAt.getTime();
+            if (ageMs > STALE_UNPUSHED_THRESHOLD_MS) {
+                log.warn(
+                    { orderNumber: order.orderNumber, ageMinutes: Math.round(ageMs / 60000) },
+                    'Stale unpushed order — primary push may have failed'
+                );
+            }
+        }
+
+        // Read order numbers already on the sheet (column B) for exact-match dedup
         const tab = MASTERSHEET_TABS.ORDERS_FROM_COH;
         const sheetRows = await readRange(ORDERS_MASTERSHEET_ID, `'${tab}'!B:B`);
         const sheetOrderNumbers = new Set<string>();
@@ -513,28 +521,42 @@ export async function reconcileSheetOrders(): Promise<ReconcileResult> {
             if (orderNo) sheetOrderNumbers.add(orderNo);
         }
 
-        log.info(
-            { count: unpushed.length, orders: unpushed.map(o => o.orderNumber), sheetRows: sheetOrderNumbers.size },
-            'Sheet reconciler: found unpushed orders, cross-checking sheet'
-        );
+        // Separate into "already on sheet" (just stamp) vs "needs push"
+        const alreadyOnSheetIds: string[] = [];
+        const toPushIds: string[] = [];
 
-        // Push each one, but skip if already on the sheet (just stamp it)
         for (const order of unpushed) {
-            try {
-                if (sheetOrderNumbers.has(order.orderNumber)) {
-                    // Already on the sheet — just stamp the DB so we don't re-process
-                    await stampSheetPushed(order.id);
-                    result.alreadyOnSheet++;
-                    log.info({ orderNumber: order.orderNumber }, 'Reconciler: order already on sheet, stamped only');
-                } else {
-                    await pushERPOrderToSheet(order.id);
-                    result.pushed++;
-                }
-            } catch (err: unknown) {
-                result.failed++;
-                const message = err instanceof Error ? err.message : String(err);
-                result.errors.push(`#${order.orderNumber}: ${message}`);
-                log.error({ orderNumber: order.orderNumber, err: message }, 'Reconciler: failed to push order');
+            if (sheetOrderNumbers.has(order.orderNumber)) {
+                alreadyOnSheetIds.push(order.id);
+                result.alreadyOnSheet++;
+            } else {
+                toPushIds.push(order.id);
+            }
+        }
+
+        // Stamp orders already on sheet
+        if (alreadyOnSheetIds.length > 0) {
+            await prisma.order.updateMany({
+                where: { id: { in: alreadyOnSheetIds } },
+                data: { sheetPushedAt: new Date() },
+            });
+            log.info(
+                { count: alreadyOnSheetIds.length },
+                'Reconciler: stamped orders already on sheet'
+            );
+        }
+
+        // Batch push the rest
+        if (toPushIds.length > 0) {
+            log.info(
+                { count: toPushIds.length, sheetRows: sheetOrderNumbers.size },
+                'Sheet reconciler: batch pushing unpushed orders'
+            );
+            const batchResult = await batchPushOrdersToSheet(toPushIds);
+            result.pushed = batchResult.pushed;
+            result.failed = batchResult.failed;
+            if (batchResult.errors.length > 0) {
+                result.errors.push(...batchResult.errors);
             }
         }
 
