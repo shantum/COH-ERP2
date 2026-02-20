@@ -1239,6 +1239,7 @@ export type Sku = {
     size: string;
     fabricConsumption: Generated<number>;
     mrp: number;
+    sellingPrice: number | null;
     currentBalance: Generated<number>;
     targetStockQty: Generated<number>;
     targetStockMethod: Generated<string>;

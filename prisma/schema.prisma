@@ -165,6 +165,7 @@ model Sku {
   size                   String
   fabricConsumption      Float                         @default(1.5)
   mrp                    Float
+  sellingPrice           Float?                        // Shopify selling price (null = same as MRP, i.e. not discounted)
   currentBalance         Int                           @default(0) // Materialized balance: updated atomically on every transaction
   targetStockQty         Int                           @default(10)
   targetStockMethod      String                        @default("day14")

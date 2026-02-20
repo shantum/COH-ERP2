@@ -44,6 +44,7 @@ interface ShopifyProductWithImages extends ShopifyProduct {
 interface ShopifyVariantWithInventory extends ShopifyVariant {
     inventory_item_id?: number;
     inventory_quantity?: number;
+    compare_at_price?: string | null;
 }
 
 /**
@@ -419,8 +420,13 @@ async function syncSingleSku(
         // If Shopify now has a proper SKU (barcode) and our stored code is a slug fallback, update it
         const shopifySku = variant.sku?.trim();
         const shouldUpdateSkuCode = shopifySku && shopifySku !== sku.skuCode && /[a-zA-Z].*-/.test(sku.skuCode);
-        const shopifyPrice = parseFloat(variant.price);
-        const newMrp = shopifyPrice > 0 ? shopifyPrice : sku.mrp;
+        // MRP = compare_at_price (original retail) if set, otherwise selling price
+        const sellingPrice = parseFloat(variant.price) || 0;
+        const compareAtPrice = parseFloat(variant.compare_at_price || '') || 0;
+        const shopifyMrp = compareAtPrice > 0 ? compareAtPrice : sellingPrice;
+        const newMrp = shopifyMrp > 0 ? shopifyMrp : sku.mrp;
+        // sellingPrice only stored when discounted (compare_at_price is set and price < compare_at_price)
+        const isDiscounted = compareAtPrice > 0 && sellingPrice > 0 && sellingPrice < compareAtPrice;
         await prisma.sku.update({
             where: { id: sku.id },
             data: {
@@ -428,6 +434,7 @@ async function syncSingleSku(
                 shopifyVariantId,
                 shopifyInventoryItemId: variant.inventory_item_id ? String(variant.inventory_item_id) : null,
                 mrp: newMrp,
+                sellingPrice: isDiscounted ? sellingPrice : null,
             },
         });
 
@@ -450,12 +457,17 @@ async function syncSingleSku(
         result.updated++;
     } else {
         // Create new SKU
+        const createSellingPrice = parseFloat(variant.price) || 0;
+        const createCompareAtPrice = parseFloat(variant.compare_at_price || '') || 0;
+        const createMrp = createCompareAtPrice > 0 ? createCompareAtPrice : createSellingPrice;
+        const createIsDiscounted = createCompareAtPrice > 0 && createSellingPrice > 0 && createSellingPrice < createCompareAtPrice;
         const newSku = await prisma.sku.create({
             data: {
                 variationId,
                 skuCode,
                 size,
-                mrp: parseFloat(variant.price) || 0,
+                mrp: createMrp,
+                ...(createIsDiscounted ? { sellingPrice: createSellingPrice } : {}),
                 fabricConsumption: 1.5,
                 targetStockQty: 10,
                 shopifyVariantId,
