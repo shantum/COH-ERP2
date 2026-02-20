@@ -11,28 +11,39 @@ const log = logger.child({ module: 'parseRazorpayReport' });
 export interface RazorpaySettlementLine {
   paymentId: string;
   razorpayOrderId: string;
-  orderNumber: string;
-  amount: number;    // In INR (divided by 100 from paise)
-  fee: number;       // In INR
-  tax: number;       // In INR
-  netAmount: number; // amount - fee - tax
-  type: string;      // "payment" | "refund" | "adjustment"
+  orderReceipt: string;
+  settlementId: string;
+  amount: number;    // Gross amount in INR
+  fee: number;       // Gateway fee in INR
+  tax: number;       // GST on fee in INR
+  netAmount: number; // credit column (amount - fee)
+  type: string;      // "payment" | "refund"
   method: string;
   settledAt: string;
+  cardNetwork: string;
+}
+
+export interface SettlementBatch {
+  settlementId: string;
+  amount: number;    // Settled amount
+  settledAt: string;
+  utr: string;       // Bank UTR for HDFC matching
 }
 
 export interface ParsedRazorpayReport {
-  settlementId: string;
   fileHash: string;
 
-  // Totals
+  // Totals (from payment rows only)
   grossAmount: number;
   totalFee: number;
   totalTax: number;
   netSettlement: number;
 
-  // Line items
+  // Line items (payment/refund rows only)
   lines: RazorpaySettlementLine[];
+
+  // Settlement batches (for bank matching)
+  settlements: SettlementBatch[];
 
   // Counts
   paymentCount: number;
@@ -47,11 +58,6 @@ export interface ParsedRazorpayReport {
 /** Round to 2 decimal places. */
 function r2(n: number): number {
   return Math.round(n * 100) / 100;
-}
-
-/** Convert paise to INR (divide by 100) and round. */
-function paiseToInr(paise: number): number {
-  return r2(paise / 100);
 }
 
 /** Safely coerce a value to number, returning 0 for blanks/non-numeric. */
@@ -69,21 +75,26 @@ function stripBom(content: string): string {
   return content;
 }
 
-/**
- * Try to extract an order number from the description field.
- * Common patterns: "Order #COH-12345", "COH-12345", etc.
- */
-function extractOrderFromDescription(description: string): string {
-  if (!description) return '';
-  // Look for COH-style order numbers
-  const match = description.match(/\b(COH-\d+)\b/i);
-  return match ? match[1] : '';
-}
-
 // ---------------------------------------------------------------------------
 // Main parser
 // ---------------------------------------------------------------------------
 
+/**
+ * Parse a Razorpay "transactions" CSV export.
+ *
+ * Real format columns:
+ *   entity_id, type, debit, credit, amount, currency, fee, tax, on_hold,
+ *   settled, created_at, settled_at, settlement_id, description, notes,
+ *   payment_id, arn, settlement_utr, order_id, order_receipt, method,
+ *   upi_flow, card_network, card_issuer, card_type, dispute_id, additional_utr
+ *
+ * Key differences from what was assumed:
+ *   - Amounts are in INR (not paise)
+ *   - entity_id holds the payment/settlement ID (pay_xxx / setl_xxx)
+ *   - type includes "settlement" rows (summary of settled batch)
+ *   - order_receipt has Shopify receipt/payment session IDs
+ *   - notes is a JSON string (not separate columns)
+ */
 export function parseRazorpayReport(csvContent: string): ParsedRazorpayReport {
   const fileHash = crypto.createHash('sha256').update(csvContent).digest('hex');
   const cleaned = stripBom(csvContent);
@@ -101,43 +112,12 @@ export function parseRazorpayReport(csvContent: string): ParsedRazorpayReport {
     throw new Error('CSV file is empty or has no data rows');
   }
 
-  // Detect the order number column — could be "notes[order_number]" or "notes.order_number"
   const sampleKeys = Object.keys(records[0]);
-  const notesOrderKey = sampleKeys.find(
-    (k) => k.toLowerCase() === 'notes[order_number]' || k.toLowerCase() === 'notes.order_number'
-  );
+  log.debug({ columns: sampleKeys }, 'CSV columns detected');
 
-  if (notesOrderKey) {
-    log.debug({ notesOrderKey }, 'Found order number column');
-  } else {
-    log.warn({ columns: sampleKeys }, 'No notes[order_number] column found — will try description fallback');
-  }
-
-  // Detect settlement ID — use the first non-empty one
-  let settlementId = '';
-  const settlementIds = new Set<string>();
-  for (const row of records) {
-    const sid = (row['settlement_id'] ?? '').trim();
-    if (sid) {
-      settlementIds.add(sid);
-      if (!settlementId) settlementId = sid;
-    }
-  }
-
-  if (settlementIds.size > 1) {
-    log.warn(
-      { settlementIds: Array.from(settlementIds), using: settlementId },
-      'Multiple settlement IDs found — using the first one'
-    );
-  }
-
-  if (!settlementId) {
-    settlementId = `unknown_${fileHash.slice(0, 8)}`;
-    log.warn('No settlement_id found in CSV — using hash-based fallback');
-  }
-
-  // Parse lines
+  // Parse lines — separate payment/refund rows from settlement summary rows
   const lines: RazorpaySettlementLine[] = [];
+  const settlements: SettlementBatch[] = [];
   let grossAmount = 0;
   let totalFee = 0;
   let totalTax = 0;
@@ -146,36 +126,41 @@ export function parseRazorpayReport(csvContent: string): ParsedRazorpayReport {
   let adjustmentCount = 0;
 
   for (const row of records) {
-    const paymentId = (row['payment_id'] ?? '').trim();
-    const razorpayOrderId = (row['order_id'] ?? '').trim();
+    const entityId = (row['entity_id'] ?? '').trim();
     const type = (row['type'] ?? '').trim().toLowerCase();
+
+    // Settlement summary rows — extract UTR for bank matching
+    if (type === 'settlement') {
+      const utr = (row['settlement_utr'] ?? row['additional_utr'] ?? '').trim();
+      settlements.push({
+        settlementId: entityId,
+        amount: r2(toNum(row['debit'])),  // settlement rows use debit column
+        settledAt: (row['settled_at'] ?? '').trim(),
+        utr,
+      });
+      continue;
+    }
+
+    // Payment / refund / adjustment rows
+    const razorpayOrderId = (row['order_id'] ?? '').trim();
+    const orderReceipt = (row['order_receipt'] ?? '').trim();
     const method = (row['method'] ?? '').trim();
     const settledAt = (row['settled_at'] ?? '').trim();
-    const description = (row['description'] ?? '').trim();
+    const settlementId = (row['settlement_id'] ?? '').trim();
+    const cardNetwork = (row['card_network'] ?? '').trim();
 
-    // Amount fields are in paise
-    const amountPaise = toNum(row['amount']);
-    const feePaise = toNum(row['fee']);
-    const taxPaise = toNum(row['tax']);
-
-    const amount = paiseToInr(amountPaise);
-    const fee = paiseToInr(feePaise);
-    const tax = paiseToInr(taxPaise);
-    const netAmount = r2(amount - fee - tax);
-
-    // Extract order number from notes or description
-    let orderNumber = '';
-    if (notesOrderKey) {
-      orderNumber = (row[notesOrderKey] ?? '').trim();
-    }
-    if (!orderNumber) {
-      orderNumber = extractOrderFromDescription(description);
-    }
+    // Amounts are already in INR
+    const amount = r2(toNum(row['amount']));
+    const fee = r2(toNum(row['fee']));
+    const tax = r2(toNum(row['tax']));
+    const credit = r2(toNum(row['credit']));  // net amount after fees
+    const netAmount = credit || r2(amount - fee - tax);
 
     lines.push({
-      paymentId,
+      paymentId: entityId,  // entity_id = pay_xxx
       razorpayOrderId,
-      orderNumber,
+      orderReceipt,
+      settlementId,
       amount,
       fee,
       tax,
@@ -183,6 +168,7 @@ export function parseRazorpayReport(csvContent: string): ParsedRazorpayReport {
       type,
       method,
       settledAt,
+      cardNetwork,
     });
 
     // Accumulate totals
@@ -190,7 +176,6 @@ export function parseRazorpayReport(csvContent: string): ParsedRazorpayReport {
     totalFee += fee;
     totalTax += tax;
 
-    // Count by type
     if (type === 'payment') {
       paymentCount++;
     } else if (type === 'refund') {
@@ -203,16 +188,13 @@ export function parseRazorpayReport(csvContent: string): ParsedRazorpayReport {
   const netSettlement = r2(grossAmount - totalFee - totalTax);
 
   const result: ParsedRazorpayReport = {
-    settlementId,
     fileHash,
-
     grossAmount: r2(grossAmount),
     totalFee: r2(totalFee),
     totalTax: r2(totalTax),
     netSettlement,
-
     lines,
-
+    settlements,
     paymentCount,
     refundCount,
     adjustmentCount,
@@ -220,12 +202,14 @@ export function parseRazorpayReport(csvContent: string): ParsedRazorpayReport {
 
   log.info(
     {
-      settlementId,
       totalLines: lines.length,
+      settlementBatches: settlements.length,
       paymentCount,
       refundCount,
       adjustmentCount,
       grossAmount: result.grossAmount,
+      totalFee: result.totalFee,
+      totalTax: result.totalTax,
       netSettlement: result.netSettlement,
     },
     'Razorpay report parsed successfully'

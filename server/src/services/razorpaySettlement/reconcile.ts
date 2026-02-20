@@ -3,14 +3,12 @@
  *
  * Takes a parsed Razorpay settlement report, matches orders + bank transactions
  * against ERP, and on confirmation creates invoices and allocations.
- *
- * Follows the same pattern as marketplace payout reconciliation (Nykaa).
  */
 
 import { Prisma } from '@prisma/client';
 import prisma from '../../lib/prisma.js';
 import logger from '../../utils/logger.js';
-import type { ParsedRazorpayReport, RazorpaySettlementLine } from './parseRazorpayReport.js';
+import type { ParsedRazorpayReport, RazorpaySettlementLine, SettlementBatch } from './parseRazorpayReport.js';
 
 const log = logger.child({ module: 'razorpayReconcile' });
 
@@ -43,31 +41,40 @@ export interface PreviewResult {
   };
   bankMatch: {
     found: boolean;
-    bankTxnId?: string;
-    amount?: number;
-    narration?: string;
-    txnDate?: string;
-  } | null;
+    matchedCount?: number;
+    totalSettlements?: number;
+    totalMatchedAmount?: number;
+    matches?: Array<{
+      settlementId: string;
+      bankTxnId: string;
+      amount: number;
+      narration: string | null;
+      txnDate: string;
+      utr: string;
+    }>;
+  };
 }
 
 export interface ConfirmResult {
   reportId: string;
   revenueInvoiceId: string;
   commissionInvoiceId: string;
-  bankTransactionId?: string;
+  bankTransactionIds: string[];
 }
 
 interface MatchedOrder {
-  orderNumber: string;
+  razorpayOrderId: string;
   erpOrderId: string;
   erpOrderNumber: string;
 }
 
 interface BankMatchResult {
+  settlementId: string;
   bankTxnId: string;
   amount: number;
   narration: string | null;
   txnDate: string;
+  utr: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -87,19 +94,8 @@ function currentPeriod(): string {
   return `${yyyy}-${mm}`;
 }
 
-/** Extract unique order numbers from parsed lines (only non-empty) */
-function uniqueOrderNumbers(lines: RazorpaySettlementLine[]): string[] {
-  const set = new Set<string>();
-  for (const line of lines) {
-    if (line.orderNumber) {
-      set.add(line.orderNumber);
-    }
-  }
-  return Array.from(set);
-}
-
 // ---------------------------------------------------------------------------
-// Order matching
+// Order matching — match via Razorpay order_id against ShopifyOrderCache
 // ---------------------------------------------------------------------------
 
 async function matchOrders(
@@ -108,102 +104,91 @@ async function matchOrders(
   matched: MatchedOrder[];
   unmatched: string[];
 }> {
-  const orderNumbers = uniqueOrderNumbers(lines);
-  const matched: MatchedOrder[] = [];
-  const unmatched: string[] = [];
-
-  if (orderNumbers.length === 0) {
-    log.warn('No order numbers found in settlement lines — skipping order matching');
-    return { matched, unmatched };
-  }
-
-  // Batch lookup to avoid N+1
-  const BATCH_SIZE = 50;
-  for (let i = 0; i < orderNumbers.length; i += BATCH_SIZE) {
-    const batch = orderNumbers.slice(i, i + BATCH_SIZE);
-
-    const results = await prisma.order.findMany({
-      where: {
-        orderNumber: { in: batch },
-      },
-      select: { id: true, orderNumber: true },
-    });
-
-    const resultMap = new Map(results.map((r) => [r.orderNumber, r]));
-
-    for (const orderNum of batch) {
-      const match = resultMap.get(orderNum);
-      if (match) {
-        matched.push({
-          orderNumber: orderNum,
-          erpOrderId: match.id,
-          erpOrderNumber: match.orderNumber,
-        });
-      } else {
-        unmatched.push(orderNum);
-      }
-    }
-  }
+  // Razorpay is our own payment gateway — the CSV has Razorpay order_ids (order_xxx)
+  // but we don't store those on the Order model. Per-order matching isn't critical here;
+  // settlement-level bank matching (UTR → HDFC) is what matters for reconciliation.
+  // TODO: Add per-order matching if needed (store Razorpay order_id on Order during import)
+  const razorpayOrderIds = [...new Set(
+    lines.map(l => l.razorpayOrderId).filter(Boolean)
+  )];
 
   log.info(
-    { matchedCount: matched.length, unmatchedCount: unmatched.length },
-    'Order matching complete',
+    { totalRazorpayOrders: razorpayOrderIds.length },
+    'Order matching skipped — Razorpay order IDs not stored on Order model',
   );
 
-  return { matched, unmatched };
+  return { matched: [], unmatched: razorpayOrderIds };
 }
 
 // ---------------------------------------------------------------------------
-// Bank matching
+// Bank matching — match settlement UTRs against HDFC bank transactions
 // ---------------------------------------------------------------------------
 
-async function matchBankTransaction(
-  netSettlement: number,
-): Promise<BankMatchResult | null> {
-  if (netSettlement <= 0) return null;
+async function matchBankTransactions(
+  settlements: SettlementBatch[],
+): Promise<BankMatchResult[]> {
+  const results: BankMatchResult[] = [];
 
-  const tolerance = round2(netSettlement * 0.01); // 1%
-  const lower = round2(netSettlement - tolerance);
-  const upper = round2(netSettlement + tolerance);
+  for (const settlement of settlements) {
+    if (!settlement.utr || settlement.amount <= 0) continue;
 
-  const candidates = await prisma.bankTransaction.findMany({
-    where: {
-      bank: 'hdfc',
-      direction: 'credit',
-      narration: { contains: 'RAZORPAY', mode: 'insensitive' },
-      amount: { gte: lower, lte: upper },
-      // Only match unlinked transactions
-      paymentId: null,
-    },
-    orderBy: { txnDate: 'desc' },
-    take: 5,
-    select: { id: true, amount: true, narration: true, txnDate: true },
-  });
+    // Try exact UTR match first
+    const byUtr = await prisma.bankTransaction.findFirst({
+      where: {
+        bank: 'hdfc',
+        direction: 'credit',
+        utr: settlement.utr,
+      },
+      select: { id: true, amount: true, narration: true, txnDate: true },
+    });
 
-  if (candidates.length === 0) return null;
+    if (byUtr) {
+      results.push({
+        settlementId: settlement.settlementId,
+        bankTxnId: byUtr.id,
+        amount: byUtr.amount,
+        narration: byUtr.narration,
+        txnDate: byUtr.txnDate.toISOString().split('T')[0],
+        utr: settlement.utr,
+      });
+      continue;
+    }
 
-  // Pick the closest match by amount
-  let best = candidates[0];
-  let bestDiff = Math.abs(best.amount - netSettlement);
-  for (let i = 1; i < candidates.length; i++) {
-    const diff = Math.abs(candidates[i].amount - netSettlement);
-    if (diff < bestDiff) {
-      best = candidates[i];
-      bestDiff = diff;
+    // Fallback: match by amount ±1% with RAZORPAY narration
+    const tolerance = round2(settlement.amount * 0.01);
+    const lower = round2(settlement.amount - tolerance);
+    const upper = round2(settlement.amount + tolerance);
+
+    const byAmount = await prisma.bankTransaction.findFirst({
+      where: {
+        bank: 'hdfc',
+        direction: 'credit',
+        narration: { contains: 'RAZORPAY', mode: 'insensitive' },
+        amount: { gte: lower, lte: upper },
+        paymentId: null,  // unlinked only
+      },
+      orderBy: { txnDate: 'desc' },
+      select: { id: true, amount: true, narration: true, txnDate: true },
+    });
+
+    if (byAmount) {
+      results.push({
+        settlementId: settlement.settlementId,
+        bankTxnId: byAmount.id,
+        amount: byAmount.amount,
+        narration: byAmount.narration,
+        txnDate: byAmount.txnDate.toISOString().split('T')[0],
+        utr: settlement.utr,
+      });
     }
   }
 
   log.info(
-    { bankTxnId: best.id, amount: best.amount, diff: bestDiff },
-    'Bank transaction matched',
+    { matched: results.length, total: settlements.length },
+    'Bank transaction matching complete',
   );
 
-  return {
-    bankTxnId: best.id,
-    amount: best.amount,
-    narration: best.narration,
-    txnDate: best.txnDate.toISOString().split('T')[0],
-  };
+  return results;
 }
 
 // ---------------------------------------------------------------------------
@@ -232,8 +217,8 @@ export async function previewReport(
   // 2. Order matching
   const orderResult = await matchOrders(parsed.lines);
 
-  // 3. Bank matching
-  const bankResult = await matchBankTransaction(parsed.netSettlement);
+  // 3. Bank matching — per settlement batch
+  const bankResults = await matchBankTransactions(parsed.settlements);
 
   // 4. Report period — use current month
   const reportPeriod = currentPeriod();
@@ -244,14 +229,11 @@ export async function previewReport(
     unmatched: orderResult.unmatched,
   })) as Prisma.InputJsonValue;
 
-  const bankMatchJson: Prisma.InputJsonValue | typeof Prisma.DbNull = bankResult
-    ? (JSON.parse(JSON.stringify({
-        bankTxnId: bankResult.bankTxnId,
-        amount: bankResult.amount,
-        narration: bankResult.narration,
-        txnDate: bankResult.txnDate,
-      })) as Prisma.InputJsonValue)
-    : Prisma.DbNull;
+  const bankMatchJson: Prisma.InputJsonValue = bankResults.length > 0
+    ? (JSON.parse(JSON.stringify(bankResults)) as Prisma.InputJsonValue)
+    : [];
+
+  const totalCommission = round2(parsed.totalFee + parsed.totalTax);
 
   const report = await prisma.marketplacePayoutReport.create({
     data: {
@@ -260,7 +242,7 @@ export async function previewReport(
       fileHash: parsed.fileHash,
       reportPeriod,
       grossRevenue: round2(parsed.grossAmount),
-      totalCommission: round2(parsed.totalFee + parsed.totalTax),
+      totalCommission,
       bannerDeduction: 0,
       shippingCharges: 0,
       returnCharges: 0,
@@ -278,9 +260,9 @@ export async function previewReport(
     },
   });
 
-  log.info({ reportId: report.id, settlementId: parsed.settlementId }, 'Draft report created');
+  log.info({ reportId: report.id }, 'Draft report created');
 
-  const totalCommission = round2(parsed.totalFee + parsed.totalTax);
+  const totalMatchedAmount = round2(bankResults.reduce((s, b) => s + b.amount, 0));
 
   // 6. Return preview
   return {
@@ -304,17 +286,15 @@ export async function previewReport(
       cancelledCount: parsed.adjustmentCount,
       matchedOrderCount: orderResult.matched.length,
       unmatchedOrderCount: orderResult.unmatched.length,
-      unmatchedBaseOrders: orderResult.unmatched,
+      unmatchedBaseOrders: orderResult.unmatched.slice(0, 20), // limit preview size
     },
-    bankMatch: bankResult
-      ? {
-          found: true,
-          bankTxnId: bankResult.bankTxnId,
-          amount: bankResult.amount,
-          narration: bankResult.narration ?? undefined,
-          txnDate: bankResult.txnDate,
-        }
-      : { found: false },
+    bankMatch: {
+      found: bankResults.length > 0,
+      matchedCount: bankResults.length,
+      totalSettlements: parsed.settlements.length,
+      totalMatchedAmount,
+      matches: bankResults.slice(0, 10), // limit preview size
+    },
   };
 }
 
@@ -356,7 +336,7 @@ export async function confirmReport(
   }
 
   // Extract bank match info
-  const bankMatch = report.bankMatchResult as BankMatchResult | null;
+  const bankMatches = (report.bankMatchResult ?? []) as unknown as BankMatchResult[];
 
   // 3. Run everything in a transaction
   const result = await prisma.$transaction(async (tx) => {
@@ -395,41 +375,41 @@ export async function confirmReport(
       },
     });
 
-    // 6. Set matchedAmount on bank transaction (if matched) and create allocation
-    let bankTxnId: string | undefined;
-    if (bankMatch?.bankTxnId) {
+    // 6. Match bank transactions and create allocations
+    const bankTxnIds: string[] = [];
+    for (const bankMatch of bankMatches) {
+      if (!bankMatch.bankTxnId) continue;
+
       await tx.bankTransaction.update({
         where: { id: bankMatch.bankTxnId },
         data: {
-          matchedAmount: round2(report.netPayout),
+          matchedAmount: round2(bankMatch.amount),
           unmatchedAmount: 0,
-          notes: `Razorpay prepaid settlement for ${report.reportPeriod}`,
+          notes: `Razorpay settlement ${bankMatch.settlementId} (UTR: ${bankMatch.utr})`,
         },
       });
-      bankTxnId = bankMatch.bankTxnId;
-    }
 
-    // 7. Allocation: link bank transaction to revenue invoice
-    if (bankTxnId) {
       await tx.allocation.create({
         data: {
-          bankTransactionId: bankTxnId,
+          bankTransactionId: bankMatch.bankTxnId,
           invoiceId: revenueInvoice.id,
-          amount: round2(report.netPayout),
-          notes: 'Razorpay settlement payout allocation',
+          amount: round2(bankMatch.amount),
+          notes: `Razorpay settlement ${bankMatch.settlementId}`,
           matchedById: userId,
         },
       });
+
+      bankTxnIds.push(bankMatch.bankTxnId);
     }
 
-    // 8. Update report to confirmed
+    // 7. Update report to confirmed
     await tx.marketplacePayoutReport.update({
       where: { id: reportId },
       data: {
         status: 'confirmed',
         revenueInvoiceId: revenueInvoice.id,
         commissionInvoiceId: commissionInvoice.id,
-        ...(bankTxnId ? { bankTransactionId: bankTxnId } : {}),
+        ...(bankTxnIds.length > 0 ? { bankTransactionId: bankTxnIds[0] } : {}),
       },
     });
 
@@ -437,7 +417,7 @@ export async function confirmReport(
       reportId,
       revenueInvoiceId: revenueInvoice.id,
       commissionInvoiceId: commissionInvoice.id,
-      ...(bankTxnId ? { bankTransactionId: bankTxnId } : {}),
+      bankTransactionIds: bankTxnIds,
     };
   });
 
@@ -446,7 +426,7 @@ export async function confirmReport(
       reportId,
       revenueInvoiceId: result.revenueInvoiceId,
       commissionInvoiceId: result.commissionInvoiceId,
-      bankTransactionId: result.bankTransactionId,
+      bankTxnCount: result.bankTransactionIds.length,
     },
     'Razorpay settlement report confirmed with invoices',
   );
