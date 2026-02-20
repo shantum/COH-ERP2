@@ -28,6 +28,18 @@ import {
   getCategoryLabel,
 } from '@coh/shared';
 
+const CHANNEL_LABELS: Record<string, string> = {
+  shopify_online: 'Shopify',
+  nykaa: 'Nykaa',
+  myntra: 'Myntra',
+  ajio: 'Ajio',
+  offline: 'Offline',
+};
+
+function formatChannelName(channel: string): string {
+  return CHANNEL_LABELS[channel] ?? channel.charAt(0).toUpperCase() + channel.slice(1);
+}
+
 // ============================================
 // INLINE INVOICE NOTES
 // ============================================
@@ -476,7 +488,7 @@ export default function InvoicesTab({ search: rawSearch }: { search: FinanceSear
                   inv.invoiceNumber ?? '',
                   inv.type,
                   inv.category,
-                  inv.party?.name ?? '',
+                  inv.party?.name ?? (inv.customer ? [inv.customer.firstName, inv.customer.lastName].filter(Boolean).join(' ') || inv.customer.email : null) ?? (inv.order?.channel ? formatChannelName(inv.order.channel) : '') ?? '',
                   inv.notes ?? '',
                   String(inv.totalAmount),
                   String(inv.balanceDue),
@@ -579,6 +591,7 @@ export default function InvoicesTab({ search: rawSearch }: { search: FinanceSear
                     <td className="p-3">
                       {inv.party?.name ??
                         (inv.customer ? [inv.customer.firstName, inv.customer.lastName].filter(Boolean).join(' ') || inv.customer.email : null) ??
+                        (inv.order?.channel ? formatChannelName(inv.order.channel) : null) ??
                         '—'}
                     </td>
                     <td className="p-3 max-w-[180px]" onClick={(e) => e.stopPropagation()}>

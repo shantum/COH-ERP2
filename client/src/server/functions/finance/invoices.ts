@@ -66,6 +66,7 @@ export const listInvoices = createServerFn({ method: 'POST' })
           createdAt: true,
           party: { select: { id: true, name: true, bankAccountName: true, bankAccountNumber: true, bankIfsc: true, phone: true, email: true } },
           customer: { select: { id: true, email: true, firstName: true, lastName: true } },
+          order: { select: { channel: true } },
           _count: { select: { lines: true, allocations: true } },
         },
         orderBy: sortBy
