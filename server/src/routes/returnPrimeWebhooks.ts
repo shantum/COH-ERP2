@@ -166,12 +166,13 @@ router.post('/', verifyReturnPrimeWebhook, async (req: WebhookRequest, res: Resp
         }
 
         // 2. Log webhook receipt
+        const requestBody = req.body as { request?: { id?: string } };
         await req.prisma.webhookLog.create({
             data: {
                 webhookId,
                 topic,
                 source: 'returnprime',
-                resourceId: req.body.id || 'unknown',
+                resourceId: requestBody.request?.id || 'unknown',
                 status: 'processing',
                 payload: JSON.stringify(req.body).slice(0, 50000),
             },

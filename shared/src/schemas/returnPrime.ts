@@ -8,97 +8,198 @@
 import { z } from 'zod';
 
 // ============================================
-// NESTED SCHEMAS
+// NORMALIZED OUTPUT TYPES (what handlers consume)
 // ============================================
 
 /**
- * Line item from Return Prime
- * Contains info about the item being returned
+ * Normalized line item — handlers work with this shape
  */
-export const ReturnPrimeLineItemSchema = z.object({
-    id: z.string().min(1),
-    shopify_line_id: z.string().regex(/^\d+$/).optional(), // Shopify IDs are numeric strings
-    sku: z.string().optional(),
-    quantity: z.number().int().positive().max(1000), // Reasonable max
-    price: z.number().nonnegative().optional(),
-    reason: z.string().optional(),
-});
-
-export type ReturnPrimeLineItem = z.infer<typeof ReturnPrimeLineItemSchema>;
+export interface ReturnPrimeLineItem {
+    id: string;
+    shopify_line_id: string;
+    sku: string | undefined;
+    quantity: number;
+    price: number | undefined;
+    reason: string | undefined;
+}
 
 /**
- * Shipping/logistics info from Return Prime
+ * Normalized shipping info
  */
-export const ReturnPrimeShippingSchema = z.object({
-    awb_number: z.string().optional(),
-    courier: z.string().optional(),
-    status: z.string().optional(),
-    tracking_url: z.string().url().optional().or(z.string().max(0)),
-});
+export interface ReturnPrimeShipping {
+    awb_number: string | undefined;
+    courier: string | undefined;
+}
 
 /**
- * Exchange info from Return Prime
+ * Normalized order reference
  */
-export const ReturnPrimeExchangeSchema = z.object({
-    order_id: z.string().optional(),
-    variant_id: z.string().optional(),
-    sku: z.string().optional(),
-});
+export interface ReturnPrimeOrder {
+    shopify_order_id: string;
+    order_name: string | undefined;
+}
 
 /**
- * Refund info from Return Prime
+ * Normalized webhook payload — handlers work with this shape
  */
-export const ReturnPrimeRefundSchema = z.object({
+export interface ReturnPrimeWebhookPayload {
+    id: string;
+    request_number: string | undefined;
+    request_type: 'return' | 'exchange';
+    status: string | undefined;
+    reason: string | undefined;
+    reason_details: string | undefined;
+    rejection_reason: string | undefined;
+    created_at: string | undefined;
+    updated_at: string | undefined;
+    order: ReturnPrimeOrder | undefined;
+    customer: { email?: string; phone?: string; name?: string } | undefined;
+    line_items: ReturnPrimeLineItem[];
+    shipping: ReturnPrimeShipping | undefined;
+    refund: { id?: string; amount?: number; transaction_id?: string; method?: string } | undefined;
+}
+
+// ============================================
+// RAW WEBHOOK SCHEMAS (what Return Prime actually sends)
+// ============================================
+
+/**
+ * Raw line item shipping entry (per-line, array)
+ */
+const RawLineShippingSchema = z.object({
+    awb: z.string().nullable().optional(),
+    shipping_company: z.string().nullable().optional(),
+    tracking_url: z.string().nullable().optional(),
+    tracking_available: z.boolean().optional(),
+}).passthrough();
+
+/**
+ * Raw line item from Return Prime webhook
+ * id = Shopify line item ID (number), SKU nested in original_product
+ */
+const RawLineItemSchema = z.object({
+    id: z.union([z.number(), z.string()]),
+    quantity: z.number().int().positive().max(1000),
+    reason: z.string().nullable().optional(),
+    original_product: z.object({
+        sku: z.string().nullable().optional(),
+        price: z.number().nullable().optional(),
+    }).passthrough().nullable().optional(),
+    shipping: z.array(RawLineShippingSchema).nullable().optional(),
+}).passthrough();
+
+/**
+ * Raw order reference — uses `id` (number) and `name`, not `shopify_order_id`
+ */
+const RawOrderSchema = z.object({
+    id: z.union([z.string(), z.number()]),
+    name: z.string().optional(),
+}).passthrough();
+
+/**
+ * Raw customer info
+ */
+const RawCustomerSchema = z.object({
+    email: z.string().optional(),
+    phone: z.string().optional(),
+    name: z.string().optional(),
+}).passthrough();
+
+/**
+ * Raw refund info nested in line items or at request level
+ */
+const RawRefundSchema = z.object({
     id: z.string().optional(),
     amount: z.number().nonnegative().optional(),
     transaction_id: z.string().optional(),
     method: z.string().optional(),
-});
+}).passthrough();
 
 /**
- * Order reference from Return Prime
+ * Inner request object — the actual data inside { request: { ... } }
  */
-export const ReturnPrimeOrderSchema = z.object({
-    shopify_order_id: z.union([z.string(), z.number()]).transform(String),
-    order_name: z.string().optional(),
-});
-
-/**
- * Customer info from Return Prime
- */
-export const ReturnPrimeCustomerSchema = z.object({
-    email: z.string().email().optional().or(z.string().max(0)),
-    phone: z.string().optional(),
-    name: z.string().optional(),
-});
+const RawRequestSchema = z.object({
+    id: z.string().min(1),
+    request_number: z.string().optional(),
+    request_type: z.enum(['return', 'exchange']).default('return'),
+    status: z.string().optional(),
+    created_at: z.string().optional(),
+    updated_at: z.string().optional(),
+    order: RawOrderSchema.optional(),
+    customer: RawCustomerSchema.optional(),
+    line_items: z.array(RawLineItemSchema).default([]),
+    refund: RawRefundSchema.nullable().optional(),
+}).passthrough();
 
 // ============================================
 // MAIN WEBHOOK PAYLOAD SCHEMA
 // ============================================
 
 /**
- * Main Return Prime webhook payload
- * Strict mode - no passthrough for security
+ * Return Prime webhook payload schema.
+ * Accepts the actual { request: { ... } } wrapper and normalizes
+ * to the ReturnPrimeWebhookPayload shape that handlers expect.
  */
 export const ReturnPrimeWebhookPayloadSchema = z.object({
-    id: z.string().min(1),
-    request_number: z.string().optional(),
-    request_type: z.enum(['return', 'exchange']).default('return'),
-    status: z.string().optional(),
-    reason: z.string().optional(),
-    reason_details: z.string().optional(),
-    rejection_reason: z.string().optional(),
-    created_at: z.string().optional(),
-    updated_at: z.string().optional(),
-    order: ReturnPrimeOrderSchema.optional(),
-    customer: ReturnPrimeCustomerSchema.optional(),
-    line_items: z.array(ReturnPrimeLineItemSchema).default([]),
-    shipping: ReturnPrimeShippingSchema.optional(),
-    exchange: ReturnPrimeExchangeSchema.optional(),
-    refund: ReturnPrimeRefundSchema.optional(),
-});
+    request: RawRequestSchema,
+}).transform((raw): ReturnPrimeWebhookPayload => {
+    const req = raw.request;
 
-export type ReturnPrimeWebhookPayload = z.infer<typeof ReturnPrimeWebhookPayloadSchema>;
+    // Extract first AWB from any line item's shipping array
+    let shipping: ReturnPrimeShipping | undefined;
+    for (const li of req.line_items) {
+        const shipEntry = li.shipping?.find(s => s.awb);
+        if (shipEntry) {
+            shipping = {
+                awb_number: shipEntry.awb ?? undefined,
+                courier: shipEntry.shipping_company ?? undefined,
+            };
+            break;
+        }
+    }
+
+    // Collect unique reasons from line items (RP puts reason per-line)
+    const reasons = req.line_items
+        .map(li => li.reason)
+        .filter((r): r is string => !!r);
+    const reason = reasons.length > 0 ? reasons[0] : undefined;
+
+    return {
+        id: req.id,
+        request_number: req.request_number,
+        request_type: req.request_type,
+        status: req.status,
+        reason,
+        reason_details: undefined,
+        rejection_reason: undefined,
+        created_at: req.created_at,
+        updated_at: req.updated_at,
+        order: req.order ? {
+            shopify_order_id: String(req.order.id),
+            order_name: req.order.name,
+        } : undefined,
+        customer: req.customer ? {
+            email: req.customer.email,
+            phone: req.customer.phone,
+            name: req.customer.name,
+        } : undefined,
+        line_items: req.line_items.map(li => ({
+            id: String(li.id),
+            shopify_line_id: String(li.id),
+            sku: li.original_product?.sku ?? undefined,
+            quantity: li.quantity,
+            price: li.original_product?.price ?? undefined,
+            reason: li.reason ?? undefined,
+        })),
+        shipping,
+        refund: req.refund ? {
+            id: req.refund.id,
+            amount: req.refund.amount,
+            transaction_id: req.refund.transaction_id,
+            method: req.refund.method,
+        } : undefined,
+    };
+});
 
 // ============================================
 // RETURN PRIME STATUS VALUES
