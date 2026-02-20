@@ -60,6 +60,7 @@ export async function generateDraftInvoice(
     select: {
       id: true,
       orderNumber: true,
+      channel: true,
       totalAmount: true,
       orderDate: true,
       customerId: true,
@@ -89,6 +90,16 @@ export async function generateDraftInvoice(
 
   if (!order) {
     log.warn({ orderId }, 'Order not found');
+    return null;
+  }
+
+  // Only auto-generate invoices for direct channels (Shopify, offline).
+  // Marketplace channels (Myntra, AJIO, Nykaa, etc.) have different settlement
+  // flows — invoices should be created during channel reconciliation.
+  const DIRECT_CHANNELS = ['shopify', 'shopify_online', 'offline'];
+  const channel = (order.channel ?? '').toLowerCase();
+  if (!DIRECT_CHANNELS.some(c => channel === c || channel.startsWith(`${c}_`))) {
+    log.debug({ orderId, orderNumber: order.orderNumber, channel: order.channel }, 'Marketplace order — skipping invoice');
     return null;
   }
 

@@ -104,6 +104,28 @@ export const getInvoice = createServerFn({ method: 'GET' })
             matchedTxn: {
               select: { id: true, qty: true, unit: true, costPerUnit: true, createdAt: true },
             },
+            orderLine: {
+              select: {
+                id: true,
+                qty: true,
+                unitPrice: true,
+                sku: {
+                  select: {
+                    skuCode: true,
+                    size: true,
+                    mrp: true,
+                    variation: {
+                      select: {
+                        colorName: true,
+                        product: {
+                          select: { name: true, hsnCode: true, styleCode: true },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
           },
         },
         allocations: {
@@ -112,6 +134,29 @@ export const getInvoice = createServerFn({ method: 'GET' })
               select: { id: true, reference: true, utr: true, bank: true, amount: true, txnDate: true },
             },
             matchedBy: { select: { id: true, name: true } },
+          },
+        },
+        order: {
+          select: {
+            id: true,
+            orderNumber: true,
+            channel: true,
+            orderDate: true,
+            customerName: true,
+            customerEmail: true,
+            customerPhone: true,
+            shippingAddress: true,
+            paymentMethod: true,
+            paymentConfirmedAt: true,
+            settledAt: true,
+            settlementRef: true,
+            settlementAmount: true,
+            paymentGateway: true,
+            totalAmount: true,
+            customerState: true,
+            shopifyCache: {
+              select: { paymentGatewayNames: true, confirmationNumber: true, rawData: true },
+            },
           },
         },
         party: { select: { id: true, name: true, tdsApplicable: true, tdsSection: true, tdsRate: true, bankAccountName: true, bankAccountNumber: true, bankIfsc: true } },
@@ -124,6 +169,25 @@ export const getInvoice = createServerFn({ method: 'GET' })
 
     // Strip file binary from response
     const { fileData: _, ...rest } = invoice;
+
+    // Enrich payment info from Shopify rawData when cache columns are empty
+    if (rest.order?.shopifyCache) {
+      const cache = rest.order.shopifyCache;
+      if (!cache.paymentGatewayNames || !cache.confirmationNumber) {
+        try {
+          const raw = JSON.parse(cache.rawData ?? '{}');
+          if (!cache.paymentGatewayNames && raw.payment_gateway_names) {
+            cache.paymentGatewayNames = (raw.payment_gateway_names as string[]).join(', ');
+          }
+          if (!cache.confirmationNumber && raw.confirmation_number) {
+            cache.confirmationNumber = raw.confirmation_number as string;
+          }
+        } catch { /* ignore parse errors */ }
+      }
+      // Don't send rawData to client
+      (cache as Record<string, unknown>).rawData = undefined;
+    }
+
     return { success: true as const, invoice: rest };
   });
 
