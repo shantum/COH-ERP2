@@ -115,6 +115,16 @@ export function parseSheetDate(value: string | undefined): Date | null {
     } else {
         // Ambiguous — default DD/MM for live tabs (Indian locale)
         day = a; month = b;
+
+        // Safety net: if DD/MM gives a future date but MM/DD gives a recent past date, prefer MM/DD.
+        // This catches cases where US-format dates (MM/DD) slip into the Indian-format sheet.
+        const ddMm = new Date(year, month - 1, day);
+        const mmDd = new Date(year, a - 1, b); // interpret as MM/DD instead
+        const now = new Date();
+        const threeDaysOut = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
+        if (ddMm > threeDaysOut && mmDd <= now && mmDd.getMonth() === a - 1 && mmDd.getDate() === b) {
+            month = a; day = b;
+        }
     }
 
     const d = new Date(year, month - 1, day);
