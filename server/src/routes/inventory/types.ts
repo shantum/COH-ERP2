@@ -53,7 +53,6 @@ export interface SkuWithRelations {
     isCustomSku?: boolean;
     targetStockQty?: number;
     isActive?: boolean;
-    fabricConsumption?: number | null;
     writeOffCount?: number;
     variation: {
         id?: string;

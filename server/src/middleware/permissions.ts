@@ -271,11 +271,6 @@ export function filterConfidentialFields<T extends DataWithConfidentialFields>(
             delete result.fabricCostPerUnit;
         }
 
-        // Consumption fields - require products:view:consumption
-        if (!hasPermission(userPermissions, 'products:view:consumption')) {
-            delete result.fabricConsumption;
-        }
-
         // Financial order data - require orders:view:financial
         if (!hasPermission(userPermissions, 'orders:view:financial')) {
             delete result.totalAmount;

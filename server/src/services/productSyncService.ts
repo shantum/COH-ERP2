@@ -468,7 +468,6 @@ async function syncSingleSku(
                 size,
                 mrp: createMrp,
                 ...(createIsDiscounted ? { sellingPrice: createSellingPrice } : {}),
-                fabricConsumption: 1.5,
                 targetStockQty: 10,
                 shopifyVariantId,
                 shopifyInventoryItemId: variant.inventory_item_id ? String(variant.inventory_item_id) : null,

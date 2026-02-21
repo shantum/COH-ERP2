@@ -16,7 +16,6 @@ type EditLevel = 'sku' | 'variation' | 'product';
 /** Data passed into the modal for display context (title, subtitle) */
 interface EditModalData {
     skuCode?: string;
-    fabricConsumption?: string | number;
     mrp?: string | number;
     targetStockQty?: string | number;
     colorName?: string;
@@ -60,7 +59,6 @@ export function EditModal({
         if (data) {
             if (level === 'sku') {
                 setFormData({
-                    fabricConsumption: String(data.fabricConsumption || ''),
                     mrp: String(data.mrp || ''),
                     targetStockQty: String(data.targetStockQty || ''),
                 });
@@ -118,18 +116,6 @@ export function EditModal({
             <div className="space-y-4">
                 {level === 'sku' && (
                     <>
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                                Fabric Consumption (m)
-                            </label>
-                            <input
-                                type="number"
-                                step="0.01"
-                                value={str('fabricConsumption')}
-                                onChange={(e) => handleChange('fabricConsumption', e.target.value)}
-                                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100"
-                            />
-                        </div>
                         <div>
                             <label className="block text-sm font-medium text-gray-700 mb-1">MRP (₹)</label>
                             <input

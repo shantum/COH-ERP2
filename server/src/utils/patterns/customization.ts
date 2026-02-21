@@ -69,7 +69,6 @@ export async function createCustomSku(
                 customizationValue: customizationData.value,
                 customizationNotes: customizationData.notes || null,
                 linkedOrderLineId: orderLineId,
-                fabricConsumption: baseSku.fabricConsumption,
             },
         });
 

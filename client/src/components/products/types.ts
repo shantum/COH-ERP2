@@ -63,7 +63,6 @@ export interface ProductTreeNode {
     barcode?: string;
     size?: string;
     mrp?: number;
-    fabricConsumption?: number;
     currentBalance?: number;
     availableBalance?: number;
     targetStockQty?: number;
@@ -231,8 +230,7 @@ export interface VariationViewRow {
     sales30DayUnits?: number;
     sales30DayValue?: number;
 
-    // === Consumption & Cost fields ===
-    avgConsumption?: number;        // Average fabric consumption across SKUs
+    // === Cost fields ===
     bomCost?: number | null;        // Pre-computed total BOM cost
 
     // Original node reference for actions

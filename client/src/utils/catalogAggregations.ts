@@ -46,7 +46,6 @@ export function aggregateByVariation(items: CatalogRow[]): CatalogRow[] {
                 skuIds: [], // Track all SKU IDs for bulk updates
                 // Track sums for averaging
                 _mrpSum: 0,
-                _fabricConsumptionSum: 0,
                 _bomCostSum: 0,
                 _totalCostSum: 0,
                 _exGstPriceSum: 0,
@@ -62,7 +61,6 @@ export function aggregateByVariation(items: CatalogRow[]): CatalogRow[] {
         group.skuCount += 1;
         // Sum values for averaging
         group._mrpSum += item.mrp || 0;
-        group._fabricConsumptionSum += item.fabricConsumption || 0;
         group._bomCostSum += item.bomCost || 0;
         group._totalCostSum += item.totalCost || 0;
         group._exGstPriceSum += item.exGstPrice || 0;
@@ -78,7 +76,6 @@ export function aggregateByVariation(items: CatalogRow[]): CatalogRow[] {
         // Calculate averages
         if (group.skuCount > 0) {
             group.mrp = Math.round(group._mrpSum / group.skuCount);
-            group.fabricConsumption = Math.round((group._fabricConsumptionSum / group.skuCount) * 100) / 100;
             group.bomCost = Math.round(group._bomCostSum / group.skuCount);
             group.totalCost = Math.round(group._totalCostSum / group.skuCount);
             group.exGstPrice = Math.round(group._exGstPriceSum / group.skuCount);
@@ -90,7 +87,6 @@ export function aggregateByVariation(items: CatalogRow[]): CatalogRow[] {
         }
         // Clean up temp fields
         delete group._mrpSum;
-        delete group._fabricConsumptionSum;
         delete group._bomCostSum;
         delete group._totalCostSum;
         delete group._exGstPriceSum;
@@ -133,7 +129,6 @@ export function aggregateByProduct(items: CatalogRow[]): CatalogRow[] {
                 hasLining: false, // Will be set to true if any variation has lining
                 // Track sums for averaging
                 _mrpSum: 0,
-                _fabricConsumptionSum: 0,
                 _bomCostSum: 0,
                 _totalCostSum: 0,
                 _exGstPriceSum: 0,
@@ -152,7 +147,6 @@ export function aggregateByProduct(items: CatalogRow[]): CatalogRow[] {
         if (item.hasLining) group.hasLining = true;
         // Sum values for averaging
         group._mrpSum += item.mrp || 0;
-        group._fabricConsumptionSum += item.fabricConsumption || 0;
         group._bomCostSum += item.bomCost || 0;
         group._totalCostSum += item.totalCost || 0;
         group._exGstPriceSum += item.exGstPrice || 0;
@@ -181,7 +175,6 @@ export function aggregateByProduct(items: CatalogRow[]): CatalogRow[] {
         // Calculate averages
         if (group.skuCount > 0) {
             group.mrp = Math.round(group._mrpSum / group.skuCount);
-            group.fabricConsumption = Math.round((group._fabricConsumptionSum / group.skuCount) * 100) / 100;
             group.bomCost = Math.round(group._bomCostSum / group.skuCount);
             group.totalCost = Math.round(group._totalCostSum / group.skuCount);
             group.exGstPrice = Math.round(group._exGstPriceSum / group.skuCount);
@@ -193,7 +186,6 @@ export function aggregateByProduct(items: CatalogRow[]): CatalogRow[] {
         }
         // Clean up temp fields
         delete group._mrpSum;
-        delete group._fabricConsumptionSum;
         delete group._bomCostSum;
         delete group._totalCostSum;
         delete group._exGstPriceSum;
@@ -232,13 +224,8 @@ export function aggregateByConsumption(items: CatalogRow[]): CatalogRow[] {
         }
 
         const group = groups.get(key)!;
-        const sizeKey = `consumption_${item.size}`;
         const skuIdsKey = `skuIds_${item.size}`;
 
-        // Set consumption value (should be same for all colors of same product+size)
-        if (group[sizeKey] === null && item.fabricConsumption != null) {
-            group[sizeKey] = item.fabricConsumption;
-        }
         // Collect SKU IDs for this size
         if (group[skuIdsKey]) {
             group[skuIdsKey].push(item.skuId);

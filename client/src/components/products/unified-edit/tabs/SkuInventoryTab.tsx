@@ -95,12 +95,6 @@ export function SkuInventoryTab({ sku }: SkuInventoryTabProps) {
               <span className="ml-2 font-medium">{sku.mrp}</span>
             </div>
           )}
-          {sku.fabricConsumption && (
-            <div>
-              <span className="text-gray-500">Fabric:</span>
-              <span className="ml-2">{sku.fabricConsumption}m</span>
-            </div>
-          )}
         </div>
       </div>
 

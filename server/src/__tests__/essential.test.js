@@ -10,7 +10,6 @@
 import {
     TXN_TYPE,
     TXN_REASON,
-    getEffectiveFabricConsumption,
 } from '../utils/queryPatterns.js';
 import shopifyClient from '../services/shopify.js';
 import { validatePassword } from '../utils/validation.js';
@@ -23,72 +22,7 @@ import { buildCustomerData } from '../services/customerSyncService.ts';
 // INVENTORY CALCULATION TESTS
 // ============================================
 
-describe('getEffectiveFabricConsumption', () => {
-    it('should use SKU-specific value when set and positive', () => {
-        const sku = {
-            fabricConsumption: 2.5,
-            variation: {
-                product: {
-                    defaultFabricConsumption: 1.0
-                }
-            }
-        };
-        expect(getEffectiveFabricConsumption(sku)).toBe(2.5);
-    });
-
-    it('should fallback to product default when SKU consumption is 0', () => {
-        const sku = {
-            fabricConsumption: 0,
-            variation: {
-                product: {
-                    defaultFabricConsumption: 1.8
-                }
-            }
-        };
-        expect(getEffectiveFabricConsumption(sku)).toBe(1.8);
-    });
-
-    it('should fallback to product default when SKU consumption is not set', () => {
-        const sku = {
-            variation: {
-                product: {
-                    defaultFabricConsumption: 2.0
-                }
-            }
-        };
-        expect(getEffectiveFabricConsumption(sku)).toBe(2.0);
-    });
-
-    it('should return 1.5 as final fallback when no values set', () => {
-        const sku = {
-            fabricConsumption: 0,
-            variation: {
-                product: {}
-            }
-        };
-        expect(getEffectiveFabricConsumption(sku)).toBe(1.5);
-    });
-
-    it('should return 1.5 when product default is 0', () => {
-        const sku = {
-            fabricConsumption: 0,
-            variation: {
-                product: {
-                    defaultFabricConsumption: 0
-                }
-            }
-        };
-        expect(getEffectiveFabricConsumption(sku)).toBe(1.5);
-    });
-
-    it('should handle missing variation gracefully', () => {
-        const sku = {
-            fabricConsumption: 0,
-            variation: null
-        };
-        expect(getEffectiveFabricConsumption(sku)).toBe(1.5);
-    });
-});
+// NOTE: getEffectiveFabricConsumption tests removed — fabric consumption now from BOM
 
 // ============================================
 // TRANSACTION CONSTANTS TESTS

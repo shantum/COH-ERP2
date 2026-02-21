@@ -24,7 +24,6 @@ const DEFAULT_COLUMN_WIDTHS: Record<string, number> = {
     fabric: 160,
     skus: 50,
     avgMrp: 65,
-    consumption: 55,
     bomCost: 60,
     bomMultiple: 45,
     stock: 55,

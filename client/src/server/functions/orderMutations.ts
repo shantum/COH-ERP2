@@ -1107,7 +1107,6 @@ export const customizeLine = createServerFn({ method: 'POST' })
                     customizationValue: value,
                     customizationNotes: notes || null,
                     linkedOrderLineId: lineId,
-                    fabricConsumption: baseSku.fabricConsumption,
                 },
             });
 

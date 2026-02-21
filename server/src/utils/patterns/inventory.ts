@@ -274,30 +274,5 @@ export async function calculateAllFabricBalances(
     return new Map();
 }
 
-// ============================================
-// FABRIC CONSUMPTION
-// ============================================
-
-/**
- * Get effective fabric consumption for a SKU
- * Cascade priority: SKU.fabricConsumption -> Product.defaultFabricConsumption -> 1.5
- */
-export function getEffectiveFabricConsumption(sku: {
-    fabricConsumption?: number | null;
-    variation?: {
-        product?: {
-            defaultFabricConsumption?: number | null;
-        } | null;
-    } | null;
-}): number {
-    if (sku.fabricConsumption && sku.fabricConsumption > 0) {
-        return sku.fabricConsumption;
-    }
-
-    const productDefault = sku.variation?.product?.defaultFabricConsumption;
-    if (productDefault && productDefault > 0) {
-        return productDefault;
-    }
-
-    return 1.5;
-}
+// NOTE: getEffectiveFabricConsumption removed — fabric consumption now comes from BOM
+// (SkuBomLine.quantity > VariationBomLine.quantity > default 1.5)

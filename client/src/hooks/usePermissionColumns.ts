@@ -162,21 +162,6 @@ export function createProductCostColumns(): PermissionColDef[] {
 }
 
 /**
- * Create consumption column for products
- */
-export function createConsumptionColumn(
-    field: string = 'fabricConsumption',
-    headerName: string = 'Consumption'
-): PermissionColDef {
-    return createConfidentialColumn(field, headerName, {
-        viewPermission: 'products:view:consumption',
-        editPermission: 'products:edit:consumption',
-        editable: true,
-        valueFormatter: (params) => params.value ? `${params.value.toFixed(2)}m` : '-',
-    });
-}
-
-/**
  * Create financial columns for orders (totalAmount, unitPrice, etc.)
  */
 export function createOrderFinancialColumns(): PermissionColDef[] {

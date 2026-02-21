@@ -96,7 +96,6 @@ export interface Sku {
   skuCode: string;
   variationId: string;
   size: string;
-  fabricConsumption: number;
   mrp: number;
   targetStockQty: number;
   targetStockMethod: string;
@@ -511,7 +510,6 @@ export interface UpdateVariationData extends Partial<CreateVariationData> {
 export interface CreateSkuData {
   size: string;
   skuCode?: string;
-  fabricConsumption?: number;
   mrp?: number;
   targetStockQty?: number;
   barcode?: string | null;

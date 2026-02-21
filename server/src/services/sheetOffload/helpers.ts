@@ -271,9 +271,9 @@ export async function bulkLookupSkus(skuCodes: string[]): Promise<Map<string, Sk
     const unique = [...new Set(skuCodes)];
     const skus = await prisma.sku.findMany({
         where: { skuCode: { in: unique } },
-        select: { id: true, skuCode: true, variationId: true, fabricConsumption: true, isActive: true },
+        select: { id: true, skuCode: true, variationId: true, isActive: true },
     });
-    return new Map(skus.map(s => [s.skuCode, { id: s.id, variationId: s.variationId, fabricConsumption: s.fabricConsumption, isActive: s.isActive }]));
+    return new Map(skus.map(s => [s.skuCode, { id: s.id, variationId: s.variationId, isActive: s.isActive }]));
 }
 
 /**

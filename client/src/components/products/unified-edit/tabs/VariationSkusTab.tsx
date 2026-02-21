@@ -45,7 +45,7 @@ export function VariationSkusTab({ skus, onNavigate }: VariationSkusTabProps) {
               <th className="text-left px-4 py-2 font-medium text-gray-600">Size</th>
               <th className="text-left px-4 py-2 font-medium text-gray-600">SKU Code</th>
               <th className="text-right px-4 py-2 font-medium text-gray-600">MRP</th>
-              <th className="text-right px-4 py-2 font-medium text-gray-600">Consumption</th>
+              <th className="text-right px-4 py-2 font-medium text-gray-600">BOM Cost</th>
               <th className="text-right px-4 py-2 font-medium text-gray-600">Stock</th>
               <th className="text-center px-4 py-2 font-medium text-gray-600">Status</th>
               <th className="w-10"></th>
@@ -74,10 +74,10 @@ export function VariationSkusTab({ skus, onNavigate }: VariationSkusTabProps) {
                   )}
                 </td>
                 <td className="px-4 py-3 text-right">
-                  {sku.fabricConsumption != null ? (
-                    <span>{sku.fabricConsumption}m</span>
+                  {sku.bomCost != null ? (
+                    <span>{sku.bomCost.toFixed(2)}</span>
                   ) : (
-                    <span className="text-gray-400 italic">inherited</span>
+                    <span className="text-gray-400">-</span>
                   )}
                 </td>
                 <td className="px-4 py-3 text-right">

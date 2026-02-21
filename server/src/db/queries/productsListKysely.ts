@@ -162,7 +162,6 @@ export async function listProductsKysely(
                       'Sku.size',
                       'Sku.mrp',
                       'Sku.isActive',
-                      'Sku.fabricConsumption',
                       'Sku.targetStockQty',
                   ])
                   .where('Sku.variationId', 'in', variationIds)
@@ -179,7 +178,6 @@ export async function listProductsKysely(
             size: sku.size,
             mrp: sku.mrp,
             isActive: sku.isActive,
-            fabricConsumption: sku.fabricConsumption,
             targetStockQty: sku.targetStockQty,
         });
         skusByVariation.set(sku.variationId, list);

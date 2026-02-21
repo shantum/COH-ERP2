@@ -265,7 +265,6 @@ export function VariationsDataTable({
                             <col style={{ width: columnWidths.fabric }} />
                             <col style={{ width: columnWidths.skus }} />
                             <col style={{ width: columnWidths.avgMrp }} />
-                            <col style={{ width: columnWidths.consumption }} />
                             <col style={{ width: columnWidths.bomCost }} />
                             <col style={{ width: columnWidths.bomMultiple }} />
                             <col style={{ width: columnWidths.stock }} />
@@ -301,9 +300,6 @@ export function VariationsDataTable({
                                 </th>
                                 <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
                                     Avg MRP
-                                </th>
-                                <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
-                                    Consump
                                 </th>
                                 <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
                                     BOM
@@ -361,7 +357,7 @@ export function VariationsDataTable({
                                                 <tr>
                                                     <td colSpan={16} className="p-0 bg-blue-50/30">
                                                         <div className="py-1.5 px-3 ml-8">
-                                                            <SkusTable skus={row.skus} fabricUnit={row.fabricUnit} />
+                                                            <SkusTable skus={row.skus} />
                                                         </div>
                                                     </td>
                                                 </tr>
@@ -521,11 +517,6 @@ const VariationRow = memo(function VariationRow({
                 {row.avgMrp ? `₹${Math.round(row.avgMrp).toLocaleString()}` : '-'}
             </td>
 
-            {/* Consumption (avg) */}
-            <td className="px-2 py-1 text-right tabular-nums text-xs text-gray-600">
-                {row.avgConsumption != null ? `${row.avgConsumption.toFixed(2)}${row.fabricUnit || 'm'}` : '-'}
-            </td>
-
             {/* BOM Cost */}
             <td className="px-2 py-1 text-right tabular-nums text-xs text-gray-600">
                 {row.bomCost != null ? `₹${Math.round(row.bomCost).toLocaleString()}` : '-'}
@@ -656,10 +647,9 @@ const VariationRow = memo(function VariationRow({
  */
 interface SkusTableProps {
     skus: ProductTreeNode[];
-    fabricUnit?: string;
 }
 
-const SkusTable = memo(function SkusTable({ skus, fabricUnit }: SkusTableProps) {
+const SkusTable = memo(function SkusTable({ skus }: SkusTableProps) {
     // Sort SKUs by size order
     const sortedSkus = useMemo(() => {
         return [...skus].sort((a, b) => sortBySizeOrder(a.size || '', b.size || ''));
@@ -678,9 +668,6 @@ const SkusTable = memo(function SkusTable({ skus, fabricUnit }: SkusTableProps) 
                         </th>
                         <th className="text-right px-2 py-1 text-[10px] font-semibold text-blue-700 uppercase w-16">
                             MRP
-                        </th>
-                        <th className="text-right px-2 py-1 text-[10px] font-semibold text-blue-700 uppercase w-14">
-                            Cons
                         </th>
                         <th className="text-right px-2 py-1 text-[10px] font-semibold text-blue-700 uppercase w-14">
                             BOM
@@ -708,9 +695,6 @@ const SkusTable = memo(function SkusTable({ skus, fabricUnit }: SkusTableProps) 
                             </td>
                             <td className="px-2 py-0.5 text-right tabular-nums font-medium">
                                 {sku.mrp ? `₹${sku.mrp.toLocaleString()}` : '-'}
-                            </td>
-                            <td className="px-2 py-0.5 text-right tabular-nums text-gray-600">
-                                {sku.fabricConsumption != null ? `${sku.fabricConsumption.toFixed(2)}${fabricUnit || 'm'}` : '-'}
                             </td>
                             <td className="px-2 py-0.5 text-right tabular-nums text-gray-600">
                                 {sku.bomCost != null ? `₹${Math.round(sku.bomCost).toLocaleString()}` : '-'}

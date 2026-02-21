@@ -286,7 +286,6 @@ export interface MarkTracker {
 export interface SkuLookupInfo {
     id: string;
     variationId: string;
-    fabricConsumption: number;
     isActive: boolean;
 }
 

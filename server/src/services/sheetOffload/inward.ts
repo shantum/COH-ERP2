@@ -59,7 +59,7 @@ import {
 
 /**
  * After sampling inward rows are created, deduct fabric used.
- * Formula: fabric qty = row.qty × Sku.fabricConsumption
+ * Formula: fabric qty = row.qty × BOM consumption (SkuBomLine > VariationBomLine > 1.5)
  * Creates FabricColourTransaction (outward) records.
  */
 export async function deductFabricForSamplingRows(
@@ -86,6 +86,47 @@ export async function deductFabricForSamplingRows(
     // Batch lookup fabric assignments via BOM
     const { getVariationsMainFabrics } = await import('@coh/shared/services/bom');
     const fabricMap = await getVariationsMainFabrics(prisma, variationIds);
+
+    // Batch lookup fabric consumption quantities from BOM
+    // Priority: SkuBomLine.quantity > VariationBomLine.quantity > default 1.5
+    const skuIds = samplingRows
+        .map(r => skuMap.get(r.skuCode)?.id)
+        .filter((id): id is string => !!id);
+
+    // Get variation-level fabric BOM quantities
+    const variationBomLines = await prisma.variationBomLine.findMany({
+        where: {
+            variationId: { in: variationIds },
+            role: { code: 'main', type: { code: 'FABRIC' } },
+        },
+        select: { variationId: true, quantity: true },
+    });
+    const variationQtyMap = new Map(
+        variationBomLines.map(l => [l.variationId, l.quantity])
+    );
+
+    // Get SKU-level fabric BOM quantity overrides
+    const skuBomLines = skuIds.length > 0
+        ? await prisma.skuBomLine.findMany({
+            where: {
+                skuId: { in: skuIds },
+                role: { code: 'main', type: { code: 'FABRIC' } },
+            },
+            select: { skuId: true, quantity: true },
+        })
+        : [];
+    const skuQtyMap = new Map(
+        skuBomLines.map(l => [l.skuId, l.quantity])
+    );
+
+    /** Get effective fabric consumption for a SKU from BOM */
+    const getFabricConsumption = (skuInfo: { id: string; variationId: string }): number => {
+        const skuQty = skuQtyMap.get(skuInfo.id);
+        if (skuQty != null && skuQty > 0) return skuQty;
+        const varQty = variationQtyMap.get(skuInfo.variationId);
+        if (varQty != null && varQty > 0) return varQty;
+        return 1.5; // default
+    };
 
     // Dedup: check existing referenceIds in FabricColourTransaction
     const existingFabricRefs = await findExistingFabricReferenceIds(
@@ -132,12 +173,6 @@ export async function deductFabricForSamplingRows(
         const skuInfo = skuMap.get(row.skuCode);
         if (!skuInfo) continue;
 
-        // Skip if fabricConsumption is 0
-        if (skuInfo.fabricConsumption <= 0) {
-            skippedZeroConsumption++;
-            continue;
-        }
-
         // Look up fabric assignment
         const fabric = fabricMap.get(skuInfo.variationId);
         if (!fabric) {
@@ -146,7 +181,14 @@ export async function deductFabricForSamplingRows(
             continue;
         }
 
-        const fabricQty = row.qty * skuInfo.fabricConsumption;
+        // Get fabric consumption from BOM (SkuBomLine > VariationBomLine > 1.5)
+        const consumption = getFabricConsumption(skuInfo);
+        if (consumption <= 0) {
+            skippedZeroConsumption++;
+            continue;
+        }
+
+        const fabricQty = row.qty * consumption;
 
         fabricTxnData.push({
             fabricColourId: fabric.fabricColourId,

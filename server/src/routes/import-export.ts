@@ -57,7 +57,6 @@ interface ProductCsvRow {
     skuCode: string;
     size: string;
     mrp?: string;
-    fabricConsumption?: string;
     targetStockQty?: string;
     isActive?: string;
 }
@@ -139,7 +138,6 @@ router.get('/export/products', authenticateToken, async (req: Request, res: Resp
                         skuCode: sku.skuCode,
                         size: sku.size,
                         mrp: sku.mrp,
-                        fabricConsumption: sku.fabricConsumption,
                         targetStockQty: sku.targetStockQty,
                         isActive: sku.isActive ? 'true' : 'false',
                     });
@@ -256,7 +254,6 @@ router.post('/import/products', authenticateToken, upload.single('file'), async 
                         where: { id: sku.id },
                         data: {
                             mrp: parseFloat(row.mrp || '0') || sku.mrp,
-                            fabricConsumption: parseFloat(row.fabricConsumption || '0') || sku.fabricConsumption,
                             targetStockQty: parseInt(row.targetStockQty || '0') || sku.targetStockQty,
                             isActive: row.isActive === 'false' ? false : true,
                         },
@@ -270,7 +267,6 @@ router.post('/import/products', authenticateToken, upload.single('file'), async 
                             skuCode: row.skuCode,
                             size: row.size,
                             mrp: parseFloat(row.mrp || '0') || 0,
-                            fabricConsumption: parseFloat(row.fabricConsumption || '1.5') || 1.5,
                             targetStockQty: parseInt(row.targetStockQty || '10') || 10,
                             isActive: row.isActive === 'false' ? false : true,
                         },

@@ -98,10 +98,6 @@ function SkuInfoContent({ sku }: { sku: ProductTreeNode }) {
                 <InfoRow label="MRP" value={sku.mrp ? `₹${sku.mrp.toLocaleString()}` : null} />
             </InfoSection>
 
-            <InfoSection title="Production">
-                <InfoRow label="Fabric Consumption" value={sku.fabricConsumption ? `${sku.fabricConsumption} m` : null} />
-            </InfoSection>
-
             <InfoSection title="Costs">
                 <InfoRow label="BOM Cost" value={formatCost(sku.bomCost)} />
             </InfoSection>

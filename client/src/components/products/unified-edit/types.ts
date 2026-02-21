@@ -50,7 +50,7 @@ export interface VariationFormData {
 
 export interface SkuFormData {
   size: string;
-  fabricConsumption: number | null;
+
   mrp: number | null;
   targetStockQty: number | null;
   isActive: boolean;
@@ -94,7 +94,7 @@ export interface SkuDetailData {
   skuCode: string;
   variationId: string;
   size: string;
-  fabricConsumption: number | null;
+
   mrp: number | null;
   targetStockQty: number | null;
   bomCost: number | null;

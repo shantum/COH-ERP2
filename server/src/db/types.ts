@@ -928,7 +928,6 @@ export type Product = {
     returnCount: Generated<number>;
     writeOffCount: Generated<number>;
     hsnCode: string | null;
-    packagingCost: number | null;
     shopifyProductIds: Generated<string[]>;
 };
 export type ProductBomTemplate = {
@@ -1237,7 +1236,6 @@ export type Sku = {
     skuCode: string;
     variationId: string;
     size: string;
-    fabricConsumption: Generated<number>;
     mrp: number;
     sellingPrice: number | null;
     currentBalance: Generated<number>;
@@ -1256,8 +1254,6 @@ export type Sku = {
     isCustomSku: Generated<boolean>;
     linkedOrderLineId: string | null;
     parentSkuId: string | null;
-    packagingCost: number | null;
-    laborMinutes: number | null;
     bomCost: number | null;
 };
 export type SkuBomLine = {
@@ -1399,8 +1395,6 @@ export type Variation = {
     imageUrl: string | null;
     isActive: Generated<boolean>;
     hasLining: Generated<boolean>;
-    packagingCost: number | null;
-    laborMinutes: number | null;
     bomCost: number | null;
     shopifySourceProductId: string | null;
     shopifySourceHandle: string | null;

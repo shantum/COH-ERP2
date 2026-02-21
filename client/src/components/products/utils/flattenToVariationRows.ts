@@ -8,23 +8,6 @@
 import type { ProductTreeNode, VariationViewRow } from '../types';
 
 /**
- * Calculate average fabric consumption for a variation from its SKUs.
- * Returns undefined if no valid consumptions are found.
- */
-function calculateAvgConsumption(skus: ProductTreeNode[] | undefined): number | undefined {
-    if (!skus || skus.length === 0) return undefined;
-
-    const validConsumptions = skus
-        .map((sku) => sku.fabricConsumption)
-        .filter((c): c is number => c != null && c > 0);
-
-    if (validConsumptions.length === 0) return undefined;
-
-    const sum = validConsumptions.reduce((a, b) => a + b, 0);
-    return sum / validConsumptions.length;
-}
-
-/**
  * Transform ProductTreeNode[] into VariationViewRow[]
  * Returns only variation rows with product info embedded.
  */
@@ -61,8 +44,7 @@ export function flattenToVariationRows(products: ProductTreeNode[]): VariationVi
                 fabricUnit: variation.fabricUnit,
                 sales30DayUnits: variation.sales30DayUnits,
                 sales30DayValue: variation.sales30DayValue,
-                // Consumption & Cost fields
-                avgConsumption: calculateAvgConsumption(variation.children),
+                // Cost fields
                 bomCost: variation.bomCost,
                 variationNode: variation,
                 productNode: product,

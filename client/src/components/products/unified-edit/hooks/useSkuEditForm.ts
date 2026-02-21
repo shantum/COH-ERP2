@@ -52,7 +52,6 @@ export function useSkuEditForm({
       const result = await updateSkuFn({
         data: {
           id: sku.id,
-          fabricConsumption: data.fabricConsumption ?? undefined,
           mrp: data.mrp ?? undefined,
           targetStockQty: data.targetStockQty ?? undefined,
           isActive: data.isActive,
@@ -97,7 +96,6 @@ export function useSkuEditForm({
 function getDefaultValues(sku: SkuDetailData): SkuFormData {
   return {
     size: sku.size ?? '',
-    fabricConsumption: sku.fabricConsumption ?? null,
     mrp: sku.mrp ?? null,
     targetStockQty: sku.targetStockQty ?? null,
     isActive: sku.isActive ?? true,

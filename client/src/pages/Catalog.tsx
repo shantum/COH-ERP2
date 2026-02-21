@@ -103,7 +103,6 @@ export default function Catalog() {
         allColumnIds: ALL_COLUMN_IDS,
         defaultPageSize: 100,
         // Hide cost calculation columns by default (users can enable via Columns dropdown)
-        // fabricConsumption remains visible as it's a key data field
         defaultHiddenColumns: ['bomCost', 'totalCost', 'exGstPrice', 'gstAmount', 'costMultiple'],
     });
 

@@ -129,7 +129,6 @@ export interface SkuNode {
     barcode: string;
     size: string;
     mrp: number;
-    fabricConsumption?: number;
     currentBalance: number;
     availableBalance: number;
     targetStockQty?: number;
@@ -152,7 +151,6 @@ interface SkuData {
     variationId: string;
     size: string;
     mrp: number;
-    fabricConsumption: number | null;
     targetStockQty: number | null;
     currentBalance: number;
     isActive: boolean;
@@ -402,7 +400,6 @@ export const getProductsTree = createServerFn({ method: 'GET' })
                                 barcode: sku.skuCode,
                                 size: sku.size,
                                 mrp: sku.mrp,
-                                fabricConsumption: sku.fabricConsumption ?? undefined,
                                 currentBalance: balance,
                                 availableBalance: balance,
                                 targetStockQty: sku.targetStockQty ?? undefined,
@@ -687,7 +684,6 @@ export const getProductsList = createServerFn({ method: 'GET' })
                           'Sku.size',
                           'Sku.mrp',
                           'Sku.isActive',
-                          'Sku.fabricConsumption',
                           'Sku.targetStockQty',
                       ])
                       .where('Sku.variationId', 'in', variationIds)
@@ -704,7 +700,6 @@ export const getProductsList = createServerFn({ method: 'GET' })
                 size: sku.size,
                 mrp: sku.mrp,
                 isActive: sku.isActive,
-                fabricConsumption: sku.fabricConsumption ?? 0,
                 targetStockQty: sku.targetStockQty ?? 0,
             });
             skusByVariation.set(sku.variationId, list);
@@ -807,7 +802,6 @@ export interface SkuDetailResponse {
     skuCode: string;
     variationId: string;
     size: string;
-    fabricConsumption: number | null;
     mrp: number | null;
     targetStockQty: number | null;
     bomCost: number | null;
@@ -901,7 +895,6 @@ export const getProductById = createServerFn({ method: 'GET' })
                         skuCode: s.skuCode,
                         variationId: s.variationId,
                         size: s.size,
-                        fabricConsumption: s.fabricConsumption,
                         mrp: s.mrp,
                         targetStockQty: s.targetStockQty,
                         bomCost: s.bomCost,

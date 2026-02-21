@@ -17,7 +17,6 @@ export const skuRowSchema = z.object({
     size: z.string(),
     mrp: z.number(),
     isActive: z.boolean(),
-    fabricConsumption: z.number(),
     targetStockQty: z.number(),
 });
 

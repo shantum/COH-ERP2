@@ -123,7 +123,6 @@ model Product {
   returnCount              Int         @default(0)
   writeOffCount            Int         @default(0)
   hsnCode                  String?     // HSN/SAC code for GST (default '6109' for knitted apparel)
-  packagingCost            Float?
   shopifyProductIds        String[]    @default([])
   variations               Variation[]
   bomTemplates             ProductBomTemplate[] // BOM structure for this product
@@ -144,8 +143,6 @@ model Variation {
   imageUrl               String?
   isActive               Boolean @default(true)
   hasLining              Boolean @default(false)
-  packagingCost          Float?
-  laborMinutes           Float?
   bomCost                Float?   // Computed total BOM cost (sum of SKU bomCosts)
   shopifySourceProductId String?
   shopifySourceHandle    String?
@@ -163,7 +160,6 @@ model Sku {
   skuCode                String                        @unique
   variationId            String
   size                   String
-  fabricConsumption      Float                         @default(1.5)
   mrp                    Float
   sellingPrice           Float?                        // Shopify selling price (null = same as MRP, i.e. not discounted)
   currentBalance         Int                           @default(0) // Materialized balance: updated atomically on every transaction
@@ -182,8 +178,6 @@ model Sku {
   isCustomSku            Boolean                       @default(false)
   linkedOrderLineId      String?                       @unique
   parentSkuId            String?
-  packagingCost          Float?
-  laborMinutes           Float?
   bomCost                Float?   // Computed total BOM cost (fabric + trims + services)
   feedbackProductLinks   FeedbackProductLink[]
   reconciliationItems    InventoryReconciliationItem[]

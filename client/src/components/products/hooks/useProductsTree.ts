@@ -53,7 +53,6 @@ type UpdateVariationData = {
 
 /** Fields accepted by updateSku (minus 'id') */
 type UpdateSkuData = {
-    fabricConsumption?: number;
     mrp?: number;
     targetStockQty?: number;
     targetStockMethod?: string;
@@ -85,7 +84,6 @@ type CreateVariationData = {
 type CreateSkuData = {
     size: string;
     skuCode: string;
-    fabricConsumption?: number;
     mrp: number;
     targetStockQty?: number;
     targetStockMethod?: string;
