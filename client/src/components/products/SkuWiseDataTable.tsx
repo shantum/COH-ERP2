@@ -8,8 +8,6 @@
 
 import { useState, useMemo, useEffect, memo, useCallback } from 'react';
 import {
-    ChevronRight,
-    ChevronLeft,
     Layers,
     Box,
     Package,
@@ -27,7 +25,7 @@ interface SkuWiseDataTableProps {
     onEditProduct?: (node: ProductTreeNode) => void;
 }
 
-const PAGE_SIZE = 500;
+const BATCH_SIZE = 250;
 
 /** Format currency as Indian Rupees */
 function formatCurrency(value: number | undefined | null): string {
@@ -61,7 +59,7 @@ export function SkuWiseDataTable({
     searchQuery,
     onEditProduct,
 }: SkuWiseDataTableProps) {
-    const [pageIndex, setPageIndex] = useState(0);
+    const [visibleCount, setVisibleCount] = useState(BATCH_SIZE);
 
     // Transform to flat SKU rows
     const allRows = useMemo(() => flattenToSkuRows(filteredData), [filteredData]);
@@ -92,17 +90,17 @@ export function SkuWiseDataTable({
         };
     }, [filteredRows]);
 
-    // Paginate rows
-    const paginatedRows = useMemo(() => {
-        const start = pageIndex * PAGE_SIZE;
-        return filteredRows.slice(start, start + PAGE_SIZE);
-    }, [filteredRows, pageIndex]);
+    // Show rows up to visibleCount
+    const visibleRows = useMemo(
+        () => filteredRows.slice(0, visibleCount),
+        [filteredRows, visibleCount]
+    );
 
-    const pageCount = Math.ceil(filteredRows.length / PAGE_SIZE);
+    const hasMore = visibleCount < filteredRows.length;
 
-    // Reset pagination when data changes
+    // Reset visible count when data changes
     useEffect(() => {
-        setPageIndex(0);
+        setVisibleCount(BATCH_SIZE);
     }, [searchQuery, filteredData]);
 
     // Click handler
@@ -149,7 +147,7 @@ export function SkuWiseDataTable({
                             <col style={{ width: 120 }} />  {/* SKU */}
                             <col />                         {/* Product / Colour / Size */}
                             <col style={{ width: 90 }} />   {/* Style Code */}
-                            <col style={{ width: 100 }} />  {/* Fabric */}
+                            <col style={{ width: 180 }} />  {/* Fabric */}
                             <col style={{ width: 55 }} />   {/* Shopify */}
                             <col style={{ width: 68 }} />   {/* MRP */}
                             <col style={{ width: 68 }} />   {/* Shopify ₹ */}
@@ -177,14 +175,14 @@ export function SkuWiseDataTable({
                             </tr>
                         </thead>
                         <tbody>
-                            {paginatedRows.length === 0 ? (
+                            {visibleRows.length === 0 ? (
                                 <tr>
                                     <td colSpan={13} className="h-24 text-center text-muted-foreground">
                                         No SKUs found.
                                     </td>
                                 </tr>
                             ) : (
-                                paginatedRows.map((row) => (
+                                visibleRows.map((row) => (
                                     <SkuRow
                                         key={row.id}
                                         row={row}
@@ -197,42 +195,22 @@ export function SkuWiseDataTable({
                 </div>
             </div>
 
-            {/* Pagination Controls */}
+            {/* Load More */}
             {filteredRows.length > 0 && (
                 <div className="flex items-center justify-between px-3 py-2 border rounded bg-gray-50/50 mt-2 flex-shrink-0">
                     <div className="text-xs text-muted-foreground">
-                        Showing {Math.min(pageIndex * PAGE_SIZE + 1, filteredRows.length)} to{' '}
-                        {Math.min((pageIndex + 1) * PAGE_SIZE, filteredRows.length)} of{' '}
-                        {filteredRows.length} SKUs
+                        Showing {Math.min(visibleCount, filteredRows.length)} of {filteredRows.length} SKUs
                     </div>
-                    <div className="flex items-center gap-1.5">
+                    {hasMore && (
                         <Button
                             variant="outline"
                             size="sm"
-                            onClick={() => setPageIndex((p) => Math.max(0, p - 1))}
-                            disabled={pageIndex === 0}
-                            className="gap-0.5 h-7 px-2 text-xs"
+                            onClick={() => setVisibleCount((c) => Math.min(c + BATCH_SIZE, filteredRows.length))}
+                            className="h-7 px-3 text-xs"
                         >
-                            <ChevronLeft size={14} />
-                            Previous
+                            Load more ({Math.min(BATCH_SIZE, filteredRows.length - visibleCount)})
                         </Button>
-                        <div className="flex items-center gap-1 text-xs">
-                            <span className="text-muted-foreground">Page</span>
-                            <span className="font-medium">{pageIndex + 1}</span>
-                            <span className="text-muted-foreground">of</span>
-                            <span className="font-medium">{Math.max(1, pageCount)}</span>
-                        </div>
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setPageIndex((p) => Math.min(pageCount - 1, p + 1))}
-                            disabled={pageIndex >= pageCount - 1}
-                            className="gap-0.5 h-7 px-2 text-xs"
-                        >
-                            Next
-                            <ChevronRight size={14} />
-                        </Button>
-                    </div>
+                    )}
                 </div>
             )}
         </div>
@@ -326,7 +304,16 @@ const SkuRow = memo(function SkuRow({ row, onClick }: SkuRowProps) {
 
             {/* Fabric */}
             <td className="px-2 py-0 truncate text-gray-500">
-                {row.fabricColourName || row.fabricColourCode || '-'}
+{row.fabricName ? (
+                    <>
+                        {row.fabricName}
+                        {row.fabricColourName && (
+                            <span className="text-gray-400"> | {row.fabricColourName}</span>
+                        )}
+                    </>
+                ) : (
+                    <span className="text-gray-300">-</span>
+                )}
             </td>
 
             {/* Shopify dot */}

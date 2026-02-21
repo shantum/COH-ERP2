@@ -247,6 +247,18 @@ export function ProductsViewSwitcher({ searchQuery, onSearchChange, onViewProduc
         }
     }, []);
 
+    // Determine a product's effective Shopify status (best among its variations).
+    // Priority: active > draft > archived > not_on_shopify
+    const getProductShopifyStatus = useCallback((variations: ProductTreeNode[]): 'active' | 'draft' | 'archived' | 'not_on_shopify' => {
+        const hasActive = variations.some(v => v.shopifyStatus === 'active');
+        if (hasActive) return 'active';
+        const hasDraft = variations.some(v => v.shopifyStatus === 'draft');
+        if (hasDraft) return 'draft';
+        const hasArchived = variations.some(v => v.shopifyStatus === 'archived');
+        if (hasArchived) return 'archived';
+        return 'not_on_shopify';
+    }, []);
+
     // Filter products based on selected filters
     const filteredProducts = useMemo(() => {
         if (!treeData) return [];
@@ -259,22 +271,15 @@ export function ProductsViewSwitcher({ searchQuery, onSearchChange, onViewProduc
             const variations = (product.children || []) as ProductTreeNode[];
             if (!matchesFabricFilter(variations, filters.fabricFilter)) return false;
 
-            // Shopify status filter - check if any variation matches
-            if (filters.shopifyStatus === 'not_on_shopify') {
-                const allUnlinked = variations.every(v =>
-                    !v.shopifyStatus || v.shopifyStatus === 'not_linked' || v.shopifyStatus === 'not_cached' || v.shopifyStatus === 'unknown'
-                );
-                if (!allUnlinked) return false;
-            } else if (filters.shopifyStatus !== 'all') {
-                const hasMatchingVariation = variations.some(v =>
-                    v.shopifyStatus === filters.shopifyStatus
-                );
-                if (!hasMatchingVariation) return false;
+            // Shopify status filter — uses best status so a product only appears in one tab
+            if (filters.shopifyStatus !== 'all') {
+                const effectiveStatus = getProductShopifyStatus(variations);
+                if (effectiveStatus !== filters.shopifyStatus) return false;
             }
 
             return true;
         });
-    }, [treeData, filters, matchesFabricFilter]);
+    }, [treeData, filters, matchesFabricFilter, getProductShopifyStatus]);
 
     // Compute Shopify tab counts from full (non-shopify-filtered) data
     const shopifyTabCounts = useMemo(() => {
@@ -293,17 +298,11 @@ export function ProductsViewSwitcher({ searchQuery, onSearchChange, onViewProduc
 
         for (const product of baseFiltered) {
             const variations = (product.children || []) as ProductTreeNode[];
-            const hasActive = variations.some(v => v.shopifyStatus === 'active');
-            const hasDraft = variations.some(v => v.shopifyStatus === 'draft');
-            const hasArchived = variations.some(v => v.shopifyStatus === 'archived');
-            const allUnlinked = variations.every(v =>
-                !v.shopifyStatus || v.shopifyStatus === 'not_linked' || v.shopifyStatus === 'not_cached' || v.shopifyStatus === 'unknown'
-            );
-
-            if (hasActive) active++;
-            if (hasDraft) draft++;
-            if (hasArchived) archived++;
-            if (allUnlinked) notOnShopify++;
+            const status = getProductShopifyStatus(variations);
+            if (status === 'active') active++;
+            else if (status === 'draft') draft++;
+            else if (status === 'archived') archived++;
+            else notOnShopify++;
         }
 
         return { all: baseFiltered.length, active, draft, archived, not_on_shopify: notOnShopify };

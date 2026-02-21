@@ -123,7 +123,7 @@ export function SkuEditDialog({
       {/* Tab Content */}
       <div className="flex-1 overflow-y-auto py-4">
         {activeTab === 'info' && (
-          <SkuInfoTab form={form} sku={sku} disabled={isSaving} />
+          <SkuInfoTab form={form} sku={sku} product={product} disabled={isSaving} />
         )}
         {activeTab === 'costs' && (
           <SkuCostsTab bomCost={sku.bomCost} />
