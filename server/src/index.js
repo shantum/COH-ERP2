@@ -211,11 +211,7 @@ app.get('/terms', (req, res) => {
 
 // Health check
 app.get('/api/health', (req, res) => {
-  res.json({
-    status: 'ok',
-    timestamp: new Date().toISOString(),
-    commit: process.env.GIT_COMMIT || 'unknown',
-  });
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
 // Production health check with performance metrics

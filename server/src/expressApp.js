@@ -8,6 +8,8 @@
  */
 
 // Validate ALL environment variables using Zod schema
+import fs from 'node:fs';
+import path from 'node:path';
 import './config/env.js';
 
 // Import logger EARLY to capture console.log/warn/error from all subsequent imports
@@ -180,7 +182,9 @@ export async function createExpressApp() {
 
   // Health check
   app.get('/api/health', (req, res) => {
-    res.json({ status: 'ok', timestamp: new Date().toISOString() });
+    let commit = 'unknown';
+    try { commit = fs.readFileSync(path.join(process.cwd(), 'VERSION'), 'utf8').trim(); } catch {}
+    res.json({ status: 'ok', timestamp: new Date().toISOString(), commit });
   });
 
   // Production health check with performance metrics
