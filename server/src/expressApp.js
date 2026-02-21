@@ -55,6 +55,8 @@ import cacheProcessor from './services/cacheProcessor.js';
 import cacheDumpWorker from './services/cacheDumpWorker.js';
 import sheetOffloadWorker from './services/sheetOffload/index.js';
 import driveFinanceSync from './services/driveFinanceSync.js';
+import remittanceSync from './services/remittanceSync.js';
+import payuSettlementSync from './services/payuSettlementSync.js';
 import { runAllCleanup } from './utils/cacheCleanup.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import shutdownCoordinator from './utils/shutdownCoordinator.js';
@@ -265,6 +267,8 @@ export async function startBackgroundWorkers() {
     cacheDumpWorker.start();
     sheetOffloadWorker.start();
     driveFinanceSync.start();
+    remittanceSync.start();
+    payuSettlementSync.start();
 
     shutdownCoordinator.register('scheduledSync', () => scheduledSync.stop(), 5000);
     shutdownCoordinator.register('trackingSync', () => trackingSync.stop(), 5000);
@@ -272,6 +276,8 @@ export async function startBackgroundWorkers() {
     shutdownCoordinator.register('cacheDumpWorker', () => cacheDumpWorker.stop(), 5000);
     shutdownCoordinator.register('sheetOffloadWorker', () => sheetOffloadWorker.stop(), 5000);
     shutdownCoordinator.register('driveFinanceSync', () => driveFinanceSync.stop(), 5000);
+    shutdownCoordinator.register('remittanceSync', () => remittanceSync.stop(), 5000);
+    shutdownCoordinator.register('payuSettlementSync', () => payuSettlementSync.stop(), 5000);
   }
 
   // Start Pulse broadcaster
