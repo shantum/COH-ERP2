@@ -288,7 +288,7 @@ export const markPaid = createServerFn({ method: 'POST' })
 
         await prisma.order.update({
             where: { id: orderId },
-            data: { codRemittedAt: now },
+            data: { codRemittedAt: now, paymentStatus: 'paid' },
         });
 
         return {

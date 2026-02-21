@@ -175,7 +175,6 @@ export const confirmOrderInvoice = createServerFn({ method: 'POST' })
         await tx.order.update({
           where: { id: invoice.orderId },
           data: {
-            paymentStatus: 'confirmed',
             paymentConfirmedAt: new Date(),
             paymentConfirmedBy: userId,
           },

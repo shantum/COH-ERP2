@@ -134,7 +134,7 @@ export const UpdateOrderSchema = z.object({
     totalAmount: z.number().positive('Total amount must be positive').optional(),
     shipByDate: z.string().optional().nullable(), // Accepts YYYY-MM-DD or ISO datetime
     paymentMethod: z.enum(['Prepaid', 'COD']).optional(),
-    paymentStatus: z.enum(['pending', 'paid', 'partially_paid', 'refunded', 'partially_refunded']).optional(),
+    paymentStatus: z.enum(['pending', 'paid']).optional(),
     isExchange: z.boolean().optional(),
 });
 

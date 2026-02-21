@@ -260,6 +260,7 @@ async function matchOrdersForDetails(
                     where: { id: order.id, codRemittedAt: null },
                     data: {
                         codRemittedAt: remittanceDate,
+                        paymentStatus: 'paid',
                         codRemittedAmount: amount || null,
                         codShopifySyncStatus: syncStatus,
                         codShopifySyncError: syncError,
