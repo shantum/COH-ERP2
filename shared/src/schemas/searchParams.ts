@@ -74,6 +74,20 @@ export const ProductsSearchParams = z.object({
 export type ProductsSearchParams = z.infer<typeof ProductsSearchParams>;
 
 // ============================================
+// FABRICS PAGE SEARCH PARAMS
+// ============================================
+
+/**
+ * Fabrics page search params
+ * 6 tabs: overview, transactions, reconciliation, invoices, trims, services
+ */
+export const FabricsSearchParams = z.object({
+    /** Active tab */
+    tab: z.enum(['overview', 'transactions', 'reconciliation', 'invoices', 'trims', 'services']).catch('overview'),
+});
+export type FabricsSearchParams = z.infer<typeof FabricsSearchParams>;
+
+// ============================================
 // INVENTORY PAGE SEARCH PARAMS
 // ============================================
 

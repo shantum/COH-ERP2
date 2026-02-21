@@ -52,6 +52,7 @@ const navGroups: NavGroup[] = [
         label: 'Catalog',
         items: [
             { to: '/products', icon: Package, label: 'Products' },
+            { to: '/fabrics', icon: Layers, label: 'Fabrics' },
             { to: '/shopify-catalog', icon: ShoppingBag, label: 'Shopify Catalog' },
             { to: '/facebook-feed-health', icon: HeartPulse, label: 'Feed Health' },
             { to: '/inventory', icon: Package, label: 'Inventory' },
