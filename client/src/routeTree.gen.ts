@@ -40,9 +40,6 @@ import { Route as AuthenticatedInventoryRouteImport } from './routes/_authentica
 import { Route as AuthenticatedFinanceRouteImport } from './routes/_authenticated/finance'
 import { Route as AuthenticatedFacebookFeedHealthRouteImport } from './routes/_authenticated/facebook-feed-health'
 import { Route as AuthenticatedFabricsRouteImport } from './routes/_authenticated/fabrics'
-import { Route as AuthenticatedFabricReportRouteImport } from './routes/_authenticated/fabric-report'
-import { Route as AuthenticatedFabricReconciliationRouteImport } from './routes/_authenticated/fabric-reconciliation'
-import { Route as AuthenticatedFabricReceiptRouteImport } from './routes/_authenticated/fabric-receipt'
 import { Route as AuthenticatedCustomersRouteImport } from './routes/_authenticated/customers'
 import { Route as AuthenticatedCostingRouteImport } from './routes/_authenticated/costing'
 import { Route as AuthenticatedChannelsRouteImport } from './routes/_authenticated/channels'
@@ -211,24 +208,6 @@ const AuthenticatedFabricsRoute = AuthenticatedFabricsRouteImport.update({
   path: '/fabrics',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
-const AuthenticatedFabricReportRoute =
-  AuthenticatedFabricReportRouteImport.update({
-    id: '/fabric-report',
-    path: '/fabric-report',
-    getParentRoute: () => AuthenticatedRoute,
-  } as any)
-const AuthenticatedFabricReconciliationRoute =
-  AuthenticatedFabricReconciliationRouteImport.update({
-    id: '/fabric-reconciliation',
-    path: '/fabric-reconciliation',
-    getParentRoute: () => AuthenticatedRoute,
-  } as any)
-const AuthenticatedFabricReceiptRoute =
-  AuthenticatedFabricReceiptRouteImport.update({
-    id: '/fabric-receipt',
-    path: '/fabric-receipt',
-    getParentRoute: () => AuthenticatedRoute,
-  } as any)
 const AuthenticatedCustomersRoute = AuthenticatedCustomersRouteImport.update({
   id: '/customers',
   path: '/customers',
@@ -270,9 +249,6 @@ export interface FileRoutesByFullPath {
   '/channels': typeof AuthenticatedChannelsRoute
   '/costing': typeof AuthenticatedCostingRoute
   '/customers': typeof AuthenticatedCustomersRoute
-  '/fabric-receipt': typeof AuthenticatedFabricReceiptRoute
-  '/fabric-reconciliation': typeof AuthenticatedFabricReconciliationRoute
-  '/fabric-report': typeof AuthenticatedFabricReportRoute
   '/fabrics': typeof AuthenticatedFabricsRoute
   '/facebook-feed-health': typeof AuthenticatedFacebookFeedHealthRoute
   '/finance': typeof AuthenticatedFinanceRoute
@@ -309,9 +285,6 @@ export interface FileRoutesByTo {
   '/channels': typeof AuthenticatedChannelsRoute
   '/costing': typeof AuthenticatedCostingRoute
   '/customers': typeof AuthenticatedCustomersRoute
-  '/fabric-receipt': typeof AuthenticatedFabricReceiptRoute
-  '/fabric-reconciliation': typeof AuthenticatedFabricReconciliationRoute
-  '/fabric-report': typeof AuthenticatedFabricReportRoute
   '/fabrics': typeof AuthenticatedFabricsRoute
   '/facebook-feed-health': typeof AuthenticatedFacebookFeedHealthRoute
   '/finance': typeof AuthenticatedFinanceRoute
@@ -351,9 +324,6 @@ export interface FileRoutesById {
   '/_authenticated/channels': typeof AuthenticatedChannelsRoute
   '/_authenticated/costing': typeof AuthenticatedCostingRoute
   '/_authenticated/customers': typeof AuthenticatedCustomersRoute
-  '/_authenticated/fabric-receipt': typeof AuthenticatedFabricReceiptRoute
-  '/_authenticated/fabric-reconciliation': typeof AuthenticatedFabricReconciliationRoute
-  '/_authenticated/fabric-report': typeof AuthenticatedFabricReportRoute
   '/_authenticated/fabrics': typeof AuthenticatedFabricsRoute
   '/_authenticated/facebook-feed-health': typeof AuthenticatedFacebookFeedHealthRoute
   '/_authenticated/finance': typeof AuthenticatedFinanceRoute
@@ -394,9 +364,6 @@ export interface FileRouteTypes {
     | '/channels'
     | '/costing'
     | '/customers'
-    | '/fabric-receipt'
-    | '/fabric-reconciliation'
-    | '/fabric-report'
     | '/fabrics'
     | '/facebook-feed-health'
     | '/finance'
@@ -433,9 +400,6 @@ export interface FileRouteTypes {
     | '/channels'
     | '/costing'
     | '/customers'
-    | '/fabric-receipt'
-    | '/fabric-reconciliation'
-    | '/fabric-report'
     | '/fabrics'
     | '/facebook-feed-health'
     | '/finance'
@@ -474,9 +438,6 @@ export interface FileRouteTypes {
     | '/_authenticated/channels'
     | '/_authenticated/costing'
     | '/_authenticated/customers'
-    | '/_authenticated/fabric-receipt'
-    | '/_authenticated/fabric-reconciliation'
-    | '/_authenticated/fabric-report'
     | '/_authenticated/fabrics'
     | '/_authenticated/facebook-feed-health'
     | '/_authenticated/finance'
@@ -732,27 +693,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedFabricsRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
-    '/_authenticated/fabric-report': {
-      id: '/_authenticated/fabric-report'
-      path: '/fabric-report'
-      fullPath: '/fabric-report'
-      preLoaderRoute: typeof AuthenticatedFabricReportRouteImport
-      parentRoute: typeof AuthenticatedRoute
-    }
-    '/_authenticated/fabric-reconciliation': {
-      id: '/_authenticated/fabric-reconciliation'
-      path: '/fabric-reconciliation'
-      fullPath: '/fabric-reconciliation'
-      preLoaderRoute: typeof AuthenticatedFabricReconciliationRouteImport
-      parentRoute: typeof AuthenticatedRoute
-    }
-    '/_authenticated/fabric-receipt': {
-      id: '/_authenticated/fabric-receipt'
-      path: '/fabric-receipt'
-      fullPath: '/fabric-receipt'
-      preLoaderRoute: typeof AuthenticatedFabricReceiptRouteImport
-      parentRoute: typeof AuthenticatedRoute
-    }
     '/_authenticated/customers': {
       id: '/_authenticated/customers'
       path: '/customers'
@@ -797,9 +737,6 @@ interface AuthenticatedRouteChildren {
   AuthenticatedChannelsRoute: typeof AuthenticatedChannelsRoute
   AuthenticatedCostingRoute: typeof AuthenticatedCostingRoute
   AuthenticatedCustomersRoute: typeof AuthenticatedCustomersRoute
-  AuthenticatedFabricReceiptRoute: typeof AuthenticatedFabricReceiptRoute
-  AuthenticatedFabricReconciliationRoute: typeof AuthenticatedFabricReconciliationRoute
-  AuthenticatedFabricReportRoute: typeof AuthenticatedFabricReportRoute
   AuthenticatedFabricsRoute: typeof AuthenticatedFabricsRoute
   AuthenticatedFacebookFeedHealthRoute: typeof AuthenticatedFacebookFeedHealthRoute
   AuthenticatedFinanceRoute: typeof AuthenticatedFinanceRoute
@@ -831,10 +768,6 @@ const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedChannelsRoute: AuthenticatedChannelsRoute,
   AuthenticatedCostingRoute: AuthenticatedCostingRoute,
   AuthenticatedCustomersRoute: AuthenticatedCustomersRoute,
-  AuthenticatedFabricReceiptRoute: AuthenticatedFabricReceiptRoute,
-  AuthenticatedFabricReconciliationRoute:
-    AuthenticatedFabricReconciliationRoute,
-  AuthenticatedFabricReportRoute: AuthenticatedFabricReportRoute,
   AuthenticatedFabricsRoute: AuthenticatedFabricsRoute,
   AuthenticatedFacebookFeedHealthRoute: AuthenticatedFacebookFeedHealthRoute,
   AuthenticatedFinanceRoute: AuthenticatedFinanceRoute,

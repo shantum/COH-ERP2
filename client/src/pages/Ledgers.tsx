@@ -2,12 +2,10 @@
  * Ledgers Page - Inventory Transaction Audit Interface
  *
  * PURPOSE: Primary audit interface for 134K+ inventory transactions.
- * Three tabs: Inward (stock received), Outward (stock dispatched), Materials (fabric txns).
+ * Two tabs: Inward (stock received), Outward (stock dispatched).
  * Server-side search, filtering, and pagination.
  *
- * DATA SOURCE:
- * - Inward/Outward: getLedgerTransactions server function
- * - Materials: getAllFabricColourTransactions server function
+ * Materials tab moved to /fabrics (Transactions tab).
  */
 
 import { useState, useEffect, useCallback } from 'react';
@@ -15,7 +13,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
 import {
     Search, Trash2, ChevronLeft, ChevronRight,
-    ArrowDownCircle, ArrowUpCircle, FileSpreadsheet, Monitor,
+    FileSpreadsheet, Monitor,
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { invalidateOrderView } from '../hooks/orders/orderMutationUtils';
@@ -25,11 +23,9 @@ import { useDebounce } from '../hooks/useDebounce';
 
 // Server Functions
 import { getLedgerTransactions, type LedgerTransactionItem, type LedgerTransactionsResult } from '../server/functions/inventory';
-import { getAllFabricColourTransactions } from '../server/functions/fabricColours';
 import { deleteTransaction as deleteInventoryTransaction } from '../server/functions/inventoryMutations';
-import { deleteFabricColourTransaction } from '../server/functions/fabricColourMutations';
 
-type Tab = 'inward' | 'outward' | 'materials';
+type Tab = 'inward' | 'outward';
 
 // ============================================
 // HELPER: Format number with commas
@@ -126,66 +122,7 @@ export default function Ledgers() {
                 offset,
             },
         }),
-        enabled: activeTab !== 'materials',
         initialData: loaderData.ledger ?? undefined,
-    });
-
-    // ============================================
-    // MATERIALS DATA (client-side, existing pattern)
-    // ============================================
-
-    interface FabricColourTransaction {
-        id: string;
-        fabricColour?: {
-            colourName: string;
-            colourHex?: string | null;
-            fabric?: {
-                name: string;
-                material?: { name: string } | null;
-            } | null;
-        } | null;
-        txnType: string;
-        reason: string;
-        createdAt: string;
-        qty: number;
-        unit: string;
-        notes?: string | null;
-        costPerUnit?: number | null;
-        party?: { name: string } | null;
-        createdBy?: { name: string } | null;
-    }
-
-    const { data: materialTxns, isLoading: materialsLoading } = useQuery<FabricColourTransaction[]>({
-        queryKey: ['allFabricColourTransactions'],
-        queryFn: async () => {
-            const result = await getAllFabricColourTransactions({ data: { limit: 1000, days: 365 } });
-            return result.transactions.map((t): FabricColourTransaction => ({
-                id: t.id,
-                txnType: t.txnType,
-                reason: t.reason,
-                createdAt: typeof t.createdAt === 'string' ? t.createdAt : new Date(t.createdAt as Date).toISOString(),
-                qty: Number(t.qty),
-                unit: t.unit,
-                notes: t.notes,
-                costPerUnit: t.costPerUnit ? Number(t.costPerUnit) : null,
-                fabricColour: t.fabricColour,
-                party: t.party,
-                createdBy: t.createdBy
-            }));
-        },
-        enabled: activeTab === 'materials'
-    });
-
-    // Filter materials client-side (search only, no pagination needed for ~1K records)
-    const filteredMaterials = materialTxns?.filter((txn) => {
-        if (search.search) {
-            const s = search.search.toLowerCase();
-            const colourMatch = txn.fabricColour?.colourName?.toLowerCase().includes(s);
-            const fabricMatch = txn.fabricColour?.fabric?.name?.toLowerCase().includes(s);
-            const materialMatch = txn.fabricColour?.fabric?.material?.name?.toLowerCase().includes(s);
-            if (!colourMatch && !fabricMatch && !materialMatch) return false;
-        }
-        return true;
     });
 
     // ============================================
@@ -215,21 +152,6 @@ export default function Ledgers() {
         onError: (err: Error) => alert(err.message || 'Failed to delete transaction')
     });
 
-    const deleteMaterialsTxnMutation = useMutation({
-        mutationFn: async (txnId: string) => {
-            const result = await deleteFabricColourTransaction({ data: { txnId } });
-            if (!result.success) {
-                throw new Error(result.error?.message || 'Failed to delete transaction');
-            }
-            return result;
-        },
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['allFabricColourTransactions'] });
-            queryClient.invalidateQueries({ queryKey: ['fabricColourStock'] });
-        },
-        onError: (err: Error) => alert(err.message || 'Failed to delete transaction')
-    });
-
     // ============================================
     // RENDER
     // ============================================
@@ -237,7 +159,6 @@ export default function Ledgers() {
     const tabs: { key: Tab; label: string }[] = [
         { key: 'inward', label: 'Inward' },
         { key: 'outward', label: 'Outward' },
-        { key: 'materials', label: 'Materials' },
     ];
 
     return (
@@ -288,21 +209,6 @@ export default function Ledgers() {
                 />
             )}
 
-            {/* Materials Tab */}
-            {activeTab === 'materials' && (
-                <MaterialsTab
-                    data={filteredMaterials}
-                    isLoading={materialsLoading}
-                    searchInput={searchInput}
-                    setSearchInput={setSearchInput}
-                    isAdmin={isAdmin}
-                    onDelete={(id) => {
-                        if (confirm('Delete this fabric transaction?')) {
-                            deleteMaterialsTxnMutation.mutate(id);
-                        }
-                    }}
-                />
-            )}
         </div>
     );
 }
@@ -551,157 +457,6 @@ function LedgerRow({ txn, tab, isAdmin, onDelete }: {
                 </td>
             )}
         </tr>
-    );
-}
-
-// ============================================
-// MATERIALS TAB COMPONENT
-// ============================================
-
-interface MaterialsTabProps {
-    data: Array<{
-        id: string;
-        fabricColour?: {
-            colourName: string;
-            colourHex?: string | null;
-            fabric?: {
-                name: string;
-                material?: { name: string } | null;
-            } | null;
-        } | null;
-        txnType: string;
-        reason: string;
-        createdAt: string;
-        qty: number;
-        unit: string;
-        notes?: string | null;
-        costPerUnit?: number | null;
-        party?: { name: string } | null;
-        createdBy?: { name: string } | null;
-    }> | undefined;
-    isLoading: boolean;
-    searchInput: string;
-    setSearchInput: (v: string) => void;
-    isAdmin: boolean;
-    onDelete: (id: string) => void;
-}
-
-function MaterialsTab({ data, isLoading, searchInput, setSearchInput, isAdmin, onDelete }: MaterialsTabProps) {
-    return (
-        <div className="space-y-4">
-            {/* Filter Bar */}
-            <div className="card flex flex-wrap gap-2 md:gap-3 items-center">
-                <div className="relative flex-1 min-w-[200px] max-w-sm">
-                    <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                    <input
-                        type="text"
-                        placeholder="Search material, fabric, colour..."
-                        className="input pl-9 w-full"
-                        value={searchInput}
-                        onChange={(e) => setSearchInput(e.target.value)}
-                    />
-                </div>
-                <span className="text-sm text-gray-500">
-                    {data?.length || 0} transactions
-                </span>
-            </div>
-
-            {/* Table */}
-            {isLoading ? (
-                <div className="flex justify-center py-12">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" />
-                </div>
-            ) : !data || data.length === 0 ? (
-                <div className="card text-center py-12 text-gray-500">No transactions found</div>
-            ) : (
-                <div className="card p-0 overflow-x-auto">
-                    <table className="w-full text-sm">
-                        <thead>
-                            <tr className="border-b bg-gray-50 text-left text-xs text-gray-500 uppercase tracking-wider">
-                                <th className="px-3 py-2.5">Date</th>
-                                <th className="px-3 py-2.5">Material</th>
-                                <th className="px-3 py-2.5">Fabric</th>
-                                <th className="px-3 py-2.5">Colour</th>
-                                <th className="px-3 py-2.5">Type</th>
-                                <th className="px-3 py-2.5 text-right">Qty</th>
-                                <th className="px-3 py-2.5">Reason</th>
-                                <th className="px-3 py-2.5">Cost/Unit</th>
-                                <th className="px-3 py-2.5">Supplier</th>
-                                <th className="px-3 py-2.5">Created By</th>
-                                {isAdmin && <th className="px-3 py-2.5 w-10"></th>}
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-100">
-                            {data.map((txn) => {
-                                const date = new Date(txn.createdAt);
-                                const isInward = txn.txnType === 'inward';
-                                return (
-                                    <tr key={txn.id} className="hover:bg-gray-50 transition-colors">
-                                        <td className="px-3 py-2 text-gray-500 whitespace-nowrap text-xs">
-                                            {date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' })}
-                                            <br />
-                                            <span className="text-gray-400">{date.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>
-                                        </td>
-                                        <td className="px-3 py-2 text-gray-700 text-xs">
-                                            {txn.fabricColour?.fabric?.material?.name || '-'}
-                                        </td>
-                                        <td className="px-3 py-2 text-gray-700 text-xs">
-                                            {txn.fabricColour?.fabric?.name || '-'}
-                                        </td>
-                                        <td className="px-3 py-2 whitespace-nowrap">
-                                            <div className="flex items-center gap-1.5">
-                                                <div
-                                                    className="w-4 h-4 rounded-full border border-gray-300 shrink-0"
-                                                    style={{ backgroundColor: txn.fabricColour?.colourHex || '#ccc' }}
-                                                />
-                                                <span className="text-gray-700 text-xs">{txn.fabricColour?.colourName || '-'}</span>
-                                            </div>
-                                        </td>
-                                        <td className="px-3 py-2 whitespace-nowrap">
-                                            {isInward ? (
-                                                <span className="inline-flex items-center gap-0.5 text-green-700 text-xs font-medium">
-                                                    <ArrowDownCircle size={12} /> In
-                                                </span>
-                                            ) : (
-                                                <span className="inline-flex items-center gap-0.5 text-red-700 text-xs font-medium">
-                                                    <ArrowUpCircle size={12} /> Out
-                                                </span>
-                                            )}
-                                        </td>
-                                        <td className={`px-3 py-2 text-right font-semibold whitespace-nowrap ${isInward ? 'text-green-700' : 'text-red-700'}`}>
-                                            {isInward ? '+' : '-'}{txn.qty} {txn.unit}
-                                        </td>
-                                        <td className="px-3 py-2 text-gray-600 whitespace-nowrap text-xs capitalize">
-                                            {txn.reason.replace(/_/g, ' ')}
-                                        </td>
-                                        <td className="px-3 py-2 text-gray-600 text-xs">
-                                            {txn.costPerUnit ? `\u20B9${txn.costPerUnit}` : '-'}
-                                        </td>
-                                        <td className="px-3 py-2 text-gray-600 text-xs">
-                                            {txn.party?.name || '-'}
-                                        </td>
-                                        <td className="px-3 py-2 text-gray-500 text-xs">
-                                            {txn.createdBy?.name || 'System'}
-                                        </td>
-                                        {isAdmin && (
-                                            <td className="px-3 py-2">
-                                                <button
-                                                    onClick={() => onDelete(txn.id)}
-                                                    className="p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded"
-                                                    title="Delete transaction"
-                                                >
-                                                    <Trash2 size={14} />
-                                                </button>
-                                            </td>
-                                        )}
-                                    </tr>
-                                );
-                            })}
-                        </tbody>
-                    </table>
-                </div>
-            )}
-        </div>
     );
 }
 
