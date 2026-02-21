@@ -106,39 +106,6 @@ describe('Fabric Balance - Unit Handling', () => {
 // SECTION 3: FABRIC CONSUMPTION CALCULATION
 // ============================================
 
-describe('Fabric Consumption - Per Unit', () => {
-    const DEFAULT_FABRIC_CONSUMPTION = 1.5;
-
-    const getEffectiveFabricConsumption = (sku) => {
-        if (sku.fabricConsumption && sku.fabricConsumption > 0) {
-            return sku.fabricConsumption;
-        }
-        const productDefault = sku.variation?.product?.defaultFabricConsumption;
-        if (productDefault && productDefault > 0) {
-            return productDefault;
-        }
-        return DEFAULT_FABRIC_CONSUMPTION;
-    };
-
-    it('should use SKU-specific consumption when set', () => {
-        const sku = { fabricConsumption: 2.0 };
-        expect(getEffectiveFabricConsumption(sku)).toBe(2.0);
-    });
-
-    it('should fallback to product default', () => {
-        const sku = {
-            fabricConsumption: null,
-            variation: { product: { defaultFabricConsumption: 1.8 } }
-        };
-        expect(getEffectiveFabricConsumption(sku)).toBe(1.8);
-    });
-
-    it('should fallback to system default (1.5)', () => {
-        const sku = { fabricConsumption: null };
-        expect(getEffectiveFabricConsumption(sku)).toBe(1.5);
-    });
-});
-
 describe('Fabric Consumption - Batch Total', () => {
     const calculateBatchFabricConsumption = (consumptionPerUnit, qtyCompleted) => {
         return consumptionPerUnit * qtyCompleted;

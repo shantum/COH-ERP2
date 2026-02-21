@@ -232,7 +232,6 @@ describe('filterConfidentialFields - Cost Fields', () => {
         fabricCost: 150.00,
         laborCost: 50.00,
         bomCost: 175.00,
-        packagingCost: 10.00,
         totalCost: 265.00,
         totalCogs: 265.00,
         costMultiple: 3.5,
@@ -245,7 +244,6 @@ describe('filterConfidentialFields - Cost Fields', () => {
         expect(result.fabricCost).toBe(150.00);
         expect(result.laborCost).toBe(50.00);
         expect(result.bomCost).toBe(175.00);
-        expect(result.packagingCost).toBe(10.00);
         expect(result.totalCost).toBe(265.00);
         expect(result.totalCogs).toBe(265.00);
         expect(result.costMultiple).toBe(3.5);
@@ -259,7 +257,6 @@ describe('filterConfidentialFields - Cost Fields', () => {
         expect(result.fabricCost).toBeUndefined();
         expect(result.laborCost).toBeUndefined();
         expect(result.bomCost).toBeUndefined();
-        expect(result.packagingCost).toBeUndefined();
         expect(result.totalCost).toBeUndefined();
         expect(result.totalCogs).toBeUndefined();
         expect(result.costMultiple).toBeUndefined();
@@ -288,38 +285,6 @@ describe('filterConfidentialFields - Cost Fields', () => {
         expect(result.costPerUnit).toBeUndefined();
         expect(result.laborRatePerMin).toBeUndefined();
         expect(result.name).toBe('Cotton');
-    });
-});
-
-describe('filterConfidentialFields - Consumption Fields', () => {
-    const sampleSku = {
-        id: 'sku-1',
-        code: 'SKU-001',
-        fabricConsumption: 2.5,
-        size: 'M',
-    };
-
-    it('should preserve fabricConsumption when user has products:view:consumption', () => {
-        const userPermissions = ['products:view', 'products:view:consumption'];
-        const result = filterConfidentialFields(sampleSku, userPermissions);
-
-        expect(result.fabricConsumption).toBe(2.5);
-        expect(result.code).toBe('SKU-001');
-    });
-
-    it('should remove fabricConsumption when user lacks products:view:consumption', () => {
-        const userPermissions = ['products:view'];
-        const result = filterConfidentialFields(sampleSku, userPermissions);
-
-        expect(result.fabricConsumption).toBeUndefined();
-        expect(result.code).toBe('SKU-001');
-    });
-
-    it('should allow consumption view with products:* wildcard', () => {
-        const userPermissions = ['products:*'];
-        const result = filterConfidentialFields(sampleSku, userPermissions);
-
-        expect(result.fabricConsumption).toBe(2.5);
     });
 });
 
@@ -463,7 +428,6 @@ describe('filterConfidentialFields - Combined Permissions', () => {
         customerEmail: 'john@example.com',
         totalAmount: 5000.00,
         fabricCost: 150.00,
-        fabricConsumption: 2.5,
     };
 
     it('should filter multiple field types when user has no special permissions', () => {
@@ -475,7 +439,6 @@ describe('filterConfidentialFields - Combined Permissions', () => {
         expect(result.customerEmail).toBeUndefined();
         expect(result.totalAmount).toBeUndefined();
         expect(result.fabricCost).toBeUndefined();
-        expect(result.fabricConsumption).toBeUndefined();
     });
 
     it('should preserve all fields when user has all permissions', () => {
@@ -484,7 +447,6 @@ describe('filterConfidentialFields - Combined Permissions', () => {
             'orders:view:financial',
             'products:view',
             'products:view:cost',
-            'products:view:consumption',
             'customers:view:contact',
         ];
         const result = filterConfidentialFields(complexData, userPermissions);
@@ -492,7 +454,6 @@ describe('filterConfidentialFields - Combined Permissions', () => {
         expect(result.customerEmail).toBe('john@example.com');
         expect(result.totalAmount).toBe(5000.00);
         expect(result.fabricCost).toBe(150.00);
-        expect(result.fabricConsumption).toBe(2.5);
     });
 
     it('should handle partial permissions correctly', () => {

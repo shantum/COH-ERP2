@@ -159,7 +159,6 @@ export function generateSkuData(count, variationId) {
             skuCode: `PERF-SKU-${i}-${Date.now()}`,
             variationId,
             size: ['XS', 'S', 'M', 'L', 'XL'][i % 5],
-            fabricConsumption: 1.5,
             mrp: 1000 + (i * 10),
             isActive: true,
         });

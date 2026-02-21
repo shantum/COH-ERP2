@@ -6,11 +6,7 @@
  */
 
 export {
-  recalculateSkuBomCost,
-  recalculateVariationBomCost,
-  recalculateVariationAndSkuBomCosts,
-  getVariationIdForSku,
-  getVariationIdsForProduct,
+  calculateSkuBomCost,
 } from './bomCostService.js';
 
 export {

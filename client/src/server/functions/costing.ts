@@ -571,12 +571,42 @@ export const getFabricColourCosts = createServerFn({ method: 'GET' })
                 sku: {
                     select: {
                         id: true,
+                        bomLines: {
+                            where: { fabricColourId: { not: null } },
+                            select: {
+                                roleId: true,
+                                quantity: true,
+                                fabricColour: {
+                                    select: {
+                                        id: true,
+                                        colourName: true,
+                                        colourHex: true,
+                                        costPerUnit: true,
+                                        fabric: {
+                                            select: {
+                                                id: true,
+                                                name: true,
+                                                costPerUnit: true,
+                                                unit: true,
+                                                material: {
+                                                    select: { name: true },
+                                                },
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        },
                         variation: {
                             select: {
                                 id: true,
+                                product: {
+                                    select: { defaultFabricConsumption: true },
+                                },
                                 bomLines: {
                                     where: { fabricColourId: { not: null } },
                                     select: {
+                                        roleId: true,
                                         quantity: true,
                                         fabricColour: {
                                             select: {
@@ -623,17 +653,28 @@ export const getFabricColourCosts = createServerFn({ method: 'GET' })
         }>();
 
         for (const line of orderLines) {
-            const bomLines = line.sku.variation.bomLines;
-            if (bomLines.length === 0) continue;
+            // Resolve BOM lines: prefer SKU-level, fall back to variation-level
+            const skuBomLines = line.sku.bomLines;
+            const variationBomLines = line.sku.variation.bomLines;
+            const productDefault = line.sku.variation.product?.defaultFabricConsumption;
 
-            for (const bom of bomLines) {
+            // Use SKU BOM lines if available, otherwise variation BOM lines
+            const effectiveBomLines = skuBomLines.length > 0 ? skuBomLines : variationBomLines;
+            if (effectiveBomLines.length === 0) continue;
+
+            for (const bom of effectiveBomLines) {
                 const fc = bom.fabricColour;
                 if (!fc) continue;
 
                 const fabric = fc.fabric;
                 const fabricKey = fabric.id;
                 const rate = fc.costPerUnit ?? fabric.costPerUnit ?? 0;
-                const consumption = bom.quantity ?? 1.5;
+
+                // Consumption cascade: SkuBomLine > VariationBomLine > Product.defaultFabricConsumption > 1.5
+                let consumption: number;
+                const skuLine = skuBomLines.find(s => s.roleId === bom.roleId);
+                const varLine = variationBomLines.find(v => v.roleId === bom.roleId);
+                consumption = skuLine?.quantity ?? varLine?.quantity ?? productDefault ?? 1.5;
 
                 if (!fabricMap.has(fabricKey)) {
                     fabricMap.set(fabricKey, {

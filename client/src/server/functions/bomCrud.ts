@@ -8,13 +8,6 @@ import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth';
 import { getPrisma } from '@coh/shared/services/db';
-import {
-    recalculateSkuBomCost,
-    recalculateVariationBomCost,
-    recalculateVariationAndSkuBomCosts,
-    getVariationIdForSku,
-    getVariationIdsForProduct,
-} from '@coh/shared/services/bom';
 import type { MutationResult } from './bomHelpers';
 
 // ============================================
@@ -193,7 +186,7 @@ export const createBomLine = createServerFn({ method: 'POST' })
                         serviceItemId: serviceItemId || null,
                         quantity,
                         wastagePercent,
-                        overrideCost: overrideCost || null,
+                        overrideCost: overrideCost ?? null,
                         notes: notes || null,
                     },
                     create: {
@@ -204,7 +197,7 @@ export const createBomLine = createServerFn({ method: 'POST' })
                         serviceItemId: serviceItemId || null,
                         quantity,
                         wastagePercent,
-                        overrideCost: overrideCost || null,
+                        overrideCost: overrideCost ?? null,
                         notes: notes || null,
                     },
                 });
@@ -215,30 +208,7 @@ export const createBomLine = createServerFn({ method: 'POST' })
                 };
             }
 
-            // Trigger BOM cost recalculation (fire and forget)
-            (async () => {
-                try {
-                    if (level === 'sku' && skuId) {
-                        // SKU-level change: recalculate this SKU and its variation
-                        const varId = await getVariationIdForSku(prisma, skuId);
-                        await recalculateSkuBomCost(prisma, skuId);
-                        if (varId) {
-                            await recalculateVariationBomCost(prisma, varId);
-                        }
-                    } else if (level === 'variation' && variationId) {
-                        // Variation-level change: affects all SKUs in this variation
-                        await recalculateVariationAndSkuBomCosts(prisma, variationId);
-                    } else if (level === 'product' && productId) {
-                        // Product-level change: affects all variations and SKUs
-                        const varIds = await getVariationIdsForProduct(prisma, productId);
-                        for (const varId of varIds) {
-                            await recalculateVariationAndSkuBomCosts(prisma, varId);
-                        }
-                    }
-                } catch (err) {
-                    console.error('[createBomLine] BOM cost recalculation failed:', err);
-                }
-            })();
+            // BOM cost recalculation handled by DB triggers
 
             return {
                 success: true,
@@ -275,18 +245,7 @@ export const updateBomLine = createServerFn({ method: 'POST' })
         } = data;
 
         try {
-            // Get parent IDs before update for cost recalculation
-            let productId: string | undefined;
-            let variationId: string | undefined;
-            let skuId: string | undefined;
-
             if (level === 'product') {
-                const template = await prisma.productBomTemplate.findUnique({
-                    where: { id: lineId },
-                    select: { productId: true },
-                });
-                productId = template?.productId;
-
                 await prisma.productBomTemplate.update({
                     where: { id: lineId },
                     data: {
@@ -299,12 +258,6 @@ export const updateBomLine = createServerFn({ method: 'POST' })
                     },
                 });
             } else if (level === 'variation') {
-                const line = await prisma.variationBomLine.findUnique({
-                    where: { id: lineId },
-                    select: { variationId: true },
-                });
-                variationId = line?.variationId;
-
                 await prisma.variationBomLine.update({
                     where: { id: lineId },
                     data: {
@@ -317,12 +270,6 @@ export const updateBomLine = createServerFn({ method: 'POST' })
                     },
                 });
             } else if (level === 'sku') {
-                const line = await prisma.skuBomLine.findUnique({
-                    where: { id: lineId },
-                    select: { skuId: true },
-                });
-                skuId = line?.skuId;
-
                 await prisma.skuBomLine.update({
                     where: { id: lineId },
                     data: {
@@ -331,7 +278,7 @@ export const updateBomLine = createServerFn({ method: 'POST' })
                         ...(serviceItemId !== undefined && { serviceItemId: serviceItemId || null }),
                         ...(quantity !== undefined && { quantity }),
                         ...(wastagePercent !== undefined && { wastagePercent }),
-                        ...(overrideCost !== undefined && { overrideCost: overrideCost || null }),
+                        ...(overrideCost !== undefined && { overrideCost: overrideCost ?? null }),
                         ...(notes !== undefined && { notes: notes || null }),
                     },
                 });
@@ -342,27 +289,7 @@ export const updateBomLine = createServerFn({ method: 'POST' })
                 };
             }
 
-            // Trigger BOM cost recalculation (fire and forget)
-            (async () => {
-                try {
-                    if (level === 'sku' && skuId) {
-                        const varId = await getVariationIdForSku(prisma, skuId);
-                        await recalculateSkuBomCost(prisma, skuId);
-                        if (varId) {
-                            await recalculateVariationBomCost(prisma, varId);
-                        }
-                    } else if (level === 'variation' && variationId) {
-                        await recalculateVariationAndSkuBomCosts(prisma, variationId);
-                    } else if (level === 'product' && productId) {
-                        const varIds = await getVariationIdsForProduct(prisma, productId);
-                        for (const varId of varIds) {
-                            await recalculateVariationAndSkuBomCosts(prisma, varId);
-                        }
-                    }
-                } catch (err) {
-                    console.error('[updateBomLine] BOM cost recalculation failed:', err);
-                }
-            })();
+            // BOM cost recalculation handled by DB triggers
 
             return {
                 success: true,
@@ -394,38 +321,15 @@ export const deleteBomLine = createServerFn({ method: 'POST' })
         const { lineId, level } = data;
 
         try {
-            // Get parent IDs before delete for cost recalculation
-            let productId: string | undefined;
-            let variationId: string | undefined;
-            let skuId: string | undefined;
-
             if (level === 'product') {
-                const template = await prisma.productBomTemplate.findUnique({
-                    where: { id: lineId },
-                    select: { productId: true },
-                });
-                productId = template?.productId;
-
                 await prisma.productBomTemplate.delete({
                     where: { id: lineId },
                 });
             } else if (level === 'variation') {
-                const line = await prisma.variationBomLine.findUnique({
-                    where: { id: lineId },
-                    select: { variationId: true },
-                });
-                variationId = line?.variationId;
-
                 await prisma.variationBomLine.delete({
                     where: { id: lineId },
                 });
             } else if (level === 'sku') {
-                const line = await prisma.skuBomLine.findUnique({
-                    where: { id: lineId },
-                    select: { skuId: true },
-                });
-                skuId = line?.skuId;
-
                 await prisma.skuBomLine.delete({
                     where: { id: lineId },
                 });
@@ -436,27 +340,7 @@ export const deleteBomLine = createServerFn({ method: 'POST' })
                 };
             }
 
-            // Trigger BOM cost recalculation (fire and forget)
-            (async () => {
-                try {
-                    if (level === 'sku' && skuId) {
-                        const varId = await getVariationIdForSku(prisma, skuId);
-                        await recalculateSkuBomCost(prisma, skuId);
-                        if (varId) {
-                            await recalculateVariationBomCost(prisma, varId);
-                        }
-                    } else if (level === 'variation' && variationId) {
-                        await recalculateVariationAndSkuBomCosts(prisma, variationId);
-                    } else if (level === 'product' && productId) {
-                        const varIds = await getVariationIdsForProduct(prisma, productId);
-                        for (const varId of varIds) {
-                            await recalculateVariationAndSkuBomCosts(prisma, varId);
-                        }
-                    }
-                } catch (err) {
-                    console.error('[deleteBomLine] BOM cost recalculation failed:', err);
-                }
-            })();
+            // BOM cost recalculation handled by DB triggers
 
             return {
                 success: true,

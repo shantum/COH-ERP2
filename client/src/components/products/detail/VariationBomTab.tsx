@@ -90,8 +90,7 @@ export function VariationBomTab({ variation }: VariationBomTabProps) {
                     componentName = variationLine.fabricColour.name;
                     componentId = variationLine.fabricColourId;
                     colourHex = variationLine.fabricColour.colourHex;
-                    // Get cost from fabric colour (would need to be included in API response)
-                    costPerUnit = null; // TODO: Include cost in variation line response
+                    costPerUnit = variationLine.fabricColour.costPerUnit ?? variationLine.fabricColour.fabric?.costPerUnit ?? null;
                 } else {
                     componentName = null; // Not assigned yet
                 }

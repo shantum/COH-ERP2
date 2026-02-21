@@ -124,18 +124,26 @@ export default function BomEditorPanel({
         // Calculate from templates + variations
         bomData.templates?.forEach((line) => {
             const qty = line.defaultQuantity || 0;
-            let cost = 0;
 
-            if (line.typeCode === 'TRIM' && line.trimItem) {
-                cost = line.trimItem.costPerUnit || 0;
+            if (line.typeCode === 'FABRIC') {
+                // Fabric cost varies by colour — compute average across variations
+                const variationCosts: number[] = [];
+                for (const v of bomData.variations || []) {
+                    const vLine = v.bomLines.find(bl => bl.roleId === line.roleId);
+                    if (vLine?.fabricColour) {
+                        const rate = vLine.fabricColour.costPerUnit ?? vLine.fabricColour.fabric?.costPerUnit ?? 0;
+                        if (rate > 0) variationCosts.push(rate);
+                    }
+                }
+                const avgRate = variationCosts.length > 0
+                    ? variationCosts.reduce((a, b) => a + b, 0) / variationCosts.length
+                    : 0;
+                fabricCost += avgRate * qty;
+            } else if (line.typeCode === 'TRIM' && line.trimItem) {
+                trimCost += (line.trimItem.costPerUnit || 0) * qty;
             } else if (line.typeCode === 'SERVICE' && line.serviceItem) {
-                cost = line.serviceItem.costPerJob || 0;
+                serviceCost += (line.serviceItem.costPerJob || 0) * qty;
             }
-            const lineTotal = cost * qty;
-
-            if (line.typeCode === 'FABRIC') fabricCost += lineTotal;
-            else if (line.typeCode === 'TRIM') trimCost += lineTotal;
-            else if (line.typeCode === 'SERVICE') serviceCost += lineTotal;
         });
 
         return {
@@ -333,7 +341,40 @@ export default function BomEditorPanel({
 
                             {activeTab === 'skus' && (
                                 <BomSkuTab
-                                    skus={[]}
+                                    skus={(bomData.skus || []).map(sku => {
+                                        // Build resolved BOM lines for each SKU
+                                        const variation = bomData.variations?.find(v => v.id === sku.variationId);
+                                        const resolvedLines = (componentRoles || [])
+                                            .filter(r => r.type.code === 'FABRIC')
+                                            .map(role => {
+                                                const skuLine = sku.bomLines.find(bl => bl.roleId === role.id);
+                                                const varLine = variation?.bomLines.find(bl => bl.roleId === role.id);
+                                                const templateLine = bomData.templates?.find(t => t.roleId === role.id);
+                                                const resolvedQty = skuLine?.quantity ?? varLine?.quantity ?? templateLine?.defaultQuantity ?? 0;
+                                                return {
+                                                    id: skuLine?.id,
+                                                    roleId: role.id,
+                                                    roleName: role.name,
+                                                    roleCode: role.code,
+                                                    componentType: role.type.code,
+                                                    quantity: skuLine?.quantity ?? undefined,
+                                                    overrideCost: skuLine?.overrideCost ?? undefined,
+                                                    notes: skuLine?.notes ?? undefined,
+                                                    isInherited: !skuLine?.quantity,
+                                                    resolvedQuantity: resolvedQty,
+                                                    resolvedCost: 0,
+                                                };
+                                            });
+                                        return {
+                                            id: sku.id,
+                                            skuCode: sku.skuCode,
+                                            size: sku.size,
+                                            variationId: sku.variationId,
+                                            colorName: sku.colorName,
+                                            colorHex: sku.colorHex ?? undefined,
+                                            bomLines: resolvedLines,
+                                        };
+                                    })}
                                     variations={(bomData.variations || []).map(v => ({
                                         id: v.id,
                                         colorName: v.colorName,

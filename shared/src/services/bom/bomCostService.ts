@@ -1,21 +1,14 @@
 /**
  * BOM Cost Service
  *
- * Recalculates and stores pre-computed BOM costs on Sku and Variation models.
- * Uses dynamic imports to prevent client bundling issues.
+ * Read-only BOM cost calculation for diagnostics and reporting.
  *
- * The stored costs enable:
- * - O(1) cost lookups in product listings
- * - No need for complex JOINs/SUMs at query time
- * - Cost columns in VariationsDataTable
- *
- * Call these functions after any BOM line changes:
- * - Create/update/delete SkuBomLine
- * - Create/update/delete VariationBomLine
- * - Catalog cost changes (FabricColour, TrimItem, ServiceItem)
+ * IMPORTANT: BOM cost recalculation (writing to Sku.bomCost / Variation.bomCost)
+ * is handled exclusively by PostgreSQL triggers. Do NOT add app-level recalc
+ * functions here — the `pg_trigger_depth() = 0` guard will block them.
  */
 
-import { getPrisma, type PrismaTransaction } from '../db/index.js';
+import { getPrisma } from '../db/index.js';
 
 // Type for Prisma client (from dynamic import)
 type PrismaClient = Awaited<ReturnType<typeof getPrisma>>;
@@ -23,8 +16,11 @@ type PrismaClient = Awaited<ReturnType<typeof getPrisma>>;
 /**
  * Calculate BOM cost for a single SKU using resolved BOM lines.
  * Uses 3-level cascade: Product → Variation → SKU
+ *
+ * This is a READ-ONLY calculation — useful for diagnostics, audits,
+ * and verifying that DB triggers are computing costs correctly.
  */
-async function calculateSkuBomCost(prisma: PrismaClient, skuId: string): Promise<number | null> {
+export async function calculateSkuBomCost(prisma: PrismaClient, skuId: string): Promise<number | null> {
   // Load SKU with variation and product
   const sku = await prisma.sku.findUnique({
     where: { id: skuId },
@@ -134,116 +130,4 @@ async function calculateSkuBomCost(prisma: PrismaClient, skuId: string): Promise
   }
 
   return totalCost > 0 ? totalCost : null;
-}
-
-/**
- * Recalculate and store BOM cost for a single SKU.
- * Call this after SkuBomLine changes.
- *
- * @param prisma - Prisma client instance
- * @param skuId - The SKU to recalculate cost for
- */
-export async function recalculateSkuBomCost(
-  prisma: PrismaClient | PrismaTransaction,
-  skuId: string
-): Promise<void> {
-  try {
-    // Type cast for Prisma transaction compatibility
-    const bomCost = await calculateSkuBomCost(prisma as PrismaClient, skuId);
-
-    await prisma.sku.update({
-      where: { id: skuId },
-      data: { bomCost },
-    });
-  } catch (error) {
-    // SKU not found or error - set to null
-    console.warn(`[bomCostService] Failed to calculate BOM cost for SKU ${skuId}:`, error);
-  }
-}
-
-/**
- * Recalculate Variation.bomCost as the average of its SKU costs.
- * Call this after all SKUs in a variation have been recalculated.
- *
- * @param prisma - Prisma client instance
- * @param variationId - The variation to recalculate cost for
- */
-export async function recalculateVariationBomCost(
-  prisma: PrismaClient | PrismaTransaction,
-  variationId: string
-): Promise<void> {
-  // Get average of non-null SKU bomCosts
-  const result = await prisma.sku.aggregate({
-    where: {
-      variationId,
-      isActive: true,
-      bomCost: { not: null },
-    },
-    _avg: { bomCost: true },
-    _count: { bomCost: true },
-  });
-
-  // Use average cost if we have any SKUs with costs
-  const bomCost = result._count.bomCost > 0 ? result._avg.bomCost : null;
-
-  await prisma.variation.update({
-    where: { id: variationId },
-    data: { bomCost },
-  });
-}
-
-/**
- * Recalculate all SKUs for a variation, then the variation average.
- * Call this after VariationBomLine changes (affects all SKUs).
- *
- * @param prisma - Prisma client instance
- * @param variationId - The variation to recalculate
- */
-export async function recalculateVariationAndSkuBomCosts(
-  prisma: PrismaClient | PrismaTransaction,
-  variationId: string
-): Promise<void> {
-  // Get all active SKUs for this variation
-  const skus = await prisma.sku.findMany({
-    where: { variationId, isActive: true },
-    select: { id: true },
-  });
-
-  // Recalculate each SKU
-  for (const sku of skus) {
-    await recalculateSkuBomCost(prisma, sku.id);
-  }
-
-  // Recalculate variation average
-  await recalculateVariationBomCost(prisma, variationId);
-}
-
-/**
- * Get the variationId for a given SKU.
- * Helper for getting the parent variation when only skuId is known.
- */
-export async function getVariationIdForSku(
-  prisma: PrismaClient | PrismaTransaction,
-  skuId: string
-): Promise<string | null> {
-  const sku = await prisma.sku.findUnique({
-    where: { id: skuId },
-    select: { variationId: true },
-  });
-  return sku?.variationId ?? null;
-}
-
-/**
- * Get all variationIds for a given product.
- * Helper for getting all variations when productId is known.
- */
-export async function getVariationIdsForProduct(
-  prisma: PrismaClient | PrismaTransaction,
-  productId: string
-): Promise<string[]> {
-  const variations = await prisma.variation.findMany({
-    where: { productId, isActive: true },
-    select: { id: true },
-  });
-  return variations.map((v: { id: string }) => v.id);
 }

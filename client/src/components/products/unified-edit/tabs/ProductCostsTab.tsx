@@ -43,15 +43,18 @@ export function ProductCostsTab({ form, disabled = false }: ProductCostsTabProps
             disabled={disabled}
           />
 
-          <SimpleCostField
-            name="defaultFabricConsumption"
-            label="Default Fabric Consumption (m)"
-            control={control}
-            defaultValue={1.5}
-            step="0.1"
-            placeholder="1.5"
-            disabled={disabled}
-          />
+          <div>
+            <SimpleCostField
+              name="defaultFabricConsumption"
+              label="Default Fabric Consumption (m)"
+              control={control}
+              defaultValue={1.5}
+              step="0.1"
+              placeholder="1.5"
+              disabled={disabled}
+            />
+            <p className="text-xs text-gray-400 mt-1">Fallback when no BOM consumption is set for a variation/SKU</p>
+          </div>
         </div>
       </div>
 

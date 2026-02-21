@@ -8,7 +8,6 @@ import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth';
 import { getPrisma, type PrismaTransaction } from '@coh/shared/services/db';
-import { recalculateVariationAndSkuBomCosts } from '@coh/shared/services/bom';
 import { sortBySizeOrder, getMainFabricRole, type MutationResult, type DbRecord } from './bomHelpers';
 
 // ============================================
@@ -183,25 +182,7 @@ export const importConsumption = createServerFn({ method: 'POST' })
 
             const uniqueProducts = new Set(imports.map((i) => i.productId)).size;
 
-            // Trigger BOM cost recalculation for all affected variations (fire and forget)
-            (async () => {
-                try {
-                    // Get unique variation IDs from the updates
-                    const skuIds = skuUpdates.map((u) => u.skuId);
-                    const skusWithVariations = await prisma.sku.findMany({
-                        where: { id: { in: skuIds } },
-                        select: { id: true, variationId: true },
-                    });
-
-                    // Group by variation and recalculate
-                    const variationIds = [...new Set(skusWithVariations.map((s) => s.variationId))];
-                    for (const variationId of variationIds) {
-                        await recalculateVariationAndSkuBomCosts(prisma, variationId);
-                    }
-                } catch (err) {
-                    console.error('[importConsumption] BOM cost recalculation failed:', err);
-                }
-            })();
+            // BOM cost recalculation handled by DB triggers
 
             return {
                 success: true,
@@ -289,17 +270,7 @@ export const updateSizeConsumptions = createServerFn({ method: 'POST' })
                 }
             }, { timeout: 30000 });
 
-            // Trigger BOM cost recalculation for all variations (fire and forget)
-            (async () => {
-                try {
-                    const variationIds = product.variations.map((v: DbRecord) => v.id);
-                    for (const variationId of variationIds) {
-                        await recalculateVariationAndSkuBomCosts(prisma, variationId);
-                    }
-                } catch (err) {
-                    console.error('[updateSizeConsumptions] BOM cost recalculation failed:', err);
-                }
-            })();
+            // BOM cost recalculation handled by DB triggers
 
             return {
                 success: true,
@@ -549,19 +520,7 @@ export const updateConsumptionGrid = createServerFn({ method: 'POST' })
                 }
             }, { timeout: 60000 });
 
-            // Trigger BOM cost recalculation for all affected variations (fire and forget)
-            (async () => {
-                try {
-                    const variationIds = products.flatMap((p: DbRecord) =>
-                        (p.variations as DbRecord[]).map((v: DbRecord) => v.id)
-                    );
-                    for (const variationId of variationIds) {
-                        await recalculateVariationAndSkuBomCosts(prisma, variationId);
-                    }
-                } catch (err) {
-                    console.error('[updateConsumptionGrid] BOM cost recalculation failed:', err);
-                }
-            })();
+            // BOM cost recalculation handled by DB triggers
 
             return {
                 success: true,

@@ -568,7 +568,7 @@ export function createConsumptionColumnDefs(CONSUMPTION_SIZES: string[]): ColDef
             valueFormatter: (params: ValueFormatterParams) => {
                 const skuIds = params.data?.[`skuIds_${params.colDef.field?.replace('consumption_', '')}`] || [];
                 if ((skuIds as unknown[]).length === 0) return '-';
-                return params.value != null ? Number(params.value).toFixed(2) : '1.50';
+                return params.value != null ? Number(params.value).toFixed(2) : '—';
             },
             valueParser: (params: ValueParserParams) => {
                 const val = parseFloat(params.newValue);
@@ -576,8 +576,9 @@ export function createConsumptionColumnDefs(CONSUMPTION_SIZES: string[]): ColDef
             },
             cellStyle: (params: CellClassParams) => {
                 const skuIds = params.data?.[`skuIds_${size}`] || [];
-                if ((skuIds as unknown[]).length === 0) return { backgroundColor: '#f9fafb' };
-                return { backgroundColor: '#f0f9ff' }; // Light blue for editable
+                if ((skuIds as unknown[]).length === 0) return { backgroundColor: '#f9fafb' } as Record<string, string>;
+                if (params.value == null) return { backgroundColor: '#f0f9ff', color: '#9ca3af', fontStyle: 'italic' } as Record<string, string>;
+                return { backgroundColor: '#f0f9ff' } as Record<string, string>;
             },
         })),
     ];

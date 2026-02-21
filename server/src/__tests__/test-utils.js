@@ -51,7 +51,6 @@ export const mockSku = (overrides = {}) => ({
     size: 'M',
     isActive: true,
     isCustomSku: false,
-    fabricConsumption: 1.5,
     ...overrides
 });
 

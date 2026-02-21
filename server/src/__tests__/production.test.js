@@ -194,45 +194,6 @@ describe('Batch Quantity - Progress Calculation', () => {
 // SECTION 4: FABRIC CONSUMPTION CALCULATION
 // ============================================
 
-describe('Fabric Consumption - Priority Logic', () => {
-    const DEFAULT_FABRIC_CONSUMPTION = 1.5;
-
-    const getEffectiveFabricConsumption = (sku, product) => {
-        const skuConsumption = Number(sku.fabricConsumption);
-        if (skuConsumption && skuConsumption !== DEFAULT_FABRIC_CONSUMPTION && skuConsumption > 0) {
-            return skuConsumption;
-        }
-        const productDefault = product?.defaultFabricConsumption;
-        if (productDefault && Number(productDefault) > 0) {
-            return Number(productDefault);
-        }
-        return DEFAULT_FABRIC_CONSUMPTION;
-    };
-
-    it('should use SKU-specific consumption when set', () => {
-        const sku = { fabricConsumption: 2.0 };
-        const product = { defaultFabricConsumption: 1.8 };
-        expect(getEffectiveFabricConsumption(sku, product)).toBe(2.0);
-    });
-
-    it('should fallback to product default when SKU uses default', () => {
-        const sku = { fabricConsumption: 1.5 }; // Same as default
-        const product = { defaultFabricConsumption: 1.8 };
-        expect(getEffectiveFabricConsumption(sku, product)).toBe(1.8);
-    });
-
-    it('should fallback to system default when nothing set', () => {
-        const sku = { fabricConsumption: 1.5 };
-        const product = {};
-        expect(getEffectiveFabricConsumption(sku, product)).toBe(1.5);
-    });
-
-    it('should handle null product', () => {
-        const sku = { fabricConsumption: 1.5 };
-        expect(getEffectiveFabricConsumption(sku, null)).toBe(1.5);
-    });
-});
-
 describe('Fabric Consumption - Total Calculation', () => {
     const calculateTotalFabricConsumption = (consumptionPerUnit, quantity) => {
         return consumptionPerUnit * quantity;

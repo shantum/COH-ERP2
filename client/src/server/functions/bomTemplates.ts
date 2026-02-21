@@ -75,6 +75,8 @@ export interface VariationBomData {
             id: string;
             name: string;
             colourHex: string | null;
+            costPerUnit: number | null;
+            fabric: { costPerUnit: number | null };
         } | null;
         trimItemId: string | null;
         trimItem: { id: string; name: string; code: string; costPerUnit: number } | null;
@@ -83,9 +85,27 @@ export interface VariationBomData {
     }>;
 }
 
+export interface SkuBomData {
+    id: string;
+    skuCode: string;
+    size: string;
+    variationId: string;
+    colorName: string;
+    colorHex: string | null;
+    bomLines: Array<{
+        id: string;
+        roleId: string;
+        roleCode: string;
+        quantity: number | null;
+        overrideCost: number | null;
+        notes: string | null;
+    }>;
+}
+
 export interface ProductBomResult {
     templates: ProductBomTemplateLine[];
     variations: VariationBomData[];
+    skus: SkuBomData[];
 }
 
 // ============================================
@@ -127,7 +147,7 @@ export const getProductBom = createServerFn({ method: 'GET' })
                 orderBy: { role: { sortOrder: 'asc' } },
             });
 
-            // Get variations with their BOM lines
+            // Get variations with their BOM lines and SKUs
             const variations = await prisma.variation.findMany({
                 where: { productId, isActive: true },
                 include: {
@@ -141,9 +161,47 @@ export const getProductBom = createServerFn({ method: 'GET' })
                             serviceItem: true,
                         },
                     },
+                    skus: {
+                        where: { isActive: true },
+                        select: {
+                            id: true,
+                            skuCode: true,
+                            size: true,
+                            variationId: true,
+                            bomLines: {
+                                include: {
+                                    role: { include: { type: true } },
+                                },
+                            },
+                        },
+                        orderBy: { size: 'asc' },
+                    },
                 },
                 orderBy: { colorName: 'asc' },
             });
+
+            // Flatten SKU data from all variations
+            const allSkus: SkuBomData[] = [];
+            for (const v of variations as DbRecord[]) {
+                for (const sku of (v.skus || []) as DbRecord[]) {
+                    allSkus.push({
+                        id: sku.id,
+                        skuCode: sku.skuCode,
+                        size: sku.size,
+                        variationId: sku.variationId,
+                        colorName: v.colorName,
+                        colorHex: v.colorHex,
+                        bomLines: (sku.bomLines || []).map((bl: DbRecord) => ({
+                            id: bl.id,
+                            roleId: bl.roleId,
+                            roleCode: bl.role.code,
+                            quantity: bl.quantity,
+                            overrideCost: bl.overrideCost,
+                            notes: bl.notes,
+                        })),
+                    });
+                }
+            }
 
             const result: ProductBomResult = {
                 templates: templates.map((t: DbRecord) => ({
@@ -170,6 +228,7 @@ export const getProductBom = createServerFn({ method: 'GET' })
                         costPerJob: t.serviceItem.costPerJob,
                     } : null,
                 })),
+                skus: allSkus,
                 variations: variations.map((v: DbRecord) => ({
                     id: v.id,
                     colorName: v.colorName,
@@ -184,6 +243,8 @@ export const getProductBom = createServerFn({ method: 'GET' })
                             id: line.fabricColour.id,
                             name: `${line.fabricColour.fabric.name} - ${line.fabricColour.colourName}`,
                             colourHex: line.fabricColour.colourHex,
+                            costPerUnit: line.fabricColour.costPerUnit,
+                            fabric: { costPerUnit: line.fabricColour.fabric.costPerUnit },
                         } : null,
                         trimItemId: line.trimItemId,
                         trimItem: line.trimItem ? {

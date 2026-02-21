@@ -8,7 +8,6 @@ import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth';
 import { getPrisma, type PrismaTransaction } from '@coh/shared/services/db';
-import { recalculateVariationAndSkuBomCosts } from '@coh/shared/services/bom';
 import { getMainFabricRole, type MutationResult } from './bomHelpers';
 
 // ============================================
@@ -107,7 +106,7 @@ export const linkFabricToVariation = createServerFn({ method: 'POST' })
         // Verify variations exist and get their productIds
         const variations = await prisma.variation.findMany({
             where: { id: { in: variationIds } },
-            select: { id: true, colorName: true, productId: true, product: { select: { name: true } } },
+            select: { id: true, colorName: true, productId: true, product: { select: { name: true, defaultFabricConsumption: true } } },
         });
 
         if (variations.length !== variationIds.length) {
@@ -119,6 +118,10 @@ export const linkFabricToVariation = createServerFn({ method: 'POST' })
 
         // Get unique productIds to ensure ProductBomTemplates exist
         const productIds = [...new Set(variations.map(v => v.productId))];
+        // Build product default consumption map
+        const productDefaultMap = new Map(
+            variations.map(v => [v.productId, v.product.defaultFabricConsumption as number | null])
+        );
 
         try {
             // OPTIMIZED: Batch operations instead of sequential loop
@@ -134,7 +137,7 @@ export const linkFabricToVariation = createServerFn({ method: 'POST' })
                         create: {
                             productId,
                             roleId: targetRoleId!,
-                            defaultQuantity: 1.5, // Default fabric consumption
+                            defaultQuantity: productDefaultMap.get(productId) ?? 1.5,
                             quantityUnit: 'meter',
                             wastagePercent: 5, // 5% wastage default
                         },
@@ -175,13 +178,10 @@ export const linkFabricToVariation = createServerFn({ method: 'POST' })
                     });
                 }
 
-                // Recalculate BOM costs for all affected variations
-                for (const variationId of variationIds) {
-                    await recalculateVariationAndSkuBomCosts(tx, variationId);
-                }
+                // BOM cost recalculation handled by DB triggers
 
                 return { updated: variationIds };
-            }, { timeout: 60000 }); // 60 second timeout for bulk operations with cost recalculation
+            }, { timeout: 30000 });
 
             return {
                 success: true,
@@ -328,7 +328,7 @@ export const linkVariationsToColour = createServerFn({ method: 'POST' })
             // Verify variations exist and get their productIds
             const variations = await prisma.variation.findMany({
                 where: { id: { in: variationIds } },
-                select: { id: true, colorName: true, productId: true, product: { select: { name: true } } },
+                select: { id: true, colorName: true, productId: true, product: { select: { name: true, defaultFabricConsumption: true } } },
             });
 
             if (variations.length !== variationIds.length) {
@@ -340,6 +340,9 @@ export const linkVariationsToColour = createServerFn({ method: 'POST' })
 
             // Get unique productIds to ensure ProductBomTemplates exist
             const productIds = [...new Set(variations.map(v => v.productId))];
+            const productDefaultMap2 = new Map(
+                variations.map(v => [v.productId, v.product.defaultFabricConsumption as number | null])
+            );
 
             // Create/update BOM lines - BOM is now the single source of truth for fabric
             const results = await prisma.$transaction(async (tx) => {
@@ -354,7 +357,7 @@ export const linkVariationsToColour = createServerFn({ method: 'POST' })
                         create: {
                             productId,
                             roleId: targetRoleId!,
-                            defaultQuantity: 1.5, // Default fabric consumption
+                            defaultQuantity: productDefaultMap2.get(productId) ?? 1.5,
                             quantityUnit: 'meter',
                             wastagePercent: 5, // 5% wastage default
                         },
@@ -383,14 +386,11 @@ export const linkVariationsToColour = createServerFn({ method: 'POST' })
                     updated.push(variation.id);
                 }
 
-                // Recalculate BOM costs for all affected variations
-                for (const variationId of updated) {
-                    await recalculateVariationAndSkuBomCosts(tx, variationId);
-                }
+                // BOM cost recalculation handled by DB triggers
 
                 return { updated };
             }, {
-                timeout: 60000, // 60 second timeout for bulk operations with cost recalculation
+                timeout: 30000,
             });
 
             return {

@@ -59,7 +59,7 @@ import {
 
 /**
  * After sampling inward rows are created, deduct fabric used.
- * Formula: fabric qty = row.qty × BOM consumption (SkuBomLine > VariationBomLine > 1.5)
+ * Formula: fabric qty = row.qty × BOM consumption (SkuBomLine > VariationBomLine > Product.defaultFabricConsumption > 1.5)
  * Creates FabricColourTransaction (outward) records.
  */
 export async function deductFabricForSamplingRows(
@@ -88,7 +88,7 @@ export async function deductFabricForSamplingRows(
     const fabricMap = await getVariationsMainFabrics(prisma, variationIds);
 
     // Batch lookup fabric consumption quantities from BOM
-    // Priority: SkuBomLine.quantity > VariationBomLine.quantity > default 1.5
+    // Priority: SkuBomLine.quantity > VariationBomLine.quantity > Product.defaultFabricConsumption > 1.5
     const skuIds = samplingRows
         .map(r => skuMap.get(r.skuCode)?.id)
         .filter((id): id is string => !!id);
@@ -119,13 +119,24 @@ export async function deductFabricForSamplingRows(
         skuBomLines.map(l => [l.skuId, l.quantity])
     );
 
+    // Get product default fabric consumption for each variation
+    const variationsWithProduct = await prisma.variation.findMany({
+        where: { id: { in: variationIds } },
+        select: { id: true, product: { select: { defaultFabricConsumption: true } } },
+    });
+    const productDefaultByVariation = new Map(
+        variationsWithProduct.map(v => [v.id, v.product.defaultFabricConsumption])
+    );
+
     /** Get effective fabric consumption for a SKU from BOM */
     const getFabricConsumption = (skuInfo: { id: string; variationId: string }): number => {
         const skuQty = skuQtyMap.get(skuInfo.id);
         if (skuQty != null && skuQty > 0) return skuQty;
         const varQty = variationQtyMap.get(skuInfo.variationId);
         if (varQty != null && varQty > 0) return varQty;
-        return 1.5; // default
+        const productDefault = productDefaultByVariation.get(skuInfo.variationId);
+        if (productDefault != null && productDefault > 0) return productDefault;
+        return 1.5; // ultimate fallback
     };
 
     // Dedup: check existing referenceIds in FabricColourTransaction
@@ -181,7 +192,7 @@ export async function deductFabricForSamplingRows(
             continue;
         }
 
-        // Get fabric consumption from BOM (SkuBomLine > VariationBomLine > 1.5)
+        // Get fabric consumption from BOM (SkuBomLine > VariationBomLine > Product.defaultFabricConsumption > 1.5)
         const consumption = getFabricConsumption(skuInfo);
         if (consumption <= 0) {
             skippedZeroConsumption++;

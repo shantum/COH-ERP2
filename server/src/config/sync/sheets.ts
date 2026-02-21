@@ -551,7 +551,7 @@ export const VALID_INWARD_LIVE_SOURCES = ['sampling', 'repacking', 'adjustment',
 /**
  * Inward sources that trigger automatic fabric deduction.
  * When these sources come in, the system also creates FabricColourTransaction (outward)
- * to deduct the fabric used: qty × Sku.fabricConsumption.
+ * to deduct the fabric used: qty × BOM consumption (SkuBomLine > VariationBomLine > Product.defaultFabricConsumption > 1.5).
  */
 export const FABRIC_DEDUCT_SOURCES = ['sampling'] as const;
 

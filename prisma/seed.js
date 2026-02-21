@@ -22,76 +22,114 @@ async function main() {
         create: { id: 'default-config', laborRatePerMin: 2.50, defaultPackagingCost: 50 },
     });
 
-    // Create fabric types
-    const linenType = await prisma.fabricType.create({
-        data: { name: 'Linen 60 Lea', composition: '100% Linen', unit: 'meter', avgShrinkagePct: 5 },
+    // Create materials (replaces old FabricType)
+    const linenMaterial = await prisma.material.create({
+        data: { name: 'Linen', category: 'fabric' },
     });
-    const cottonType = await prisma.fabricType.create({
-        data: { name: 'Organic Cotton', composition: '100% Cotton', unit: 'meter', avgShrinkagePct: 3 },
+    const cottonMaterial = await prisma.material.create({
+        data: { name: 'Cotton', category: 'fabric' },
     });
-    console.log('✅ Created fabric types');
+    console.log('✅ Created materials');
 
     // Create party
     const party = await prisma.party.create({
         data: { name: 'Premium Fabrics Co', category: 'fabric', contactName: 'Rahul Sharma', email: 'rahul@premiumfabrics.com', phone: '+91-9876543210' },
     });
 
-    // Create fabrics
-    const blueLinenFabric = await prisma.fabric.create({
-        data: { fabricTypeId: linenType.id, name: 'Linen Wildflower Blue 60 Lea', colorName: 'Wildflower Blue', colorHex: '#6B8E9F', costPerUnit: 450, partyId: party.id, leadTimeDays: 14, minOrderQty: 20 },
+    // Create fabrics (linked to Material, not FabricType)
+    const linenFabric = await prisma.fabric.create({
+        data: { materialId: linenMaterial.id, name: 'Linen 60 Lea', composition: '100% Linen', costPerUnit: 450, partyId: party.id },
     });
-    const beigeLinenFabric = await prisma.fabric.create({
-        data: { fabricTypeId: linenType.id, name: 'Linen Natural Beige 60 Lea', colorName: 'Natural Beige', colorHex: '#D4C4B0', costPerUnit: 420, partyId: party.id, leadTimeDays: 14, minOrderQty: 20 },
-    });
-    const whiteCottonFabric = await prisma.fabric.create({
-        data: { fabricTypeId: cottonType.id, name: 'Organic Cotton White', colorName: 'Pure White', colorHex: '#FFFFFF', costPerUnit: 350, partyId: party.id, leadTimeDays: 10, minOrderQty: 25 },
+    const cottonFabric = await prisma.fabric.create({
+        data: { materialId: cottonMaterial.id, name: 'Organic Cotton', composition: '100% Cotton', costPerUnit: 350, partyId: party.id },
     });
     console.log('✅ Created fabrics');
 
-    // Add initial fabric stock
-    await prisma.fabricTransaction.createMany({
+    // Create fabric colours
+    const blueLinenColour = await prisma.fabricColour.create({
+        data: { fabricId: linenFabric.id, colourName: 'Wildflower Blue', colourHex: '#6B8E9F', costPerUnit: 450 },
+    });
+    const beigeLinenColour = await prisma.fabricColour.create({
+        data: { fabricId: linenFabric.id, colourName: 'Natural Beige', colourHex: '#D4C4B0', costPerUnit: 420 },
+    });
+    const whiteCottonColour = await prisma.fabricColour.create({
+        data: { fabricId: cottonFabric.id, colourName: 'Pure White', colourHex: '#FFFFFF', costPerUnit: 350 },
+    });
+    console.log('✅ Created fabric colours');
+
+    // Add initial fabric colour stock
+    await prisma.fabricColourTransaction.createMany({
         data: [
-            { fabricId: blueLinenFabric.id, txnType: 'inward', qty: 100, unit: 'meter', reason: 'supplier_receipt', createdById: admin.id },
-            { fabricId: beigeLinenFabric.id, txnType: 'inward', qty: 80, unit: 'meter', reason: 'supplier_receipt', createdById: admin.id },
-            { fabricId: whiteCottonFabric.id, txnType: 'inward', qty: 120, unit: 'meter', reason: 'supplier_receipt', createdById: admin.id },
+            { fabricColourId: blueLinenColour.id, txnType: 'inward', qty: 100, unit: 'meter', reason: 'supplier_receipt', createdById: admin.id },
+            { fabricColourId: beigeLinenColour.id, txnType: 'inward', qty: 80, unit: 'meter', reason: 'supplier_receipt', createdById: admin.id },
+            { fabricColourId: whiteCottonColour.id, txnType: 'inward', qty: 120, unit: 'meter', reason: 'supplier_receipt', createdById: admin.id },
         ],
     });
 
     // Create products
     const midiDress = await prisma.product.create({
-        data: { name: 'Linen MIDI Dress', category: 'dress', productType: 'basic', baseProductionTimeMins: 90 },
+        data: { name: 'Linen MIDI Dress', category: 'dress', productType: 'basic', baseProductionTimeMins: 90, defaultFabricConsumption: 2.2 },
     });
     const relaxedTop = await prisma.product.create({
-        data: { name: 'Relaxed Fit Top', category: 'top', productType: 'basic', baseProductionTimeMins: 45 },
+        data: { name: 'Relaxed Fit Top', category: 'top', productType: 'basic', baseProductionTimeMins: 45, defaultFabricConsumption: 1.2 },
     });
     console.log('✅ Created products');
 
-    // Create variations
+    // Create variations (no fabricId — fabric assignment via BOM)
     const blueMidiVar = await prisma.variation.create({
-        data: { productId: midiDress.id, colorName: 'Wildflower Blue', colorHex: '#6B8E9F', fabricId: blueLinenFabric.id },
+        data: { productId: midiDress.id, colorName: 'Wildflower Blue', colorHex: '#6B8E9F' },
     });
     const beigeMidiVar = await prisma.variation.create({
-        data: { productId: midiDress.id, colorName: 'Natural Beige', colorHex: '#D4C4B0', fabricId: beigeLinenFabric.id },
+        data: { productId: midiDress.id, colorName: 'Natural Beige', colorHex: '#D4C4B0' },
     });
     const whiteTopVar = await prisma.variation.create({
-        data: { productId: relaxedTop.id, colorName: 'Pure White', colorHex: '#FFFFFF', fabricId: whiteCottonFabric.id },
+        data: { productId: relaxedTop.id, colorName: 'Pure White', colorHex: '#FFFFFF' },
     });
 
-    // Create SKUs with barcodes
+    // Create SKUs (no fabricConsumption — consumption via BOM)
     const sizes = ['XS', 'S', 'M', 'L', 'XL'];
     const skusData = [];
-    let barcodeCounter = 10000001; // Start with 8-digit barcode
 
     for (const size of sizes) {
-        skusData.push({ skuCode: `LMD-BLU-${size}`, variationId: blueMidiVar.id, size, fabricConsumption: 2.2, mrp: 4500, targetStockQty: 5, barcode: String(barcodeCounter++) });
-        skusData.push({ skuCode: `LMD-BGE-${size}`, variationId: beigeMidiVar.id, size, fabricConsumption: 2.2, mrp: 4500, targetStockQty: 5, barcode: String(barcodeCounter++) });
-        skusData.push({ skuCode: `RFT-WHT-${size}`, variationId: whiteTopVar.id, size, fabricConsumption: 1.2, mrp: 2200, targetStockQty: 8, barcode: String(barcodeCounter++) });
+        skusData.push({ skuCode: `LMD-BLU-${size}`, variationId: blueMidiVar.id, size, mrp: 4500, targetStockQty: 5 });
+        skusData.push({ skuCode: `LMD-BGE-${size}`, variationId: beigeMidiVar.id, size, mrp: 4500, targetStockQty: 5 });
+        skusData.push({ skuCode: `RFT-WHT-${size}`, variationId: whiteTopVar.id, size, mrp: 2200, targetStockQty: 8 });
     }
 
     for (const skuData of skusData) {
         await prisma.sku.create({ data: skuData });
     }
-    console.log('✅ Created SKUs with barcodes');
+    console.log('✅ Created SKUs');
+
+    // Set up BOM: create component type + role, then link fabrics via BOM
+    const fabricType = await prisma.componentType.upsert({
+        where: { code: 'FABRIC' },
+        update: {},
+        create: { code: 'FABRIC', name: 'Fabric', sortOrder: 1 },
+    });
+    const mainFabricRole = await prisma.componentRole.upsert({
+        where: { code_typeId: { code: 'main', typeId: fabricType.id } },
+        update: {},
+        create: { code: 'main', name: 'Main Fabric', typeId: fabricType.id, sortOrder: 1 },
+    });
+
+    // Product BOM templates (default consumption)
+    await prisma.productBomTemplate.createMany({
+        data: [
+            { productId: midiDress.id, roleId: mainFabricRole.id, defaultQuantity: 2.2, quantityUnit: 'meter', wastagePercent: 5 },
+            { productId: relaxedTop.id, roleId: mainFabricRole.id, defaultQuantity: 1.2, quantityUnit: 'meter', wastagePercent: 5 },
+        ],
+    });
+
+    // Variation BOM lines (fabric colour assignments)
+    await prisma.variationBomLine.createMany({
+        data: [
+            { variationId: blueMidiVar.id, roleId: mainFabricRole.id, fabricColourId: blueLinenColour.id },
+            { variationId: beigeMidiVar.id, roleId: mainFabricRole.id, fabricColourId: beigeLinenColour.id },
+            { variationId: whiteTopVar.id, roleId: mainFabricRole.id, fabricColourId: whiteCottonColour.id },
+        ],
+    });
+    console.log('✅ Created BOM structure');
 
     // Add some initial inventory
     const allSkus = await prisma.sku.findMany();

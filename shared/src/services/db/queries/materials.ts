@@ -50,22 +50,30 @@ export async function getFabricSalesMetricsKysely(): Promise<Map<string, FabricS
     const thirtyDaysAgo = getISTMidnightAsUTC(-30);
 
     // Join through VariationBomLine to get fabric (Variation.fabricColourId was removed)
+    // LEFT JOIN SkuBomLine for size-specific overrides
+    // LEFT JOIN Product for defaultFabricConsumption fallback
     const rows = await db
         .selectFrom('OrderLine')
         .innerJoin('Order', 'Order.id', 'OrderLine.orderId')
         .innerJoin('Sku', 'Sku.id', 'OrderLine.skuId')
         .innerJoin('Variation', 'Variation.id', 'Sku.variationId')
+        .innerJoin('Product', 'Product.id', 'Variation.productId')
         .innerJoin('VariationBomLine', (join) =>
             join
                 .onRef('VariationBomLine.variationId', '=', 'Variation.id')
                 .on('VariationBomLine.fabricColourId', 'is not', null)
+        )
+        .leftJoin('SkuBomLine', (join) =>
+            join
+                .onRef('SkuBomLine.skuId', '=', 'Sku.id')
+                .onRef('SkuBomLine.roleId', '=', 'VariationBomLine.roleId')
         )
         .innerJoin('FabricColour', 'FabricColour.id', 'VariationBomLine.fabricColourId')
         .select([
             'FabricColour.id as fabricColourId',
             sql<number>`SUM("OrderLine"."qty" * "OrderLine"."unitPrice")::numeric`.as('sales30DayValue'),
             sql<number>`SUM("OrderLine"."qty")::int`.as('sales30DayUnits'),
-            sql<number>`SUM("OrderLine"."qty" * COALESCE("VariationBomLine"."quantity", 1.5))::numeric`.as('consumption30Day'),
+            sql<number>`SUM("OrderLine"."qty" * COALESCE("SkuBomLine"."quantity", "VariationBomLine"."quantity", "Product"."defaultFabricConsumption", 1.5))::numeric`.as('consumption30Day'),
         ])
         .where('Order.orderDate', '>=', thirtyDaysAgo)
         .where('OrderLine.lineStatus', '!=', 'cancelled')
