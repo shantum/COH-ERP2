@@ -6,9 +6,6 @@
 // Types and constants
 export * from './types.js';
 
-// Order select patterns
-export * from './orderSelects.js';
-
 // Order helper functions
 export * from './orderHelpers.js';
 

@@ -15,7 +15,6 @@ export { CustomerDetailModal } from './CustomerDetailModal';
 export { TrackingModal } from './TrackingModal';
 
 // Panels and Search
-export { SummaryPanel } from './SummaryPanel';
 export { OrdersAnalyticsBar } from './OrdersAnalyticsBar';
 export { GlobalOrderSearch } from './GlobalOrderSearch';
 
