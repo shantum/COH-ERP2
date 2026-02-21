@@ -63,6 +63,7 @@ type VariantsByColor = Record<string, ShopifyVariantWithInventory[]>;
 interface SyncResult {
     created: number;
     updated: number;
+    productId?: string;
 }
 
 /**
@@ -147,12 +148,45 @@ export function buildVariantImageMap(shopifyProduct: ShopifyProductWithImages): 
 }
 
 /**
- * Group variants by color option
+ * Resolve which option position holds "Color" and which holds "Size".
+ * Shopify products have options like [{name:"Color", position:1}, {name:"Size", position:2}]
+ * but the order isn't guaranteed — some products put Size first.
+ * Returns the option key (option1/option2/option3) for color and size.
  */
-export function groupVariantsByColor(variants: ShopifyVariantWithInventory[]): VariantsByColor {
+function resolveOptionPositions(options: Array<{ name: string; position: number }>): {
+    colorKey: 'option1' | 'option2' | 'option3';
+    sizeKey: 'option1' | 'option2' | 'option3';
+} {
+    const positionMap = { 1: 'option1', 2: 'option2', 3: 'option3' } as const;
+    let colorKey: 'option1' | 'option2' | 'option3' = 'option1';
+    let sizeKey: 'option1' | 'option2' | 'option3' = 'option2';
+
+    for (const opt of options) {
+        const key = positionMap[opt.position as 1 | 2 | 3];
+        if (!key) continue;
+        const name = opt.name.toLowerCase();
+        if (name === 'color' || name === 'colour') colorKey = key;
+        if (name === 'size') sizeKey = key;
+    }
+
+    return { colorKey, sizeKey };
+}
+
+/**
+ * Group variants by color option.
+ * Uses product options array to determine which option holds color (not assumed to be option1).
+ */
+export function groupVariantsByColor(
+    variants: ShopifyVariantWithInventory[],
+    options?: Array<{ name: string; position: number }>,
+): VariantsByColor {
+    const { colorKey } = options?.length
+        ? resolveOptionPositions(options)
+        : { colorKey: 'option1' as const };
+
     const variantsByColor: VariantsByColor = {};
     for (const variant of variants || []) {
-        const colorOption = variant.option1 || 'Default';
+        const colorOption = variant[colorKey] || 'Default';
         if (!variantsByColor[colorOption]) {
             variantsByColor[colorOption] = [];
         }
@@ -162,11 +196,51 @@ export function groupVariantsByColor(variants: ShopifyVariantWithInventory[]): V
 }
 
 /**
+ * Copy ProductBomTemplate records from source product to target product.
+ * Only copies if target has no templates yet. Uses skipDuplicates for idempotency.
+ */
+async function copyProductBomTemplates(
+    prisma: PrismaClient,
+    sourceProductId: string,
+    targetProductId: string,
+): Promise<number> {
+    // Check if target already has templates
+    const existingCount = await prisma.productBomTemplate.count({
+        where: { productId: targetProductId },
+    });
+    if (existingCount > 0) return 0;
+
+    // Fetch source templates
+    const sourceTemplates = await prisma.productBomTemplate.findMany({
+        where: { productId: sourceProductId },
+    });
+    if (sourceTemplates.length === 0) return 0;
+
+    // Copy to target product
+    const result = await prisma.productBomTemplate.createMany({
+        data: sourceTemplates.map(t => ({
+            productId: targetProductId,
+            roleId: t.roleId,
+            trimItemId: t.trimItemId,
+            serviceItemId: t.serviceItemId,
+            defaultQuantity: t.defaultQuantity,
+            quantityUnit: t.quantityUnit,
+            wastagePercent: t.wastagePercent,
+            notes: t.notes,
+        })),
+        skipDuplicates: true,
+    });
+
+    if (result.count > 0) {
+        log.info({ from: sourceProductId, to: targetProductId, count: result.count }, 'Copied ProductBomTemplate records');
+    }
+    return result.count;
+}
+
+/**
  * Sync a single product from Shopify to the database
- * Uses 3-tier matching: SKU-first → Title match → Create new
- * 
- * This prevents duplicates when multiple Shopify products share the same title
- * (e.g., each color variant is a separate Shopify product)
+ * 1:1 mapping: one Shopify product = one ERP product.
+ * Matches by shopifyProductId (unique). Creates new if not found.
  */
 export async function syncSingleProduct(
     prisma: PrismaClient,
@@ -176,119 +250,22 @@ export async function syncSingleProduct(
 
     const shopifyProductId = String(shopifyProduct.id);
     const mainImageUrl = shopifyProduct.image?.src || shopifyProduct.images?.[0]?.src || null;
-    // Use tags as source of truth for gender
     const gender = shopifyClient.extractGenderFromMetafields(null, shopifyProduct.product_type, shopifyProduct.tags || null);
     const variantImageMap = buildVariantImageMap(shopifyProduct);
 
-    // Extract all SKU codes from incoming Shopify variants
-    const incomingSkuCodes = (shopifyProduct.variants || [])
-        .map(v => v.sku?.trim())
-        .filter((sku): sku is string => Boolean(sku));
-
-    let product: Product | null = null;
-
     // ============================================
-    // TIER 1: SKU-FIRST MATCHING (Primary)
-    // Find if ANY incoming SKU already exists → trace to its Product
-    // IMPORTANT: Only use if gender matches (men/women can have same SKU patterns)
+    // FIND OR CREATE PRODUCT (1:1 by shopifyProductId)
     // ============================================
 
-    if (incomingSkuCodes.length > 0) {
-        const existingSku = await prisma.sku.findFirst({
-            where: { skuCode: { in: incomingSkuCodes } },
-            include: {
-                variation: {
-                    include: { product: true }
-                }
-            }
-        });
-
-        if (existingSku) {
-            const foundProduct = existingSku.variation.product;
-
-            // CRITICAL: Verify gender matches before using this product
-            // Men's and women's products can share same title and color
-            const genderMatches = foundProduct.gender === gender ||
-                foundProduct.gender === 'unisex' ||
-                gender === 'unisex';
-
-            if (genderMatches) {
-                product = foundProduct;
-
-                // Add this Shopify ID to the product's linked IDs if not present
-                if (!product.shopifyProductIds.includes(shopifyProductId)) {
-                    await prisma.product.update({
-                        where: { id: product.id },
-                        data: {
-                            shopifyProductIds: { push: shopifyProductId }
-                        }
-                    });
-                    result.updated++;
-                }
-            }
-            // If gender doesn't match, fall through to Tier 2
-        }
-    }
-
-    // ============================================
-    // TIER 2: TITLE + GENDER MATCHING (Fallback)
-    // Find product by title AND gender (men's/women's versions should stay separate)
-    // ============================================
-
-    if (!product) {
-        // First try matching by title + gender (preferred - keeps men/women separate)
-        product = await prisma.product.findFirst({
-            where: {
-                name: shopifyProduct.title,
-                gender: gender || 'unisex'
-            }
-        });
-
-        // If no match with same gender, try finding any product with same title
-        // but only if the existing product is 'unisex' (can absorb gendered variants)
-        if (!product) {
-            const existingByTitle = await prisma.product.findFirst({
-                where: { name: shopifyProduct.title }
-            });
-
-            // Only merge if existing is unisex (not a specific gender product)
-            if (existingByTitle && existingByTitle.gender === 'unisex') {
-                product = existingByTitle;
-            }
-        }
-
-        if (product) {
-            // Link this Shopify product to existing
-            if (!product.shopifyProductIds.includes(shopifyProductId)) {
-                const updateData: { shopifyProductIds?: { push: string }; shopifyProductId?: string } = {
-                    shopifyProductIds: { push: shopifyProductId }
-                };
-
-                // Set primary ID if not set
-                if (!product.shopifyProductId) {
-                    updateData.shopifyProductId = shopifyProductId;
-                }
-
-                await prisma.product.update({
-                    where: { id: product.id },
-                    data: updateData
-                });
-                result.updated++;
-            }
-        }
-    }
-
-    // ============================================
-    // TIER 3: CREATE NEW PRODUCT
-    // Only if no SKU or title match
-    // ============================================
+    let product = await prisma.product.findUnique({
+        where: { shopifyProductId },
+    });
 
     if (!product) {
         product = await prisma.product.create({
             data: {
                 name: shopifyProduct.title,
-                shopifyProductId: shopifyProductId,
-                shopifyProductIds: [shopifyProductId],
+                shopifyProductId,
                 shopifyHandle: shopifyProduct.handle,
                 category: resolveProductCategory({
                     product_type: shopifyProduct.product_type,
@@ -302,15 +279,15 @@ export async function syncSingleProduct(
         });
         result.created++;
     } else {
-        // Product exists - refresh key fields from Shopify on every resync
+        // Product exists — refresh key fields from Shopify
         const updates: Partial<Product> = {};
         if (mainImageUrl && mainImageUrl !== product.imageUrl) updates.imageUrl = mainImageUrl;
         if (shopifyProduct.handle && shopifyProduct.handle !== product.shopifyHandle) {
             updates.shopifyHandle = shopifyProduct.handle;
         }
         if (gender && gender !== product.gender) updates.gender = gender;
+        if (shopifyProduct.title !== product.name) updates.name = shopifyProduct.title;
 
-        // Update category if Shopify tags changed (recalculate from current data)
         const resolvedCategory = resolveProductCategory({
             product_type: shopifyProduct.product_type,
             tags: shopifyProduct.tags,
@@ -327,36 +304,80 @@ export async function syncSingleProduct(
         }
     }
 
+    result.productId = product.id;
+
     // ============================================
     // SYNC VARIATIONS & SKUs
-    // Track which Shopify product each color came from
     // ============================================
 
-    const variantsByColor = groupVariantsByColor(shopifyProduct.variants as ShopifyVariantWithInventory[]);
+    const variantsByColor = groupVariantsByColor(
+        shopifyProduct.variants as ShopifyVariantWithInventory[],
+        shopifyProduct.options,
+    );
+    const { sizeKey } = shopifyProduct.options?.length
+        ? resolveOptionPositions(shopifyProduct.options)
+        : { sizeKey: 'option2' as const };
 
     for (const [colorName, variants] of Object.entries(variantsByColor)) {
         const firstVariantId = variants[0]?.id;
         const variationImageUrl = variantImageMap[firstVariantId] || mainImageUrl;
 
-        // Find or create variation (with source tracking)
+        // Priority 1: match by shopifySourceProductId (handles color renames on Shopify)
+        // Priority 2: match by colorName
         let variation = await prisma.variation.findFirst({
-            where: { productId: product.id, colorName },
+            where: { productId: product.id, shopifySourceProductId: shopifyProductId },
         });
 
+        if (variation && variation.colorName !== colorName) {
+            log.info({ variationId: variation.id, old: variation.colorName, new: colorName }, 'Shopify color renamed, updating variation');
+            await prisma.variation.update({
+                where: { id: variation.id },
+                data: { colorName },
+            });
+            variation = { ...variation, colorName };
+            result.updated++;
+        }
+
         if (!variation) {
-            // NOTE: fabricId removed from Variation - fabric assignment now via BOM
+            variation = await prisma.variation.findFirst({
+                where: { productId: product.id, colorName },
+            });
+        }
+
+        // Priority 3: variation ANYWHERE by shopifySourceProductId → MOVE to this product
+        if (!variation) {
+            variation = await prisma.variation.findFirst({
+                where: { shopifySourceProductId: shopifyProductId },
+            });
+            if (variation) {
+                const sourceProductId = variation.productId;
+                await prisma.variation.update({
+                    where: { id: variation.id },
+                    data: { productId: product.id },
+                });
+                log.info({ variationId: variation.id, from: sourceProductId, to: product.id, colorName }, 'Moved variation to correct product');
+
+                // Copy ProductBomTemplate from source product if new product has none
+                await copyProductBomTemplates(prisma, sourceProductId, product.id);
+
+                variation = { ...variation, productId: product.id };
+                result.updated++;
+            }
+        }
+
+        // Priority 4: create new variation
+        if (!variation) {
             variation = await prisma.variation.create({
                 data: {
                     productId: product.id,
                     colorName,
                     imageUrl: variationImageUrl,
-                    shopifySourceProductId: shopifyProductId,  // Track source
+                    shopifySourceProductId: shopifyProductId,
                     shopifySourceHandle: shopifyProduct.handle,
                 },
             });
             result.created++;
         } else {
-            // Update source tracking and refresh image from Shopify
             const variationUpdates: Record<string, string | null> = {};
             if (!variation.shopifySourceProductId) {
                 variationUpdates.shopifySourceProductId = shopifyProductId;
@@ -377,7 +398,7 @@ export async function syncSingleProduct(
 
         // Process SKUs for each variant
         for (const variant of variants) {
-            const skuResult = await syncSingleSku(prisma, variant, variation.id, shopifyProduct.handle, colorName);
+            const skuResult = await syncSingleSku(prisma, variant, variation.id, shopifyProduct.handle, colorName, sizeKey);
             result.created += skuResult.created;
             result.updated += skuResult.updated;
         }
@@ -395,14 +416,16 @@ async function syncSingleSku(
     variant: ShopifyVariantWithInventory,
     variationId: string,
     productHandle: string,
-    colorName: string
+    colorName: string,
+    sizeKey: 'option1' | 'option2' | 'option3' = 'option2'
 ): Promise<SyncResult> {
     const result: SyncResult = { created: 0, updated: 0 };
 
     const shopifyVariantId = String(variant.id);
+    const sizeValue = variant[sizeKey];
     const skuCode = variant.sku?.trim() ||
-        `${productHandle}-${colorName}-${variant.option2 || 'OS'}`.replace(/\s+/g, '-').toUpperCase();
-    const rawSize = variant.option2 || variant.option3 || 'One Size';
+        `${productHandle}-${colorName}-${sizeValue || 'OS'}`.replace(/\s+/g, '-').toUpperCase();
+    const rawSize = sizeValue || 'One Size';
     const size = normalizeSize(rawSize);
 
     // Check if SKU exists by shopifyVariantId or skuCode
@@ -431,6 +454,8 @@ async function syncSingleSku(
             where: { id: sku.id },
             data: {
                 ...(shouldUpdateSkuCode ? { skuCode: shopifySku } : {}),
+                // Fix variationId if SKU was stuck on wrong variation from old syncs
+                ...(sku.variationId !== variationId ? { variationId } : {}),
                 shopifyVariantId,
                 shopifyInventoryItemId: variant.inventory_item_id ? String(variant.inventory_item_id) : null,
                 mrp: newMrp,
@@ -531,14 +556,9 @@ export async function cacheAndProcessProduct(
             data: { processedAt: new Date() },
         });
 
-        // Find the product to return its ID
-        const product = await prisma.product.findUnique({
-            where: { shopifyProductId },
-        });
-
         return {
             action: result.created > 0 ? 'created' : 'updated',
-            productId: product?.id,
+            productId: result.productId,
             created: result.created,
             updated: result.updated,
         };
@@ -663,4 +683,252 @@ export async function syncAllProducts(
     }
 
     return { shopifyProducts, results };
+}
+
+// ============================================
+// DRY-RUN SYNC (read-only preview)
+// ============================================
+
+interface DryRunProductAction {
+    shopifyProductId: string;
+    title: string;
+    handle: string;
+    action: 'create' | 'update';
+    fieldChanges?: Record<string, { from: string | null; to: string | null }>;
+}
+
+interface DryRunVariationAction {
+    shopifyProductId: string;
+    colorName: string;
+    action: 'create' | 'exists' | 'move';
+    productTitle: string;
+    fromProductId?: string;
+}
+
+interface DryRunSkuAction {
+    shopifyVariantId: string;
+    skuCode: string;
+    action: 'create' | 'update' | 'move';
+    fromVariationId?: string;
+    toVariationId?: string;
+}
+
+interface DryRunOrphan {
+    variationId: string;
+    colorName: string;
+    productName: string;
+    productId: string;
+    skuCount: number;
+}
+
+interface DryRunResult {
+    summary: {
+        products: { create: number; update: number };
+        variations: { create: number; existing: number; move: number };
+        skus: { create: number; update: number; move: number };
+        bomTemplateCopies: number;
+        orphanedVariations: number;
+    };
+    products: DryRunProductAction[];
+    variations: DryRunVariationAction[];
+    skuMoves: DryRunSkuAction[];
+    orphanedVariations: DryRunOrphan[];
+}
+
+/**
+ * Dry-run: simulate the 1:1 sync and return what WOULD change.
+ * All read-only — no writes to the database.
+ */
+export async function dryRunSync(
+    prisma: PrismaClient,
+    shopifyProducts: ShopifyProductWithImages[],
+): Promise<DryRunResult> {
+    const products: DryRunProductAction[] = [];
+    const variations: DryRunVariationAction[] = [];
+    const skuMoves: DryRunSkuAction[] = [];
+    // Track which variations get "claimed" by a Shopify product
+    const claimedVariationIds = new Set<string>();
+    let bomTemplateCopyCount = 0;
+
+    for (const sp of shopifyProducts) {
+        const shopifyProductId = String(sp.id);
+        const gender = shopifyClient.extractGenderFromMetafields(null, sp.product_type, sp.tags || null);
+        const mainImageUrl = sp.image?.src || sp.images?.[0]?.src || null;
+
+        // 1. Would we find or create the product?
+        const existing = await prisma.product.findUnique({
+            where: { shopifyProductId },
+        });
+
+        if (existing) {
+            const fieldChanges: Record<string, { from: string | null; to: string | null }> = {};
+            if (sp.title !== existing.name) fieldChanges.name = { from: existing.name, to: sp.title };
+            if (gender && gender !== existing.gender) fieldChanges.gender = { from: existing.gender, to: gender };
+            if (sp.handle && sp.handle !== existing.shopifyHandle) fieldChanges.handle = { from: existing.shopifyHandle, to: sp.handle };
+            const resolvedCat = resolveProductCategory({ product_type: sp.product_type, tags: sp.tags });
+            if (resolvedCat !== existing.category) fieldChanges.category = { from: existing.category, to: resolvedCat };
+            if (mainImageUrl && mainImageUrl !== existing.imageUrl) fieldChanges.imageUrl = { from: existing.imageUrl, to: mainImageUrl };
+
+            products.push({
+                shopifyProductId, title: sp.title, handle: sp.handle,
+                action: 'update',
+                ...(Object.keys(fieldChanges).length > 0 ? { fieldChanges } : {}),
+            });
+        } else {
+            products.push({
+                shopifyProductId, title: sp.title, handle: sp.handle,
+                action: 'create',
+            });
+        }
+
+        // 2. Check variations
+        const variantsByColor = groupVariantsByColor(
+            sp.variants as ShopifyVariantWithInventory[],
+            sp.options,
+        );
+        const { sizeKey } = sp.options?.length
+            ? resolveOptionPositions(sp.options)
+            : { sizeKey: 'option2' as const };
+
+        for (const [colorName, variants] of Object.entries(variantsByColor)) {
+            // Would we find a variation?
+            let variation = existing
+                ? await prisma.variation.findFirst({
+                    where: { productId: existing.id, shopifySourceProductId: shopifyProductId },
+                })
+                : null;
+            if (!variation && existing) {
+                variation = await prisma.variation.findFirst({
+                    where: { productId: existing.id, colorName },
+                });
+            }
+
+            if (variation) {
+                claimedVariationIds.add(variation.id);
+                variations.push({
+                    shopifyProductId, colorName, action: 'exists', productTitle: sp.title,
+                });
+            }
+
+            // Priority 3: variation ANYWHERE by shopifySourceProductId → would MOVE
+            if (!variation) {
+                variation = await prisma.variation.findFirst({
+                    where: { shopifySourceProductId: shopifyProductId },
+                });
+                if (variation) {
+                    claimedVariationIds.add(variation.id);
+                    variations.push({
+                        shopifyProductId, colorName, action: 'move', productTitle: sp.title,
+                        fromProductId: variation.productId,
+                    });
+                    // Check if BOM templates would be copied
+                    if (existing) {
+                        const targetTemplateCount = await prisma.productBomTemplate.count({ where: { productId: existing.id } });
+                        if (targetTemplateCount === 0) {
+                            const sourceTemplateCount = await prisma.productBomTemplate.count({ where: { productId: variation.productId } });
+                            if (sourceTemplateCount > 0) bomTemplateCopyCount++;
+                        }
+                    }
+                }
+            }
+
+            // Priority 4: create
+            if (!variation) {
+                variations.push({
+                    shopifyProductId, colorName, action: 'create', productTitle: sp.title,
+                });
+            }
+
+            // 3. Check SKUs — would any move?
+            for (const variant of variants) {
+                const shopifyVariantId = String(variant.id);
+                const sizeValue = variant[sizeKey];
+                const skuCode = variant.sku?.trim() ||
+                    `${sp.handle}-${colorName}-${sizeValue || 'OS'}`.replace(/\s+/g, '-').toUpperCase();
+
+                const existingSku = await prisma.sku.findFirst({
+                    where: {
+                        OR: [{ shopifyVariantId }, { skuCode }],
+                    },
+                });
+
+                if (existingSku) {
+                    if (variation && existingSku.variationId !== variation.id) {
+                        skuMoves.push({
+                            shopifyVariantId, skuCode: existingSku.skuCode,
+                            action: 'move',
+                            fromVariationId: existingSku.variationId,
+                            toVariationId: variation.id,
+                        });
+                    }
+                    // If product is new (no existing), the SKU will also move
+                    if (!existing) {
+                        skuMoves.push({
+                            shopifyVariantId, skuCode: existingSku.skuCode,
+                            action: 'move',
+                            fromVariationId: existingSku.variationId,
+                            toVariationId: '(new variation)',
+                        });
+                    }
+                } else {
+                    skuMoves.push({
+                        shopifyVariantId, skuCode,
+                        action: 'create',
+                    });
+                }
+            }
+        }
+    }
+
+    // 4. Find orphaned variations (on products with multiple shopifyProductIds, variations whose
+    //    shopifySourceProductId doesn't match the product's primary shopifyProductId)
+    const orphanedVariations: DryRunOrphan[] = [];
+    const consolidatedProducts = await prisma.product.findMany({
+        where: { shopifyProductIds: { isEmpty: false } },
+        select: { id: true, name: true, shopifyProductId: true, shopifyProductIds: true },
+    });
+
+    for (const p of consolidatedProducts) {
+        if (p.shopifyProductIds.length <= 1) continue;
+        // Variations on this product that belong to a DIFFERENT Shopify product
+        const vars = await prisma.variation.findMany({
+            where: {
+                productId: p.id,
+                shopifySourceProductId: { not: p.shopifyProductId ?? undefined },
+            },
+            select: { id: true, colorName: true, _count: { select: { skus: true } } },
+        });
+        for (const v of vars) {
+            if (!claimedVariationIds.has(v.id)) {
+                orphanedVariations.push({
+                    variationId: v.id,
+                    colorName: v.colorName,
+                    productName: p.name,
+                    productId: p.id,
+                    skuCount: v._count.skus,
+                });
+            }
+        }
+    }
+
+    const summary = {
+        products: {
+            create: products.filter(p => p.action === 'create').length,
+            update: products.filter(p => p.action === 'update').length,
+        },
+        variations: {
+            create: variations.filter(v => v.action === 'create').length,
+            existing: variations.filter(v => v.action === 'exists').length,
+            move: variations.filter(v => v.action === 'move').length,
+        },
+        skus: {
+            create: skuMoves.filter(s => s.action === 'create').length,
+            update: skuMoves.filter(s => s.action === 'update').length,
+            move: skuMoves.filter(s => s.action === 'move').length,
+        },
+        bomTemplateCopies: bomTemplateCopyCount,
+        orphanedVariations: orphanedVariations.length,
+    };
+
+    return { summary, products, variations, skuMoves, orphanedVariations };
 }

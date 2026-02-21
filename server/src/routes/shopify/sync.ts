@@ -7,7 +7,7 @@ import asyncHandler from '../../middleware/asyncHandler.js';
 import { ValidationError, ExternalServiceError, NotFoundError } from '../../utils/errors.js';
 import shopifyClient from '../../services/shopify.js';
 import type { ShopifyOrder } from '../../services/shopify.js';
-import { syncAllProducts } from '../../services/productSyncService.js';
+import { syncAllProducts, dryRunSync } from '../../services/productSyncService.js';
 import { syncCustomers, syncAllCustomers } from '../../services/customerSyncService.js';
 import { processFromCache, markCacheProcessed, markCacheError, cacheShopifyOrders, processCacheBatch, syncFulfillmentsToOrderLines } from '../../services/shopifyOrderProcessor.js';
 import { detectPaymentMethod } from '../../utils/shopifyHelpers.js';
@@ -321,9 +321,22 @@ router.post('/products', authenticateToken, asyncHandler(async (req: Request, re
     throw new ValidationError('Shopify is not configured');
   }
 
-  const { limit = 50, syncAll = false } = req.body as { limit?: number; syncAll?: boolean };
+  const { limit = 50, syncAll = false, dryRun = false } = req.body as {
+    limit?: number; syncAll?: boolean; dryRun?: boolean;
+  };
 
   try {
+    if (dryRun) {
+      // Dry-run: fetch from Shopify, simulate sync, return changeset (no writes)
+      const shopifyProducts = syncAll
+        ? await shopifyClient.getAllProducts()
+        : await shopifyClient.getProducts({ limit, status: 'any' });
+
+      const changeset = await dryRunSync(req.prisma, shopifyProducts);
+      res.json({ dryRun: true, fetched: shopifyProducts.length, ...changeset });
+      return;
+    }
+
     const { shopifyProducts, results } = await syncAllProducts(req.prisma, { limit, syncAll });
 
     res.json({

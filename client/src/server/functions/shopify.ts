@@ -687,13 +687,8 @@ export const getShopifyCatalog = createServerFn({ method: 'GET' })
         const shopifyIds = parsed.map(p => p.id);
         const erpProducts = shopifyIds.length > 0
             ? await prisma.product.findMany({
-                where: {
-                    OR: [
-                        { shopifyProductId: { in: shopifyIds } },
-                        { shopifyProductIds: { hasSome: shopifyIds } },
-                    ],
-                },
-                select: { id: true, name: true, shopifyProductId: true, shopifyProductIds: true },
+                where: { shopifyProductId: { in: shopifyIds } },
+                select: { id: true, name: true, shopifyProductId: true },
             })
             : [];
 
@@ -702,11 +697,6 @@ export const getShopifyCatalog = createServerFn({ method: 'GET' })
         for (const p of erpProducts) {
             if (p.shopifyProductId) {
                 erpLinkMap.set(p.shopifyProductId, { id: p.id, name: p.name });
-            }
-            for (const sid of p.shopifyProductIds) {
-                if (!erpLinkMap.has(sid)) {
-                    erpLinkMap.set(sid, { id: p.id, name: p.name });
-                }
             }
         }
         stats.linkedToErp = erpLinkMap.size;

@@ -153,22 +153,13 @@ router.get('/product-cache/:skuCode', authenticateToken, asyncHandler(async (req
     }
   }
 
-  // Check cache for all linked shopifyProductIds
-  const linkedCaches = [];
-  for (const shopifyId of product.shopifyProductIds || []) {
-    const cache = await req.prisma.shopifyProductCache.findUnique({
-      where: { id: shopifyId }
-    });
-    if (cache) {
-      const rawData = JSON.parse(cache.rawData);
-      linkedCaches.push({
-        cacheId: cache.id,
-        statusInCache: rawData.status,
-        titleInCache: rawData.title,
-        isPrimary: shopifyId === product.shopifyProductId
-      });
-    }
-  }
+  // Primary cache already fetched above — no need to iterate shopifyProductIds
+  const linkedCaches = primaryCache ? [{
+    cacheId: primaryCache.cacheId,
+    statusInCache: primaryCache.statusInCache,
+    titleInCache: primaryCache.titleInCache,
+    isPrimary: true,
+  }] : [];
 
   // Check variation's source product cache
   let variationSourceCache = null;
