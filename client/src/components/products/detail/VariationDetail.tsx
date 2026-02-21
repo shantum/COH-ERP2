@@ -3,10 +3,9 @@
  */
 
 import { useState } from 'react';
-import { Palette, FileText, Package, Box, Edit, X } from 'lucide-react';
+import { Palette, FileText, Box, Edit, X } from 'lucide-react';
 import type { ProductTreeNode } from '../types';
 import { sortBySizeOrder } from '../types';
-import { VariationBomTab } from './VariationBomTab';
 
 interface VariationDetailProps {
     variation: ProductTreeNode;
@@ -14,11 +13,10 @@ interface VariationDetailProps {
     onClose?: () => void;
 }
 
-type TabType = 'info' | 'bom' | 'skus';
+type TabType = 'info' | 'skus';
 
 const TABS: { id: TabType; label: string; icon: typeof Palette }[] = [
     { id: 'info', label: 'Info', icon: FileText },
-    { id: 'bom', label: 'BOM', icon: Package },
     { id: 'skus', label: 'SKUs', icon: Box },
 ];
 
@@ -87,9 +85,6 @@ export function VariationDetail({ variation, onEdit, onClose }: VariationDetailP
             <div className="flex-1 overflow-auto p-4">
                 {activeTab === 'info' && (
                     <VariationInfoContent variation={variation} />
-                )}
-                {activeTab === 'bom' && (
-                    <VariationBomTab variation={variation} />
                 )}
                 {activeTab === 'skus' && (
                     <VariationSkusContent variation={variation} />

@@ -8,7 +8,6 @@ import { useProductEditForm } from '../hooks/useProductEditForm';
 import { ProductInfoTab } from '../tabs/ProductInfoTab';
 import { ProductVariationsTab } from '../tabs/ProductVariationsTab';
 import { ProductCostsTab } from '../tabs/ProductCostsTab';
-import { ProductBomTab } from '../tabs/ProductBomTab';
 import { EditDialogFooter, UnsavedIndicator } from '../shared/EditDialogFooter';
 import type { ProductTabId, EditLevel } from '../types';
 
@@ -24,7 +23,6 @@ const TABS: { id: ProductTabId; label: string }[] = [
   { id: 'info', label: 'Info' },
   { id: 'variations', label: 'Variations' },
   { id: 'costs', label: 'Costs' },
-  { id: 'bom', label: 'BOM' },
 ];
 
 export function ProductEditDialog({
@@ -151,12 +149,6 @@ export function ProductEditDialog({
         )}
         {activeTab === 'costs' && (
           <ProductCostsTab form={form} disabled={isSaving} />
-        )}
-        {activeTab === 'bom' && (
-          <ProductBomTab
-            productId={productId}
-            productName={product.name}
-          />
         )}
       </div>
 

@@ -1,10 +1,11 @@
 /**
- * Materials Redirect - /materials -> /products
+ * Materials Redirect - /materials -> /fabrics
+ * Materials, Trims, Services now live on the /fabrics page.
  */
 import { createFileRoute, redirect } from '@tanstack/react-router';
 
 export const Route = createFileRoute('/materials')({
     beforeLoad: () => {
-        throw redirect({ to: '/products', search: { tab: 'materials', view: 'tree' } });
+        throw redirect({ to: '/fabrics', search: { tab: 'overview' } });
     },
 });

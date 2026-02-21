@@ -33,6 +33,7 @@
  */
 
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
+import { useNavigate } from '@tanstack/react-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { AgGridReact } from 'ag-grid-react';
@@ -42,7 +43,7 @@ import { Layers, Package, AlertTriangle, XCircle, ArrowLeft, X, ChevronDown, Che
 import { getCatalogProducts, getCatalogCategories } from '@/server/functions/catalog';
 import type { CatalogSkuItem, CatalogProductsResponse } from '@/server/functions/catalog';
 import { updateProduct, updateVariation, updateSku } from '@/server/functions/productsMutations';
-import BomEditorPanel from '../components/bom/BomEditorPanel';
+// BOM editing moved to /fabrics?tab=bom
 import { ConfirmModal } from '../components/Modal';
 import { compactThemeSmall } from '../utils/agGridHelpers';
 import { useGridState, getColumnOrderFromApi, applyColumnVisibility, applyColumnWidths, orderColumns } from '../hooks/useGridState';
@@ -72,6 +73,7 @@ ModuleRegistry.registerModules([AllCommunityModule]);
 export default function Catalog() {
     // Grid ref for API access
     const gridRef = useRef<AgGridReact>(null);
+    const navigate = useNavigate();
     const queryClient = useQueryClient();
 
     // Server Function wrappers
@@ -128,21 +130,13 @@ export default function Catalog() {
         data: Record<string, unknown> | null;
     }>({ isOpen: false, level: 'sku', data: null });
 
-    // BOM editor panel state
-    const [bomEditor, setBomEditor] = useState<{
-        isOpen: boolean;
-        productId: string;
-        productName: string;
-    }>({ isOpen: false, productId: '', productName: '' });
-
-    // Open BOM editor for a product
+    // Navigate to BOM editor on /fabrics page
     const openBomEditor = useCallback((row: Record<string, unknown>) => {
-        setBomEditor({
-            isOpen: true,
-            productId: String(row.productId ?? ''),
-            productName: String(row.productName ?? ''),
-        });
-    }, []);
+        const productId = String(row.productId ?? '');
+        if (productId) {
+            navigate({ to: '/fabrics', search: { tab: 'bom', productId } });
+        }
+    }, [navigate]);
 
     // Apply quick filter when search input changes (client-side, instant)
     useEffect(() => {
@@ -843,13 +837,6 @@ export default function Catalog() {
                 isLoading={updateSkuMutation.isPending || updateVariationFullMutation.isPending || updateProductFullMutation.isPending}
             />
 
-            {/* BOM Editor Slide-out Panel */}
-            <BomEditorPanel
-                productId={bomEditor.productId}
-                productName={bomEditor.productName}
-                isOpen={bomEditor.isOpen}
-                onClose={() => setBomEditor({ isOpen: false, productId: '', productName: '' })}
-            />
         </div>
     );
 }

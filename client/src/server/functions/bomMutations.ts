@@ -38,23 +38,6 @@ export type {
     DeleteBomLineResult,
 } from './bomCrud';
 
-// Consumption
-export {
-    importConsumption,
-    updateSizeConsumptions,
-    getConsumptionGrid,
-    updateConsumptionGrid,
-    getProductsForMapping,
-    resetConsumption,
-} from './bomConsumption';
-
-export type {
-    ConsumptionGridRow,
-    ConsumptionGridResult,
-    ImportConsumptionResult,
-    ProductForMappingResult,
-} from './bomConsumption';
-
 // Templates
 export {
     getProductBom,

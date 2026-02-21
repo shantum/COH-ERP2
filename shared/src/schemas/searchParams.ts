@@ -56,14 +56,15 @@ export type OrdersSearchParams = z.infer<typeof OrdersSearchParams>;
 
 /**
  * Products page search params
- * Supports 9 tabs: products, materials, trims, services, bom, consumption, import, fabricMapping, styleCodes
+ * 2 tabs: products, styleCodes
+ * BOM/Consumption/FabricMapping moved to /fabrics?tab=bom
  *
  * @example
- * /products?tab=bom&id=123e4567-e89b-12d3-a456-426614174000&type=product
+ * /products?tab=products&view=tree
  */
 export const ProductsSearchParams = z.object({
     /** Active tab in products page */
-    tab: z.enum(['products', 'materials', 'trims', 'services', 'bom', 'consumption', 'import', 'fabricMapping', 'styleCodes']).catch('products'),
+    tab: z.enum(['products', 'styleCodes']).catch('products'),
     /** View mode for products tab */
     view: z.enum(['tree', 'flat']).catch('tree'),
     /** Selected item ID for master-detail views */
@@ -79,11 +80,13 @@ export type ProductsSearchParams = z.infer<typeof ProductsSearchParams>;
 
 /**
  * Fabrics page search params
- * 5 tabs: overview, transactions, reconciliation, trims, services
+ * 6 tabs: overview, transactions, reconciliation, trims, services, bom
  */
 export const FabricsSearchParams = z.object({
     /** Active tab */
-    tab: z.enum(['overview', 'transactions', 'reconciliation', 'trims', 'services']).catch('overview'),
+    tab: z.enum(['overview', 'transactions', 'reconciliation', 'trims', 'services', 'bom']).catch('overview'),
+    /** Selected product ID for BOM tab master-detail */
+    productId: z.string().optional().catch(undefined),
 });
 export type FabricsSearchParams = z.infer<typeof FabricsSearchParams>;
 

@@ -161,7 +161,7 @@ export interface SkuEditDialogProps extends LevelDialogProps {
 
 // === Tab Types ===
 
-export type ProductTabId = 'info' | 'variations' | 'costs' | 'bom';
+export type ProductTabId = 'info' | 'variations' | 'costs';
 export type VariationTabId = 'info' | 'skus' | 'fabric' | 'costs';
 export type SkuTabId = 'info' | 'costs' | 'inventory';
 

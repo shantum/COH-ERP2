@@ -3,7 +3,6 @@
  *
  * Shows tabs:
  * - Info: Basic product information with edit capability
- * - BOM: Bill of materials template (trims, services)
  * - Costs: Cost breakdown and cascade
  * - SKUs: All SKUs with inventory
  */
@@ -12,7 +11,6 @@ import { useState } from 'react';
 import { Package, FileText, DollarSign, Box, Edit, Save, X } from 'lucide-react';
 import type { ProductTreeNode } from '../types';
 import { ProductInfoTab } from './ProductInfoTab';
-import { ProductBomTab } from './ProductBomTab';
 import { ProductCostsTab } from './ProductCostsTab';
 import { ProductSkusTab } from './ProductSkusTab';
 
@@ -21,11 +19,10 @@ interface ProductDetailProps {
     onClose?: () => void;
 }
 
-type TabType = 'info' | 'bom' | 'costs' | 'skus';
+type TabType = 'info' | 'costs' | 'skus';
 
 const TABS: { id: TabType; label: string; icon: typeof Package }[] = [
     { id: 'info', label: 'Info', icon: FileText },
-    { id: 'bom', label: 'BOM', icon: Package },
     { id: 'costs', label: 'Costs', icon: DollarSign },
     { id: 'skus', label: 'SKUs', icon: Box },
 ];
@@ -109,9 +106,6 @@ export function ProductDetail({ product, onClose }: ProductDetailProps) {
                 {activeTab === 'info' && (
                     <ProductInfoTab product={product} isEditing={isEditing} />
                 )}
-                {activeTab === 'bom' && (
-                    <ProductBomTab product={product} />
-                )}
                 {activeTab === 'costs' && (
                     <ProductCostsTab product={product} />
                 )}
@@ -122,4 +116,3 @@ export function ProductDetail({ product, onClose }: ProductDetailProps) {
         </div>
     );
 }
-

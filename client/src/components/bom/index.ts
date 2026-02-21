@@ -9,6 +9,9 @@
  */
 
 export { default as BomEditorPanel } from './BomEditorPanel';
+export { default as BomEditorInline } from './BomEditorInline';
+export { default as BomTab } from './BomTab';
+export { default as BomProductList } from './BomProductList';
 export { default as BomTemplateTab } from './BomTemplateTab';
 export { default as BomVariationsTab } from './BomVariationsTab';
 export { default as BomSkuTab } from './BomSkuTab';

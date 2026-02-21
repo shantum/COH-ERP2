@@ -46,6 +46,7 @@ import { AgGridReact } from 'ag-grid-react';
 import type { ColDef, ICellRendererParams } from 'ag-grid-community';
 import type { MaterialNode } from '../components/materials/types';
 import type { Party } from '@/server/functions/materialsMutations';
+import BomTab from '../components/bom/BomTab';
 
 // ============================================
 // HELPERS
@@ -2696,7 +2697,7 @@ export default function Fabrics() {
     const setActiveTab = useCallback((tab: string) => {
         navigate({
             to: '/fabrics',
-            search: { tab } as { tab: 'overview' | 'transactions' | 'reconciliation' | 'trims' | 'services' },
+            search: { tab } as { tab: 'overview' | 'transactions' | 'reconciliation' | 'trims' | 'services' | 'bom' },
             replace: true,
         });
     }, [navigate]);
@@ -2723,6 +2724,7 @@ export default function Fabrics() {
                         <TabsTrigger value="reconciliation">Reconciliation</TabsTrigger>
                         <TabsTrigger value="trims">Trims</TabsTrigger>
                         <TabsTrigger value="services">Services</TabsTrigger>
+                        <TabsTrigger value="bom">BOM</TabsTrigger>
                     </TabsList>
                 </div>
 
@@ -2741,6 +2743,9 @@ export default function Fabrics() {
                     </TabsContent>
                     <TabsContent value="services" className="h-full m-0">
                         <ServicesTab />
+                    </TabsContent>
+                    <TabsContent value="bom" className="h-full m-0">
+                        <BomTab />
                     </TabsContent>
                 </div>
             </Tabs>
