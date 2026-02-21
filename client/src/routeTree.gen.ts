@@ -33,7 +33,6 @@ import { Route as AuthenticatedProductionRouteImport } from './routes/_authentic
 import { Route as AuthenticatedPayrollRouteImport } from './routes/_authenticated/payroll'
 import { Route as AuthenticatedOrdersRouteImport } from './routes/_authenticated/orders'
 import { Route as AuthenticatedOrderSearchRouteImport } from './routes/_authenticated/order-search'
-import { Route as AuthenticatedNewOrderRouteImport } from './routes/_authenticated/new-order'
 import { Route as AuthenticatedLedgersRouteImport } from './routes/_authenticated/ledgers'
 import { Route as AuthenticatedInventoryInwardRouteImport } from './routes/_authenticated/inventory-inward'
 import { Route as AuthenticatedInventoryCountRouteImport } from './routes/_authenticated/inventory-count'
@@ -173,11 +172,6 @@ const AuthenticatedOrderSearchRoute =
     path: '/order-search',
     getParentRoute: () => AuthenticatedRoute,
   } as any)
-const AuthenticatedNewOrderRoute = AuthenticatedNewOrderRouteImport.update({
-  id: '/new-order',
-  path: '/new-order',
-  getParentRoute: () => AuthenticatedRoute,
-} as any)
 const AuthenticatedLedgersRoute = AuthenticatedLedgersRouteImport.update({
   id: '/ledgers',
   path: '/ledgers',
@@ -279,7 +273,6 @@ export interface FileRoutesByFullPath {
   '/inventory-count': typeof AuthenticatedInventoryCountRoute
   '/inventory-inward': typeof AuthenticatedInventoryInwardRoute
   '/ledgers': typeof AuthenticatedLedgersRoute
-  '/new-order': typeof AuthenticatedNewOrderRoute
   '/order-search': typeof AuthenticatedOrderSearchRoute
   '/orders': typeof AuthenticatedOrdersRoute
   '/payroll': typeof AuthenticatedPayrollRoute
@@ -318,7 +311,6 @@ export interface FileRoutesByTo {
   '/inventory-count': typeof AuthenticatedInventoryCountRoute
   '/inventory-inward': typeof AuthenticatedInventoryInwardRoute
   '/ledgers': typeof AuthenticatedLedgersRoute
-  '/new-order': typeof AuthenticatedNewOrderRoute
   '/order-search': typeof AuthenticatedOrderSearchRoute
   '/orders': typeof AuthenticatedOrdersRoute
   '/payroll': typeof AuthenticatedPayrollRoute
@@ -360,7 +352,6 @@ export interface FileRoutesById {
   '/_authenticated/inventory-count': typeof AuthenticatedInventoryCountRoute
   '/_authenticated/inventory-inward': typeof AuthenticatedInventoryInwardRoute
   '/_authenticated/ledgers': typeof AuthenticatedLedgersRoute
-  '/_authenticated/new-order': typeof AuthenticatedNewOrderRoute
   '/_authenticated/order-search': typeof AuthenticatedOrderSearchRoute
   '/_authenticated/orders': typeof AuthenticatedOrdersRoute
   '/_authenticated/payroll': typeof AuthenticatedPayrollRoute
@@ -403,7 +394,6 @@ export interface FileRouteTypes {
     | '/inventory-count'
     | '/inventory-inward'
     | '/ledgers'
-    | '/new-order'
     | '/order-search'
     | '/orders'
     | '/payroll'
@@ -442,7 +432,6 @@ export interface FileRouteTypes {
     | '/inventory-count'
     | '/inventory-inward'
     | '/ledgers'
-    | '/new-order'
     | '/order-search'
     | '/orders'
     | '/payroll'
@@ -483,7 +472,6 @@ export interface FileRouteTypes {
     | '/_authenticated/inventory-count'
     | '/_authenticated/inventory-inward'
     | '/_authenticated/ledgers'
-    | '/_authenticated/new-order'
     | '/_authenticated/order-search'
     | '/_authenticated/orders'
     | '/_authenticated/payroll'
@@ -683,13 +671,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedOrderSearchRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
-    '/_authenticated/new-order': {
-      id: '/_authenticated/new-order'
-      path: '/new-order'
-      fullPath: '/new-order'
-      preLoaderRoute: typeof AuthenticatedNewOrderRouteImport
-      parentRoute: typeof AuthenticatedRoute
-    }
     '/_authenticated/ledgers': {
       id: '/_authenticated/ledgers'
       path: '/ledgers'
@@ -806,7 +787,6 @@ interface AuthenticatedRouteChildren {
   AuthenticatedInventoryCountRoute: typeof AuthenticatedInventoryCountRoute
   AuthenticatedInventoryInwardRoute: typeof AuthenticatedInventoryInwardRoute
   AuthenticatedLedgersRoute: typeof AuthenticatedLedgersRoute
-  AuthenticatedNewOrderRoute: typeof AuthenticatedNewOrderRoute
   AuthenticatedOrderSearchRoute: typeof AuthenticatedOrderSearchRoute
   AuthenticatedOrdersRoute: typeof AuthenticatedOrdersRoute
   AuthenticatedPayrollRoute: typeof AuthenticatedPayrollRoute
@@ -841,7 +821,6 @@ const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedInventoryCountRoute: AuthenticatedInventoryCountRoute,
   AuthenticatedInventoryInwardRoute: AuthenticatedInventoryInwardRoute,
   AuthenticatedLedgersRoute: AuthenticatedLedgersRoute,
-  AuthenticatedNewOrderRoute: AuthenticatedNewOrderRoute,
   AuthenticatedOrderSearchRoute: AuthenticatedOrderSearchRoute,
   AuthenticatedOrdersRoute: AuthenticatedOrdersRoute,
   AuthenticatedPayrollRoute: AuthenticatedPayrollRoute,

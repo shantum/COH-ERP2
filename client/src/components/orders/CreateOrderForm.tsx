@@ -1,6 +1,6 @@
 /**
  * CreateOrderForm - Reusable order creation form
- * Used by both CreateOrderModal (dialog) and /new-order (full page)
+ * Used by CreateOrderModal (dialog)
  */
 
 import { useState } from 'react';

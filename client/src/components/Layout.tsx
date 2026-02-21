@@ -44,7 +44,7 @@ const navGroups: NavGroup[] = [
         label: 'Orders',
         items: [
             { to: '/orders', icon: ShoppingCart, label: 'Orders' },
-            { to: '/new-order', icon: FilePlus, label: 'New Order' },
+            { to: '/quick-order', icon: FilePlus, label: 'Quick Order' },
             { to: '/channel-import', icon: Upload, label: 'Channel Import' },
         ],
     },
@@ -55,7 +55,6 @@ const navGroups: NavGroup[] = [
             { to: '/shopify-catalog', icon: ShoppingBag, label: 'Shopify Catalog' },
             { to: '/facebook-feed-health', icon: HeartPulse, label: 'Feed Health' },
             { to: '/inventory', icon: Package, label: 'Inventory' },
-            { to: '/inventory-mobile', icon: Package, label: 'Stock (Mobile)' },
         ],
     },
     {
