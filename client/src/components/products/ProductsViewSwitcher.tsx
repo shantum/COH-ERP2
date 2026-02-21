@@ -27,7 +27,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select';
-import { VariationsDataTable } from './VariationsDataTable';
+import { SkuWiseDataTable } from './SkuWiseDataTable';
 import { useProductsTree } from './hooks/useProductsTree';
 import { UnifiedProductEditModal } from './unified-edit';
 import type { ProductTreeNode } from './types';
@@ -619,7 +619,7 @@ export function ProductsViewSwitcher({ searchQuery, onSearchChange, onViewProduc
 
             {/* View Content */}
             <div className="flex-1 min-h-0">
-                <VariationsDataTable
+                <SkuWiseDataTable
                     filteredData={filteredProducts}
                     searchQuery={debouncedSearchQuery}
                     onViewProduct={onViewProduct}

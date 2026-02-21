@@ -51,6 +51,7 @@ export interface ProductTreeNode {
     fabricName?: string;
     // New 3-tier fabric hierarchy fields (for variations)
     fabricColourId?: string;
+    fabricColourCode?: string;
     fabricColourName?: string;
     fabricColourHex?: string;
     materialId?: string;
@@ -63,6 +64,7 @@ export interface ProductTreeNode {
     barcode?: string;
     size?: string;
     mrp?: number;
+    sellingPrice?: number;         // ERP selling price (null = same as MRP)
     currentBalance?: number;
     availableBalance?: number;
     targetStockQty?: number;
@@ -75,6 +77,12 @@ export interface ProductTreeNode {
 
     // === Shopify & Sales fields ===
     shopifyStatus?: ShopifyStatus;
+    shopifyVariantId?: string;     // Shopify variant ID (per SKU)
+    shopifyProductId?: string;     // Shopify product ID
+    shopifySourceProductId?: string; // Variation's Shopify source product ID
+    shopifyPrice?: number;         // Shopify original price (compare_at_price or price)
+    shopifySalePrice?: number;     // Shopify sale price (only when on sale)
+    shopifySalePercent?: number;   // Discount percentage
     shopifyStock?: number;         // SKU: direct from cache, Variation: sum of SKUs
     fabricStock?: number;          // From FabricColour.currentBalance
     fabricUnit?: string;           // From Fabric.unit (e.g., "m", "kg")

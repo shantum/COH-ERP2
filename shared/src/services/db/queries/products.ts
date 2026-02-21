@@ -279,6 +279,75 @@ export async function getProductShopifyStatusesKysely(): Promise<Map<string, str
  *
  * @returns Map keyed by variationId for O(1) lookup
  */
+/**
+ * Shopify pricing data for a single variant
+ */
+export interface SkuShopifyPricing {
+    /** Shopify price (current selling price) */
+    price: number;
+    /** Shopify compare_at_price (original price, null if not on sale) */
+    compareAtPrice: number | null;
+    /** Shopify product ID */
+    shopifyProductId: string;
+}
+
+// ============================================
+// SKU SHOPIFY PRICING QUERY
+// ============================================
+
+/**
+ * Get Shopify pricing for all SKU variants
+ *
+ * Fetches price and compare_at_price from ShopifyProductCache.rawData
+ * by parsing variant data from each cached product.
+ *
+ * @returns Map keyed by Shopify variant ID (string) for O(1) lookup
+ */
+export async function getSkuShopifyPricingKysely(): Promise<Map<string, SkuShopifyPricing>> {
+    const db = await getKysely();
+
+    const rows = await db
+        .selectFrom('ShopifyProductCache')
+        .select(['ShopifyProductCache.id', 'ShopifyProductCache.rawData'])
+        .execute();
+
+    const pricingMap = new Map<string, SkuShopifyPricing>();
+
+    for (const row of rows) {
+        try {
+            const data = typeof row.rawData === 'string' ? JSON.parse(row.rawData) : row.rawData;
+            const variants = data?.variants;
+            if (!Array.isArray(variants)) continue;
+
+            for (const variant of variants) {
+                if (!variant?.id) continue;
+                pricingMap.set(variant.id.toString(), {
+                    price: parseFloat(variant.price),
+                    compareAtPrice: variant.compare_at_price ? parseFloat(variant.compare_at_price) : null,
+                    shopifyProductId: data.id?.toString() ?? '',
+                });
+            }
+        } catch {
+            // Skip malformed rawData
+        }
+    }
+
+    return pricingMap;
+}
+
+// ============================================
+// VARIATION SHOPIFY STATUS QUERY
+// ============================================
+
+/**
+ * Get Shopify status for all variations
+ *
+ * Fetches status from ShopifyProductCache.rawData via Variation.shopifySourceProductId.
+ * This gives the correct status for variations that came from different Shopify products
+ * than the main product (e.g., merged products).
+ *
+ * @returns Map keyed by variationId for O(1) lookup
+ */
 export async function getVariationShopifyStatusesKysely(): Promise<Map<string, string>> {
     const db = await getKysely();
     const { sql } = await import('kysely');

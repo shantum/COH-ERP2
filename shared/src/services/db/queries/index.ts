@@ -71,6 +71,8 @@ export {
     getFabricColourBalancesKysely,
     getProductShopifyStatusesKysely,
     getVariationShopifyStatusesKysely,
+    getSkuShopifyPricingKysely,
     type VariationSalesMetrics,
     type SkuSalesMetrics,
+    type SkuShopifyPricing,
 } from './products.js';

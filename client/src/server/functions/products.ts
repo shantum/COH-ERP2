@@ -97,6 +97,7 @@ export interface VariationNode {
     fabricName?: string;
     // New 3-tier fabric hierarchy fields
     fabricColourId?: string;
+    fabricColourCode?: string;
     fabricColourName?: string;
     fabricColourHex?: string;
     materialId?: string;
@@ -113,6 +114,7 @@ export interface VariationNode {
     sales30DayUnits?: number;
     sales30DayValue?: number;
     bomCost?: number;              // Pre-computed average BOM cost
+    shopifySourceProductId?: string; // Variation's Shopify product ID
     children: SkuNode[];
 }
 
@@ -129,10 +131,16 @@ export interface SkuNode {
     barcode: string;
     size: string;
     mrp: number;
+    sellingPrice?: number;         // ERP selling price (null = same as MRP, i.e. not discounted)
     currentBalance: number;
     availableBalance: number;
     targetStockQty?: number;
     // Shopify & Sales fields
+    shopifyVariantId?: string;
+    shopifyProductId?: string;
+    shopifyPrice?: number;         // Shopify compare_at_price (original) or price if no compare_at
+    shopifySalePrice?: number;     // Shopify price when on sale (compare_at_price exists)
+    shopifySalePercent?: number;   // Discount percentage
     shopifyStock?: number;
     sales30DayUnits?: number;
     sales30DayValue?: number;
@@ -151,10 +159,12 @@ interface SkuData {
     variationId: string;
     size: string;
     mrp: number;
+    sellingPrice: number | null;
     targetStockQty: number | null;
     currentBalance: number;
     isActive: boolean;
     bomCost: number | null;
+    shopifyVariantId: string | null;
 }
 
 interface VariationData {
@@ -213,6 +223,7 @@ export const getProductsTree = createServerFn({ method: 'GET' })
                 getVariationShopifyStockKysely,
                 getSkuShopifyStockKysely,
                 getVariationShopifyStatusesKysely,
+                getSkuShopifyPricingKysely,
             } = await import('@coh/shared/services/db/queries');
 
             const [
@@ -222,6 +233,7 @@ export const getProductsTree = createServerFn({ method: 'GET' })
                 skuShopifyStockMap,
                 // fabricColourBalanceMap removed - fabric assignment now via BOM
                 variationShopifyStatusMap,
+                shopifyPricingMap,
             ] = await Promise.all([
                 getVariationSalesMetricsKysely(),
                 getSkuSalesMetricsKysely(),
@@ -229,6 +241,7 @@ export const getProductsTree = createServerFn({ method: 'GET' })
                 getSkuShopifyStockKysely(),
                 // Uses variation-level shopifySourceProductId for accurate status
                 getVariationShopifyStatusesKysely(),
+                getSkuShopifyPricingKysely(),
             ]);
 
             // Step 1b: Pre-fetch BOM fabric details (N+1 safe - single query)
@@ -249,6 +262,7 @@ export const getProductsTree = createServerFn({ method: 'GET' })
                     fabricColour: {
                         select: {
                             id: true,
+                            code: true,
                             colourName: true,
                             colourHex: true,
                             currentBalance: true,
@@ -272,6 +286,7 @@ export const getProductsTree = createServerFn({ method: 'GET' })
             // Build map of variationId -> fabric details
             const bomFabricMap = new Map<string, {
                 fabricColourId: string;
+                fabricColourCode: string | null;
                 fabricColourName: string;
                 fabricColourHex: string | null;
                 fabricId: string;
@@ -285,6 +300,7 @@ export const getProductsTree = createServerFn({ method: 'GET' })
                 if (v.fabricColour) {
                     bomFabricMap.set(v.variationId, {
                         fabricColourId: v.fabricColour.id,
+                        fabricColourCode: v.fabricColour.code ?? null,
                         fabricColourName: v.fabricColour.colourName,
                         fabricColourHex: v.fabricColour.colourHex,
                         fabricId: v.fabricColour.fabric?.id ?? '',
@@ -390,6 +406,12 @@ export const getProductsTree = createServerFn({ method: 'GET' })
                             const skuSales = skuSalesMap.get(sku.id);
                             const skuShopifyStock = skuShopifyStockMap.get(sku.id);
 
+                            // Get Shopify pricing by variant ID
+                            const shopifyPricing = sku.shopifyVariantId ? shopifyPricingMap.get(sku.shopifyVariantId) : undefined;
+                            const shopifyPrice = shopifyPricing?.compareAtPrice ?? shopifyPricing?.price;
+                            const shopifySalePrice = shopifyPricing?.compareAtPrice ? shopifyPricing.price : undefined;
+                            const shopifySalePercent = shopifyPrice && shopifySalePrice ? Math.round((1 - shopifySalePrice / shopifyPrice) * 100) : undefined;
+
                             return {
                                 id: sku.id,
                                 type: 'sku' as const,
@@ -400,10 +422,16 @@ export const getProductsTree = createServerFn({ method: 'GET' })
                                 barcode: sku.skuCode,
                                 size: sku.size,
                                 mrp: sku.mrp,
+                                sellingPrice: sku.sellingPrice ?? undefined,
                                 currentBalance: balance,
                                 availableBalance: balance,
                                 targetStockQty: sku.targetStockQty ?? undefined,
                                 // Shopify & Sales fields
+                                shopifyVariantId: sku.shopifyVariantId ?? undefined,
+                                shopifyProductId: variation.shopifySourceProductId ?? shopifyPricing?.shopifyProductId ?? undefined,
+                                shopifyPrice,
+                                shopifySalePrice,
+                                shopifySalePercent,
                                 shopifyStock: skuShopifyStock,
                                 sales30DayUnits: skuSales?.sales30DayUnits,
                                 sales30DayValue: skuSales?.sales30DayValue,
@@ -444,6 +472,7 @@ export const getProductsTree = createServerFn({ method: 'GET' })
                             fabricId: bomFabric?.fabricId,
                             fabricName: bomFabric?.fabricName,
                             fabricColourId: bomFabric?.fabricColourId,
+                            fabricColourCode: bomFabric?.fabricColourCode ?? undefined,
                             fabricColourName: bomFabric?.fabricColourName,
                             fabricColourHex: bomFabric?.fabricColourHex ?? undefined,
                             materialId: bomFabric?.materialId,
@@ -461,6 +490,7 @@ export const getProductsTree = createServerFn({ method: 'GET' })
                             sales30DayUnits: variationSales?.sales30DayUnits,
                             sales30DayValue: variationSales?.sales30DayValue,
                             bomCost: variation.bomCost ?? undefined,
+                            shopifySourceProductId: variation.shopifySourceProductId ?? undefined,
                             children,
                         };
                     }
