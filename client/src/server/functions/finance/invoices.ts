@@ -43,6 +43,8 @@ export const listInvoices = createServerFn({ method: 'POST' })
     if (data?.dateFrom) where.invoiceDate = { ...(where.invoiceDate as object ?? {}), gte: new Date(data.dateFrom) };
     if (data?.dateTo) where.invoiceDate = { ...(where.invoiceDate as object ?? {}), lte: new Date(data.dateTo + 'T23:59:59') };
 
+    const isFabricFilter = category === 'fabric';
+
     const [invoices, total] = await Promise.all([
       prisma.invoice.findMany({
         where,
@@ -68,6 +70,28 @@ export const listInvoices = createServerFn({ method: 'POST' })
           customer: { select: { id: true, email: true, firstName: true, lastName: true } },
           order: { select: { channel: true } },
           _count: { select: { lines: true, allocations: true } },
+          // Include fabric colour details when filtering by fabric category
+          ...(isFabricFilter ? {
+            lines: {
+              select: {
+                id: true,
+                description: true,
+                qty: true,
+                unit: true,
+                rate: true,
+                amount: true,
+                fabricColourId: true,
+                fabricColour: {
+                  select: {
+                    id: true,
+                    colourName: true,
+                    code: true,
+                    fabric: { select: { id: true, name: true } },
+                  },
+                },
+              },
+            },
+          } : {}),
         },
         orderBy: sortBy
           ? [{ [sortBy]: sortDir ?? 'desc' }, { createdAt: 'desc' }]

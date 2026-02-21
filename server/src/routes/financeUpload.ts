@@ -384,11 +384,8 @@ router.post('/upload-and-parse', requireAdmin, upload.single('file'), asyncHandl
     billingPeriod = `${ist.getUTCFullYear()}-${String(ist.getUTCMonth() + 1).padStart(2, '0')}`;
   }
 
-  // 4b. Fabric matching: if category is 'fabric', match lines to fabric colours
-  const isFabric = matchedCategory === 'fabric';
-  const fabricMatches = isFabric && parsed?.lines?.length
-    ? await matchInvoiceLines(parsed.lines, partyId ?? null, req.prisma as any)
-    : [];
+  // 4b. Fabric matching removed — fabric colours must be selected manually via InlineFabricPicker
+  const fabricMatches: Awaited<ReturnType<typeof matchInvoiceLines>> = [];
 
   // 5. Create draft Invoice + lines
   const supplierName = parsed?.supplierName ?? null;
@@ -676,11 +673,8 @@ router.post('/upload-preview', requireAdmin, upload.single('file'), asyncHandler
     ? await previewEnrichment(req.prisma, partyMatch?.partyId, parsed)
     : { willCreateNewParty: false, fieldsWillBeAdded: [] as string[], bankMismatch: false };
 
-  // 5b. Fabric matching preview (read-only)
-  const isFabricPreview = partyMatch?.category === 'fabric';
-  const fabricMatchPreview = isFabricPreview && parsed?.lines?.length
-    ? await matchInvoiceLines(parsed.lines, partyMatch?.partyId ?? null, req.prisma as any)
-    : [];
+  // 5b. Fabric matching removed — fabric colours must be selected manually
+  const fabricMatchPreview: Awaited<ReturnType<typeof matchInvoiceLines>> = [];
 
   // 6. Validate invoice (buyer checks, GST checks)
   const validationWarnings = parsed ? validateInvoice(parsed) : [];
@@ -809,11 +803,8 @@ router.post('/confirm-preview/:previewId', requireAdmin, asyncHandler(async (req
   const supplierName = parsed?.supplierName ?? null;
   const finalCategory = overrides.category ?? matchedCategory;
 
-  // Fabric matching if category is 'fabric'
-  const isFabricConfirm = finalCategory === 'fabric';
-  const fabricMatchesConfirm = isFabricConfirm && parsed?.lines?.length
-    ? await matchInvoiceLines(parsed.lines, partyId ?? null, req.prisma as any)
-    : [];
+  // Fabric matching removed — fabric colours must be selected manually
+  const fabricMatchesConfirm: Awaited<ReturnType<typeof matchInvoiceLines>> = [];
 
   let invoice = await req.prisma.invoice.create({
     data: {

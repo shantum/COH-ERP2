@@ -104,6 +104,7 @@ function InlineInvoiceNotes({ invoiceId, notes, onSaved }: { invoiceId: string; 
 export default function InvoicesTab({ search: rawSearch }: { search: FinanceSearchParams }) {
   // Default to payable if no type selected
   const search = { ...rawSearch, type: rawSearch.type ?? 'payable' as const };
+  const isFabricView = search.category === 'fabric';
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -546,7 +547,8 @@ export default function InvoicesTab({ search: rawSearch }: { search: FinanceSear
                   </th>
                   <th className="text-left p-3 font-medium">Party</th>
                   <th className="text-left p-3 font-medium max-w-[180px]">Notes</th>
-                  <th className="text-left p-3 font-medium">Category</th>
+                  {!isFabricView && <th className="text-left p-3 font-medium">Category</th>}
+                  {isFabricView && <th className="text-left p-3 font-medium">Fabrics</th>}
                   <th className="text-left p-3 font-medium">Invoice #</th>
                   <th className="text-left p-3 font-medium cursor-pointer select-none hover:text-blue-600" onClick={() => toggleSort('invoiceDate')}>
                     <span className="inline-flex items-center">Invoice Date<SortIcon col="invoiceDate" /></span>
@@ -605,7 +607,38 @@ export default function InvoicesTab({ search: rawSearch }: { search: FinanceSear
                         <span className="text-[11px] text-muted-foreground truncate block">{inv.notes || '—'}</span>
                       )}
                     </td>
-                    <td className="p-3 text-xs">{getCategoryLabel(inv.category)}</td>
+                    {!isFabricView && <td className="p-3 text-xs">{getCategoryLabel(inv.category)}</td>}
+                    {isFabricView && (
+                      <td className="p-3 max-w-[220px]">
+                        {(() => {
+                          const lines = (inv as Record<string, unknown>).lines as Array<{
+                            id: string; description: string | null; qty: number | null; unit: string | null;
+                            fabricColourId: string | null;
+                            fabricColour: { colourName: string; code: string | null; fabric: { name: string } } | null;
+                          }> | undefined;
+                          if (!lines?.length) return <span className="text-xs text-muted-foreground">No lines</span>;
+                          const matched = lines.filter(l => l.fabricColour);
+                          const unmatched = lines.length - matched.length;
+                          return (
+                            <div className="space-y-0.5">
+                              {matched.map(l => (
+                                <div key={l.id} className="flex items-center gap-1 text-[11px] leading-tight">
+                                  <span className="truncate font-medium">{l.fabricColour!.fabric.name}</span>
+                                  <span className="text-muted-foreground">·</span>
+                                  <span className="truncate text-muted-foreground">{l.fabricColour!.colourName}</span>
+                                  {l.qty != null && (
+                                    <span className="shrink-0 text-muted-foreground ml-auto tabular-nums">{l.qty}{l.unit === 'meter' ? 'm' : l.unit ?? ''}</span>
+                                  )}
+                                </div>
+                              ))}
+                              {unmatched > 0 && (
+                                <div className="text-[10px] text-amber-600">{unmatched} unmatched</div>
+                              )}
+                            </div>
+                          );
+                        })()}
+                      </td>
+                    )}
                     <td className="p-3 font-mono text-xs">{inv.invoiceNumber ?? '—'}</td>
                     <td className="p-3 text-xs text-muted-foreground">{inv.invoiceDate ? new Date(inv.invoiceDate).toLocaleDateString('en-IN') : '—'}</td>
                     <td className="p-3 text-xs text-muted-foreground">{inv.billingPeriod ?? '—'}</td>
