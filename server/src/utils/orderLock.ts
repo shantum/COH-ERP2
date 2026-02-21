@@ -12,7 +12,7 @@ import { ORDER_LOCK_CONFIG } from '../constants.js';
 
 // In-memory lock for lightweight operations (single-instance only)
 // For multi-instance deployments, use the database lock
-const processingOrders = new Map();
+const processingOrders = new Map<string, { source: string; acquiredAt: number }>();
 
 // Lock timeout - release if not explicitly released after this time
 // Configurable via ORDER_LOCK_TIMEOUT_MS env var, defaults to 90 seconds
@@ -20,12 +20,8 @@ const LOCK_TIMEOUT_MS = ORDER_LOCK_CONFIG.timeoutMs;
 
 /**
  * Acquire a lock for processing a Shopify order
- *
- * @param {string} shopifyOrderId - The Shopify order ID to lock
- * @param {string} source - The source acquiring the lock ('webhook' or 'sync')
- * @returns {boolean} - True if lock acquired, false if order is already being processed
  */
-export function acquireOrderLock(shopifyOrderId, source = 'unknown') {
+export function acquireOrderLock(shopifyOrderId: string, source = 'unknown'): boolean {
     const lockKey = `order:${shopifyOrderId}`;
     const existing = processingOrders.get(lockKey);
 
@@ -50,41 +46,25 @@ export function acquireOrderLock(shopifyOrderId, source = 'unknown') {
 
 /**
  * Release the lock for a Shopify order
- *
- * @param {string} shopifyOrderId - The Shopify order ID to unlock
  */
-export function releaseOrderLock(shopifyOrderId) {
+export function releaseOrderLock(shopifyOrderId: string): void {
     const lockKey = `order:${shopifyOrderId}`;
     processingOrders.delete(lockKey);
 }
 
 /**
- * Execute a function with order lock protection
- * Automatically acquires and releases the lock
- *
- * Database-level locking for multi-instance deployment support.
- * Uses processingLock timestamp on ShopifyOrderCache.
- * Lock auto-expires after 30 seconds to prevent deadlocks.
+ * Execute a function with order lock protection.
+ * Automatically acquires and releases the lock.
  *
  * Two-tier locking strategy:
  * 1. In-memory lock (fast-path): Prevents duplicate work in same instance
  * 2. Database lock (distributed): Ensures mutual exclusion across instances
- *
- * @param {string} shopifyOrderId - The Shopify order ID to lock
- * @param {string} source - The source of the operation ('webhook' or 'sync')
- * @param {Function} fn - The async function to execute (receives no params)
- * @returns {Promise<{locked: boolean, result?: any, skipped?: boolean, reason?: string}>}
- *
- * @example
- * const result = await withOrderLock('6234567890', 'webhook', async () => {
- *   // Your processing logic here
- *   return { success: true };
- * });
- * if (result.skipped) {
- *   console.log('Order locked by another process:', result.reason);
- * }
  */
-export async function withOrderLock(shopifyOrderId, source, fn) {
+export async function withOrderLock<T>(
+    shopifyOrderId: string,
+    source: string,
+    fn: () => Promise<T>
+): Promise<{ locked: boolean; result?: T; skipped?: boolean; reason?: string }> {
     // Fast-path: Check in-memory lock first (cheap operation)
     if (!acquireOrderLock(shopifyOrderId, source)) {
         return { locked: false, skipped: true, reason: 'in_memory_lock' };
@@ -92,7 +72,6 @@ export async function withOrderLock(shopifyOrderId, source, fn) {
 
     try {
         // Database lock: Import prisma client dynamically to avoid circular dependency
-        // This works because fn() will have access to prisma via closure
         const { default: prisma } = await import('../lib/prisma.js');
 
         const lockExpiry = new Date(Date.now() + LOCK_TIMEOUT_MS);
@@ -107,14 +86,14 @@ export async function withOrderLock(shopifyOrderId, source, fn) {
 
             // If no cache entry exists yet, allow processing (will be created by cacheShopifyOrders)
             if (!cache) {
-                return { acquired: true, isNew: true };
+                return { acquired: true as const, isNew: true };
             }
 
             // Check if lock is held and not expired
             if (cache.processingLock) {
                 const lockAge = Date.now() - new Date(cache.processingLock).getTime();
                 if (lockAge < LOCK_TIMEOUT_MS) {
-                    return { acquired: false, reason: 'locked', lockAge };
+                    return { acquired: false as const, reason: 'locked', lockAge };
                 }
                 // Lock expired, we can take it
                 console.log(`[OrderLock] Expired database lock released for ${shopifyOrderId}`);
@@ -126,7 +105,7 @@ export async function withOrderLock(shopifyOrderId, source, fn) {
                 data: { processingLock: lockExpiry }
             });
 
-            return { acquired: true };
+            return { acquired: true as const, isNew: false };
         });
 
         if (!lockResult.acquired) {
@@ -145,8 +124,9 @@ export async function withOrderLock(shopifyOrderId, source, fn) {
                 await prisma.shopifyOrderCache.updateMany({
                     where: { id: shopifyOrderId },
                     data: { processingLock: null }
-                }).catch((err) => {
-                    console.error(`[OrderLock] Failed to release database lock for ${shopifyOrderId}:`, err.message);
+                }).catch((err: unknown) => {
+                    const message = err instanceof Error ? err.message : String(err);
+                    console.error(`[OrderLock] Failed to release database lock for ${shopifyOrderId}:`, message);
                 });
             }
         }
@@ -159,8 +139,8 @@ export async function withOrderLock(shopifyOrderId, source, fn) {
 /**
  * Get current lock status for debugging
  */
-export function getOrderLockStatus() {
-    const locks = [];
+export function getOrderLockStatus(): Array<{ orderId: string; source: string; age: number; expired: boolean }> {
+    const locks: Array<{ orderId: string; source: string; age: number; expired: boolean }> = [];
     const now = Date.now();
 
     for (const [key, value] of processingOrders.entries()) {
@@ -178,6 +158,6 @@ export function getOrderLockStatus() {
 /**
  * Clear all locks (for testing/debugging only)
  */
-export function clearAllOrderLocks() {
+export function clearAllOrderLocks(): void {
     processingOrders.clear();
 }
