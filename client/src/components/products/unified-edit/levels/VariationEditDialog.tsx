@@ -46,7 +46,6 @@ export function VariationEditDialog({
 
   const {
     form,
-    costCascade,
     isSaving,
     isDirty,
     isValid,
@@ -146,12 +145,7 @@ export function VariationEditDialog({
           />
         )}
         {activeTab === 'costs' && (
-          <VariationCostsTab
-            form={form}
-            costCascade={costCascade}
-            bomCost={variation.bomCost}
-            disabled={isSaving}
-          />
+          <VariationCostsTab bomCost={variation.bomCost} />
         )}
       </div>
 

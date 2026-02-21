@@ -68,14 +68,9 @@ export interface ProductTreeNode {
     availableBalance?: number;
     targetStockQty?: number;
 
-    // === Cost fields ===
-    packagingCost?: number | null;
-    laborMinutes?: number | null;
-
     // === Calculated costs ===
     fabricCostPerUnit?: number | null;
     fabricCost?: number | null;
-    laborCost?: number | null;
     totalCost?: number | null;
     bomCost?: number | null;        // Pre-computed total BOM cost
 

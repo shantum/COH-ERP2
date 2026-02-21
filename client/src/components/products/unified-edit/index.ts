@@ -15,8 +15,6 @@ export type {
   ProductFormData,
   VariationFormData,
   SkuFormData,
-  CostCascade,
-  CostCascadeValue,
 } from './types';
 
 // Shared components (for custom use cases)

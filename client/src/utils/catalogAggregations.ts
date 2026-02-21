@@ -44,14 +44,10 @@ export function aggregateByVariation(items: CatalogRow[]): CatalogRow[] {
                 targetStockQty: null,
                 skuCount: 0,
                 skuIds: [], // Track all SKU IDs for bulk updates
-                // Use variation-level costs for editing
-                packagingCost: item.variationPackagingCost ?? item.productPackagingCost ?? item.globalPackagingCost ?? null,
-                laborMinutes: item.variationLaborMinutes ?? item.productLaborMinutes ?? null,
                 // Track sums for averaging
                 _mrpSum: 0,
                 _fabricConsumptionSum: 0,
                 _bomCostSum: 0,
-                _laborCostSum: 0,
                 _totalCostSum: 0,
                 _exGstPriceSum: 0,
                 _gstAmountSum: 0,
@@ -68,7 +64,6 @@ export function aggregateByVariation(items: CatalogRow[]): CatalogRow[] {
         group._mrpSum += item.mrp || 0;
         group._fabricConsumptionSum += item.fabricConsumption || 0;
         group._bomCostSum += item.bomCost || 0;
-        group._laborCostSum += item.laborCost || 0;
         group._totalCostSum += item.totalCost || 0;
         group._exGstPriceSum += item.exGstPrice || 0;
         group._gstAmountSum += item.gstAmount || 0;
@@ -85,7 +80,6 @@ export function aggregateByVariation(items: CatalogRow[]): CatalogRow[] {
             group.mrp = Math.round(group._mrpSum / group.skuCount);
             group.fabricConsumption = Math.round((group._fabricConsumptionSum / group.skuCount) * 100) / 100;
             group.bomCost = Math.round(group._bomCostSum / group.skuCount);
-            group.laborCost = Math.round(group._laborCostSum / group.skuCount);
             group.totalCost = Math.round(group._totalCostSum / group.skuCount);
             group.exGstPrice = Math.round(group._exGstPriceSum / group.skuCount);
             group.gstAmount = Math.round(group._gstAmountSum / group.skuCount);
@@ -98,7 +92,6 @@ export function aggregateByVariation(items: CatalogRow[]): CatalogRow[] {
         delete group._mrpSum;
         delete group._fabricConsumptionSum;
         delete group._bomCostSum;
-        delete group._laborCostSum;
         delete group._totalCostSum;
         delete group._exGstPriceSum;
         delete group._gstAmountSum;
@@ -137,15 +130,11 @@ export function aggregateByProduct(items: CatalogRow[]): CatalogRow[] {
                 skuCount: 0,
                 skuIds: [], // Track all SKU IDs for bulk updates
                 _uniqueFabricIds: new Set<string>(), // Track unique fabric IDs
-                // Use product-level costs for editing
-                packagingCost: item.productPackagingCost ?? item.globalPackagingCost ?? null,
-                laborMinutes: item.productLaborMinutes ?? null,
                 hasLining: false, // Will be set to true if any variation has lining
                 // Track sums for averaging
                 _mrpSum: 0,
                 _fabricConsumptionSum: 0,
                 _bomCostSum: 0,
-                _laborCostSum: 0,
                 _totalCostSum: 0,
                 _exGstPriceSum: 0,
                 _gstAmountSum: 0,
@@ -165,7 +154,6 @@ export function aggregateByProduct(items: CatalogRow[]): CatalogRow[] {
         group._mrpSum += item.mrp || 0;
         group._fabricConsumptionSum += item.fabricConsumption || 0;
         group._bomCostSum += item.bomCost || 0;
-        group._laborCostSum += item.laborCost || 0;
         group._totalCostSum += item.totalCost || 0;
         group._exGstPriceSum += item.exGstPrice || 0;
         group._gstAmountSum += item.gstAmount || 0;
@@ -195,7 +183,6 @@ export function aggregateByProduct(items: CatalogRow[]): CatalogRow[] {
             group.mrp = Math.round(group._mrpSum / group.skuCount);
             group.fabricConsumption = Math.round((group._fabricConsumptionSum / group.skuCount) * 100) / 100;
             group.bomCost = Math.round(group._bomCostSum / group.skuCount);
-            group.laborCost = Math.round(group._laborCostSum / group.skuCount);
             group.totalCost = Math.round(group._totalCostSum / group.skuCount);
             group.exGstPrice = Math.round(group._exGstPriceSum / group.skuCount);
             group.gstAmount = Math.round(group._gstAmountSum / group.skuCount);
@@ -208,7 +195,6 @@ export function aggregateByProduct(items: CatalogRow[]): CatalogRow[] {
         delete group._mrpSum;
         delete group._fabricConsumptionSum;
         delete group._bomCostSum;
-        delete group._laborCostSum;
         delete group._totalCostSum;
         delete group._exGstPriceSum;
         delete group._gstAmountSum;

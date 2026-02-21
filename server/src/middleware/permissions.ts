@@ -263,23 +263,11 @@ export function filterConfidentialFields<T extends DataWithConfidentialFields>(
         // Cost fields - require products:view:cost
         if (!hasPermission(userPermissions, 'products:view:cost')) {
             delete result.fabricCost;
-            delete result.laborCost;
             delete result.bomCost;
-            delete result.packagingCost;
             delete result.totalCost;
             delete result.totalCogs;
             delete result.costMultiple;
             delete result.costPerUnit;
-            delete result.laborRatePerMin;
-
-            // Cascade cost fields
-            delete result.skuPackagingCost;
-            delete result.variationPackagingCost;
-            delete result.productPackagingCost;
-            delete result.globalPackagingCost;
-            delete result.skuLaborMinutes;
-            delete result.variationLaborMinutes;
-            delete result.productLaborMinutes;
             delete result.fabricCostPerUnit;
         }
 

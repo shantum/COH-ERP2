@@ -76,7 +76,6 @@ const updateProductSchema = z.object({
     defaultFabricConsumption: z.number().positive().optional().nullable(),
     imageUrl: z.string().url().optional().nullable(),
     isActive: z.boolean().optional(),
-    packagingCost: z.number().nonnegative().optional().nullable(),
 });
 
 const deleteProductSchema = z.object({
@@ -102,15 +101,12 @@ const updateVariationSchema = z.object({
     imageUrl: z.string().url().optional().nullable(),
     hasLining: z.boolean().optional(),
     isActive: z.boolean().optional(),
-    packagingCost: z.number().nonnegative().optional().nullable(),
-    laborMinutes: z.number().positive().optional().nullable(),
 });
 
 const createSkuSchema = z.object({
     variationId: z.string().uuid('Invalid variation ID'),
     size: z.string().min(1, 'Size is required').trim(),
     skuCode: z.string().min(1, 'SKU code is required').trim(),
-    fabricConsumption: z.number().positive().default(1.5),
     mrp: z.number().positive('MRP must be greater than 0'),
     targetStockQty: z.number().int().nonnegative().default(10),
     targetStockMethod: z.string().default('day14'),
@@ -118,13 +114,10 @@ const createSkuSchema = z.object({
 
 const updateSkuSchema = z.object({
     id: z.string().uuid('Invalid SKU ID'),
-    fabricConsumption: z.number().positive().optional(),
     mrp: z.number().positive().optional(),
     targetStockQty: z.number().int().nonnegative().optional(),
     targetStockMethod: z.string().optional(),
     isActive: z.boolean().optional(),
-    packagingCost: z.number().nonnegative().optional().nullable(),
-    laborMinutes: z.number().positive().optional().nullable(),
 });
 
 // ============================================
@@ -187,7 +180,6 @@ export const updateProduct = createServerFn({ method: 'POST' })
                 if (data.defaultFabricConsumption !== undefined) updateData.defaultFabricConsumption = data.defaultFabricConsumption;
                 if (data.imageUrl !== undefined) updateData.imageUrl = data.imageUrl;
                 if (data.isActive !== undefined) updateData.isActive = data.isActive;
-                if (data.packagingCost !== undefined) updateData.packagingCost = data.packagingCost;
 
                 const product = await prisma.product.update({
                     where: { id: data.id },
@@ -285,8 +277,6 @@ export const updateVariation = createServerFn({ method: 'POST' })
                 if (data.imageUrl !== undefined) updateData.imageUrl = data.imageUrl;
                 if (data.hasLining !== undefined) updateData.hasLining = data.hasLining;
                 if (data.isActive !== undefined) updateData.isActive = data.isActive;
-                if (data.packagingCost !== undefined) updateData.packagingCost = data.packagingCost;
-                if (data.laborMinutes !== undefined) updateData.laborMinutes = data.laborMinutes;
 
                 const variation = await prisma.variation.update({
                     where: { id: data.id },
@@ -331,7 +321,6 @@ export const createSku = createServerFn({ method: 'POST' })
                         variationId: data.variationId,
                         size: data.size,
                         skuCode: data.skuCode,
-                        fabricConsumption: data.fabricConsumption || 1.5,
                         mrp: data.mrp,
                         targetStockQty: data.targetStockQty || 10,
                         targetStockMethod: data.targetStockMethod || 'day14',
@@ -367,13 +356,10 @@ export const updateSku = createServerFn({ method: 'POST' })
             const prisma = await getPrisma();
                 // Build update data with only provided fields
                 const updateData: Record<string, unknown> = {};
-                if (data.fabricConsumption !== undefined) updateData.fabricConsumption = data.fabricConsumption;
                 if (data.mrp !== undefined) updateData.mrp = data.mrp;
                 if (data.targetStockQty !== undefined) updateData.targetStockQty = data.targetStockQty;
                 if (data.targetStockMethod !== undefined) updateData.targetStockMethod = data.targetStockMethod;
                 if (data.isActive !== undefined) updateData.isActive = data.isActive;
-                if (data.packagingCost !== undefined) updateData.packagingCost = data.packagingCost;
-                if (data.laborMinutes !== undefined) updateData.laborMinutes = data.laborMinutes;
 
                 const sku = await prisma.sku.update({
                     where: { id: data.id },

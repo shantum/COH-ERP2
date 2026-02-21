@@ -2,25 +2,15 @@
  * VariationCostsTab - Variation-level costs with inheritance
  */
 
-import { type UseFormReturn } from 'react-hook-form';
 import { Info } from 'lucide-react';
-import type { VariationFormData, CostCascade } from '../types';
-import { CostInheritanceField } from '../shared/CostInheritanceField';
 
 interface VariationCostsTabProps {
-  form: UseFormReturn<VariationFormData>;
-  costCascade: CostCascade;
   bomCost: number | null;
-  disabled?: boolean;
 }
 
 export function VariationCostsTab({
-  form,
-  costCascade,
   bomCost,
-  disabled = false,
 }: VariationCostsTabProps) {
-  const { control } = form;
 
   return (
     <div className="space-y-6">
@@ -30,7 +20,7 @@ export function VariationCostsTab({
         <div>
           <p className="font-medium">Variation-level costs</p>
           <p className="text-blue-600 mt-0.5">
-            Leave empty to inherit from product. Set a value to override.
+            Costs are computed from the BOM (Bill of Materials).
           </p>
         </div>
       </div>
@@ -48,37 +38,9 @@ export function VariationCostsTab({
         </div>
       </div>
 
-      {/* Cost fields */}
-      <div className="space-y-4">
-        <CostInheritanceField
-          name="laborMinutes"
-          label="Labor Time (mins)"
-          control={control}
-          cascade={costCascade.laborMinutes}
-          step="1"
-          level="variation"
-          disabled={disabled}
-        />
-
-        <CostInheritanceField
-          name="packagingCost"
-          label="Packaging Cost"
-          control={control}
-          cascade={costCascade.packagingCost}
-          unit=""
-          level="variation"
-          disabled={disabled}
-        />
-      </div>
-
-      {/* Cascade explanation */}
+      {/* Cost info */}
       <div className="text-xs text-gray-500 pt-4 border-t">
-        <p><strong>Inheritance:</strong></p>
-        <ul className="list-disc list-inside mt-1 space-y-0.5">
-          <li>Empty values inherit from product defaults</li>
-          <li>Set a value to override for this variation</li>
-          <li>SKUs can further override these values</li>
-        </ul>
+        <p><strong>Note:</strong> Labor and packaging costs are now managed through the BOM editor.</p>
       </div>
     </div>
   );

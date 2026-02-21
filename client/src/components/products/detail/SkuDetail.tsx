@@ -102,10 +102,8 @@ function SkuInfoContent({ sku }: { sku: ProductTreeNode }) {
                 <InfoRow label="Fabric Consumption" value={sku.fabricConsumption ? `${sku.fabricConsumption} m` : null} />
             </InfoSection>
 
-            <InfoSection title="Costs (Override)">
+            <InfoSection title="Costs">
                 <InfoRow label="BOM Cost" value={formatCost(sku.bomCost)} />
-                <InfoRow label="Packaging Cost" value={formatCost(sku.packagingCost)} />
-                <InfoRow label="Labor Minutes" value={sku.laborMinutes ? `${sku.laborMinutes} min` : null} />
             </InfoSection>
         </div>
     );

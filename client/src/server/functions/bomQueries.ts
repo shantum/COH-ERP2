@@ -434,13 +434,13 @@ export const getSizeConsumptions = createServerFn({ method: 'GET' })
             const size = sku.size;
             const existing = sizeConsumptionMap.get(size);
 
-            // Get quantity: SKU BOM line → template default → SKU fabricConsumption (legacy)
+            // Get quantity: SKU BOM line → template default
             const bomQty = skuQuantityMap.get(sku.id);
             let quantity: number | null;
             if (bomQty !== undefined) {
                 quantity = bomQty;
             } else {
-                quantity = template?.defaultQuantity ?? sku.fabricConsumption ?? null;
+                quantity = template?.defaultQuantity ?? null;
             }
 
             if (existing) {

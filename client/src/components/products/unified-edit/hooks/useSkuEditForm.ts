@@ -4,13 +4,13 @@
  * Migrated to use TanStack Start Server Functions instead of REST API.
  */
 
-import { useEffect, useMemo } from 'react';
+import { useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { updateSku } from '@/server/functions/productsMutations';
 import { productsTreeKeys } from '../../hooks/useProductsTree';
-import type { SkuFormData, SkuDetailData, VariationDetailData, ProductDetailData, CostCascade } from '../types';
+import type { SkuFormData, SkuDetailData, VariationDetailData, ProductDetailData } from '../types';
 
 interface UseSkuEditFormOptions {
   sku: SkuDetailData;
@@ -55,8 +55,6 @@ export function useSkuEditForm({
           fabricConsumption: data.fabricConsumption ?? undefined,
           mrp: data.mrp ?? undefined,
           targetStockQty: data.targetStockQty ?? undefined,
-          packagingCost: data.packagingCost ?? undefined,
-          laborMinutes: data.laborMinutes ?? undefined,
           isActive: data.isActive,
         },
       });
@@ -77,76 +75,6 @@ export function useSkuEditForm({
     },
   });
 
-  // Cost cascade - SKU inherits from Variation → Product → Default
-  const costCascade = useMemo((): CostCascade => {
-    const resolveCost = (
-      skuValue: number | null,
-      variationValue: number | null,
-      productValue: number | null,
-      defaultValue: number
-    ) => {
-      if (skuValue != null) {
-        return {
-          effectiveValue: skuValue,
-          source: 'sku' as const,
-          skuValue,
-          variationValue,
-          productValue,
-          defaultValue,
-        };
-      }
-      if (variationValue != null) {
-        return {
-          effectiveValue: variationValue,
-          source: 'variation' as const,
-          skuValue: null,
-          variationValue,
-          productValue,
-          defaultValue,
-        };
-      }
-      if (productValue != null) {
-        return {
-          effectiveValue: productValue,
-          source: 'product' as const,
-          skuValue: null,
-          variationValue: null,
-          productValue,
-          defaultValue,
-        };
-      }
-      return {
-        effectiveValue: defaultValue,
-        source: 'default' as const,
-        skuValue: null,
-        variationValue: null,
-        productValue: null,
-        defaultValue,
-      };
-    };
-
-    return {
-      packagingCost: resolveCost(
-        sku.packagingCost,
-        variation.packagingCost,
-        product.packagingCost,
-        50
-      ),
-      laborMinutes: resolveCost(
-        sku.laborMinutes,
-        variation.laborMinutes,
-        product.baseProductionTimeMins,
-        60
-      ),
-      fabricConsumption: resolveCost(
-        sku.fabricConsumption,
-        null, // Variation doesn't have fabricConsumption
-        product.defaultFabricConsumption,
-        1.5
-      ),
-    };
-  }, [sku, variation, product]);
-
   const handleSubmit = form.handleSubmit((data) => {
     updateMutation.mutate(data);
   });
@@ -156,7 +84,6 @@ export function useSkuEditForm({
     sku,
     variation,
     product,
-    costCascade,
     isLoading: false,
     isSaving: updateMutation.isPending,
     isDirty,
@@ -173,8 +100,6 @@ function getDefaultValues(sku: SkuDetailData): SkuFormData {
     fabricConsumption: sku.fabricConsumption ?? null,
     mrp: sku.mrp ?? null,
     targetStockQty: sku.targetStockQty ?? null,
-    packagingCost: sku.packagingCost ?? null,
-    laborMinutes: sku.laborMinutes ?? null,
     isActive: sku.isActive ?? true,
   };
 }

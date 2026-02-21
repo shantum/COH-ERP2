@@ -162,14 +162,6 @@ export const importConsumption = createServerFn({ method: 'POST' })
 
             // Batch update in transaction
             await prisma.$transaction(async (tx: PrismaTransaction) => {
-                // Update Sku.fabricConsumption (legacy backward compat)
-                for (const update of skuUpdates) {
-                    await tx.sku.update({
-                        where: { id: update.skuId },
-                        data: { fabricConsumption: update.quantity },
-                    });
-                }
-
                 // Delete existing BOM lines for these SKUs
                 const skuIds = skuUpdates.map((u) => u.skuId);
                 await tx.skuBomLine.deleteMany({
@@ -273,14 +265,6 @@ export const updateSizeConsumptions = createServerFn({ method: 'POST' })
         const allSkus = product.variations.flatMap((v: DbRecord) => v.skus);
         const skusToUpdate = allSkus.filter((sku: DbRecord) => sizeQuantityMap.has(sku.size));
 
-        // Get role to check if it's main fabric (for backward compat)
-        const role = await prisma.componentRole.findUnique({
-            where: { id: roleId },
-            include: { type: true },
-        });
-
-        const isMainFabric = role?.type.code === 'FABRIC' && role.code === 'main';
-
         try {
             // Batch update in transaction
             let updatedCount = 0;
@@ -300,14 +284,6 @@ export const updateSizeConsumptions = createServerFn({ method: 'POST' })
                             quantity,
                         },
                     });
-
-                    // Backward compatibility: also update legacy fabricConsumption field
-                    if (isMainFabric) {
-                        await tx.sku.update({
-                            where: { id: sku.id },
-                            data: { fabricConsumption: quantity },
-                        });
-                    }
 
                     updatedCount++;
                 }
@@ -456,12 +432,10 @@ export const getConsumptionGrid = createServerFn({ method: 'GET' })
                         const sizeData = sizesData[sku.size];
                         if (sizeData) {
                             sizeData.skuCount++;
-                            // Get quantity: SKU BOM line -> legacy fabricConsumption -> template default
+                            // Get quantity: SKU BOM line -> template default
                             const bomQty = skuQuantityMap.get(sku.id);
                             if (bomQty !== undefined && bomQty !== null) {
                                 sizeData.quantity = bomQty;
-                            } else if (sku.fabricConsumption !== null && sizeData.quantity === null) {
-                                sizeData.quantity = sku.fabricConsumption;
                             } else if (defaultQuantity !== null && sizeData.quantity === null) {
                                 sizeData.quantity = defaultQuantity;
                             }
@@ -546,14 +520,6 @@ export const updateConsumptionGrid = createServerFn({ method: 'POST' })
                 productSizeSkuMap.set(product.id, sizeMap);
             }
 
-            // Check if this is main fabric role for backward compat
-            const role = await prisma.componentRole.findUnique({
-                where: { id: roleId },
-                include: { type: true },
-            });
-
-            const isMainFabric = role?.type.code === 'FABRIC' && role.code === 'main';
-
             let updatedCount = 0;
 
             await prisma.$transaction(async (tx: PrismaTransaction) => {
@@ -577,14 +543,6 @@ export const updateConsumptionGrid = createServerFn({ method: 'POST' })
                                 quantity: update.quantity,
                             },
                         });
-
-                        // Backward compatibility: update legacy fabricConsumption
-                        if (isMainFabric) {
-                            await tx.sku.update({
-                                where: { id: skuId },
-                                data: { fabricConsumption: update.quantity },
-                            });
-                        }
 
                         updatedCount++;
                     }
@@ -635,7 +593,7 @@ export const getProductsForMapping = createServerFn({ method: 'GET' })
                         include: {
                             skus: {
                                 where: { isActive: true },
-                                select: { id: true, fabricConsumption: true },
+                                select: { id: true },
                             },
                         },
                     },
@@ -643,11 +601,33 @@ export const getProductsForMapping = createServerFn({ method: 'GET' })
                 orderBy: { name: 'asc' },
             });
 
+            // Get all SKU IDs for BOM lookup
+            const allSkuIds: string[] = [];
+            for (const product of products) {
+                for (const variation of product.variations as DbRecord[]) {
+                    for (const sku of variation.skus as DbRecord[]) {
+                        allSkuIds.push(sku.id);
+                    }
+                }
+            }
+
+            // Get main fabric role
+            const mainFabricRole = await getMainFabricRole(prisma);
+
+            // Look up BOM lines for all SKUs
+            const skuBomLines = mainFabricRole ? await prisma.skuBomLine.findMany({
+                where: { skuId: { in: allSkuIds }, roleId: mainFabricRole.id },
+            }) : [];
+            const skuBomMap = new Map<string, number>();
+            for (const line of skuBomLines) {
+                skuBomMap.set(line.skuId, Number(line.quantity) || 0);
+            }
+
             const result: ProductForMappingResult[] = products.map((product: DbRecord) => {
                 const allSkus = product.variations.flatMap((v: DbRecord) => v.skus);
                 const consumptions = allSkus
-                    .map((s: DbRecord) => s.fabricConsumption)
-                    .filter((c: number | null): c is number => c !== null && c > 0);
+                    .map((s: DbRecord) => skuBomMap.get(s.id))
+                    .filter((c: number | undefined): c is number => c !== undefined && c > 0);
 
                 return {
                     id: product.id,
@@ -696,13 +676,6 @@ export const resetConsumption = createServerFn({ method: 'POST' })
                     });
                     deletedBomLines = deleteResult.count;
                 }
-
-                // Reset legacy fabricConsumption field to default
-                const updateResult = await tx.sku.updateMany({
-                    where: { fabricConsumption: { not: 1.5 } },
-                    data: { fabricConsumption: 1.5 },
-                });
-                resetSkus = updateResult.count;
             }, { timeout: 60000 });
 
             return {

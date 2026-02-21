@@ -7,7 +7,17 @@
 
 import { Controller, type Control } from 'react-hook-form';
 import { ArrowUp } from 'lucide-react';
-import type { CostCascadeValue, CostSource } from '../types';
+// Types defined locally since cost cascade was removed from the shared types
+type CostSource = 'sku' | 'variation' | 'product' | 'default' | 'none';
+
+interface CostCascadeValue {
+  effectiveValue: number | null;
+  source: CostSource;
+  skuValue: number | null;
+  variationValue: number | null;
+  productValue: number | null;
+  defaultValue: number | null;
+}
 
 interface CostInheritanceFieldProps {
   name: string;

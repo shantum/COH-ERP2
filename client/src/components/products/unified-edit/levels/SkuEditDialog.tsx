@@ -42,7 +42,6 @@ export function SkuEditDialog({
 
   const {
     form,
-    costCascade,
     isSaving,
     isDirty,
     isValid,
@@ -127,12 +126,7 @@ export function SkuEditDialog({
           <SkuInfoTab form={form} sku={sku} disabled={isSaving} />
         )}
         {activeTab === 'costs' && (
-          <SkuCostsTab
-            form={form}
-            costCascade={costCascade}
-            bomCost={sku.bomCost}
-            disabled={isSaving}
-          />
+          <SkuCostsTab bomCost={sku.bomCost} />
         )}
         {activeTab === 'inventory' && (
           <SkuInventoryTab sku={sku} />

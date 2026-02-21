@@ -4,13 +4,13 @@
  * Migrated to use TanStack Start Server Functions instead of REST API.
  */
 
-import { useEffect, useMemo } from 'react';
+import { useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { updateVariation } from '@/server/functions/productsMutations';
 import { productsTreeKeys } from '../../hooks/useProductsTree';
-import type { VariationFormData, VariationDetailData, ProductDetailData, CostCascade } from '../types';
+import type { VariationFormData, VariationDetailData, ProductDetailData } from '../types';
 
 interface UseVariationEditFormOptions {
   variation: VariationDetailData;
@@ -54,8 +54,6 @@ export function useVariationEditForm({
           colorName: data.colorName,
           colorHex: data.colorHex ?? undefined,
           hasLining: data.hasLining,
-          packagingCost: data.packagingCost ?? undefined,
-          laborMinutes: data.laborMinutes ?? undefined,
           isActive: data.isActive,
         },
       });
@@ -76,57 +74,6 @@ export function useVariationEditForm({
     },
   });
 
-  // Cost cascade - Variation inherits from Product
-  const costCascade = useMemo((): CostCascade => {
-    const resolveCost = (
-      variationValue: number | null,
-      productValue: number | null,
-      defaultValue: number
-    ) => {
-      if (variationValue != null) {
-        return {
-          effectiveValue: variationValue,
-          source: 'variation' as const,
-          skuValue: null,
-          variationValue,
-          productValue,
-          defaultValue,
-        };
-      }
-      if (productValue != null) {
-        return {
-          effectiveValue: productValue,
-          source: 'product' as const,
-          skuValue: null,
-          variationValue: null,
-          productValue,
-          defaultValue,
-        };
-      }
-      return {
-        effectiveValue: defaultValue,
-        source: 'default' as const,
-        skuValue: null,
-        variationValue: null,
-        productValue: null,
-        defaultValue,
-      };
-    };
-
-    return {
-      packagingCost: resolveCost(variation.packagingCost, product.packagingCost, 50),
-      laborMinutes: resolveCost(variation.laborMinutes, product.baseProductionTimeMins, 60),
-      fabricConsumption: {
-        effectiveValue: product.defaultFabricConsumption ?? 1.5,
-        source: product.defaultFabricConsumption != null ? 'product' : 'default',
-        skuValue: null,
-        variationValue: null,
-        productValue: product.defaultFabricConsumption,
-        defaultValue: 1.5,
-      },
-    };
-  }, [variation, product]);
-
   const handleSubmit = form.handleSubmit((data) => {
     updateMutation.mutate(data);
   });
@@ -135,7 +82,6 @@ export function useVariationEditForm({
     form,
     variation,
     product,
-    costCascade,
     isLoading: false,
     isSaving: updateMutation.isPending,
     isDirty,
@@ -151,8 +97,6 @@ function getDefaultValues(variation: VariationDetailData): VariationFormData {
     colorName: variation.colorName ?? '',
     colorHex: variation.colorHex ?? null,
     hasLining: variation.hasLining ?? false,
-    packagingCost: variation.packagingCost ?? null,
-    laborMinutes: variation.laborMinutes ?? null,
     isActive: variation.isActive ?? true,
   };
 }

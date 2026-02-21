@@ -24,7 +24,7 @@ export interface FabricSalesMetrics {
     sales30DayValue: number;
     /** Units sold in last 30 days (SUM of qty) */
     sales30DayUnits: number;
-    /** Fabric consumed in last 30 days (SUM of qty × fabricConsumption) */
+    /** Fabric consumed in last 30 days (SUM of qty × BOM quantity) */
     consumption30Day: number;
 }
 
@@ -65,7 +65,7 @@ export async function getFabricSalesMetricsKysely(): Promise<Map<string, FabricS
             'FabricColour.id as fabricColourId',
             sql<number>`SUM("OrderLine"."qty" * "OrderLine"."unitPrice")::numeric`.as('sales30DayValue'),
             sql<number>`SUM("OrderLine"."qty")::int`.as('sales30DayUnits'),
-            sql<number>`SUM("OrderLine"."qty" * "Sku"."fabricConsumption")::numeric`.as('consumption30Day'),
+            sql<number>`SUM("OrderLine"."qty" * COALESCE("VariationBomLine"."quantity", 1.5))::numeric`.as('consumption30Day'),
         ])
         .where('Order.orderDate', '>=', thirtyDaysAgo)
         .where('OrderLine.lineStatus', '!=', 'cancelled')

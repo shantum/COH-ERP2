@@ -38,7 +38,6 @@ export interface ProductFormData {
   gender: string;
   baseProductionTimeMins: number;
   defaultFabricConsumption: number | null;
-  packagingCost: number | null;
   isActive: boolean;
 }
 
@@ -46,8 +45,6 @@ export interface VariationFormData {
   colorName: string;
   colorHex: string | null;
   hasLining: boolean;
-  packagingCost: number | null;
-  laborMinutes: number | null;
   isActive: boolean;
 }
 
@@ -56,28 +53,7 @@ export interface SkuFormData {
   fabricConsumption: number | null;
   mrp: number | null;
   targetStockQty: number | null;
-  packagingCost: number | null;
-  laborMinutes: number | null;
   isActive: boolean;
-}
-
-// === Cost Cascade Types ===
-
-export type CostSource = 'sku' | 'variation' | 'product' | 'default' | 'none';
-
-export interface CostCascadeValue {
-  effectiveValue: number | null;
-  source: CostSource;
-  skuValue: number | null;
-  variationValue: number | null;
-  productValue: number | null;
-  defaultValue: number | null;
-}
-
-export interface CostCascade {
-  packagingCost: CostCascadeValue;
-  laborMinutes: CostCascadeValue;
-  fabricConsumption: CostCascadeValue;
 }
 
 // === API Data Types ===
@@ -91,7 +67,6 @@ export interface ProductDetailData {
   gender: string;
   baseProductionTimeMins: number;
   defaultFabricConsumption: number | null;
-  packagingCost: number | null;
   isActive: boolean;
   imageUrl: string | null;
   variations: VariationDetailData[];
@@ -109,8 +84,6 @@ export interface VariationDetailData {
   materialName: string | null;
   hasLining: boolean;
   bomCost: number | null;
-  packagingCost: number | null;
-  laborMinutes: number | null;
   isActive: boolean;
   imageUrl: string | null;
   skus: SkuDetailData[];
@@ -125,8 +98,6 @@ export interface SkuDetailData {
   mrp: number | null;
   targetStockQty: number | null;
   bomCost: number | null;
-  packagingCost: number | null;
-  laborMinutes: number | null;
   isActive: boolean;
   currentBalance: number;
 }
@@ -201,12 +172,6 @@ export interface TabConfig {
 }
 
 // === Default Values ===
-
-export const DEFAULT_COST_VALUES = {
-  packagingCost: 50,
-  laborMinutes: 60,
-  fabricConsumption: 1.5,
-};
 
 export const PRODUCT_TABS: TabConfig[] = [
   { id: 'info', label: 'Info' },

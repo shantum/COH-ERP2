@@ -33,7 +33,6 @@ const updateCatalogProductSchema = z.object({
     skuId: z.string().uuid('Invalid SKU ID'),
     mrp: z.number().positive().optional(),
     targetStockQty: z.number().int().nonnegative().optional(),
-    fabricConsumption: z.number().positive().optional(),
     isActive: z.boolean().optional(),
 });
 
@@ -55,12 +54,8 @@ export interface CatalogSkuItem {
     skuCode: string;
     size: string;
     mrp: number | null;
-    fabricConsumption: number | null;
     bomCost: number;
-    packagingCost: number | null;
-    laborMinutes: number;
     // Costing
-    laborCost: number;
     totalCost: number;
     // GST & Pricing
     gstRate: number;
@@ -296,10 +291,8 @@ async function callExpressApi<T>(
  * Returns flat array of all SKUs with product hierarchy, inventory, and costing data.
  * Supports filtering by gender, category, productId, stock status, and search.
  *
- * COSTING: totalCost = bomCost + laborCost + packagingCost
- *   bomCost: Pre-computed on SKU from BOM (fabric + trims + services)
- *   packagingCost: SKU -> Variation -> Product -> CostConfig.defaultPackagingCost
- *   laborMinutes: SKU -> Variation -> Product.baseProductionTimeMins -> 60
+ * COSTING: totalCost = bomCost
+ *   bomCost: Pre-computed on SKU from BOM (fabric + trims + services + packaging + labor)
  */
 export const getCatalogProducts = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
@@ -385,10 +378,8 @@ export const getCatalogProducts = createServerFn({ method: 'GET' })
                     ])
                 );
 
-                // Fetch global cost config
+                // Fetch global cost config (for GST thresholds)
                 const costConfig = await prisma.costConfig.findFirst();
-                const globalPackagingCost = costConfig?.defaultPackagingCost || 50;
-                const laborRatePerMin = costConfig?.laborRatePerMin || 2.5;
                 const gstThreshold = costConfig?.gstThreshold || 2500;
                 const gstRateAbove = costConfig?.gstRateAbove || 18;
                 const gstRateBelow = costConfig?.gstRateBelow || 5;
@@ -429,15 +420,8 @@ export const getCatalogProducts = createServerFn({ method: 'GET' })
                     const product = sku.variation.product;
                     const variation = sku.variation;
 
-                    // BOM-based costing: bomCost covers fabric + trims + services
-                    const bomCost = Number(sku.bomCost) || 0;
-                    const effectivePackagingCost =
-                        sku.packagingCost ?? variation.packagingCost ?? product.packagingCost ?? globalPackagingCost;
-                    const effectiveLaborMinutes =
-                        sku.laborMinutes ?? variation.laborMinutes ?? product.baseProductionTimeMins ?? 60;
-
-                    const laborCost = (Number(effectiveLaborMinutes) || 0) * laborRatePerMin;
-                    const totalCost = bomCost + laborCost + (effectivePackagingCost || 0);
+                    // BOM-based costing: bomCost covers everything (fabric + trims + services + packaging + labor)
+                    const totalCost = Number(sku.bomCost) || 0;
 
                     // GST calculations
                     const mrp = Number(sku.mrp) || 0;
@@ -451,11 +435,7 @@ export const getCatalogProducts = createServerFn({ method: 'GET' })
                         skuCode: sku.skuCode,
                         size: sku.size,
                         mrp: sku.mrp ?? null,
-                        fabricConsumption: sku.fabricConsumption ?? null,
-                        bomCost,
-                        packagingCost: effectivePackagingCost,
-                        laborMinutes: effectiveLaborMinutes,
-                        laborCost: Math.round(laborCost * 100) / 100,
+                        bomCost: totalCost,
                         totalCost: Math.round(totalCost * 100) / 100,
                         gstRate,
                         exGstPrice,
@@ -592,7 +572,6 @@ export const updateCatalogProduct = createServerFn({ method: 'POST' })
                 const updateData: Record<string, unknown> = {};
                 if (data.mrp !== undefined) updateData.mrp = data.mrp;
                 if (data.targetStockQty !== undefined) updateData.targetStockQty = data.targetStockQty;
-                if (data.fabricConsumption !== undefined) updateData.fabricConsumption = data.fabricConsumption;
                 if (data.isActive !== undefined) updateData.isActive = data.isActive;
 
                 const sku = await prisma.sku.update({

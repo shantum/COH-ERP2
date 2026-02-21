@@ -8,9 +8,7 @@
  * - Consumption (consumption): Fabric matrix (sizes × fabric consumption)
  *
  * COST FORMULA:
- *   totalCost = bomCost (from BOM) + laborCost + packagingCost
- *   packagingCost: SKU → Variation → Product → GlobalDefault
- *   laborMinutes: SKU → Variation → Product → 60
+ *   totalCost = bomCost (from BOM lines: fabric + trims + services)
  *
  * EDITING & BULK UPDATES:
  * - Inline cell editing for costs
@@ -39,7 +37,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { AgGridReact } from 'ag-grid-react';
 import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community';
-import type { ColumnResizedEvent, GridReadyEvent, CellValueChangedEvent, Column } from 'ag-grid-community';
+import type { ColumnResizedEvent, GridReadyEvent, Column } from 'ag-grid-community';
 import { Layers, Package, AlertTriangle, XCircle, ArrowLeft, X, ChevronDown, ChevronRight } from 'lucide-react';
 import { getCatalogProducts, getCatalogCategories } from '@/server/functions/catalog';
 import type { CatalogSkuItem, CatalogProductsResponse } from '@/server/functions/catalog';
@@ -106,7 +104,7 @@ export default function Catalog() {
         defaultPageSize: 100,
         // Hide cost calculation columns by default (users can enable via Columns dropdown)
         // fabricConsumption remains visible as it's a key data field
-        defaultHiddenColumns: ['bomCost', 'laborMinutes', 'laborCost', 'packagingCost', 'totalCost', 'exGstPrice', 'gstAmount', 'costMultiple'],
+        defaultHiddenColumns: ['bomCost', 'totalCost', 'exGstPrice', 'gstAmount', 'costMultiple'],
     });
 
     // View level state
@@ -259,7 +257,7 @@ export default function Catalog() {
 
     // SKU update mutation
     const updateSkuMutation = useMutation({
-        mutationFn: async ({ skuId, data }: { skuId: string; data: { fabricConsumption?: number; mrp?: number; targetStockQty?: number } }) => {
+        mutationFn: async ({ skuId, data }: { skuId: string; data: { mrp?: number; targetStockQty?: number } }) => {
             const result = await updateSkuFn({ data: { id: skuId, ...data } });
             if (!result.success) {
                 throw new Error(result.error?.message || 'Failed to update SKU');
@@ -313,31 +311,6 @@ export default function Catalog() {
         },
     });
 
-    // Inline cost update mutation (packagingCost or laborMinutes)
-    const updateCostMutation = useMutation({
-        mutationFn: async ({ level, id, field, value }: { level: 'product' | 'variation' | 'sku'; id: string; field: 'packagingCost' | 'laborMinutes'; value: number | null }) => {
-            const fieldData = { [field]: value };
-            let result;
-            if (level === 'product') {
-                result = await updateProductFn({ data: { id, ...fieldData } });
-            } else if (level === 'variation') {
-                result = await updateVariationFn({ data: { id, ...fieldData } });
-            } else {
-                result = await updateSkuFn({ data: { id, ...fieldData } });
-            }
-            if (!result.success) {
-                throw new Error(result.error?.message || 'Failed to update cost');
-            }
-            return result.data;
-        },
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['catalog'], refetchType: 'all' });
-        },
-        onError: (err: Error) => {
-            alert(err.message || 'Failed to update cost');
-        },
-    });
-
     // Handle edit modal submit
     // NOTE: fabricId and fabricTypeId removed - fabric is now managed via BOM Editor
     const handleEditSubmit = useCallback((formData: Record<string, unknown>) => {
@@ -347,7 +320,6 @@ export default function Catalog() {
             updateSkuMutation.mutate({
                 skuId: String(editModal.data.skuId),
                 data: {
-                    fabricConsumption: parseFloat(String(formData.fabricConsumption)) || undefined,
                     mrp: parseFloat(String(formData.mrp)) || undefined,
                     targetStockQty: parseInt(String(formData.targetStockQty)) || undefined,
                 },
@@ -459,70 +431,6 @@ export default function Catalog() {
         setFilter,
         setViewLevel,
     }), [viewLevel, promptLiningChange, openEditModal, openBomEditor]);
-
-    // Mutation for updating fabric consumption by SKU IDs
-    const updateConsumption = useMutation({
-        mutationFn: async ({ skuIds, fabricConsumption }: { skuIds: string[]; fabricConsumption: number }) => {
-            // Batch updates to prevent server overload (5 concurrent requests at a time)
-            const batchSize = 5;
-            const results: Record<string, unknown>[] = [];
-
-            for (let i = 0; i < skuIds.length; i += batchSize) {
-                const batch = skuIds.slice(i, i + batchSize);
-                const batchResults = await Promise.all(
-                    batch.map(async (skuId) => {
-                        const result = await updateSkuFn({ data: { id: skuId, fabricConsumption } });
-                        if (!result.success) {
-                            throw new Error(result.error?.message || 'Failed to update fabric consumption');
-                        }
-                        return result.data;
-                    })
-                );
-                results.push(...batchResults);
-            }
-
-            return results;
-        },
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['catalog'] });
-        },
-        onError: (err: Error) => {
-            alert(err.message || 'Failed to update fabric consumption');
-        },
-    });
-
-    // Handle consumption cell value change (called by AG-Grid)
-    const handleConsumptionChange = useCallback((params: CellValueChangedEvent) => {
-        const { data, colDef, newValue } = params;
-        const size = colDef.field?.replace('consumption_', '');
-        if (!size) return;
-
-        const skuIds = data[`skuIds_${size}`] || [];
-        const newConsumption = parseFloat(newValue);
-
-        if (!isNaN(newConsumption) && newConsumption > 0 && skuIds.length > 0) {
-            updateConsumption.mutate({ skuIds, fabricConsumption: newConsumption });
-        }
-    }, [updateConsumption]);
-
-    // Handle cost cell value change (packagingCost or laborMinutes)
-    const handleCostChange = useCallback((params: CellValueChangedEvent) => {
-        const { data, colDef, newValue } = params;
-        const field = colDef.field as 'packagingCost' | 'laborMinutes';
-        if (field !== 'packagingCost' && field !== 'laborMinutes') return;
-
-        const newCost = newValue === '' || newValue === null ? null : parseFloat(newValue);
-        if (newValue !== '' && newValue !== null && isNaN(newCost as number)) return;
-
-        // Determine which level to update based on current view
-        if (viewLevel === 'product') {
-            updateCostMutation.mutate({ level: 'product', id: data.productId, field, value: newCost });
-        } else if (viewLevel === 'variation') {
-            updateCostMutation.mutate({ level: 'variation', id: data.variationId, field, value: newCost });
-        } else {
-            updateCostMutation.mutate({ level: 'sku', id: data.skuId, field, value: newCost });
-        }
-    }, [viewLevel, updateCostMutation]);
 
     // Column definitions for consumption matrix view
     const consumptionColumnDefs = useMemo(() => createConsumptionColumnDefs(CONSUMPTION_SIZES), []);
@@ -890,31 +798,9 @@ export default function Catalog() {
                                 if (viewLevel === 'variation') return params.data.variationId;
                                 return params.data.skuId;
                             }}
-                            // Handle cell edits (consumption and cost fields)
-                            onCellValueChanged={(params) => {
-                                if (viewLevel === 'consumption') {
-                                    handleConsumptionChange(params);
-                                } else if (params.colDef.field === 'packagingCost' || params.colDef.field === 'laborMinutes') {
-                                    handleCostChange(params);
-                                } else if (params.colDef.field === 'fabricConsumption') {
-                                    // Handle fabric consumption edit
-                                    const newConsumption = parseFloat(params.newValue);
-                                    if (!isNaN(newConsumption) && newConsumption > 0) {
-                                        if (viewLevel === 'sku') {
-                                            // Single SKU update
-                                            updateSkuMutation.mutate({
-                                                skuId: params.data.skuId,
-                                                data: { fabricConsumption: newConsumption },
-                                            });
-                                        } else {
-                                            // Bulk update all SKUs in this product/variation
-                                            const skuIds = params.data.skuIds || [];
-                                            if (skuIds.length > 0) {
-                                                updateConsumption.mutate({ skuIds, fabricConsumption: newConsumption });
-                                            }
-                                        }
-                                    }
-                                }
+                            // Handle cell edits (MRP inline editing)
+                            onCellValueChanged={(_params) => {
+                                // Inline edits handled by individual column editable callbacks
                             }}
                             // Pagination
                             pagination={true}

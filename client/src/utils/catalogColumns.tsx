@@ -31,7 +31,7 @@ import { getOptimizedImageUrl } from './imageOptimization';
 export const ALL_COLUMN_IDS = [
     'image', 'productName', 'styleCode', 'category', 'gender', 'productType', 'fabricTypeName',
     'colorName', 'hasLining', 'fabricName',
-    'skuCode', 'size', 'mrp', 'fabricConsumption', 'bomCost', 'laborMinutes', 'laborCost', 'packagingCost', 'totalCost',
+    'skuCode', 'size', 'mrp', 'bomCost', 'totalCost',
     'exGstPrice', 'gstAmount', 'costMultiple',
     'currentBalance', 'reservedBalance', 'availableBalance', 'shopifyQty', 'targetStockQty', 'shopifyStatus', 'status',
     'actions'
@@ -52,11 +52,7 @@ export const DEFAULT_HEADERS: Record<string, string> = {
     skuCode: 'SKU Code',
     size: 'Size',
     mrp: 'MRP',
-    fabricConsumption: 'Fab (m)',
     bomCost: 'BOM ₹',
-    laborMinutes: 'Labor (min)',
-    laborCost: 'Labor ₹',
-    packagingCost: 'Pkg ₹',
     totalCost: 'Cost ₹',
     exGstPrice: 'Ex-GST',
     gstAmount: 'GST',
@@ -326,19 +322,6 @@ export function createColumnDefs({
             cellClass: 'text-right',
         },
         {
-            colId: 'fabricConsumption',
-            headerName: DEFAULT_HEADERS.fabricConsumption,
-            field: 'fabricConsumption',
-            width: 65,
-            viewPermission: 'products:view:consumption',
-            editPermission: 'products:edit:consumption',
-            editable: () => viewLevel !== 'consumption', // Editable in all views except consumption matrix
-            valueFormatter: (params: ValueFormatterParams) =>
-                params.value != null ? params.value.toFixed(2) : '-',
-            cellClass: 'text-right text-xs cursor-pointer hover:bg-blue-50',
-            cellStyle: { backgroundColor: '#f0f9ff' }, // Light blue for editable
-        },
-        {
             colId: 'bomCost',
             headerName: DEFAULT_HEADERS.bomCost,
             field: 'bomCost',
@@ -347,42 +330,6 @@ export function createColumnDefs({
             valueFormatter: (params: ValueFormatterParams) =>
                 params.value != null ? `₹${Number(params.value).toFixed(0)}` : '-',
             cellClass: 'text-right text-xs text-blue-600',
-        },
-        {
-            colId: 'laborMinutes',
-            headerName: DEFAULT_HEADERS.laborMinutes,
-            field: 'laborMinutes',
-            width: 75,
-            viewPermission: 'products:view:cost',
-            editPermission: 'products:edit:cost',
-            editable: true,
-            valueFormatter: (params: ValueFormatterParams) =>
-                params.value != null ? params.value.toFixed(0) : '-',
-            cellClass: 'text-right text-xs cursor-pointer hover:bg-blue-50',
-            cellStyle: { backgroundColor: '#f0f9ff' }, // Light blue for editable
-        },
-        {
-            colId: 'laborCost',
-            headerName: DEFAULT_HEADERS.laborCost,
-            field: 'laborCost',
-            width: 70,
-            viewPermission: 'products:view:cost',
-            valueFormatter: (params: ValueFormatterParams) =>
-                params.value != null ? `₹${Number(params.value).toFixed(0)}` : '-',
-            cellClass: 'text-right text-xs text-purple-600',
-        },
-        {
-            colId: 'packagingCost',
-            headerName: DEFAULT_HEADERS.packagingCost,
-            field: 'packagingCost',
-            width: 65,
-            viewPermission: 'products:view:cost',
-            editPermission: 'products:edit:cost',
-            editable: true,
-            valueFormatter: (params: ValueFormatterParams) =>
-                params.value != null ? `₹${Number(params.value).toFixed(0)}` : '-',
-            cellClass: 'text-right text-xs cursor-pointer hover:bg-blue-50',
-            cellStyle: { backgroundColor: '#f0f9ff' }, // Light blue for editable
         },
         {
             colId: 'totalCost',

@@ -55,26 +55,11 @@ export function ProductCostsTab({ form, disabled = false }: ProductCostsTabProps
         </div>
       </div>
 
-      {/* Cost defaults */}
-      <div className="space-y-4">
-        <h4 className="text-sm font-medium text-gray-900">Cost Defaults</h4>
-
-        <SimpleCostField
-          name="packagingCost"
-          label="Packaging Cost"
-          control={control}
-          defaultValue={50}
-          unit=""
-          step="0.01"
-          disabled={disabled}
-        />
-      </div>
-
       {/* Cascade explanation */}
       <div className="text-xs text-gray-500 pt-2 border-t">
-        <p><strong>Cost formula:</strong> Total = BOM Cost + Labor + Packaging</p>
+        <p><strong>Cost formula:</strong> Total cost is computed from BOM (fabric + trims + labor + packaging).</p>
         <p className="mt-1">
-          BOM cost (fabric + trims + services) is set via the BOM editor. Labor and packaging cascade from SKU → Variation → Product → System default.
+          All costs are managed through the BOM editor.
         </p>
       </div>
     </div>

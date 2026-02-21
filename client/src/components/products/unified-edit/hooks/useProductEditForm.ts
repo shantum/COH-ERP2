@@ -4,14 +4,14 @@
  * Migrated to use TanStack Start Server Functions instead of REST API.
  */
 
-import { useEffect, useMemo } from 'react';
+import { useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { getProductById } from '@/server/functions/products';
 import { updateProduct } from '@/server/functions/productsMutations';
 import { productsTreeKeys } from '../../hooks/useProductsTree';
-import type { ProductFormData, ProductDetailData, CostCascade } from '../types';
+import type { ProductFormData, ProductDetailData } from '../types';
 
 interface UseProductEditFormOptions {
   productId: string;
@@ -68,7 +68,6 @@ export function useProductEditForm({ productId, onSuccess, onError }: UseProduct
           gender: data.gender,
           baseProductionTimeMins: data.baseProductionTimeMins,
           defaultFabricConsumption: data.defaultFabricConsumption,
-          packagingCost: data.packagingCost,
           isActive: data.isActive,
         },
       });
@@ -89,33 +88,7 @@ export function useProductEditForm({ productId, onSuccess, onError }: UseProduct
     },
   });
 
-  // Cost cascade (Product is top level, so it just shows defaults)
-  const costCascade = useMemo((): CostCascade => ({
-    packagingCost: {
-      effectiveValue: product?.packagingCost ?? 50,
-      source: product?.packagingCost != null ? 'product' : 'default',
-      skuValue: null,
-      variationValue: null,
-      productValue: product?.packagingCost ?? null,
-      defaultValue: 50,
-    },
-    laborMinutes: {
-      effectiveValue: product?.baseProductionTimeMins ?? 60,
-      source: 'product',
-      skuValue: null,
-      variationValue: null,
-      productValue: product?.baseProductionTimeMins ?? null,
-      defaultValue: 60,
-    },
-    fabricConsumption: {
-      effectiveValue: product?.defaultFabricConsumption ?? 1.5,
-      source: product?.defaultFabricConsumption != null ? 'product' : 'default',
-      skuValue: null,
-      variationValue: null,
-      productValue: product?.defaultFabricConsumption ?? null,
-      defaultValue: 1.5,
-    },
-  }), [product]);
+  // Cost cascade removed — costs are now fully managed via BOM
 
   const handleSubmit = form.handleSubmit((data) => {
     updateMutation.mutate(data);
@@ -124,7 +97,6 @@ export function useProductEditForm({ productId, onSuccess, onError }: UseProduct
   return {
     form,
     product,
-    costCascade,
     isLoading: isLoadingProduct,
     isSaving: updateMutation.isPending,
     isDirty,
@@ -145,7 +117,6 @@ function getDefaultValues(product?: ProductDetailData | null): ProductFormData {
     gender: product?.gender ?? 'Women',
     baseProductionTimeMins: product?.baseProductionTimeMins ?? 60,
     defaultFabricConsumption: product?.defaultFabricConsumption ?? null,
-    packagingCost: product?.packagingCost ?? null,
     isActive: product?.isActive ?? true,
   };
 }

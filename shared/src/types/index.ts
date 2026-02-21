@@ -493,7 +493,6 @@ export interface CreateProductData {
 
 export interface UpdateProductData extends Partial<CreateProductData> {
   isActive?: boolean;
-  packagingCost?: number | null;
 }
 
 export interface CreateVariationData {
@@ -507,7 +506,6 @@ export interface CreateVariationData {
 
 export interface UpdateVariationData extends Partial<CreateVariationData> {
   isActive?: boolean;
-  packagingCost?: number | null;
 }
 
 export interface CreateSkuData {
@@ -521,7 +519,6 @@ export interface CreateSkuData {
 
 export interface UpdateSkuData extends Partial<CreateSkuData> {
   isActive?: boolean;
-  packagingCost?: number | null;
 }
 
 export interface CreatePartyData {

@@ -1430,12 +1430,12 @@ export const getFabricStockHealth = createServerFn({ method: 'GET' })
             WITH sales_consumption AS (
                 SELECT
                     vbl."fabricColourId",
-                    SUM(CASE WHEN o."orderDate" >= NOW() - INTERVAL '1 day'   THEN ol."qty" * COALESCE(vbl."quantity", s."fabricConsumption", 1.5) ELSE 0 END) AS "consumed1d",
-                    SUM(CASE WHEN o."orderDate" >= NOW() - INTERVAL '7 days'  THEN ol."qty" * COALESCE(vbl."quantity", s."fabricConsumption", 1.5) ELSE 0 END) AS "consumed7d",
-                    SUM(CASE WHEN o."orderDate" >= NOW() - INTERVAL '14 days' THEN ol."qty" * COALESCE(vbl."quantity", s."fabricConsumption", 1.5) ELSE 0 END) AS "consumed14d",
-                    SUM(CASE WHEN o."orderDate" >= NOW() - INTERVAL '30 days' THEN ol."qty" * COALESCE(vbl."quantity", s."fabricConsumption", 1.5) ELSE 0 END) AS "consumed30d",
-                    SUM(CASE WHEN o."orderDate" >= NOW() - INTERVAL '60 days' THEN ol."qty" * COALESCE(vbl."quantity", s."fabricConsumption", 1.5) ELSE 0 END) AS "consumed60d",
-                    SUM(ol."qty" * COALESCE(vbl."quantity", s."fabricConsumption", 1.5)) AS "consumed90d"
+                    SUM(CASE WHEN o."orderDate" >= NOW() - INTERVAL '1 day'   THEN ol."qty" * COALESCE(vbl."quantity", 1.5) ELSE 0 END) AS "consumed1d",
+                    SUM(CASE WHEN o."orderDate" >= NOW() - INTERVAL '7 days'  THEN ol."qty" * COALESCE(vbl."quantity", 1.5) ELSE 0 END) AS "consumed7d",
+                    SUM(CASE WHEN o."orderDate" >= NOW() - INTERVAL '14 days' THEN ol."qty" * COALESCE(vbl."quantity", 1.5) ELSE 0 END) AS "consumed14d",
+                    SUM(CASE WHEN o."orderDate" >= NOW() - INTERVAL '30 days' THEN ol."qty" * COALESCE(vbl."quantity", 1.5) ELSE 0 END) AS "consumed30d",
+                    SUM(CASE WHEN o."orderDate" >= NOW() - INTERVAL '60 days' THEN ol."qty" * COALESCE(vbl."quantity", 1.5) ELSE 0 END) AS "consumed60d",
+                    SUM(ol."qty" * COALESCE(vbl."quantity", 1.5)) AS "consumed90d"
                 FROM "OrderLine" ol
                 JOIN "Order" o ON o."id" = ol."orderId"
                 JOIN "Sku" s ON s."id" = ol."skuId"

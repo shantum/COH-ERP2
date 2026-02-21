@@ -2,18 +2,12 @@
  * ProductCostsTab - Cost breakdown from BOM system for Product detail panel
  *
  * Shows:
- * - Product-level cost settings (packagingCost, laborMinutes)
  * - Per-SKU BOM cost breakdown from product tree data
+ * - Summary stats (average cost, average margin)
  */
 
 import { useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import { DollarSign, Info, TrendingUp } from 'lucide-react';
-import { useServerFn } from '@tanstack/react-start';
-import {
-    getCostConfig,
-    type CostConfigResult,
-} from '../../../server/functions/bomMutations';
 import type { ProductTreeNode } from '../types';
 
 interface ProductCostsTabProps {
@@ -21,20 +15,6 @@ interface ProductCostsTabProps {
 }
 
 export function ProductCostsTab({ product }: ProductCostsTabProps) {
-    const getCostConfigFn = useServerFn(getCostConfig);
-
-    const { data: costConfig } = useQuery<CostConfigResult | null>({
-        queryKey: ['costConfig'],
-        queryFn: async () => {
-            const result = await getCostConfigFn({ data: undefined });
-            if (!result.success || !result.data) {
-                throw new Error(result.error?.message || 'Failed to load cost config');
-            }
-            return result.data;
-        },
-        staleTime: 5 * 60 * 1000,
-    });
-
     // Collect SKU data from product tree (already available via props)
     const skuData = useMemo(() => {
         const skus: Array<{
@@ -43,22 +23,14 @@ export function ProductCostsTab({ product }: ProductCostsTabProps) {
             size: string;
             mrp: number;
             bomCost: number;
-            laborCost: number;
-            packagingCost: number;
             totalCost: number;
             marginPct: number;
         }> = [];
 
-        const laborRate = costConfig?.laborRatePerMin ?? 2.5;
-        const defaultPackaging = costConfig?.defaultPackagingCost ?? 50;
-
         for (const variation of product.children ?? []) {
             for (const sku of variation.children ?? []) {
                 const bomCost = sku.bomCost ?? 0;
-                const laborMinutes = sku.laborMinutes ?? variation.laborMinutes ?? product.laborMinutes ?? 60;
-                const laborCost = (laborMinutes ?? 0) * laborRate;
-                const packagingCost = sku.packagingCost ?? variation.packagingCost ?? product.packagingCost ?? defaultPackaging;
-                const totalCost = bomCost + laborCost + (packagingCost ?? 0);
+                const totalCost = bomCost;
                 const mrp = sku.mrp ?? 0;
                 const marginPct = mrp > 0 ? ((mrp - totalCost) / mrp) * 100 : 0;
 
@@ -68,15 +40,13 @@ export function ProductCostsTab({ product }: ProductCostsTabProps) {
                     size: sku.size ?? '',
                     mrp,
                     bomCost,
-                    laborCost: Math.round(laborCost * 100) / 100,
-                    packagingCost: packagingCost ?? 0,
                     totalCost: Math.round(totalCost * 100) / 100,
                     marginPct,
                 });
             }
         }
         return skus;
-    }, [product, costConfig]);
+    }, [product]);
 
     // Calculate summary stats
     const summary = useMemo(() => {
@@ -93,40 +63,6 @@ export function ProductCostsTab({ product }: ProductCostsTabProps) {
 
     return (
         <div className="space-y-6">
-            {/* Cost Settings Card */}
-            <div className="bg-gradient-to-r from-green-50 to-emerald-50 rounded-lg p-4 border border-green-100">
-                <div className="flex items-center gap-2 mb-4">
-                    <DollarSign size={18} className="text-green-600" />
-                    <h4 className="text-sm font-medium text-gray-700">Product Cost Settings</h4>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                    <CostSettingCard
-                        label="Packaging Cost"
-                        productValue={product.packagingCost}
-                        defaultValue={costConfig?.defaultPackagingCost}
-                        defaultLabel={`Default: ₹${costConfig?.defaultPackagingCost || 50}`}
-                    />
-                    <CostSettingCard
-                        label="Labor Minutes"
-                        productValue={product.laborMinutes}
-                        unit="min"
-                        defaultValue={60}
-                        defaultLabel="Default: 60 min"
-                    />
-                </div>
-
-                {/* Labor Rate Info */}
-                <div className="mt-4 pt-4 border-t border-green-200">
-                    <div className="flex items-center justify-between text-sm">
-                        <span className="text-gray-500">Labor Rate (Global)</span>
-                        <span className="font-medium text-gray-900">
-                            ₹{costConfig?.laborRatePerMin || 2.5}/min
-                        </span>
-                    </div>
-                </div>
-            </div>
-
             {/* Cost Formula Explanation */}
             <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
                 <div className="flex items-start gap-2">
@@ -134,7 +70,7 @@ export function ProductCostsTab({ product }: ProductCostsTabProps) {
                     <div>
                         <h4 className="text-sm font-medium text-gray-700">Cost Formula</h4>
                         <p className="text-xs text-gray-500 mt-1">
-                            Total Cost = BOM Cost (fabric + trims + services) + Labor + Packaging
+                            Total Cost = BOM Cost (fabric + trims + services)
                         </p>
                     </div>
                 </div>
@@ -219,34 +155,6 @@ export function ProductCostsTab({ product }: ProductCostsTabProps) {
                     </p>
                 </div>
             )}
-        </div>
-    );
-}
-
-interface CostSettingCardProps {
-    label: string;
-    productValue?: number | null;
-    defaultValue?: number;
-    defaultLabel: string;
-    unit?: string;
-}
-
-function CostSettingCard({ label, productValue, defaultValue, defaultLabel, unit = '₹' }: CostSettingCardProps) {
-    const hasValue = productValue !== null && productValue !== undefined;
-    const displayValue = hasValue ? productValue : defaultValue;
-
-    return (
-        <div className="bg-white rounded-lg p-3 border border-green-100">
-            <span className="text-xs text-gray-500">{label}</span>
-            <div className="mt-1">
-                {hasValue ? (
-                    <span className="text-sm font-medium text-gray-900">
-                        {unit === '₹' ? '₹' : ''}{displayValue}{unit !== '₹' ? ` ${unit}` : ''}
-                    </span>
-                ) : (
-                    <span className="text-sm text-gray-400">{defaultLabel}</span>
-                )}
-            </div>
         </div>
     );
 }

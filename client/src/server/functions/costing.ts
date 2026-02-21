@@ -571,7 +571,6 @@ export const getFabricColourCosts = createServerFn({ method: 'GET' })
                 sku: {
                     select: {
                         id: true,
-                        fabricConsumption: true,
                         variation: {
                             select: {
                                 id: true,
@@ -634,7 +633,7 @@ export const getFabricColourCosts = createServerFn({ method: 'GET' })
                 const fabric = fc.fabric;
                 const fabricKey = fabric.id;
                 const rate = fc.costPerUnit ?? fabric.costPerUnit ?? 0;
-                const consumption = bom.quantity ?? line.sku.fabricConsumption ?? 1.5;
+                const consumption = bom.quantity ?? 1.5;
 
                 if (!fabricMap.has(fabricKey)) {
                     fabricMap.set(fabricKey, {

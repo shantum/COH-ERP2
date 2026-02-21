@@ -39,7 +39,6 @@ type UpdateProductData = {
     defaultFabricConsumption?: number | null;
     imageUrl?: string | null;
     isActive?: boolean;
-    packagingCost?: number | null;
 };
 
 /** Fields accepted by updateVariation (minus 'id') */
@@ -50,8 +49,6 @@ type UpdateVariationData = {
     imageUrl?: string | null;
     hasLining?: boolean;
     isActive?: boolean;
-    packagingCost?: number | null;
-    laborMinutes?: number | null;
 };
 
 /** Fields accepted by updateSku (minus 'id') */
@@ -61,8 +58,6 @@ type UpdateSkuData = {
     targetStockQty?: number;
     targetStockMethod?: string;
     isActive?: boolean;
-    packagingCost?: number | null;
-    laborMinutes?: number | null;
 };
 
 /** Fields accepted by createProduct */
