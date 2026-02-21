@@ -1,13 +1,9 @@
 /**
- * SkuWiseDataTable - Flat SKU view for Products
+ * SkuWiseDataTable - Flat SKU spreadsheet view
  *
- * Every row is a single SKU (one size of one color of one product).
- * Product and variation info shown only on first row of each group.
- * Single border between variations, double border between products.
- *
- * Columns: Barcode/SKU | Product | Colour | Size | Style Code | Fabric Colour |
- *          Shopify (status + variant ID + product ID) | ERP Price | Shopify Price |
- *          Sale Price | Sale % | BOM | Multiple
+ * Every row is a single SKU with all data filled in.
+ * Product boundaries marked with a heavier border.
+ * Repeated product/colour values are dimmed for visual grouping.
  */
 
 import { useState, useMemo, useEffect, memo, useCallback } from 'react';
@@ -31,7 +27,7 @@ interface SkuWiseDataTableProps {
     onEditProduct?: (node: ProductTreeNode) => void;
 }
 
-const PAGE_SIZE = 200;
+const PAGE_SIZE = 500;
 
 /** Format currency as Indian Rupees */
 function formatCurrency(value: number | undefined | null): string {
@@ -40,50 +36,22 @@ function formatCurrency(value: number | undefined | null): string {
 }
 
 /**
- * Shopify status badge styles
+ * Shopify status dot — compact inline indicator
  */
-const shopifyStatusConfig: Record<ShopifyStatus, { label: string; className: string }> = {
-    active: {
-        label: 'Active',
-        className: 'bg-green-100 text-green-700 border-green-200',
-    },
-    archived: {
-        label: 'Archived',
-        className: 'bg-gray-100 text-gray-600 border-gray-200',
-    },
-    draft: {
-        label: 'Draft',
-        className: 'bg-amber-100 text-amber-700 border-amber-200',
-    },
-    not_linked: {
-        label: '-',
-        className: 'text-gray-300',
-    },
-    not_cached: {
-        label: '?',
-        className: 'text-gray-400',
-    },
-    unknown: {
-        label: '?',
-        className: 'text-gray-400',
-    },
-};
-
-/**
- * Shopify status badge component
- */
-const ShopifyStatusBadge = memo(function ShopifyStatusBadge({ status }: { status?: ShopifyStatus }) {
-    const config = shopifyStatusConfig[status ?? 'not_linked'];
-
-    if (status === 'not_linked' || status === 'not_cached' || status === 'unknown' || !status) {
-        return <span className={`text-xs ${config.className}`}>{config.label}</span>;
+const ShopifyDot = memo(function ShopifyDot({ status }: { status?: ShopifyStatus }) {
+    if (!status || status === 'not_linked' || status === 'not_cached' || status === 'unknown') {
+        return <span className="text-gray-300">-</span>;
     }
-
+    const config =
+        status === 'active'
+            ? { dot: 'bg-green-500', text: 'text-green-700', label: 'Live' }
+            : status === 'draft'
+            ? { dot: 'bg-amber-400', text: 'text-amber-600', label: 'Draft' }
+            : { dot: 'bg-gray-400', text: 'text-gray-500', label: 'Arch' };
     return (
-        <span
-            className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${config.className}`}
-        >
-            {config.label}
+        <span className={`inline-flex items-center gap-1 ${config.text}`}>
+            <span className={`w-2 h-2 rounded-full ${config.dot}`} />
+            <span>{config.label}</span>
         </span>
     );
 });
@@ -173,79 +141,45 @@ export function SkuWiseDataTable({
             </div>
 
             {/* Table */}
-            <div className="rounded-md border overflow-hidden flex-1 min-h-0 flex flex-col">
+            <div className="border rounded-md overflow-hidden flex-1 min-h-0 flex flex-col">
                 <div className="overflow-auto flex-1">
-                    <table className="w-full text-sm border-collapse table-fixed">
+                    <table className="w-full text-[11px] border-collapse table-fixed">
                         <colgroup>
-                            <col style={{ width: 160 }} />  {/* Barcode/SKU */}
-                            <col style={{ width: 180 }} />  {/* Product */}
-                            <col style={{ width: 55 }} />   {/* Gender */}
-                            <col style={{ width: 110 }} />  {/* Colour */}
-                            <col style={{ width: 50 }} />   {/* Size */}
+                            <col style={{ width: 72 }} />   {/* Image */}
+                            <col style={{ width: 120 }} />  {/* SKU */}
+                            <col />                         {/* Product / Colour / Size */}
                             <col style={{ width: 90 }} />   {/* Style Code */}
-                            <col style={{ width: 130 }} />  {/* Fabric Colour */}
-                            <col style={{ width: 180 }} />  {/* Shopify */}
-                            <col style={{ width: 70 }} />   {/* ERP Price */}
-                            <col style={{ width: 80 }} />   {/* Shopify Price */}
-                            <col style={{ width: 80 }} />   {/* Sale Price */}
-                            <col style={{ width: 55 }} />   {/* Sale % */}
-                            <col style={{ width: 65 }} />   {/* BOM */}
-                            <col style={{ width: 55 }} />   {/* MRP× */}
-                            <col style={{ width: 55 }} />   {/* Sale× */}
+                            <col style={{ width: 100 }} />  {/* Fabric */}
+                            <col style={{ width: 55 }} />   {/* Shopify */}
+                            <col style={{ width: 68 }} />   {/* MRP */}
+                            <col style={{ width: 68 }} />   {/* Shopify ₹ */}
+                            <col style={{ width: 68 }} />   {/* Sale ₹ */}
+                            <col style={{ width: 42 }} />   {/* Sale % */}
+                            <col style={{ width: 60 }} />   {/* BOM */}
+                            <col style={{ width: 42 }} />   {/* MRP× */}
+                            <col style={{ width: 42 }} />   {/* Sale× */}
                         </colgroup>
-                        <thead className="sticky top-0 z-10 bg-gray-50 shadow-sm">
-                            <tr className="border-b border-gray-200">
-                                <th className="text-left px-2 py-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
-                                    Barcode/SKU
-                                </th>
-                                <th className="text-left px-2 py-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
-                                    Product
-                                </th>
-                                <th className="text-left px-2 py-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
-                                    Gender
-                                </th>
-                                <th className="text-left px-2 py-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
-                                    Colour
-                                </th>
-                                <th className="text-center px-2 py-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
-                                    Size
-                                </th>
-                                <th className="text-left px-2 py-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
-                                    Style Code
-                                </th>
-                                <th className="text-left px-2 py-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
-                                    Fabric Colour
-                                </th>
-                                <th className="text-left px-2 py-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
-                                    Shopify
-                                </th>
-                                <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
-                                    ERP Price
-                                </th>
-                                <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
-                                    Shopify Price
-                                </th>
-                                <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
-                                    Sale Price
-                                </th>
-                                <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
-                                    Sale %
-                                </th>
-                                <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
-                                    BOM
-                                </th>
-                                <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
-                                    MRP&times;
-                                </th>
-                                <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
-                                    Sale&times;
-                                </th>
+                        <thead className="sticky top-0 z-10">
+                            <tr className="bg-gray-50 border-b border-gray-200">
+                                <th className="px-1 py-1.5" />
+                                <th className="px-2 py-1.5 text-[10px] font-medium text-gray-500 uppercase tracking-wide text-left">SKU</th>
+                                <th className="px-2 py-1.5 text-[10px] font-medium text-gray-500 uppercase tracking-wide text-left">Product</th>
+                                <th className="px-2 py-1.5 text-[10px] font-medium text-gray-500 uppercase tracking-wide text-left">Style</th>
+                                <th className="px-2 py-1.5 text-[10px] font-medium text-gray-500 uppercase tracking-wide text-left">Fabric</th>
+                                <th className="px-2 py-1.5 text-[10px] font-medium text-gray-500 uppercase tracking-wide text-center">Shpfy</th>
+                                <th className="px-2 py-1.5 text-[10px] font-medium text-gray-500 uppercase tracking-wide text-right">MRP</th>
+                                <th className="px-2 py-1.5 text-[10px] font-medium text-gray-500 uppercase tracking-wide text-right">Shopify</th>
+                                <th className="px-2 py-1.5 text-[10px] font-medium text-gray-500 uppercase tracking-wide text-right">Sale</th>
+                                <th className="px-2 py-1.5 text-[10px] font-medium text-gray-500 uppercase tracking-wide text-right">Off%</th>
+                                <th className="px-2 py-1.5 text-[10px] font-medium text-gray-500 uppercase tracking-wide text-right">BOM</th>
+                                <th className="px-2 py-1.5 text-[10px] font-medium text-gray-500 uppercase tracking-wide text-right">MRP×</th>
+                                <th className="px-2 py-1.5 text-[10px] font-medium text-gray-500 uppercase tracking-wide text-right">Sale×</th>
                             </tr>
                         </thead>
                         <tbody>
                             {paginatedRows.length === 0 ? (
                                 <tr>
-                                    <td colSpan={15} className="h-24 text-center text-muted-foreground">
+                                    <td colSpan={13} className="h-24 text-center text-muted-foreground">
                                         No SKUs found.
                                     </td>
                                 </tr>
@@ -314,159 +248,122 @@ interface SkuRowProps {
 }
 
 const SkuRow = memo(function SkuRow({ row, onClick }: SkuRowProps) {
-    // MRP× uses ERP MRP (full retail price)
     const mrpMultiple =
         row.mrp != null && row.bomCost != null && row.bomCost > 0
             ? row.mrp / row.bomCost
             : null;
 
-    // Sale× uses ERP sellingPrice (discounted), fallback to Shopify sale price
     const actualSellingPrice = row.sellingPrice ?? row.shopifySalePrice;
     const saleMultiple =
         actualSellingPrice != null && row.bomCost != null && row.bomCost > 0
             ? actualSellingPrice / row.bomCost
             : null;
 
-    // Price mismatch: Shopify price differs from ERP price
     const hasPriceMismatch =
         row.shopifyPrice != null && row.mrp != null && Math.round(row.shopifyPrice) !== Math.round(row.mrp);
 
-    // Border classes based on grouping
+    // Grouping borders: thick for products, medium for variations, thin for SKUs
     const borderClass = row.isFirstOfProduct
-        ? 'border-t-2 border-gray-400'
+        ? 'border-t-2 border-t-gray-400'
         : row.isFirstOfVariation
-        ? 'border-t border-gray-300'
-        : 'border-t border-gray-100';
-
-    // Subtle background tint for product-first rows
-    const bgClass = row.isFirstOfProduct
-        ? 'bg-gray-50/30 hover:bg-gray-50/50'
-        : 'hover:bg-gray-50/50';
+        ? 'border-t border-t-gray-300'
+        : 'border-t border-t-gray-100';
 
     return (
         <tr
-            className={`cursor-pointer h-8 ${borderClass} ${bgClass}`}
+            className={`cursor-pointer h-7 hover:bg-blue-50/40 ${borderClass}`}
             onClick={() => onClick(row)}
         >
-            {/* 1. Barcode/SKU */}
-            <td className="px-2 py-0.5">
-                <span className="text-xs font-mono text-gray-700">{row.skuCode}</span>
+            {/* Image — spans all SKUs of this variation */}
+            {row.isFirstOfVariation && (
+                <td
+                    className="px-1 py-0.5 align-middle"
+                    rowSpan={row.variationSkuCount}
+                >
+                    {(row.variationImageUrl || row.productImageUrl) ? (
+                        <img
+                            src={row.variationImageUrl || row.productImageUrl}
+                            alt=""
+                            className="w-full rounded object-cover"
+                            loading="lazy"
+                        />
+                    ) : (
+                        <span className="block w-full aspect-square rounded bg-gray-100" />
+                    )}
+                </td>
+            )}
+
+            {/* SKU */}
+            <td className="px-2 py-0 font-mono text-gray-600 truncate">
+                {row.skuCode}
             </td>
 
-            {/* 2. Product Name */}
-            <td className="px-2 py-0.5 whitespace-nowrap overflow-hidden">
-                {row.isFirstOfProduct ? (
-                    <div className="text-xs font-medium text-gray-900 truncate">
+            {/* Product / Colour / Size */}
+            <td className="px-2 py-0">
+                <span className="inline-flex items-center gap-1.5 min-w-0">
+                    {row.colorHex && (
+                        <span
+                            className="w-2.5 h-2.5 rounded-full border border-gray-200 flex-shrink-0"
+                            style={{ backgroundColor: row.colorHex }}
+                        />
+                    )}
+                    <span className={`truncate ${row.isFirstOfProduct ? 'font-medium text-gray-900' : 'text-gray-400'}`}>
                         {row.productName}
-                    </div>
-                ) : null}
+                    </span>
+                    <span className="text-gray-400 flex-shrink-0">/</span>
+                    <span className={`flex-shrink-0 ${row.isFirstOfVariation ? 'text-gray-700' : 'text-gray-400'}`}>
+                        {row.colorName}
+                    </span>
+                    <span className="text-gray-400 flex-shrink-0">/</span>
+                    <span className="font-medium text-gray-900 flex-shrink-0">{row.size}</span>
+                </span>
             </td>
 
-            {/* 3. Gender */}
-            <td className="px-2 py-0.5 whitespace-nowrap overflow-hidden">
-                {row.isFirstOfProduct && row.gender ? (
-                    <span className="text-xs text-gray-500">{row.gender}</span>
-                ) : null}
+            {/* Style Code */}
+            <td className="px-2 py-0 truncate font-mono text-gray-500">
+                {row.styleCode || '-'}
             </td>
 
-            {/* 4. Colour */}
-            <td className="px-2 py-0.5 whitespace-nowrap overflow-hidden">
-                {row.isFirstOfVariation ? (
-                    <div className="flex items-center gap-1.5">
-                        {row.colorHex && (
-                            <span
-                                className="w-3 h-3 rounded-full border border-gray-200 flex-shrink-0"
-                                style={{ backgroundColor: row.colorHex }}
-                            />
-                        )}
-                        <span className="text-xs text-gray-700 truncate">
-                            {row.colorName}
-                        </span>
-                    </div>
-                ) : null}
+            {/* Fabric */}
+            <td className="px-2 py-0 truncate text-gray-500">
+                {row.fabricColourName || row.fabricColourCode || '-'}
             </td>
 
-            {/* 4. Size */}
-            <td className="px-2 py-0.5 text-center">
-                <span className="text-xs font-semibold text-gray-900">{row.size}</span>
+            {/* Shopify dot */}
+            <td className="px-1 py-0 text-center">
+                <ShopifyDot status={row.shopifyStatus} />
             </td>
 
-            {/* 5. Style Code */}
-            <td className="px-2 py-0.5 whitespace-nowrap overflow-hidden">
-                {row.isFirstOfProduct && row.styleCode ? (
-                    <span className="text-xs font-mono text-gray-500">{row.styleCode}</span>
-                ) : null}
-            </td>
-
-            {/* 7. Fabric Colour */}
-            <td className="px-2 py-0.5 whitespace-nowrap overflow-hidden">
-                {row.isFirstOfVariation ? (
-                    <div className="text-xs truncate">
-                        {row.fabricColourCode ? (
-                            <>
-                                <span className="font-mono text-gray-500">{row.fabricColourCode}</span>
-                                {row.fabricColourName && (
-                                    <span className="text-gray-600"> {row.fabricColourName}</span>
-                                )}
-                            </>
-                        ) : (
-                            <span className="text-gray-600">{row.fabricColourName || '-'}</span>
-                        )}
-                    </div>
-                ) : null}
-            </td>
-
-            {/* 7. Shopify (status badge + variant ID + product ID) */}
-            <td className="px-2 py-0.5">
-                {row.shopifyVariantId ? (
-                    <div className="flex flex-col gap-0">
-                        <ShopifyStatusBadge status={row.shopifyStatus} />
-                        <span className="text-[10px] text-gray-400 font-mono leading-tight">
-                            V:{row.shopifyVariantId}
-                        </span>
-                        {row.isFirstOfVariation && row.shopifyProductId && (
-                            <span className="text-[10px] text-gray-400 font-mono leading-tight">
-                                P:{row.shopifyProductId}
-                            </span>
-                        )}
-                    </div>
-                ) : (
-                    <span className="text-xs text-gray-300">-</span>
-                )}
-            </td>
-
-            {/* 8. ERP Price */}
-            <td className="px-2 py-0.5 text-right tabular-nums text-xs">
+            {/* MRP */}
+            <td className="px-2 py-0 text-right tabular-nums">
                 {formatCurrency(row.mrp)}
             </td>
 
-            {/* 9. Shopify Price */}
-            <td className={`px-2 py-0.5 text-right tabular-nums text-xs ${hasPriceMismatch ? 'text-amber-600 font-medium' : ''}`}>
+            {/* Shopify Price */}
+            <td className={`px-2 py-0 text-right tabular-nums ${hasPriceMismatch ? 'text-amber-600 font-medium' : ''}`}>
                 {formatCurrency(row.shopifyPrice)}
             </td>
 
-            {/* 10. Sale Price */}
-            <td className="px-2 py-0.5 text-right tabular-nums text-xs">
+            {/* Sale Price */}
+            <td className="px-2 py-0 text-right tabular-nums">
                 {row.shopifySalePrice != null ? (
-                    <span className="text-green-600 font-medium">
-                        {formatCurrency(row.shopifySalePrice)}
-                    </span>
+                    <span className="text-green-600">{formatCurrency(row.shopifySalePrice)}</span>
                 ) : (
                     <span className="text-gray-300">-</span>
                 )}
             </td>
 
-            {/* 11. Sale % */}
-            <td className="px-2 py-0.5 text-right tabular-nums text-xs">
+            {/* Sale % */}
+            <td className="px-1 py-0 text-right tabular-nums">
                 {row.shopifySalePercent != null ? (
                     <span
-                        className={`font-medium ${
+                        className={
                             row.shopifySalePercent > 30
                                 ? 'text-red-500'
                                 : row.shopifySalePercent > 15
                                 ? 'text-amber-600'
                                 : 'text-green-600'
-                        }`}
+                        }
                     >
                         {row.shopifySalePercent}%
                     </span>
@@ -475,43 +372,43 @@ const SkuRow = memo(function SkuRow({ row, onClick }: SkuRowProps) {
                 )}
             </td>
 
-            {/* 12. BOM */}
-            <td className="px-2 py-0.5 text-right tabular-nums text-xs text-gray-600">
+            {/* BOM */}
+            <td className="px-2 py-0 text-right tabular-nums text-gray-600">
                 {formatCurrency(row.bomCost)}
             </td>
 
-            {/* 13. MRP Multiple */}
-            <td className="px-2 py-0.5 text-right tabular-nums text-xs">
+            {/* MRP× */}
+            <td className="px-1 py-0 text-right tabular-nums">
                 {mrpMultiple != null ? (
                     <span
-                        className={`font-medium ${
+                        className={
                             mrpMultiple >= 3
                                 ? 'text-green-600'
                                 : mrpMultiple >= 2
                                 ? 'text-gray-600'
                                 : 'text-red-500'
-                        }`}
+                        }
                     >
-                        {mrpMultiple.toFixed(1)}&times;
+                        {mrpMultiple.toFixed(1)}×
                     </span>
                 ) : (
                     <span className="text-gray-300">-</span>
                 )}
             </td>
 
-            {/* 14. Sale Multiple */}
-            <td className="px-2 py-0.5 text-right tabular-nums text-xs">
+            {/* Sale× */}
+            <td className="px-1 py-0 text-right tabular-nums">
                 {saleMultiple != null ? (
                     <span
-                        className={`font-medium ${
+                        className={
                             saleMultiple >= 3
                                 ? 'text-green-600'
                                 : saleMultiple >= 2
                                 ? 'text-gray-600'
                                 : 'text-red-500'
-                        }`}
+                        }
                     >
-                        {saleMultiple.toFixed(1)}&times;
+                        {saleMultiple.toFixed(1)}×
                     </span>
                 ) : (
                     <span className="text-gray-300">-</span>

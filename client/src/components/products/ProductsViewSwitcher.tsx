@@ -54,7 +54,7 @@ interface FilterState {
     gender: string | null;
     fabricFilter: FabricFilterValue;
     category: string | null;
-    shopifyStatus: 'all' | 'active' | 'archived';
+    shopifyStatus: 'all' | 'active' | 'draft' | 'archived' | 'not_on_shopify';
 }
 
 // Types for fabric filter hierarchy
@@ -101,7 +101,7 @@ export function ProductsViewSwitcher({ searchQuery, onSearchChange, onViewProduc
         gender: null,
         fabricFilter: { type: 'all' },
         category: null,
-        shopifyStatus: 'all',
+        shopifyStatus: 'active',
     });
     const [showFilters, setShowFilters] = useState(false);
 
@@ -260,7 +260,12 @@ export function ProductsViewSwitcher({ searchQuery, onSearchChange, onViewProduc
             if (!matchesFabricFilter(variations, filters.fabricFilter)) return false;
 
             // Shopify status filter - check if any variation matches
-            if (filters.shopifyStatus !== 'all') {
+            if (filters.shopifyStatus === 'not_on_shopify') {
+                const allUnlinked = variations.every(v =>
+                    !v.shopifyStatus || v.shopifyStatus === 'not_linked' || v.shopifyStatus === 'not_cached' || v.shopifyStatus === 'unknown'
+                );
+                if (!allUnlinked) return false;
+            } else if (filters.shopifyStatus !== 'all') {
                 const hasMatchingVariation = variations.some(v =>
                     v.shopifyStatus === filters.shopifyStatus
                 );
@@ -271,13 +276,45 @@ export function ProductsViewSwitcher({ searchQuery, onSearchChange, onViewProduc
         });
     }, [treeData, filters, matchesFabricFilter]);
 
+    // Compute Shopify tab counts from full (non-shopify-filtered) data
+    const shopifyTabCounts = useMemo(() => {
+        if (!treeData) return { all: 0, active: 0, draft: 0, archived: 0, not_on_shopify: 0 };
+
+        let active = 0, draft = 0, archived = 0, notOnShopify = 0;
+
+        // Apply non-shopify filters first
+        const baseFiltered = treeData.filter(product => {
+            if (filters.gender && product.gender !== filters.gender) return false;
+            if (filters.category && product.category !== filters.category) return false;
+            const variations = (product.children || []) as ProductTreeNode[];
+            if (!matchesFabricFilter(variations, filters.fabricFilter)) return false;
+            return true;
+        });
+
+        for (const product of baseFiltered) {
+            const variations = (product.children || []) as ProductTreeNode[];
+            const hasActive = variations.some(v => v.shopifyStatus === 'active');
+            const hasDraft = variations.some(v => v.shopifyStatus === 'draft');
+            const hasArchived = variations.some(v => v.shopifyStatus === 'archived');
+            const allUnlinked = variations.every(v =>
+                !v.shopifyStatus || v.shopifyStatus === 'not_linked' || v.shopifyStatus === 'not_cached' || v.shopifyStatus === 'unknown'
+            );
+
+            if (hasActive) active++;
+            if (hasDraft) draft++;
+            if (hasArchived) archived++;
+            if (allUnlinked) notOnShopify++;
+        }
+
+        return { all: baseFiltered.length, active, draft, archived, not_on_shopify: notOnShopify };
+    }, [treeData, filters.gender, filters.category, filters.fabricFilter, matchesFabricFilter]);
+
     // Count active filters
     const activeFilterCount = useMemo(() => {
         let count = 0;
         if (filters.gender) count++;
         if (filters.category) count++;
         if (filters.fabricFilter.type !== 'all') count++;
-        if (filters.shopifyStatus !== 'all') count++;
         return count;
     }, [filters]);
 
@@ -530,26 +567,6 @@ export function ProductsViewSwitcher({ searchQuery, onSearchChange, onViewProduc
                         </Select>
                     </div>
 
-                    <div className="w-px h-6 bg-gray-200" />
-
-                    {/* Shopify Status Filter */}
-                    <div className="flex items-center gap-2">
-                        <span className="text-sm text-muted-foreground hidden sm:inline">Shopify</span>
-                        <Select
-                            value={filters.shopifyStatus}
-                            onValueChange={(v) => updateFilter('shopifyStatus', v as 'all' | 'active' | 'archived')}
-                        >
-                            <SelectTrigger className="w-40 h-8">
-                                <SelectValue placeholder="All Statuses" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="all">All Statuses</SelectItem>
-                                <SelectItem value="active">Active on Shopify</SelectItem>
-                                <SelectItem value="archived">Archived on Shopify</SelectItem>
-                            </SelectContent>
-                        </Select>
-                    </div>
-
                     {/* Active Filter Pills */}
                     {activeFilterCount > 0 && (
                         <>
@@ -600,22 +617,37 @@ export function ProductsViewSwitcher({ searchQuery, onSearchChange, onViewProduc
                                         </button>
                                     </Badge>
                                 )}
-                                {filters.shopifyStatus !== 'all' && (
-                                    <Badge variant="secondary" className="gap-1 pr-1">
-                                        {filters.shopifyStatus === 'active' ? 'Active on Shopify' : 'Archived on Shopify'}
-                                        <button
-                                            onClick={() => updateFilter('shopifyStatus', 'all')}
-                                            className="ml-1 rounded-full hover:bg-gray-300 p-0.5"
-                                        >
-                                            <X size={12} />
-                                        </button>
-                                    </Badge>
-                                )}
                             </div>
                         </>
                     )}
                 </div>
             )}
+
+            {/* Shopify Status Tabs */}
+            <div className="flex items-center gap-0 border-b mb-3 flex-shrink-0">
+                {([
+                    { key: 'active', label: 'Active', count: shopifyTabCounts.active },
+                    { key: 'draft', label: 'Draft', count: shopifyTabCounts.draft },
+                    { key: 'archived', label: 'Archived', count: shopifyTabCounts.archived },
+                    { key: 'not_on_shopify', label: 'Not on Shopify', count: shopifyTabCounts.not_on_shopify },
+                    { key: 'all', label: 'All', count: shopifyTabCounts.all },
+                ] as const).map(tab => (
+                    <button
+                        key={tab.key}
+                        onClick={() => updateFilter('shopifyStatus', tab.key)}
+                        className={`px-3 py-1.5 text-xs font-medium border-b-2 transition-colors ${
+                            filters.shopifyStatus === tab.key
+                                ? 'border-gray-900 text-gray-900'
+                                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                        }`}
+                    >
+                        {tab.label}
+                        <span className={`ml-1.5 ${filters.shopifyStatus === tab.key ? 'text-gray-600' : 'text-gray-400'}`}>
+                            {tab.count}
+                        </span>
+                    </button>
+                ))}
+            </div>
 
             {/* View Content */}
             <div className="flex-1 min-h-0">

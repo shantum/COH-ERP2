@@ -26,6 +26,7 @@ export interface SkuViewRow {
     category?: string;
     gender?: string;
     productImageUrl?: string;
+    variationImageUrl?: string;
 
     // Variation-level
     colorName?: string;
@@ -57,6 +58,7 @@ export interface SkuViewRow {
     // Grouping flags for border/display logic
     isFirstOfProduct: boolean;
     isFirstOfVariation: boolean;
+    variationSkuCount: number;
 
     // Original node references for actions
     productNode: ProductTreeNode;
@@ -100,6 +102,7 @@ export function flattenToSkuRows(products: ProductTreeNode[]): SkuViewRow[] {
                     category: product.category,
                     gender: product.gender,
                     productImageUrl: product.imageUrl,
+                    variationImageUrl: variation.imageUrl,
 
                     colorName: variation.colorName || variation.name,
                     colorHex: variation.colorHex,
@@ -127,6 +130,7 @@ export function flattenToSkuRows(products: ProductTreeNode[]): SkuViewRow[] {
 
                     isFirstOfProduct: isFirstProduct,
                     isFirstOfVariation: isFirstVariation || isFirstProduct,
+                    variationSkuCount: sortedSkus.length,
 
                     productNode: product,
                     variationNode: variation,
@@ -191,9 +195,15 @@ export function filterSkuRows(
 }
 
 /**
- * Recompute isFirstOfProduct and isFirstOfVariation flags after filtering.
+ * Recompute isFirstOfProduct, isFirstOfVariation, and variationSkuCount after filtering.
  */
 function recomputeGroupFlags(rows: SkuViewRow[]): SkuViewRow[] {
+    // First pass: count SKUs per variation in filtered set
+    const variationCounts = new Map<string, number>();
+    for (const row of rows) {
+        variationCounts.set(row.variationId, (variationCounts.get(row.variationId) || 0) + 1);
+    }
+
     let lastProductId = '';
     let lastVariationId = '';
 
@@ -201,17 +211,19 @@ function recomputeGroupFlags(rows: SkuViewRow[]): SkuViewRow[] {
         const isFirstOfProduct = row.productId !== lastProductId;
         const isFirstOfVariation =
             isFirstOfProduct || row.variationId !== lastVariationId;
+        const variationSkuCount = variationCounts.get(row.variationId) || 1;
 
         lastProductId = row.productId;
         lastVariationId = row.variationId;
 
         if (
             row.isFirstOfProduct === isFirstOfProduct &&
-            row.isFirstOfVariation === isFirstOfVariation
+            row.isFirstOfVariation === isFirstOfVariation &&
+            row.variationSkuCount === variationSkuCount
         ) {
             return row;
         }
 
-        return { ...row, isFirstOfProduct, isFirstOfVariation };
+        return { ...row, isFirstOfProduct, isFirstOfVariation, variationSkuCount };
     });
 }
