@@ -29,7 +29,8 @@ jobs:
             npx prisma migrate deploy --schema=prisma/schema.prisma
             cd client && pnpm build && cd ..
             EXPECTED_COMMIT=$(git rev-parse --short HEAD)
-            GIT_COMMIT=$EXPECTED_COMMIT pm2 restart coh-erp --update-env
+            export GIT_COMMIT=$EXPECTED_COMMIT
+            pm2 restart coh-erp --update-env
             sleep 5
             for i in 1 2 3 4 5; do
               RESPONSE=$(curl -s http://127.0.0.1:3001/api/health || true)
