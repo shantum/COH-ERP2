@@ -43,6 +43,7 @@ import { Route as AuthenticatedInventoryCountRouteImport } from './routes/_authe
 import { Route as AuthenticatedInventoryRouteImport } from './routes/_authenticated/inventory'
 import { Route as AuthenticatedFinanceRouteImport } from './routes/_authenticated/finance'
 import { Route as AuthenticatedFacebookFeedHealthRouteImport } from './routes/_authenticated/facebook-feed-health'
+import { Route as AuthenticatedFabricReportRouteImport } from './routes/_authenticated/fabric-report'
 import { Route as AuthenticatedFabricReconciliationRouteImport } from './routes/_authenticated/fabric-reconciliation'
 import { Route as AuthenticatedFabricReceiptRouteImport } from './routes/_authenticated/fabric-receipt'
 import { Route as AuthenticatedCustomersRouteImport } from './routes/_authenticated/customers'
@@ -231,6 +232,12 @@ const AuthenticatedFacebookFeedHealthRoute =
     path: '/facebook-feed-health',
     getParentRoute: () => AuthenticatedRoute,
   } as any)
+const AuthenticatedFabricReportRoute =
+  AuthenticatedFabricReportRouteImport.update({
+    id: '/fabric-report',
+    path: '/fabric-report',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
 const AuthenticatedFabricReconciliationRoute =
   AuthenticatedFabricReconciliationRouteImport.update({
     id: '/fabric-reconciliation',
@@ -286,6 +293,7 @@ export interface FileRoutesByFullPath {
   '/customers': typeof AuthenticatedCustomersRoute
   '/fabric-receipt': typeof AuthenticatedFabricReceiptRoute
   '/fabric-reconciliation': typeof AuthenticatedFabricReconciliationRoute
+  '/fabric-report': typeof AuthenticatedFabricReportRoute
   '/facebook-feed-health': typeof AuthenticatedFacebookFeedHealthRoute
   '/finance': typeof AuthenticatedFinanceRoute
   '/inventory': typeof AuthenticatedInventoryRoute
@@ -327,6 +335,7 @@ export interface FileRoutesByTo {
   '/customers': typeof AuthenticatedCustomersRoute
   '/fabric-receipt': typeof AuthenticatedFabricReceiptRoute
   '/fabric-reconciliation': typeof AuthenticatedFabricReconciliationRoute
+  '/fabric-report': typeof AuthenticatedFabricReportRoute
   '/facebook-feed-health': typeof AuthenticatedFacebookFeedHealthRoute
   '/finance': typeof AuthenticatedFinanceRoute
   '/inventory': typeof AuthenticatedInventoryRoute
@@ -371,6 +380,7 @@ export interface FileRoutesById {
   '/_authenticated/customers': typeof AuthenticatedCustomersRoute
   '/_authenticated/fabric-receipt': typeof AuthenticatedFabricReceiptRoute
   '/_authenticated/fabric-reconciliation': typeof AuthenticatedFabricReconciliationRoute
+  '/_authenticated/fabric-report': typeof AuthenticatedFabricReportRoute
   '/_authenticated/facebook-feed-health': typeof AuthenticatedFacebookFeedHealthRoute
   '/_authenticated/finance': typeof AuthenticatedFinanceRoute
   '/_authenticated/inventory': typeof AuthenticatedInventoryRoute
@@ -416,6 +426,7 @@ export interface FileRouteTypes {
     | '/customers'
     | '/fabric-receipt'
     | '/fabric-reconciliation'
+    | '/fabric-report'
     | '/facebook-feed-health'
     | '/finance'
     | '/inventory'
@@ -457,6 +468,7 @@ export interface FileRouteTypes {
     | '/customers'
     | '/fabric-receipt'
     | '/fabric-reconciliation'
+    | '/fabric-report'
     | '/facebook-feed-health'
     | '/finance'
     | '/inventory'
@@ -500,6 +512,7 @@ export interface FileRouteTypes {
     | '/_authenticated/customers'
     | '/_authenticated/fabric-receipt'
     | '/_authenticated/fabric-reconciliation'
+    | '/_authenticated/fabric-report'
     | '/_authenticated/facebook-feed-health'
     | '/_authenticated/finance'
     | '/_authenticated/inventory'
@@ -779,6 +792,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedFacebookFeedHealthRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/fabric-report': {
+      id: '/_authenticated/fabric-report'
+      path: '/fabric-report'
+      fullPath: '/fabric-report'
+      preLoaderRoute: typeof AuthenticatedFabricReportRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/fabric-reconciliation': {
       id: '/_authenticated/fabric-reconciliation'
       path: '/fabric-reconciliation'
@@ -839,6 +859,7 @@ interface AuthenticatedRouteChildren {
   AuthenticatedCustomersRoute: typeof AuthenticatedCustomersRoute
   AuthenticatedFabricReceiptRoute: typeof AuthenticatedFabricReceiptRoute
   AuthenticatedFabricReconciliationRoute: typeof AuthenticatedFabricReconciliationRoute
+  AuthenticatedFabricReportRoute: typeof AuthenticatedFabricReportRoute
   AuthenticatedFacebookFeedHealthRoute: typeof AuthenticatedFacebookFeedHealthRoute
   AuthenticatedFinanceRoute: typeof AuthenticatedFinanceRoute
   AuthenticatedInventoryRoute: typeof AuthenticatedInventoryRoute
@@ -876,6 +897,7 @@ const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedFabricReceiptRoute: AuthenticatedFabricReceiptRoute,
   AuthenticatedFabricReconciliationRoute:
     AuthenticatedFabricReconciliationRoute,
+  AuthenticatedFabricReportRoute: AuthenticatedFabricReportRoute,
   AuthenticatedFacebookFeedHealthRoute: AuthenticatedFacebookFeedHealthRoute,
   AuthenticatedFinanceRoute: AuthenticatedFinanceRoute,
   AuthenticatedInventoryRoute: AuthenticatedInventoryRoute,
