@@ -22,7 +22,6 @@
  */
 
 import prisma from '../lib/prisma.js';
-import { recalculateVariationAndSkuBomCosts } from '@coh/shared/services/bom';
 
 const BATCH_SIZE = 50;
 
@@ -33,7 +32,6 @@ interface Summary {
   variationLaborLines: number;
   skuLaborLines: number;
   skuPackagingLines: number;
-  variationsRecalculated: number;
   errors: number;
 }
 
@@ -107,7 +105,6 @@ async function main() {
     variationLaborLines: 0,
     skuLaborLines: 0,
     skuPackagingLines: 0,
-    variationsRecalculated: 0,
     errors: 0,
   };
 
@@ -229,9 +226,6 @@ async function main() {
             }
           }
 
-          // Recalculate BOM costs for this variation and its SKUs
-          await recalculateVariationAndSkuBomCosts(prisma, variation.id);
-          summary.variationsRecalculated++;
         }
 
         summary.productsProcessed++;
@@ -252,7 +246,6 @@ async function main() {
   console.log(`Variation labor overrides:  ${summary.variationLaborLines}`);
   console.log(`SKU labor overrides:        ${summary.skuLaborLines}`);
   console.log(`SKU packaging overrides:    ${summary.skuPackagingLines}`);
-  console.log(`Variations recalculated:    ${summary.variationsRecalculated}`);
   console.log(`Errors:                     ${summary.errors}`);
 }
 
