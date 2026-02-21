@@ -24,7 +24,7 @@ export const routeMeta: Record<string, RouteMeta> = {
   '/returns-rto': { title: 'RTO Inward', breadcrumb: 'RTO Inward' },
   '/production': { title: 'Production', breadcrumb: 'Production' },
   '/inventory-inward': { title: 'Inventory Inward', breadcrumb: 'Inventory Inward' },
-  '/fabric-reconciliation': { title: 'Fabric Count', breadcrumb: 'Fabric Count' },
+  '/fabrics': { title: 'Fabrics', breadcrumb: 'Fabrics' },
   '/inventory-count': { title: 'Inventory Count', breadcrumb: 'Inventory Count' },
   '/customers': { title: 'Customers', breadcrumb: 'Customers' },
   '/ledgers': { title: 'Ledgers', breadcrumb: 'Ledgers' },

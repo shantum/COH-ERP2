@@ -2,7 +2,7 @@
  * Ledgers Route - /ledgers
  *
  * Server-side search, filtering, and pagination for inventory transactions.
- * Three tabs: Inward, Outward, Materials.
+ * Two tabs: Inward, Outward. Materials moved to /fabrics.
  */
 import { createFileRoute } from '@tanstack/react-router';
 import { lazy } from 'react';
@@ -28,11 +28,6 @@ export const Route = createFileRoute('/_authenticated/ledgers')({
         limit: search.limit,
     }),
     loader: async ({ deps }): Promise<LedgersLoaderData> => {
-        // Only prefetch for inward/outward tabs (materials uses a different server fn)
-        if (deps.tab === 'materials') {
-            return { ledger: null, error: null };
-        }
-
         try {
             const offset = (deps.page - 1) * deps.limit;
             const ledger = await getLedgerTransactions({

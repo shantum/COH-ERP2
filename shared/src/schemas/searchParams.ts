@@ -198,12 +198,11 @@ export type AnalyticsSearchParams = z.infer<typeof AnalyticsSearchParams>;
 
 /**
  * Ledgers page search params
- * Supports 3 tabs: inward, outward, materials
- * With server-side search, filters, and pagination
+ * 2 tabs: inward, outward. Materials tab moved to /fabrics.
  */
 export const LedgersSearchParams = z.object({
-    /** Active tab: inward (SKU in), outward (SKU out), materials (fabric txns) */
-    tab: z.enum(['inward', 'outward', 'materials']).catch('inward'),
+    /** Active tab: inward (SKU in), outward (SKU out) */
+    tab: z.enum(['inward', 'outward']).catch('inward'),
     /** Full-text search across SKU, product, color, order#, source/destination */
     search: z.string().optional().catch(undefined),
     /** Filter by transaction reason */

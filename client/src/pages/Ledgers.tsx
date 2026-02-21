@@ -187,28 +187,24 @@ export default function Ledgers() {
                 </nav>
             </div>
 
-            {/* Inward / Outward Tabs */}
-            {activeTab !== 'materials' && (
-                <InwardOutwardTab
-                    data={ledgerData}
-                    isLoading={ledgerLoading}
-                    tab={activeTab}
-                    search={search}
-                    searchInput={searchInput}
-                    setSearchInput={setSearchInput}
-                    setSearchParam={setSearchParam}
-                    page={page}
-                    limit={limit}
-                    setPage={setPage}
-                    isAdmin={isAdmin}
-                    onDelete={(id) => {
-                        if (confirm('Delete this transaction? This will affect inventory balances.')) {
-                            deleteInventoryTxnMutation.mutate(id);
-                        }
-                    }}
-                />
-            )}
-
+            <InwardOutwardTab
+                data={ledgerData}
+                isLoading={ledgerLoading}
+                tab={activeTab}
+                search={search}
+                searchInput={searchInput}
+                setSearchInput={setSearchInput}
+                setSearchParam={setSearchParam}
+                page={page}
+                limit={limit}
+                setPage={setPage}
+                isAdmin={isAdmin}
+                onDelete={(id) => {
+                    if (confirm('Delete this transaction? This will affect inventory balances.')) {
+                        deleteInventoryTxnMutation.mutate(id);
+                    }
+                }}
+            />
         </div>
     );
 }
