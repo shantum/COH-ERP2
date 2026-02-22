@@ -120,6 +120,13 @@ export const updateLine = createServerFn({ method: 'POST' })
             context.user.id
         );
 
+        // Log domain event for significant line changes (status, AWB)
+        if (awbNumber !== undefined || qty !== undefined) {
+            import('@coh/shared/services/eventLog').then(({ logEvent }) =>
+                logEvent({ domain: 'orders', event: 'line.updated', entityType: 'OrderLine', entityId: lineId, summary: `Line updated on order #${line.order.orderNumber}`, meta: { changes: Object.keys(updateData), orderId: line.orderId }, actorId: context.user.id })
+            );
+        }
+
         return {
             success: true,
             data: {
@@ -190,6 +197,11 @@ export const addLine = createServerFn({ method: 'POST' })
                 changes: { lineAdded: newLineId },
             },
             context.user.id
+        );
+
+        // Log domain event
+        import('@coh/shared/services/eventLog').then(({ logEvent }) =>
+            logEvent({ domain: 'orders', event: 'line.added', entityType: 'OrderLine', entityId: newLineId, summary: `Line added to order`, meta: { orderId, skuId, qty, unitPrice }, actorId: context.user.id })
         );
 
         return {

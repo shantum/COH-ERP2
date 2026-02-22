@@ -254,6 +254,11 @@ export const updateOrder = createServerFn({ method: 'POST' })
             context.user.id
         );
 
+        // Log domain event
+        import('@coh/shared/services/eventLog').then(({ logEvent }) =>
+            logEvent({ domain: 'orders', event: 'order.updated', entityType: 'Order', entityId: orderId, summary: `Order #${order.orderNumber} updated`, meta: { changes: Object.keys(updateData) }, actorId: context.user.id })
+        );
+
         return {
             success: true,
             data: {
@@ -290,6 +295,11 @@ export const markPaid = createServerFn({ method: 'POST' })
             where: { id: orderId },
             data: { codRemittedAt: now, paymentStatus: 'paid' },
         });
+
+        // Log domain event
+        import('@coh/shared/services/eventLog').then(({ logEvent }) =>
+            logEvent({ domain: 'orders', event: 'order.paid', entityType: 'Order', entityId: orderId, summary: `Order #${order.orderNumber} marked paid`, meta: { paymentMethod: order.paymentMethod, totalAmount: order.totalAmount } })
+        );
 
         return {
             success: true,
@@ -378,6 +388,11 @@ export const deleteOrder = createServerFn({ method: 'POST' })
                 // Non-critical
             }
         }
+
+        // Log domain event
+        import('@coh/shared/services/eventLog').then(({ logEvent }) =>
+            logEvent({ domain: 'orders', event: 'order.deleted', entityType: 'Order', entityId: orderId, summary: `Order #${order.orderNumber} deleted`, meta: { lineCount: order.orderLines.length } })
+        );
 
         return {
             success: true,
@@ -540,6 +555,11 @@ export const createOrder = createServerFn({ method: 'POST' })
                 changes: { orderNumber: order.orderNumber },
             },
             context.user.id
+        );
+
+        // Log domain event
+        import('@coh/shared/services/eventLog').then(({ logEvent }) =>
+            logEvent({ domain: 'orders', event: 'order.created', entityType: 'Order', entityId: order.id, summary: `Order #${order.orderNumber} — ₹${order.totalAmount.toLocaleString('en-IN')} via ${channel}`, meta: { channel, lineCount: order.orderLines.length, totalAmount: order.totalAmount, paymentMethod, isExchange }, actorId: context.user.id })
         );
 
         // Push to "Orders from COH" sheet (fire-and-forget, same pattern as SSE broadcast)

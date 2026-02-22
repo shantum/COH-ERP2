@@ -249,6 +249,13 @@ router.post('/shopify/orders', verifyWebhook, async (req: WebhookRequest, res: R
         // Log success with result data
         await updateWebhookLog(req.prisma, webhookId, 'processed', null, Date.now() - startTime, result);
 
+        // Log domain event for webhook-created orders
+        if (result.action === 'created' && result.orderId) {
+            import('@coh/shared/services/eventLog').then(({ logEvent }) =>
+                logEvent({ domain: 'orders', event: 'order.received_webhook', entityType: 'Order', entityId: result.orderId!, summary: `Shopify order ${orderName} received via webhook`, meta: { topic: webhookTopic, shopifyOrderId: String(shopifyOrder.id), action: result.action } })
+            ).catch(() => {});
+        }
+
         res.status(200).json({ received: true, ...result });
     } catch (error) {
         const err = error as Error;

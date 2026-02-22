@@ -2338,3 +2338,26 @@ model MarketplacePayoutReport {
   @@index([reportPeriod])
   @@index([status])
 }
+
+// ============================================
+// DOMAIN EVENT LOG
+// ============================================
+
+/// Unified event stream for all business domains — enables activity feed, audit timeline, analytics
+model DomainEvent {
+  id         String   @id @default(uuid())
+  domain     String   // orders, customers, returns, finance, shipping, inventory, production
+  event      String   // order.created, payment.received, shipment.delivered, etc.
+  entityType String   // Order, Customer, ReturnLine, BankTransaction, etc.
+  entityId   String   // UUID of the entity
+  summary    String   // Human-readable: "Order #4521 — ₹2,450 via Shopify"
+  meta       Json?    // Structured payload (channel, items, amounts, etc.)
+  actorId    String?  // userId who triggered it (null for system/webhook events)
+  createdAt  DateTime @default(now())
+
+  @@index([domain, createdAt])
+  @@index([entityType, entityId])
+  @@index([event, createdAt])
+  @@index([createdAt])
+  @@index([actorId])
+}

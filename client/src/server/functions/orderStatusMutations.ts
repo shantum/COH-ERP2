@@ -216,6 +216,11 @@ export const cancelOrder = createServerFn({ method: 'POST' })
             }
         }
 
+        // Log domain event
+        import('@coh/shared/services/eventLog').then(({ logEvent }) =>
+            logEvent({ domain: 'orders', event: 'order.cancelled', entityType: 'Order', entityId: orderId, summary: `Order #${order.orderNumber} cancelled${reason ? ` — ${reason}` : ''}`, meta: { reason, linesAffected: order.orderLines.filter((l: CancelOrderLine) => l.lineStatus !== 'shipped').length, inventoryReleased }, actorId: context.user.id })
+        );
+
         return {
             success: true,
             data: {
@@ -308,6 +313,11 @@ export const uncancelOrder = createServerFn({ method: 'POST' })
                 changes: { status: newOrderStatus, lineStatus: 'pending' },
             },
             context.user.id
+        );
+
+        // Log domain event
+        import('@coh/shared/services/eventLog').then(({ logEvent }) =>
+            logEvent({ domain: 'orders', event: 'order.uncancelled', entityType: 'Order', entityId: orderId, summary: `Order #${order.orderNumber} restored — ${cancelledLines.length} lines`, meta: { linesRestored: cancelledLines.length, newStatus: newOrderStatus }, actorId: context.user.id })
         );
 
         return {

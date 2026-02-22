@@ -890,6 +890,11 @@ router.post('/confirm-preview/:previewId', requireAdmin, asyncHandler(async (req
 
   log.info({ invoiceId: invoice.id, aiConfidence, partyMatched: !!partyId }, 'Invoice created from preview confirm');
 
+  // Log domain event
+  import('@coh/shared/services/eventLog').then(({ logEvent }) =>
+    logEvent({ domain: 'finance', event: 'invoice.created', entityType: 'Invoice', entityId: invoice.id, summary: `Invoice ${invoice.invoiceNumber ?? 'draft'} — ₹${invoice.totalAmount?.toLocaleString('en-IN') ?? 0}`, meta: { category: finalCategory, totalAmount: invoice.totalAmount, aiConfidence, partyMatched: !!partyId }, actorId: userId })
+  ).catch(() => {});
+
   // Enrich party data
   let enrichment: EnrichmentResult = { fieldsAdded: [], bankMismatch: false, partyCreated: false };
 

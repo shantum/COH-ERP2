@@ -273,6 +273,16 @@ async function updateLineTracking(
         await updateCustomerTier(prisma, orderInfo.customerId);
     }
 
+    // Log domain events for significant tracking milestones
+    const status = trackingData.internalStatus;
+    if (status === 'delivered' || status === 'picked_up' || status === 'rto_initiated' || status === 'rto_delivered') {
+        const eventMap: Record<string, string> = { delivered: 'shipment.delivered', picked_up: 'shipment.picked_up', rto_initiated: 'shipment.rto', rto_delivered: 'shipment.rto_delivered' };
+        const summaryMap: Record<string, string> = { delivered: `Order #${orderInfo.orderNumber} delivered — AWB ${awbNumber}`, picked_up: `Order #${orderInfo.orderNumber} picked up — AWB ${awbNumber}`, rto_initiated: `RTO initiated for #${orderInfo.orderNumber} — AWB ${awbNumber}`, rto_delivered: `RTO received for #${orderInfo.orderNumber} — AWB ${awbNumber}` };
+        import('@coh/shared/services/eventLog').then(({ logEvent }) =>
+            logEvent({ domain: 'shipping', event: eventMap[status] ?? status, entityType: 'Order', entityId: orderInfo.orderId, summary: summaryMap[status] ?? `Tracking update: ${status}`, meta: { awbNumber, trackingStatus: status, courier: trackingData.courier } })
+        ).catch(() => {});
+    }
+
     return { lineUpdateData };
 }
 

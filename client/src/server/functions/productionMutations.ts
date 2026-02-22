@@ -422,6 +422,11 @@ export const createBatch = createServerFn({ method: 'POST' })
             );
         }
 
+        // Log domain event
+        import('@coh/shared/services/eventLog').then(({ logEvent }) =>
+            logEvent({ domain: 'production', event: 'batch.created', entityType: 'ProductionBatch', entityId: batch.id, summary: `Batch ${batch.batchCode ?? batch.sampleCode ?? batch.id.slice(0, 8)} — ${batch.qtyPlanned} units`, meta: { batchCode: batch.batchCode, sampleCode: batch.sampleCode, skuId: batch.skuId, quantity: batch.qtyPlanned }, actorId: context.user.id })
+        );
+
         return {
             success: true,
             data: {
@@ -710,6 +715,11 @@ export const completeBatch = createServerFn({ method: 'POST' })
         if (batch.skuId) {
             await invalidateInventoryCache([batch.skuId]);
         }
+
+        // Log domain event
+        import('@coh/shared/services/eventLog').then(({ logEvent }) =>
+            logEvent({ domain: 'production', event: 'batch.completed', entityType: 'ProductionBatch', entityId: batchId, summary: `Batch ${batch.batchCode ?? batch.sampleCode ?? batchId.slice(0, 8)} completed — ${qtyCompleted} units`, meta: { batchCode: batch.batchCode, qtyCompleted, autoAllocated, isSampleBatch: !!isSampleBatch }, actorId: context.user.id })
+        );
 
         return {
             success: true,

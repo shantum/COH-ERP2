@@ -45,6 +45,7 @@ import { Route as AuthenticatedCostingRouteImport } from './routes/_authenticate
 import { Route as AuthenticatedChannelsRouteImport } from './routes/_authenticated/channels'
 import { Route as AuthenticatedChannelImportRouteImport } from './routes/_authenticated/channel-import'
 import { Route as AuthenticatedAnalyticsRouteImport } from './routes/_authenticated/analytics'
+import { Route as AuthenticatedBusinessIndexRouteImport } from './routes/_authenticated/business/index'
 
 const ShipmentsRoute = ShipmentsRouteImport.update({
   id: '/shipments',
@@ -234,6 +235,12 @@ const AuthenticatedAnalyticsRoute = AuthenticatedAnalyticsRouteImport.update({
   path: '/analytics',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
+const AuthenticatedBusinessIndexRoute =
+  AuthenticatedBusinessIndexRouteImport.update({
+    id: '/business/',
+    path: '/business/',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AuthenticatedIndexRoute
@@ -271,6 +278,7 @@ export interface FileRoutesByFullPath {
   '/stock-report': typeof AuthenticatedStockReportRoute
   '/tracking': typeof AuthenticatedTrackingRoute
   '/users': typeof AuthenticatedUsersRoute
+  '/business/': typeof AuthenticatedBusinessIndexRoute
 }
 export interface FileRoutesByTo {
   '/catalog': typeof CatalogRoute
@@ -308,6 +316,7 @@ export interface FileRoutesByTo {
   '/tracking': typeof AuthenticatedTrackingRoute
   '/users': typeof AuthenticatedUsersRoute
   '/': typeof AuthenticatedIndexRoute
+  '/business': typeof AuthenticatedBusinessIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -347,6 +356,7 @@ export interface FileRoutesById {
   '/_authenticated/tracking': typeof AuthenticatedTrackingRoute
   '/_authenticated/users': typeof AuthenticatedUsersRoute
   '/_authenticated/': typeof AuthenticatedIndexRoute
+  '/_authenticated/business/': typeof AuthenticatedBusinessIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -386,6 +396,7 @@ export interface FileRouteTypes {
     | '/stock-report'
     | '/tracking'
     | '/users'
+    | '/business/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/catalog'
@@ -423,6 +434,7 @@ export interface FileRouteTypes {
     | '/tracking'
     | '/users'
     | '/'
+    | '/business'
   id:
     | '__root__'
     | '/_authenticated'
@@ -461,6 +473,7 @@ export interface FileRouteTypes {
     | '/_authenticated/tracking'
     | '/_authenticated/users'
     | '/_authenticated/'
+    | '/_authenticated/business/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -728,6 +741,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAnalyticsRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/business/': {
+      id: '/_authenticated/business/'
+      path: '/business'
+      fullPath: '/business/'
+      preLoaderRoute: typeof AuthenticatedBusinessIndexRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
   }
 }
 
@@ -760,6 +780,7 @@ interface AuthenticatedRouteChildren {
   AuthenticatedTrackingRoute: typeof AuthenticatedTrackingRoute
   AuthenticatedUsersRoute: typeof AuthenticatedUsersRoute
   AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
+  AuthenticatedBusinessIndexRoute: typeof AuthenticatedBusinessIndexRoute
 }
 
 const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
@@ -791,6 +812,7 @@ const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedTrackingRoute: AuthenticatedTrackingRoute,
   AuthenticatedUsersRoute: AuthenticatedUsersRoute,
   AuthenticatedIndexRoute: AuthenticatedIndexRoute,
+  AuthenticatedBusinessIndexRoute: AuthenticatedBusinessIndexRoute,
 }
 
 const AuthenticatedRouteWithChildren = AuthenticatedRoute._addFileChildren(

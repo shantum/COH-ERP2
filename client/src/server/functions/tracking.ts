@@ -165,6 +165,11 @@ export const createShipment = createServerFn({ method: 'POST' })
             }
 
             const result = await response.json();
+            // Log domain event
+            import('@coh/shared/services/eventLog').then(({ logEvent }) =>
+                logEvent({ domain: 'shipping', event: 'shipment.created', entityType: 'Order', entityId: data.orderId, summary: `Shipment booked — AWB ${result.awbNumber} via ${result.courier}`, meta: { awbNumber: result.awbNumber, courier: result.courier } })
+            );
+
             return {
                 success: true,
                 awbNumber: result.awbNumber,

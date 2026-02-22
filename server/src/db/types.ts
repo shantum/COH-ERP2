@@ -207,6 +207,17 @@ export type Customer = {
     tier: Generated<string>;
     ltv: Generated<number>;
 };
+export type DomainEvent = {
+    id: Generated<string>;
+    domain: string;
+    event: string;
+    entityType: string;
+    entityId: string;
+    summary: string;
+    meta: unknown | null;
+    actorId: string | null;
+    createdAt: Generated<Timestamp>;
+};
 export type Employee = {
     id: Generated<string>;
     name: string;
@@ -1389,6 +1400,7 @@ export type DB = {
     ComponentType: ComponentType;
     CostConfig: CostConfig;
     Customer: Customer;
+    DomainEvent: DomainEvent;
     Employee: Employee;
     Fabric: Fabric;
     FabricColour: FabricColour;

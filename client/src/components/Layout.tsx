@@ -37,6 +37,7 @@ const navGroups: NavGroup[] = [
         label: '',
         items: [
             { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
+            { to: '/business', icon: HeartPulse, label: 'Business Pulse' },
             { to: '/order-search', icon: Search, label: 'Search' },
         ],
     },

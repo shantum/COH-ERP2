@@ -343,6 +343,13 @@ export async function syncReturnPrimeRequests(options: SyncOptions = {}): Promis
 
         log.info({ created: result.created, updated: result.updated, errors: result.errors.length, durationMs: result.durationMs }, 'Sync complete');
 
+        // Log domain event for new returns synced
+        if (result.created > 0) {
+            import('@coh/shared/services/eventLog').then(({ logEvent }) =>
+                logEvent({ domain: 'returns', event: 'return.synced', entityType: 'ReturnPrimeRequest', entityId: 'batch', summary: `${result.created} new returns synced from Return Prime`, meta: { created: result.created, updated: result.updated, durationMs: result.durationMs } })
+            ).catch(() => {});
+        }
+
         return result;
     } catch (error: unknown) {
         const msg = error instanceof Error ? error.message : 'Unknown error';

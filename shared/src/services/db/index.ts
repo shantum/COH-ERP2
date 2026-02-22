@@ -11,3 +11,6 @@ export { getPrisma, type PrismaInstance, type PrismaTransaction } from './prisma
 
 // Re-export queries for convenience
 export * from './queries/index.js';
+
+// Re-export business graph layer
+export * from '../business/index.js';
