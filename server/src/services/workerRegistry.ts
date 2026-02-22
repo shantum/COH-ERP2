@@ -14,6 +14,8 @@ import stockSnapshotWorker from './stockSnapshotWorker.js';
 import driveFinanceSync from './driveFinanceSync.js';
 import remittanceSync from './remittanceSync.js';
 import payuSettlementSync from './payuSettlementSync.js';
+import returnPrimeSyncWorker from './returnPrimeSyncWorker.js';
+import { returnPrimeInboundSyncWorker } from './returnPrimeInboundSync.js';
 import { pulseBroadcaster } from './pulseBroadcaster.js';
 import { reconcileSheetOrders, syncSheetOrderStatus, syncSheetAwb } from './sheetOrderPush.js';
 import { runAllCleanup } from '../utils/cacheCleanup.js';
@@ -39,6 +41,8 @@ const workers: WorkerEntry[] = [
   { name: 'driveFinanceSync',    start: () => driveFinanceSync.start(),    stop: () => driveFinanceSync.stop() },
   { name: 'remittanceSync',      start: () => remittanceSync.start(),      stop: () => remittanceSync.stop() },
   { name: 'payuSettlementSync',  start: () => payuSettlementSync.start(),  stop: () => payuSettlementSync.stop() },
+  { name: 'returnPrimeSyncWorker', start: () => returnPrimeSyncWorker.start(), stop: () => returnPrimeSyncWorker.stop() },
+  { name: 'returnPrimeInboundSync', start: () => returnPrimeInboundSyncWorker.start(), stop: () => returnPrimeInboundSyncWorker.stop() },
 ];
 
 // Interval handles for cleanup
@@ -95,6 +99,11 @@ function startIntervalWorkers(): void {
 export async function startAllWorkers(): Promise<void> {
   // Clean up stale WorkerRun records from previous boot
   await cleanupStaleRuns();
+
+  // Warn about missing Return Prime webhook secret
+  if (!process.env.RETURNPRIME_WEBHOOK_SECRET) {
+    console.warn('⚠️  RETURNPRIME_WEBHOOK_SECRET not set — webhooks accepted without signature verification. Get the secret from the Return Prime dashboard.');
+  }
 
   const disableWorkers = process.env.DISABLE_BACKGROUND_WORKERS === 'true';
 

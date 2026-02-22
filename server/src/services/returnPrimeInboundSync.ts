@@ -357,6 +357,59 @@ export async function syncReturnPrimeRequests(options: SyncOptions = {}): Promis
 // STATUS FUNCTIONS
 // ============================================
 
+// ============================================
+// WORKER LIFECYCLE (for workerRegistry)
+// ============================================
+
+const SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
+const INITIAL_DELAY_MS = 3 * 60 * 1000; // 3 min after startup
+
+let syncInterval: NodeJS.Timeout | null = null;
+let initialTimeout: NodeJS.Timeout | null = null;
+
+function startInboundSync(): void {
+    if (syncInterval) {
+        log.info('Already started');
+        return;
+    }
+
+    log.info({ intervalHours: SYNC_INTERVAL_MS / 3600000 }, 'Starting inbound sync worker');
+
+    // Run after initial delay, then every 6 hours
+    initialTimeout = setTimeout(() => {
+        syncReturnPrimeRequests().catch(err => {
+            log.error({ err }, 'Initial inbound sync error');
+        });
+    }, INITIAL_DELAY_MS);
+
+    syncInterval = setInterval(() => {
+        syncReturnPrimeRequests().catch(err => {
+            log.error({ err }, 'Scheduled inbound sync error');
+        });
+    }, SYNC_INTERVAL_MS);
+}
+
+function stopInboundSync(): void {
+    if (initialTimeout) {
+        clearTimeout(initialTimeout);
+        initialTimeout = null;
+    }
+    if (syncInterval) {
+        clearInterval(syncInterval);
+        syncInterval = null;
+        log.info('Stopped');
+    }
+}
+
+export const returnPrimeInboundSyncWorker = {
+    start: startInboundSync,
+    stop: stopInboundSync,
+};
+
+// ============================================
+// STATUS FUNCTIONS
+// ============================================
+
 /**
  * Get sync status - total records, last synced, date range
  */
