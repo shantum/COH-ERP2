@@ -351,44 +351,6 @@ export interface ProductionBatch {
 }
 
 // ============================================
-// RETURNS
-// ============================================
-
-export type ReturnStatus = 'requested' | 'reverse_initiated' | 'in_transit' | 'received' | 'inspected' | 'resolved' | 'cancelled';
-
-export interface ReturnRequest {
-  id: string;
-  requestNumber: string;
-  requestType: 'return' | 'exchange';
-  originalOrderId: string;
-  customerId: string | null;
-  status: ReturnStatus;
-  reasonCategory: string;
-  reasonDetails: string | null;
-  resolutionType: string | null;
-  resolutionNotes: string | null;
-  createdAt: string;
-  updatedAt: string;
-  originalOrder?: Order;
-  customer?: Customer;
-  lines?: ReturnRequestLine[];
-}
-
-export interface ReturnRequestLine {
-  id: string;
-  requestId: string;
-  originalOrderLineId: string | null;
-  skuId: string;
-  qty: number;
-  exchangeSkuId: string | null;
-  exchangeQty: number | null;
-  itemCondition: string | null;
-  inspectionNotes: string | null;
-  sku?: Sku;
-  exchangeSku?: Sku;
-}
-
-// ============================================
 // SHOPIFY
 // ============================================
 
@@ -560,33 +522,6 @@ export interface CreateCustomerData {
   lastName?: string;
   phone?: string;
   defaultAddress?: string;
-}
-
-// Returns
-export interface CreateReturnData {
-  originalOrderId: string;
-  requestType: 'return' | 'exchange';
-  reasonCategory: string;
-  reasonDetails?: string;
-  lines: CreateReturnLineData[];
-}
-
-export interface CreateReturnLineData {
-  originalOrderLineId?: string;
-  skuId: string;
-  qty: number;
-  exchangeSkuId?: string;
-  exchangeQty?: number;
-}
-
-export interface InitiateReverseData {
-  carrier?: string;
-  trackingNumber?: string;
-}
-
-export interface ResolveReturnData {
-  resolutionType: 'refund' | 'exchange' | 'store_credit' | 'rejected';
-  resolutionNotes?: string;
 }
 
 // Production
@@ -764,7 +699,6 @@ export interface PendingRepackingItem {
   size: string;
   qty: number;
   condition: string;
-  returnRequestNumber: string | null;
 }
 
 export interface ScanLookupResult {
@@ -871,7 +805,6 @@ export interface QueuePanelItem {
   queueItemId?: string;
   condition?: string;
   inspectionNotes?: string;
-  returnRequestNumber?: string;
   orderLineId?: string;
   rtoOrderNumber?: string;
   // For click-to-process

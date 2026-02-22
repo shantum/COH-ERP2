@@ -966,8 +966,6 @@ export type RepackingQueueItem = {
     id: Generated<string>;
     skuId: string;
     qty: Generated<number>;
-    returnRequestId: string | null;
-    returnLineId: string | null;
     status: Generated<string>;
     condition: string;
     inspectionNotes: string | null;
@@ -977,13 +975,6 @@ export type RepackingQueueItem = {
     processedById: string | null;
     qcComments: string | null;
     orderLineId: string | null;
-};
-export type ReplacementItem = {
-    id: Generated<string>;
-    requestId: string;
-    skuId: string;
-    qty: number;
-    unitPrice: number;
 };
 export type ReturnPrimeRequest = {
     id: Generated<string>;
@@ -1025,46 +1016,6 @@ export type ReturnPrimeRequest = {
     createdAt: Generated<Timestamp>;
     updatedAt: Timestamp;
 };
-export type ReturnRequest = {
-    id: Generated<string>;
-    requestNumber: string;
-    requestType: string;
-    originalOrderId: string;
-    customerId: string | null;
-    status: Generated<string>;
-    reasonCategory: string;
-    reasonDetails: string | null;
-    resolutionNotes: string | null;
-    createdAt: Generated<Timestamp>;
-    updatedAt: Timestamp;
-    exchangeOrderId: string | null;
-    forwardDelivered: Generated<boolean>;
-    forwardDeliveredAt: Timestamp | null;
-    reverseReceived: Generated<boolean>;
-    reverseReceivedAt: Timestamp | null;
-    forwardShippedAt: Timestamp | null;
-    paymentAmount: number | null;
-    paymentCollectedAt: Timestamp | null;
-    refundAmount: number | null;
-    refundProcessedAt: Timestamp | null;
-    replacementValue: number | null;
-    resolution: Generated<string>;
-    returnValue: number | null;
-    reverseInTransitAt: Timestamp | null;
-    valueDifference: number | null;
-};
-export type ReturnRequestLine = {
-    id: Generated<string>;
-    requestId: string;
-    originalOrderLineId: string | null;
-    skuId: string;
-    qty: number;
-    exchangeSkuId: string | null;
-    exchangeQty: number | null;
-    itemCondition: string | null;
-    inspectionNotes: string | null;
-    unitPrice: number | null;
-};
 export type ReturnSettings = {
     id: Generated<string>;
     /**
@@ -1085,30 +1036,6 @@ export type ReturnSettings = {
     allowExpiredOverride: Generated<boolean>;
     updatedAt: Timestamp;
     updatedById: string | null;
-};
-export type ReturnShipping = {
-    id: Generated<string>;
-    requestId: string;
-    direction: string;
-    courier: string | null;
-    awbNumber: string | null;
-    pickupAddress: string | null;
-    pickupScheduledAt: Timestamp | null;
-    pickedUpAt: Timestamp | null;
-    receivedAt: Timestamp | null;
-    shippedAt: Timestamp | null;
-    deliveredAt: Timestamp | null;
-    status: Generated<string>;
-    notes: string | null;
-};
-export type ReturnStatusHistory = {
-    id: Generated<string>;
-    requestId: string;
-    fromStatus: string;
-    toStatus: string;
-    changedById: string;
-    notes: string | null;
-    createdAt: Generated<Timestamp>;
 };
 export type Role = {
     id: Generated<string>;
@@ -1504,13 +1431,8 @@ export type DB = {
     ProductBomTemplate: ProductBomTemplate;
     ProductionBatch: ProductionBatch;
     RepackingQueueItem: RepackingQueueItem;
-    ReplacementItem: ReplacementItem;
     ReturnPrimeRequest: ReturnPrimeRequest;
-    ReturnRequest: ReturnRequest;
-    ReturnRequestLine: ReturnRequestLine;
     ReturnSettings: ReturnSettings;
-    ReturnShipping: ReturnShipping;
-    ReturnStatusHistory: ReturnStatusHistory;
     Role: Role;
     ServiceItem: ServiceItem;
     ShopifyInventoryCache: ShopifyInventoryCache;

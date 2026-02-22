@@ -462,11 +462,7 @@ export default function ReturnsRto() {
                                             </td>
                                             {activeTab === 'repacking' && (
                                                 <td className="px-4 py-3">
-                                                    {item.returnRequestNumber ? (
-                                                        <span className="text-xs text-gray-600">
-                                                            Return: {item.returnRequestNumber}
-                                                        </span>
-                                                    ) : item.rtoOrderNumber ? (
+                                                    {item.rtoOrderNumber ? (
                                                         <span className="text-xs text-purple-600">
                                                             RTO: #{item.rtoOrderNumber}
                                                         </span>
@@ -488,7 +484,7 @@ export default function ReturnsRto() {
                                             {activeTab === 'repacking' && (
                                                 <td className="px-4 py-3">
                                                     <div className="flex items-center justify-center gap-2">
-                                                        {!item.returnRequestNumber && (
+                                                        {!item.rtoOrderNumber && !item.orderLineId && (
                                                             <button
                                                                 onClick={() => handleAllocateClick(item)}
                                                                 className="px-2 py-1 text-xs font-medium text-gray-600 border border-gray-300 rounded hover:bg-gray-50 transition-colors"
@@ -592,26 +588,16 @@ function AllocationModalContent({
     const returnMatches: ScanLookupMatch[] = matchData?.matches.filter((m: ScanLookupMatch) => m.source === 'return') || [];
     const rtoMatches: ScanLookupMatch[] = matchData?.matches.filter((m: ScanLookupMatch) => m.source === 'rto') || [];
 
-    const handleAllocate = async (type: 'return' | 'rto', lineId: string, requestId?: string) => {
+    const handleAllocate = async (_type: 'return' | 'rto', lineId: string) => {
         setIsLoading(true);
         try {
-            if (type === 'return') {
-                await updateQueueItemFn({
-                    data: {
-                        id: item.queueItemId || item.id,
-                        returnRequestId: requestId,
-                        returnLineId: lineId,
-                    },
-                });
-            } else {
-                // For RTO, use the proper orderLineId field
-                await updateQueueItemFn({
-                    data: {
-                        id: item.queueItemId || item.id,
-                        orderLineId: lineId,
-                    },
-                });
-            }
+            // Both return and RTO use orderLineId now
+            await updateQueueItemFn({
+                data: {
+                    id: item.queueItemId || item.id,
+                    orderLineId: lineId,
+                },
+            });
             onSuccess();
         } catch (error) {
             console.error('Failed to allocate:', error);
@@ -658,7 +644,7 @@ function AllocationModalContent({
                                         {returnMatches.map((match) => (
                                             <button
                                                 key={match.data.lineId}
-                                                onClick={() => handleAllocate('return', match.data.lineId, match.data.requestId)}
+                                                onClick={() => handleAllocate('return', match.data.lineId)}
                                                 disabled={isLoading}
                                                 className="w-full p-3 text-left border border-gray-200 rounded-lg hover:border-orange-300 hover:bg-orange-50 transition-colors disabled:opacity-50"
                                             >

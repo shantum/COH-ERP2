@@ -45,7 +45,6 @@ model User {
   inventoryTransactions InventoryTransaction[]
   // NOTE: fabricTransactions removed - use fabricColourTransactions
   fabricColourTransactions FabricColourTransaction[] @relation("FabricColourTxnCreator")
-  returnStatusHistory   ReturnStatusHistory[]
   processedRepackItems  RepackingQueueItem[]     @relation("RepackingProcessor")
   createdWriteOffs      WriteOffLog[]            @relation("WriteOffCreator")
   rtoInwardedLines      OrderLine[]              @relation("RtoInwardedBy")
@@ -185,9 +184,6 @@ model Sku {
   orderLines             OrderLine[]
   productionBatches      ProductionBatch[]
   repackingQueueItems    RepackingQueueItem[]
-  replacementItems       ReplacementItem[]
-  exchangeRequestLines   ReturnRequestLine[]           @relation("ExchangeSku")
-  returnRequestLines     ReturnRequestLine[]           @relation("ReturnedSku")
   shopifyInventoryCache  ShopifyInventoryCache?
   parentSku              Sku?                          @relation("CustomSkus", fields: [parentSkuId], references: [id])
   customSkus             Sku[]                         @relation("CustomSkus")
@@ -488,7 +484,6 @@ model Customer {
   ltv               Int             @default(0)  // Stored LTV, updated incrementally on order changes
   feedback          Feedback[]
   orders            Order[]
-  returnRequests    ReturnRequest[]
   financeInvoices   Invoice[] @relation("InvoiceCustomer")
   financePayments   Payment[] @relation("PaymentCustomer")
 
@@ -541,8 +536,6 @@ model Order {
   shopifyCache         ShopifyOrderCache? @relation(fields: [shopifyOrderId], references: [id])
   orderLines           OrderLine[]
   payments             OrderPayment[]     // Payment transactions for this order
-  returnRequests       ReturnRequest[]    @relation("OriginalOrder")
-  exchangeRequests     ReturnRequest[]    @relation("ExchangeOrder")
   originalOrder        Order?             @relation("ExchangeOriginalOrder", fields: [originalOrderId], references: [id])
   exchangeOrders       Order[]            @relation("ExchangeOriginalOrder")
   exchangeSourceLines  OrderLine[]        @relation("ExchangeOrderLine") // Lines that created this exchange order
@@ -718,7 +711,6 @@ model OrderLine {
   rtoInwardedBy        User?               @relation("RtoInwardedBy", fields: [rtoInwardedById], references: [id])
   sku                  Sku                 @relation(fields: [skuId], references: [id])
   repackingQueueItems  RepackingQueueItem[] @relation("OrderLineToRepacking")
-  returnRequestLines   ReturnRequestLine[]
   returnRequestedBy    User?               @relation("ReturnRequestedBy", fields: [returnRequestedById], references: [id])
   returnReceivedBy     User?               @relation("ReturnReceivedBy", fields: [returnReceivedById], references: [id])
   returnClosedManuallyBy User?             @relation("ReturnClosedManuallyBy", fields: [returnClosedManuallyById], references: [id])
@@ -755,121 +747,6 @@ model OrderLine {
   @@index([returnExchangeOrderId])
   @@index([returnPrimeRequestId])
   @@index([returnPrimeStatus, returnPrimeUpdatedAt])  // Composite for status queries
-}
-
-model ReturnRequest {
-  id                  String                @id @default(uuid())
-  requestNumber       String                @unique
-  requestType         String
-  originalOrderId     String
-  customerId          String?
-  status              String                @default("pending_pickup")
-  reasonCategory      String
-  reasonDetails       String?
-  resolutionNotes     String?
-  createdAt           DateTime              @default(now())
-  updatedAt           DateTime              @updatedAt
-  exchangeOrderId     String?
-  forwardDelivered    Boolean               @default(false)
-  forwardDeliveredAt  DateTime?
-  reverseReceived     Boolean               @default(false)
-  reverseReceivedAt   DateTime?
-  forwardShippedAt    DateTime?
-  paymentAmount       Float?
-  paymentCollectedAt  DateTime?
-  refundAmount        Float?
-  refundProcessedAt   DateTime?
-  replacementValue    Float?
-  resolution          String                @default("refund")
-  returnValue         Float?
-  reverseInTransitAt  DateTime?
-  valueDifference     Float?
-  repackingQueueItems RepackingQueueItem[]
-  replacementItems    ReplacementItem[]
-  customer            Customer?             @relation(fields: [customerId], references: [id])
-  exchangeOrder       Order?                @relation("ExchangeOrder", fields: [exchangeOrderId], references: [id])
-  originalOrder       Order                 @relation("OriginalOrder", fields: [originalOrderId], references: [id])
-  lines               ReturnRequestLine[]
-  shipping            ReturnShipping[]
-  statusHistory       ReturnStatusHistory[]
-
-  @@index([originalOrderId])
-  @@index([customerId])
-  @@index([status])
-  @@index([resolution])
-  @@index([exchangeOrderId])
-  @@index([status, createdAt])
-  @@index([customerId, status])
-}
-
-model ReturnRequestLine {
-  id                  String        @id @default(uuid())
-  requestId           String
-  originalOrderLineId String?
-  skuId               String
-  qty                 Int
-  exchangeSkuId       String?
-  exchangeQty         Int?
-  itemCondition       String?
-  inspectionNotes     String?
-  unitPrice           Float?
-  exchangeSku         Sku?          @relation("ExchangeSku", fields: [exchangeSkuId], references: [id])
-  originalOrderLine   OrderLine?    @relation(fields: [originalOrderLineId], references: [id])
-  request             ReturnRequest @relation(fields: [requestId], references: [id])
-  sku                 Sku           @relation("ReturnedSku", fields: [skuId], references: [id])
-
-  @@index([requestId])
-  @@index([skuId])
-  @@index([skuId, itemCondition])
-  @@index([originalOrderLineId]) // FK index for return processing
-  @@index([exchangeSkuId])       // FK index for exchange lookups
-}
-
-model ReplacementItem {
-  id        String        @id @default(uuid())
-  requestId String
-  skuId     String
-  qty       Int
-  unitPrice Float
-  request   ReturnRequest @relation(fields: [requestId], references: [id])
-  sku       Sku           @relation(fields: [skuId], references: [id])
-
-  @@index([requestId])
-  @@index([skuId])
-}
-
-model ReturnShipping {
-  id                String        @id @default(uuid())
-  requestId         String
-  direction         String
-  courier           String?
-  awbNumber         String?
-  pickupAddress     String?
-  pickupScheduledAt DateTime?
-  pickedUpAt        DateTime?
-  receivedAt        DateTime?
-  shippedAt         DateTime?
-  deliveredAt       DateTime?
-  status            String        @default("scheduled")
-  notes             String?
-  request           ReturnRequest @relation(fields: [requestId], references: [id])
-
-  @@index([requestId])
-}
-
-model ReturnStatusHistory {
-  id          String        @id @default(uuid())
-  requestId   String
-  fromStatus  String
-  toStatus    String
-  changedById String
-  notes       String?
-  createdAt   DateTime      @default(now())
-  changedBy   User          @relation(fields: [changedById], references: [id])
-  request     ReturnRequest @relation(fields: [requestId], references: [id])
-
-  @@index([requestId])
-  @@index([changedById]) // FK index for audit queries
 }
 
 model Feedback {
@@ -993,8 +870,6 @@ model RepackingQueueItem {
   id              String         @id @default(uuid())
   skuId           String
   qty             Int            @default(1)
-  returnRequestId String?
-  returnLineId    String?
   status          String         @default("pending")
   condition       String
   inspectionNotes String?
@@ -1006,14 +881,10 @@ model RepackingQueueItem {
   orderLineId     String?
   processedBy     User?          @relation("RepackingProcessor", fields: [processedById], references: [id])
   orderLine       OrderLine?     @relation("OrderLineToRepacking", fields: [orderLineId], references: [id])
-
-
-  returnRequest   ReturnRequest? @relation(fields: [returnRequestId], references: [id])
   sku             Sku            @relation(fields: [skuId], references: [id])
 
   @@index([skuId])
   @@index([status])
-  @@index([returnRequestId])
   @@index([orderLineId])
   @@index([skuId, status])
 }

@@ -946,15 +946,12 @@ export const getFrequentReturners = createServerFn({ method: 'GET' })
     .handler(async (): Promise<TopCustomer[]> => {
         const prisma = await getPrisma();
 
-        // Get customers with return requests
+        // Get customers with returns (using returnCount field on Customer)
         const returners = await prisma.customer.findMany({
             where: {
-                returnRequests: {
-                    some: {},
-                },
+                returnCount: { gt: 0 },
             },
             include: {
-                returnRequests: true,
                 orders: {
                     where: {
                         status: {
@@ -976,7 +973,7 @@ export const getFrequentReturners = createServerFn({ method: 'GET' })
             take: 100,
         });
 
-        // Define type for customer with return requests and orders
+        // Define type for customer with return count and orders
         type ReturnerCustomer = {
             id: string;
             email: string;
@@ -985,20 +982,20 @@ export const getFrequentReturners = createServerFn({ method: 'GET' })
             tier: string | null;
             orderCount: number | null;
             ltv: number | null;
-            returnRequests: unknown[];
+            returnCount: number;
             orders: { orderDate: Date }[];
         };
 
         // Filter to customers with return rate > 10%
         const frequentReturners = (returners as ReturnerCustomer[])
             .filter((customer: ReturnerCustomer) => {
-                const returnCount = customer.returnRequests.length;
+                const returnCount = customer.returnCount || 0;
                 const orderCount = customer.orderCount || 0;
                 return orderCount > 0 && returnCount / orderCount > 0.1;
             })
             .sort((a: ReturnerCustomer, b: ReturnerCustomer) => {
-                const aRate = a.returnRequests.length / (a.orderCount || 1);
-                const bRate = b.returnRequests.length / (b.orderCount || 1);
+                const aRate = (a.returnCount || 0) / (a.orderCount || 1);
+                const bRate = (b.returnCount || 0) / (b.orderCount || 1);
                 return bRate - aRate;
             });
 

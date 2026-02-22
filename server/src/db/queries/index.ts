@@ -61,16 +61,6 @@ export {
     type CapacityRow,
 } from './productionKysely.js';
 
-// Returns
-export {
-    listReturnsKysely,
-    getReturnKysely,
-    type ReturnsListParams,
-    type ReturnLineRow,
-    type ReturnsListResult,
-    type ReturnDetailResult,
-} from './returnsKysely.js';
-
 // Reconciliation
 export {
     getReconciliationHistoryKysely,

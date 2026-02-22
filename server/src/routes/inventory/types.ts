@@ -119,29 +119,6 @@ export interface ProductionBatch {
 }
 
 /**
- * Return request line data
- */
-export interface ReturnRequestLine {
-    id: string;
-    skuId: string;
-    qty: number;
-    requestId: string;
-    itemCondition?: string | null;
-    inspectedAt?: Date | null;
-    inspectedById?: string | null;
-    request: {
-        id?: string;
-        requestNumber: string;
-        reasonCategory?: string | null;
-        status?: string;
-        customer?: {
-            firstName?: string | null;
-        } | null;
-    };
-    sku?: SkuWithRelations;
-}
-
-/**
  * Repacking queue item data
  */
 export interface RepackingQueueItem {
@@ -154,9 +131,6 @@ export interface RepackingQueueItem {
     qcComments?: string | null;
     processedAt?: Date | null;
     processedById?: string | null;
-    returnRequest?: {
-        requestNumber: string;
-    } | null;
     sku?: SkuWithRelations;
 }
 

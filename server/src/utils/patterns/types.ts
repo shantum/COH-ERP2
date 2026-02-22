@@ -62,7 +62,6 @@ export type TxnReason = typeof TXN_REASON[keyof typeof TXN_REASON];
 export const TXN_REFERENCE_TYPE = {
     ORDER_LINE: 'order_line',
     PRODUCTION_BATCH: 'production_batch',
-    RETURN_REQUEST_LINE: 'return_request_line',
     REPACKING_QUEUE_ITEM: 'repacking_queue_item',
     WRITE_OFF_LOG: 'write_off_log',
     MANUAL_ADJUSTMENT: 'manual_adjustment',

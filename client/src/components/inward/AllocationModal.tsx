@@ -7,7 +7,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { getTransactionMatches, allocateTransactionFn } from '../../server/functions/inventoryMutations';
-import { searchRtoOrders, getReturnsAll } from '../../server/functions/returns';
+import { searchRtoOrders } from '../../server/functions/returns';
 import { X, Search, Package, Truck, RotateCcw, Check, AlertTriangle } from 'lucide-react';
 import type { TransactionMatchesResult, TransactionMatch } from '../../server/functions/inventoryMutations';
 
@@ -51,7 +51,6 @@ export default function AllocationModal({
     // Server functions
     const getTransactionMatchesFn = useServerFn(getTransactionMatches);
     const searchRtoOrdersFn = useServerFn(searchRtoOrders);
-    const getReturnsAllFn = useServerFn(getReturnsAll);
     const allocateTransactionMutationFn = useServerFn(allocateTransactionFn);
 
     // Auto-focus search input
@@ -95,29 +94,6 @@ export default function AllocationModal({
                         detail: `${order.customerName || 'Unknown'} - AWB: ${order.awbNumber || 'N/A'}`,
                         date: order.rtoInitiatedAt || order.orderDate,
                         orderId: order.id,
-                    });
-                });
-            } catch {
-                // Ignore search errors
-            }
-
-            // Search return requests
-            try {
-                const returnsRes = await getReturnsAllFn();
-                const returns = returnsRes || [];
-                // Filter returns by search query
-                const filteredReturns = returns.filter(ret =>
-                    ret.requestNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                    (ret.customerName && ret.customerName.toLowerCase().includes(searchQuery.toLowerCase()))
-                ).slice(0, 5);
-
-                filteredReturns.forEach((ret) => {
-                    results.push({
-                        type: 'production', // Returns use 'production' type in backend
-                        id: ret.id,
-                        label: `Return ${ret.requestNumber}`,
-                        detail: `${ret.customerName || 'Unknown'} - ${ret.status}`,
-                        date: ret.createdAt,
                     });
                 });
             } catch {

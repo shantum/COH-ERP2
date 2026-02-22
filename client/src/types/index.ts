@@ -62,15 +62,6 @@ export type {
   UpdateBatchData,
   CompleteBatchData,
 
-  // Returns
-  ReturnStatus,
-  ReturnRequest,
-  ReturnRequestLine,
-  CreateReturnData,
-  CreateReturnLineData,
-  InitiateReverseData,
-  ResolveReturnData,
-
   // Shopify
   SyncJob,
 

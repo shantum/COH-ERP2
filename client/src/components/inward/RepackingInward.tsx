@@ -22,7 +22,7 @@ interface MatchedRepackingItem {
     queueId: string;
     qty: number;
     condition: string;
-    returnRequestNumber?: string | null;
+    orderReference?: string | null;
 }
 
 // QC decision options
@@ -113,7 +113,7 @@ export default function RepackingInward({ onSuccess: _onSuccess, onError: _onErr
                 queueId: repackMatch.data.queueId || repackMatch.data.lineId,
                 qty: repackMatch.data.qty,
                 condition: repackMatch.data.condition || 'unknown',
-                returnRequestNumber: repackMatch.data.returnRequestNumber,
+                orderReference: repackMatch.data.returnRequestNumber,
             });
             setQcDecision('ready');
             setWriteOffReason('defective');
@@ -294,10 +294,10 @@ export default function RepackingInward({ onSuccess: _onSuccess, onError: _onErr
                                     <span className="text-green-600">Qty:</span>{' '}
                                     {matchedRepack.qty}
                                 </div>
-                                {matchedRepack.returnRequestNumber && (
+                                {matchedRepack.orderReference && (
                                     <div className="col-span-2">
-                                        <span className="text-green-600">Return:</span>{' '}
-                                        <span className="font-mono">{matchedRepack.returnRequestNumber}</span>
+                                        <span className="text-green-600">Order:</span>{' '}
+                                        <span className="font-mono">{matchedRepack.orderReference}</span>
                                     </div>
                                 )}
                             </div>

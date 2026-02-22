@@ -766,7 +766,7 @@ export function CustomerDetailModal({
                                     />
                                     <StatCard
                                         label="Returns"
-                                        value={customer.returnRequests?.length || customer.returnCount || 0}
+                                        value={customer.returnCount || 0}
                                         icon={Package}
                                         color="amber"
                                     />

@@ -77,11 +77,6 @@ router.post('/clear', requireAdmin, asyncHandler(async (req: Request, res: Respo
     await req.prisma.$transaction(async (prisma) => {
         // Clear in correct order to respect foreign key constraints
         const deleteOperations: DeleteOperation[] = [
-            // Return-related (references orders, SKUs)
-            { name: 'returnStatusHistory', model: prisma.returnStatusHistory },
-            { name: 'returnShipping', model: prisma.returnShipping },
-            { name: 'returnRequestLines', model: prisma.returnRequestLine },
-            { name: 'returnRequests', model: prisma.returnRequest },
             // Order-related (references customers, SKUs)
             { name: 'orderLines', model: prisma.orderLine },
             { name: 'orders', model: prisma.order },

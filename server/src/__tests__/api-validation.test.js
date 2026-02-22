@@ -276,73 +276,7 @@ describe('Inventory Transaction - Reason Validation', () => {
 });
 
 // ============================================
-// SECTION 5: RETURN REQUEST VALIDATION
-// ============================================
-
-describe('Return Request - Schema', () => {
-    const validateReturnRequest = (data) => {
-        const errors = [];
-
-        if (!data.orderId) errors.push('orderId is required');
-        if (!data.returnType || !['refund', 'exchange'].includes(data.returnType)) {
-            errors.push('returnType must be refund or exchange');
-        }
-        if (!data.items || !Array.isArray(data.items) || data.items.length === 0) {
-            errors.push('items array is required and must not be empty');
-        }
-
-        return { valid: errors.length === 0, errors };
-    };
-
-    it('should pass for valid return request', () => {
-        const request = {
-            orderId: 'order-1',
-            returnType: 'refund',
-            items: [{ orderLineId: 'line-1', qty: 1 }]
-        };
-        expect(validateReturnRequest(request).valid).toBe(true);
-    });
-
-    it('should fail without orderId', () => {
-        const request = {
-            returnType: 'refund',
-            items: [{ orderLineId: 'line-1', qty: 1 }]
-        };
-        expect(validateReturnRequest(request).valid).toBe(false);
-    });
-
-    it('should fail with empty items array', () => {
-        const request = {
-            orderId: 'order-1',
-            returnType: 'refund',
-            items: []
-        };
-        expect(validateReturnRequest(request).valid).toBe(false);
-    });
-});
-
-describe('Return Request - Item Validation', () => {
-    const validateReturnItem = (item) => {
-        const errors = [];
-        if (!item.orderLineId) errors.push('orderLineId is required');
-        if (!item.qty || item.qty <= 0) errors.push('qty must be positive');
-        if (!item.reasonCode) errors.push('reasonCode is required');
-        return { valid: errors.length === 0, errors };
-    };
-
-    it('should pass for valid return item', () => {
-        const item = { orderLineId: 'line-1', qty: 1, reasonCode: 'SIZE_ISSUE' };
-        expect(validateReturnItem(item).valid).toBe(true);
-    });
-
-    it('should fail without reasonCode', () => {
-        const item = { orderLineId: 'line-1', qty: 1 };
-        expect(validateReturnItem(item).valid).toBe(false);
-    });
-});
-
-// ============================================
-// SECTION 6: SHIPPING DATA VALIDATION
+// SECTION 5: SHIPPING DATA VALIDATION
 // ============================================
 
 describe('Shipping Data - AWB Validation', () => {

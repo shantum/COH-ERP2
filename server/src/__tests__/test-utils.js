@@ -75,15 +75,6 @@ export const mockProductionBatch = (overrides = {}) => ({
     ...overrides
 });
 
-export const mockReturnRequest = (overrides = {}) => ({
-    id: 'return-1',
-    requestNumber: 'RET-001',
-    orderId: 'order-1',
-    returnType: 'refund',
-    status: 'pending',
-    ...overrides
-});
-
 // Shopify webhook payload factories
 export const mockShopifyOrderPayload = (overrides = {}) => ({
     id: 5551234567890,

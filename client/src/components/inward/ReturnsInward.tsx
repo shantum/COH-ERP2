@@ -7,7 +7,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { scanLookup, type ScanLookupResult } from '../../server/functions/returns';
-import { receiveReturnItem } from '../../server/functions/returnsMutations';
+import { receiveLineReturn } from '../../server/functions/returnsMutations';
 import { Search, Check, AlertTriangle, X, RotateCcw } from 'lucide-react';
 import RecentInwardsTable from './RecentInwardsTable';
 import PendingQueuePanel from './PendingQueuePanel';
@@ -20,8 +20,7 @@ interface ReturnsInwardProps {
 
 // Local type for matched return item from scan lookup
 interface MatchedReturnItem {
-    lineId: string;
-    requestId: string;
+    orderLineId: string;
     requestNumber: string;
     reasonCategory?: string | null;
     customerName?: string;
@@ -42,7 +41,7 @@ export default function ReturnsInward({ onSuccess: _onSuccess, onError: _onError
 
     // Server function hooks
     const scanLookupFn = useServerFn(scanLookup);
-    const receiveReturnFn = useServerFn(receiveReturnItem);
+    const receiveReturnFn = useServerFn(receiveLineReturn);
 
     // State
     const [searchInput, setSearchInput] = useState('');
@@ -104,8 +103,7 @@ export default function ReturnsInward({ onSuccess: _onSuccess, onError: _onError
 
             setScanResult(result);
             setMatchedReturn({
-                lineId: returnMatch.data.lineId,
-                requestId: returnMatch.data.requestId || '',
+                orderLineId: returnMatch.data.lineId,
                 requestNumber: returnMatch.data.requestNumber || '',
                 reasonCategory: returnMatch.data.reasonCategory,
                 customerName: returnMatch.data.customerName,
@@ -148,13 +146,12 @@ export default function ReturnsInward({ onSuccess: _onSuccess, onError: _onError
             if (!matchedReturn) throw new Error('No return selected');
             const result = await receiveReturnFn({
                 data: {
-                    requestId: matchedReturn.requestId,
-                    lineId: matchedReturn.lineId,
+                    orderLineId: matchedReturn.orderLineId,
                     condition: selectedCondition as ReturnCondition,
                 },
             });
             if (!result.success) {
-                throw new Error('Failed to receive return');
+                throw new Error(result.error?.message || 'Failed to receive return');
             }
             return result;
         },

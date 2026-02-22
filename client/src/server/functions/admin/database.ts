@@ -233,7 +233,6 @@ export const getTables = createServerFn({ method: 'GET' })
             { model: 'user', displayName: 'User' },
             { model: 'role', displayName: 'Role' },
             { model: 'systemSetting', displayName: 'System Setting' },
-            { model: 'returnRequest', displayName: 'Return Request' },
             { model: 'trim', displayName: 'Trim' },
             { model: 'externalService', displayName: 'External Service' },
             { model: 'supplier', displayName: 'Supplier' },
