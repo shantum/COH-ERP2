@@ -48,16 +48,7 @@ import returnPrimeWebhooks from './routes/returnPrimeWebhooks.js';
 import returnPrimeSync from './routes/returnPrimeSync.js';
 import returnPrimeAdminRoutes from './routes/returnPrimeAdminRoutes.js';
 import resendWebhookRoutes from './routes/resendWebhook.js';
-import { pulseBroadcaster } from './services/pulseBroadcaster.js';
-import scheduledSync from './services/scheduledSync.js';
-import trackingSync from './services/trackingSync.js';
-import cacheProcessor from './services/cacheProcessor.js';
-import cacheDumpWorker from './services/cacheDumpWorker.js';
-import sheetOffloadWorker from './services/sheetOffload/index.js';
-import driveFinanceSync from './services/driveFinanceSync.js';
-import remittanceSync from './services/remittanceSync.js';
-import payuSettlementSync from './services/payuSettlementSync.js';
-import { runAllCleanup } from './utils/cacheCleanup.js';
+import { startAllWorkers } from './services/workerRegistry.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import shutdownCoordinator from './utils/shutdownCoordinator.js';
 
@@ -250,63 +241,9 @@ export async function createExpressApp() {
  * Call this after the server is listening.
  */
 export async function startBackgroundWorkers() {
-  // Auto-archive shipped orders older than 90 days
   await autoArchiveOldOrders(prisma);
-
-  // Backfill customer LTVs if needed
   await backfillLtvsIfNeeded(prisma);
-
-  const disableWorkers = process.env.DISABLE_BACKGROUND_WORKERS === 'true';
-
-  if (disableWorkers) {
-    console.log('⚠️  Background workers disabled (DISABLE_BACKGROUND_WORKERS=true)');
-  } else {
-    scheduledSync.start();
-    trackingSync.start();
-    cacheProcessor.start();
-    cacheDumpWorker.start();
-    sheetOffloadWorker.start();
-    driveFinanceSync.start();
-    remittanceSync.start();
-    payuSettlementSync.start();
-
-    shutdownCoordinator.register('scheduledSync', () => scheduledSync.stop(), 5000);
-    shutdownCoordinator.register('trackingSync', () => trackingSync.stop(), 5000);
-    shutdownCoordinator.register('cacheProcessor', () => cacheProcessor.stop(), 5000);
-    shutdownCoordinator.register('cacheDumpWorker', () => cacheDumpWorker.stop(), 5000);
-    shutdownCoordinator.register('sheetOffloadWorker', () => sheetOffloadWorker.stop(), 5000);
-    shutdownCoordinator.register('driveFinanceSync', () => driveFinanceSync.stop(), 5000);
-    shutdownCoordinator.register('remittanceSync', () => remittanceSync.stop(), 5000);
-    shutdownCoordinator.register('payuSettlementSync', () => payuSettlementSync.stop(), 5000);
-  }
-
-  // Start Pulse broadcaster
-  pulseBroadcaster.start();
-  shutdownCoordinator.register('pulseBroadcaster', async () => {
-    await pulseBroadcaster.shutdown();
-  }, 5000);
-
-  shutdownCoordinator.register('prisma', async () => {
-    await prisma.$disconnect();
-  }, 10000);
-
-  // Cache cleanup scheduler
-  const cacheCleanupInterval = setInterval(async () => {
-    const hour = new Date().getHours();
-    if (hour === 2) {
-      console.log('[CacheCleanup] Running scheduled daily cleanup...');
-      await runAllCleanup();
-    }
-  }, 60 * 60 * 1000);
-
-  setTimeout(() => {
-    console.log('[CacheCleanup] Running startup cleanup...');
-    runAllCleanup().catch(err => console.error('[CacheCleanup] Startup cleanup error:', err));
-  }, 30000);
-
-  shutdownCoordinator.register('cacheCleanup', () => {
-    clearInterval(cacheCleanupInterval);
-  }, 1000);
+  await startAllWorkers();
 }
 
 /**

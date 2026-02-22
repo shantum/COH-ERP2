@@ -52,21 +52,9 @@ import chatRoutes from './routes/chat.js';
 import returnPrimeWebhooks from './routes/returnPrimeWebhooks.js';
 import returnPrimeSync from './routes/returnPrimeSync.js';
 import returnPrimeAdminRoutes from './routes/returnPrimeAdminRoutes.js';
-import driveFinanceSync from './services/driveFinanceSync.js';
-import { pulseBroadcaster } from './services/pulseBroadcaster.js';
-import scheduledSync from './services/scheduledSync.js';
-import trackingSync from './services/trackingSync.js';
-import remittanceSync from './services/remittanceSync.js';
-import payuSettlementSync from './services/payuSettlementSync.js';
-import cacheProcessor from './services/cacheProcessor.js';
-import cacheDumpWorker from './services/cacheDumpWorker.js';
-import sheetOffloadWorker from './services/sheetOffload/index.js';
-import stockSnapshotWorker from './services/stockSnapshotWorker.js';
-import { reconcileSheetOrders, syncSheetOrderStatus, syncSheetAwb } from './services/sheetOrderPush.js';
-import { runAllCleanup } from './utils/cacheCleanup.js';
+import { startAllWorkers, stopAllWorkers } from './services/workerRegistry.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import shutdownCoordinator from './utils/shutdownCoordinator.js';
-import { cleanupStaleRuns, trackWorkerRun } from './utils/workerRunTracker.js';
 
 const app = express();
 
@@ -297,148 +285,8 @@ app.listen(PORT, '0.0.0.0', async () => {
   // Backfill customer LTVs if needed (runs in background)
   await backfillLtvsIfNeeded(prisma);
 
-  // Mark any worker runs left in "running" state from before this boot as failed
-  await cleanupStaleRuns();
-
-  // Background workers can be disabled via environment variable
-  // Useful when running locally while production is also running
-  const disableWorkers = process.env.DISABLE_BACKGROUND_WORKERS === 'true';
-
-  if (disableWorkers) {
-    console.log('⚠️  Background workers disabled (DISABLE_BACKGROUND_WORKERS=true)');
-  } else {
-    // Start hourly Shopify sync scheduler
-    scheduledSync.start();
-
-    // Start tracking sync scheduler (every 4 hours)
-    trackingSync.start();
-
-    // Start background cache processor (processes pending orders every 30s)
-    cacheProcessor.start();
-
-    // Start cache dump worker (auto-resumes incomplete Shopify full dumps)
-    cacheDumpWorker.start();
-
-    // Start sheet offload worker (feature-flagged — only runs if ENABLE_SHEET_OFFLOAD=true)
-    sheetOffloadWorker.start();
-
-    // Start stock snapshot worker (manual trigger only)
-    stockSnapshotWorker.start();
-
-    // Start Drive finance sync (on-demand only, no scheduled interval)
-    driveFinanceSync.start();
-
-    // Start COD remittance sync (every 12 hours, 5 min startup delay)
-    remittanceSync.start();
-
-    // Start PayU settlement sync (every 12 hours, 8 min startup delay)
-    payuSettlementSync.start();
-
-    // Sheet order reconciler — catches orders missed due to crashes/downtime
-    // Runs immediately on startup (with delay), then every 2 min
-    const RECONCILE_INTERVAL_MS = 2 * 60 * 1000;
-    setTimeout(() => {
-      console.log('[SheetReconciler] Running startup reconciliation...');
-      reconcileSheetOrders().catch(() => {});
-    }, 15000); // 15 seconds after startup
-    const reconcileInterval = setInterval(() => {
-      reconcileSheetOrders().catch(() => {}); // errors logged internally
-    }, RECONCILE_INTERVAL_MS);
-
-    // Sheet order status sync — updates status/courier/AWB in sheet from ERP
-    // Runs every 5 min
-    const STATUS_SYNC_INTERVAL_MS = 5 * 60 * 1000;
-    const statusSyncInterval = setInterval(() => {
-      syncSheetOrderStatus().catch(() => {});
-    }, STATUS_SYNC_INTERVAL_MS);
-
-    // Sheet AWB sync — reads AWBs from sheet, validates/links to order lines
-    // Runs every 30 min (ops team enters AWBs periodically)
-    const AWB_SYNC_INTERVAL_MS = 30 * 60 * 1000;
-    const awbSyncInterval = setInterval(() => {
-      trackWorkerRun('sync_sheet_awb', syncSheetAwb, 'scheduled').catch(() => {});
-    }, AWB_SYNC_INTERVAL_MS);
-
-    // Register shutdown handlers for graceful shutdown
-    shutdownCoordinator.register('scheduledSync', () => {
-      scheduledSync.stop();
-    }, 5000);
-
-    shutdownCoordinator.register('trackingSync', () => {
-      trackingSync.stop();
-    }, 5000);
-
-    shutdownCoordinator.register('cacheProcessor', () => {
-      cacheProcessor.stop();
-    }, 5000);
-
-    shutdownCoordinator.register('cacheDumpWorker', () => {
-      cacheDumpWorker.stop();
-    }, 5000);
-
-    shutdownCoordinator.register('sheetOffloadWorker', () => {
-      sheetOffloadWorker.stop();
-    }, 5000);
-
-    shutdownCoordinator.register('stockSnapshotWorker', () => {
-      stockSnapshotWorker.stop();
-    }, 5000);
-
-    shutdownCoordinator.register('driveFinanceSync', () => {
-      driveFinanceSync.stop();
-    }, 5000);
-
-    shutdownCoordinator.register('remittanceSync', () => {
-      remittanceSync.stop();
-    }, 5000);
-
-    shutdownCoordinator.register('payuSettlementSync', () => {
-      payuSettlementSync.stop();
-    }, 5000);
-
-    shutdownCoordinator.register('sheetReconciler', () => {
-      clearInterval(reconcileInterval);
-    }, 1000);
-
-    shutdownCoordinator.register('sheetStatusSync', () => {
-      clearInterval(statusSyncInterval);
-    }, 1000);
-
-    shutdownCoordinator.register('sheetAwbSync', () => {
-      clearInterval(awbSyncInterval);
-    }, 1000);
-  }
-
-  // Start Pulse broadcaster (Postgres NOTIFY → SSE)
-  // Always enabled - required for real-time UI updates
-  pulseBroadcaster.start();
-  shutdownCoordinator.register('pulseBroadcaster', async () => {
-    await pulseBroadcaster.shutdown();
-  }, 5000);
-
-  shutdownCoordinator.register('prisma', async () => {
-    await prisma.$disconnect();
-  }, 10000);
-
-  // Start daily cache cleanup scheduler (runs at 2 AM)
-  const cacheCleanupInterval = setInterval(async () => {
-    const hour = new Date().getHours();
-    if (hour === 2) {
-      console.log('[CacheCleanup] Running scheduled daily cleanup...');
-      await trackWorkerRun('cache_cleanup', runAllCleanup, 'scheduled');
-    }
-  }, 60 * 60 * 1000); // Check every hour
-
-  // Run initial cleanup on startup (in background, don't block)
-  setTimeout(() => {
-    console.log('[CacheCleanup] Running startup cleanup...');
-    trackWorkerRun('cache_cleanup', runAllCleanup, 'startup').catch(err => console.error('[CacheCleanup] Startup cleanup error:', err));
-  }, 30000); // 30 seconds after startup
-
-  // Register cache cleanup shutdown handler
-  shutdownCoordinator.register('cacheCleanup', () => {
-    clearInterval(cacheCleanupInterval);
-  }, 1000);
+  // Start all background workers (includes stale run cleanup, intervals, shutdown registration)
+  await startAllWorkers();
 });
 
 // ============================================
