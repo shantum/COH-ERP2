@@ -12,6 +12,7 @@
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
 import { getISTMidnightAsUTC, getISTMonthStartAsUTC, getISTDayOfMonth, getISTDaysInMonth } from '@coh/shared';
+import { authMiddleware } from '../middleware/auth';
 
 // ============================================
 // RESPONSE TYPES
@@ -171,6 +172,7 @@ async function getDashboardCache() {
  * Uses server-side cache with 60s TTL.
  */
 export const getOrdersAnalytics = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
     .handler(async (): Promise<OrdersAnalyticsResponse> => {
         try {
             // Check cache first
@@ -282,6 +284,7 @@ export const getOrdersAnalytics = createServerFn({ method: 'GET' })
  * Optimized version using Kysely GROUP BY aggregation.
  */
 export const getTopProductsForDashboard = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
     .inputValidator((input: unknown) => getTopProductsInputSchema.parse(input))
     .handler(async ({ data }): Promise<DashboardTopProductsResponse> => {
         try {
@@ -354,6 +357,7 @@ export const getTopProductsForDashboard = createServerFn({ method: 'GET' })
  * Optimized version using Kysely GROUP BY aggregation.
  */
 export const getTopCustomersForDashboard = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
     .inputValidator((input: unknown) => getTopCustomersInputSchema.parse(input))
     .handler(async ({ data }): Promise<DashboardTopCustomersResponse> => {
         try {
@@ -434,6 +438,7 @@ export const getTopCustomersForDashboard = createServerFn({ method: 'GET' })
  * Optimized version using Kysely multi-JOIN aggregation.
  */
 export const getTopMaterials = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
     .inputValidator((input: unknown) => getTopMaterialsInputSchema.parse(input))
     .handler(async ({ data }): Promise<DashboardTopMaterialsResponse> => {
         try {
@@ -531,6 +536,7 @@ export const getTopMaterials = createServerFn({ method: 'GET' })
  * Call this after mutations that affect dashboard metrics.
  */
 export const invalidateDashboardCache = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
     .handler(async () => {
         try {
             const cache = await getDashboardCache();
@@ -564,6 +570,7 @@ export interface WorkerStatusResponse {
  * Get status of all background workers for dashboard display
  */
 export const getWorkerStatuses = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
     .handler(async (): Promise<WorkerStatusResponse> => {
         try {
             const { getInternalApiBaseUrl } = await import('../utils');

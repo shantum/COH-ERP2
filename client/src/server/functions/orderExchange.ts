@@ -7,6 +7,7 @@
 
 import { createServerFn } from '@tanstack/react-start';
 import { getPrisma } from '@coh/shared/services/db';
+import { authMiddleware } from '../middleware/auth';
 import { getOrderForExchangeSchema } from './orderTypes';
 import type { GetOrderForExchangeResult } from './orderTypes';
 
@@ -21,6 +22,7 @@ import type { GetOrderForExchangeResult } from './orderTypes';
  * Returns order with customer info and order lines for reference.
  */
 export const getOrderForExchange = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
     .inputValidator((input: unknown) => getOrderForExchangeSchema.parse(input))
     .handler(async ({ data }): Promise<GetOrderForExchangeResult> => {
         try {

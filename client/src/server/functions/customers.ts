@@ -12,6 +12,7 @@ import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
 import type { Prisma } from '@prisma/client';
 import { getPrisma } from '@coh/shared/services/db';
+import { authMiddleware } from '../middleware/auth';
 
 // Input validation schema
 const customersListInputSchema = z.object({
@@ -63,6 +64,7 @@ export interface CustomersListResponse {
  * Returns paginated items with tier filtering.
  */
 export const getCustomersList = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
     .inputValidator((input: unknown) => customersListInputSchema.parse(input))
     .handler(async ({ data }): Promise<CustomersListResponse> => {
         try {
@@ -168,6 +170,7 @@ const getCustomerInputSchema = z.object({
 export type { CustomerDetailResult } from '@coh/shared/schemas/customers';
 
 export const getCustomer = createServerFn({ method: 'POST' }) // POST to avoid header size limits with large response
+    .middleware([authMiddleware])
     .inputValidator((input: unknown) => getCustomerInputSchema.parse(input))
     .handler(async ({ data }) => {
         const { getCustomerKysely } = await import('@coh/shared/services/db/queries');
@@ -211,6 +214,7 @@ export interface CustomerSearchItem {
  * Returns minimal fields needed for display.
  */
 export const searchCustomers = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
     .inputValidator((input: unknown) => searchCustomersInputSchema.parse(input))
     .handler(async ({ data }): Promise<CustomerSearchItem[]> => {
         const prisma = await getPrisma();
@@ -275,6 +279,7 @@ export interface CustomerAddress {
  * Returns deduplicated addresses sorted by most recent use.
  */
 export const getCustomerAddresses = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
     .inputValidator((input: unknown) => getCustomerAddressesInputSchema.parse(input))
     .handler(async ({ data }): Promise<CustomerAddress[]> => {
         const prisma = await getPrisma();

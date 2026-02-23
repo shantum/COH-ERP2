@@ -942,6 +942,7 @@ interface SkuWithBalance {
  * @deprecated Use getInventoryAll instead for new code
  */
 export const getInventoryList = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
     .inputValidator(
         (input: unknown): z.infer<typeof inventoryListInputSchema> =>
             inventoryListInputSchema.parse(input)

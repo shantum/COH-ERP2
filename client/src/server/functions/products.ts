@@ -205,6 +205,7 @@ interface ProductData {
  * Returns hierarchical tree ready for TanStack Table display.
  */
 export const getProductsTree = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
     .inputValidator((input: unknown) => productsTreeInputSchema.parse(input))
     .handler(async ({ data }): Promise<ProductsTreeResponse> => {
         try {

@@ -10,6 +10,7 @@
 
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
+import { authMiddleware } from '../middleware/auth';
 
 // ============================================
 // INPUT SCHEMAS
@@ -45,6 +46,7 @@ const entityTimelineInputSchema = z.object({
  * Get full order context — customer, lines, payments, shipping, returns
  */
 export const getOrderContextFn = createServerFn({ method: 'GET' })
+  .middleware([authMiddleware])
   .inputValidator((input: unknown) => orderContextInputSchema.parse(input))
   .handler(async ({ data }) => {
     try {
@@ -60,6 +62,7 @@ export const getOrderContextFn = createServerFn({ method: 'GET' })
  * Get full product context — variations, SKUs, stock, sales velocity, return rate
  */
 export const getProductContextFn = createServerFn({ method: 'GET' })
+  .middleware([authMiddleware])
   .inputValidator((input: unknown) => productContextInputSchema.parse(input))
   .handler(async ({ data }) => {
     try {
@@ -75,6 +78,7 @@ export const getProductContextFn = createServerFn({ method: 'GET' })
  * Get full customer context — order history, return behavior, LTV
  */
 export const getCustomerContextFn = createServerFn({ method: 'GET' })
+  .middleware([authMiddleware])
   .inputValidator((input: unknown) => customerContextInputSchema.parse(input))
   .handler(async ({ data }) => {
     try {
@@ -93,6 +97,7 @@ export const getCustomerContextFn = createServerFn({ method: 'GET' })
  * at the server function level if needed.
  */
 export const getBusinessPulseFn = createServerFn({ method: 'GET' })
+  .middleware([authMiddleware])
   .handler(async () => {
     try {
       const { getBusinessPulse } = await import('@coh/shared/services/business');
@@ -107,6 +112,7 @@ export const getBusinessPulseFn = createServerFn({ method: 'GET' })
  * Get recent domain events for activity feed
  */
 export const getRecentEventsFn = createServerFn({ method: 'GET' })
+  .middleware([authMiddleware])
   .inputValidator((input: unknown) => recentEventsInputSchema.parse(input))
   .handler(async ({ data }) => {
     try {
@@ -122,6 +128,7 @@ export const getRecentEventsFn = createServerFn({ method: 'GET' })
  * Get all events for a specific entity (audit timeline)
  */
 export const getEntityTimelineFn = createServerFn({ method: 'GET' })
+  .middleware([authMiddleware])
   .inputValidator((input: unknown) => entityTimelineInputSchema.parse(input))
   .handler(async ({ data }) => {
     try {

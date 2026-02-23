@@ -7,6 +7,7 @@
 
 import { createServerFn } from '@tanstack/react-start';
 import { getPrisma } from '@coh/shared/services/db';
+import { authMiddleware } from '../middleware/auth';
 import { getISTMidnightAsUTC, getISTMonthStartAsUTC, getISTMonthEndAsUTC } from '@coh/shared';
 import type { OrdersAnalyticsResponse, TopProduct } from './orderTypes';
 
@@ -21,6 +22,7 @@ import type { OrdersAnalyticsResponse, TopProduct } from './orderTypes';
  * Includes pipeline counts, revenue data, payment split, and top products.
  */
 export const getOrdersAnalytics = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
     .handler(async (): Promise<OrdersAnalyticsResponse> => {
         try {
             const prisma = await getPrisma();

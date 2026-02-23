@@ -10,6 +10,7 @@
 
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
+import { authMiddleware } from '../middleware/auth';
 
 // ============================================
 // INPUT SCHEMAS
@@ -184,6 +185,7 @@ function paiseToRupees(paise: number | null): number {
  * Get channel summary metrics (revenue, orders, AOV by channel)
  */
 export const getChannelSummary = createServerFn({ method: 'GET' })
+  .middleware([authMiddleware])
   .inputValidator((input: unknown) => getChannelSummaryInputSchema.parse(input))
   .handler(async ({ data }): Promise<ChannelSummary> => {
     const { getKysely } = await import('@coh/shared/services/db');
@@ -251,6 +253,7 @@ export const getChannelSummary = createServerFn({ method: 'GET' })
  * Get time series data for revenue over time by channel
  */
 export const getChannelTimeSeries = createServerFn({ method: 'GET' })
+  .middleware([authMiddleware])
   .inputValidator((input: unknown) => getChannelTimeSeriesInputSchema.parse(input))
   .handler(async ({ data }): Promise<ChannelTimeSeries> => {
     const { getKysely } = await import('@coh/shared/services/db');
@@ -310,6 +313,7 @@ export const getChannelTimeSeries = createServerFn({ method: 'GET' })
  * Get breakdown by status, payment type, channel, or state
  */
 export const getChannelBreakdown = createServerFn({ method: 'GET' })
+  .middleware([authMiddleware])
   .inputValidator((input: unknown) => getChannelBreakdownInputSchema.parse(input))
   .handler(async ({ data }): Promise<ChannelBreakdown> => {
     const { getKysely } = await import('@coh/shared/services/db');
@@ -377,6 +381,7 @@ export const getChannelBreakdown = createServerFn({ method: 'GET' })
  * Get RTO and return analytics
  */
 export const getChannelRTOAnalytics = createServerFn({ method: 'GET' })
+  .middleware([authMiddleware])
   .inputValidator((input: unknown) => channelFilterSchema.parse(input))
   .handler(async ({ data }): Promise<RTOAnalytics> => {
     const { getKysely } = await import('@coh/shared/services/db');
@@ -476,6 +481,7 @@ export const getChannelRTOAnalytics = createServerFn({ method: 'GET' })
  * Get paginated channel order lines
  */
 export const getChannelOrders = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
   .inputValidator((input: unknown) => getChannelOrdersInputSchema.parse(input))
   .handler(async ({ data }): Promise<ChannelOrdersResponse> => {
     const { getKysely } = await import('@coh/shared/services/db');
@@ -636,6 +642,7 @@ export const getChannelOrders = createServerFn({ method: 'POST' })
  * Get import batch history
  */
 export const getImportHistory = createServerFn({ method: 'GET' })
+  .middleware([authMiddleware])
   .handler(async (): Promise<ImportBatch[]> => {
     const { getKysely } = await import('@coh/shared/services/db');
     const db = await getKysely();
@@ -676,6 +683,7 @@ export const getImportHistory = createServerFn({ method: 'GET' })
  * Get unique values for filters (channels, statuses, states)
  */
 export const getChannelFilterOptions = createServerFn({ method: 'GET' })
+  .middleware([authMiddleware])
   .handler(async () => {
     const { getKysely } = await import('@coh/shared/services/db');
     const db = await getKysely();
@@ -721,6 +729,7 @@ export const getChannelFilterOptions = createServerFn({ method: 'GET' })
  * Get top products from channel data (grouped by product variation)
  */
 export const getChannelTopProducts = createServerFn({ method: 'GET' })
+  .middleware([authMiddleware])
   .inputValidator((input: unknown) =>
     channelFilterSchema.extend({
       limit: z.number().int().positive().default(10),
@@ -817,6 +826,7 @@ export const getChannelTopProducts = createServerFn({ method: 'GET' })
  * Get top states from channel data
  */
 export const getChannelTopStates = createServerFn({ method: 'GET' })
+  .middleware([authMiddleware])
   .inputValidator((input: unknown) =>
     channelFilterSchema.extend({ limit: z.number().int().positive().default(10) }).parse(input)
   )

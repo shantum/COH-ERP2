@@ -11,6 +11,7 @@
 import { createServerFn } from '@tanstack/react-start';
 import type { Prisma } from '@prisma/client';
 import { getPrisma } from '@coh/shared/services/db';
+import { authMiddleware } from '../middleware/auth';
 
 // Re-export types and schemas from orderTypes.ts for backward compatibility
 export type {
@@ -569,6 +570,7 @@ function flattenOrdersToRows(orders: PrismaOrder[]): FlattenedOrderRow[] {
  * Returns flattened rows ready for AG-Grid display.
  */
 export const getOrders = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
     .inputValidator((input: unknown) => ordersListInputSchema.parse(input))
     .handler(async ({ data }): Promise<OrdersResponse> => {
         try {
@@ -700,6 +702,7 @@ export const getOrders = createServerFn({ method: 'GET' })
  * Uses parallel count queries for performance.
  */
 export const getOrderViewCounts = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
     .handler(async (): Promise<OrderViewCounts> => {
         try {
             const prisma = await getPrisma();
@@ -788,6 +791,7 @@ function getTabDisplayName(tab: string): string {
  * and returns results grouped by tab.
  */
 export const searchAllOrders = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
     .inputValidator((input: unknown) => searchAllInputSchema.parse(input))
     .handler(async ({ data }): Promise<SearchAllResponse> => {
         try {
@@ -981,6 +985,7 @@ export const searchAllOrders = createServerFn({ method: 'GET' })
  * Searches across all order statuses (open, shipped, cancelled).
  */
 export const searchUnifiedOrders = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
     .inputValidator((input: unknown) => searchUnifiedInputSchema.parse(input))
     .handler(async ({ data }): Promise<SearchUnifiedResponse> => {
         try {
@@ -1097,6 +1102,7 @@ export const searchUnifiedOrders = createServerFn({ method: 'GET' })
 // ============================================
 
 export const getOrderById = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
     .inputValidator((input: unknown) => getOrderByIdInputSchema.parse(input))
     .handler(async ({ data }): Promise<OrderDetail> => {
         try {

@@ -13,6 +13,7 @@
 import { createServerFn } from '@tanstack/react-start';
 import { getCookie } from '@tanstack/react-start/server';
 import { z } from 'zod';
+import { authMiddleware } from '../middleware/auth';
 import type { Prisma } from '@prisma/client';
 import { getPrisma } from '@coh/shared/services/db';
 import type {
@@ -209,6 +210,7 @@ async function fetchDashboardData(
  * Fetch Return Prime dashboard data from local database
  */
 export const getReturnPrimeDashboard = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
     .inputValidator((input: unknown) => ReturnPrimeFiltersSchema.parse(input))
     .handler(async ({ data: filters }): Promise<ReturnPrimeDashboardData> => {
         try {
@@ -224,6 +226,7 @@ export const getReturnPrimeDashboard = createServerFn({ method: 'POST' })
  * Fetch a single Return Prime request by ID from local database
  */
 export const getReturnPrimeRequest = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
     .inputValidator((input: unknown) => ReturnPrimeRequestIdSchema.parse(input))
     .handler(async ({ data }): Promise<ReturnPrimeRequest | null> => {
         const prisma = await getPrisma();
@@ -249,6 +252,7 @@ export const getReturnPrimeRequest = createServerFn({ method: 'POST' })
  * Get analytics data computed from local database
  */
 export const getReturnPrimeAnalytics = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
     .inputValidator((input: unknown) => ReturnPrimeFiltersSchema.parse(input))
     .handler(async ({ data: filters }) => {
         try {
@@ -323,7 +327,9 @@ export const getReturnPrimeAnalytics = createServerFn({ method: 'POST' })
 /**
  * Get sync status from local database
  */
-export const getReturnPrimeSyncStatus = createServerFn({ method: 'POST' }).handler(async () => {
+export const getReturnPrimeSyncStatus = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .handler(async () => {
     const prisma = await getPrisma();
 
     try {
@@ -359,8 +365,9 @@ export const getReturnPrimeSyncStatus = createServerFn({ method: 'POST' }).handl
 /**
  * Trigger a manual Return Prime inbound sync via the Express admin route.
  */
-export const triggerReturnPrimeSync = createServerFn({ method: 'POST' }).handler(
-    async (): Promise<{ success: boolean; message: string }> => {
+export const triggerReturnPrimeSync = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .handler(async (): Promise<{ success: boolean; message: string }> => {
         const port = process.env.PORT || '3001';
         const apiUrl =
             process.env.NODE_ENV === 'production'
