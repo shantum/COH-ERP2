@@ -1526,6 +1526,8 @@ function AttendanceTab() {
 // ATTENDANCE IMPORT DIALOG (Preview + Confirm)
 // ============================================
 
+const API_BASE = import.meta.env.PROD ? '/api' : 'http://localhost:3001/api';
+
 interface PreviewResult {
   previewId: string;
   period: string;
@@ -1586,7 +1588,7 @@ function AttendanceImportDialog({
       formData.append('month', String(month));
       formData.append('year', String(year));
 
-      const res = await fetch('/api/attendance-import/preview', {
+      const res = await fetch(`${API_BASE}/attendance-import/preview`, {
         method: 'POST',
         credentials: 'include',
         body: formData,
@@ -1614,7 +1616,7 @@ function AttendanceImportDialog({
     setError('');
 
     try {
-      const res = await fetch('/api/attendance-import/confirm', {
+      const res = await fetch(`${API_BASE}/attendance-import/confirm`, {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },

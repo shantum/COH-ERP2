@@ -2,21 +2,26 @@
  * Fingerprint Attendance XLSX Parser
  *
  * Parses monthly attendance reports from biometric fingerprint machines.
- * The XLSX format has 12-row blocks per employee:
- *   Row 1: Employee header (code, name, department, designation, DOJ)
- *   Row 2: Header row for "Status" per day
- *   Row 3: Status values (P/A/WO etc.)
- *   Row 4: Header for "Shift"
- *   Row 5: Shift values (GS etc.)
- *   Row 6: Header for "In Time"
- *   Row 7: In time values (HH:MM)
- *   Row 8: Header for "Out Time"
- *   Row 9: Out time values (HH:MM)
- *   Row 10: Header for "Late By" / "Early By" / "OT" / "Duration" / "Work Dur."
- *   Row 11: Corresponding values
- *   Row 12: Blank separator row
  *
- * Days are columns: 1, 2, 3, ... 31
+ * Actual XLSX structure (12-row blocks per employee):
+ *   Row 0: "EmployeeCode" in col 0, code in col 7, "EmployeeName" in col 14, name in col 19
+ *   Row 1: Day headers "1-Sun", "2-Mon", ... starting at col 1
+ *   Row 2: Summary text (Total Present - X Total Absent - Y ...)
+ *   Row 3: "Shift" + values per day
+ *   Row 4: "In Time" + values per day
+ *   Row 5: "Out Time" + values per day
+ *   Row 6: "Late By" + values per day
+ *   Row 7: "Early By" + values per day
+ *   Row 8: "Total OT" + values per day
+ *   Row 9: "T Duration" + values per day
+ *   Row 10: "Status" + values per day (P/A/WO etc.)
+ *   Row 11: blank separator
+ *
+ * First 3 rows of the file are:
+ *   Row 0: blank
+ *   Row 1: title "Monthly Detailed Attendance Report(...)"
+ *   Row 2: period "01-Feb-2026 to 22-Feb-2026"
+ *   Row 3+: employee blocks
  */
 
 import XLSX from 'xlsx';
@@ -46,7 +51,7 @@ export interface EmployeeBlock {
 }
 
 export interface ParsedAttendanceReport {
-  period: string;         // e.g. "Jan 2026"
+  period: string;         // e.g. "01-Feb-2026 to 22-Feb-2026"
   daysInMonth: number;
   employees: EmployeeBlock[];
 }
@@ -70,7 +75,6 @@ function parseTime(val: unknown): string | null {
   if (val == null) return null;
   const s = String(val).trim();
   if (!s || s === '00:00' || s === '0:00') return null;
-  // Validate HH:MM format
   if (/^\d{1,2}:\d{2}$/.test(s)) return s;
   return null;
 }
@@ -90,79 +94,73 @@ export function parseAttendanceXlsx(filePath: string): ParsedAttendanceReport {
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
   if (!sheet) throw new Error('No sheets found in workbook');
 
-  // Convert to array of arrays (raw cell values)
   const rows: unknown[][] = XLSX.utils.sheet_to_json(sheet, {
     header: 1,
     raw: true,
     defval: null,
   });
 
-  if (rows.length < 3) {
+  if (rows.length < 5) {
     throw new Error('File has too few rows to be a valid attendance report');
   }
 
-  // Try to detect the period from the first few rows
+  // Detect period from row 2 (e.g. "01-Feb-2026 to 22-Feb-2026")
   let period = '';
-  let daysInMonth = 31;
-
-  // Find the header row that says "Employee Code" or similar
-  // and detect the date range from column headers
-  const employees: EmployeeBlock[] = [];
+  for (let i = 0; i < Math.min(5, rows.length); i++) {
+    const row = rows[i];
+    if (!row) continue;
+    const first = cellStr(row[0]);
+    if (first.match(/^\d{2}-\w{3}-\d{4}\s+to\s+\d{2}-\w{3}-\d{4}$/i)) {
+      period = first;
+      break;
+    }
+  }
 
   // Scan for employee blocks
+  const employees: EmployeeBlock[] = [];
+  let maxDay = 0;
   let i = 0;
+
   while (i < rows.length) {
     const row = rows[i];
     if (!row) { i++; continue; }
 
-    // Detect employee header row: contains "Employee Code" or starts with an employee code pattern
     const firstCell = cellStr(row[0]);
 
-    // Look for rows that start with a code like "E001" or numeric employee codes
-    // The fingerprint report typically has the employee code in column 0 of the header row
-    // and columns 1..31 are the day numbers
-
-    // Detect the "Status" label row — it usually comes right after the employee header
-    if (firstCell.toLowerCase().includes('status') ||
-        firstCell.toLowerCase().includes('employee code') ||
-        firstCell.toLowerCase() === 'date') {
-      // This is a section header row, skip
-      i++;
-      continue;
-    }
-
-    // Try to detect period from a "Month Year" header row
-    if (!period && firstCell.match(/^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i)) {
-      period = firstCell;
-      i++;
-      continue;
-    }
-
-    // Look for employee blocks: the pattern is usually:
-    // Row with employee code/name, followed by rows with day data
-    // Let's use a more robust approach - find rows that have day-column data
-
-    // Alternative approach: look for the standard fingerprint report structure
-    // which has a clearly labeled header section
-
-    // Let me try parsing by looking for rows where column pattern matches
-    // status codes (P, A, WO, etc.) in columns 1-31
-    const block = tryParseEmployeeBlock(rows, i);
-    if (block) {
-      employees.push(block.employee);
-      i = block.nextRow;
-
-      // Detect days in month from the block
-      if (block.employee.days.length > 0) {
-        daysInMonth = Math.max(daysInMonth, Math.max(...block.employee.days.map(d => d.day)));
+    // Detect employee header: col 0 starts with "EmployeeCode"
+    if (firstCell.toLowerCase().startsWith('employeecode')) {
+      const block = parseEmployeeBlock(rows, i);
+      if (block) {
+        employees.push(block.employee);
+        if (block.employee.days.length > 0) {
+          maxDay = Math.max(maxDay, ...block.employee.days.map(d => d.day));
+        }
+        i = block.nextRow;
+        continue;
       }
-      continue;
     }
 
     i++;
   }
 
-  // If we haven't found the period, try to derive from file or set unknown
+  // Determine days in month from the data or period string
+  let daysInMonth = maxDay || 31;
+  if (period) {
+    // Try to extract month/year from period to calculate actual days
+    const match = period.match(/(\d{2})-(\w{3})-(\d{4})$/);
+    if (match) {
+      const monthNames: Record<string, number> = {
+        jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6,
+        jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
+      };
+      const m = monthNames[match[2].toLowerCase()];
+      const y = parseInt(match[3], 10);
+      if (m && y) {
+        daysInMonth = new Date(y, m, 0).getDate();
+      }
+    }
+  }
+
   if (!period) period = 'Unknown';
 
   return { period, daysInMonth, employees };
@@ -173,58 +171,63 @@ interface BlockResult {
   nextRow: number;
 }
 
-function tryParseEmployeeBlock(rows: unknown[][], startIdx: number): BlockResult | null {
-  // Fingerprint reports typically have this layout for each employee:
-  //
-  // Row A: [EmpCode] [EmpName] [Dept] [Desig] [DOJ] ...
-  // Row B: [Status] [P] [WO] [P] [A] [P] ... (status per day)
-  // Row C: [Shift]  [GS] [GS] [GS] ... (shift per day)
-  // Row D: [In Time] [09:00] [09:00] ...
-  // Row E: [Out Time] [18:00] [18:00] ...
-  // Row F: [Late By] [00:00] [00:10] ...
-  // Row G: [Early By] [00:00] [00:05] ...
-  // Row H: [OT] / [Overtime] [00:00] ...
-  // Row I: [Duration] / [Work Dur.] [09:00] ...
-  // Row J: blank separator
+function parseEmployeeBlock(rows: unknown[][], startIdx: number): BlockResult | null {
+  // Row layout within a block (12 rows):
+  //   startIdx + 0: EmployeeCode header (code in col 7, name in col 19)
+  //   startIdx + 1: Day headers (1-Sun, 2-Mon, ...)
+  //   startIdx + 2: Summary text
+  //   startIdx + 3: Shift
+  //   startIdx + 4: In Time
+  //   startIdx + 5: Out Time
+  //   startIdx + 6: Late By
+  //   startIdx + 7: Early By
+  //   startIdx + 8: Total OT
+  //   startIdx + 9: T Duration
+  //   startIdx + 10: Status
+  //   startIdx + 11: blank separator
 
-  // Look for a row that has an employee code/name pattern
-  // and the next row contains status codes
-
-  if (startIdx + 1 >= rows.length) return null;
+  if (startIdx + 10 >= rows.length) return null;
 
   const headerRow = rows[startIdx];
-  if (!headerRow || !headerRow[0]) return null;
+  if (!headerRow) return null;
 
-  const headerFirstCell = cellStr(headerRow[0]);
+  // Extract employee code and name
+  // Code is in col 7, name is in col 19 (based on actual file inspection)
+  // But these positions might vary — scan for the values
+  let employeeCode = '';
+  let name = '';
 
-  // Skip known label rows
-  if (['status', 'shift', 'in time', 'out time', 'late by', 'early by',
-       'overtime', 'ot', 'duration', 'work dur.', 'work dur', 'date',
-       'employee code', 'sl no', 'sl.no', 's.no'].some(
-    label => headerFirstCell.toLowerCase() === label ||
-             headerFirstCell.toLowerCase().startsWith(label)
-  )) {
-    return null;
+  // The header row has: "EmployeeCode" at col 0, code value nearby,
+  // "EmployeeName" at col 14, name value nearby
+  // Scan the row for the pattern
+  for (let c = 0; c < headerRow.length; c++) {
+    const val = cellStr(headerRow[c]);
+    if (val.toLowerCase().startsWith('employeecode')) {
+      // Code should be in a nearby column (within next 10 cols)
+      for (let k = c + 1; k < Math.min(c + 12, headerRow.length); k++) {
+        const v = cellStr(headerRow[k]);
+        if (v && !v.toLowerCase().startsWith('employee')) {
+          employeeCode = v;
+          break;
+        }
+      }
+    }
+    if (val.toLowerCase().startsWith('employeename')) {
+      // Name should be in a nearby column
+      for (let k = c + 1; k < Math.min(c + 12, headerRow.length); k++) {
+        const v = cellStr(headerRow[k]);
+        if (v && !v.toLowerCase().startsWith('employee')) {
+          name = v;
+          break;
+        }
+      }
+    }
   }
 
-  // This might be an employee row. Check if following rows have recognizable patterns.
-  // Employee code is typically in the first cell
+  if (!employeeCode) return null;
+  if (!name) name = employeeCode;
 
-  // Try to find status row (could be same row or next row)
-  // In some formats, the employee header and status are on separate rows
-  // In others, the employee info is in the first few columns and days start from a column offset
-
-  // Let's handle the common format where:
-  // Row 0: Employee info line
-  // Row 1: Status values for days 1-31
-
-  // First, detect column layout by finding day numbers (1, 2, 3, ...) in a header row
-  // This requires scanning backwards for a day-number header row
-
-  // Common alternative: employee code is in col 0, name in col 1,
-  // and days start from col 2 or later
-
-  // Let's try a robust approach: look for a row containing mostly P/A/WO values
+  // Find labeled rows by scanning from startIdx+2 to startIdx+12
   let statusRowIdx = -1;
   let shiftRowIdx = -1;
   let inTimeRowIdx = -1;
@@ -234,8 +237,7 @@ function tryParseEmployeeBlock(rows: unknown[][], startIdx: number): BlockResult
   let otRowIdx = -1;
   let durationRowIdx = -1;
 
-  // Scan from startIdx up to startIdx+12 for labeled rows
-  for (let j = startIdx; j < Math.min(startIdx + 14, rows.length); j++) {
+  for (let j = startIdx + 2; j < Math.min(startIdx + 14, rows.length); j++) {
     const row = rows[j];
     if (!row) continue;
     const label = cellStr(row[0]).toLowerCase();
@@ -246,42 +248,38 @@ function tryParseEmployeeBlock(rows: unknown[][], startIdx: number): BlockResult
     else if (label === 'out time' || label === 'outtime' || label === 'out-time') outTimeRowIdx = j;
     else if (label === 'late by' || label === 'lateby' || label === 'late-by') lateByRowIdx = j;
     else if (label === 'early by' || label === 'earlyby' || label === 'early-by') earlyByRowIdx = j;
-    else if (label === 'ot' || label === 'overtime' || label === 'over time') otRowIdx = j;
-    else if (label === 'duration' || label === 'work dur.' || label === 'work dur' || label === 'tot dur' || label === 'tot. dur') durationRowIdx = j;
+    else if (label === 'total ot' || label === 'ot' || label === 'overtime' || label === 'over time') otRowIdx = j;
+    else if (label === 't duration' || label === 'duration' || label === 'work dur.' || label === 'work dur' || label === 'tot dur' || label === 'tot. dur') durationRowIdx = j;
   }
 
-  // If we can't find a status row, this isn't a valid employee block
   if (statusRowIdx < 0) return null;
 
-  // The employee info is in the rows between startIdx and statusRowIdx
-  // Parse employee code and name from the header row
-  let employeeCode = '';
-  let name = '';
-  let department: string | null = null;
-  let designation: string | null = null;
+  // Determine day column mapping from the day header row (startIdx + 1)
+  // Format: "1-Sun", "2-Mon", etc. starting at col 1
+  const dayHeaderRow = rows[startIdx + 1];
+  const dayColMap: { col: number; day: number }[] = [];
 
-  // Employee info could be in header row cells
-  const empRow = rows[startIdx];
-  if (empRow) {
-    // Common layout: [Code] [Name] or [Code: E001, Name: John Smith, ...]
-    employeeCode = cellStr(empRow[0]);
-    name = cellStr(empRow[1]) || employeeCode;
-
-    // Sometimes code and name are combined
-    const codeMatch = employeeCode.match(/^([A-Z]?\d+)\s*[-:]\s*(.+)$/i);
-    if (codeMatch) {
-      employeeCode = codeMatch[1];
-      name = codeMatch[2];
+  if (dayHeaderRow) {
+    for (let c = 1; c < dayHeaderRow.length; c++) {
+      const val = cellStr(dayHeaderRow[c]);
+      const dayMatch = val.match(/^(\d{1,2})-/);
+      if (dayMatch) {
+        dayColMap.push({ col: c, day: parseInt(dayMatch[1], 10) });
+      }
     }
-
-    if (empRow.length > 2) department = cellStr(empRow[2]) || null;
-    if (empRow.length > 3) designation = cellStr(empRow[3]) || null;
   }
 
-  if (!employeeCode) return null;
+  // Fallback: if no day headers found, assume col 1 = day 1
+  if (dayColMap.length === 0) {
+    const statusRow = rows[statusRowIdx];
+    if (statusRow) {
+      for (let c = 1; c < statusRow.length; c++) {
+        dayColMap.push({ col: c, day: c });
+      }
+    }
+  }
 
-  // Parse day data from the labeled rows
-  // Day columns typically start at column 1 (col 0 is the label)
+  // Parse day records
   const statusRow = rows[statusRowIdx];
   const shiftRow = shiftRowIdx >= 0 ? rows[shiftRowIdx] : null;
   const inTimeRow = inTimeRowIdx >= 0 ? rows[inTimeRowIdx] : null;
@@ -293,54 +291,48 @@ function tryParseEmployeeBlock(rows: unknown[][], startIdx: number): BlockResult
 
   const days: DayRecord[] = [];
 
-  // Determine column offset (where day 1 starts)
-  // Usually column 1, but could vary
-  const colOffset = 1;
+  for (const { col, day } of dayColMap) {
+    if (day > 31) break;
 
-  if (statusRow) {
-    for (let col = colOffset; col < statusRow.length; col++) {
-      const day = col - colOffset + 1;
-      if (day > 31) break;
+    const status = statusRow ? cellStr(statusRow[col]).toUpperCase() : '';
+    if (!status) continue;
 
-      const status = cellStr(statusRow[col]).toUpperCase();
-      if (!status) continue; // Skip empty columns
+    // Only include recognizable status codes (allow short unknown codes too)
+    if (status.length > 5) continue;
 
-      // Only include if it's a recognizable status
-      if (!['P', 'A', 'WO', 'WOP', 'HD', 'L', 'PL', 'CL', 'SL', 'ML', 'OD', 'CO'].includes(status)) {
-        // Might be an unrecognized code — still include it
-        if (status.length > 5) continue; // Too long, probably not a status
-      }
-
-      days.push({
-        day,
-        status,
-        shift: shiftRow ? cellStr(shiftRow[col]) || null : null,
-        inTime: inTimeRow ? parseTime(inTimeRow[col]) : null,
-        outTime: outTimeRow ? parseTime(outTimeRow[col]) : null,
-        lateByMins: lateByRow ? timeToMins(lateByRow[col]) : 0,
-        earlyByMins: earlyByRow ? timeToMins(earlyByRow[col]) : 0,
-        overtimeMins: otRow ? timeToMins(otRow[col]) : 0,
-        durationMins: durationRow ? timeToMins(durationRow[col]) : 0,
-      });
-    }
+    days.push({
+      day,
+      status,
+      shift: shiftRow ? cellStr(shiftRow[col]) || null : null,
+      inTime: inTimeRow ? parseTime(inTimeRow[col]) : null,
+      outTime: outTimeRow ? parseTime(outTimeRow[col]) : null,
+      lateByMins: lateByRow ? timeToMins(lateByRow[col]) : 0,
+      earlyByMins: earlyByRow ? timeToMins(earlyByRow[col]) : 0,
+      overtimeMins: otRow ? timeToMins(otRow[col]) : 0,
+      durationMins: durationRow ? timeToMins(durationRow[col]) : 0,
+    });
   }
 
   if (days.length === 0) return null;
 
-  // Determine the next row after this block
+  // Next row: skip past the block (12 rows typical) + any blank rows
   const maxRow = Math.max(
     statusRowIdx, shiftRowIdx, inTimeRowIdx, outTimeRowIdx,
     lateByRowIdx, earlyByRowIdx, otRowIdx, durationRowIdx
   );
 
-  // Skip 1-2 blank rows after the block
   let nextRow = maxRow + 1;
-  while (nextRow < rows.length && (!rows[nextRow] || rows[nextRow].every(c => !c || cellStr(c) === ''))) {
-    nextRow++;
+  while (nextRow < rows.length) {
+    const row = rows[nextRow];
+    if (!row || row.every(c => c == null || cellStr(c) === '')) {
+      nextRow++;
+    } else {
+      break;
+    }
   }
 
   return {
-    employee: { employeeCode, name, department, designation, days },
+    employee: { employeeCode, name, department: null, designation: null, days },
     nextRow,
   };
 }
