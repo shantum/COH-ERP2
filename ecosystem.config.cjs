@@ -1,7 +1,7 @@
 module.exports = {
   apps: [{
     name: 'coh-erp',
-    script: 'server/src/index.js',
+    script: 'server/src/production.js',
     interpreter: 'tsx',
     cwd: '/app/COH-ERP2',
     env: {

@@ -268,93 +268,52 @@ app.get('/api/health/production', async (req, res) => {
   res.json(metrics);
 });
 
-// Serve static files from client build in production
-if (process.env.NODE_ENV === 'production') {
-  const clientBuildPath = path.join(__dirname, '../../client/dist');
-  app.use(express.static(clientBuildPath));
-
-  // Handle client-side routing - serve index.html for non-API routes
-  app.get('*', (req, res) => {
-    if (!req.path.startsWith('/api')) {
-      res.sendFile(path.join(clientBuildPath, 'index.html'));
-    }
-  });
-}
-
 // Centralized error handling middleware
 // Handles custom errors (ValidationError, NotFoundError, etc.), Prisma errors, and Zod errors
 app.use(errorHandler);
 
+// Export for production.js (unified server)
+export { app, autoArchiveOldOrders, backfillLtvsIfNeeded, startAllWorkers };
+
 const PORT = process.env.PORT || 3001;
 
-// Bind to 0.0.0.0 for Docker/production compatibility
-app.listen(PORT, '0.0.0.0', async () => {
-  console.log(`🚀 COH ERP Server running on port ${PORT}`);
+// Only auto-listen when run directly (dev mode), not when imported by production.js
+const isDirectRun = process.argv[1]?.replace(/\.ts$/, '.js').endsWith('index.js');
+if (isDirectRun) {
+  app.listen(PORT, '0.0.0.0', async () => {
+    console.log(`🚀 COH ERP Server running on port ${PORT}`);
+    await autoArchiveOldOrders(prisma);
+    await backfillLtvsIfNeeded(prisma);
+    await startAllWorkers();
+  });
+}
 
-  // Auto-archive shipped orders older than 90 days on startup
-  await autoArchiveOldOrders(prisma);
+// Global error handlers + shutdown — only when run directly (production.js has its own)
+if (isDirectRun) {
+  process.on('uncaughtException', (error) => {
+    logger.fatal({ type: 'UncaughtException', message: error.message, stack: error.stack },
+      `Uncaught exception: ${error.message}`);
+    setTimeout(() => process.exit(1), 1000);
+  });
 
-  // Backfill customer LTVs if needed (runs in background)
-  await backfillLtvsIfNeeded(prisma);
+  process.on('unhandledRejection', (reason) => {
+    logger.error({ type: 'UnhandledRejection',
+      reason: reason instanceof Error ? { message: reason.message, stack: reason.stack } : reason },
+      `Unhandled promise rejection: ${reason}`);
+  });
 
-  // Start all background workers (includes stale run cleanup, intervals, shutdown registration)
-  await startAllWorkers();
-});
+  process.on('SIGTERM', async () => {
+    logger.info('SIGTERM received, shutting down gracefully...');
+    await shutdownCoordinator.shutdown();
+    logger.info('Server shut down complete');
+    process.exit(0);
+  });
 
-// ============================================
-// GLOBAL ERROR HANDLERS
-// ============================================
-
-// Handle uncaught exceptions
-process.on('uncaughtException', (error) => {
-  logger.fatal({
-    type: 'UncaughtException',
-    name: error.name,
-    message: error.message,
-    stack: error.stack,
-  }, `Uncaught exception: ${error.message}`);
-
-  // Give logger time to flush, then exit
-  setTimeout(() => {
-    process.exit(1);
-  }, 1000);
-});
-
-// Handle unhandled promise rejections
-process.on('unhandledRejection', (reason, promise) => {
-  logger.error({
-    type: 'UnhandledRejection',
-    reason: reason instanceof Error ? {
-      name: reason.name,
-      message: reason.message,
-      stack: reason.stack,
-    } : reason,
-    promise: promise.toString(),
-  }, `Unhandled promise rejection: ${reason}`);
-});
-
-// Handle process warnings
-process.on('warning', (warning) => {
-  logger.warn({
-    type: 'ProcessWarning',
-    name: warning.name,
-    message: warning.message,
-    stack: warning.stack,
-  }, `Process warning: ${warning.message}`);
-});
-
-// Graceful shutdown using coordinator
-process.on('SIGTERM', async () => {
-  logger.info('SIGTERM received, shutting down gracefully...');
-  await shutdownCoordinator.shutdown();
-  logger.info('Server shut down complete');
-  process.exit(0);
-});
-
-process.on('SIGINT', async () => {
-  logger.info('SIGINT received, shutting down gracefully...');
-  await shutdownCoordinator.shutdown();
-  logger.info('Server shut down complete');
-  process.exit(0);
-});
+  process.on('SIGINT', async () => {
+    logger.info('SIGINT received, shutting down gracefully...');
+    await shutdownCoordinator.shutdown();
+    logger.info('Server shut down complete');
+    process.exit(0);
+  });
+}
 
