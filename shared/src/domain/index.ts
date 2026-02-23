@@ -13,3 +13,4 @@ export * from './inventory/index.js';
 export * from './materials/index.js';
 export * from './orders/index.js';
 export * from './returns/index.js';
+export * from './payroll/index.js';

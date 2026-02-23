@@ -126,8 +126,6 @@ export const ListPayrollRunsInput = z.object({
 // DISPLAY CONSTANTS (shared between client + server)
 // ============================================
 
-export const DEPARTMENTS = ['production', 'office'] as const;
-
 export const DEPARTMENT_LABELS: Record<string, string> = {
   production: 'Production',
   office: 'Office',
@@ -192,8 +190,6 @@ export const LEAVE_SOURCES = ['manual', 'fingerprint_import'] as const;
 // ============================================
 // PAYROLL RUN SCHEMAS
 // ============================================
-
-export const PAYROLL_STATUSES = ['draft', 'confirmed', 'cancelled'] as const;
 
 export const PAYROLL_STATUS_LABELS: Record<string, string> = {
   draft: 'Draft',
