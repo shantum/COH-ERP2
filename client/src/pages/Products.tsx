@@ -29,6 +29,10 @@ export default function Products() {
         });
     }, [navigate]);
 
+    const handleAddProduct = useCallback(() => {
+        navigate({ to: '/products/new' });
+    }, [navigate]);
+
     return (
         <div className="flex flex-col h-[calc(100vh-4rem)]">
             {/* Main Content */}
@@ -39,6 +43,7 @@ export default function Products() {
                         onSearchChange={setSearchQuery}
                         onViewProduct={handleEditBom}
                         onEditBom={handleEditBom}
+                        onAddProduct={handleAddProduct}
                         initialData={loaderData?.productsTree}
                     />
                 </div>

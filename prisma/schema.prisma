@@ -111,7 +111,9 @@ model Product {
   // NOTE: fabricTypeId removed - fabric info comes from variation BOM lines
   baseProductionTimeMins   Int         @default(60)
   defaultFabricConsumption Float?
+  description              String?
   imageUrl                 String?
+  status                   String      @default("draft") // draft | active | archived
   isActive                 Boolean     @default(true)
   isReturnable             Boolean     @default(true)
   nonReturnableReason      String?     // 'sale_item', 'hygiene', 'custom_made', etc.

@@ -954,7 +954,9 @@ export type Product = {
     gender: Generated<string>;
     baseProductionTimeMins: Generated<number>;
     defaultFabricConsumption: number | null;
+    description: string | null;
     imageUrl: string | null;
+    status: Generated<string>;
     isActive: Generated<boolean>;
     isReturnable: Generated<boolean>;
     nonReturnableReason: string | null;

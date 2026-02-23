@@ -42,6 +42,7 @@ export interface ProductNode {
     type: 'product';
     name: string;
     isActive: boolean;
+    status?: string;
     styleCode?: string;
     category: string;
     gender?: string;
@@ -470,6 +471,7 @@ export const getProductsTree = createServerFn({ method: 'GET' })
                     type: 'product' as const,
                     name: product.name,
                     isActive: product.isActive,
+                    status: product.status ?? 'active',
                     styleCode: product.styleCode ?? undefined,
                     category: product.category || '',
                     gender: product.gender ?? undefined,

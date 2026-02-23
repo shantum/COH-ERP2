@@ -533,3 +533,125 @@ export const importStyleCodes = createServerFn({ method: 'POST' })
             return { success: false as const, error: { message }, updated: 0, notFound: 0, duplicates: 0, errors: 0 };
         }
     });
+
+// ============================================
+// CREATE PRODUCT DRAFT (Product + Variations + SKUs)
+// ============================================
+
+export interface CreateProductDraftResult {
+    productId: string;
+    productName: string;
+    variationCount: number;
+    skuCount: number;
+    skuCodes: string[];
+}
+
+const createProductDraftSchema = z.object({
+    name: z.string().min(1, 'Product name is required').trim(),
+    description: z.string().optional(),
+    category: z.string().min(1, 'Category is required'),
+    productType: z.string().min(1, 'Product type is required'),
+    gender: z.string().min(1),
+    mrp: z.number().positive('MRP must be greater than 0'),
+    defaultFabricConsumption: z.number().positive().optional(),
+    hsnCode: z.string().optional(),
+    sizes: z.array(z.string().min(1)).min(1, 'At least one size is required'),
+    variations: z.array(z.object({
+        colorName: z.string().min(1, 'Color name is required').trim(),
+        colorHex: z.string().regex(/^#[0-9A-Fa-f]{6}$/, 'Invalid hex color').optional(),
+        hasLining: z.boolean().default(false),
+    })).min(1, 'At least one color is required'),
+});
+
+/**
+ * Create a complete product draft with variations and SKUs in a single transaction.
+ *
+ * Generates sequential 8-digit numeric SKU codes starting from the next available code.
+ * Creates: Product → Variations (one per color) → SKUs (one per variation × size).
+ */
+export const createProductDraft = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => createProductDraftSchema.parse(input))
+    .handler(async ({ data }) => {
+        try {
+            // Find the max existing 8-digit numeric SKU code
+            const { getKysely } = await import('@coh/shared/services/db');
+            const { sql } = await import('kysely');
+            type SqlBool = import('kysely').SqlBool;
+            const db = await getKysely();
+            const result = await db.selectFrom('Sku' as any)
+                .select(sql<string>`MAX("skuCode")`.as('maxCode'))
+                .where(sql<SqlBool>`"skuCode" ~ '^[0-9]{8}$'`)
+                .executeTakeFirst();
+
+            let nextCode = 10000001;
+            if (result?.maxCode) {
+                const parsed = parseInt(result.maxCode, 10);
+                if (!isNaN(parsed) && parsed >= 10000000) {
+                    nextCode = parsed + 1;
+                }
+            }
+
+            const prisma = await getPrisma();
+            const allSkuCodes: string[] = [];
+
+            const product = await prisma.$transaction(async (tx) => {
+                // 1. Create Product
+                const product = await tx.product.create({
+                    data: {
+                        name: data.name,
+                        ...(data.description ? { description: data.description } : {}),
+                        category: data.category,
+                        productType: data.productType,
+                        gender: data.gender,
+                        ...(data.defaultFabricConsumption ? { defaultFabricConsumption: data.defaultFabricConsumption } : {}),
+                        ...(data.hsnCode ? { hsnCode: data.hsnCode } : {}),
+                        status: 'draft',
+                        isActive: true,
+                    },
+                });
+
+                // 2. Create variations and SKUs
+                let codeCounter = nextCode;
+                for (const v of data.variations) {
+                    const variation = await tx.variation.create({
+                        data: {
+                            productId: product.id,
+                            colorName: v.colorName,
+                            ...(v.colorHex ? { colorHex: v.colorHex } : {}),
+                            hasLining: v.hasLining,
+                        },
+                    });
+
+                    const skuData = data.sizes.map((size) => {
+                        const code = String(codeCounter++).padStart(8, '0');
+                        allSkuCodes.push(code);
+                        return {
+                            variationId: variation.id,
+                            size,
+                            skuCode: code,
+                            mrp: data.mrp,
+                        };
+                    });
+                    await tx.sku.createMany({ data: skuData });
+                }
+
+                return product;
+            });
+
+            return {
+                success: true,
+                data: {
+                    productId: product.id,
+                    productName: product.name,
+                    variationCount: data.variations.length,
+                    skuCount: allSkuCodes.length,
+                    skuCodes: allSkuCodes,
+                },
+            };
+        } catch (error: unknown) {
+            console.error('Create product draft error:', error);
+            const message = error instanceof Error ? error.message : 'Failed to create product draft';
+            return { success: false, error: { message } };
+        }
+    });

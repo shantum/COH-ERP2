@@ -23,6 +23,7 @@ export interface ProductTreeNode {
     type: ProductNodeType;
     name: string;
     isActive?: boolean;
+    status?: string; // draft | active | archived
 
     // === Tree structure ===
     children?: ProductTreeNode[];

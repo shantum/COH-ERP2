@@ -39,6 +39,7 @@ export interface ProductData {
     productType: string;
     shopifyProductId: string | null;
     imageUrl: string | null;
+    status: string;
     isActive: boolean;
     baseProductionTimeMins: number;
     variations: VariationData[];

@@ -288,6 +288,11 @@ const SkuRow = memo(function SkuRow({ row, onClick }: SkuRowProps) {
                     <span className={`truncate ${row.isFirstOfProduct ? 'font-medium text-gray-900' : 'text-gray-400'}`}>
                         {row.productName}
                     </span>
+                    {row.isFirstOfProduct && row.productStatus === 'draft' && (
+                        <span className="flex-shrink-0 px-1.5 py-0.5 text-[10px] font-medium rounded bg-yellow-100 text-yellow-700">
+                            Draft
+                        </span>
+                    )}
                     <span className="text-gray-400 flex-shrink-0">/</span>
                     <span className={`flex-shrink-0 ${row.isFirstOfVariation ? 'text-gray-700' : 'text-gray-400'}`}>
                         {row.colorName}

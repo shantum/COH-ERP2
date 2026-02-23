@@ -46,6 +46,7 @@ import { Route as AuthenticatedChannelsRouteImport } from './routes/_authenticat
 import { Route as AuthenticatedChannelImportRouteImport } from './routes/_authenticated/channel-import'
 import { Route as AuthenticatedAnalyticsRouteImport } from './routes/_authenticated/analytics'
 import { Route as AuthenticatedBusinessIndexRouteImport } from './routes/_authenticated/business/index'
+import { Route as AuthenticatedProductsNewRouteImport } from './routes/_authenticated/products_.new'
 
 const ShipmentsRoute = ShipmentsRouteImport.update({
   id: '/shipments',
@@ -241,6 +242,12 @@ const AuthenticatedBusinessIndexRoute =
     path: '/business/',
     getParentRoute: () => AuthenticatedRoute,
   } as any)
+const AuthenticatedProductsNewRoute =
+  AuthenticatedProductsNewRouteImport.update({
+    id: '/products_/new',
+    path: '/products/new',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AuthenticatedIndexRoute
@@ -278,6 +285,7 @@ export interface FileRoutesByFullPath {
   '/stock-report': typeof AuthenticatedStockReportRoute
   '/tracking': typeof AuthenticatedTrackingRoute
   '/users': typeof AuthenticatedUsersRoute
+  '/products/new': typeof AuthenticatedProductsNewRoute
   '/business/': typeof AuthenticatedBusinessIndexRoute
 }
 export interface FileRoutesByTo {
@@ -316,6 +324,7 @@ export interface FileRoutesByTo {
   '/tracking': typeof AuthenticatedTrackingRoute
   '/users': typeof AuthenticatedUsersRoute
   '/': typeof AuthenticatedIndexRoute
+  '/products/new': typeof AuthenticatedProductsNewRoute
   '/business': typeof AuthenticatedBusinessIndexRoute
 }
 export interface FileRoutesById {
@@ -356,6 +365,7 @@ export interface FileRoutesById {
   '/_authenticated/tracking': typeof AuthenticatedTrackingRoute
   '/_authenticated/users': typeof AuthenticatedUsersRoute
   '/_authenticated/': typeof AuthenticatedIndexRoute
+  '/_authenticated/products_/new': typeof AuthenticatedProductsNewRoute
   '/_authenticated/business/': typeof AuthenticatedBusinessIndexRoute
 }
 export interface FileRouteTypes {
@@ -396,6 +406,7 @@ export interface FileRouteTypes {
     | '/stock-report'
     | '/tracking'
     | '/users'
+    | '/products/new'
     | '/business/'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -434,6 +445,7 @@ export interface FileRouteTypes {
     | '/tracking'
     | '/users'
     | '/'
+    | '/products/new'
     | '/business'
   id:
     | '__root__'
@@ -473,6 +485,7 @@ export interface FileRouteTypes {
     | '/_authenticated/tracking'
     | '/_authenticated/users'
     | '/_authenticated/'
+    | '/_authenticated/products_/new'
     | '/_authenticated/business/'
   fileRoutesById: FileRoutesById
 }
@@ -748,6 +761,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedBusinessIndexRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/products_/new': {
+      id: '/_authenticated/products_/new'
+      path: '/products/new'
+      fullPath: '/products/new'
+      preLoaderRoute: typeof AuthenticatedProductsNewRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
   }
 }
 
@@ -780,6 +800,7 @@ interface AuthenticatedRouteChildren {
   AuthenticatedTrackingRoute: typeof AuthenticatedTrackingRoute
   AuthenticatedUsersRoute: typeof AuthenticatedUsersRoute
   AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
+  AuthenticatedProductsNewRoute: typeof AuthenticatedProductsNewRoute
   AuthenticatedBusinessIndexRoute: typeof AuthenticatedBusinessIndexRoute
 }
 
@@ -812,6 +833,7 @@ const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedTrackingRoute: AuthenticatedTrackingRoute,
   AuthenticatedUsersRoute: AuthenticatedUsersRoute,
   AuthenticatedIndexRoute: AuthenticatedIndexRoute,
+  AuthenticatedProductsNewRoute: AuthenticatedProductsNewRoute,
   AuthenticatedBusinessIndexRoute: AuthenticatedBusinessIndexRoute,
 }
 

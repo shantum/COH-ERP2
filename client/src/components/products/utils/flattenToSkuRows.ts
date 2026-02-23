@@ -22,6 +22,7 @@ export interface SkuViewRow {
 
     // Product-level
     productName: string;
+    productStatus?: string;
     styleCode?: string;
     category?: string;
     gender?: string;
@@ -98,6 +99,7 @@ export function flattenToSkuRows(products: ProductTreeNode[]): SkuViewRow[] {
                     productId: product.id,
 
                     productName: product.name,
+                    productStatus: product.status,
                     styleCode: product.styleCode,
                     category: product.category,
                     gender: product.gender,
