@@ -15,6 +15,7 @@ import { broadcastOrderUpdate } from './sse.js';
 import type { OrderUpdateEvent } from './sse.js';
 import { deferredExecutor } from '../services/deferredExecutor.js';
 import { pushERPOrderToSheet } from '../services/sheetOrderPush.js';
+import { updateSheetBalances } from '../services/sheetOffload/balances.js';
 import scheduledSync from '../services/scheduledSync.js';
 import trackingSync from '../services/trackingSync.js';
 import cacheProcessor from '../services/cacheProcessor.js';
@@ -124,6 +125,38 @@ router.post('/push-order-to-sheet', verifyInternalRequest, (req: Request, res: R
         const message = error instanceof Error ? error.message : 'Unknown error';
         console.error('[Internal API] Push order to sheet error:', message);
         res.status(500).json({ error: 'Failed to enqueue sheet push' });
+    }
+});
+
+/**
+ * POST /api/internal/push-sku-balances
+ *
+ * Pushes balance for specific SKUs to Google Sheets (Inventory col R + Balance Final col F).
+ * Called by Server Functions after inventory mutations to keep sheets in sync.
+ *
+ * Body: { skuIds: string[] }
+ */
+router.post('/push-sku-balances', verifyInternalRequest, (req: Request, res: Response): void => {
+    try {
+        const { skuIds } = req.body as { skuIds: string[] };
+
+        if (!skuIds || !Array.isArray(skuIds) || skuIds.length === 0) {
+            res.status(400).json({ error: 'Missing or empty skuIds array' });
+            return;
+        }
+
+        deferredExecutor.enqueue(
+            async () => {
+                await updateSheetBalances(new Set(skuIds), { errors: 0, skusUpdated: 0 });
+            },
+            { action: 'push_sku_balances' }
+        );
+
+        res.json({ success: true, skuCount: skuIds.length });
+    } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        console.error('[Internal API] Push SKU balances error:', message);
+        res.status(500).json({ error: 'Failed to enqueue balance push' });
     }
 });
 

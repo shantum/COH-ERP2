@@ -350,6 +350,28 @@ async function invalidateCache(skuIds: string[]): Promise<void> {
         // The Express server's tRPC endpoints will still work with fresh data
         console.warn('[inventoryMutations] Cache invalidation skipped (server module not available)');
     }
+
+    // Fire-and-forget: sync updated balances to Google Sheets
+    pushSkuBalancesToSheet(skuIds);
+}
+
+// ============================================
+// SHEET BALANCE PUSH HELPER
+// ============================================
+
+/**
+ * Fire-and-forget: push updated SKU balances to Google Sheets.
+ * Calls the internal API which enqueues via deferredExecutor.
+ */
+function pushSkuBalancesToSheet(skuIds: string[]): void {
+    const baseUrl = getInternalApiBaseUrl();
+    fetch(`${baseUrl}/api/internal/push-sku-balances`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ skuIds }),
+    }).catch(() => {
+        console.warn('[inventoryMutations] Sheet balance push failed (non-critical)');
+    });
 }
 
 // ============================================
