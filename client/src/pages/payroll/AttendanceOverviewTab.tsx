@@ -181,6 +181,7 @@ export default function AttendanceOverviewTab() {
           <thead className="bg-muted/50">
             <tr>
               <th className="text-left p-3 font-medium">Name</th>
+              <th className="text-left p-3 font-medium">Machine ID</th>
               <th className="text-left p-3 font-medium">Dept</th>
               <th className="text-left p-3 font-medium">Designation</th>
               <th className="text-right p-3 font-medium">Absent</th>
@@ -194,6 +195,7 @@ export default function AttendanceOverviewTab() {
             {rows.map((row) => (
               <tr key={row.employee.id} className="border-t hover:bg-muted/30">
                 <td className="p-3 font-medium">{row.employee.name}</td>
+                <td className="p-3 text-muted-foreground font-mono">{row.employee.employeeCode ?? '-'}</td>
                 <td className="p-3 text-muted-foreground">{getDepartmentLabel(row.employee.department)}</td>
                 <td className="p-3 text-muted-foreground">{row.employee.designation ?? '-'}</td>
                 <td className="p-3 text-right font-mono">{row.absent ?? '-'}</td>
@@ -209,7 +211,7 @@ export default function AttendanceOverviewTab() {
             ))}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={8} className="p-8 text-center text-muted-foreground">No employees found</td>
+                <td colSpan={9} className="p-8 text-center text-muted-foreground">No employees found</td>
               </tr>
             )}
           </tbody>
