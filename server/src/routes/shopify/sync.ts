@@ -723,21 +723,4 @@ router.get('/orders/:orderNumber', authenticateToken, asyncHandler(async (req: R
   });
 }));
 
-router.get('/history', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
-  const lastSyncedOrder = await req.prisma.order.findFirst({
-    where: { shopifyOrderId: { not: null } },
-    orderBy: { syncedAt: 'desc' },
-    select: { shopifyOrderId: true, orderNumber: true, syncedAt: true },
-  });
-
-  const syncedOrders = await req.prisma.order.count({ where: { shopifyOrderId: { not: null } } });
-  const syncedCustomers = await req.prisma.customer.count({ where: { shopifyCustomerId: { not: null } } });
-
-  res.json({
-    lastSync: lastSyncedOrder?.syncedAt || null,
-    lastOrderNumber: lastSyncedOrder?.orderNumber || null,
-    counts: { syncedOrders, syncedCustomers },
-  });
-}));
-
 export default router;

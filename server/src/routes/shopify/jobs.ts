@@ -28,7 +28,7 @@ router.post('/start', authenticateToken, asyncHandler(async (req: Request, res: 
   }
 
   if (syncMode && !['deep', 'incremental', 'quick', 'update'].includes(syncMode)) {
-    throw new ValidationError(`Invalid syncMode: ${syncMode}. Must be 'deep' or 'incremental'.`);
+    throw new ValidationError(`Invalid syncMode: ${syncMode}. Must be 'deep', 'incremental', 'quick', or 'update'.`);
   }
 
   const job = await syncWorker.startJob(jobType as 'orders' | 'customers' | 'products', {

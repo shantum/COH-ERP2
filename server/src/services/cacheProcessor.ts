@@ -86,7 +86,7 @@ const stats: ProcessorStats = {
 /**
  * Process one batch of pending cache entries
  */
-async function processBatch(): Promise<{ processed: number; isEmpty: boolean }> {
+async function processBatch(): Promise<{ processed: number; succeeded: number; failed: number; isEmpty: boolean }> {
     // Check for pending entries
     const entries = await prisma.shopifyOrderCache.findMany({
         where: {
@@ -99,7 +99,7 @@ async function processBatch(): Promise<{ processed: number; isEmpty: boolean }> 
     });
 
     if (entries.length === 0) {
-        return { processed: 0, isEmpty: true };
+        return { processed: 0, succeeded: 0, failed: 0, isEmpty: true };
     }
 
     const startTime = Date.now();
@@ -132,7 +132,7 @@ async function processBatch(): Promise<{ processed: number; isEmpty: boolean }> 
         ordersPerSecond: ordersPerSecond.toFixed(1)
     }, 'Cache processor: batch completed');
 
-    return { processed: result.processed, isEmpty: false };
+    return { processed: result.processed, succeeded: result.succeeded, failed: result.failed, isEmpty: false };
 }
 
 /**
@@ -328,8 +328,8 @@ async function triggerBatch(): Promise<{ processed: number; succeeded: number; f
 
     return {
         processed: result.processed,
-        succeeded: stats.lastBatchSize > 0 ? stats.totalSucceeded : 0,
-        failed: stats.totalFailed
+        succeeded: result.succeeded,
+        failed: result.failed,
     };
 }
 

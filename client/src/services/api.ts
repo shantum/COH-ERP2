@@ -83,7 +83,6 @@ export const shopifyApi = {
     updateConfig: (data: { shopDomain: string; accessToken: string }) => api.put('/shopify/config', data),
     testConnection: () => api.post('/shopify/test-connection'),
     getStatus: () => api.get('/shopify/status'),
-    getSyncHistory: () => api.get('/shopify/sync/history'),
     // Preview endpoints
     previewProducts: (limit?: number) => api.post('/shopify/preview/products', { limit }),
     previewOrders: (limit?: number) => api.post('/shopify/preview/orders', { limit }),
@@ -94,10 +93,7 @@ export const shopifyApi = {
         api.post('/shopify/sync/customers', data || {}),
     syncAllCustomers: () => api.post('/shopify/sync/customers/all'),
     // Cache utilities
-    backfillFromCache: () => api.post('/shopify/sync/backfill-from-cache'),
-    backfillCacheFields: () => api.post('/shopify/sync/backfill-cache-fields'),
     reprocessCache: () => api.post('/shopify/sync/reprocess-cache'),
-    getCacheStatus: () => api.get('/shopify/sync/cache-status'),
     getProductCacheStatus: () => api.get('/shopify/sync/product-cache-status'),
     // Simple sync operations
     fullDump: (daysBack?: number) => api.post('/shopify/sync/full-dump', { daysBack }),

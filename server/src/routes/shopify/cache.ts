@@ -12,22 +12,7 @@ const router = Router();
 // ============================================
 // CACHE STATUS
 // ============================================
-
-router.get('/cache-status', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
-  const totalCached = await req.prisma.shopifyOrderCache.count();
-  const processed = await req.prisma.shopifyOrderCache.count({ where: { processedAt: { not: null } } });
-  const failed = await req.prisma.shopifyOrderCache.count({ where: { processingError: { not: null } } });
-  const pending = await req.prisma.shopifyOrderCache.count({ where: { processedAt: null, processingError: null } });
-
-  const recentFailures = await req.prisma.shopifyOrderCache.findMany({
-    where: { processingError: { not: null } },
-    select: { id: true, orderNumber: true, processingError: true, lastWebhookAt: true },
-    orderBy: { lastWebhookAt: 'desc' },
-    take: 5
-  });
-
-  res.json({ totalCached, processed, failed, pending, recentFailures });
-}));
+// Note: /cache-status moved to server function getCacheStatus (client/src/server/functions/shopify.ts)
 
 router.get('/cache-stats', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
   const [total, unprocessed, failed, processed] = await Promise.all([
@@ -57,32 +42,30 @@ router.get('/cache-stats', authenticateToken, asyncHandler(async (req: Request, 
 // ============================================
 
 router.get('/product-cache-status', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
-  const totalCached = await req.prisma.shopifyProductCache.count();
-  const processed = await req.prisma.shopifyProductCache.count({ where: { processedAt: { not: null } } });
-  const failed = await req.prisma.shopifyProductCache.count({ where: { processingError: { not: null } } });
-  const pending = await req.prisma.shopifyProductCache.count({ where: { processedAt: null, processingError: null } });
+  // Run counts and status distribution in parallel using SQL JSON extraction (avoids loading all rawData)
+  const [totalCached, processed, failed, pending, statusRows, totalProducts, linkedProducts, lastSync] = await Promise.all([
+    req.prisma.shopifyProductCache.count(),
+    req.prisma.shopifyProductCache.count({ where: { processedAt: { not: null } } }),
+    req.prisma.shopifyProductCache.count({ where: { processingError: { not: null } } }),
+    req.prisma.shopifyProductCache.count({ where: { processedAt: null, processingError: null } }),
+    req.prisma.$queryRaw<Array<{ status: string; count: bigint }>>`
+      SELECT COALESCE("rawData"::jsonb->>'status', 'unknown') AS status, COUNT(*) AS count
+      FROM "ShopifyProductCache"
+      GROUP BY 1
+    `,
+    req.prisma.product.count(),
+    req.prisma.product.count({ where: { shopifyProductId: { not: null } } }),
+    req.prisma.shopifyProductCache.findFirst({
+      where: { webhookTopic: 'manual_sync' },
+      orderBy: { lastWebhookAt: 'desc' },
+      select: { lastWebhookAt: true }
+    }),
+  ]);
 
-  // Get status distribution from cached rawData
-  const allCache = await req.prisma.shopifyProductCache.findMany({ select: { rawData: true } });
   const statusCounts: Record<string, number> = { active: 0, draft: 0, archived: 0, unknown: 0 };
-  for (const cache of allCache) {
-    try {
-      const data = JSON.parse(cache.rawData) as { status?: string };
-      const status = data.status || 'unknown';
-      statusCounts[status] = (statusCounts[status] || 0) + 1;
-    } catch {
-      statusCounts.unknown++;
-    }
+  for (const row of statusRows) {
+    statusCounts[row.status] = Number(row.count);
   }
-
-  const totalProducts = await req.prisma.product.count();
-  const linkedProducts = await req.prisma.product.count({ where: { shopifyProductId: { not: null } } });
-
-  const lastSync = await req.prisma.shopifyProductCache.findFirst({
-    where: { webhookTopic: 'manual_sync' },
-    orderBy: { lastWebhookAt: 'desc' },
-    select: { lastWebhookAt: true }
-  });
 
   res.json({
     totalCached, processed, failed, pending,

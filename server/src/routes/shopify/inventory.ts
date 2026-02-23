@@ -6,6 +6,7 @@
  */
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
+import { authenticateToken } from '../../middleware/auth.js';
 import shopifyClient from '../../services/shopify.js';
 import { shopifyLogger } from '../../utils/logger.js';
 
@@ -34,7 +35,7 @@ const ZeroOutSkusSchema = z.object({
  * GET /api/shopify/inventory/locations
  * Get all Shopify inventory locations
  */
-router.get('/locations', async (_req: Request, res: Response): Promise<void> => {
+router.get('/locations', authenticateToken, async (_req: Request, res: Response): Promise<void> => {
     try {
         if (!shopifyClient.isConfigured()) {
             res.status(400).json({ error: 'Shopify is not configured' });
@@ -54,7 +55,7 @@ router.get('/locations', async (_req: Request, res: Response): Promise<void> => 
  * GET /api/shopify/inventory/item/:sku
  * Get inventory item info by SKU
  */
-router.get('/item/:sku', async (req: Request, res: Response): Promise<void> => {
+router.get('/item/:sku', authenticateToken, async (req: Request, res: Response): Promise<void> => {
     try {
         if (!shopifyClient.isConfigured()) {
             res.status(400).json({ error: 'Shopify is not configured' });
@@ -81,7 +82,7 @@ router.get('/item/:sku', async (req: Request, res: Response): Promise<void> => {
  * POST /api/shopify/inventory/set
  * Set inventory quantity for a SKU at a location
  */
-router.post('/set', async (req: Request, res: Response): Promise<void> => {
+router.post('/set', authenticateToken, async (req: Request, res: Response): Promise<void> => {
     try {
         if (!shopifyClient.isConfigured()) {
             res.status(400).json({ error: 'Shopify is not configured' });
@@ -115,7 +116,7 @@ router.post('/set', async (req: Request, res: Response): Promise<void> => {
  * Set inventory to zero for multiple SKUs (batch operation)
  * Use case: Zeroing out archived product stock
  */
-router.post('/zero-out', async (req: Request, res: Response): Promise<void> => {
+router.post('/zero-out', authenticateToken, async (req: Request, res: Response): Promise<void> => {
     try {
         if (!shopifyClient.isConfigured()) {
             res.status(400).json({ error: 'Shopify is not configured' });

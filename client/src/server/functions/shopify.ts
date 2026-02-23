@@ -4,8 +4,9 @@
  * TanStack Start Server Functions for Shopify integration management.
  * Provides configuration, sync jobs, and cache status endpoints.
  *
- * IMPORTANT: Uses Express API calls for Shopify service interactions.
- * This avoids bundling server-only code into the client.
+ * Uses Express API calls (via callExpressApi) for operations that depend on
+ * server-only services (sync jobs, config, scheduler). Uses direct DB access
+ * (via getPrisma) for simple read queries (sync history, cache status, catalog).
  */
 
 import { createServerFn } from '@tanstack/react-start';
