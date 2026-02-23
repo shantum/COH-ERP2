@@ -75,7 +75,7 @@ const DEFAULT_HSN = GST_CONFIG.defaultHsn;
 
 /**
  * Get GST rate for a product based on its MRP.
- * Apparel: 5% below ₹1000, 12% at/above ₹1000.
+ * Apparel: 5% for MRP ≤ ₹2500, 18% for MRP > ₹2500 (from GST_CONFIG).
  */
 export function getGstRateForMrp(mrp: number): number {
   return mrp > GST_CONFIG.threshold ? GST_CONFIG.rateAboveThreshold : GST_CONFIG.rateBelowThreshold;
