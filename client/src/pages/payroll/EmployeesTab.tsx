@@ -66,24 +66,29 @@ function getFullMonthSalaryBreakdown(basicSalary: number, flags: StatutoryFlags)
   });
 }
 
+function getInHandIncludingEmployeePf(basicSalary: number, flags: StatutoryFlags): number {
+  const breakdown = getFullMonthSalaryBreakdown(basicSalary, flags);
+  return breakdown.netPay + (flags.pfApplicable ? breakdown.pfEmployee : 0);
+}
+
 function reverseBasicFromInHand(inHand: number, flags: StatutoryFlags): number {
   if (!Number.isFinite(inHand) || inHand <= 0) return 0;
 
   let low = 0;
   let high = Math.max(inHand, 10_000);
-  while (getFullMonthSalaryBreakdown(high, flags).netPay < inHand && high < 1_000_000) {
+  while (getInHandIncludingEmployeePf(high, flags) < inHand && high < 1_000_000) {
     high *= 2;
   }
 
   for (let i = 0; i < 60; i++) {
     const mid = (low + high) / 2;
-    const net = getFullMonthSalaryBreakdown(mid, flags).netPay;
+    const net = getInHandIncludingEmployeePf(mid, flags);
     if (net < inHand) low = mid;
     else high = mid;
   }
 
-  const lowNet = getFullMonthSalaryBreakdown(low, flags).netPay;
-  const highNet = getFullMonthSalaryBreakdown(high, flags).netPay;
+  const lowNet = getInHandIncludingEmployeePf(low, flags);
+  const highNet = getInHandIncludingEmployeePf(high, flags);
   const best = Math.abs(lowNet - inHand) <= Math.abs(highNet - inHand) ? low : high;
   return Math.max(1, Math.round(best));
 }
@@ -438,6 +443,9 @@ function EmployeeModal({
       ptApplicable: form.ptApplicable,
     })
     : null;
+  const inHandIncludingPf = salaryBreakdown
+    ? salaryBreakdown.netPay + (form.pfApplicable ? salaryBreakdown.pfEmployee : 0)
+    : 0;
 
   return (
     <Dialog open onOpenChange={() => onClose()}>
@@ -539,7 +547,7 @@ function EmployeeModal({
                       placeholder="e.g. 22000"
                     />
                     <p className="text-xs text-muted-foreground mt-1">
-                      Basic is auto-calculated from in-hand using PF/ESIC/PT selections.
+                      Basic is auto-calculated from in-hand (including employee PF) using PF/ESIC/PT selections.
                     </p>
                   </div>
                 )}
@@ -635,8 +643,8 @@ function EmployeeModal({
                     <div className="text-muted-foreground font-medium">Total Deductions</div>
                     <div className="text-right font-mono font-medium">{formatINR(salaryBreakdown.totalDeductions)}</div>
 
-                    <div className="text-emerald-700 font-semibold mt-2">Net In-Hand</div>
-                    <div className="text-right font-mono text-emerald-700 font-semibold mt-2">{formatINR(salaryBreakdown.netPay)}</div>
+                    <div className="text-emerald-700 font-semibold mt-2">Net In-Hand (incl Emp PF)</div>
+                    <div className="text-right font-mono text-emerald-700 font-semibold mt-2">{formatINR(inHandIncludingPf)}</div>
 
                     <div className="text-muted-foreground mt-2">PF (Employer)</div>
                     <div className="text-right font-mono mt-2">{formatINR(salaryBreakdown.pfEmployer)}</div>
