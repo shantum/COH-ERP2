@@ -11,7 +11,7 @@ import { z } from 'zod';
 // ============================================
 
 export const PayrollSearchParams = z.object({
-  tab: z.enum(['employees', 'runs', 'attendance']).catch('employees'),
+  tab: z.enum(['employees', 'salary', 'runs', 'attendance']).catch('employees'),
   search: z.string().optional().catch(undefined),
   department: z.string().optional().catch(undefined),
   status: z.string().optional().catch(undefined),

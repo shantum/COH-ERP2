@@ -2,10 +2,11 @@ import { useCallback } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { Route } from '../routes/_authenticated/payroll';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Calculator, Users, FileSpreadsheet, CalendarDays } from 'lucide-react';
+import { Calculator, Users, FileSpreadsheet, CalendarDays, LayoutDashboard } from 'lucide-react';
 import type { PayrollSearchParams } from '@coh/shared';
 
 import EmployeesTab from './payroll/EmployeesTab';
+import AttendanceOverviewTab from './payroll/AttendanceOverviewTab';
 import PayrollRunsTab, { PayrollRunDetail } from './payroll/PayrollRunsTab';
 import AttendanceTab from './payroll/AttendanceTab';
 
@@ -36,7 +37,10 @@ export default function Payroll() {
       <Tabs value={search.tab || 'employees'} onValueChange={handleTabChange}>
         <TabsList>
           <TabsTrigger value="employees" className="gap-1.5">
-            <Users className="h-4 w-4" /> Employees
+            <LayoutDashboard className="h-4 w-4" /> Overview
+          </TabsTrigger>
+          <TabsTrigger value="salary" className="gap-1.5">
+            <Users className="h-4 w-4" /> Salary
           </TabsTrigger>
           <TabsTrigger value="runs" className="gap-1.5">
             <FileSpreadsheet className="h-4 w-4" /> Payroll Runs
@@ -47,6 +51,9 @@ export default function Payroll() {
         </TabsList>
 
         <TabsContent value="employees">
+          <AttendanceOverviewTab />
+        </TabsContent>
+        <TabsContent value="salary">
           <EmployeesTab />
         </TabsContent>
         <TabsContent value="runs">
