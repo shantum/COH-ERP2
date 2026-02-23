@@ -30,7 +30,8 @@ jobs:
             cd client && pnpm build && cd ..
             EXPECTED_COMMIT=$(git rev-parse --short HEAD)
             echo "$EXPECTED_COMMIT" > VERSION
-            pm2 restart coh-erp
+            pm2 delete coh-erp || true
+            pm2 start ecosystem.config.cjs
             sleep 5
             for i in 1 2 3 4 5; do
               RESPONSE=$(curl -s http://127.0.0.1:3001/api/health || true)
