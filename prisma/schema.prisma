@@ -199,6 +199,8 @@ model Sku {
   @@index([variationId])
   @@index([parentSkuId])
   @@index([isCustomSku])
+  @@index([shopifyVariantId])     // Shopify sync: variant lookup
+  @@index([shopifyInventoryItemId]) // Shopify inventory sync lookup
 }
 
 model CostConfig {
@@ -462,6 +464,7 @@ model InventoryTransaction {
   @@index([skuId, txnType])
   @@index([referenceId])
   @@index([orderNumber])
+  @@index([createdById])          // FK — audit: who created this transaction
 }
 
 model Customer {
@@ -492,6 +495,9 @@ model Customer {
   financePayments   Payment[] @relation("PaymentCustomer")
 
   @@index([createdAt])
+  @@index([tier])                 // Customer segmentation queries
+  @@index([phone])                // Customer lookup by phone (support)
+  @@index([lastOrderDate])        // Retention/churn analysis
 }
 
 model Order {
@@ -1659,6 +1665,7 @@ model ReturnPrimeRequest {
   @@index([isApproved, isReceived, isRefunded])
   @@index([customerEmail])
   @@index([syncedAt])
+  @@index([orderId])              // FK — return requests for an order
 }
 
 model MonthlyStockSnapshot {
@@ -1832,6 +1839,10 @@ model Invoice {
   @@index([invoiceNumber])
   @@index([partyId, invoiceNumber, invoiceDate])
   @@index([fileHash])
+  @@index([type, status])         // Dashboard: payable/receivable + status filter
+  @@index([type, billingPeriod])  // P&L queries by period
+  @@index([partyId, status])      // Party detail: outstanding invoices
+  @@index([createdById])          // FK — audit trail
 }
 
 /// Line item on an invoice
@@ -2250,6 +2261,11 @@ model BankTransaction {
   @@index([reference])
   @@index([legacySourceId])
   @@index([batchId])
+  @@index([partyId])              // FK — party detail page, narration matching
+  @@index([matchedInvoiceId])     // FK — invoice reconciliation lookups
+  @@index([category])             // Categorization UI filter
+  @@index([bank, txnDate])        // Primary query: bank transactions by date range
+  @@index([bank, status, period]) // Monthly categorization workflow
 }
 
 /// Batch metadata for a single CSV import run

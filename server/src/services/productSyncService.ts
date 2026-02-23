@@ -280,7 +280,7 @@ export async function syncSingleProduct(
         result.created++;
     } else {
         // Product exists — refresh key fields from Shopify
-        const updates: Partial<Product> = {};
+        const updates: Record<string, string | number | boolean> = {};
         if (mainImageUrl && mainImageUrl !== product.imageUrl) updates.imageUrl = mainImageUrl;
         if (shopifyProduct.handle && shopifyProduct.handle !== product.shopifyHandle) {
             updates.shopifyHandle = shopifyProduct.handle;
