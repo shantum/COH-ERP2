@@ -17,22 +17,8 @@ import Products from '../../pages/Products';
 
 export const Route = createFileRoute('/_authenticated/products')({
     validateSearch: (search) => ProductsSearchParams.parse(search),
-    // Extract search params for loader
-    loaderDeps: ({ search }) => ({
-        tab: search.tab || 'products',
-    }),
-    // Pre-fetch products tree data on server (only for certain tabs)
-    loader: async ({ deps }): Promise<ProductsLoaderData> => {
-        // Only load products tree for tabs that need it
-        const needsProductsTree = ['products', 'bom', 'consumption', 'fabricMapping'].includes(
-            deps.tab
-        );
-
-        // Skip if tab doesn't need products tree data
-        if (!needsProductsTree) {
-            return { productsTree: null, error: null };
-        }
-
+    // Pre-fetch products tree data on server
+    loader: async (): Promise<ProductsLoaderData> => {
         try {
             const productsTree = await getProductsTree({ data: {} });
             return { productsTree, error: null };

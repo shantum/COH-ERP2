@@ -116,11 +116,6 @@ export interface ProductSelectionState {
 }
 
 /**
- * Main tab types for Products page
- */
-export type ProductsTabType = 'products' | 'styleCodes';
-
-/**
  * Detail panel tab types for Product
  */
 export type ProductDetailTabType = 'info' | 'bom' | 'costs' | 'skus';

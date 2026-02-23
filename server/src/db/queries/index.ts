@@ -4,16 +4,6 @@
  * High-performance queries using type-safe SQL.
  */
 
-// Products
-export {
-    listProductsKysely,
-    type ProductsListParams,
-    type ProductsListResult,
-    type ProductWithVariations,
-    type VariationRow,
-    type SkuRow,
-} from './productsListKysely.js';
-
 // Customers
 export {
     listCustomersKysely,

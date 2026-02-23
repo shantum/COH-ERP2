@@ -64,7 +64,7 @@ export type OrdersSearchParams = z.infer<typeof OrdersSearchParams>;
  */
 export const ProductsSearchParams = z.object({
     /** Active tab in products page */
-    tab: z.enum(['products', 'styleCodes']).catch('products'),
+    tab: z.enum(['products']).catch('products'),
     /** View mode for products tab */
     view: z.enum(['tree', 'flat']).catch('tree'),
     /** Selected item ID for master-detail views */
