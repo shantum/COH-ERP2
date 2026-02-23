@@ -796,11 +796,15 @@ export default function InventoryInward() {
                                                         </div>
                                                     </td>
                                                     <td className="px-3 py-3 min-w-[120px]">
-                                                        <TailorCell
-                                                            transactionId={txn.id}
-                                                            currentValue={txn.tailorNumber}
-                                                            tailors={tailors}
-                                                        />
+                                                        {txn.source === 'production' || txn.source === 'received' ? (
+                                                            <TailorCell
+                                                                transactionId={txn.id}
+                                                                currentValue={txn.tailorNumber}
+                                                                tailors={tailors}
+                                                            />
+                                                        ) : (
+                                                            <span className="text-xs text-gray-400">—</span>
+                                                        )}
                                                     </td>
                                                     <td className="px-3 py-3 text-xs text-gray-600 max-w-[200px] truncate">
                                                         {txn.notes || '-'}
