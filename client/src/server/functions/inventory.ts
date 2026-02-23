@@ -1479,6 +1479,7 @@ export interface RecentInwardItem {
     reason: string;
     source: string;
     notes: string | null;
+    tailorNumber: string | null;
     createdAt: string;
     createdBy: string;
     isAllocated: boolean;
@@ -1536,6 +1537,7 @@ export const getRecentInwards = createServerFn({ method: 'GET' })
                 reason: true,
                 referenceId: true,
                 notes: true,
+                tailorNumber: true,
                 createdAt: true,
                 sku: {
                     select: {
@@ -1577,6 +1579,7 @@ export const getRecentInwards = createServerFn({ method: 'GET' })
             reason: t.reason || '',
             source: mapReasonToSource(t.reason),
             notes: t.notes,
+            tailorNumber: t.tailorNumber,
             createdAt: t.createdAt.toISOString(),
             createdBy: t.createdBy?.name || 'System',
             isAllocated: t.reason !== 'received',

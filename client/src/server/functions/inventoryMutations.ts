@@ -1932,3 +1932,59 @@ export const quickInwardBySkuCode = createServerFn({ method: 'POST' })
             },
         };
     });
+
+// ============================================
+// UPDATE TRANSACTION TAILOR
+// ============================================
+
+const updateTransactionTailorSchema = z.object({
+    transactionId: z.string().uuid('Invalid transaction ID'),
+    tailorNumber: z.string().nullable(),
+});
+
+export interface UpdateTransactionTailorResult {
+    transactionId: string;
+    tailorNumber: string | null;
+}
+
+/**
+ * Update the tailor number on an inventory transaction.
+ * Used by the Inventory Inward page to assign/change tailor info inline.
+ */
+export const updateTransactionTailor = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => updateTransactionTailorSchema.parse(input))
+    .handler(async ({ data }): Promise<MutationResult<UpdateTransactionTailorResult>> => {
+        const prisma = await getPrisma();
+        const { transactionId, tailorNumber } = data;
+
+        try {
+            const existing = await prisma.inventoryTransaction.findUnique({
+                where: { id: transactionId },
+                select: { id: true },
+            });
+
+            if (!existing) {
+                return {
+                    success: false,
+                    error: { code: 'NOT_FOUND', message: 'Transaction not found' },
+                };
+            }
+
+            await prisma.inventoryTransaction.update({
+                where: { id: transactionId },
+                data: { tailorNumber: tailorNumber || null },
+            });
+
+            return {
+                success: true,
+                data: { transactionId, tailorNumber: tailorNumber || null },
+            };
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : 'Unknown error';
+            return {
+                success: false,
+                error: { code: 'INTERNAL', message },
+            };
+        }
+    });

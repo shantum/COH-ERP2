@@ -11,7 +11,7 @@
  * Migrated to Server Functions (Phase 4 TanStack Start migration)
  */
 
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { getRecentInwards, type RecentInwardItem } from '@/server/functions/inventory';
@@ -19,9 +19,11 @@ import {
     instantInwardBySkuCode,
     getTransactionMatches,
     allocateTransactionFn,
+    updateTransactionTailor,
     type TransactionMatch,
     type TransactionMatchesResult,
 } from '@/server/functions/inventoryMutations';
+import { getProductionTailors, type TailorRow } from '@/server/functions/production';
 import {
     Package,
     Scan,
@@ -87,6 +89,117 @@ interface SuccessFlash {
     size: string;
     qty: number;
     newBalance: number;
+}
+
+/** Inline editable tailor cell with datalist suggestions */
+function TailorCell({
+    transactionId,
+    currentValue,
+    tailors,
+}: {
+    transactionId: string;
+    currentValue: string | null;
+    tailors: TailorRow[];
+}) {
+    const queryClient = useQueryClient();
+    const [isEditing, setIsEditing] = useState(false);
+    const [value, setValue] = useState(currentValue || '');
+    const inputRef = useRef<HTMLInputElement>(null);
+    const updateTailorFn = useServerFn(updateTransactionTailor);
+
+    const saveMutation = useMutation({
+        mutationFn: async (tailorNumber: string | null) => {
+            const result = await updateTailorFn({
+                data: { transactionId, tailorNumber },
+            });
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to update tailor');
+            }
+            return result.data;
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['recent-inwards'] });
+            setIsEditing(false);
+        },
+    });
+
+    const handleSave = useCallback(() => {
+        const trimmed = value.trim();
+        const newValue = trimmed || null;
+        if (newValue !== currentValue) {
+            saveMutation.mutate(newValue);
+        } else {
+            setIsEditing(false);
+        }
+    }, [value, currentValue, saveMutation]);
+
+    const handleKeyDown = useCallback(
+        (e: React.KeyboardEvent) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                handleSave();
+            } else if (e.key === 'Escape') {
+                setValue(currentValue || '');
+                setIsEditing(false);
+            }
+        },
+        [handleSave, currentValue]
+    );
+
+    useEffect(() => {
+        if (isEditing) {
+            inputRef.current?.focus();
+            inputRef.current?.select();
+        }
+    }, [isEditing]);
+
+    // Sync external value changes
+    useEffect(() => {
+        if (!isEditing) {
+            setValue(currentValue || '');
+        }
+    }, [currentValue, isEditing]);
+
+    const datalistId = `tailors-${transactionId}`;
+
+    if (isEditing) {
+        return (
+            <div className="relative">
+                <input
+                    ref={inputRef}
+                    type="text"
+                    list={datalistId}
+                    value={value}
+                    onChange={(e) => setValue(e.target.value)}
+                    onBlur={handleSave}
+                    onKeyDown={handleKeyDown}
+                    disabled={saveMutation.isPending}
+                    className="w-full px-2 py-1 text-xs border border-blue-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white"
+                    placeholder="Tailor name..."
+                />
+                <datalist id={datalistId}>
+                    {tailors.map((t) => (
+                        <option key={t.id} value={t.name} />
+                    ))}
+                </datalist>
+                {saveMutation.isPending && (
+                    <div className="absolute right-1 top-1/2 -translate-y-1/2">
+                        <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-600"></div>
+                    </div>
+                )}
+            </div>
+        );
+    }
+
+    return (
+        <button
+            onClick={() => setIsEditing(true)}
+            className="text-xs text-gray-500 hover:text-blue-600 hover:bg-blue-50 px-2 py-1 rounded transition-colors cursor-pointer w-full text-left"
+            title="Click to edit tailor"
+        >
+            {currentValue || <span className="text-gray-400">Add</span>}
+        </button>
+    );
 }
 
 interface SourceAssignmentModalProps {
@@ -376,6 +489,14 @@ export default function InventoryInward() {
     // Server Functions
     const getRecentInwardsFn = useServerFn(getRecentInwards);
     const instantInwardFn = useServerFn(instantInwardBySkuCode);
+    const getProductionTailorsFn = useServerFn(getProductionTailors);
+
+    // Fetch tailors for suggestions (cached, rarely changes)
+    const { data: tailors = [] } = useQuery<TailorRow[]>({
+        queryKey: ['production', 'tailors'],
+        queryFn: async () => getProductionTailorsFn({}),
+        staleTime: 5 * 60 * 1000, // 5 minutes
+    });
 
     // Focus input on mount and after operations
     useEffect(() => {
@@ -632,6 +753,7 @@ export default function InventoryInward() {
                                             <th className="px-3 py-3 text-left font-semibold text-gray-700">Product</th>
                                             <th className="px-3 py-3 text-center font-semibold text-gray-700">Qty</th>
                                             <th className="px-3 py-3 text-left font-semibold text-gray-700">Source</th>
+                                            <th className="px-3 py-3 text-left font-semibold text-gray-700">Tailor</th>
                                             <th className="px-3 py-3 text-left font-semibold text-gray-700">Notes</th>
                                             <th className="px-3 py-3 text-center font-semibold text-gray-700">Action</th>
                                         </tr>
@@ -672,6 +794,13 @@ export default function InventoryInward() {
                                                             <SourceIcon size={14} />
                                                             {sourceConfig.label}
                                                         </div>
+                                                    </td>
+                                                    <td className="px-3 py-3 min-w-[120px]">
+                                                        <TailorCell
+                                                            transactionId={txn.id}
+                                                            currentValue={txn.tailorNumber}
+                                                            tailors={tailors}
+                                                        />
                                                     </td>
                                                     <td className="px-3 py-3 text-xs text-gray-600 max-w-[200px] truncate">
                                                         {txn.notes || '-'}
