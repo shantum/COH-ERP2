@@ -162,8 +162,8 @@ export function BookShipmentSection({
     },
     onSuccess: () => {
       setStep('booked');
-      // Invalidate only affected views: open (where order is) and shipped (where it may go)
-      invalidateOrderViews(queryClient, ['open', 'shipped']);
+      // Invalidate only affected views: all (where order is) and in_transit (where it may go)
+      invalidateOrderViews(queryClient, ['all', 'in_transit']);
       queryClient.invalidateQueries({ queryKey: ['order', order.id] });
       onShipmentBooked?.();
     },
@@ -183,8 +183,8 @@ export function BookShipmentSection({
       return result;
     },
     onSuccess: () => {
-      // Invalidate only affected views: open and shipped
-      invalidateOrderViews(queryClient, ['open', 'shipped']);
+      // Invalidate only affected views: all and in_transit
+      invalidateOrderViews(queryClient, ['all', 'in_transit']);
       queryClient.invalidateQueries({ queryKey: ['order', order.id] });
       onShipmentBooked?.();
     },

@@ -20,24 +20,9 @@ import { ORDERS_PAGE_SIZE } from '../constants/queryKeys';
 import { getOrdersListQueryKey, invalidateAllOrderViewsStale } from './orders/orderMutationUtils';
 import type { FlattenedOrderRow } from '../server/functions/orders';
 
-// Nested order line type for cache updates
-interface CachedOrderLine {
-    id: string;
-    lineStatus: string | null;
-    [key: string]: unknown; // Allow other properties
-}
-
-// Nested order type for cache updates
-interface CachedOrder {
-    id: string;
-    orderLines?: CachedOrderLine[];
-    [key: string]: unknown; // Allow other properties
-}
-
 // Cache data structure for orders list queries
 interface OrderListCacheData {
     rows: FlattenedOrderRow[];
-    orders: CachedOrder[]; // Legacy field, kept for backwards compatibility
     [key: string]: unknown; // Allow other properties from OrdersResponse
 }
 
@@ -160,23 +145,7 @@ function applyLineUpdates(
         return { ...row, ...changes };
     });
 
-    // Also update legacy orders array for backwards compatibility
-    const newOrders = old.orders.map(order => {
-        const hasAffectedLine = order.orderLines?.some(
-            line => updates.has(line.id) && wouldChange(line as unknown as FlattenedOrderRow, updates.get(line.id)!)
-        );
-        if (!hasAffectedLine) return order; // Same order reference
-        return {
-            ...order,
-            orderLines: order.orderLines?.map(line => {
-                const changes = updates.get(line.id);
-                if (!changes) return line;
-                return { ...line, ...changes };
-            })
-        };
-    });
-
-    return { ...old, rows: newRows, orders: newOrders };
+    return { ...old, rows: newRows };
 }
 
 export function useOrderSSE({
@@ -304,23 +273,14 @@ export function useOrderSSE({
                             : row
                     );
 
-                    const newOrders = old.orders.map((order) => ({
-                        ...order,
-                        orderLines: order.orderLines?.map((line) =>
-                            lineIdSet.has(line.id)
-                                ? { ...line, ...data.changes }
-                                : line
-                        )
-                    }));
-
-                    return { ...old, rows: newRows, orders: newOrders };
+                    return { ...old, rows: newRows };
                 });
             }
 
             // Handle new order created
             if (data.type === 'order_created') {
-                // Just invalidate - new orders should trigger a refetch
-                queryClient.invalidateQueries({ queryKey: ['orders', { view: 'open' }] });
+                // Invalidate all views - new orders affect counts across views
+                invalidateAllOrderViewsStale(queryClient);
             }
 
             // Handle order deleted
@@ -330,7 +290,6 @@ export function useOrderSSE({
                     return {
                         ...old,
                         rows: old.rows.filter((row) => row.orderId !== data.orderId),
-                        orders: old.orders.filter((order) => order.id !== data.orderId),
                     };
                 });
             }
@@ -362,37 +321,22 @@ export function useOrderSSE({
                         return { ...row, ...updates };
                     });
 
-                    const newOrders = old.orders.map((order) => {
-                        if (order.id !== data.orderId) return order;
-                        const updates: Partial<CachedOrder> = {};
-                        if (data.changes?.status) updates.status = data.changes.status;
-                        if (data.changes?.lineStatus) {
-                            updates.orderLines = order.orderLines?.map((line) => ({
-                                ...line,
-                                lineStatus: data.changes!.lineStatus as string,
-                            }));
-                        }
-                        return { ...order, ...updates };
-                    });
-
-                    return { ...old, rows: newRows, orders: newOrders };
+                    return { ...old, rows: newRows };
                 });
             }
 
-            // Handle order shipped - remove from current view if it's 'open'
+            // Handle order shipped - remove from current view if it's 'all'
             if (data.type === 'order_shipped' && data.orderId) {
-                // Remove from open view cache (order moved to shipped)
-                if (currentViewRef.current === 'open') {
+                if (currentViewRef.current === 'all') {
                     queryClient.setQueryData<OrderListCacheData>(queryKey, (old) => {
                         if (!old) return old;
                         return {
                             ...old,
                             rows: old.rows.filter((row) => row.orderId !== data.orderId),
-                            orders: old.orders.filter((order) => order.id !== data.orderId),
                         };
                     });
                 }
-                // Don't invalidate shipped view - it will refresh when user navigates to it
+                queryClient.invalidateQueries({ queryKey: ['orders', 'viewCounts'] });
             }
 
             // Handle lines shipped
@@ -433,34 +377,32 @@ export function useOrderSSE({
                 });
             }
 
-            // Handle order RTO received - remove from shipped/rto view
+            // Handle order RTO received - remove from in_transit view
             if (data.type === 'order_rto_received' && data.orderId) {
-                if (currentViewRef.current === 'shipped') {
+                if (currentViewRef.current === 'in_transit') {
                     queryClient.setQueryData<OrderListCacheData>(queryKey, (old) => {
                         if (!old) return old;
                         return {
                             ...old,
                             rows: old.rows.filter((row) => row.orderId !== data.orderId),
-                            orders: old.orders.filter((order) => order.id !== data.orderId),
                         };
                     });
                 }
-                // Don't invalidate open view - it will refresh when user navigates
+                queryClient.invalidateQueries({ queryKey: ['orders', 'viewCounts'] });
             }
 
-            // Handle order cancelled - remove from open view
+            // Handle order cancelled - remove from all view
             if (data.type === 'order_cancelled' && data.orderId) {
-                if (currentViewRef.current === 'open') {
+                if (currentViewRef.current === 'all') {
                     queryClient.setQueryData<OrderListCacheData>(queryKey, (old) => {
                         if (!old) return old;
                         return {
                             ...old,
                             rows: old.rows.filter((row) => row.orderId !== data.orderId),
-                            orders: old.orders.filter((order) => order.id !== data.orderId),
                         };
                     });
                 }
-                // Don't invalidate cancelled view - it will refresh when user navigates
+                queryClient.invalidateQueries({ queryKey: ['orders', 'viewCounts'] });
             }
 
             // Handle order uncancelled - remove from cancelled view
@@ -471,11 +413,10 @@ export function useOrderSSE({
                         return {
                             ...old,
                             rows: old.rows.filter((row) => row.orderId !== data.orderId),
-                            orders: old.orders.filter((order) => order.id !== data.orderId),
                         };
                     });
                 }
-                // Don't invalidate open view - it will refresh when user navigates
+                queryClient.invalidateQueries({ queryKey: ['orders', 'viewCounts'] });
             }
 
             // Handle production batch created/updated/deleted
@@ -495,16 +436,7 @@ export function useOrderSSE({
                             : row
                     );
 
-                    const newOrders = old.orders.map((order) => ({
-                        ...order,
-                        orderLines: order.orderLines?.map((line) =>
-                            line.id === data.lineId
-                                ? { ...line, ...data.changes }
-                                : line
-                        ),
-                    }));
-
-                    return { ...old, rows: newRows, orders: newOrders };
+                    return { ...old, rows: newRows };
                 });
             }
 

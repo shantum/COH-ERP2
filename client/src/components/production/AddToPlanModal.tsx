@@ -112,8 +112,8 @@ export function AddToPlanModal({
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['production'] });
-            // Production batch affects open view (shows production batch info)
-            invalidateOrderView(queryClient, 'open');
+            // Production batch affects all view (shows production batch info)
+            invalidateOrderView(queryClient, 'all');
             resetForm();
             onOpenChange(false);
         },
