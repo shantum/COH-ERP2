@@ -7,12 +7,11 @@
 
 import type { PrismaClient, Order, OrderLine as PrismaOrderLine } from '@prisma/client';
 import prisma from '../lib/prisma.js';
-import { isValidTransition } from './orderStateMachine.js';
 import { computeOrderStatus, type OrderStatus } from '@coh/shared/domain';
 
 // Re-export shared types so existing consumers don't break
 export { computeOrderStatus, type OrderStatus, type OrderLineForStatus } from '@coh/shared/domain';
-export { SHIPPED_OR_BEYOND, LINE_STATUSES } from '@coh/shared/domain';
+export { SHIPPED_OR_BEYOND, LINE_STATUSES, isValidTransition } from '@coh/shared/domain';
 
 // ============================================
 // TYPE DEFINITIONS (server-only)
@@ -163,10 +162,6 @@ export async function batchRecomputeOrderStatus(orderIds: string[]): Promise<Bat
     return results;
 }
 
-/**
- * @deprecated Use isValidTransition from orderStateMachine.ts instead.
- */
-export { isValidTransition as isValidLineStatusTransition } from './orderStateMachine.js';
 
 /**
  * Get summary of order line states. Useful for UI display.
@@ -270,16 +265,3 @@ export function calculateProcessingTimes(order: OrderForProcessingTimes): Proces
     return times;
 }
 
-// ============================================
-// DEFAULT EXPORT
-// ============================================
-
-export default {
-    computeOrderStatus,
-    recomputeOrderStatus,
-    batchRecomputeOrderStatus,
-    isValidLineStatusTransition: isValidTransition,
-    getLineStatusSummary,
-    computeOrderState,
-    calculateProcessingTimes,
-};

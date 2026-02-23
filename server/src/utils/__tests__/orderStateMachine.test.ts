@@ -16,7 +16,7 @@ import {
     LINE_STATUSES,
     STATUSES_WITH_ALLOCATED_INVENTORY,
     type LineStatus,
-} from '../orderStateMachine.js';
+} from '@coh/shared/domain';
 
 describe('orderStateMachine', () => {
     describe('LINE_STATUSES constant', () => {
