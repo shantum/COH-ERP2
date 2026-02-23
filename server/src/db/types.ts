@@ -956,6 +956,7 @@ export type Product = {
     defaultFabricConsumption: number | null;
     description: string | null;
     imageUrl: string | null;
+    notes: unknown | null;
     status: Generated<string>;
     isActive: Generated<boolean>;
     isReturnable: Generated<boolean>;

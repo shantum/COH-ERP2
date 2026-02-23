@@ -51,6 +51,7 @@ import attendanceImportRoutes from './routes/attendanceImport.js';
 import marketplacePayoutRoutes from './routes/marketplacePayout.js';
 import razorpaySettlementRoutes from './routes/razorpaySettlement.js';
 import chatRoutes from './routes/chat.js';
+import imageUploadRoutes from './routes/imageUpload.js';
 import resendWebhookRoutes from './routes/resendWebhook.js';
 import returnPrimeWebhooks from './routes/returnPrimeWebhooks.js';
 import returnPrimeSync from './routes/returnPrimeSync.js';
@@ -71,7 +72,7 @@ app.use(helmet({
             defaultSrc: ["'self'"],
             scriptSrc: ["'self'", "'unsafe-inline'"],
             styleSrc: ["'self'", "'unsafe-inline'"],
-            imgSrc: ["'self'", "data:", "blob:", "https://cdn.shopify.com"],
+            imgSrc: ["'self'", "data:", "blob:", "https://cdn.shopify.com", "/api/uploads/"],
             connectSrc: ["'self'"],
             fontSrc: ["'self'", "data:"],
             objectSrc: ["'none'"],
@@ -157,6 +158,10 @@ app.use('/api/attendance-import', attendanceImportRoutes);
 app.use('/api/marketplace-payout', marketplacePayoutRoutes);
 app.use('/api/razorpay-settlement', razorpaySettlementRoutes);
 app.use('/api/chat', chatRoutes);
+
+// Image uploads
+app.use('/api/uploads', imageUploadRoutes);
+app.use('/api/uploads/products', express.static(path.join(process.cwd(), 'uploads', 'products')));
 
 // Resend inbound email webhook
 app.use('/api/webhooks/resend', resendWebhookRoutes);

@@ -113,6 +113,7 @@ model Product {
   defaultFabricConsumption Float?
   description              String?
   imageUrl                 String?
+  notes                    Json?       // Array of {id, text, createdAt, updatedAt}
   status                   String      @default("draft") // draft | active | archived
   isActive                 Boolean     @default(true)
   isReturnable             Boolean     @default(true)

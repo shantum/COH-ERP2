@@ -58,7 +58,7 @@ const createProductSchema = z.object({
     name: z.string().min(1, 'Product name is required').trim(),
     styleCode: z.string().optional().nullable(),
     category: z.string().min(1, 'Category is required'),
-    productType: z.string().min(1, 'Product type is required'),
+    productType: z.string().optional(),
     gender: z.string().default('unisex'),
     baseProductionTimeMins: z.number().int().positive().default(60),
     defaultFabricConsumption: z.number().positive().optional().nullable(),
@@ -141,7 +141,7 @@ export const createProduct = createServerFn({ method: 'POST' })
                         name: data.name,
                         styleCode: data.styleCode || null,
                         category: data.category,
-                        productType: data.productType,
+                        productType: data.productType || '',
                         gender: data.gender || 'unisex',
                         baseProductionTimeMins: data.baseProductionTimeMins || 60,
                         defaultFabricConsumption: data.defaultFabricConsumption || null,
@@ -551,11 +551,18 @@ const createProductDraftSchema = z.object({
     description: z.string().optional(),
     imageUrl: z.string().url().optional(),
     category: z.string().min(1, 'Category is required'),
-    productType: z.string().min(1, 'Product type is required'),
+    productType: z.string().optional(),
     gender: z.string().min(1),
-    mrp: z.number().positive('MRP must be greater than 0'),
+    mrp: z.number().nonnegative().optional(),
+    styleCode: z.string().optional(),
     defaultFabricConsumption: z.number().positive().optional(),
     hsnCode: z.string().optional(),
+    notes: z.array(z.object({
+        id: z.string(),
+        text: z.string().min(1),
+        createdAt: z.string(),
+        updatedAt: z.string().optional(),
+    })).optional(),
     sizes: z.array(z.string().min(1)).min(1, 'At least one size is required'),
     variations: z.array(z.object({
         colorName: z.string().min(1, 'Color name is required').trim(),
@@ -605,11 +612,13 @@ export const createProductDraft = createServerFn({ method: 'POST' })
                         name: data.name,
                         ...(data.description ? { description: data.description } : {}),
                         ...(data.imageUrl ? { imageUrl: data.imageUrl } : {}),
+                        ...(data.styleCode ? { styleCode: data.styleCode } : {}),
                         category: data.category,
-                        productType: data.productType,
+                        productType: data.productType || '',
                         gender: data.gender,
                         ...(data.defaultFabricConsumption ? { defaultFabricConsumption: data.defaultFabricConsumption } : {}),
                         ...(data.hsnCode ? { hsnCode: data.hsnCode } : {}),
+                        ...(data.notes && data.notes.length > 0 ? { notes: data.notes } : {}),
                         status: 'draft',
                         isActive: true,
                     },
@@ -638,7 +647,7 @@ export const createProductDraft = createServerFn({ method: 'POST' })
                             variationId: variation.id,
                             size,
                             skuCode: code,
-                            mrp: data.mrp,
+                            mrp: data.mrp ?? 0,
                         };
                     });
                     await tx.sku.createMany({ data: skuData });
@@ -680,4 +689,34 @@ export const createProductDraft = createServerFn({ method: 'POST' })
             const message = error instanceof Error ? error.message : 'Failed to create product draft';
             return { success: false, error: { message } };
         }
+    });
+
+// ============================================
+// GET NEXT SKU CODE
+// ============================================
+
+/**
+ * Returns the next available 8-digit sequential SKU code number.
+ * Used by the NewProduct page to preview what codes will be assigned.
+ */
+export const getNextSkuCode = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
+    .handler(async () => {
+        const { getKysely } = await import('@coh/shared/services/db');
+        const { sql } = await import('kysely');
+        type SqlBool = import('kysely').SqlBool;
+        const db = await getKysely();
+        const result = await db.selectFrom('Sku' as any)
+            .select(sql<string>`MAX("skuCode")`.as('maxCode'))
+            .where(sql<SqlBool>`"skuCode" ~ '^[0-9]{8}$'`)
+            .executeTakeFirst();
+
+        let nextCode = 10000001;
+        if (result?.maxCode) {
+            const parsed = parseInt(result.maxCode, 10);
+            if (!isNaN(parsed) && parsed >= 10000000) {
+                nextCode = parsed + 1;
+            }
+        }
+        return { nextCode };
     });

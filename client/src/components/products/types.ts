@@ -158,7 +158,7 @@ export interface ProductRowActionsProps {
  * Category options
  */
 export const PRODUCT_CATEGORIES = [
-    'Kurti', 'Shirt', 'Pants', 'Dress', 'Top', 'Blouse', 'Skirt', 'Jacket', 'Other'
+    'Shirt', 'Pants', 'Dress', 'Top', 'Blouse', 'Skirt', 'Jacket', 'Other'
 ] as const;
 export type ProductCategory = typeof PRODUCT_CATEGORIES[number];
 

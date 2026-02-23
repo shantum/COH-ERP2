@@ -6,11 +6,11 @@
  * hierarchy in a single server call.
  */
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback, useRef } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { useServerFn } from '@tanstack/react-start';
 import { useQuery } from '@tanstack/react-query';
-import { createProductDraft } from '../server/functions/productsMutations';
+import { createProductDraft, getNextSkuCode } from '../server/functions/productsMutations';
 import { getCatalogFilters } from '../server/functions/products';
 import { SIZE_ORDER } from '../constants/sizes';
 import { PRODUCT_CATEGORIES, GENDERS } from '../components/products/types';
@@ -28,7 +28,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select';
-import { ArrowLeft, Plus, X, Loader2, ChevronsUpDown } from 'lucide-react';
+import { ArrowLeft, Plus, X, Loader2, ChevronsUpDown, Upload, Image as ImageIcon, Pencil, Trash2, Check } from 'lucide-react';
 
 // --- Constants ---
 
@@ -162,6 +162,140 @@ function FabricColourPicker({
     );
 }
 
+// --- Image Dropzone ---
+
+function ImageDropzone({
+    imageUrl,
+    imagePreview,
+    onFileSelect,
+    onUrlChange,
+    onClear,
+}: {
+    imageUrl: string;
+    imagePreview: string;
+    onFileSelect: (file: File) => void;
+    onUrlChange: (url: string) => void;
+    onClear: () => void;
+}) {
+    const fileInputRef = useRef<HTMLInputElement>(null);
+    const [isDragging, setIsDragging] = useState(false);
+    const [showUrlInput, setShowUrlInput] = useState(false);
+
+    const displayImage = imagePreview || imageUrl;
+
+    const handleDragOver = useCallback((e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsDragging(true);
+    }, []);
+
+    const handleDragLeave = useCallback((e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsDragging(false);
+    }, []);
+
+    const handleDrop = useCallback((e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsDragging(false);
+        const file = e.dataTransfer.files[0];
+        if (file && file.type.startsWith('image/')) {
+            onFileSelect(file);
+        }
+    }, [onFileSelect]);
+
+    const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (file) {
+            onFileSelect(file);
+        }
+    }, [onFileSelect]);
+
+    if (displayImage) {
+        return (
+            <div className="space-y-2">
+                <Label>Product Image</Label>
+                <div className="relative inline-block">
+                    <img
+                        src={displayImage}
+                        alt="Product preview"
+                        className="h-32 w-32 object-cover rounded-lg border"
+                    />
+                    <button
+                        type="button"
+                        onClick={onClear}
+                        className="absolute -top-2 -right-2 h-6 w-6 rounded-full bg-red-500 text-white flex items-center justify-center hover:bg-red-600 shadow"
+                    >
+                        <X className="h-3 w-3" />
+                    </button>
+                </div>
+            </div>
+        );
+    }
+
+    return (
+        <div className="space-y-2">
+            <Label>Product Image</Label>
+            <div
+                onClick={() => fileInputRef.current?.click()}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+                className={`flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed p-6 cursor-pointer transition-colors ${
+                    isDragging
+                        ? 'border-primary bg-primary/5'
+                        : 'border-muted-foreground/25 hover:border-muted-foreground/50'
+                }`}
+            >
+                <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    onChange={handleFileChange}
+                    className="hidden"
+                />
+                <div className="flex items-center gap-2 text-muted-foreground">
+                    <Upload className="h-5 w-5" />
+                    <ImageIcon className="h-5 w-5" />
+                </div>
+                <p className="text-sm text-muted-foreground">
+                    Drop image here or click to upload
+                </p>
+                <p className="text-xs text-muted-foreground">
+                    JPG, PNG, WebP up to 5MB
+                </p>
+            </div>
+            {showUrlInput ? (
+                <div className="flex gap-2">
+                    <Input
+                        type="url"
+                        value={imageUrl}
+                        onChange={(e) => onUrlChange(e.target.value)}
+                        placeholder="https://..."
+                        className="text-sm"
+                    />
+                    <button
+                        type="button"
+                        onClick={() => setShowUrlInput(false)}
+                        className="text-xs text-muted-foreground hover:text-foreground"
+                    >
+                        Cancel
+                    </button>
+                </div>
+            ) : (
+                <button
+                    type="button"
+                    onClick={() => setShowUrlInput(true)}
+                    className="text-xs text-primary hover:underline"
+                >
+                    or paste image URL
+                </button>
+            )}
+        </div>
+    );
+}
+
 // --- Component ---
 
 export default function NewProduct() {
@@ -172,6 +306,12 @@ export default function NewProduct() {
     const { data: catalog } = useQuery({
         queryKey: ['products', 'catalogFilters', 'getCatalogFilters'],
         queryFn: () => getCatalogFilters(),
+    });
+
+    // Next SKU code for preview
+    const { data: skuCodeData } = useQuery({
+        queryKey: ['products', 'nextSkuCode', 'getNextSkuCode'],
+        queryFn: () => getNextSkuCode(),
     });
 
     // Derive unique materials from fabric colours
@@ -197,11 +337,14 @@ export default function NewProduct() {
 
     // Form state
     const [name, setName] = useState('');
+    const [styleCode, setStyleCode] = useState('');
     const [description, setDescription] = useState('');
     const [imageUrl, setImageUrl] = useState('');
+    const [imageFile, setImageFile] = useState<File | null>(null);
+    const [imagePreview, setImagePreview] = useState('');
     const [category, setCategory] = useState('');
-    const [productType, setProductType] = useState('');
     const [gender, setGender] = useState('Women');
+    const [fabricType, setFabricType] = useState<'woven' | 'knit'>('woven');
     const [selectedMaterialId, setSelectedMaterialId] = useState('');
     const [mrp, setMrp] = useState<string>('');
     const [fabricConsumption, setFabricConsumption] = useState<string>('');
@@ -209,8 +352,76 @@ export default function NewProduct() {
     const [variations, setVariations] = useState<
         Array<{ colorName: string; colorHex: string; hasLining: boolean; fabricColourId: string }>
     >([{ colorName: '', colorHex: '#000000', hasLining: false, fabricColourId: '' }]);
+    const [notes, setNotes] = useState<Array<{ id: string; text: string; createdAt: string; updatedAt?: string }>>([]);
+    const [newNote, setNewNote] = useState('');
+    const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+    const [editingNoteText, setEditingNoteText] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [error, setError] = useState<string | null>(null);
+
+    // --- Image helpers ---
+
+    const handleImageFileSelect = useCallback((file: File) => {
+        setImageFile(file);
+        setImagePreview(URL.createObjectURL(file));
+        setImageUrl('');
+    }, []);
+
+    const handleImageUrlChange = useCallback((url: string) => {
+        setImageUrl(url);
+        setImageFile(null);
+        if (imagePreview) {
+            URL.revokeObjectURL(imagePreview);
+            setImagePreview('');
+        }
+    }, [imagePreview]);
+
+    const handleImageClear = useCallback(() => {
+        setImageFile(null);
+        setImageUrl('');
+        if (imagePreview) {
+            URL.revokeObjectURL(imagePreview);
+            setImagePreview('');
+        }
+    }, [imagePreview]);
+
+    // --- Note helpers ---
+
+    const addNote = useCallback(() => {
+        if (!newNote.trim()) return;
+        const now = new Date().toISOString();
+        setNotes(prev => [{
+            id: crypto.randomUUID(),
+            text: newNote.trim(),
+            createdAt: now,
+        }, ...prev]);
+        setNewNote('');
+    }, [newNote]);
+
+    const deleteNote = useCallback((id: string) => {
+        setNotes(prev => prev.filter(n => n.id !== id));
+    }, []);
+
+    const startEditNote = useCallback((note: { id: string; text: string }) => {
+        setEditingNoteId(note.id);
+        setEditingNoteText(note.text);
+    }, []);
+
+    const saveEditNote = useCallback(() => {
+        if (!editingNoteId || !editingNoteText.trim()) return;
+        setNotes(prev => prev.map(n =>
+            n.id === editingNoteId
+                ? { ...n, text: editingNoteText.trim(), updatedAt: new Date().toISOString() }
+                : n
+        ));
+        setEditingNoteId(null);
+        setEditingNoteText('');
+    }, [editingNoteId, editingNoteText]);
+
+    const cancelEditNote = useCallback(() => {
+        setEditingNoteId(null);
+        setEditingNoteText('');
+    }, []);
 
     // --- Size helpers ---
 
@@ -252,6 +463,26 @@ export default function NewProduct() {
     const validVariations = variations.filter((v) => v.colorName.trim());
     const totalSkus = validVariations.length * sizes.length;
 
+    // Compute predicted SKU codes
+    const skuPreview = useMemo(() => {
+        if (!skuCodeData?.nextCode || validVariations.length === 0 || sizes.length === 0) {
+            return [];
+        }
+        const items: Array<{ color: string; colorHex: string; size: string; code: string }> = [];
+        let counter = skuCodeData.nextCode;
+        for (const v of validVariations) {
+            for (const size of sizes) {
+                items.push({
+                    color: v.colorName.trim(),
+                    colorHex: v.colorHex,
+                    size,
+                    code: String(counter++).padStart(8, '0'),
+                });
+            }
+        }
+        return items;
+    }, [skuCodeData?.nextCode, validVariations, sizes]);
+
     // --- Submit ---
 
     const handleSubmit = async () => {
@@ -261,14 +492,6 @@ export default function NewProduct() {
         }
         if (!category) {
             setError('Category is required');
-            return;
-        }
-        if (!productType.trim()) {
-            setError('Product type is required');
-            return;
-        }
-        if (!mrp || Number(mrp) <= 0) {
-            setError('MRP must be greater than 0');
             return;
         }
         if (sizes.length === 0) {
@@ -284,22 +507,42 @@ export default function NewProduct() {
         setIsSubmitting(true);
 
         try {
+            // Upload image file if selected
+            let finalImageUrl = imageUrl.trim();
+            if (imageFile) {
+                const formData = new FormData();
+                formData.append('image', imageFile);
+                const uploadRes = await fetch('/api/uploads/images', {
+                    method: 'POST',
+                    body: formData,
+                });
+                if (!uploadRes.ok) {
+                    const errData = await uploadRes.json().catch(() => ({ error: 'Upload failed' }));
+                    throw new Error(errData.error || 'Image upload failed');
+                }
+                const uploadData = await uploadRes.json();
+                finalImageUrl = uploadData.url;
+            }
+
             const result = await createDraftFn({
                 data: {
                     name: name.trim(),
                     ...(description.trim()
                         ? { description: description.trim() }
                         : {}),
-                    ...(imageUrl.trim()
-                        ? { imageUrl: imageUrl.trim() }
+                    ...(finalImageUrl
+                        ? { imageUrl: finalImageUrl }
+                        : {}),
+                    ...(styleCode.trim()
+                        ? { styleCode: styleCode.trim() }
                         : {}),
                     category,
-                    productType: productType.trim(),
                     gender,
-                    mrp: Number(mrp),
+                    ...(mrp ? { mrp: Number(mrp) } : {}),
                     ...(fabricConsumption
                         ? { defaultFabricConsumption: Number(fabricConsumption) }
                         : {}),
+                    ...(notes.length > 0 ? { notes } : {}),
                     sizes,
                     variations: validVariations.map((v) => ({
                         colorName: v.colorName.trim(),
@@ -325,6 +568,15 @@ export default function NewProduct() {
             setIsSubmitting(false);
         }
     };
+
+    // --- Fabric consumption label/placeholder based on fabric type ---
+    const fabricConsumptionLabel = fabricType === 'knit'
+        ? 'Default Fabric Consumption (kg)'
+        : 'Default Fabric Consumption (m)';
+    const fabricConsumptionPlaceholder = fabricType === 'knit' ? 'kg' : 'meters';
+    const fabricConsumptionHint = fabricType === 'knit'
+        ? 'In kilograms (optional)'
+        : 'In meters (optional)';
 
     // --- Render ---
 
@@ -373,7 +625,16 @@ export default function NewProduct() {
                                 id="name"
                                 value={name}
                                 onChange={(e) => setName(e.target.value)}
-                                placeholder="e.g. Floral Kurti"
+                            />
+                        </div>
+
+                        <div className="space-y-2">
+                            <Label htmlFor="styleCode">Style Code</Label>
+                            <Input
+                                id="styleCode"
+                                value={styleCode}
+                                onChange={(e) => setStyleCode(e.target.value)}
+                                placeholder="e.g. SC-001"
                             />
                         </div>
 
@@ -393,19 +654,6 @@ export default function NewProduct() {
                                     <option key={cat} value={cat} />
                                 ))}
                             </datalist>
-                        </div>
-
-                        <div className="space-y-2">
-                            <Label htmlFor="productType">
-                                Product Type{' '}
-                                <span className="text-red-500">*</span>
-                            </Label>
-                            <Input
-                                id="productType"
-                                value={productType}
-                                onChange={(e) => setProductType(e.target.value)}
-                                placeholder="e.g. Regular, Premium"
-                            />
                         </div>
 
                         <div className="space-y-2">
@@ -448,9 +696,35 @@ export default function NewProduct() {
                         </div>
 
                         <div className="space-y-2">
-                            <Label htmlFor="mrp">
-                                MRP <span className="text-red-500">*</span>
-                            </Label>
+                            <Label>Fabric Type</Label>
+                            <div className="flex gap-1 rounded-lg border p-1">
+                                <button
+                                    type="button"
+                                    onClick={() => setFabricType('woven')}
+                                    className={`flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                                        fabricType === 'woven'
+                                            ? 'bg-primary text-primary-foreground shadow-sm'
+                                            : 'text-muted-foreground hover:text-foreground'
+                                    }`}
+                                >
+                                    Woven
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setFabricType('knit')}
+                                    className={`flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                                        fabricType === 'knit'
+                                            ? 'bg-primary text-primary-foreground shadow-sm'
+                                            : 'text-muted-foreground hover:text-foreground'
+                                    }`}
+                                >
+                                    Knit
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="space-y-2">
+                            <Label htmlFor="mrp">MRP</Label>
                             <Input
                                 id="mrp"
                                 type="number"
@@ -464,7 +738,7 @@ export default function NewProduct() {
 
                         <div className="space-y-2">
                             <Label htmlFor="fabricConsumption">
-                                Default Fabric Consumption
+                                {fabricConsumptionLabel}
                             </Label>
                             <Input
                                 id="fabricConsumption"
@@ -475,10 +749,10 @@ export default function NewProduct() {
                                 onChange={(e) =>
                                     setFabricConsumption(e.target.value)
                                 }
-                                placeholder="meters"
+                                placeholder={fabricConsumptionPlaceholder}
                             />
                             <p className="text-xs text-muted-foreground">
-                                In meters (optional)
+                                {fabricConsumptionHint}
                             </p>
                         </div>
                     </div>
@@ -494,16 +768,13 @@ export default function NewProduct() {
                         />
                     </div>
 
-                    <div className="space-y-2">
-                        <Label htmlFor="imageUrl">Sample Image URL</Label>
-                        <Input
-                            id="imageUrl"
-                            type="url"
-                            value={imageUrl}
-                            onChange={(e) => setImageUrl(e.target.value)}
-                            placeholder="https://..."
-                        />
-                    </div>
+                    <ImageDropzone
+                        imageUrl={imageUrl}
+                        imagePreview={imagePreview}
+                        onFileSelect={handleImageFileSelect}
+                        onUrlChange={handleImageUrlChange}
+                        onClear={handleImageClear}
+                    />
                 </CardContent>
             </Card>
 
@@ -646,12 +917,121 @@ export default function NewProduct() {
                 </CardContent>
             </Card>
 
+            {/* Notes */}
+            <Card>
+                <CardHeader>
+                    <CardTitle>Notes</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                    {/* Add note input */}
+                    <div className="flex gap-2">
+                        <Textarea
+                            value={newNote}
+                            onChange={(e) => setNewNote(e.target.value)}
+                            placeholder="Add a note..."
+                            rows={2}
+                            className="flex-1"
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                                    addNote();
+                                }
+                            }}
+                        />
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={addNote}
+                            disabled={!newNote.trim()}
+                            className="self-end"
+                        >
+                            <Plus className="mr-1 h-4 w-4" />
+                            Add
+                        </Button>
+                    </div>
+
+                    {/* Notes timeline */}
+                    {notes.length > 0 && (
+                        <div className="relative space-y-0">
+                            {/* Timeline line */}
+                            {notes.length > 1 && (
+                                <div className="absolute left-[7px] top-3 bottom-3 w-px bg-border" />
+                            )}
+                            {notes.map((note) => (
+                                <div key={note.id} className="relative flex gap-3 py-2">
+                                    {/* Timeline dot */}
+                                    <div className="relative z-10 mt-1.5 h-[9px] w-[9px] rounded-full bg-primary border-2 border-background ring-2 ring-border flex-shrink-0" />
+
+                                    <div className="flex-1 min-w-0">
+                                        {editingNoteId === note.id ? (
+                                            <div className="flex gap-2">
+                                                <Textarea
+                                                    value={editingNoteText}
+                                                    onChange={(e) => setEditingNoteText(e.target.value)}
+                                                    rows={2}
+                                                    className="flex-1 text-sm"
+                                                    autoFocus
+                                                    onKeyDown={(e) => {
+                                                        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                                                            saveEditNote();
+                                                        }
+                                                        if (e.key === 'Escape') {
+                                                            cancelEditNote();
+                                                        }
+                                                    }}
+                                                />
+                                                <div className="flex flex-col gap-1 self-end">
+                                                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={saveEditNote}>
+                                                        <Check className="h-3.5 w-3.5" />
+                                                    </Button>
+                                                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={cancelEditNote}>
+                                                        <X className="h-3.5 w-3.5" />
+                                                    </Button>
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <>
+                                                <p className="text-sm whitespace-pre-wrap">{note.text}</p>
+                                                <div className="flex items-center gap-2 mt-1">
+                                                    <span className="text-xs text-muted-foreground">
+                                                        {new Date(note.createdAt).toLocaleString('en-IN', {
+                                                            day: 'numeric', month: 'short', year: 'numeric',
+                                                            hour: '2-digit', minute: '2-digit',
+                                                        })}
+                                                    </span>
+                                                    {note.updatedAt && (
+                                                        <span className="text-xs text-muted-foreground italic">(edited)</span>
+                                                    )}
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => startEditNote(note)}
+                                                        className="text-muted-foreground hover:text-foreground"
+                                                    >
+                                                        <Pencil className="h-3 w-3" />
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => deleteNote(note.id)}
+                                                        className="text-muted-foreground hover:text-red-500"
+                                                    >
+                                                        <Trash2 className="h-3 w-3" />
+                                                    </button>
+                                                </div>
+                                            </>
+                                        )}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </CardContent>
+            </Card>
+
             {/* Preview */}
             <Card>
                 <CardHeader>
                     <CardTitle>Preview</CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-2">
+                <CardContent className="space-y-4">
                     <p className="text-sm text-muted-foreground">
                         {validVariations.length} color
                         {validVariations.length !== 1 ? 's' : ''} &times;{' '}
@@ -690,6 +1070,41 @@ export default function NewProduct() {
                                 </li>
                             ))}
                         </ul>
+                    )}
+
+                    {/* SKU Code Preview */}
+                    {skuPreview.length > 0 && (
+                        <div className="space-y-2">
+                            <h4 className="text-sm font-medium">Predicted SKU Codes</h4>
+                            <div className="rounded-md border overflow-hidden">
+                                <table className="w-full text-sm">
+                                    <thead>
+                                        <tr className="bg-muted/50">
+                                            <th className="px-3 py-1.5 text-left font-medium">Color</th>
+                                            <th className="px-3 py-1.5 text-left font-medium">Size</th>
+                                            <th className="px-3 py-1.5 text-left font-medium">SKU Code</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {skuPreview.map((item, i) => (
+                                            <tr key={i} className="border-t">
+                                                <td className="px-3 py-1 flex items-center gap-1.5">
+                                                    {item.colorHex && (
+                                                        <span
+                                                            className="inline-block h-2.5 w-2.5 rounded-full border flex-shrink-0"
+                                                            style={{ backgroundColor: item.colorHex }}
+                                                        />
+                                                    )}
+                                                    {item.color}
+                                                </td>
+                                                <td className="px-3 py-1">{item.size}</td>
+                                                <td className="px-3 py-1 font-mono text-xs">{item.code}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
                     )}
                 </CardContent>
             </Card>
