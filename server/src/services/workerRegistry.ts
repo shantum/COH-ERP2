@@ -1,8 +1,8 @@
 /**
  * Worker Registry — single source of truth for all background workers.
  *
- * Both index.js (dev) and expressApp.js (prod) call startAllWorkers() / stopAllWorkers().
- * Adding a new worker here automatically adds it to dev, prod, and shutdown handling.
+ * index.js calls startAllWorkers() / stopAllWorkers() on startup/shutdown.
+ * Adding a new worker here automatically registers it for startup and graceful shutdown.
  */
 
 import scheduledSync from './scheduledSync.js';

@@ -7,7 +7,6 @@
   "scripts": {
     "dev": "tsx watch src/index.js",
     "start": "tsx src/index.js",
-    "start:production": "tsx src/production.js",
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "test": "NODE_OPTIONS='--experimental-vm-modules' jest",

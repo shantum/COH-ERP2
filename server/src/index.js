@@ -6,6 +6,7 @@ import './config/env.js';
 // Import logger EARLY to capture console.log/warn/error from all subsequent imports
 import logger from './utils/logger.js';
 
+import fs from 'node:fs';
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -50,6 +51,7 @@ import attendanceImportRoutes from './routes/attendanceImport.js';
 import marketplacePayoutRoutes from './routes/marketplacePayout.js';
 import razorpaySettlementRoutes from './routes/razorpaySettlement.js';
 import chatRoutes from './routes/chat.js';
+import resendWebhookRoutes from './routes/resendWebhook.js';
 import returnPrimeWebhooks from './routes/returnPrimeWebhooks.js';
 import returnPrimeSync from './routes/returnPrimeSync.js';
 import returnPrimeAdminRoutes from './routes/returnPrimeAdminRoutes.js';
@@ -58,6 +60,9 @@ import { errorHandler } from './middleware/errorHandler.js';
 import shutdownCoordinator from './utils/shutdownCoordinator.js';
 
 const app = express();
+
+// Trust reverse proxy (Caddy) for correct IP, cookies, and rate limiting
+app.set('trust proxy', 1);
 
 // Security middleware
 app.use(helmet({
@@ -153,6 +158,9 @@ app.use('/api/marketplace-payout', marketplacePayoutRoutes);
 app.use('/api/razorpay-settlement', razorpaySettlementRoutes);
 app.use('/api/chat', chatRoutes);
 
+// Resend inbound email webhook
+app.use('/api/webhooks/resend', resendWebhookRoutes);
+
 // Return Prime integration
 app.use('/api/webhooks/returnprime', returnPrimeWebhooks);
 app.use('/api/returnprime/admin', returnPrimeAdminRoutes);  // Must be before /api/returnprime
@@ -201,7 +209,9 @@ app.get('/terms', (req, res) => {
 
 // Health check
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  let commit = 'unknown';
+  try { commit = fs.readFileSync(path.join(process.cwd(), 'VERSION'), 'utf8').trim(); } catch {}
+  res.json({ status: 'ok', timestamp: new Date().toISOString(), commit });
 });
 
 // Production health check with performance metrics

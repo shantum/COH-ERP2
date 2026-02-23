@@ -549,6 +549,7 @@ export interface CreateProductDraftResult {
 const createProductDraftSchema = z.object({
     name: z.string().min(1, 'Product name is required').trim(),
     description: z.string().optional(),
+    imageUrl: z.string().url().optional(),
     category: z.string().min(1, 'Category is required'),
     productType: z.string().min(1, 'Product type is required'),
     gender: z.string().min(1),
@@ -560,6 +561,7 @@ const createProductDraftSchema = z.object({
         colorName: z.string().min(1, 'Color name is required').trim(),
         colorHex: z.string().regex(/^#[0-9A-Fa-f]{6}$/, 'Invalid hex color').optional(),
         hasLining: z.boolean().default(false),
+        fabricColourId: z.string().uuid().optional(),
     })).min(1, 'At least one color is required'),
 });
 
@@ -594,6 +596,7 @@ export const createProductDraft = createServerFn({ method: 'POST' })
 
             const prisma = await getPrisma();
             const allSkuCodes: string[] = [];
+            const variationFabricLinks: Array<{ variationId: string; fabricColourId: string }> = [];
 
             const product = await prisma.$transaction(async (tx) => {
                 // 1. Create Product
@@ -601,6 +604,7 @@ export const createProductDraft = createServerFn({ method: 'POST' })
                     data: {
                         name: data.name,
                         ...(data.description ? { description: data.description } : {}),
+                        ...(data.imageUrl ? { imageUrl: data.imageUrl } : {}),
                         category: data.category,
                         productType: data.productType,
                         gender: data.gender,
@@ -623,6 +627,10 @@ export const createProductDraft = createServerFn({ method: 'POST' })
                         },
                     });
 
+                    if (v.fabricColourId) {
+                        variationFabricLinks.push({ variationId: variation.id, fabricColourId: v.fabricColourId });
+                    }
+
                     const skuData = data.sizes.map((size) => {
                         const code = String(codeCounter++).padStart(8, '0');
                         allSkuCodes.push(code);
@@ -638,6 +646,24 @@ export const createProductDraft = createServerFn({ method: 'POST' })
 
                 return product;
             });
+
+            // After transaction, link fabric colours via BOM
+            if (variationFabricLinks.length > 0) {
+                const { linkFabricToVariation } = await import('./bomFabricMapping');
+                for (const link of variationFabricLinks) {
+                    try {
+                        await linkFabricToVariation({
+                            data: {
+                                colourId: link.fabricColourId,
+                                variationIds: [link.variationId],
+                            },
+                        });
+                    } catch (err) {
+                        // Non-fatal: product was created, fabric linking is optional
+                        console.warn(`Failed to link fabric colour ${link.fabricColourId} to variation ${link.variationId}:`, err);
+                    }
+                }
+            }
 
             return {
                 success: true,

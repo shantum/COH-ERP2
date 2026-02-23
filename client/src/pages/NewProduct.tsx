@@ -6,10 +6,12 @@
  * hierarchy in a single server call.
  */
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { useServerFn } from '@tanstack/react-start';
+import { useQuery } from '@tanstack/react-query';
 import { createProductDraft } from '../server/functions/productsMutations';
+import { getCatalogFilters } from '../server/functions/products';
 import { SIZE_ORDER } from '../constants/sizes';
 import { PRODUCT_CATEGORIES, GENDERS } from '../components/products/types';
 
@@ -26,12 +28,139 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select';
-import { ArrowLeft, Plus, X, Loader2 } from 'lucide-react';
+import { ArrowLeft, Plus, X, Loader2, ChevronsUpDown } from 'lucide-react';
 
 // --- Constants ---
 
 const DEFAULT_SIZES: string[] = ['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL'];
 const ALL_SIZES: string[] = [...SIZE_ORDER];
+
+// --- Fabric Colour Picker ---
+
+function FabricColourPicker({
+    fabricColours,
+    materialId,
+    value,
+    onChange,
+}: {
+    fabricColours: Array<{
+        id: string;
+        code: string | null;
+        name: string;
+        hex: string | null;
+        fabricId: string;
+        fabricName: string;
+        materialId: string;
+        materialName: string;
+        costPerUnit: number | null;
+    }>;
+    materialId: string;
+    value: string;
+    onChange: (id: string) => void;
+}) {
+    const [isOpen, setIsOpen] = useState(false);
+    const [search, setSearch] = useState('');
+
+    const filtered = useMemo(() => {
+        let list = fabricColours;
+        if (materialId) {
+            list = list.filter(fc => fc.materialId === materialId);
+        }
+        if (search.trim()) {
+            const q = search.toLowerCase();
+            list = list.filter(fc =>
+                fc.name.toLowerCase().includes(q) ||
+                fc.fabricName.toLowerCase().includes(q) ||
+                fc.materialName.toLowerCase().includes(q) ||
+                (fc.code && fc.code.toLowerCase().includes(q))
+            );
+        }
+        return list;
+    }, [fabricColours, materialId, search]);
+
+    const selected = fabricColours.find(fc => fc.id === value);
+
+    return (
+        <div className="relative flex-1">
+            <Label className="text-xs text-muted-foreground">Fabric Colour</Label>
+            <button
+                type="button"
+                onClick={() => setIsOpen(!isOpen)}
+                className="w-full flex items-center justify-between gap-1 px-2 py-1.5 border rounded-md text-sm text-left h-9"
+            >
+                {selected ? (
+                    <span className="flex items-center gap-1 truncate">
+                        {selected.hex && (
+                            <span
+                                className="inline-block h-3 w-3 rounded-full border flex-shrink-0"
+                                style={{ backgroundColor: selected.hex }}
+                            />
+                        )}
+                        <span className="truncate">{selected.name}</span>
+                    </span>
+                ) : (
+                    <span className="text-muted-foreground">Optional</span>
+                )}
+                <ChevronsUpDown className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+            </button>
+            {isOpen && (
+                <>
+                    <div className="fixed inset-0 z-40" onClick={() => { setIsOpen(false); setSearch(''); }} />
+                    <div className="absolute z-50 w-72 mt-1 bg-white border rounded-lg shadow-lg">
+                        <div className="p-2 border-b">
+                            <Input
+                                value={search}
+                                onChange={(e) => setSearch(e.target.value)}
+                                placeholder="Search fabrics..."
+                                className="h-7 text-xs"
+                                autoFocus
+                            />
+                        </div>
+                        <div className="max-h-48 overflow-y-auto">
+                            {value && (
+                                <button
+                                    type="button"
+                                    onClick={() => { onChange(''); setIsOpen(false); setSearch(''); }}
+                                    className="w-full px-3 py-1.5 text-xs text-muted-foreground hover:bg-red-50 hover:text-red-600 text-left border-b"
+                                >
+                                    Clear selection
+                                </button>
+                            )}
+                            {filtered.length === 0 ? (
+                                <div className="px-3 py-3 text-xs text-muted-foreground text-center">
+                                    No fabric colours found
+                                </div>
+                            ) : (
+                                filtered.map((fc) => (
+                                    <button
+                                        key={fc.id}
+                                        type="button"
+                                        onClick={() => { onChange(fc.id); setIsOpen(false); setSearch(''); }}
+                                        className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left hover:bg-gray-50 ${value === fc.id ? 'bg-blue-50' : ''}`}
+                                    >
+                                        {fc.hex && (
+                                            <span
+                                                className="inline-block h-3 w-3 rounded-full border flex-shrink-0"
+                                                style={{ backgroundColor: fc.hex }}
+                                            />
+                                        )}
+                                        <span className="flex-1 min-w-0">
+                                            <span className="font-medium truncate block">{fc.name}</span>
+                                            <span className="text-muted-foreground truncate block">
+                                                {fc.materialName} &rarr; {fc.fabricName}
+                                                {fc.costPerUnit != null && ` · ₹${fc.costPerUnit}/m`}
+                                            </span>
+                                        </span>
+                                    </button>
+                                ))
+                            )}
+                        </div>
+                    </div>
+                </>
+            )}
+        </div>
+    );
+}
 
 // --- Component ---
 
@@ -39,18 +168,47 @@ export default function NewProduct() {
     const navigate = useNavigate();
     const createDraftFn = useServerFn(createProductDraft);
 
+    // Catalog data for dropdowns
+    const { data: catalog } = useQuery({
+        queryKey: ['products', 'catalogFilters', 'getCatalogFilters'],
+        queryFn: () => getCatalogFilters(),
+    });
+
+    // Derive unique materials from fabric colours
+    const materials = useMemo(() => {
+        if (!catalog?.fabricColours) return [];
+        const seen = new Map<string, string>();
+        for (const fc of catalog.fabricColours) {
+            if (!seen.has(fc.materialId)) {
+                seen.set(fc.materialId, fc.materialName);
+            }
+        }
+        return Array.from(seen.entries()).map(([id, name]) => ({ id, name }));
+    }, [catalog?.fabricColours]);
+
+    // Merge static + DB categories, deduplicated
+    const allCategories = useMemo(() => {
+        const set = new Set<string>([...PRODUCT_CATEGORIES]);
+        if (catalog?.categories) {
+            catalog.categories.forEach(c => set.add(c));
+        }
+        return Array.from(set).sort();
+    }, [catalog?.categories]);
+
     // Form state
     const [name, setName] = useState('');
     const [description, setDescription] = useState('');
+    const [imageUrl, setImageUrl] = useState('');
     const [category, setCategory] = useState('');
     const [productType, setProductType] = useState('');
     const [gender, setGender] = useState('Women');
+    const [selectedMaterialId, setSelectedMaterialId] = useState('');
     const [mrp, setMrp] = useState<string>('');
     const [fabricConsumption, setFabricConsumption] = useState<string>('');
     const [sizes, setSizes] = useState<string[]>([...DEFAULT_SIZES]);
     const [variations, setVariations] = useState<
-        Array<{ colorName: string; colorHex: string; hasLining: boolean }>
-    >([{ colorName: '', colorHex: '#000000', hasLining: false }]);
+        Array<{ colorName: string; colorHex: string; hasLining: boolean; fabricColourId: string }>
+    >([{ colorName: '', colorHex: '#000000', hasLining: false, fabricColourId: '' }]);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
@@ -70,7 +228,7 @@ export default function NewProduct() {
     const addVariation = () => {
         setVariations((prev) => [
             ...prev,
-            { colorName: '', colorHex: '#000000', hasLining: false },
+            { colorName: '', colorHex: '#000000', hasLining: false, fabricColourId: '' },
         ]);
     };
 
@@ -132,6 +290,9 @@ export default function NewProduct() {
                     ...(description.trim()
                         ? { description: description.trim() }
                         : {}),
+                    ...(imageUrl.trim()
+                        ? { imageUrl: imageUrl.trim() }
+                        : {}),
                     category,
                     productType: productType.trim(),
                     gender,
@@ -146,6 +307,9 @@ export default function NewProduct() {
                             ? { colorHex: v.colorHex }
                             : {}),
                         hasLining: v.hasLining,
+                        ...(v.fabricColourId
+                            ? { fabricColourId: v.fabricColourId }
+                            : {}),
                     })),
                 },
             });
@@ -217,18 +381,18 @@ export default function NewProduct() {
                             <Label htmlFor="category">
                                 Category <span className="text-red-500">*</span>
                             </Label>
-                            <Select value={category} onValueChange={setCategory}>
-                                <SelectTrigger id="category">
-                                    <SelectValue placeholder="Select category" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {PRODUCT_CATEGORIES.map((cat) => (
-                                        <SelectItem key={cat} value={cat}>
-                                            {cat}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
+                            <Input
+                                id="category"
+                                list="category-options"
+                                value={category}
+                                onChange={(e) => setCategory(e.target.value)}
+                                placeholder="Select or type category"
+                            />
+                            <datalist id="category-options">
+                                {allCategories.map((cat) => (
+                                    <option key={cat} value={cat} />
+                                ))}
+                            </datalist>
                         </div>
 
                         <div className="space-y-2">
@@ -258,6 +422,29 @@ export default function NewProduct() {
                                     ))}
                                 </SelectContent>
                             </Select>
+                        </div>
+
+                        <div className="space-y-2">
+                            <Label htmlFor="material">Material</Label>
+                            <Select
+                                value={selectedMaterialId || '__all__'}
+                                onValueChange={(v) => setSelectedMaterialId(v === '__all__' ? '' : v)}
+                            >
+                                <SelectTrigger id="material">
+                                    <SelectValue placeholder="All materials" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="__all__">All materials</SelectItem>
+                                    {materials.map((m) => (
+                                        <SelectItem key={m.id} value={m.id}>
+                                            {m.name}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                            <p className="text-xs text-muted-foreground">
+                                Filters fabric colours below
+                            </p>
                         </div>
 
                         <div className="space-y-2">
@@ -304,6 +491,17 @@ export default function NewProduct() {
                             onChange={(e) => setDescription(e.target.value)}
                             placeholder="Optional product description..."
                             rows={3}
+                        />
+                    </div>
+
+                    <div className="space-y-2">
+                        <Label htmlFor="imageUrl">Sample Image URL</Label>
+                        <Input
+                            id="imageUrl"
+                            type="url"
+                            value={imageUrl}
+                            onChange={(e) => setImageUrl(e.target.value)}
+                            placeholder="https://..."
                         />
                     </div>
                 </CardContent>
@@ -415,6 +613,15 @@ export default function NewProduct() {
                                 </label>
                             </div>
 
+                            {catalog?.fabricColours && (
+                                <FabricColourPicker
+                                    fabricColours={catalog.fabricColours}
+                                    materialId={selectedMaterialId}
+                                    value={variation.fabricColourId}
+                                    onChange={(id) => updateVariation(index, 'fabricColourId', id)}
+                                />
+                            )}
+
                             <Button
                                 variant="ghost"
                                 size="icon"
@@ -471,6 +678,11 @@ export default function NewProduct() {
                                         />
                                     )}
                                     <span>{v.colorName.trim()}</span>
+                                    {v.fabricColourId && catalog?.fabricColours && (
+                                        <span className="text-muted-foreground text-xs">
+                                            ({catalog.fabricColours.find(fc => fc.id === v.fabricColourId)?.name})
+                                        </span>
+                                    )}
                                     <span className="text-muted-foreground">
                                         — {sizes.length} SKU
                                         {sizes.length !== 1 ? 's' : ''}
