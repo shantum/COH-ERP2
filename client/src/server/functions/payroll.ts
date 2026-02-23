@@ -23,6 +23,8 @@ import {
   GetAttendanceSummarySchema,
 } from '@coh/shared/schemas/payroll';
 
+import type { AttendanceRecord } from '@prisma/client';
+
 // ============================================
 // INLINE CALCULATION (avoid cross-project import)
 // ============================================
@@ -805,4 +807,40 @@ export const deleteLeaveRecord = createServerFn({ method: 'POST' })
     });
 
     return { success: true as const };
+  });
+
+// ============================================
+// ATTENDANCE RECORDS — GET (fingerprint data)
+// ============================================
+
+export const getAttendanceRecords = createServerFn({ method: 'POST' })
+  .middleware([authMiddleware])
+  .inputValidator((input: unknown) => GetAttendanceSummarySchema.parse(input))
+  .handler(async ({ data }) => {
+    const prisma = await getPrisma();
+
+    const monthStart = new Date(data.year, data.month - 1, 1);
+    const monthEnd = new Date(data.year, data.month, 0);
+
+    const records = await prisma.attendanceRecord.findMany({
+      where: {
+        date: { gte: monthStart, lte: monthEnd },
+      },
+      include: {
+        employee: {
+          select: { id: true, name: true, employeeCode: true },
+        },
+      },
+      orderBy: [{ employee: { name: 'asc' } }, { date: 'asc' }],
+    });
+
+    return {
+      success: true as const,
+      records: records.map((r: AttendanceRecord & { employee: { id: string; name: string; employeeCode: string | null } }) => ({
+        ...r,
+        date: r.date.toISOString().split('T')[0],
+      })),
+      month: data.month,
+      year: data.year,
+    };
   });

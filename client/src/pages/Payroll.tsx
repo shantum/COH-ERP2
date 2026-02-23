@@ -24,6 +24,7 @@ import {
   getAttendanceSummary,
   upsertLeaveRecord,
   deleteLeaveRecord,
+  getAttendanceRecords,
 } from '../server/functions/payroll';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
@@ -60,6 +61,7 @@ import {
   ArrowLeft,
   Pencil,
   Trash2,
+  Upload,
 } from 'lucide-react';
 import {
   type PayrollSearchParams,
@@ -68,9 +70,16 @@ import {
   PAYROLL_STATUS_LABELS,
   LEAVE_TYPES,
   LEAVE_TYPE_LABELS,
+  ATTENDANCE_STATUS_LABELS,
 } from '@coh/shared';
 import { Textarea } from '@/components/ui/textarea';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 
 // ============================================
 // HELPERS
@@ -364,6 +373,7 @@ function EmployeeModal({
 
   const [form, setForm] = useState({
     name: '',
+    employeeCode: '',
     department: 'production' as string,
     designation: '',
     basicSalary: '',
@@ -390,6 +400,7 @@ function EmployeeModal({
   if (isEdit && emp && !formLoaded) {
     setForm({
       name: emp.name,
+      employeeCode: emp.employeeCode ?? '',
       department: emp.department,
       designation: emp.designation ?? '',
       basicSalary: String(emp.basicSalary),
@@ -437,6 +448,7 @@ function EmployeeModal({
           data: {
             id: employeeId!,
             name: form.name,
+            employeeCode: form.employeeCode || null,
             department: form.department as 'production' | 'office',
             designation: form.designation || null,
             basicSalary,
@@ -463,6 +475,7 @@ function EmployeeModal({
         const res = await createFn({
           data: {
             name: form.name,
+            ...(form.employeeCode ? { employeeCode: form.employeeCode } : {}),
             department: form.department as 'production' | 'office',
             ...(form.designation ? { designation: form.designation } : {}),
             basicSalary,
@@ -515,6 +528,10 @@ function EmployeeModal({
               <div className="col-span-2">
                 <Label>Name *</Label>
                 <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+              </div>
+              <div>
+                <Label>Employee Code</Label>
+                <Input value={form.employeeCode} onChange={(e) => setForm({ ...form, employeeCode: e.target.value })} placeholder="e.g. E001" />
               </div>
               <div>
                 <Label>Department *</Label>
@@ -1119,6 +1136,7 @@ function AttendanceTab() {
   const summaryFn = useServerFn(getAttendanceSummary);
   const upsertFn = useServerFn(upsertLeaveRecord);
   const deleteFn = useServerFn(deleteLeaveRecord);
+  const attRecordsFn = useServerFn(getAttendanceRecords);
 
   const queryKey = ['payroll', 'attendance', month, year];
   const { data, isLoading } = useQuery({
@@ -1126,6 +1144,11 @@ function AttendanceTab() {
     queryFn: () => summaryFn({ data: { month, year } }),
   });
 
+  // Fetch fingerprint attendance records for the month
+  const { data: attData } = useQuery({
+    queryKey: ['payroll', 'attendance-records', month, year],
+    queryFn: () => attRecordsFn({ data: { month, year } }),
+  });
 
   const sundays = useMemo(() => getSundays(month, year), [month, year]);
   const daysInMonth = data?.daysInMonth ?? new Date(year, month, 0).getDate();
@@ -1135,7 +1158,6 @@ function AttendanceTab() {
     const map = new Map<string, { type: string; reason: string | null }>();
     if (!data?.leaveRecords) return map;
     for (const lr of data.leaveRecords) {
-      // date comes as "YYYY-MM-DD" string from server
       const dateStr = typeof lr.date === 'string' ? lr.date : String(lr.date);
       const day = parseInt(dateStr.split('-')[2] ?? dateStr.split('T')[0]?.split('-')[2], 10);
       if (!isNaN(day)) {
@@ -1145,6 +1167,33 @@ function AttendanceTab() {
     return map;
   }, [data?.leaveRecords]);
 
+  // Build fingerprint attendance lookup: "employeeId:day" -> record
+  const attMap = useMemo(() => {
+    const map = new Map<string, {
+      status: string; inTime: string | null; outTime: string | null;
+      durationMins: number; lateByMins: number; earlyByMins: number; overtimeMins: number;
+    }>();
+    if (!attData?.records) return map;
+    for (const r of attData.records) {
+      const dateStr = typeof r.date === 'string' ? r.date : String(r.date);
+      const day = parseInt(dateStr.split('-')[2], 10);
+      if (!isNaN(day)) {
+        map.set(`${r.employeeId}:${day}`, {
+          status: r.status,
+          inTime: r.inTime,
+          outTime: r.outTime,
+          durationMins: r.durationMins,
+          lateByMins: r.lateByMins,
+          earlyByMins: r.earlyByMins,
+          overtimeMins: r.overtimeMins,
+        });
+      }
+    }
+    return map;
+  }, [attData?.records]);
+
+  const hasFingerprint = attMap.size > 0;
+
   // Dialog state
   const [dialogOpen, setDialogOpen] = useState(false);
   const [dialogEmployee, setDialogEmployee] = useState<{ id: string; name: string } | null>(null);
@@ -1152,6 +1201,9 @@ function AttendanceTab() {
   const [dialogType, setDialogType] = useState<string>('absent');
   const [dialogReason, setDialogReason] = useState('');
   const [saving, setSaving] = useState(false);
+
+  // Import dialog state
+  const [importOpen, setImportOpen] = useState(false);
 
   const openDialog = (emp: { id: string; name: string }, day: number) => {
     const existing = leaveMap.get(`${emp.id}:${day}`);
@@ -1244,63 +1296,61 @@ function AttendanceTab() {
           </Button>
         </div>
         <div className="flex-1" />
-        <div className="flex gap-3 text-sm text-muted-foreground">
+        <div className="flex gap-3 text-sm text-muted-foreground items-center">
           <span>{daysInMonth} days</span>
           <span className="text-red-600 font-medium">{totalAbsent} absent</span>
           <span className="text-amber-600 font-medium">{totalHalf} half-day</span>
+          {hasFingerprint && (
+            <Badge variant="outline" className="text-xs">Fingerprint data loaded</Badge>
+          )}
+          <Button variant="outline" size="sm" onClick={() => setImportOpen(true)}>
+            <Upload className="h-4 w-4 mr-1" /> Import XLSX
+          </Button>
         </div>
       </div>
 
       {isLoading ? (
         <LoadingState />
       ) : (
-        <div className="border rounded-lg overflow-x-auto">
-          <table className="text-sm border-collapse">
-            <thead className="bg-muted/50">
-              <tr>
-                <th className="text-left p-2 font-medium sticky left-0 bg-muted/50 min-w-[140px] border-r">
-                  Employee
-                </th>
-                {dayNumbers.map((d) => (
-                  <th
-                    key={d}
-                    className={`text-center p-1 font-medium min-w-[32px] text-xs ${
-                      sundays.has(d) ? 'bg-muted text-muted-foreground' : ''
-                    }`}
-                  >
-                    {d}
+        <TooltipProvider delayDuration={200}>
+          <div className="border rounded-lg overflow-x-auto">
+            <table className="text-sm border-collapse">
+              <thead className="bg-muted/50">
+                <tr>
+                  <th className="text-left p-2 font-medium sticky left-0 bg-muted/50 min-w-[140px] border-r">
+                    Employee
                   </th>
-                ))}
-                <th className="text-center p-2 font-medium min-w-[70px] border-l">Days</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data?.employees?.map((emp) => {
-                // Calculate payable days for this employee
-                const empLeaves = data.leaveRecords?.filter((l) => l.employeeId === emp.id) ?? [];
-                const absences = empLeaves.filter((l) => l.type === 'absent').length;
-                const halfs = empLeaves.filter((l) => l.type === 'half_day').length;
-                const payable = daysInMonth - absences - halfs * 0.5;
+                  {dayNumbers.map((d) => (
+                    <th
+                      key={d}
+                      className={`text-center p-1 font-medium min-w-[32px] text-xs ${
+                        sundays.has(d) ? 'bg-muted text-muted-foreground' : ''
+                      }`}
+                    >
+                      {d}
+                    </th>
+                  ))}
+                  <th className="text-center p-2 font-medium min-w-[70px] border-l">Days</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data?.employees?.map((emp) => {
+                  const empLeaves = data.leaveRecords?.filter((l) => l.employeeId === emp.id) ?? [];
+                  const absences = empLeaves.filter((l) => l.type === 'absent').length;
+                  const halfs = empLeaves.filter((l) => l.type === 'half_day').length;
+                  const payable = daysInMonth - absences - halfs * 0.5;
 
-                return (
-                  <tr key={emp.id} className="border-t hover:bg-muted/20">
-                    <td className="p-2 font-medium sticky left-0 bg-background border-r truncate max-w-[140px]">
-                      {emp.name}
-                    </td>
-                    {dayNumbers.map((d) => {
-                      const isSunday = sundays.has(d);
-                      const leave = leaveMap.get(`${emp.id}:${d}`);
+                  return (
+                    <tr key={emp.id} className="border-t hover:bg-muted/20">
+                      <td className="p-2 font-medium sticky left-0 bg-background border-r truncate max-w-[140px]">
+                        {emp.name}
+                      </td>
+                      {dayNumbers.map((d) => {
+                        const isSunday = sundays.has(d);
+                        const leave = leaveMap.get(`${emp.id}:${d}`);
+                        const att = attMap.get(`${emp.id}:${d}`);
 
-                      return (
-                        <td
-                          key={d}
-                          className={`text-center p-0 ${
-                            isSunday
-                              ? 'bg-muted/60 cursor-default'
-                              : 'cursor-pointer hover:bg-muted/40'
-                          }`}
-                          onClick={isSunday ? undefined : () => openDialog(emp, d)}
-                        >
+                        const cellContent = (
                           <div className="w-full h-8 flex items-center justify-center">
                             {isSunday ? (
                               <span className="text-[10px] text-muted-foreground/50">S</span>
@@ -1314,32 +1364,80 @@ function AttendanceTab() {
                               >
                                 {leave.type === 'absent' ? 'A' : 'HD'}
                               </span>
+                            ) : att ? (
+                              <span className={`text-[10px] font-bold rounded px-1 py-0.5 ${
+                                att.status === 'P' ? 'bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-400' :
+                                att.status === 'WO' ? 'bg-gray-100 text-gray-500 dark:bg-gray-900 dark:text-gray-500' :
+                                'text-green-600/60'
+                              }`}>
+                                {att.status === 'WO' ? 'WO' : 'P'}
+                              </span>
                             ) : d <= today ? (
                               <span className="text-[10px] text-green-600/60 font-medium">P</span>
                             ) : null}
                           </div>
-                        </td>
-                      );
-                    })}
-                    <td className="text-center p-2 font-mono text-sm border-l">
-                      <span className={payable < daysInMonth ? 'text-amber-600 font-semibold' : ''}>
-                        {payable % 1 === 0 ? payable : payable.toFixed(1)}
-                      </span>
-                      <span className="text-muted-foreground">/{daysInMonth}</span>
+                        );
+
+                        // Show tooltip when fingerprint data exists
+                        if (att && !isSunday) {
+                          return (
+                            <td
+                              key={d}
+                              className="text-center p-0 cursor-pointer hover:bg-muted/40"
+                              onClick={() => openDialog(emp, d)}
+                            >
+                              <Tooltip>
+                                <TooltipTrigger asChild>{cellContent}</TooltipTrigger>
+                                <TooltipContent side="top" className="text-xs">
+                                  <div className="space-y-0.5">
+                                    <div className="font-semibold">{ATTENDANCE_STATUS_LABELS[att.status] ?? att.status}</div>
+                                    {att.inTime && <div>In: {att.inTime}</div>}
+                                    {att.outTime && <div>Out: {att.outTime}</div>}
+                                    {att.durationMins > 0 && <div>Duration: {Math.floor(att.durationMins / 60)}h {att.durationMins % 60}m</div>}
+                                    {att.lateByMins > 0 && <div className="text-amber-400">Late: {att.lateByMins}m</div>}
+                                    {att.earlyByMins > 0 && <div className="text-amber-400">Early: {att.earlyByMins}m</div>}
+                                    {att.overtimeMins > 0 && <div className="text-blue-400">OT: {att.overtimeMins}m</div>}
+                                  </div>
+                                </TooltipContent>
+                              </Tooltip>
+                            </td>
+                          );
+                        }
+
+                        return (
+                          <td
+                            key={d}
+                            className={`text-center p-0 ${
+                              isSunday
+                                ? 'bg-muted/60 cursor-default'
+                                : 'cursor-pointer hover:bg-muted/40'
+                            }`}
+                            onClick={isSunday ? undefined : () => openDialog(emp, d)}
+                          >
+                            {cellContent}
+                          </td>
+                        );
+                      })}
+                      <td className="text-center p-2 font-mono text-sm border-l">
+                        <span className={payable < daysInMonth ? 'text-amber-600 font-semibold' : ''}>
+                          {payable % 1 === 0 ? payable : payable.toFixed(1)}
+                        </span>
+                        <span className="text-muted-foreground">/{daysInMonth}</span>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {(!data?.employees || data.employees.length === 0) && (
+                  <tr>
+                    <td colSpan={daysInMonth + 2} className="p-8 text-center text-muted-foreground">
+                      No active employees
                     </td>
                   </tr>
-                );
-              })}
-              {(!data?.employees || data.employees.length === 0) && (
-                <tr>
-                  <td colSpan={daysInMonth + 2} className="p-8 text-center text-muted-foreground">
-                    No active employees
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </TooltipProvider>
       )}
 
       {/* Leave Dialog */}
@@ -1353,6 +1451,24 @@ function AttendanceTab() {
               <DialogDescription>Mark leave or remove existing record.</DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
+              {/* Show fingerprint data if available */}
+              {attMap.has(`${dialogEmployee.id}:${dialogDay}`) && (() => {
+                const att = attMap.get(`${dialogEmployee.id}:${dialogDay}`)!;
+                return (
+                  <div className="border rounded-lg p-3 bg-muted/30 text-sm space-y-1">
+                    <div className="font-medium text-xs text-muted-foreground uppercase tracking-wide mb-1">Fingerprint Data</div>
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
+                      <span className="text-muted-foreground">Status:</span>
+                      <span className="font-medium">{ATTENDANCE_STATUS_LABELS[att.status] ?? att.status}</span>
+                      {att.inTime && <><span className="text-muted-foreground">In:</span><span>{att.inTime}</span></>}
+                      {att.outTime && <><span className="text-muted-foreground">Out:</span><span>{att.outTime}</span></>}
+                      {att.durationMins > 0 && <><span className="text-muted-foreground">Duration:</span><span>{Math.floor(att.durationMins / 60)}h {att.durationMins % 60}m</span></>}
+                      {att.lateByMins > 0 && <><span className="text-muted-foreground">Late by:</span><span className="text-amber-600">{att.lateByMins}m</span></>}
+                      {att.overtimeMins > 0 && <><span className="text-muted-foreground">Overtime:</span><span className="text-blue-600">{att.overtimeMins}m</span></>}
+                    </div>
+                  </div>
+                );
+              })()}
               <div>
                 <Label className="mb-2 block">Leave Type</Label>
                 <RadioGroup value={dialogType} onValueChange={setDialogType} className="flex gap-4">
@@ -1389,7 +1505,305 @@ function AttendanceTab() {
           </DialogContent>
         </Dialog>
       )}
+
+      {/* Import Dialog */}
+      {importOpen && (
+        <AttendanceImportDialog
+          month={month}
+          year={year}
+          onClose={() => setImportOpen(false)}
+          onImported={() => {
+            setImportOpen(false);
+            qc.invalidateQueries({ queryKey: ['payroll'] });
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+// ============================================
+// ATTENDANCE IMPORT DIALOG (Preview + Confirm)
+// ============================================
+
+interface PreviewResult {
+  previewId: string;
+  period: string;
+  totalEmployeesInFile: number;
+  matchedCount: number;
+  unmatchedCount: number;
+  unmatchedNames: string[];
+  matched: {
+    employeeCode: string;
+    nameInFile: string;
+    nameInSystem: string;
+    presentDays: number;
+    absentDays: number;
+    weeklyOffs: number;
+    totalDays: number;
+  }[];
+  summary: { totalPresent: number; totalAbsent: number; totalWO: number };
+}
+
+interface ConfirmResult {
+  success: boolean;
+  importBatchId: string;
+  matchedEmployees: number;
+  attendanceRecordsCreated: number;
+  attendanceRecordsUpdated: number;
+  leaveRecordsCreated: number;
+  leaveRecordsDeleted: number;
+}
+
+function AttendanceImportDialog({
+  month,
+  year,
+  onClose,
+  onImported,
+}: {
+  month: number;
+  year: number;
+  onClose: () => void;
+  onImported: () => void;
+}) {
+  const [step, setStep] = useState<'upload' | 'preview' | 'done'>('upload');
+  const [uploading, setUploading] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [error, setError] = useState('');
+  const [preview, setPreview] = useState<PreviewResult | null>(null);
+  const [result, setResult] = useState<ConfirmResult | null>(null);
+
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploading(true);
+    setError('');
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('month', String(month));
+      formData.append('year', String(year));
+
+      const res = await fetch('/api/attendance-import/preview', {
+        method: 'POST',
+        credentials: 'include',
+        body: formData,
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(data.error || 'Upload failed');
+        return;
+      }
+
+      setPreview(data);
+      setStep('preview');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Upload failed');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleConfirm = async () => {
+    if (!preview) return;
+    setConfirming(true);
+    setError('');
+
+    try {
+      const res = await fetch('/api/attendance-import/confirm', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ previewId: preview.previewId }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(data.error || 'Import failed');
+        return;
+      }
+
+      setResult(data);
+      setStep('done');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Import failed');
+    } finally {
+      setConfirming(false);
+    }
+  };
+
+  return (
+    <Dialog open onOpenChange={() => onClose()}>
+      <DialogContent className="max-w-lg max-h-[80vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>
+            Import Fingerprint Attendance — {MONTH_NAMES[month - 1]} {year}
+          </DialogTitle>
+          <DialogDescription>
+            {step === 'upload' && 'Upload the fingerprint machine XLSX report.'}
+            {step === 'preview' && 'Review matched employees before importing.'}
+            {step === 'done' && 'Import complete.'}
+          </DialogDescription>
+        </DialogHeader>
+
+        {/* STEP 1: Upload */}
+        {step === 'upload' && (
+          <div className="space-y-4">
+            <div className="border-2 border-dashed rounded-lg p-6 text-center">
+              <Upload className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
+              <p className="text-sm text-muted-foreground mb-3">
+                Upload .xlsx file from the fingerprint machine
+              </p>
+              <label className="cursor-pointer">
+                <Input
+                  type="file"
+                  accept=".xls,.xlsx"
+                  onChange={handleUpload}
+                  disabled={uploading}
+                  className="max-w-[250px] mx-auto"
+                />
+              </label>
+              {uploading && (
+                <div className="flex items-center justify-center mt-3 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" /> Parsing file...
+                </div>
+              )}
+            </div>
+            {error && <p className="text-sm text-destructive">{error}</p>}
+          </div>
+        )}
+
+        {/* STEP 2: Preview */}
+        {step === 'preview' && preview && (
+          <div className="space-y-4">
+            {/* Summary cards */}
+            <div className="grid grid-cols-3 gap-2">
+              <div className="border rounded p-2 text-center">
+                <div className="text-lg font-bold">{preview.totalEmployeesInFile}</div>
+                <div className="text-xs text-muted-foreground">In file</div>
+              </div>
+              <div className="border rounded p-2 text-center">
+                <div className="text-lg font-bold text-green-600">{preview.matchedCount}</div>
+                <div className="text-xs text-muted-foreground">Matched</div>
+              </div>
+              <div className="border rounded p-2 text-center">
+                <div className={`text-lg font-bold ${preview.unmatchedCount > 0 ? 'text-amber-600' : ''}`}>
+                  {preview.unmatchedCount}
+                </div>
+                <div className="text-xs text-muted-foreground">Unmatched</div>
+              </div>
+            </div>
+
+            {/* Unmatched warning */}
+            {preview.unmatchedCount > 0 && (
+              <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded p-3 text-sm">
+                <div className="font-medium text-amber-800 dark:text-amber-300 mb-1">
+                  {preview.unmatchedCount} employee(s) could not be matched:
+                </div>
+                <ul className="list-disc ml-4 text-amber-700 dark:text-amber-400 text-xs">
+                  {preview.unmatchedNames.map((n, i) => <li key={i}>{n}</li>)}
+                </ul>
+                <p className="text-xs text-amber-600 dark:text-amber-500 mt-1">
+                  Add Employee Codes in the Employees tab to match them.
+                </p>
+              </div>
+            )}
+
+            {/* Matched employees table */}
+            {preview.matched.length > 0 && (
+              <div className="border rounded-lg overflow-x-auto max-h-[250px]">
+                <table className="w-full text-sm">
+                  <thead className="bg-muted/50 sticky top-0">
+                    <tr>
+                      <th className="text-left p-2 font-medium">Code</th>
+                      <th className="text-left p-2 font-medium">Name</th>
+                      <th className="text-center p-2 font-medium">P</th>
+                      <th className="text-center p-2 font-medium">A</th>
+                      <th className="text-center p-2 font-medium">WO</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {preview.matched.map((emp, i) => (
+                      <tr key={i} className="border-t">
+                        <td className="p-2 font-mono text-xs">{emp.employeeCode}</td>
+                        <td className="p-2">{emp.nameInSystem}</td>
+                        <td className="p-2 text-center text-green-600 font-medium">{emp.presentDays}</td>
+                        <td className="p-2 text-center text-red-600 font-medium">{emp.absentDays}</td>
+                        <td className="p-2 text-center text-muted-foreground">{emp.weeklyOffs}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* Stats */}
+            <div className="flex gap-4 text-sm text-muted-foreground">
+              <span>Total: <strong className="text-green-600">{preview.summary.totalPresent} P</strong></span>
+              <span><strong className="text-red-600">{preview.summary.totalAbsent} A</strong></span>
+              <span><strong>{preview.summary.totalWO} WO</strong></span>
+            </div>
+
+            {error && <p className="text-sm text-destructive">{error}</p>}
+          </div>
+        )}
+
+        {/* STEP 3: Done */}
+        {step === 'done' && result && (
+          <div className="space-y-4">
+            <div className="text-center">
+              <div className="h-12 w-12 rounded-full bg-green-100 dark:bg-green-950 flex items-center justify-center mx-auto mb-3">
+                <Check className="h-6 w-6 text-green-600" />
+              </div>
+              <p className="font-medium">Import successful!</p>
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-sm">
+              <div className="border rounded p-2">
+                <span className="text-muted-foreground">Employees:</span>{' '}
+                <strong>{result.matchedEmployees}</strong>
+              </div>
+              <div className="border rounded p-2">
+                <span className="text-muted-foreground">Records created:</span>{' '}
+                <strong>{result.attendanceRecordsCreated}</strong>
+              </div>
+              <div className="border rounded p-2">
+                <span className="text-muted-foreground">Records updated:</span>{' '}
+                <strong>{result.attendanceRecordsUpdated}</strong>
+              </div>
+              <div className="border rounded p-2">
+                <span className="text-muted-foreground">Leave records:</span>{' '}
+                <strong>+{result.leaveRecordsCreated} / -{result.leaveRecordsDeleted}</strong>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <DialogFooter>
+          {step === 'upload' && (
+            <Button variant="outline" onClick={onClose}>Cancel</Button>
+          )}
+          {step === 'preview' && (
+            <>
+              <Button variant="outline" onClick={() => { setStep('upload'); setPreview(null); setError(''); }}>
+                Back
+              </Button>
+              <Button onClick={handleConfirm} disabled={confirming || preview!.matchedCount === 0}>
+                {confirming && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
+                Confirm Import ({preview!.matchedCount} employees)
+              </Button>
+            </>
+          )}
+          {step === 'done' && (
+            <Button onClick={onImported}>Done</Button>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

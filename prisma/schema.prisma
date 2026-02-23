@@ -2029,8 +2029,9 @@ model Employee {
 
   party            Party?    @relation(fields: [partyId], references: [id])
   tailor           Tailor?   @relation(fields: [tailorId], references: [id])
-  payrollSlips     PayrollSlip[]
-  leaveRecords     LeaveRecord[]
+  payrollSlips      PayrollSlip[]
+  leaveRecords      LeaveRecord[]
+  attendanceRecords AttendanceRecord[]
 
   @@index([department])
   @@index([isActive])
@@ -2043,6 +2044,7 @@ model LeaveRecord {
   date        DateTime @db.Date
   type        String   // "absent" | "half_day"
   reason      String?
+  source      String   @default("manual") // "manual" | "fingerprint_import"
   createdById String
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -2052,6 +2054,30 @@ model LeaveRecord {
 
   @@unique([employeeId, date])
   @@index([date])
+}
+
+/// Fingerprint machine attendance record — imported from XLSX reports
+model AttendanceRecord {
+  id            String   @id @default(uuid())
+  employeeId    String
+  date          DateTime @db.Date
+  status        String   // "P" | "A" | "WO"
+  shift         String?  // "GS"
+  inTime        String?  // "HH:MM", null if no punch
+  outTime       String?
+  lateByMins    Int      @default(0)
+  earlyByMins   Int      @default(0)
+  overtimeMins  Int      @default(0)
+  durationMins  Int      @default(0)
+  importBatchId String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  employee      Employee @relation(fields: [employeeId], references: [id])
+
+  @@unique([employeeId, date])
+  @@index([date])
+  @@index([importBatchId])
 }
 
 /// Monthly payroll batch header

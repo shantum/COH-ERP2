@@ -14,6 +14,22 @@ export type Allocation = {
     matchedAt: Generated<Timestamp>;
     matchedById: string;
 };
+export type AttendanceRecord = {
+    id: Generated<string>;
+    employeeId: string;
+    date: Timestamp;
+    status: string;
+    shift: string | null;
+    inTime: string | null;
+    outTime: string | null;
+    lateByMins: Generated<number>;
+    earlyByMins: Generated<number>;
+    overtimeMins: Generated<number>;
+    durationMins: Generated<number>;
+    importBatchId: string | null;
+    createdAt: Generated<Timestamp>;
+    updatedAt: Timestamp;
+};
 export type BankImportBatch = {
     id: Generated<string>;
     bank: string;
@@ -538,6 +554,7 @@ export type LeaveRecord = {
     date: Timestamp;
     type: string;
     reason: string | null;
+    source: Generated<string>;
     createdById: string;
     createdAt: Generated<Timestamp>;
     updatedAt: Timestamp;
@@ -1401,6 +1418,7 @@ export type WriteOffLog = {
 };
 export type DB = {
     Allocation: Allocation;
+    AttendanceRecord: AttendanceRecord;
     BankImportBatch: BankImportBatch;
     BankTransaction: BankTransaction;
     ChannelImportBatch: ChannelImportBatch;

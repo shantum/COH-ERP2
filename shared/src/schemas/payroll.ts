@@ -172,6 +172,27 @@ export type GetAttendanceSummaryInput = z.infer<typeof GetAttendanceSummarySchem
 // DISPLAY CONSTANTS (shared between client + server)
 // ============================================
 
+// ============================================
+// ATTENDANCE IMPORT SCHEMAS
+// ============================================
+
+export const ATTENDANCE_STATUSES = ['P', 'A', 'WO', 'WOP', 'HD', 'L'] as const;
+
+export const ATTENDANCE_STATUS_LABELS: Record<string, string> = {
+  P: 'Present',
+  A: 'Absent',
+  WO: 'Weekly Off',
+  WOP: 'Weekly Off (Present)',
+  HD: 'Half Day',
+  L: 'Leave',
+};
+
+export const LEAVE_SOURCES = ['manual', 'fingerprint_import'] as const;
+
+// ============================================
+// PAYROLL RUN SCHEMAS
+// ============================================
+
 export const PAYROLL_STATUSES = ['draft', 'confirmed', 'cancelled'] as const;
 
 export const PAYROLL_STATUS_LABELS: Record<string, string> = {
