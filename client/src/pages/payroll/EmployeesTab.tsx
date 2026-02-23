@@ -36,8 +36,57 @@ import {
   DEPARTMENTS,
   getDepartmentLabel,
   GROSS_MULTIPLIER,
+  calculateSlip,
 } from '@coh/shared';
 import { formatINR, LoadingState, Pagination } from './shared';
+
+const CREATE_EMPLOYEE_STEPS = [
+  { id: 1, label: 'Basic' },
+  { id: 2, label: 'Salary' },
+  { id: 3, label: 'Bank & KYC' },
+  { id: 4, label: 'Review' },
+] as const;
+
+type StatutoryFlags = {
+  pfApplicable: boolean;
+  esicApplicable: boolean;
+  ptApplicable: boolean;
+};
+
+function getFullMonthSalaryBreakdown(basicSalary: number, flags: StatutoryFlags) {
+  return calculateSlip({
+    basicSalary,
+    pfApplicable: flags.pfApplicable,
+    esicApplicable: flags.esicApplicable,
+    ptApplicable: flags.ptApplicable,
+    payableDays: 30,
+    daysInMonth: 30,
+    advances: 0,
+    otherDeductions: 0,
+  });
+}
+
+function reverseBasicFromInHand(inHand: number, flags: StatutoryFlags): number {
+  if (!Number.isFinite(inHand) || inHand <= 0) return 0;
+
+  let low = 0;
+  let high = Math.max(inHand, 10_000);
+  while (getFullMonthSalaryBreakdown(high, flags).netPay < inHand && high < 1_000_000) {
+    high *= 2;
+  }
+
+  for (let i = 0; i < 60; i++) {
+    const mid = (low + high) / 2;
+    const net = getFullMonthSalaryBreakdown(mid, flags).netPay;
+    if (net < inHand) low = mid;
+    else high = mid;
+  }
+
+  const lowNet = getFullMonthSalaryBreakdown(low, flags).netPay;
+  const highNet = getFullMonthSalaryBreakdown(high, flags).netPay;
+  const best = Math.abs(lowNet - inHand) <= Math.abs(highNet - inHand) ? low : high;
+  return Math.max(1, Math.round(best));
+}
 
 export default function EmployeesTab() {
   const search = Route.useSearch();
@@ -267,6 +316,38 @@ function EmployeeModal({
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [createStep, setCreateStep] = useState<1 | 2 | 3 | 4>(1);
+  const [inHandSalary, setInHandSalary] = useState('');
+
+  const validateCreateStep = (step: 1 | 2 | 3 | 4): string | null => {
+    if (step === 1 && !form.name.trim()) return 'Name is required';
+    if (step === 2) {
+      const inHand = parseFloat(inHandSalary);
+      if (isNaN(inHand) || inHand <= 0) return 'Enter a valid in-hand salary';
+      const basicSalary = parseFloat(form.basicSalary);
+      if (isNaN(basicSalary) || basicSalary <= 0) return 'Enter a valid basic salary';
+    }
+    return null;
+  };
+
+  const goNextStep = () => {
+    const validationError = validateCreateStep(createStep);
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+    setError('');
+    if (createStep < 4) {
+      setCreateStep((prev) => (prev + 1) as 1 | 2 | 3 | 4);
+    }
+  };
+
+  const goPrevStep = () => {
+    setError('');
+    if (createStep > 1) {
+      setCreateStep((prev) => (prev - 1) as 1 | 2 | 3 | 4);
+    }
+  };
 
   const handleSave = async () => {
     setSaving(true);
@@ -348,7 +429,15 @@ function EmployeeModal({
     }
   };
 
-  const gross = parseFloat(form.basicSalary) * GROSS_MULTIPLIER || 0;
+  const basicSalaryNum = parseFloat(form.basicSalary);
+  const gross = basicSalaryNum * GROSS_MULTIPLIER || 0;
+  const salaryBreakdown = !isNaN(basicSalaryNum) && basicSalaryNum > 0
+    ? getFullMonthSalaryBreakdown(basicSalaryNum, {
+      pfApplicable: form.pfApplicable,
+      esicApplicable: form.esicApplicable,
+      ptApplicable: form.ptApplicable,
+    })
+    : null;
 
   return (
     <Dialog open onOpenChange={() => onClose()}>
@@ -356,7 +445,9 @@ function EmployeeModal({
         <DialogHeader>
           <DialogTitle>{isEdit ? 'Edit Employee' : 'Add Employee'}</DialogTitle>
           <DialogDescription>
-            {isEdit ? 'Update employee details and salary structure.' : 'Add a new employee to the payroll system.'}
+            {isEdit
+              ? 'Update employee details and salary structure.'
+              : `Step ${createStep} of 4: ${CREATE_EMPLOYEE_STEPS[createStep - 1].label}`}
           </DialogDescription>
         </DialogHeader>
 
@@ -364,14 +455,45 @@ function EmployeeModal({
           <LoadingState />
         ) : (
           <div className="space-y-4">
+            {!isEdit && (
+              <div className="grid grid-cols-4 gap-2">
+                {CREATE_EMPLOYEE_STEPS.map((step) => {
+                  const isCurrent = createStep === step.id;
+                  const isDone = createStep > step.id;
+                  return (
+                    <div
+                      key={step.id}
+                      className={`rounded-md border px-2 py-1.5 text-center ${
+                        isCurrent
+                          ? 'border-primary bg-primary/5'
+                          : isDone
+                            ? 'border-emerald-300 bg-emerald-50'
+                            : 'border-muted bg-muted/30'
+                      }`}
+                    >
+                      <div className="text-[10px] text-muted-foreground">Step {step.id}</div>
+                      <div className="text-xs font-medium">{step.label}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {(isEdit || createStep === 1) && (
             <div className="grid grid-cols-2 gap-3">
               <div className="col-span-2">
                 <Label>Name *</Label>
                 <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
               </div>
               <div>
-                <Label>Employee Code</Label>
-                <Input value={form.employeeCode} onChange={(e) => setForm({ ...form, employeeCode: e.target.value })} placeholder="e.g. E001" />
+                <Label>Employee Code {!isEdit ? '(Auto)' : ''}</Label>
+                <Input
+                  value={isEdit ? form.employeeCode : (form.employeeCode || 'Auto-generated on save')}
+                  onChange={(e) => setForm({ ...form, employeeCode: e.target.value })}
+                  placeholder={isEdit ? 'e.g. E001' : undefined}
+                  disabled={!isEdit}
+                  className={!isEdit ? 'bg-muted' : undefined}
+                />
               </div>
               <div>
                 <Label>Department *</Label>
@@ -389,32 +511,150 @@ function EmployeeModal({
                 <Input value={form.designation} onChange={(e) => setForm({ ...form, designation: e.target.value })} placeholder="e.g. Senior Tailor" />
               </div>
             </div>
+            )}
 
+            {(isEdit || createStep === 2) && (
             <div className="border rounded-lg p-3 bg-muted/30">
               <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Salary Structure</Label>
               <div className="grid grid-cols-2 gap-3 mt-2">
+                {!isEdit && (
+                  <div className="col-span-2">
+                    <Label>In-Hand Salary (monthly) *</Label>
+                    <Input
+                      type="number"
+                      value={inHandSalary}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        setInHandSalary(value);
+                        const targetInHand = parseFloat(value);
+                        if (!isNaN(targetInHand) && targetInHand > 0) {
+                          const reversedBasic = reverseBasicFromInHand(targetInHand, {
+                            pfApplicable: form.pfApplicable,
+                            esicApplicable: form.esicApplicable,
+                            ptApplicable: form.ptApplicable,
+                          });
+                          setForm({ ...form, basicSalary: String(reversedBasic) });
+                        }
+                      }}
+                      placeholder="e.g. 22000"
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Basic is auto-calculated from in-hand using PF/ESIC/PT selections.
+                    </p>
+                  </div>
+                )}
                 <div>
                   <Label>Basic Salary *</Label>
-                  <Input type="number" value={form.basicSalary} onChange={(e) => setForm({ ...form, basicSalary: e.target.value })} placeholder="e.g. 12000" />
+                  <Input
+                    type="number"
+                    value={form.basicSalary}
+                    onChange={(e) => setForm({ ...form, basicSalary: e.target.value })}
+                    placeholder="e.g. 12000"
+                  />
                 </div>
                 <div>
                   <Label>Gross (auto)</Label>
-                  <Input value={gross ? formatINR(gross) : ''} disabled className="bg-muted" />
+                  <Input value={salaryBreakdown ? formatINR(salaryBreakdown.grossFixed) : ''} disabled className="bg-muted" />
                 </div>
               </div>
               <div className="flex gap-4 mt-3">
                 <label className="flex items-center gap-2 text-sm cursor-pointer">
-                  <Checkbox checked={form.pfApplicable} onCheckedChange={(v) => setForm({ ...form, pfApplicable: !!v })} /> PF
+                  <Checkbox
+                    checked={form.pfApplicable}
+                    onCheckedChange={(v) => {
+                      const pfApplicable = !!v;
+                      const targetInHand = parseFloat(inHandSalary);
+                      const nextBasic = !isNaN(targetInHand) && targetInHand > 0
+                        ? String(reverseBasicFromInHand(targetInHand, {
+                          pfApplicable,
+                          esicApplicable: form.esicApplicable,
+                          ptApplicable: form.ptApplicable,
+                        }))
+                        : form.basicSalary;
+                      setForm({ ...form, pfApplicable, basicSalary: nextBasic });
+                    }}
+                  /> PF
                 </label>
                 <label className="flex items-center gap-2 text-sm cursor-pointer">
-                  <Checkbox checked={form.esicApplicable} onCheckedChange={(v) => setForm({ ...form, esicApplicable: !!v })} /> ESIC
+                  <Checkbox
+                    checked={form.esicApplicable}
+                    onCheckedChange={(v) => {
+                      const esicApplicable = !!v;
+                      const targetInHand = parseFloat(inHandSalary);
+                      const nextBasic = !isNaN(targetInHand) && targetInHand > 0
+                        ? String(reverseBasicFromInHand(targetInHand, {
+                          pfApplicable: form.pfApplicable,
+                          esicApplicable,
+                          ptApplicable: form.ptApplicable,
+                        }))
+                        : form.basicSalary;
+                      setForm({ ...form, esicApplicable, basicSalary: nextBasic });
+                    }}
+                  /> ESIC
                 </label>
                 <label className="flex items-center gap-2 text-sm cursor-pointer">
-                  <Checkbox checked={form.ptApplicable} onCheckedChange={(v) => setForm({ ...form, ptApplicable: !!v })} /> PT
+                  <Checkbox
+                    checked={form.ptApplicable}
+                    onCheckedChange={(v) => {
+                      const ptApplicable = !!v;
+                      const targetInHand = parseFloat(inHandSalary);
+                      const nextBasic = !isNaN(targetInHand) && targetInHand > 0
+                        ? String(reverseBasicFromInHand(targetInHand, {
+                          pfApplicable: form.pfApplicable,
+                          esicApplicable: form.esicApplicable,
+                          ptApplicable,
+                        }))
+                        : form.basicSalary;
+                      setForm({ ...form, ptApplicable, basicSalary: nextBasic });
+                    }}
+                  /> PT
                 </label>
               </div>
-            </div>
 
+              {salaryBreakdown && (
+                <div className="mt-4 border rounded-md bg-background p-3">
+                  <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+                    Full Salary Breakdown (Monthly)
+                  </div>
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+                    <div className="text-muted-foreground">Basic</div>
+                    <div className="text-right font-mono">{formatINR(salaryBreakdown.basicFixed)}</div>
+                    <div className="text-muted-foreground">HRA (40%)</div>
+                    <div className="text-right font-mono">{formatINR(salaryBreakdown.hraFixed)}</div>
+                    <div className="text-muted-foreground">Other Allowance (60%)</div>
+                    <div className="text-right font-mono">{formatINR(salaryBreakdown.otherAllowanceFixed)}</div>
+                    <div className="text-muted-foreground font-medium">Gross</div>
+                    <div className="text-right font-mono font-medium">{formatINR(salaryBreakdown.grossFixed)}</div>
+
+                    <div className="text-muted-foreground mt-2">PF (Employee)</div>
+                    <div className="text-right font-mono mt-2">{formatINR(salaryBreakdown.pfEmployee)}</div>
+                    <div className="text-muted-foreground">ESIC (Employee)</div>
+                    <div className="text-right font-mono">{formatINR(salaryBreakdown.esicEmployee)}</div>
+                    <div className="text-muted-foreground">Professional Tax</div>
+                    <div className="text-right font-mono">{formatINR(salaryBreakdown.professionalTax)}</div>
+                    <div className="text-muted-foreground font-medium">Total Deductions</div>
+                    <div className="text-right font-mono font-medium">{formatINR(salaryBreakdown.totalDeductions)}</div>
+
+                    <div className="text-emerald-700 font-semibold mt-2">Net In-Hand</div>
+                    <div className="text-right font-mono text-emerald-700 font-semibold mt-2">{formatINR(salaryBreakdown.netPay)}</div>
+
+                    <div className="text-muted-foreground mt-2">PF (Employer)</div>
+                    <div className="text-right font-mono mt-2">{formatINR(salaryBreakdown.pfEmployer)}</div>
+                    <div className="text-muted-foreground">PF Admin</div>
+                    <div className="text-right font-mono">{formatINR(salaryBreakdown.pfAdmin)}</div>
+                    <div className="text-muted-foreground">ESIC (Employer)</div>
+                    <div className="text-right font-mono">{formatINR(salaryBreakdown.esicEmployer)}</div>
+                    <div className="text-muted-foreground font-medium">Total Employer Cost</div>
+                    <div className="text-right font-mono font-medium">{formatINR(salaryBreakdown.totalEmployerCost)}</div>
+                    <div className="text-muted-foreground font-semibold">Cost to Company (CTC)</div>
+                    <div className="text-right font-mono font-semibold">{formatINR(salaryBreakdown.costToCompany)}</div>
+                  </div>
+                </div>
+              )}
+            </div>
+            )}
+
+            {(isEdit || createStep === 1) && (
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label>Phone</Label>
@@ -444,8 +684,10 @@ function EmployeeModal({
                 </Select>
               </div>
             </div>
+            )}
 
-            <details className="border rounded-lg p-3">
+            {(isEdit || createStep === 3) && (
+            <details className="border rounded-lg p-3" open={!isEdit}>
               <summary className="text-sm font-medium cursor-pointer text-muted-foreground">
                 Bank & Statutory Details
               </summary>
@@ -460,6 +702,43 @@ function EmployeeModal({
                 <div><Label>ESIC Number</Label><Input value={form.esicNumber} onChange={(e) => setForm({ ...form, esicNumber: e.target.value })} /></div>
               </div>
             </details>
+            )}
+
+            {!isEdit && createStep === 4 && (
+              <div className="border rounded-lg p-3 space-y-3 bg-muted/20">
+                <div>
+                  <div className="text-xs text-muted-foreground">Name</div>
+                  <div className="font-medium">{form.name || '-'}</div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <div className="text-xs text-muted-foreground">Employee Code</div>
+                    <div>{form.employeeCode || 'Auto-generated on save'}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">Department</div>
+                    <div>{getDepartmentLabel(form.department)}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">Designation</div>
+                    <div>{form.designation || '-'}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">Basic Salary</div>
+                    <div className="font-mono">{form.basicSalary ? formatINR(parseFloat(form.basicSalary)) : '-'}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">Gross Salary</div>
+                    <div className="font-mono">{gross ? formatINR(gross) : '-'}</div>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <Badge variant={form.pfApplicable ? 'default' : 'secondary'}>PF {form.pfApplicable ? 'On' : 'Off'}</Badge>
+                  <Badge variant={form.esicApplicable ? 'default' : 'secondary'}>ESIC {form.esicApplicable ? 'On' : 'Off'}</Badge>
+                  <Badge variant={form.ptApplicable ? 'default' : 'secondary'}>PT {form.ptApplicable ? 'On' : 'Off'}</Badge>
+                </div>
+              </div>
+            )}
 
             {isEdit && (
               <label className="flex items-center gap-2 text-sm cursor-pointer">
@@ -474,10 +753,30 @@ function EmployeeModal({
 
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button onClick={handleSave} disabled={saving}>
-            {saving && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
-            {isEdit ? 'Save Changes' : 'Create Employee'}
-          </Button>
+          {isEdit ? (
+            <Button onClick={handleSave} disabled={saving}>
+              {saving && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
+              Save Changes
+            </Button>
+          ) : (
+            <>
+              {createStep > 1 && (
+                <Button variant="outline" onClick={goPrevStep} disabled={saving}>
+                  Back
+                </Button>
+              )}
+              {createStep < 4 ? (
+                <Button onClick={goNextStep} disabled={saving}>
+                  Next
+                </Button>
+              ) : (
+                <Button onClick={handleSave} disabled={saving}>
+                  {saving && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
+                  Create Employee
+                </Button>
+              )}
+            </>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

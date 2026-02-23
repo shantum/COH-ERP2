@@ -10,6 +10,44 @@ import {
   ListEmployeesInput,
 } from '@coh/shared/schemas/payroll';
 
+async function generateEmployeeCode(prisma: Awaited<ReturnType<typeof getPrisma>>): Promise<string> {
+  const existingCodes = await prisma.employee.findMany({
+    where: { employeeCode: { not: null } },
+    select: { employeeCode: true },
+  });
+
+  let maxNumeric = 0;
+  let padWidth = 4;
+  const existingSet = new Set(
+    existingCodes
+      .map((row) => row.employeeCode?.trim().toUpperCase())
+      .filter((code): code is string => !!code),
+  );
+
+  for (const row of existingCodes) {
+    const code = row.employeeCode?.trim();
+    if (!code) continue;
+
+    const numericMatch = code.match(/(\d+)(?!.*\d)/);
+    if (!numericMatch) continue;
+
+    const num = parseInt(numericMatch[1], 10);
+    if (!isNaN(num)) {
+      if (num > maxNumeric) maxNumeric = num;
+      if (numericMatch[1].length > padWidth) padWidth = numericMatch[1].length;
+    }
+  }
+
+  let next = maxNumeric + 1;
+  let candidate = `EMP${String(next).padStart(padWidth, '0')}`;
+  while (existingSet.has(candidate.toUpperCase())) {
+    next += 1;
+    candidate = `EMP${String(next).padStart(padWidth, '0')}`;
+  }
+
+  return candidate;
+}
+
 // ============================================
 // EMPLOYEE — LIST
 // ============================================
@@ -92,6 +130,7 @@ export const createEmployee = createServerFn({ method: 'POST' })
   .inputValidator((input: unknown) => CreateEmployeeSchema.parse(input))
   .handler(async ({ data }) => {
     const prisma = await getPrisma();
+    const employeeCode = data.employeeCode?.trim() || await generateEmployeeCode(prisma);
 
     // Create a Party record for finance invoices (category: 'statutory' for salary)
     const party = await prisma.party.create({
@@ -104,7 +143,7 @@ export const createEmployee = createServerFn({ method: 'POST' })
     const employee = await prisma.employee.create({
       data: {
         name: data.name,
-        employeeCode: data.employeeCode,
+        employeeCode,
         phone: data.phone,
         email: data.email || null,
         dateOfJoining: data.dateOfJoining ? new Date(data.dateOfJoining) : null,
