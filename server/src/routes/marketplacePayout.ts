@@ -97,7 +97,7 @@ router.get('/reports', requireAdmin, asyncHandler(async (_req: Request, res: Res
     },
   });
 
-  res.json(reports);
+  res.json({ success: true, reports: reports.map(r => ({ ...r, period: r.reportPeriod })) });
 }));
 
 export default router;

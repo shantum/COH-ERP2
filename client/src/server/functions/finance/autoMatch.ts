@@ -274,42 +274,55 @@ export const applyAutoMatches = createServerFn({ method: 'POST' })
     const userId = context.user.id;
     const errors: string[] = [];
 
-    // Pre-validate all bank txns and invoices exist with sufficient balances
-    const txnIds = data.matches.map(m => m.bankTransactionId);
-    const invoiceIds = data.matches.map(m => m.invoiceId);
+    // All validation and application inside one transaction to prevent TOCTOU races
+    const txnIds = [...new Set(data.matches.map(m => m.bankTransactionId))];
+    const invoiceIds = [...new Set(data.matches.map(m => m.invoiceId))];
 
-    const [txnsData, invoicesData] = await Promise.all([
-      prisma.bankTransaction.findMany({
-        where: { id: { in: txnIds } },
-        select: { id: true, unmatchedAmount: true, matchedAmount: true, status: true, notes: true },
-      }),
-      prisma.invoice.findMany({
-        where: { id: { in: invoiceIds } },
-        select: { id: true, balanceDue: true, paidAmount: true, status: true, invoiceNumber: true, notes: true },
-      }),
-    ]);
+    const result = await prisma.$transaction(async (tx) => {
+      const [txnsData, invoicesData] = await Promise.all([
+        tx.bankTransaction.findMany({
+          where: { id: { in: txnIds } },
+          select: { id: true, unmatchedAmount: true, matchedAmount: true, status: true, notes: true },
+        }),
+        tx.invoice.findMany({
+          where: { id: { in: invoiceIds } },
+          select: { id: true, balanceDue: true, paidAmount: true, status: true, invoiceNumber: true, notes: true },
+        }),
+      ]);
 
-    const txnMap = new Map(txnsData.map(t => [t.id, t]));
-    const invoiceMap = new Map(invoicesData.map(i => [i.id, i]));
+      // Lock the rows to prevent concurrent modification
+      if (txnIds.length > 0) {
+        await tx.$queryRawUnsafe(
+          `SELECT id FROM "BankTransaction" WHERE id = ANY($1::text[]) FOR UPDATE`,
+          txnIds,
+        );
+      }
+      if (invoiceIds.length > 0) {
+        await tx.$queryRawUnsafe(
+          `SELECT id FROM "Invoice" WHERE id = ANY($1::text[]) FOR UPDATE`,
+          invoiceIds,
+        );
+      }
 
-    // Filter to valid matches only
-    const validMatches = data.matches.filter(m => {
-      const txn = txnMap.get(m.bankTransactionId);
-      const invoice = invoiceMap.get(m.invoiceId);
-      if (!txn) { errors.push(`Bank txn ${m.bankTransactionId.slice(0, 8)} not found`); return false; }
-      if (!invoice) { errors.push(`Invoice ${m.invoiceId.slice(0, 8)} not found`); return false; }
-      if (invoice.status === 'cancelled') { errors.push(`Invoice ${invoice.invoiceNumber ?? m.invoiceId.slice(0, 8)} is cancelled`); return false; }
-      if (m.amount > txn.unmatchedAmount + 0.01) { errors.push(`Amount exceeds unmatched balance for txn ${m.bankTransactionId.slice(0, 8)}`); return false; }
-      if (m.amount > invoice.balanceDue + 0.01) { errors.push(`Amount exceeds balance due for invoice ${invoice.invoiceNumber ?? m.invoiceId.slice(0, 8)}`); return false; }
-      return true;
-    });
+      const txnMap = new Map(txnsData.map(t => [t.id, t]));
+      const invoiceMap = new Map(invoicesData.map(i => [i.id, i]));
 
-    if (validMatches.length === 0) {
-      return { success: false as const, matched: 0, errors: errors.length > 0 ? errors : ['No valid matches to apply'] };
-    }
+      // Filter to valid matches only
+      const validMatches = data.matches.filter(m => {
+        const txn = txnMap.get(m.bankTransactionId);
+        const invoice = invoiceMap.get(m.invoiceId);
+        if (!txn) { errors.push(`Bank txn ${m.bankTransactionId.slice(0, 8)} not found`); return false; }
+        if (!invoice) { errors.push(`Invoice ${m.invoiceId.slice(0, 8)} not found`); return false; }
+        if (invoice.status === 'cancelled') { errors.push(`Invoice ${invoice.invoiceNumber ?? m.invoiceId.slice(0, 8)} is cancelled`); return false; }
+        if (m.amount > txn.unmatchedAmount + 0.01) { errors.push(`Amount exceeds unmatched balance for txn ${m.bankTransactionId.slice(0, 8)}`); return false; }
+        if (m.amount > invoice.balanceDue + 0.01) { errors.push(`Amount exceeds balance due for invoice ${invoice.invoiceNumber ?? m.invoiceId.slice(0, 8)}`); return false; }
+        return true;
+      });
 
-    // Apply all in one transaction
-    await prisma.$transaction(async (tx) => {
+      if (validMatches.length === 0) {
+        return { success: false as const, matched: 0, errors: errors.length > 0 ? errors : ['No valid matches to apply'] };
+      }
+
       for (const match of validMatches) {
         const txn = txnMap.get(match.bankTransactionId)!;
         const invoice = invoiceMap.get(match.invoiceId)!;
@@ -355,7 +368,9 @@ export const applyAutoMatches = createServerFn({ method: 'POST' })
         invoice.paidAmount = newInvoicePaid;
         invoice.balanceDue = Math.max(0, newInvoiceBalance);
       }
+
+      return { success: true as const, matched: validMatches.length, errors };
     });
 
-    return { success: true as const, matched: validMatches.length, errors };
+    return result;
   });

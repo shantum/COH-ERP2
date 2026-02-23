@@ -128,6 +128,25 @@ export const confirmOrderInvoice = createServerFn({ method: 'POST' })
     if (invoice.category !== 'customer_order') return { success: false as const, error: 'Not a customer order invoice' };
 
     return prisma.$transaction(async (tx) => {
+      // Validate bank transaction before any mutations
+      let bankTxn: { id: string; matchedAmount: number; unmatchedAmount: number; status: string } | null = null;
+      if (data.bankTransactionId) {
+        bankTxn = await tx.bankTransaction.findUnique({
+          where: { id: data.bankTransactionId },
+          select: { id: true, matchedAmount: true, unmatchedAmount: true, status: true },
+        });
+
+        if (!bankTxn) {
+          return { success: false as const, error: 'Bank transaction not found' };
+        }
+        if (bankTxn.status !== 'posted' && bankTxn.status !== 'legacy_posted') {
+          return { success: false as const, error: 'Bank transaction is not posted' };
+        }
+        if (bankTxn.unmatchedAmount < invoice.totalAmount - 0.01) {
+          return { success: false as const, error: `Bank transaction unmatched balance (${bankTxn.unmatchedAmount.toFixed(2)}) is less than invoice amount (${invoice.totalAmount.toFixed(2)})` };
+        }
+      }
+
       // Assign sequential invoice number (atomic, gap-free)
       const invoiceNumber = await assignNextInvoiceNumber(tx);
 
@@ -142,32 +161,25 @@ export const confirmOrderInvoice = createServerFn({ method: 'POST' })
         },
       });
 
-      // If bank transaction provided, create allocation
-      if (data.bankTransactionId) {
-        const bankTxn = await tx.bankTransaction.findUnique({
-          where: { id: data.bankTransactionId },
-          select: { id: true, matchedAmount: true, unmatchedAmount: true },
+      // Create allocation if bank transaction provided
+      if (data.bankTransactionId && bankTxn) {
+        await tx.allocation.create({
+          data: {
+            bankTransactionId: data.bankTransactionId,
+            invoiceId: invoice.id,
+            amount: invoice.totalAmount,
+            notes: 'Order payment — auto-linked on confirm',
+            matchedById: userId,
+          },
         });
 
-        if (bankTxn) {
-          await tx.allocation.create({
-            data: {
-              bankTransactionId: data.bankTransactionId,
-              invoiceId: invoice.id,
-              amount: invoice.totalAmount,
-              notes: 'Order payment — auto-linked on confirm',
-              matchedById: userId,
-            },
-          });
-
-          await tx.bankTransaction.update({
-            where: { id: data.bankTransactionId },
-            data: {
-              matchedAmount: bankTxn.matchedAmount + invoice.totalAmount,
-              unmatchedAmount: Math.max(0, bankTxn.unmatchedAmount - invoice.totalAmount),
-            },
-          });
-        }
+        await tx.bankTransaction.update({
+          where: { id: data.bankTransactionId },
+          data: {
+            matchedAmount: bankTxn.matchedAmount + invoice.totalAmount,
+            unmatchedAmount: Math.max(0, bankTxn.unmatchedAmount - invoice.totalAmount),
+          },
+        });
       }
 
       // Update order payment status

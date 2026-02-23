@@ -633,7 +633,13 @@ export const updateInvoiceLines = createServerFn({ method: 'POST' })
         if (value !== undefined) lineData[key] = value;
       }
       if (Object.keys(lineData).length > 0) {
-        await prisma.invoiceLine.update({ where: { id: lineId }, data: lineData });
+        const updated = await prisma.invoiceLine.updateMany({
+          where: { id: lineId, invoiceId: data.invoiceId },
+          data: lineData,
+        });
+        if (updated.count === 0) {
+          return { success: false as const, error: `Line ${lineId} does not belong to this invoice` };
+        }
       }
     }
 
