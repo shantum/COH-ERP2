@@ -11,7 +11,7 @@ import { z } from 'zod';
 // ============================================
 
 export const PayrollSearchParams = z.object({
-  tab: z.enum(['employees', 'runs']).catch('employees'),
+  tab: z.enum(['employees', 'runs', 'attendance']).catch('employees'),
   search: z.string().optional().catch(undefined),
   department: z.string().optional().catch(undefined),
   status: z.string().optional().catch(undefined),
@@ -20,6 +20,8 @@ export const PayrollSearchParams = z.object({
   limit: z.coerce.number().int().positive().max(200).catch(50),
   modal: z.enum(['create-employee', 'edit-employee', 'create-run', 'view-run']).optional().catch(undefined),
   modalId: z.string().optional().catch(undefined),
+  attMonth: z.coerce.number().int().min(1).max(12).optional().catch(undefined),
+  attYear: z.coerce.number().int().min(2020).max(2099).optional().catch(undefined),
 });
 export type PayrollSearchParams = z.infer<typeof PayrollSearchParams>;
 
@@ -134,6 +136,41 @@ export const DEPARTMENT_LABELS: Record<string, string> = {
 export function getDepartmentLabel(dept: string): string {
   return DEPARTMENT_LABELS[dept] ?? dept;
 }
+
+// ============================================
+// LEAVE RECORD SCHEMAS
+// ============================================
+
+export const LEAVE_TYPES = ['absent', 'half_day'] as const;
+
+export const LEAVE_TYPE_LABELS: Record<string, string> = {
+  absent: 'Absent',
+  half_day: 'Half Day',
+};
+
+export const UpsertLeaveRecordSchema = z.object({
+  employeeId: z.string().uuid(),
+  date: z.string().min(1, 'Date is required'), // ISO date string "YYYY-MM-DD"
+  type: z.enum(LEAVE_TYPES),
+  reason: z.string().optional(),
+});
+export type UpsertLeaveRecordInput = z.infer<typeof UpsertLeaveRecordSchema>;
+
+export const DeleteLeaveRecordSchema = z.object({
+  employeeId: z.string().uuid(),
+  date: z.string().min(1, 'Date is required'),
+});
+export type DeleteLeaveRecordInput = z.infer<typeof DeleteLeaveRecordSchema>;
+
+export const GetAttendanceSummarySchema = z.object({
+  month: z.number().int().min(1).max(12),
+  year: z.number().int().min(2020).max(2099),
+});
+export type GetAttendanceSummaryInput = z.infer<typeof GetAttendanceSummarySchema>;
+
+// ============================================
+// DISPLAY CONSTANTS (shared between client + server)
+// ============================================
 
 export const PAYROLL_STATUSES = ['draft', 'confirmed', 'cancelled'] as const;
 

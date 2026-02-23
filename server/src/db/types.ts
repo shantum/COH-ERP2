@@ -532,6 +532,16 @@ export type InvoiceSequence = {
     currentNumber: Generated<number>;
     fiscalYear: string;
 };
+export type LeaveRecord = {
+    id: Generated<string>;
+    employeeId: string;
+    date: Timestamp;
+    type: string;
+    reason: string | null;
+    createdById: string;
+    createdAt: Generated<Timestamp>;
+    updatedAt: Timestamp;
+};
 export type LedgerAccount = {
     id: Generated<string>;
     code: string;
@@ -1423,6 +1433,7 @@ export type DB = {
     Invoice: Invoice;
     InvoiceLine: InvoiceLine;
     InvoiceSequence: InvoiceSequence;
+    LeaveRecord: LeaveRecord;
     LedgerAccount: LedgerAccount;
     LedgerEntry: LedgerEntry;
     LedgerEntryLine: LedgerEntryLine;

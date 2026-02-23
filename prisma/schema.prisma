@@ -66,6 +66,7 @@ model User {
   // Changelog relations
   transactionTypeChangeLogs TransactionTypeChangeLog[] @relation("TxnTypeChangeUser")
   partyChangeLogs           PartyChangeLog[]           @relation("PartyChangeUser")
+  leaveRecordsCreated       LeaveRecord[]              @relation("LeaveRecordCreator")
 
   @@index([roleId])
 }
@@ -2029,9 +2030,28 @@ model Employee {
   party            Party?    @relation(fields: [partyId], references: [id])
   tailor           Tailor?   @relation(fields: [tailorId], references: [id])
   payrollSlips     PayrollSlip[]
+  leaveRecords     LeaveRecord[]
 
   @@index([department])
   @@index([isActive])
+}
+
+/// Exception-based leave record — only absences and half-days are stored
+model LeaveRecord {
+  id          String   @id @default(uuid())
+  employeeId  String
+  date        DateTime @db.Date
+  type        String   // "absent" | "half_day"
+  reason      String?
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  employee    Employee @relation(fields: [employeeId], references: [id])
+  createdBy   User     @relation("LeaveRecordCreator", fields: [createdById], references: [id])
+
+  @@unique([employeeId, date])
+  @@index([date])
 }
 
 /// Monthly payroll batch header

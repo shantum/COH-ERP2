@@ -4,7 +4,7 @@
  * Employees tab + Payroll Runs tab.
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { useNavigate } from '@tanstack/react-router';
@@ -21,6 +21,9 @@ import {
   confirmPayrollRun,
   cancelPayrollRun,
   listTailorsForLinking,
+  getAttendanceSummary,
+  upsertLeaveRecord,
+  deleteLeaveRecord,
 } from '../server/functions/payroll';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
@@ -48,6 +51,7 @@ import {
   Plus,
   Users,
   FileSpreadsheet,
+  CalendarDays,
   Loader2,
   ChevronLeft,
   ChevronRight,
@@ -55,13 +59,18 @@ import {
   X,
   ArrowLeft,
   Pencil,
+  Trash2,
 } from 'lucide-react';
 import {
   type PayrollSearchParams,
   DEPARTMENTS,
   getDepartmentLabel,
   PAYROLL_STATUS_LABELS,
+  LEAVE_TYPES,
+  LEAVE_TYPE_LABELS,
 } from '@coh/shared';
+import { Textarea } from '@/components/ui/textarea';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 
 // ============================================
 // HELPERS
@@ -145,6 +154,9 @@ export default function Payroll() {
           <TabsTrigger value="runs" className="gap-1.5">
             <FileSpreadsheet className="h-4 w-4" /> Payroll Runs
           </TabsTrigger>
+          <TabsTrigger value="attendance" className="gap-1.5">
+            <CalendarDays className="h-4 w-4" /> Attendance
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="employees">
@@ -156,6 +168,9 @@ export default function Payroll() {
           ) : (
             <PayrollRunsTab />
           )}
+        </TabsContent>
+        <TabsContent value="attendance">
+          <AttendanceTab />
         </TabsContent>
       </Tabs>
     </div>
@@ -1072,6 +1087,297 @@ function PayrollRunDetail({ runId }: { runId: string }) {
             </table>
           </div>
         </details>
+      )}
+    </div>
+  );
+}
+
+// ============================================
+// ATTENDANCE TAB
+// ============================================
+
+function getSundays(month: number, year: number): Set<number> {
+  const sundays = new Set<number>();
+  const daysInMonth = new Date(year, month, 0).getDate();
+  for (let day = 1; day <= daysInMonth; day++) {
+    if (new Date(year, month - 1, day).getDay() === 0) {
+      sundays.add(day);
+    }
+  }
+  return sundays;
+}
+
+function AttendanceTab() {
+  const search = Route.useSearch();
+  const navigate = useNavigate();
+  const qc = useQueryClient();
+
+  const now = new Date();
+  const month = search.attMonth ?? (now.getMonth() + 1);
+  const year = search.attYear ?? now.getFullYear();
+
+  const summaryFn = useServerFn(getAttendanceSummary);
+  const upsertFn = useServerFn(upsertLeaveRecord);
+  const deleteFn = useServerFn(deleteLeaveRecord);
+
+  const queryKey = ['payroll', 'attendance', month, year];
+  const { data, isLoading } = useQuery({
+    queryKey,
+    queryFn: () => summaryFn({ data: { month, year } }),
+  });
+
+  const sundays = useMemo(() => getSundays(month, year), [month, year]);
+  const daysInMonth = data?.daysInMonth ?? new Date(year, month, 0).getDate();
+
+  // Build a lookup: "employeeId:day" -> leave record
+  const leaveMap = useMemo(() => {
+    const map = new Map<string, { type: string; reason: string | null }>();
+    if (!data?.leaveRecords) return map;
+    for (const lr of data.leaveRecords) {
+      const day = parseInt(lr.date.split('-')[2], 10);
+      map.set(`${lr.employeeId}:${day}`, { type: lr.type, reason: lr.reason ?? null });
+    }
+    return map;
+  }, [data?.leaveRecords]);
+
+  // Dialog state
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [dialogEmployee, setDialogEmployee] = useState<{ id: string; name: string } | null>(null);
+  const [dialogDay, setDialogDay] = useState(0);
+  const [dialogType, setDialogType] = useState<string>('absent');
+  const [dialogReason, setDialogReason] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const openDialog = (emp: { id: string; name: string }, day: number) => {
+    const existing = leaveMap.get(`${emp.id}:${day}`);
+    setDialogEmployee(emp);
+    setDialogDay(day);
+    setDialogType(existing?.type ?? 'absent');
+    setDialogReason(existing?.reason ?? '');
+    setDialogOpen(true);
+  };
+
+  const handleSave = async () => {
+    if (!dialogEmployee) return;
+    setSaving(true);
+    const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(dialogDay).padStart(2, '0')}`;
+    try {
+      await upsertFn({
+        data: {
+          employeeId: dialogEmployee.id,
+          date: dateStr,
+          type: dialogType as 'absent' | 'half_day',
+          ...(dialogReason ? { reason: dialogReason } : {}),
+        },
+      });
+      qc.invalidateQueries({ queryKey });
+      setDialogOpen(false);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleRemove = async () => {
+    if (!dialogEmployee) return;
+    setSaving(true);
+    const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(dialogDay).padStart(2, '0')}`;
+    try {
+      await deleteFn({ data: { employeeId: dialogEmployee.id, date: dateStr } });
+      qc.invalidateQueries({ queryKey });
+      setDialogOpen(false);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const setMonthYear = (m: number, y: number) => {
+    navigate({
+      to: '/payroll',
+      search: { ...search, attMonth: m, attYear: y },
+      replace: true,
+    });
+  };
+
+  // Calculate summary stats
+  const totalAbsent = data?.leaveRecords?.filter((l) => l.type === 'absent').length ?? 0;
+  const totalHalf = data?.leaveRecords?.filter((l) => l.type === 'half_day').length ?? 0;
+
+  const dayNumbers = Array.from({ length: daysInMonth }, (_, i) => i + 1);
+
+  return (
+    <div>
+      {/* Month/Year selector + summary */}
+      <div className="flex flex-wrap gap-3 mb-4 items-center">
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              const prev = month === 1 ? 12 : month - 1;
+              const prevYear = month === 1 ? year - 1 : year;
+              setMonthYear(prev, prevYear);
+            }}
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+          <span className="text-sm font-semibold min-w-[100px] text-center">
+            {MONTH_NAMES[month - 1]} {year}
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              const next = month === 12 ? 1 : month + 1;
+              const nextYear = month === 12 ? year + 1 : year;
+              setMonthYear(next, nextYear);
+            }}
+          >
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+        </div>
+        <div className="flex-1" />
+        <div className="flex gap-3 text-sm text-muted-foreground">
+          <span>{daysInMonth} days</span>
+          <span className="text-red-600 font-medium">{totalAbsent} absent</span>
+          <span className="text-amber-600 font-medium">{totalHalf} half-day</span>
+        </div>
+      </div>
+
+      {isLoading ? (
+        <LoadingState />
+      ) : (
+        <div className="border rounded-lg overflow-x-auto">
+          <table className="text-sm border-collapse">
+            <thead className="bg-muted/50">
+              <tr>
+                <th className="text-left p-2 font-medium sticky left-0 bg-muted/50 min-w-[140px] border-r">
+                  Employee
+                </th>
+                {dayNumbers.map((d) => (
+                  <th
+                    key={d}
+                    className={`text-center p-1 font-medium min-w-[32px] text-xs ${
+                      sundays.has(d) ? 'bg-muted text-muted-foreground' : ''
+                    }`}
+                  >
+                    {d}
+                  </th>
+                ))}
+                <th className="text-center p-2 font-medium min-w-[70px] border-l">Days</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data?.employees?.map((emp) => {
+                // Calculate payable days for this employee
+                const empLeaves = data.leaveRecords?.filter((l) => l.employeeId === emp.id) ?? [];
+                const absences = empLeaves.filter((l) => l.type === 'absent').length;
+                const halfs = empLeaves.filter((l) => l.type === 'half_day').length;
+                const payable = daysInMonth - absences - halfs * 0.5;
+
+                return (
+                  <tr key={emp.id} className="border-t hover:bg-muted/20">
+                    <td className="p-2 font-medium sticky left-0 bg-background border-r truncate max-w-[140px]">
+                      {emp.name}
+                    </td>
+                    {dayNumbers.map((d) => {
+                      const isSunday = sundays.has(d);
+                      const leave = leaveMap.get(`${emp.id}:${d}`);
+
+                      return (
+                        <td
+                          key={d}
+                          className={`text-center p-0 ${
+                            isSunday
+                              ? 'bg-muted/60 cursor-default'
+                              : 'cursor-pointer hover:bg-muted/40'
+                          }`}
+                          onClick={isSunday ? undefined : () => openDialog(emp, d)}
+                        >
+                          <div className="w-full h-8 flex items-center justify-center">
+                            {isSunday ? (
+                              <span className="text-[10px] text-muted-foreground/50">S</span>
+                            ) : leave ? (
+                              <span
+                                className={`text-[10px] font-bold rounded px-1 py-0.5 ${
+                                  leave.type === 'absent'
+                                    ? 'bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-400'
+                                    : 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400'
+                                }`}
+                              >
+                                {leave.type === 'absent' ? 'A' : 'H'}
+                              </span>
+                            ) : null}
+                          </div>
+                        </td>
+                      );
+                    })}
+                    <td className="text-center p-2 font-mono text-sm border-l">
+                      <span className={payable < daysInMonth ? 'text-amber-600 font-semibold' : ''}>
+                        {payable % 1 === 0 ? payable : payable.toFixed(1)}
+                      </span>
+                      <span className="text-muted-foreground">/{daysInMonth}</span>
+                    </td>
+                  </tr>
+                );
+              })}
+              {(!data?.employees || data.employees.length === 0) && (
+                <tr>
+                  <td colSpan={daysInMonth + 2} className="p-8 text-center text-muted-foreground">
+                    No active employees
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Leave Dialog */}
+      {dialogOpen && dialogEmployee && (
+        <Dialog open onOpenChange={() => setDialogOpen(false)}>
+          <DialogContent className="max-w-sm">
+            <DialogHeader>
+              <DialogTitle>
+                {dialogEmployee.name} — {dialogDay} {MONTH_NAMES[month - 1]}
+              </DialogTitle>
+              <DialogDescription>Mark leave or remove existing record.</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div>
+                <Label className="mb-2 block">Leave Type</Label>
+                <RadioGroup value={dialogType} onValueChange={setDialogType} className="flex gap-4">
+                  {LEAVE_TYPES.map((t) => (
+                    <label key={t} className="flex items-center gap-2 cursor-pointer">
+                      <RadioGroupItem value={t} />
+                      <span className="text-sm">{LEAVE_TYPE_LABELS[t]}</span>
+                    </label>
+                  ))}
+                </RadioGroup>
+              </div>
+              <div>
+                <Label>Reason (optional)</Label>
+                <Textarea
+                  value={dialogReason}
+                  onChange={(e) => setDialogReason(e.target.value)}
+                  placeholder="e.g. Sick leave, personal work..."
+                  rows={2}
+                />
+              </div>
+            </div>
+            <DialogFooter className="flex gap-2">
+              {leaveMap.has(`${dialogEmployee.id}:${dialogDay}`) && (
+                <Button variant="destructive" onClick={handleRemove} disabled={saving} className="mr-auto">
+                  <Trash2 className="h-4 w-4 mr-1" /> Remove
+                </Button>
+              )}
+              <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
+              <Button onClick={handleSave} disabled={saving}>
+                {saving && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
+                Save
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       )}
     </div>
   );
