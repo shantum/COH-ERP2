@@ -748,7 +748,7 @@ export const upsertLeaveRecord = createServerFn({ method: 'POST' })
     const userId = context.user.id;
 
     // Reject if date is a Sunday
-    const dateObj = new Date(data.date + 'T00:00:00');
+    const dateObj = new Date(data.date + 'T00:00:00Z');
     if (dateObj.getDay() === 0) {
       return { success: false as const, error: 'Cannot mark leave on a Sunday' };
     }
@@ -785,7 +785,7 @@ export const deleteLeaveRecord = createServerFn({ method: 'POST' })
   .inputValidator((input: unknown) => DeleteLeaveRecordSchema.parse(input))
   .handler(async ({ data }) => {
     const prisma = await getPrisma();
-    const dateObj = new Date(data.date + 'T00:00:00');
+    const dateObj = new Date(data.date + 'T00:00:00Z');
 
     const existing = await prisma.leaveRecord.findUnique({
       where: {

@@ -1126,6 +1126,7 @@ function AttendanceTab() {
     queryFn: () => summaryFn({ data: { month, year } }),
   });
 
+
   const sundays = useMemo(() => getSundays(month, year), [month, year]);
   const daysInMonth = data?.daysInMonth ?? new Date(year, month, 0).getDate();
 
@@ -1134,8 +1135,12 @@ function AttendanceTab() {
     const map = new Map<string, { type: string; reason: string | null }>();
     if (!data?.leaveRecords) return map;
     for (const lr of data.leaveRecords) {
-      const day = parseInt(lr.date.split('-')[2], 10);
-      map.set(`${lr.employeeId}:${day}`, { type: lr.type, reason: lr.reason ?? null });
+      // date comes as "YYYY-MM-DD" string from server
+      const dateStr = typeof lr.date === 'string' ? lr.date : String(lr.date);
+      const day = parseInt(dateStr.split('-')[2] ?? dateStr.split('T')[0]?.split('-')[2], 10);
+      if (!isNaN(day)) {
+        map.set(`${lr.employeeId}:${day}`, { type: lr.type, reason: lr.reason ?? null });
+      }
     }
     return map;
   }, [data?.leaveRecords]);
@@ -1201,6 +1206,9 @@ function AttendanceTab() {
   // Calculate summary stats
   const totalAbsent = data?.leaveRecords?.filter((l) => l.type === 'absent').length ?? 0;
   const totalHalf = data?.leaveRecords?.filter((l) => l.type === 'half_day').length ?? 0;
+
+  // "P" shown for days up to today (only for current month)
+  const today = (month === now.getMonth() + 1 && year === now.getFullYear()) ? now.getDate() : (month < now.getMonth() + 1 || year < now.getFullYear()) ? daysInMonth : 0;
 
   const dayNumbers = Array.from({ length: daysInMonth }, (_, i) => i + 1);
 
@@ -1304,8 +1312,10 @@ function AttendanceTab() {
                                     : 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400'
                                 }`}
                               >
-                                {leave.type === 'absent' ? 'A' : 'H'}
+                                {leave.type === 'absent' ? 'A' : 'HD'}
                               </span>
+                            ) : d <= today ? (
+                              <span className="text-[10px] text-green-600/60 font-medium">P</span>
                             ) : null}
                           </div>
                         </td>
