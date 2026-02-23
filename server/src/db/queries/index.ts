@@ -4,18 +4,6 @@
  * High-performance queries using type-safe SQL.
  */
 
-// Orders
-export {
-    listOrdersKysely,
-    transformKyselyToRows,
-    type OrdersListParams,
-    type OrdersListResult,
-    type OrderRow,
-    type ViewName,
-    type ShippedFilter,
-    type SortField,
-} from './ordersListKysely.js';
-
 // Products
 export {
     listProductsKysely,

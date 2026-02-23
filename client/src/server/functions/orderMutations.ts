@@ -311,7 +311,7 @@ export const markPaid = createServerFn({ method: 'POST' })
     });
 
 /**
- * Delete an order (soft delete via deletedAt, only for manual orders)
+ * Delete an order (hard delete, only for manual orders)
  */
 export const deleteOrder = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
