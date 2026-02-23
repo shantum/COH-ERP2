@@ -179,7 +179,7 @@ export default function NewProduct() {
         if (!catalog?.fabricColours) return [];
         const seen = new Map<string, string>();
         for (const fc of catalog.fabricColours) {
-            if (!seen.has(fc.materialId)) {
+            if (fc.materialId && !seen.has(fc.materialId)) {
                 seen.set(fc.materialId, fc.materialName);
             }
         }
