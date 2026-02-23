@@ -65,16 +65,20 @@ interface PermissionContext {
 export function usePermissions(): PermissionContext {
     const { user } = useAuth();
 
-    const permissions = user?.permissions ?? [];
+    const rawPermissions = user?.permissions ?? [];
     const roleName = user?.roleName ?? null;
     const legacyRole = user?.role ?? null; // Legacy role field for users without roleId
 
     // Check by role name OR by having wildcard permission (owner has '*')
     // Also check legacy 'role' field for backwards compatibility (admin = owner equivalent)
-    const hasWildcard = permissions.includes('*');
     const isOwnerByRole = roleName?.toLowerCase() === 'owner';
     const isManagerByRole = roleName?.toLowerCase() === 'manager';
     const isAdminLegacy = legacyRole?.toLowerCase() === 'admin';
+
+    // Legacy admin users without a roleId get wildcard access
+    const permissions = (isAdminLegacy || isOwnerByRole) && !rawPermissions.includes('*')
+        ? ['*', ...rawPermissions]
+        : rawPermissions;
 
     return {
         permissions,
@@ -82,8 +86,8 @@ export function usePermissions(): PermissionContext {
         hasPermission: (permission: string) => checkPermission(permissions, permission),
         hasAnyPermission: (...perms: string[]) => checkAnyPermission(permissions, ...perms),
         hasAllPermissions: (...perms: string[]) => checkAllPermissions(permissions, ...perms),
-        isOwner: isOwnerByRole || hasWildcard || isAdminLegacy,
-        isManager: isOwnerByRole || isManagerByRole || hasWildcard || isAdminLegacy,
+        isOwner: isOwnerByRole || permissions.includes('*') || isAdminLegacy,
+        isManager: isOwnerByRole || isManagerByRole || permissions.includes('*') || isAdminLegacy,
     };
 }
 

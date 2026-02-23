@@ -161,6 +161,11 @@ router.post(
                 : []
         );
 
+        // Legacy admin users without a role get wildcard access
+        if (user.role === 'admin' && !user.roleId) {
+            rolePermissions.add('*');
+        }
+
         for (const override of user.permissionOverrides || []) {
             if (override.granted) {
                 rolePermissions.add(override.permission);
@@ -264,6 +269,11 @@ router.get(
                 ? (user.userRole.permissions as string[])
                 : []
         );
+
+        // Legacy admin users without a role get wildcard access
+        if (user.role === 'admin' && !user.roleId) {
+            rolePermissions.add('*');
+        }
 
         for (const override of user.permissionOverrides || []) {
             if (override.granted) {
