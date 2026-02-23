@@ -31,9 +31,26 @@ const getQueueHistoryInputSchema = z.object({
 
 const processItemInputSchema = z.object({
     itemId: z.string().uuid(),
-    action: z.enum(['approve', 'write_off']),
+    action: z.enum(['approve', 'write_off', 'ready']),
     qcComments: z.string().optional(),
     writeOffReason: z.string().optional(),
+    notes: z.string().optional(),
+});
+
+const addToQueueInputSchema = z.object({
+    skuId: z.string().uuid().optional(),
+    skuCode: z.string().optional(),
+    qty: z.number().int().positive().optional().default(1),
+    condition: z.string().optional(),
+    inspectionNotes: z.string().optional(),
+});
+
+const updateQueueItemInputSchema = z.object({
+    id: z.string().uuid(),
+    status: z.string().optional(),
+    condition: z.string().optional(),
+    inspectionNotes: z.string().optional(),
+    orderLineId: z.string().uuid().optional(),
 });
 
 const undoProcessInputSchema = z.object({
@@ -76,6 +93,18 @@ export interface QueueResponse {
         offset: number;
         hasMore: boolean;
     };
+}
+
+export interface RepackingQueueItemResult {
+    id: string;
+    skuId: string;
+    skuCode: string;
+    productName: string;
+    colorName: string;
+    size: string;
+    qty: number;
+    condition: string | null;
+    status: string;
 }
 
 // ============================================
@@ -234,14 +263,22 @@ export const getRepackingQueueHistory = createServerFn({ method: 'GET' })
 export const processRepackingItem = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => processItemInputSchema.parse(input))
-    .handler(async ({ data, context }): Promise<{ success: boolean; message: string }> => {
+    .handler(async ({ data, context }): Promise<{ success: boolean; message: string; action?: string; skuCode?: string; qty?: number }> => {
         const prisma = await getPrisma();
 
-        const { itemId, action, qcComments, writeOffReason } = data;
+        const { itemId, qcComments, writeOffReason, notes } = data;
+
+        // Normalize 'ready' to 'approve'
+        const normalizedAction = data.action === 'ready' ? 'approve' : data.action;
 
         // Verify item exists and is pending
         const item = await prisma.repackingQueueItem.findUnique({
             where: { id: itemId },
+            include: {
+                sku: {
+                    select: { skuCode: true },
+                },
+            },
         });
 
         if (!item) {
@@ -258,38 +295,59 @@ export const processRepackingItem = createServerFn({ method: 'POST' })
             await tx.repackingQueueItem.update({
                 where: { id: itemId },
                 data: {
-                    status: action === 'approve' ? 'approved' : 'written_off',
+                    status: normalizedAction === 'approve' ? 'approved' : 'written_off',
                     qcComments: qcComments || null,
-                    writeOffReason: action === 'write_off' ? writeOffReason : null,
+                    writeOffReason: normalizedAction === 'write_off' ? writeOffReason : null,
                     processedAt: new Date(),
+                    processedById: context.user.id,
                 },
             });
 
             // Create inventory transaction if approved
-            if (action === 'approve') {
+            if (normalizedAction === 'approve') {
                 await tx.inventoryTransaction.create({
                     data: {
                         skuId: item.skuId,
                         qty: item.qty,
                         txnType: 'inward',
-                        reason: `QC Approved - repacking queue`,
-                        notes: qcComments || `Approved from repacking queue`,
+                        reason: 'repack_complete',
+                        referenceId: item.id,
+                        notes: notes || qcComments || 'QC passed - added to stock',
                         createdById: context.user.id,
                     },
                 });
             }
 
-            // If written off, create a negative transaction or record
-            if (action === 'write_off') {
+            // If written off, create outward transaction + WriteOffLog + SKU writeOffCount
+            if (normalizedAction === 'write_off') {
                 await tx.inventoryTransaction.create({
                     data: {
                         skuId: item.skuId,
                         qty: item.qty,
                         txnType: 'outward',
                         reason: `Written Off - ${writeOffReason || 'QC Rejected'}`,
-                        notes: qcComments || `Written off from repacking queue`,
+                        notes: notes || qcComments || 'Written off from repacking queue',
                         createdById: context.user.id,
                     },
+                });
+
+                // Create WriteOffLog for tracking
+                await tx.writeOffLog.create({
+                    data: {
+                        skuId: item.skuId,
+                        qty: item.qty,
+                        reason: writeOffReason || 'defective',
+                        sourceType: 'repacking',
+                        sourceId: itemId,
+                        notes: notes || qcComments || 'QC failed - written off',
+                        createdById: context.user.id,
+                    },
+                });
+
+                // Update SKU write-off count
+                await tx.sku.update({
+                    where: { id: item.skuId },
+                    data: { writeOffCount: { increment: item.qty } },
                 });
             }
         });
@@ -300,7 +358,12 @@ export const processRepackingItem = createServerFn({ method: 'POST' })
 
         return {
             success: true,
-            message: action === 'approve' ? 'Item approved and added to inventory' : 'Item written off',
+            message: normalizedAction === 'approve'
+                ? `${item.sku.skuCode} added to stock`
+                : `${item.sku.skuCode} written off`,
+            action: normalizedAction,
+            skuCode: item.sku.skuCode,
+            qty: item.qty,
         };
     });
 
@@ -415,4 +478,109 @@ export const deleteRepackingQueueItem = createServerFn({ method: 'POST' })
             success: true,
             message: 'Queue item deleted',
         };
+    });
+
+/**
+ * Add item to repacking queue
+ * Supports: skuId or skuCode lookup
+ */
+export const addToRepackingQueue = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => addToQueueInputSchema.parse(input))
+    .handler(async ({ data }): Promise<{ success: boolean; queueItem: RepackingQueueItemResult }> => {
+        const prisma = await getPrisma();
+
+        let skuId = data.skuId;
+
+        // If no skuId, try to find by skuCode
+        if (!skuId) {
+            if (!data.skuCode) {
+                throw new Error('Either skuId or skuCode is required');
+            }
+
+            const sku = await prisma.sku.findFirst({
+                where: { skuCode: data.skuCode },
+                select: { id: true, skuCode: true },
+            });
+
+            if (!sku) {
+                throw new Error(`SKU not found: ${data.skuCode}`);
+            }
+
+            skuId = sku.id;
+        }
+
+        // Create queue item
+        const queueItem = await prisma.repackingQueueItem.create({
+            data: {
+                skuId,
+                qty: data.qty,
+                condition: data.condition || 'pending_inspection',
+                inspectionNotes: data.inspectionNotes || null,
+                status: 'pending',
+            },
+        });
+
+        // Fetch SKU details separately for the response
+        const sku = await prisma.sku.findUnique({
+            where: { id: skuId },
+            include: {
+                variation: {
+                    include: {
+                        product: true,
+                    },
+                },
+            },
+        });
+
+        return {
+            success: true,
+            queueItem: {
+                id: queueItem.id,
+                skuId: queueItem.skuId,
+                skuCode: sku?.skuCode || '',
+                productName: sku?.variation?.product?.name || '',
+                colorName: sku?.variation?.colorName || '',
+                size: sku?.size || '',
+                qty: queueItem.qty,
+                condition: queueItem.condition,
+                status: queueItem.status,
+            },
+        };
+    });
+
+/**
+ * Update repacking queue item
+ * Used for: linking to return/RTO, updating condition, etc.
+ */
+export const updateRepackingQueueItem = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => updateQueueItemInputSchema.parse(input))
+    .handler(async ({ data }) => {
+        const prisma = await getPrisma();
+
+        const { id, ...updateData } = data;
+
+        // Verify item exists
+        const existing = await prisma.repackingQueueItem.findUnique({
+            where: { id },
+        });
+
+        if (!existing) {
+            throw new Error('Queue item not found');
+        }
+
+        // Build update object (only include defined fields)
+        const updateFields: Record<string, unknown> = {};
+        if (updateData.status !== undefined) updateFields.status = updateData.status;
+        if (updateData.condition !== undefined) updateFields.condition = updateData.condition;
+        if (updateData.inspectionNotes !== undefined) updateFields.inspectionNotes = updateData.inspectionNotes;
+        if (updateData.orderLineId !== undefined) updateFields.orderLineId = updateData.orderLineId;
+
+        const updated = await prisma.repackingQueueItem.update({
+            where: { id },
+            data: updateFields,
+        });
+
+        return { success: true, queueItem: updated };
     });

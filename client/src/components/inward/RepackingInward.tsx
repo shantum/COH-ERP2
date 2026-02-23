@@ -7,7 +7,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { scanLookup, type ScanLookupResult } from '../../server/functions/returns';
-import { processRepackingQueueItem } from '../../server/functions/returnsMutations';
+import { processRepackingItem } from '../../server/functions/repacking';
 import { Search, Check, AlertTriangle, X, RefreshCw, Plus } from 'lucide-react';
 import RecentInwardsTable from './RecentInwardsTable';
 import PendingQueuePanel from './PendingQueuePanel';
@@ -46,7 +46,7 @@ export default function RepackingInward({ onSuccess: _onSuccess, onError: _onErr
 
     // Server function hooks
     const scanLookupFn = useServerFn(scanLookup);
-    const processRepackingFn = useServerFn(processRepackingQueueItem);
+    const processRepackingFn = useServerFn(processRepackingItem);
 
     // State
     const [searchInput, setSearchInput] = useState('');

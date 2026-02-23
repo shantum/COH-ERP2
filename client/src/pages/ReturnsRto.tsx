@@ -28,7 +28,7 @@ import {
     addToRepackingQueue,
     updateRepackingQueueItem,
     deleteRepackingQueueItem,
-} from '@/server/functions/returnsMutations';
+} from '@/server/functions/repacking';
 import {
     Search,
     PackageX,
@@ -153,7 +153,7 @@ export default function ReturnsRto() {
     // Delete from queue mutation
     const deleteFromQueueMutation = useMutation({
         mutationFn: async (itemId: string) => {
-            return deleteFromQueueFn({ data: { id: itemId } });
+            return deleteFromQueueFn({ data: { itemId } });
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['pendingQueue'] });
