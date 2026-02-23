@@ -34,7 +34,6 @@ import type {
     OutwardPreviewRow,
     MoveShippedResult,
     ParsedRow,
-    SkuLookupInfo,
     OrderMapEntry,
     LinkableOutward,
     BalanceSnapshot,

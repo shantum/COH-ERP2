@@ -33,15 +33,7 @@ const inwardSchema = z.object({
     adjustmentReason: z.string().optional(),
 });
 
-const outwardSchema = z.object({
-    skuId: z.string().uuid('Invalid SKU ID'),
-    qty: z.number().int().positive('Quantity must be a positive integer'),
-    reason: z.string().min(1, 'Reason is required'),
-    referenceId: z.string().optional(),
-    notes: z.string().optional(),
-    warehouseLocation: z.string().optional(),
-    adjustmentReason: z.string().optional(),
-});
+const outwardSchema = inwardSchema;
 
 const quickInwardSchema = z.object({
     items: z.array(
@@ -142,13 +134,7 @@ export interface InwardResult {
     availableBalance: number;
 }
 
-export interface OutwardResult {
-    transactionId: string;
-    skuId: string;
-    qty: number;
-    newBalance: number;
-    availableBalance: number;
-}
+export type OutwardResult = InwardResult;
 
 export interface QuickInwardResult {
     transactions: Array<{

@@ -4,7 +4,7 @@
  * Used by both background jobs (syncWorker.ts) and direct sync routes (shopify.js)
  */
 
-import type { Prisma, PrismaClient, Product } from '@prisma/client';
+import type { Prisma, PrismaClient } from '@prisma/client';
 import type { ShopifyProduct, ShopifyVariant } from './shopify.js';
 import shopifyClient from './shopify.js';
 import { resolveProductCategory } from '../config/mappings/index.js';

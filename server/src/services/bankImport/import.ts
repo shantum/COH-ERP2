@@ -465,16 +465,6 @@ export async function importHdfcStatement(filePath: string): Promise<ImportResul
 // RAZORPAYX PAYOUTS IMPORT
 // ============================================
 
-function extractNoteDescription(notes: string): string | null {
-  if (!notes || notes === '{}') return null;
-  try {
-    const parsed = JSON.parse(notes);
-    const keys = Object.keys(parsed);
-    if (keys.length > 0 && keys[0] !== 'note') return keys[0];
-    return null;
-  } catch { return null; }
-}
-
 export async function importRazorpayxPayouts(filePath: string): Promise<ImportResult> {
   const fileName = filePath.split('/').pop() || filePath;
   const batchId = randomUUID();

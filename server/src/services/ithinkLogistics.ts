@@ -19,18 +19,15 @@ import {
 import type {
     IThinkRawTrackingResponse,
     IThinkApiResponse,
-    IThinkOrderResult,
-    IThinkRawRateInfo,
     IThinkRawPincodeData,
     IThinkRawProviderInfo,
-    IThinkCancellationItem,
     IThinkLabelRequestData,
     IThinkRemittanceSummary,
     IThinkRemittanceDetail,
     IThinkRemittanceResponse,
 } from '../types/ithinkApi.js';
 import { isProviderInfo } from '../types/ithinkApi.js';
-import { storeTrackingResponse, storeTrackingResponsesBatch } from './trackingResponseStorage.js';
+import { storeTrackingResponsesBatch } from './trackingResponseStorage.js';
 
 // ============================================================================
 // Constants (from config)

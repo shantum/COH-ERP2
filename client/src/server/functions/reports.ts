@@ -15,16 +15,7 @@ import { getPrisma } from '@coh/shared/services/db';
 import { getISTMidnightAsUTC, getISTMonthStartAsUTC, parseISTDateAsUTC, parseISTDateEndAsUTC } from '@coh/shared';
 
 // Dynamic import helper for Kysely queries (prevents bundling Node.js code into client)
-async function getKyselyQueries() {
-    const module = await import('@coh/shared/services/db/queries/dashboard');
-    return {
-        getSalesBreakdownByMaterial: module.getSalesBreakdownByMaterial,
-        getSalesBreakdownByFabric: module.getSalesBreakdownByFabric,
-        getSalesBreakdownByFabricColour: module.getSalesBreakdownByFabricColour,
-        getSalesBreakdownByChannel: module.getSalesBreakdownByChannel,
-        getSalesBreakdownByStandardColor: module.getSalesBreakdownByStandardColor,
-    };
-}
+const getKyselyQueries = () => import('@coh/shared/services/db/queries/dashboard');
 
 // ============================================
 // INPUT SCHEMAS

@@ -22,7 +22,6 @@
 import type { SyncJob } from '@prisma/client';
 import prisma from '../lib/prisma.js';
 import shopifyClient from './shopify.js';
-import type { ShopifyOrder } from './shopify.js';
 import { cacheShopifyOrders } from './shopifyOrderProcessor.js';
 import { syncLogger } from '../utils/logger.js';
 import shutdownCoordinator from '../utils/shutdownCoordinator.js';

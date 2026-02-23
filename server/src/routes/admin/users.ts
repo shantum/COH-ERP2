@@ -6,10 +6,7 @@ import { asyncHandler } from '../../middleware/asyncHandler.js';
 import bcrypt from 'bcryptjs';
 import { validatePassword } from '@coh/shared';
 import { ValidationError, NotFoundError, ConflictError, BusinessLogicError } from '../../utils/errors.js';
-import logger from '../../utils/logger.js';
 import type { CreateUserBody, UpdateUserBody, PasswordValidationResult } from './types.js';
-
-const log = logger.child({ module: 'admin' });
 
 const router = Router();
 

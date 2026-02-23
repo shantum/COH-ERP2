@@ -531,15 +531,6 @@ async function processShopifyOrderWebhook(
     return result;
 }
 
-// Legacy wrapper for backward compatibility
-async function processShopifyOrder(
-    prisma: PrismaClient,
-    shopifyOrder: ShopifyOrderPayload,
-    _action: string
-): Promise<ProcessResult> {
-    return processShopifyOrderWebhook(prisma, shopifyOrder);
-}
-
 async function processShopifyCustomer(
     prisma: PrismaClient,
     shopifyCustomer: ShopifyCustomerPayload,

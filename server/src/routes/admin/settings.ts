@@ -4,7 +4,6 @@ import { authenticateToken, requireAdmin } from '../../middleware/auth.js';
 import { asyncHandler } from '../../middleware/asyncHandler.js';
 import { ValidationError } from '../../utils/errors.js';
 import { DEFAULT_TIER_THRESHOLDS, updateAllCustomerTiers } from '../../utils/tierUtils.js';
-import { chunkProcess } from '../../utils/asyncUtils.js';
 import type {
     Channel,
     TierThresholds,

@@ -10,24 +10,12 @@
 
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
-import type { Prisma } from '@prisma/client';
 import { authMiddleware } from '../middleware/auth';
 import { getPrisma, type PrismaTransaction } from '@coh/shared/services/db';
 
 // ============================================
 // INPUT SCHEMAS
 // ============================================
-
-const getQueueInputSchema = z.object({
-    limit: z.number().int().positive().optional().default(100),
-    offset: z.number().int().nonnegative().optional().default(0),
-});
-
-const getQueueHistoryInputSchema = z.object({
-    limit: z.number().int().positive().optional().default(100),
-    offset: z.number().int().nonnegative().optional().default(0),
-    status: z.enum(['approved', 'written_off', 'all']).optional().default('all'),
-});
 
 const processItemInputSchema = z.object({
     itemId: z.string().uuid(),
@@ -51,10 +39,6 @@ const updateQueueItemInputSchema = z.object({
     condition: z.string().optional(),
     inspectionNotes: z.string().optional(),
     orderLineId: z.string().uuid().optional(),
-});
-
-const undoProcessInputSchema = z.object({
-    itemId: z.string().uuid(),
 });
 
 const deleteQueueItemInputSchema = z.object({
@@ -110,150 +94,6 @@ export interface RepackingQueueItemResult {
 // ============================================
 // SERVER FUNCTIONS
 // ============================================
-
-/**
- * Get repacking queue (pending items)
- *
- * Returns items awaiting QC inspection.
- */
-export const getRepackingQueue = createServerFn({ method: 'GET' })
-    .middleware([authMiddleware])
-    .inputValidator((input: unknown) => getQueueInputSchema.parse(input))
-    .handler(async ({ data }): Promise<QueueResponse> => {
-        const prisma = await getPrisma();
-
-        const { limit, offset } = data;
-
-        // Get pending items
-        const [items, total] = await Promise.all([
-            prisma.repackingQueueItem.findMany({
-                where: {
-                    status: 'pending',
-                },
-                include: {
-                    sku: {
-                        include: {
-                            variation: {
-                                include: {
-                                    product: true,
-                                },
-                            },
-                        },
-                    },
-                },
-                orderBy: { createdAt: 'asc' },
-                take: limit,
-                skip: offset,
-            }),
-            prisma.repackingQueueItem.count({
-                where: {
-                    status: 'pending',
-                },
-            }),
-        ]);
-
-        const queueItems: QueueItem[] = items.map((item) => ({
-            id: item.id,
-            skuId: item.skuId,
-            skuCode: item.sku.skuCode,
-            barcode: null, // SKU model has no barcode field
-            productName: item.sku.variation.product.name,
-            colorName: item.sku.variation.colorName,
-            size: item.sku.size,
-            imageUrl: item.sku.variation.imageUrl || item.sku.variation.product.imageUrl,
-            qty: item.qty,
-            sourceReference: item.orderLineId || null,
-            condition: item.condition,
-            inspectionNotes: item.inspectionNotes,
-            status: item.status as 'pending' | 'approved' | 'written_off',
-            qcComments: item.qcComments,
-            writeOffReason: item.writeOffReason,
-            createdAt: item.createdAt.toISOString(),
-            processedAt: item.processedAt?.toISOString() || null,
-        }));
-
-        return {
-            items: queueItems,
-            pagination: {
-                total,
-                limit,
-                offset,
-                hasMore: offset + items.length < total,
-            },
-        };
-    });
-
-/**
- * Get repacking queue history
- *
- * Returns processed items (approved/written-off).
- */
-export const getRepackingQueueHistory = createServerFn({ method: 'GET' })
-    .middleware([authMiddleware])
-    .inputValidator((input: unknown) => getQueueHistoryInputSchema.parse(input))
-    .handler(async ({ data }): Promise<QueueResponse> => {
-        const prisma = await getPrisma();
-
-        const { limit, offset, status } = data;
-
-        // Build where clause
-        const where: Prisma.RepackingQueueItemWhereInput =
-            status === 'all'
-                ? { status: { in: ['approved', 'written_off'] } }
-                : { status };
-
-        // Get processed items
-        const [items, total] = await Promise.all([
-            prisma.repackingQueueItem.findMany({
-                where,
-                include: {
-                    sku: {
-                        include: {
-                            variation: {
-                                include: {
-                                    product: true,
-                                },
-                            },
-                        },
-                    },
-                },
-                orderBy: { processedAt: 'desc' },
-                take: limit,
-                skip: offset,
-            }),
-            prisma.repackingQueueItem.count({ where }),
-        ]);
-
-        const queueItems: QueueItem[] = items.map((item) => ({
-            id: item.id,
-            skuId: item.skuId,
-            skuCode: item.sku.skuCode,
-            barcode: null, // SKU model has no barcode field
-            productName: item.sku.variation.product.name,
-            colorName: item.sku.variation.colorName,
-            size: item.sku.size,
-            imageUrl: item.sku.variation.imageUrl || item.sku.variation.product.imageUrl,
-            qty: item.qty,
-            sourceReference: item.orderLineId || null,
-            condition: item.condition,
-            inspectionNotes: item.inspectionNotes,
-            status: item.status as 'pending' | 'approved' | 'written_off',
-            qcComments: item.qcComments,
-            writeOffReason: item.writeOffReason,
-            createdAt: item.createdAt.toISOString(),
-            processedAt: item.processedAt?.toISOString() || null,
-        }));
-
-        return {
-            items: queueItems,
-            pagination: {
-                total,
-                limit,
-                offset,
-                hasMore: offset + items.length < total,
-            },
-        };
-    });
 
 /**
  * Process repacking queue item (approve or write-off)
@@ -364,81 +204,6 @@ export const processRepackingItem = createServerFn({ method: 'POST' })
             action: normalizedAction,
             skuCode: item.sku.skuCode,
             qty: item.qty,
-        };
-    });
-
-/**
- * Undo repacking item processing
- *
- * MUTATION: Reverts item back to pending and removes inventory transaction.
- */
-export const undoRepackingProcess = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
-    .inputValidator((input: unknown) => undoProcessInputSchema.parse(input))
-    .handler(async ({ data }): Promise<{ success: boolean; message: string }> => {
-        const prisma = await getPrisma();
-
-        const { itemId } = data;
-
-        // Verify item exists and is processed
-        const item = await prisma.repackingQueueItem.findUnique({
-            where: { id: itemId },
-        });
-
-        if (!item) {
-            throw new Error('Queue item not found');
-        }
-
-        if (item.status === 'pending') {
-            throw new Error('Item has not been processed yet');
-        }
-
-        const originalStatus = item.status;
-
-        // Undo process in transaction
-        await prisma.$transaction(async (tx: PrismaTransaction) => {
-            // Reset queue item to pending
-            await tx.repackingQueueItem.update({
-                where: { id: itemId },
-                data: {
-                    status: 'pending',
-                    qcComments: null,
-                    writeOffReason: null,
-                    processedAt: null,
-                },
-            });
-
-            // Delete the inventory transaction created during processing
-            // Find transactions created around the processedAt time
-            if (item.processedAt) {
-                const timeWindow = 60000; // 1 minute
-                const startTime = new Date(item.processedAt.getTime() - timeWindow);
-                const endTime = new Date(item.processedAt.getTime() + timeWindow);
-
-                await tx.inventoryTransaction.deleteMany({
-                    where: {
-                        skuId: item.skuId,
-                        qty: item.qty,
-                        createdAt: {
-                            gte: startTime,
-                            lte: endTime,
-                        },
-                        OR: [
-                            { reason: { contains: 'QC Approved' } },
-                            { reason: { contains: 'Written Off' } },
-                        ],
-                    },
-                });
-            }
-        });
-
-        // Invalidate caches
-        const { inventoryBalanceCache } = await import('@coh/shared/services/inventory');
-        inventoryBalanceCache.invalidate([item.skuId]);
-
-        return {
-            success: true,
-            message: `${originalStatus === 'approved' ? 'Approval' : 'Write-off'} undone`,
         };
     });
 

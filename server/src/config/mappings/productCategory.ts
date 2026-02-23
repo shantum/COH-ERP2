@@ -361,42 +361,6 @@ const SORTED_GARMENT_RULES = [...GARMENT_TYPE_PATTERNS].sort(
     (a, b) => (b.priority ?? 0) - (a.priority ?? 0)
 );
 
-// ============================================
-// GENDER EXTRACTION
-// ============================================
-
-const GENDER_TAG_PATTERNS = {
-    men: ['_related_men', 'men ', 'mens ', "men's", 'male', 'for men', 'for him'],
-    women: ['_related_women', 'women ', 'womens ', "women's", 'female', 'for women', 'for her', 'ladies'],
-    unisex: ['unisex', 'gender neutral'],
-};
-
-/**
- * Extract gender from Shopify tags
- */
-function extractGender(tags: string[]): 'men' | 'women' | 'unisex' {
-    const tagsLower = tags.map((t) => t.toLowerCase());
-    const tagsJoined = tagsLower.join(' ');
-
-    // Check for explicit unisex first
-    for (const pattern of GENDER_TAG_PATTERNS.unisex) {
-        if (tagsJoined.includes(pattern)) return 'unisex';
-    }
-
-    // Check men patterns
-    for (const pattern of GENDER_TAG_PATTERNS.men) {
-        if (tagsJoined.includes(pattern)) return 'men';
-    }
-
-    // Check women patterns
-    for (const pattern of GENDER_TAG_PATTERNS.women) {
-        if (tagsJoined.includes(pattern)) return 'women';
-    }
-
-    // Default to unisex if no gender found
-    return 'unisex';
-}
-
 /**
  * Extract garment type from Shopify tags
  */

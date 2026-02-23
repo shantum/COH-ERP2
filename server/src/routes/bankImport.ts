@@ -30,7 +30,6 @@ import {
 } from '../services/bankImport/index.js';
 import type { RawRow } from '../services/bankImport/index.js';
 import {
-  findPartyByNarration,
   resolveAccounting,
 } from '../services/transactionTypeResolver.js';
 import {
@@ -180,12 +179,6 @@ router.post('/preview', requireAdmin, upload.single('file'), asyncHandler(async 
 
     // Categorize in memory
     const parties = await fetchActiveParties();
-
-    const bankAccountMap: Record<string, string> = {
-      hdfc: 'BANK_HDFC',
-      razorpayx: 'BANK_RAZORPAYX',
-    };
-    const bankAccount = bankAccountMap[bank] || 'BANK_HDFC';
 
     let partiesMatched = 0;
     let partiesUnmatched = 0;

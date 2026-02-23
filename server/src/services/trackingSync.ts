@@ -15,7 +15,6 @@ import { recomputeOrderStatus } from '../utils/orderStatus.js';
 import { updateCustomerTier } from '../utils/tierUtils.js';
 import { trackingLogger } from '../utils/logger.js';
 import { type TrackingStatus, type PaymentMethod } from '../config/types.js';
-import type { IThinkRawTrackingResponse } from '../types/ithinkApi.js';
 import { storeTrackingResponsesBatch } from './trackingResponseStorage.js';
 import { trackWorkerRun } from '../utils/workerRunTracker.js';
 
@@ -104,25 +103,6 @@ const SYNC_INTERVAL_MS = 30 * 60 * 1000;
 
 /** Batch size for tracking API calls (iThink API limit is 10 per request) */
 const BATCH_SIZE = 10;
-
-/**
- * Non-final tracking statuses that need updates
- * Include 'delivered' and 'rto_delivered' to allow re-evaluation of misclassified orders
- */
-const SYNC_STATUSES: string[] = [
-    'in_transit',
-    'out_for_delivery',
-    'delivery_delayed',
-    'rto_initiated',
-    'rto_in_transit',
-    'rto_delivered',
-    'manifested',
-    'picked_up',
-    'reached_destination',
-    'undelivered',
-    'not_picked',
-    'delivered',
-];
 
 // ============================================
 // STATE

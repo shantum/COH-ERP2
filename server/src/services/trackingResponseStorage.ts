@@ -182,22 +182,6 @@ export async function getTrackingResponses(
  * @param awbNumber - The AWB number
  * @returns Number of deleted records
  */
-export async function deleteTrackingResponses(awbNumber: string): Promise<number> {
-    try {
-        const result = await prisma.trackingApiResponse.deleteMany({
-            where: { awbNumber },
-        });
-        return result.count;
-    } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : 'Unknown error';
-        trackingLogger.error(
-            { awbNumber, error: message },
-            'Failed to delete tracking responses'
-        );
-        return 0;
-    }
-}
-
 /**
  * Rotate old responses to maintain the maximum limit
  *

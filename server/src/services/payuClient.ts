@@ -8,7 +8,7 @@
  */
 
 import crypto from 'crypto';
-import axios, { AxiosError } from 'axios';
+import axios from 'axios';
 import prisma from '../lib/prisma.js';
 import { settlementLogger } from '../utils/logger.js';
 import { PAYU_API_TIMEOUT_MS, PAYU_PAGE_SIZE } from '../config/index.js';

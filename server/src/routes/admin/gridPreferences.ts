@@ -2,7 +2,6 @@ import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { authenticateToken, requireAdmin } from '../../middleware/auth.js';
 import { asyncHandler } from '../../middleware/asyncHandler.js';
-import { ValidationError } from '../../utils/errors.js';
 import type { GridPreferences, UserGridPreferencesResponse } from './types.js';
 
 const router = Router();

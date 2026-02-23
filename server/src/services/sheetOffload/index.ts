@@ -4,8 +4,8 @@
  */
 
 import { getCycleProgress, resetCycleProgress } from './state.js';
-import { ingestInwardLive, triggerIngestInward, previewIngestInward } from './inward.js';
-import { ingestOutwardLive, triggerIngestOutward, previewIngestOutward, triggerMoveShipped } from './outward.js';
+import { triggerIngestInward, previewIngestInward } from './inward.js';
+import { triggerIngestOutward, previewIngestOutward, triggerMoveShipped } from './outward.js';
 import {
   triggerPushBalances,
   triggerCleanupDoneRows,

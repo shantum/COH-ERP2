@@ -4,7 +4,6 @@ import type { Request, Response } from 'express';
 import { authenticateToken } from '../../middleware/auth.js';
 import asyncHandler from '../../middleware/asyncHandler.js';
 import { runAllCleanup, getCacheStats } from '../../utils/cacheCleanup.js';
-import { shopifyLogger } from '../../utils/logger.js';
 import type { CleanupOptions } from './types.js';
 
 const router = Router();

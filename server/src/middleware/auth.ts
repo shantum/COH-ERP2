@@ -10,7 +10,6 @@ import type { Request, Response, NextFunction } from 'express';
 import {
     validateAuth,
     hasAdminAccess,
-    type AuthenticatedUser,
 } from '../utils/authCore.js';
 
 // Re-export types for convenience

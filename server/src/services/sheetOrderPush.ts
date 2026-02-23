@@ -16,7 +16,6 @@ import { appendRows, addBottomBorders, getSheetId, readRange, batchWriteRanges }
 import {
     ORDERS_MASTERSHEET_ID,
     MASTERSHEET_TABS,
-    ORDERS_FROM_COH_COLS,
 } from '../config/sync/sheets.js';
 import prisma from '../lib/prisma.js';
 import iThinkService from './ithinkLogistics.js';

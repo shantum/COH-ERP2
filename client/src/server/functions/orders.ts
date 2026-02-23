@@ -41,15 +41,12 @@ import {
     searchAllInputSchema,
     getOrderByIdInputSchema,
     searchUnifiedInputSchema,
-} from './orderTypes';
-
-import type {
-    OrdersResponse,
-    FlattenedOrderRow,
-    OrderViewCounts,
-    SearchAllResponse,
-    OrderDetail,
-    SearchUnifiedResponse,
+    type OrdersResponse,
+    type FlattenedOrderRow,
+    type OrderViewCounts,
+    type SearchAllResponse,
+    type OrderDetail,
+    type SearchUnifiedResponse,
 } from './orderTypes';
 
 // Re-export server functions from extracted files

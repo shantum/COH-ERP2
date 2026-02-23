@@ -19,7 +19,6 @@ import {
     FABRIC_BALANCES_HEADERS,
     FABRIC_BALANCES_COLS,
     FABRIC_BALANCES_COUNT_DATETIME,
-    REF_PREFIX,
     OFFLOAD_NOTES_PREFIX,
     INGESTED_PREFIX,
     MAX_QTY_PER_ROW,
@@ -964,7 +963,6 @@ export async function triggerImportFabricBalances(): Promise<ImportFabricBalance
         const balanceMap = new Map(updatedColours.map(c => [c.id, c.currentBalance]));
 
         // 7. Update sheet: refresh System Balance, verify, then clear entry columns
-        const now = new Date().toISOString().slice(0, 19);
         const sheetUpdates: Array<{ range: string; values: (string | number)[][] }> = [];
 
         // All processed rows (adjustments + matching): update balance, clear Physical Count & Status

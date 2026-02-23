@@ -25,7 +25,6 @@ import type {
     ParsedRow,
     SkuLookupInfo,
     BalanceSnapshot,
-    BalanceVerificationResult,
     StepTracker,
 } from './state.js';
 import {

@@ -1,9 +1,8 @@
 import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { authenticateToken, requireAdmin } from '../../middleware/auth.js';
-import { invalidateUserTokens } from '../../middleware/permissions.js';
 import { asyncHandler } from '../../middleware/asyncHandler.js';
-import { ValidationError, NotFoundError, ConflictError, BusinessLogicError } from '../../utils/errors.js';
+import { ValidationError, NotFoundError, BusinessLogicError } from '../../utils/errors.js';
 import logger from '../../utils/logger.js';
 import type { RoleAssignmentBody, PermissionOverride, PermissionsUpdateBody } from './types.js';
 

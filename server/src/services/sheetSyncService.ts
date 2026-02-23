@@ -26,7 +26,6 @@ import {
 } from '../scripts/lib/orderSync.js';
 import {
     planInventoryReconcile,
-    executeInventoryReconcile,
     type InventoryReconcileReport,
 } from '../scripts/lib/inventorySync.js';
 
@@ -285,7 +284,7 @@ async function runSteps(
     job: SheetSyncJob,
     internals: JobInternals
 ): Promise<void> {
-    const { parsedData, shipReport, createReport, notesReport, statusReport, batchReport, inventoryReport } = internals;
+    const { parsedData, createReport, notesReport, batchReport } = internals;
     const userId = job.userId;
 
     const steps: Array<() => Promise<string>> = [
