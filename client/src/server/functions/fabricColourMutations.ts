@@ -13,27 +13,7 @@
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth';
-import { getPrisma } from '@coh/shared/services/db';
-import type { PrismaClient } from '@prisma/client';
-
-// ============================================
-// PRISMA TYPE ALIASES
-// ============================================
-
-/**
- * Type alias for PrismaClient instance.
- * Used for helper functions that need prisma parameter.
- */
-type PrismaInstance = InstanceType<typeof PrismaClient>;
-
-/**
- * Type alias for Prisma transaction client.
- * Used in $transaction callbacks.
- */
-type PrismaTransaction = Omit<
-    PrismaInstance,
-    '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'
->;
+import { getPrisma, type PrismaTransaction } from '@coh/shared/services/db';
 
 // ============================================
 // INTERNAL TYPE DEFINITIONS

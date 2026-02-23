@@ -9,12 +9,9 @@
 import type { Prisma } from '@prisma/client';
 import {
     calculateBalance,
-    calculateFabricBalance as calculateFabricBalancePure,
     createEmptyBalanceWithId,
     type InventoryBalance,
     type InventoryBalanceWithSkuId,
-    type FabricBalance,
-    type FabricBalanceWithId,
 } from '@coh/shared/domain';
 import type {
     PrismaOrTransaction,
@@ -23,7 +20,7 @@ import type {
 } from './types.js';
 
 // Re-export types from shared for backwards compatibility
-export type { InventoryBalance, InventoryBalanceWithSkuId, FabricBalance, FabricBalanceWithId };
+export type { InventoryBalance, InventoryBalanceWithSkuId };
 
 // ============================================
 // SKU INVENTORY BALANCE
@@ -130,64 +127,12 @@ export async function calculateAllInventoryBalances(
     for (const sku of skus) {
         balanceMap.set(sku.id, {
             skuId: sku.id,
-            totalInward: 0, // Not tracked - use calculateAllInventoryBalancesWithTotals if needed
-            totalOutward: 0, // Not tracked - use calculateAllInventoryBalancesWithTotals if needed
+            totalInward: 0,
+            totalOutward: 0,
             currentBalance: sku.currentBalance,
             availableBalance: sku.currentBalance,
             hasDataIntegrityIssue: !allowNegative && sku.currentBalance < 0,
         });
-    }
-
-    return balanceMap;
-}
-
-/**
- * Calculate inventory balances with inward/outward totals for multiple SKUs
- * Use this when you need to display totalInward/totalOutward.
- * For just currentBalance, use calculateAllInventoryBalances() instead (faster).
- */
-export async function calculateAllInventoryBalancesWithTotals(
-    prisma: PrismaOrTransaction,
-    skuIds: string[] | null = null,
-    options: InventoryBalanceOptions = {}
-): Promise<Map<string, InventoryBalanceWithSkuId>> {
-    const { allowNegative = true, excludeCustomSkus = false } = options;
-
-    const where: Prisma.InventoryTransactionWhereInput = {};
-
-    if (skuIds) {
-        where.skuId = { in: skuIds };
-    }
-
-    if (excludeCustomSkus) {
-        where.sku = { isCustomSku: false };
-    }
-
-    const result = await prisma.inventoryTransaction.groupBy({
-        by: ['skuId', 'txnType'],
-        where,
-        _sum: { qty: true },
-    });
-
-    // Aggregate transaction totals by SKU
-    const summaryMap = new Map<string, { totalInward: number; totalOutward: number }>();
-
-    result.forEach((r) => {
-        if (!summaryMap.has(r.skuId)) {
-            summaryMap.set(r.skuId, { totalInward: 0, totalOutward: 0 });
-        }
-
-        const summary = summaryMap.get(r.skuId)!;
-        if (r.txnType === 'inward') summary.totalInward = r._sum.qty || 0;
-        else if (r.txnType === 'outward') summary.totalOutward = r._sum.qty || 0;
-    });
-
-    // Calculate balances using shared pure function
-    const balanceMap = new Map<string, InventoryBalanceWithSkuId>();
-
-    for (const [skuId, summary] of summaryMap) {
-        const balance = calculateBalance(summary, { allowNegative });
-        balanceMap.set(skuId, { skuId, ...balance });
     }
 
     return balanceMap;
@@ -246,33 +191,7 @@ export async function calculateInventoryBalancesWithLock(
     return balanceMap;
 }
 
-// ============================================
-// FABRIC BALANCE
-// ============================================
-
 // NOTE: FabricTransaction table removed - fabric balance now tracked via FabricColourTransaction
-// These functions have been deprecated. Use FabricColour.currentBalance (materialized) instead.
-
-/**
- * @deprecated FabricTransaction removed - use FabricColour.currentBalance instead
- */
-export async function calculateFabricBalance(
-    _prisma: PrismaOrTransaction,
-    _fabricId: string
-): Promise<FabricBalance> {
-    // Return zero balance - FabricTransaction no longer exists
-    return calculateFabricBalancePure({ totalInward: 0, totalOutward: 0 });
-}
-
-/**
- * @deprecated FabricTransaction removed - use FabricColour.currentBalance instead
- */
-export async function calculateAllFabricBalances(
-    _prisma: PrismaOrTransaction
-): Promise<Map<string, FabricBalanceWithId>> {
-    // Return empty map - FabricTransaction no longer exists
-    return new Map();
-}
-
+// Use FabricColour.currentBalance (materialized) instead.
 // NOTE: getEffectiveFabricConsumption removed — fabric consumption now comes from BOM
 // (SkuBomLine.quantity > VariationBomLine.quantity > default 1.5)

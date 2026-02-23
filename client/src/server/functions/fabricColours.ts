@@ -12,19 +12,9 @@
 
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
-import type { PrismaClient, Prisma } from '@prisma/client';
+import type { Prisma } from '@prisma/client';
 import { authMiddleware } from '../middleware/auth';
 import { getPrisma } from '@coh/shared/services/db';
-
-// ============================================
-// PRISMA TYPE ALIAS
-// ============================================
-
-/**
- * Type alias for PrismaClient instance.
- * Used for helper functions that need prisma parameter.
- */
-type PrismaInstance = InstanceType<typeof PrismaClient>;
 
 // ============================================
 // INTERNAL TYPE DEFINITIONS FOR QUERY RESULTS
@@ -348,54 +338,13 @@ const statusOrder: Record<StockStatus, number> = {
 // ============================================
 
 /**
- * Calculate fabric colour balance from transactions
+ * Dynamic import helpers from shared queries layer.
+ * MUST use dynamic imports — static imports break client bundling.
  */
-async function calculateFabricColourBalance(
-    prisma: PrismaInstance,
-    fabricColourId: string
-): Promise<{ currentBalance: number; totalInward: number; totalOutward: number }> {
-    const [inwardSum, outwardSum] = await Promise.all([
-        prisma.fabricColourTransaction.aggregate({
-            where: { fabricColourId, txnType: 'inward' },
-            _sum: { qty: true },
-        }),
-        prisma.fabricColourTransaction.aggregate({
-            where: { fabricColourId, txnType: 'outward' },
-            _sum: { qty: true },
-        }),
-    ]);
-
-    const totalInward = Number(inwardSum._sum.qty) || 0;
-    const totalOutward = Number(outwardSum._sum.qty) || 0;
-
-    return {
-        currentBalance: totalInward - totalOutward,
-        totalInward,
-        totalOutward,
-    };
-}
-
-/**
- * Calculate average daily fabric colour consumption over 28 days
- */
-async function calculateAvgDailyConsumption(
-    prisma: PrismaInstance,
-    fabricColourId: string
-): Promise<number> {
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 28);
-
-    const result = await prisma.fabricColourTransaction.aggregate({
-        where: {
-            fabricColourId,
-            txnType: 'outward',
-            createdAt: { gte: thirtyDaysAgo },
-        },
-        _sum: { qty: true },
-    });
-
-    const totalConsumption = Number(result._sum.qty) || 0;
-    return totalConsumption / 28;
+async function getSharedFabricColourQueries() {
+    const { calculateFabricColourBalance, calculateAvgDailyConsumption, calculateAllFabricColourBalances } =
+        await import('@coh/shared/services/db/queries');
+    return { calculateFabricColourBalance, calculateAvgDailyConsumption, calculateAllFabricColourBalances };
 }
 
 /**
@@ -615,6 +564,7 @@ export const getFabricColourStockAnalysis = createServerFn({ method: 'GET' })
     .inputValidator((input: unknown) => getStockAnalysisInputSchema.parse(input))
     .handler(async ({ data }): Promise<GetFabricColourStockAnalysisResponse> => {
         const prisma = await getPrisma();
+        const { calculateFabricColourBalance, calculateAvgDailyConsumption } = await getSharedFabricColourQueries();
 
         const where: Prisma.FabricColourWhereInput = { isActive: true };
 
@@ -1175,6 +1125,7 @@ export const startFabricColourReconciliation = createServerFn({ method: 'POST' }
     .inputValidator((input: unknown) => startFabricColourReconciliationInputSchema.parse(input))
     .handler(async ({ data, context }): Promise<StartFabricColourReconciliationResponse> => {
         const prisma = await getPrisma();
+        const { calculateAllFabricColourBalances } = await getSharedFabricColourQueries();
 
         // Get all active fabric colours
         const fabricColours = await prisma.fabricColour.findMany({
@@ -1539,43 +1490,3 @@ export const getFabricStockHealth = createServerFn({ method: 'GET' })
         };
     });
 
-/**
- * Helper: Calculate fabric colour balances in batch from FabricColourTransaction
- */
-async function calculateAllFabricColourBalances(
-    prisma: PrismaInstance,
-    fabricColourIds: string[]
-): Promise<Map<string, { currentBalance: number }>> {
-    const aggregations = await prisma.fabricColourTransaction.groupBy({
-        by: ['fabricColourId', 'txnType'],
-        where: { fabricColourId: { in: fabricColourIds } },
-        _sum: { qty: true },
-    });
-
-    const balanceMap = new Map<string, { currentBalance: number }>();
-
-    // Initialize all colours with zero balance
-    for (const colourId of fabricColourIds) {
-        balanceMap.set(colourId, { currentBalance: 0 });
-    }
-
-    // Calculate balances from aggregations
-    const colourTotals = new Map<string, { inward: number; outward: number }>();
-    for (const agg of aggregations) {
-        if (!colourTotals.has(agg.fabricColourId)) {
-            colourTotals.set(agg.fabricColourId, { inward: 0, outward: 0 });
-        }
-        const totals = colourTotals.get(agg.fabricColourId)!;
-        if (agg.txnType === 'inward') {
-            totals.inward = Number(agg._sum.qty) || 0;
-        } else if (agg.txnType === 'outward') {
-            totals.outward = Number(agg._sum.qty) || 0;
-        }
-    }
-
-    for (const [colourId, totals] of colourTotals) {
-        balanceMap.set(colourId, { currentBalance: totals.inward - totals.outward });
-    }
-
-    return balanceMap;
-}

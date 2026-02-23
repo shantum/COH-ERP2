@@ -24,32 +24,24 @@ const getInventoryBalancesSchema = z.object({
     skuIds: z.array(z.string().min(1)).min(1, 'At least one SKU ID is required'),
 });
 
-const getInventoryAllSchema = z.object({
+/** Shared filter fields used by both getInventoryAll and getInventoryGrouped */
+const inventoryFilterSchema = z.object({
+    stockFilter: z.enum(['all', 'in_stock', 'out_of_stock', 'low_stock']).optional().default('all'),
+    shopifyStatus: z.enum(['all', 'active', 'archived', 'draft']).optional().default('all'),
+    discrepancy: z.enum(['all', 'has_discrepancy', 'no_discrepancy']).optional().default('all'),
+    fabricFilter: z.enum(['all', 'has_fabric', 'no_fabric', 'low_fabric']).optional().default('all'),
+    sortBy: z.enum(['stock', 'shopify', 'fabric']).optional().default('stock'),
+    sortOrder: z.enum(['desc', 'asc']).optional().default('desc'),
+});
+
+const getInventoryAllSchema = inventoryFilterSchema.extend({
     includeCustomSkus: z.boolean().optional().default(false),
     belowTarget: z.boolean().optional(),
     search: z.string().optional(),
     limit: z.number().int().positive().optional().default(100),
     offset: z.number().int().nonnegative().optional().default(0),
-    // Filters for mobile inventory
-    stockFilter: z.enum(['all', 'in_stock', 'out_of_stock', 'low_stock']).optional().default('all'),
-    shopifyStatus: z.enum(['all', 'active', 'archived', 'draft']).optional().default('all'),
-    discrepancy: z.enum(['all', 'has_discrepancy', 'no_discrepancy']).optional().default('all'),
-    fabricFilter: z.enum(['all', 'has_fabric', 'no_fabric', 'low_fabric']).optional().default('all'),
-    // Sorting
-    sortBy: z.enum(['stock', 'shopify', 'fabric']).optional().default('stock'),
-    sortOrder: z.enum(['desc', 'asc']).optional().default('desc'),
 });
 
-// Legacy schema kept for backwards compatibility
-const inventoryListInputSchema = z.object({
-    includeCustomSkus: z.boolean().optional().default(false),
-    search: z.string().optional(),
-    stockFilter: z.enum(['all', 'in_stock', 'low_stock', 'out_of_stock']).optional().default('all'),
-    limit: z.number().int().positive().max(10000).optional().default(10000),
-    offset: z.number().int().nonnegative().optional().default(0),
-});
-
-export type InventoryListInput = z.infer<typeof inventoryListInputSchema>;
 
 // ============================================
 // OUTPUT TYPES
@@ -158,38 +150,48 @@ export interface InventoryAllResult {
     stats: InventoryStats;
 }
 
-// Legacy types kept for backwards compatibility
-export interface InventoryItem {
-    skuId: string;
-    skuCode: string;
-    productId: string;
-    productName: string;
-    productType: string;
-    gender: string;
-    colorName: string;
-    variationId: string;
-    size: string;
-    category: string;
-    imageUrl: string | null;
-    currentBalance: number;
-    availableBalance: number;
-    totalInward: number;
-    totalOutward: number;
-    targetStockQty: number;
-    status: 'ok' | 'below_target';
-    mrp: number;
-    shopifyQty: number | null;
-    isCustomSku: boolean;
-}
 
-export interface InventoryListResponse {
-    items: InventoryItem[];
-    pagination: {
-        total: number;
-        limit: number;
-        offset: number;
-        hasMore: boolean;
-    };
+// ============================================
+// SHARED HELPERS (file-local)
+// ============================================
+
+/**
+ * Fetch SKU metadata via Kysely and enrich with inventory + fabric balances from cache.
+ *
+ * Used by both getInventoryAll and getInventoryGrouped to avoid duplicating
+ * the SKU fetch + balance map + fabric balance map pattern.
+ */
+async function fetchSkusWithBalances(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    prisma: any,
+    params: { includeCustomSkus?: boolean; search?: string },
+) {
+    const { listInventorySkusKysely } = await import('@coh/shared/services/db/queries');
+
+    const skus = await listInventorySkusKysely({
+        includeCustomSkus: params.includeCustomSkus ?? false,
+        search: params.search,
+    });
+
+    // Get balances from cache
+    const { inventoryBalanceCache, fabricColourBalanceCache } = await import('@coh/shared/services/inventory');
+
+    const skuIds = skus.map((sku) => sku.skuId);
+    const balanceMap = await inventoryBalanceCache.get(prisma, skuIds);
+
+    // Get unique fabricColourIds and calculate their balances (cached)
+    const fabricColourIds = [...new Set(
+        skus.map((sku) => sku.fabricColourId).filter((id): id is string => id !== null)
+    )];
+    const fcBalanceMap = await fabricColourBalanceCache.get(prisma, fabricColourIds);
+
+    // Convert to simple number map for downstream use
+    const fabricColourBalanceMap = new Map<string, number>();
+    for (const [id, balance] of fcBalanceMap) {
+        fabricColourBalanceMap.set(id, balance.currentBalance);
+    }
+
+    return { skus, balanceMap, fabricColourBalanceMap };
 }
 
 // ============================================
@@ -360,34 +362,10 @@ export const getInventoryAll = createServerFn({ method: 'GET' })
 
         const prisma = await getPrisma();
 
-        // Use Kysely for SKU metadata fetch (JOINs SKU/Variation/Product/Fabric)
-        const { listInventorySkusKysely } = await import('@coh/shared/services/db/queries');
-
-        const skus = await listInventorySkusKysely({
+        const { skus, balanceMap, fabricColourBalanceMap } = await fetchSkusWithBalances(prisma, {
             includeCustomSkus,
             search,
         });
-
-        // Get balances from cache (already optimized with groupBy)
-        const { inventoryBalanceCache } = await import('@coh/shared/services/inventory');
-
-        const skuIds = skus.map((sku) => sku.skuId);
-        const balanceMap = await inventoryBalanceCache.get(prisma, skuIds);
-
-        // Get unique fabricColourIds and calculate their balances (cached)
-        const fabricColourIds = [...new Set(
-            skus.map((sku) => sku.fabricColourId).filter((id): id is string => id !== null)
-        )];
-
-        // Calculate fabric colour balances using cache (5-min TTL, same as inventory)
-        const { fabricColourBalanceCache } = await import('@coh/shared/services/inventory');
-        const fcBalanceMap = await fabricColourBalanceCache.get(prisma, fabricColourIds);
-
-        // Convert to simple number map for downstream use
-        const fabricColourBalanceMap = new Map<string, number>();
-        for (const [id, balance] of fcBalanceMap) {
-            fabricColourBalanceMap.set(id, balance.currentBalance);
-        }
 
         // Map SKU metadata with balances
         const balances: InventoryAllItem[] = skus.map((sku) => {
@@ -439,162 +417,15 @@ export const getInventoryAll = createServerFn({ method: 'GET' })
             };
         });
 
-        // Apply filters
-        let filteredBalances = balances;
+        // Apply filters, sort, and compute stats via shared helpers
+        const { applyInventoryFilters, sortInventoryItems, computeInventoryStats } =
+            await import('@coh/shared/services/inventory/inventoryQuery');
 
-        // Legacy below-target filter
-        if (belowTarget === true) {
-            filteredBalances = filteredBalances.filter((b) => b.status === 'below_target');
-        }
-
-        // Stock filter
-        if (stockFilter && stockFilter !== 'all') {
-            filteredBalances = filteredBalances.filter((b) => {
-                switch (stockFilter) {
-                    case 'in_stock':
-                        return b.availableBalance > 0;
-                    case 'out_of_stock':
-                        return b.availableBalance <= 0;
-                    case 'low_stock':
-                        return b.availableBalance > 0 && b.availableBalance < (b.targetStockQty || 10);
-                    default:
-                        return true;
-                }
-            });
-        }
-
-        // Shopify product status filter
-        if (shopifyStatus && shopifyStatus !== 'all') {
-            filteredBalances = filteredBalances.filter((b) => b.shopifyProductStatus === shopifyStatus);
-        }
-
-        // Shopify qty discrepancy filter
-        if (discrepancy && discrepancy !== 'all') {
-            filteredBalances = filteredBalances.filter((b) => {
-                const hasDiscrepancy = b.shopifyQty !== null && b.shopifyQty !== b.availableBalance;
-                return discrepancy === 'has_discrepancy' ? hasDiscrepancy : !hasDiscrepancy;
-            });
-        }
-
-        // Fabric filter
-        if (fabricFilter && fabricFilter !== 'all') {
-            filteredBalances = filteredBalances.filter((b) => {
-                switch (fabricFilter) {
-                    case 'has_fabric':
-                        return b.fabricColourBalance !== null && b.fabricColourBalance > 0;
-                    case 'no_fabric':
-                        return b.fabricColourBalance === null || b.fabricColourBalance <= 0;
-                    case 'low_fabric':
-                        return b.fabricColourBalance !== null && b.fabricColourBalance > 0 && b.fabricColourBalance < 10;
-                    default:
-                        return true;
-                }
-            });
-        }
-
-        // Sort by selected column and order
-        filteredBalances.sort((a, b) => {
-            let aVal: number;
-            let bVal: number;
-
-            switch (sortBy) {
-                case 'shopify':
-                    // Sort nulls to end
-                    aVal = a.shopifyQty ?? (sortOrder === 'desc' ? -Infinity : Infinity);
-                    bVal = b.shopifyQty ?? (sortOrder === 'desc' ? -Infinity : Infinity);
-                    break;
-                case 'fabric':
-                    // Sort nulls to end
-                    aVal = a.fabricColourBalance ?? (sortOrder === 'desc' ? -Infinity : Infinity);
-                    bVal = b.fabricColourBalance ?? (sortOrder === 'desc' ? -Infinity : Infinity);
-                    break;
-                case 'stock':
-                default:
-                    aVal = a.availableBalance;
-                    bVal = b.availableBalance;
-                    break;
-            }
-
-            return sortOrder === 'asc' ? aVal - bVal : bVal - aVal;
+        const filteredBalances = applyInventoryFilters(balances, {
+            belowTarget, stockFilter, shopifyStatus, discrepancy, fabricFilter,
         });
-
-        // ============================================
-        // COMPUTE STATS FROM ALL FILTERED DATA (before pagination)
-        // ============================================
-
-        // Stock status counts
-        let totalPieces = 0;
-        let inStockCount = 0;
-        let lowStockCount = 0;
-        let outOfStockCount = 0;
-
-        // Aggregate by product for top stocked
-        const productStockMap = new Map<string, {
-            productId: string;
-            productName: string;
-            imageUrl: string | null;
-            totalAvailable: number;
-            colorMap: Map<string, number>;
-        }>();
-
-        for (const item of filteredBalances) {
-            totalPieces += item.availableBalance;
-
-            if (item.availableBalance === 0) {
-                outOfStockCount++;
-            } else if (item.status === 'below_target') {
-                lowStockCount++;
-            } else {
-                inStockCount++;
-            }
-
-            // Aggregate for top stocked products
-            if (item.productId && item.availableBalance > 0) {
-                let product = productStockMap.get(item.productId);
-                if (!product) {
-                    product = {
-                        productId: item.productId,
-                        productName: item.productName,
-                        imageUrl: item.imageUrl,
-                        totalAvailable: 0,
-                        colorMap: new Map(),
-                    };
-                    productStockMap.set(item.productId, product);
-                }
-                product.totalAvailable += item.availableBalance;
-
-                const colorKey = item.colorName || 'Unknown';
-                product.colorMap.set(colorKey, (product.colorMap.get(colorKey) || 0) + item.availableBalance);
-
-                if (!product.imageUrl && item.imageUrl) {
-                    product.imageUrl = item.imageUrl;
-                }
-            }
-        }
-
-        // Build top 5 stocked products
-        const topStockedProducts: TopStockedProduct[] = Array.from(productStockMap.values())
-            .sort((a, b) => b.totalAvailable - a.totalAvailable)
-            .slice(0, 5)
-            .map(p => ({
-                productId: p.productId,
-                productName: p.productName,
-                imageUrl: p.imageUrl,
-                totalAvailable: p.totalAvailable,
-                colors: Array.from(p.colorMap.entries())
-                    .map(([colorName, available]) => ({ colorName, available }))
-                    .sort((a, b) => b.available - a.available)
-                    .slice(0, 3),
-            }));
-
-        const stats: InventoryStats = {
-            totalPieces,
-            totalSkus: filteredBalances.length,
-            inStockCount,
-            lowStockCount,
-            outOfStockCount,
-            topStockedProducts,
-        };
+        sortInventoryItems(filteredBalances, sortBy, sortOrder);
+        const stats = computeInventoryStats(filteredBalances);
 
         // Apply pagination
         const totalCount = filteredBalances.length;
@@ -660,14 +491,8 @@ export interface InventoryGroupedResult {
     totalSkus: number;
 }
 
-const getInventoryGroupedSchema = z.object({
+const getInventoryGroupedSchema = inventoryFilterSchema.extend({
     search: z.string().optional(),
-    stockFilter: z.enum(['all', 'in_stock', 'out_of_stock', 'low_stock']).optional().default('all'),
-    shopifyStatus: z.enum(['all', 'active', 'archived', 'draft']).optional().default('all'),
-    discrepancy: z.enum(['all', 'has_discrepancy', 'no_discrepancy']).optional().default('all'),
-    fabricFilter: z.enum(['all', 'has_fabric', 'no_fabric', 'low_fabric']).optional().default('all'),
-    sortBy: z.enum(['stock', 'shopify', 'fabric']).optional().default('stock'),
-    sortOrder: z.enum(['desc', 'asc']).optional().default('desc'),
 });
 
 /**
@@ -687,30 +512,10 @@ export const getInventoryGrouped = createServerFn({ method: 'GET' })
 
         const prisma = await getPrisma();
 
-        // Fetch all inventory using existing function logic
-        const { listInventorySkusKysely } = await import('@coh/shared/services/db/queries');
-
-        const skus = await listInventorySkusKysely({
+        const { skus, balanceMap, fabricColourBalanceMap } = await fetchSkusWithBalances(prisma, {
             includeCustomSkus: false,
             search,
         });
-
-        // Get balances from cache
-        const { inventoryBalanceCache, fabricColourBalanceCache } = await import('@coh/shared/services/inventory');
-
-        const skuIds = skus.map((sku) => sku.skuId);
-        const balanceMap = await inventoryBalanceCache.get(prisma, skuIds);
-
-        // Get fabric colour balances
-        const fabricColourIds = [...new Set(
-            skus.map((sku) => sku.fabricColourId).filter((id): id is string => id !== null)
-        )];
-        const fcBalanceMap = await fabricColourBalanceCache.get(prisma, fabricColourIds);
-
-        const fabricColourBalanceMap = new Map<string, number>();
-        for (const [id, balance] of fcBalanceMap) {
-            fabricColourBalanceMap.set(id, balance.currentBalance);
-        }
 
         // Size ordering for consistent display
         const sizeOrder = ['XXS', 'XS', 'S', 'M', 'L', 'XL', 'XXL', '2XL', '3XL', '4XL', '5XL'];
@@ -879,200 +684,6 @@ export const getInventoryGrouped = createServerFn({ method: 'GET' })
         };
     });
 
-// ============================================
-// LEGACY SERVER FUNCTION (Backwards Compatibility)
-// ============================================
-
-// Internal types for Prisma query results
-interface BalanceRow {
-    skuId: string;
-    totalInward: bigint;
-    totalOutward: bigint;
-    currentBalance: bigint;
-}
-
-interface SkuWithRelations {
-    id: string;
-    skuCode: string;
-    size: string;
-    mrp: number;
-    targetStockQty: number;
-    isCustomSku: boolean;
-    variation: {
-        id: string;
-        colorName: string;
-        imageUrl: string | null;
-        product: {
-            id: string;
-            name: string;
-            productType: string | null;
-            gender: string | null;
-            category: string | null;
-            imageUrl: string | null;
-        };
-        // NOTE: fabric relation removed from Variation - now via BOM
-    };
-    shopifyInventoryCache: {
-        availableQty: number;
-    } | null;
-}
-
-interface BalanceData {
-    totalInward: number;
-    totalOutward: number;
-    currentBalance: number;
-}
-
-interface SkuWithBalance {
-    sku: SkuWithRelations;
-    balance: BalanceData;
-}
-
-/**
- * Legacy Server Function: Get inventory list
- *
- * Fetches inventory directly from database using Prisma.
- * Returns paginated items with balance calculations.
- *
- * @deprecated Use getInventoryAll instead for new code
- */
-export const getInventoryList = createServerFn({ method: 'GET' })
-    .middleware([authMiddleware])
-    .inputValidator(
-        (input: unknown): z.infer<typeof inventoryListInputSchema> =>
-            inventoryListInputSchema.parse(input)
-    )
-    .handler(async ({ data }): Promise<InventoryListResponse> => {
-        try {
-            const prisma = await getPrisma();
-
-            const { includeCustomSkus, search, stockFilter, limit, offset } = data;
-
-            // Step 1: Get inventory balances by SKU using raw SQL for aggregation
-            const balances: BalanceRow[] = await prisma.$queryRaw`
-                SELECT
-                    "skuId",
-                    COALESCE(SUM(CASE WHEN "txnType" = 'inward' THEN "qty" ELSE 0 END), 0)::bigint AS "totalInward",
-                    COALESCE(SUM(CASE WHEN "txnType" = 'outward' THEN "qty" ELSE 0 END), 0)::bigint AS "totalOutward",
-                    COALESCE(SUM(CASE WHEN "txnType" = 'inward' THEN "qty" ELSE 0 END), 0) -
-                    COALESCE(SUM(CASE WHEN "txnType" = 'outward' THEN "qty" ELSE 0 END), 0) AS "currentBalance"
-                FROM "InventoryTransaction"
-                GROUP BY "skuId"
-            `;
-
-            // Create balance lookup map for O(1) access
-            const balanceMap = new Map<string, BalanceData>(
-                balances.map((b: BalanceRow) => [
-                    b.skuId,
-                    {
-                        totalInward: Number(b.totalInward),
-                        totalOutward: Number(b.totalOutward),
-                        currentBalance: Number(b.currentBalance),
-                    },
-                ])
-            );
-
-            // Step 2: Build base where clause for SKUs
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const skuWhere: Record<string, any> = {
-                isActive: true,
-                ...(includeCustomSkus ? {} : { isCustomSku: false }),
-            };
-
-            // Add search filter
-            if (search) {
-                const searchLower = search.toLowerCase();
-                skuWhere.OR = [
-                    { skuCode: { contains: searchLower, mode: 'insensitive' } },
-                    { variation: { colorName: { contains: searchLower, mode: 'insensitive' } } },
-                    { variation: { product: { name: { contains: searchLower, mode: 'insensitive' } } } },
-                ];
-            }
-
-            // Step 3: Fetch all matching SKUs with related data
-            const allSkus: SkuWithRelations[] = await prisma.sku.findMany({
-                where: skuWhere,
-                include: {
-                    variation: {
-                        include: {
-                            product: true,
-                        },
-                    },
-                    shopifyInventoryCache: true,
-                },
-                orderBy: { skuCode: 'asc' },
-            });
-
-            // Step 4: Apply stock filter in memory (since balance is computed)
-            let filteredSkus: SkuWithBalance[] = allSkus.map((sku: SkuWithRelations) => {
-                const balance = balanceMap.get(sku.id) || {
-                    totalInward: 0,
-                    totalOutward: 0,
-                    currentBalance: 0,
-                };
-                return { sku, balance };
-            });
-
-            // Apply stock filter
-            if (stockFilter === 'in_stock') {
-                filteredSkus = filteredSkus.filter((item: SkuWithBalance) => item.balance.currentBalance > 0);
-            } else if (stockFilter === 'out_of_stock') {
-                filteredSkus = filteredSkus.filter((item: SkuWithBalance) => item.balance.currentBalance <= 0);
-            } else if (stockFilter === 'low_stock') {
-                filteredSkus = filteredSkus.filter((item: SkuWithBalance) => {
-                    const targetQty = item.sku.targetStockQty || 10;
-                    return item.balance.currentBalance > 0 && item.balance.currentBalance < targetQty;
-                });
-            }
-
-            // Step 5: Get total count and apply pagination
-            const totalCount = filteredSkus.length;
-            const paginatedSkus = filteredSkus.slice(offset, offset + limit);
-
-            // Step 6: Transform to response format
-            const items: InventoryItem[] = paginatedSkus.map(({ sku, balance }: SkuWithBalance) => {
-                const { currentBalance, totalInward, totalOutward } = balance;
-                const targetStockQty = sku.targetStockQty || 0;
-                const imageUrl = sku.variation.imageUrl || sku.variation.product.imageUrl || null;
-
-                return {
-                    skuId: sku.id,
-                    skuCode: sku.skuCode,
-                    productId: sku.variation.product.id,
-                    productName: sku.variation.product.name,
-                    productType: sku.variation.product.productType || '',
-                    gender: sku.variation.product.gender || '',
-                    colorName: sku.variation.colorName,
-                    variationId: sku.variation.id,
-                    size: sku.size,
-                    category: sku.variation.product.category || '',
-                    imageUrl,
-                    currentBalance,
-                    availableBalance: currentBalance,
-                    totalInward,
-                    totalOutward,
-                    targetStockQty,
-                    status: currentBalance < targetStockQty ? 'below_target' : 'ok',
-                    mrp: Number(sku.mrp) || 0,
-                    shopifyQty: sku.shopifyInventoryCache?.availableQty ?? null,
-                    isCustomSku: sku.isCustomSku || false,
-                };
-            });
-
-            return {
-                items,
-                pagination: {
-                    total: totalCount,
-                    limit,
-                    offset,
-                    hasMore: offset + items.length < totalCount,
-                },
-            };
-        } catch (error: unknown) {
-            console.error('[Server Function] Error in getInventoryList:', error);
-            throw error;
-        }
-    });
 
 // ============================================
 // INVENTORY TRANSACTIONS SERVER FUNCTION

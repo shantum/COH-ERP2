@@ -14,6 +14,11 @@ import { authMiddleware } from '../middleware/auth';
 import { getPrisma, type PrismaTransaction } from '@coh/shared/services/db';
 import { getInternalApiBaseUrl } from '../utils';
 
+// Dynamic import helper for the shared mutation service (prevents bundling server code into client)
+async function getMutationService() {
+    return import('@coh/shared/services/inventory/inventoryMutationService');
+}
+
 // ============================================
 // INPUT SCHEMAS
 // ============================================
@@ -280,98 +285,27 @@ const TXN_REASON = {
 } as const;
 
 // ============================================
-// BALANCE CALCULATION HELPER
-// ============================================
-
-async function calculateInventoryBalance(
-    prisma: PrismaTransaction,
-    skuId: string
-): Promise<{ currentBalance: number; availableBalance: number; totalInward: number; totalOutward: number }> {
-    const aggregations = await prisma.inventoryTransaction.groupBy({
-        by: ['txnType'],
-        where: { skuId },
-        _sum: { qty: true },
-    });
-
-    let totalInward = 0;
-    let totalOutward = 0;
-
-    for (const agg of aggregations) {
-        if (agg.txnType === 'inward') {
-            totalInward = agg._sum.qty || 0;
-        } else if (agg.txnType === 'outward') {
-            totalOutward = agg._sum.qty || 0;
-        }
-    }
-
-    const currentBalance = totalInward - totalOutward;
-    return {
-        currentBalance,
-        availableBalance: currentBalance, // Same as current (no reserved type)
-        totalInward,
-        totalOutward,
-    };
-}
-
-// ============================================
-// SSE BROADCAST HELPER
-// ============================================
-
-interface InventoryUpdateEvent {
-    type: string;
-    skuId?: string;
-    changes?: Record<string, unknown>;
-}
-
-async function broadcastUpdate(event: InventoryUpdateEvent): Promise<void> {
-    try {
-        const baseUrl = getInternalApiBaseUrl();
-        await fetch(`${baseUrl}/api/internal/sse-broadcast`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ event, excludeUserId: null }),
-        });
-    } catch {
-        console.warn('[inventoryMutations] SSE broadcast failed (non-critical)');
-    }
-}
-
-// ============================================
-// CACHE INVALIDATION HELPER
-// ============================================
-
-async function invalidateCache(skuIds: string[]): Promise<void> {
-    try {
-        // Import dynamically to avoid bundling server code
-        const { inventoryBalanceCache } = await import('@coh/shared/services/inventory');
-        inventoryBalanceCache.invalidate(skuIds);
-    } catch {
-        // Cache invalidation is best-effort in Server Functions
-        // The Express server's tRPC endpoints will still work with fresh data
-        console.warn('[inventoryMutations] Cache invalidation skipped (server module not available)');
-    }
-
-    // Fire-and-forget: sync updated balances to Google Sheets
-    pushSkuBalancesToSheet(skuIds);
-}
-
-// ============================================
-// SHEET BALANCE PUSH HELPER
+// SHARED SERVICE HELPERS
 // ============================================
 
 /**
- * Fire-and-forget: push updated SKU balances to Google Sheets.
- * Calls the internal API which enqueues via deferredExecutor.
+ * Invalidate caches + broadcast SSE + push to Sheets for affected SKUs.
+ * Delegates to the shared inventoryMutationService.
  */
-function pushSkuBalancesToSheet(skuIds: string[]): void {
-    const baseUrl = getInternalApiBaseUrl();
-    fetch(`${baseUrl}/api/internal/push-sku-balances`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ skuIds }),
-    }).catch(() => {
-        console.warn('[inventoryMutations] Sheet balance push failed (non-critical)');
-    });
+async function postMutationInvalidate(
+    skuIds: string[],
+    balancesBySkuId?: Map<string, { currentBalance: number; availableBalance: number }>,
+): Promise<void> {
+    const { invalidateInventoryCaches } = await getMutationService();
+    await invalidateInventoryCaches(skuIds, getInternalApiBaseUrl(), balancesBySkuId);
+}
+
+/**
+ * Recalculate balance for a single SKU via shared service.
+ */
+async function recalcBalance(prisma: PrismaTransaction | Awaited<ReturnType<typeof getPrisma>>, skuId: string) {
+    const { recalculateBalance } = await getMutationService();
+    return recalculateBalance(prisma, skuId);
 }
 
 // ============================================
@@ -386,6 +320,7 @@ export const inward = createServerFn({ method: 'POST' })
     .inputValidator((input: unknown) => inwardSchema.parse(input))
     .handler(async ({ data, context }): Promise<MutationResult<InwardResult>> => {
         const prisma = await getPrisma();
+        const { createInwardTransaction } = await getMutationService();
         const { skuId, qty, reason, referenceId, notes, warehouseLocation, adjustmentReason } = data;
 
         // Validate SKU exists and is active
@@ -395,17 +330,11 @@ export const inward = createServerFn({ method: 'POST' })
         });
 
         if (!sku) {
-            return {
-                success: false,
-                error: { code: 'NOT_FOUND', message: 'SKU not found' },
-            };
+            return { success: false, error: { code: 'NOT_FOUND', message: 'SKU not found' } };
         }
 
         if (!sku.isActive) {
-            return {
-                success: false,
-                error: { code: 'BAD_REQUEST', message: 'Cannot add inventory to inactive SKU' },
-            };
+            return { success: false, error: { code: 'BAD_REQUEST', message: 'Cannot add inventory to inactive SKU' } };
         }
 
         // Build enhanced notes for audit trail
@@ -415,33 +344,21 @@ export const inward = createServerFn({ method: 'POST' })
             auditNotes = `[MANUAL ADJUSTMENT by ${context.user.email} at ${timestamp}] ${adjustmentReason || ''} ${notes ? '| ' + notes : ''}`.trim();
         }
 
-        const transaction = await prisma.inventoryTransaction.create({
-            data: {
-                skuId,
-                txnType: TXN_TYPE.INWARD,
-                qty,
-                reason,
-                referenceId: referenceId || null,
-                notes: auditNotes || null,
-                warehouseLocation: warehouseLocation || null,
-                createdById: context.user.id,
-            },
+        const txn = await createInwardTransaction(prisma, {
+            skuId, qty, reason,
+            referenceId: referenceId || null,
+            notes: auditNotes || null,
+            warehouseLocation: warehouseLocation || null,
+            createdById: context.user.id,
         });
 
-        await invalidateCache([skuId]);
-
-        const balance = await calculateInventoryBalance(prisma, skuId);
-
-        broadcastUpdate({
-            type: 'inventory_updated',
-            skuId,
-            changes: { availableBalance: balance.availableBalance, currentBalance: balance.currentBalance },
-        });
+        const balance = await recalcBalance(prisma, skuId);
+        await postMutationInvalidate([skuId], new Map([[skuId, balance]]));
 
         return {
             success: true,
             data: {
-                transactionId: transaction.id,
+                transactionId: txn.id,
                 skuId,
                 qty,
                 newBalance: balance.currentBalance,
@@ -458,6 +375,7 @@ export const outward = createServerFn({ method: 'POST' })
     .inputValidator((input: unknown) => outwardSchema.parse(input))
     .handler(async ({ data, context }): Promise<MutationResult<OutwardResult>> => {
         const prisma = await getPrisma();
+        const { createOutwardTransaction, InsufficientStockError, NegativeBalanceError } = await getMutationService();
         const { skuId, qty, reason, referenceId, notes, warehouseLocation, adjustmentReason } = data;
 
         // Validate SKU exists
@@ -467,10 +385,7 @@ export const outward = createServerFn({ method: 'POST' })
         });
 
         if (!sku) {
-            return {
-                success: false,
-                error: { code: 'NOT_FOUND', message: 'SKU not found' },
-            };
+            return { success: false, error: { code: 'NOT_FOUND', message: 'SKU not found' } };
         }
 
         // Build enhanced notes for audit trail
@@ -481,65 +396,34 @@ export const outward = createServerFn({ method: 'POST' })
         }
 
         // Atomic: balance check + create + recalculate inside transaction
-        let transaction: { id: string };
-        let newBalance: { currentBalance: number; availableBalance: number };
+        let result: Awaited<ReturnType<typeof createOutwardTransaction>>;
         try {
-            const result = await prisma.$transaction(async (tx: PrismaTransaction) => {
-                const bal = await calculateInventoryBalance(tx, skuId);
-
-                if (bal.currentBalance < 0) {
-                    throw new Error('BAD_REQUEST:Cannot create outward: inventory balance is already negative. Please reconcile inventory first.');
-                }
-
-                if (bal.availableBalance < qty) {
-                    throw new Error(`BAD_REQUEST:Insufficient stock: available ${bal.availableBalance}, requested ${qty}`);
-                }
-
-                const txn = await tx.inventoryTransaction.create({
-                    data: {
-                        skuId,
-                        txnType: TXN_TYPE.OUTWARD,
-                        qty,
-                        reason,
-                        referenceId: referenceId || null,
-                        notes: auditNotes || null,
-                        warehouseLocation: warehouseLocation || null,
-                        createdById: context.user.id,
-                    },
+            result = await prisma.$transaction(async (tx: PrismaTransaction) => {
+                return createOutwardTransaction(tx, {
+                    skuId, qty, reason,
+                    referenceId: referenceId || null,
+                    notes: auditNotes || null,
+                    warehouseLocation: warehouseLocation || null,
+                    createdById: context.user.id,
                 });
-
-                const balance = await calculateInventoryBalance(tx, skuId);
-                return { transaction: txn, newBalance: balance };
             });
-            transaction = result.transaction;
-            newBalance = result.newBalance;
         } catch (error: unknown) {
-            const message = error instanceof Error ? error.message : 'Unknown error';
-            if (message.startsWith('BAD_REQUEST:')) {
-                return {
-                    success: false,
-                    error: { code: 'BAD_REQUEST' as const, message: message.slice('BAD_REQUEST:'.length) },
-                };
+            if (error instanceof InsufficientStockError || error instanceof NegativeBalanceError) {
+                return { success: false, error: { code: 'BAD_REQUEST' as const, message: error.message } };
             }
             throw error;
         }
 
-        await invalidateCache([skuId]);
-
-        broadcastUpdate({
-            type: 'inventory_updated',
-            skuId,
-            changes: { availableBalance: newBalance.availableBalance, currentBalance: newBalance.currentBalance },
-        });
+        await postMutationInvalidate([skuId], new Map([[skuId, result.balance]]));
 
         return {
             success: true,
             data: {
-                transactionId: transaction.id,
+                transactionId: result.id,
                 skuId,
                 qty,
-                newBalance: newBalance.currentBalance,
-                availableBalance: newBalance.availableBalance,
+                newBalance: result.balance.currentBalance,
+                availableBalance: result.balance.availableBalance,
             },
         };
     });
@@ -552,6 +436,7 @@ export const quickInward = createServerFn({ method: 'POST' })
     .inputValidator((input: unknown) => quickInwardSchema.parse(input))
     .handler(async ({ data, context }): Promise<MutationResult<QuickInwardResult>> => {
         const prisma = await getPrisma();
+        const { createInwardTransaction } = await getMutationService();
         const { items, reason, notes } = data;
 
         // Validate all SKUs exist
@@ -565,45 +450,26 @@ export const quickInward = createServerFn({ method: 'POST' })
         const missingSkuIds = skuIds.filter(id => !foundSkuIds.has(id));
 
         if (missingSkuIds.length > 0) {
-            return {
-                success: false,
-                error: { code: 'NOT_FOUND', message: `SKUs not found: ${missingSkuIds.join(', ')}` },
-            };
+            return { success: false, error: { code: 'NOT_FOUND', message: `SKUs not found: ${missingSkuIds.join(', ')}` } };
         }
 
-        // Create transactions in batch
+        // Create transactions in batch via shared service
         const transactions: Array<{ skuId: string; qty: number; transactionId: string }> = [];
 
         await prisma.$transaction(async (tx: PrismaTransaction) => {
             for (const item of items) {
-                const txn = await tx.inventoryTransaction.create({
-                    data: {
-                        skuId: item.skuId,
-                        txnType: TXN_TYPE.INWARD,
-                        qty: item.qty,
-                        reason,
-                        notes: notes || null,
-                        createdById: context.user.id,
-                    },
-                });
-                transactions.push({
+                const txn = await createInwardTransaction(tx, {
                     skuId: item.skuId,
                     qty: item.qty,
-                    transactionId: txn.id,
+                    reason,
+                    notes: notes || null,
+                    createdById: context.user.id,
                 });
+                transactions.push({ skuId: item.skuId, qty: item.qty, transactionId: txn.id });
             }
         });
 
-        await invalidateCache(skuIds);
-
-        // Broadcast update for each SKU
-        for (const skuId of skuIds) {
-            broadcastUpdate({
-                type: 'inventory_updated',
-                skuId,
-                changes: {},
-            });
-        }
+        await postMutationInvalidate(skuIds);
 
         return {
             success: true,
@@ -622,6 +488,7 @@ export const instantInward = createServerFn({ method: 'POST' })
     .inputValidator((input: unknown) => instantInwardSchema.parse(input))
     .handler(async ({ data, context }): Promise<MutationResult<InstantInwardResult>> => {
         const prisma = await getPrisma();
+        const { createInwardTransaction } = await getMutationService();
         const { batchId, skuId, quantity } = data;
 
         // Validate SKU exists
@@ -641,10 +508,7 @@ export const instantInward = createServerFn({ method: 'POST' })
         });
 
         if (!sku) {
-            return {
-                success: false,
-                error: { code: 'NOT_FOUND', message: 'SKU not found' },
-            };
+            return { success: false, error: { code: 'NOT_FOUND', message: 'SKU not found' } };
         }
 
         // If batch provided, validate it
@@ -655,47 +519,38 @@ export const instantInward = createServerFn({ method: 'POST' })
             });
 
             if (!batch) {
-                return {
-                    success: false,
-                    error: { code: 'NOT_FOUND', message: 'Production batch not found' },
-                };
+                return { success: false, error: { code: 'NOT_FOUND', message: 'Production batch not found' } };
             }
 
             if (batch.skuId !== skuId) {
-                return {
-                    success: false,
-                    error: { code: 'BAD_REQUEST', message: 'SKU does not match production batch' },
-                };
+                return { success: false, error: { code: 'BAD_REQUEST', message: 'SKU does not match production batch' } };
             }
         }
 
-        const result = await prisma.$transaction(async (tx: PrismaTransaction) => {
-            const transaction = await tx.inventoryTransaction.create({
-                data: {
-                    skuId,
-                    txnType: TXN_TYPE.INWARD,
-                    qty: quantity,
-                    reason: TXN_REASON.PRODUCTION,
-                    referenceId: batchId || null,
-                    createdById: context.user.id,
-                },
+        let txn: Awaited<ReturnType<typeof createInwardTransaction>>;
+        let balance: { currentBalance: number; availableBalance: number };
+
+        await prisma.$transaction(async (tx: PrismaTransaction) => {
+            txn = await createInwardTransaction(tx, {
+                skuId,
+                qty: quantity,
+                reason: TXN_REASON.PRODUCTION,
+                referenceId: batchId || null,
+                createdById: context.user.id,
             });
-
-            const balance = await calculateInventoryBalance(tx, skuId);
-
-            return { transaction, balance };
+            balance = await recalcBalance(tx, skuId);
         });
 
-        await invalidateCache([skuId]);
+        await postMutationInvalidate([skuId], new Map([[skuId, balance!]]));
 
         return {
             success: true,
             data: {
-                transactionId: result.transaction.id,
+                transactionId: txn!.id,
                 skuId,
                 skuCode: sku.skuCode,
                 qty: quantity,
-                newBalance: result.balance.currentBalance,
+                newBalance: balance!.currentBalance,
                 ...(batchId && { batchId }),
             },
         };
@@ -743,15 +598,11 @@ export const editInward = createServerFn({ method: 'POST' })
             return { success: false, error: { code: code as 'NOT_FOUND' | 'BAD_REQUEST' | 'INTERNAL', message: msg as string } };
         }
 
-        await invalidateCache([skuId]);
-
         if (qtyChanged) {
-            const balance = await calculateInventoryBalance(prisma, skuId);
-            broadcastUpdate({
-                type: 'inventory_updated',
-                skuId,
-                changes: { availableBalance: balance.availableBalance, currentBalance: balance.currentBalance },
-            });
+            const balance = await recalcBalance(prisma, skuId);
+            await postMutationInvalidate([skuId], new Map([[skuId, balance]]));
+        } else {
+            await postMutationInvalidate([skuId]);
         }
 
         return {
@@ -813,15 +664,8 @@ export const deleteInward = createServerFn({ method: 'POST' })
             return { success: false, error: { code: code as 'NOT_FOUND' | 'BAD_REQUEST' | 'CONFLICT' | 'FORBIDDEN' | 'INTERNAL', message: msg as string } };
         }
 
-        await invalidateCache([skuId]);
-
-        const balance = await calculateInventoryBalance(prisma, skuId);
-
-        broadcastUpdate({
-            type: 'inventory_updated',
-            skuId,
-            changes: { availableBalance: balance.availableBalance, currentBalance: balance.currentBalance },
-        });
+        const balance = await recalcBalance(prisma, skuId);
+        await postMutationInvalidate([skuId], new Map([[skuId, balance]]));
 
         return {
             success: true,
@@ -900,9 +744,8 @@ export const undoInward = createServerFn({ method: 'POST' })
             return { success: false, error: { code: code as 'NOT_FOUND' | 'BAD_REQUEST' | 'CONFLICT' | 'FORBIDDEN' | 'INTERNAL', message: msg as string } };
         }
 
-        await invalidateCache([skuId]);
-
-        const balance = await calculateInventoryBalance(prisma, skuId);
+        const balance = await recalcBalance(prisma, skuId);
+        await postMutationInvalidate([skuId], new Map([[skuId, balance]]));
 
         return {
             success: true,
@@ -924,6 +767,7 @@ export const adjust = createServerFn({ method: 'POST' })
     .inputValidator((input: unknown) => adjustSchema.parse(input))
     .handler(async ({ data, context }): Promise<MutationResult<AdjustResult>> => {
         const prisma = await getPrisma();
+        const { createInwardTransaction, createOutwardTransaction, InsufficientStockError } = await getMutationService();
         const { skuId, adjustedQuantity, reason, notes } = data;
 
         // Validate SKU exists
@@ -933,65 +777,52 @@ export const adjust = createServerFn({ method: 'POST' })
         });
 
         if (!sku) {
-            return {
-                success: false,
-                error: { code: 'NOT_FOUND', message: 'SKU not found' },
-            };
+            return { success: false, error: { code: 'NOT_FOUND', message: 'SKU not found' } };
         }
 
-        const txnType = adjustedQuantity > 0 ? TXN_TYPE.INWARD : TXN_TYPE.OUTWARD;
+        const isInward = adjustedQuantity > 0;
         const absQuantity = Math.abs(adjustedQuantity);
+        const adjustNotes = notes ? `${reason}: ${notes}` : reason;
 
-        // Atomic: balance check + create + recalculate inside transaction
-        let transaction: { id: string };
-        let balance: { currentBalance: number };
+        let transactionId: string;
+        let newBalance: { currentBalance: number; availableBalance: number };
+
         try {
             const result = await prisma.$transaction(async (tx: PrismaTransaction) => {
-                // Check balance for outward adjustments
-                if (txnType === TXN_TYPE.OUTWARD) {
-                    const currentBalance = await calculateInventoryBalance(tx, skuId);
-                    if (currentBalance.availableBalance < absQuantity) {
-                        throw new Error(`BAD_REQUEST:Insufficient stock for adjustment: available=${currentBalance.availableBalance}, requested=${absQuantity}`);
-                    }
+                if (isInward) {
+                    const txn = await createInwardTransaction(tx, {
+                        skuId, qty: absQuantity, reason: TXN_REASON.ADJUSTMENT,
+                        notes: adjustNotes, createdById: context.user.id,
+                    });
+                    const bal = await recalcBalance(tx, skuId);
+                    return { id: txn.id, balance: bal };
+                } else {
+                    const outResult = await createOutwardTransaction(tx, {
+                        skuId, qty: absQuantity, reason: TXN_REASON.ADJUSTMENT,
+                        notes: adjustNotes, createdById: context.user.id,
+                    });
+                    return { id: outResult.id, balance: outResult.balance };
                 }
-
-                const txn = await tx.inventoryTransaction.create({
-                    data: {
-                        skuId,
-                        txnType,
-                        qty: absQuantity,
-                        reason: TXN_REASON.ADJUSTMENT,
-                        notes: notes ? `${reason}: ${notes}` : reason,
-                        createdById: context.user.id,
-                    },
-                });
-
-                const bal = await calculateInventoryBalance(tx, skuId);
-                return { transaction: txn, newBalance: bal };
             });
-            transaction = result.transaction;
-            balance = result.newBalance;
+            transactionId = result.id;
+            newBalance = result.balance;
         } catch (error: unknown) {
-            const message = error instanceof Error ? error.message : 'Unknown error';
-            if (message.startsWith('BAD_REQUEST:')) {
-                return {
-                    success: false,
-                    error: { code: 'BAD_REQUEST' as const, message: message.slice('BAD_REQUEST:'.length) },
-                };
+            if (error instanceof InsufficientStockError) {
+                return { success: false, error: { code: 'BAD_REQUEST' as const, message: `Insufficient stock for adjustment: available=${error.available}, requested=${error.requested}` } };
             }
             throw error;
         }
 
-        await invalidateCache([skuId]);
+        await postMutationInvalidate([skuId], new Map([[skuId, newBalance]]));
 
         return {
             success: true,
             data: {
-                transactionId: transaction.id,
+                transactionId,
                 skuId,
-                adjustmentType: txnType === TXN_TYPE.INWARD ? 'increase' : 'decrease',
+                adjustmentType: isInward ? 'increase' : 'decrease',
                 qty: absQuantity,
-                newBalance: balance.currentBalance,
+                newBalance: newBalance.currentBalance,
             },
         };
     });
@@ -1096,15 +927,8 @@ export const deleteTransaction = createServerFn({ method: 'POST' })
             return { success: false, error: { code: code as 'NOT_FOUND' | 'BAD_REQUEST' | 'INTERNAL', message: msg as string } };
         }
 
-        await invalidateCache([skuId]);
-
-        const balance = await calculateInventoryBalance(prisma, skuId);
-
-        broadcastUpdate({
-            type: 'inventory_updated',
-            skuId,
-            changes: { availableBalance: balance.availableBalance, currentBalance: balance.currentBalance },
-        });
+        const balance = await recalcBalance(prisma, skuId);
+        await postMutationInvalidate([skuId], new Map([[skuId, balance]]));
 
         return {
             success: true,
@@ -1125,6 +949,7 @@ export const allocateTransaction = createServerFn({ method: 'POST' })
     .inputValidator((input: unknown) => allocateTransactionSchema.parse(input))
     .handler(async ({ data, context }): Promise<MutationResult<AllocateTransactionResult>> => {
         const prisma = await getPrisma();
+        const { createOutwardTransaction, InsufficientStockError, NegativeBalanceError } = await getMutationService();
         const { skuId, quantity, reason } = data;
 
         // Validate SKU exists
@@ -1134,64 +959,37 @@ export const allocateTransaction = createServerFn({ method: 'POST' })
         });
 
         if (!sku) {
-            return {
-                success: false,
-                error: { code: 'NOT_FOUND', message: 'SKU not found' },
-            };
+            return { success: false, error: { code: 'NOT_FOUND', message: 'SKU not found' } };
         }
 
-        // Atomic: balance check + create + recalculate inside transaction
-        let transaction: { id: string };
-        let newBalance: { currentBalance: number; availableBalance: number };
+        let result: Awaited<ReturnType<typeof createOutwardTransaction>>;
         try {
-            const result = await prisma.$transaction(async (tx: PrismaTransaction) => {
-                const bal = await calculateInventoryBalance(tx, skuId);
-
-                if (bal.availableBalance < quantity) {
-                    throw new Error(`BAD_REQUEST:Insufficient stock for allocation: available=${bal.availableBalance}, requested=${quantity}`);
-                }
-
-                const txn = await tx.inventoryTransaction.create({
-                    data: {
-                        skuId,
-                        txnType: TXN_TYPE.OUTWARD,
-                        qty: quantity,
-                        reason: reason || TXN_REASON.ORDER_ALLOCATION,
-                        createdById: context.user.id,
-                    },
+            result = await prisma.$transaction(async (tx: PrismaTransaction) => {
+                return createOutwardTransaction(tx, {
+                    skuId, qty: quantity,
+                    reason: reason || TXN_REASON.ORDER_ALLOCATION,
+                    createdById: context.user.id,
                 });
-
-                const balance = await calculateInventoryBalance(tx, skuId);
-                return { transaction: txn, newBalance: balance };
             });
-            transaction = result.transaction;
-            newBalance = result.newBalance;
         } catch (error: unknown) {
-            const message = error instanceof Error ? error.message : 'Unknown error';
-            if (message.startsWith('BAD_REQUEST:')) {
-                return {
-                    success: false,
-                    error: { code: 'BAD_REQUEST' as const, message: message.slice('BAD_REQUEST:'.length) },
-                };
+            if (error instanceof InsufficientStockError) {
+                return { success: false, error: { code: 'BAD_REQUEST' as const, message: `Insufficient stock for allocation: available=${error.available}, requested=${error.requested}` } };
+            }
+            if (error instanceof NegativeBalanceError) {
+                return { success: false, error: { code: 'BAD_REQUEST' as const, message: error.message } };
             }
             throw error;
         }
 
-        await invalidateCache([skuId]);
-
-        broadcastUpdate({
-            type: 'inventory_updated',
-            skuId,
-            changes: { availableBalance: newBalance.availableBalance, currentBalance: newBalance.currentBalance },
-        });
+        await postMutationInvalidate([skuId], new Map([[skuId, result.balance]]));
 
         return {
             success: true,
             data: {
-                transactionId: transaction.id,
+                transactionId: result.id,
                 skuId,
                 qty: quantity,
-                newBalance: newBalance.currentBalance,
+                newBalance: result.balance.currentBalance,
             },
         };
     });
@@ -1246,7 +1044,7 @@ export const rtoInwardLine = createServerFn({ method: 'POST' })
             });
 
             if (existingInward) {
-                const balance = await calculateInventoryBalance(prisma, line.skuId);
+                const balance = await recalcBalance(prisma, line.skuId);
                 return {
                     success: true,
                     data: {
@@ -1275,34 +1073,26 @@ export const rtoInwardLine = createServerFn({ method: 'POST' })
                 },
             });
 
-            // Create inventory inward
-            const transaction = await tx.inventoryTransaction.create({
-                data: {
-                    skuId: line.skuId,
-                    txnType: TXN_TYPE.INWARD,
-                    qty: line.qty,
-                    reason: TXN_REASON.RTO_RECEIVED,
-                    referenceId: lineId,
-                    notes: `RTO received - condition: ${condition}${notes ? ' | ' + notes : ''}`,
-                    createdById: context.user.id,
-                },
+            // Create inventory inward via shared service
+            const { createInwardTransaction } = await getMutationService();
+            const transaction = await createInwardTransaction(tx, {
+                skuId: line.skuId,
+                qty: line.qty,
+                reason: TXN_REASON.RTO_RECEIVED,
+                referenceId: lineId,
+                notes: `RTO received - condition: ${condition}${notes ? ' | ' + notes : ''}`,
+                createdById: context.user.id,
             });
 
-            const balance = await calculateInventoryBalance(tx, line.skuId);
+            const balance = await recalcBalance(tx, line.skuId);
 
             return { transaction, balance };
         });
 
-        await invalidateCache([line.skuId]);
-
-        broadcastUpdate({
-            type: 'inventory_updated',
-            skuId: line.skuId,
-            changes: {
-                availableBalance: result.balance.availableBalance,
-                currentBalance: result.balance.currentBalance,
-            },
-        });
+        await postMutationInvalidate(
+            [line.skuId],
+            new Map([[line.skuId, result.balance]]),
+        );
 
         return {
             success: true,
@@ -1363,34 +1153,34 @@ export const instantInwardBySkuCode = createServerFn({ method: 'POST' })
         }
 
         // Create transaction and calculate balance in single DB transaction
-        const result = await prisma.$transaction(async (tx: PrismaTransaction) => {
-            const transaction = await tx.inventoryTransaction.create({
-                data: {
-                    skuId: sku.id,
-                    txnType: TXN_TYPE.INWARD,
-                    qty: 1,
-                    reason: 'received', // Unallocated - can be linked to source later
-                    createdById: context.user.id,
-                },
-            });
+        const { createInwardTransaction } = await getMutationService();
 
-            const balance = await calculateInventoryBalance(tx, sku.id);
-            return { transaction, balance };
+        let txn: Awaited<ReturnType<typeof createInwardTransaction>>;
+        let balance: { currentBalance: number; availableBalance: number };
+
+        await prisma.$transaction(async (tx: PrismaTransaction) => {
+            txn = await createInwardTransaction(tx, {
+                skuId: sku.id,
+                qty: 1,
+                reason: 'received', // Unallocated - can be linked to source later
+                createdById: context.user.id,
+            });
+            balance = await recalcBalance(tx, sku.id);
         });
 
-        await invalidateCache([sku.id]);
+        await postMutationInvalidate([sku.id], new Map([[sku.id, balance!]]));
 
         return {
             success: true,
             data: {
-                transactionId: result.transaction.id,
+                transactionId: txn!.id,
                 skuId: sku.id,
                 skuCode: sku.skuCode,
                 productName: sku.variation.product.name,
                 colorName: sku.variation.colorName,
                 size: sku.size,
                 qty: 1,
-                newBalance: result.balance.currentBalance,
+                newBalance: balance!.currentBalance,
             },
         };
     });
@@ -1613,7 +1403,7 @@ export const allocateTransactionFn = createServerFn({ method: 'POST' })
                 });
             });
 
-            await invalidateCache([transaction.skuId]);
+            await postMutationInvalidate([transaction.skuId]);
 
             return {
                 success: true,
@@ -1730,7 +1520,7 @@ export const allocateTransactionFn = createServerFn({ method: 'POST' })
                 }
             });
 
-            await invalidateCache([transaction.skuId]);
+            await postMutationInvalidate([transaction.skuId]);
 
             return {
                 success: true,
@@ -1769,7 +1559,7 @@ export const allocateTransactionFn = createServerFn({ method: 'POST' })
                 });
             });
 
-            await invalidateCache([transaction.skuId]);
+            await postMutationInvalidate([transaction.skuId]);
 
             return {
                 success: true,
@@ -1857,20 +1647,11 @@ export const undoTransaction = createServerFn({ method: 'POST' })
             }
         }
 
-        await prisma.inventoryTransaction.delete({ where: { id: transactionId } });
+        const { deleteInventoryTransaction } = await getMutationService();
+        await deleteInventoryTransaction(prisma, transactionId);
 
-        await invalidateCache([transaction.skuId]);
-
-        const balance = await calculateInventoryBalance(prisma, transaction.skuId);
-
-        broadcastUpdate({
-            type: 'inventory_updated',
-            skuId: transaction.skuId,
-            changes: {
-                availableBalance: balance.availableBalance,
-                currentBalance: balance.currentBalance,
-            },
-        });
+        const balance = await recalcBalance(prisma, transaction.skuId);
+        await postMutationInvalidate([transaction.skuId], new Map([[transaction.skuId, balance]]));
 
         return {
             success: true,
@@ -1928,44 +1709,34 @@ export const quickInwardBySkuCode = createServerFn({ method: 'POST' })
         }
 
         // Create transaction and calculate balance in single DB transaction
-        const result = await prisma.$transaction(async (tx: PrismaTransaction) => {
-            const transaction = await tx.inventoryTransaction.create({
-                data: {
-                    skuId: sku.id,
-                    txnType: TXN_TYPE.INWARD,
-                    qty,
-                    reason: reason || 'production',
-                    notes: notes || null,
-                    createdById: context.user.id,
-                },
+        const { createInwardTransaction } = await getMutationService();
+
+        let txn: Awaited<ReturnType<typeof createInwardTransaction>>;
+        let balance: { currentBalance: number; availableBalance: number };
+
+        await prisma.$transaction(async (tx: PrismaTransaction) => {
+            txn = await createInwardTransaction(tx, {
+                skuId: sku.id, qty,
+                reason: reason || 'production',
+                notes: notes || null,
+                createdById: context.user.id,
             });
-
-            const balance = await calculateInventoryBalance(tx, sku.id);
-            return { transaction, balance };
+            balance = await recalcBalance(tx, sku.id);
         });
 
-        await invalidateCache([sku.id]);
-
-        broadcastUpdate({
-            type: 'inventory_updated',
-            skuId: sku.id,
-            changes: {
-                availableBalance: result.balance.availableBalance,
-                currentBalance: result.balance.currentBalance,
-            },
-        });
+        await postMutationInvalidate([sku.id], new Map([[sku.id, balance!]]));
 
         return {
             success: true,
             data: {
-                transactionId: result.transaction.id,
+                transactionId: txn!.id,
                 skuId: sku.id,
                 skuCode: sku.skuCode,
                 productName: sku.variation.product.name,
                 colorName: sku.variation.colorName,
                 size: sku.size,
                 qty,
-                newBalance: result.balance.currentBalance,
+                newBalance: balance!.currentBalance,
             },
         };
     });

@@ -238,63 +238,10 @@ export async function calculateAllInventoryBalances(
     for (const sku of skus) {
         balanceMap.set(sku.id, {
             skuId: sku.id,
-            totalInward: 0, // Not tracked - use calculateAllInventoryBalancesWithTotals if needed
-            totalOutward: 0, // Not tracked - use calculateAllInventoryBalancesWithTotals if needed
+            totalInward: 0, // Not tracked via materialized column
+            totalOutward: 0, // Not tracked via materialized column
             currentBalance: sku.currentBalance,
             availableBalance: sku.currentBalance,
-        });
-    }
-
-    return balanceMap;
-}
-
-/**
- * Calculate inventory balances with inward/outward totals for multiple SKUs
- *
- * Uses aggregation query for full totals.
- * Use this when you need to display totalInward/totalOutward.
- * For just currentBalance, use calculateAllInventoryBalances() instead (faster).
- */
-export async function calculateAllInventoryBalancesWithTotals(
-    prisma: PrismaInstance | PrismaTransaction,
-    skuIds: string[] | null = null
-): Promise<Map<string, InventoryBalanceWithSkuId & { availableBalance: number }>> {
-    const where: { skuId?: { in: string[] } } = {};
-
-    if (skuIds) {
-        where.skuId = { in: skuIds };
-    }
-
-    const result = await prisma.inventoryTransaction.groupBy({
-        by: ['skuId', 'txnType'],
-        where,
-        _sum: { qty: true },
-    });
-
-    // Aggregate transaction totals by SKU
-    const summaryMap = new Map<string, { totalInward: number; totalOutward: number }>();
-
-    result.forEach((r: { skuId: string; txnType: string; _sum: { qty: number | null } }) => {
-        if (!summaryMap.has(r.skuId)) {
-            summaryMap.set(r.skuId, { totalInward: 0, totalOutward: 0 });
-        }
-
-        const summary = summaryMap.get(r.skuId)!;
-        if (r.txnType === 'inward') summary.totalInward = r._sum.qty || 0;
-        else if (r.txnType === 'outward') summary.totalOutward = r._sum.qty || 0;
-    });
-
-    // Calculate balances
-    const balanceMap = new Map<string, InventoryBalanceWithSkuId & { availableBalance: number }>();
-
-    for (const [skuId, summary] of summaryMap) {
-        const currentBalance = summary.totalInward - summary.totalOutward;
-        balanceMap.set(skuId, {
-            skuId,
-            totalInward: summary.totalInward,
-            totalOutward: summary.totalOutward,
-            currentBalance,
-            availableBalance: currentBalance,
         });
     }
 

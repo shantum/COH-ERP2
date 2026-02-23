@@ -77,3 +77,12 @@ export {
     type SkuSalesMetrics,
     type SkuShopifyPricing,
 } from './products.js';
+
+// Fabric colour queries
+export {
+    calculateFabricColourBalance,
+    calculateAvgDailyConsumption,
+    calculateAllFabricColourBalances,
+    type FabricColourBalance,
+    type FabricColourBalanceBatch,
+} from './fabricColour.js';
