@@ -91,7 +91,6 @@ export interface InventoryBalanceItem {
     skuCode: string;
     totalInward: number;
     totalOutward: number;
-    totalReserved: number;
     currentBalance: number;
     availableBalance: number;
     hasDataIntegrityIssue: boolean;
@@ -111,7 +110,6 @@ export interface InventoryAllItem {
     category: string | null;
     imageUrl: string | null;
     currentBalance: number;
-    reservedBalance: number;
     availableBalance: number;
     totalInward: number;
     totalOutward: number;
@@ -174,7 +172,6 @@ export interface InventoryItem {
     category: string;
     imageUrl: string | null;
     currentBalance: number;
-    reservedBalance: number;
     availableBalance: number;
     totalInward: number;
     totalOutward: number;
@@ -233,7 +230,7 @@ export const getInventoryBalance = createServerFn({ method: 'GET' })
         }
 
         // Calculate balance using query patterns
-        const { calculateInventoryBalance: calcBalance } = await import('@coh/shared/services/db/queries');
+        const { calculateInventoryBalanceWithTotals: calcBalance } = await import('@coh/shared/services/db/queries');
 
         const balance = await calcBalance(prisma, skuId, {
             allowNegative: true,
@@ -334,7 +331,6 @@ export const getInventoryBalances = createServerFn({ method: 'POST' })
                 skuCode: skuCodeMap.get(skuId) || '',
                 totalInward: balance?.totalInward ?? 0,
                 totalOutward: balance?.totalOutward ?? 0,
-                totalReserved: 0, // Reserved is no longer used, kept for backwards compatibility
                 currentBalance: balance?.currentBalance ?? 0,
                 availableBalance: balance?.currentBalance ?? 0, // Available = current (no reservation)
                 hasDataIntegrityIssue: false,
@@ -422,7 +418,6 @@ export const getInventoryAll = createServerFn({ method: 'GET' })
                 category: sku.category,
                 imageUrl,
                 currentBalance: balance.currentBalance,
-                reservedBalance: 0,
                 availableBalance: balance.availableBalance,
                 totalInward: balance.totalInward,
                 totalOutward: balance.totalOutward,
@@ -1053,7 +1048,6 @@ export const getInventoryList = createServerFn({ method: 'GET' })
                     category: sku.variation.product.category || '',
                     imageUrl,
                     currentBalance,
-                    reservedBalance: 0,
                     availableBalance: currentBalance,
                     totalInward,
                     totalOutward,

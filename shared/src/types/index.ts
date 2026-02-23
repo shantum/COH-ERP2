@@ -288,7 +288,7 @@ export interface OrderLine {
 // INVENTORY
 // ============================================
 
-export type TxnType = 'inward' | 'outward' | 'reserved';
+export type TxnType = 'inward' | 'outward';
 
 export interface InventoryTransaction {
   id: string;
@@ -305,15 +305,14 @@ export interface InventoryTransaction {
 
 /**
  * Inventory balance calculation: currentBalance = SUM(inward) - SUM(outward)
- * availableBalance = currentBalance - SUM(reserved for pending orders)
+ * No reservation system — availableBalance equals currentBalance.
  */
 export interface InventoryBalance {
   skuId: string;
-  totalInward: number; // Cumulative inward transactions
-  totalOutward: number; // Cumulative outward transactions (orders, damages, etc.)
-  totalReserved: number; // Quantity reserved for orders in pending/allocated/picked states
-  currentBalance: number; // SUM(inward) - SUM(outward): physical inventory
-  availableBalance: number; // currentBalance - reserved: can allocate to new orders
+  totalInward: number;
+  totalOutward: number;
+  currentBalance: number;
+  availableBalance: number;
   sku?: Sku;
 }
 

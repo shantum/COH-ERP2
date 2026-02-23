@@ -33,7 +33,7 @@ export const ALL_COLUMN_IDS = [
     'colorName', 'hasLining', 'fabricName',
     'skuCode', 'size', 'mrp', 'bomCost', 'totalCost',
     'exGstPrice', 'gstAmount', 'costMultiple',
-    'currentBalance', 'reservedBalance', 'availableBalance', 'shopifyQty', 'targetStockQty', 'shopifyStatus', 'status',
+    'currentBalance', 'availableBalance', 'shopifyQty', 'targetStockQty', 'shopifyStatus', 'status',
     'actions'
 ];
 
@@ -58,7 +58,7 @@ export const DEFAULT_HEADERS: Record<string, string> = {
     gstAmount: 'GST',
     costMultiple: 'Multiple',
     currentBalance: 'Balance',
-    reservedBalance: 'Reserved',
+
     availableBalance: 'Available',
     shopifyQty: 'Shopify',
     targetStockQty: 'Target',
@@ -390,17 +390,6 @@ export function createColumnDefs({
                 const val = params.value || 0;
                 if (val === 0) return 'text-right text-gray-400';
                 return 'text-right font-medium';
-            },
-        },
-        {
-            colId: 'reservedBalance',
-            headerName: DEFAULT_HEADERS.reservedBalance,
-            field: 'reservedBalance',
-            width: 70,
-            cellClass: (params: CellClassParams) => {
-                const val = params.value || 0;
-                if (val === 0) return 'text-right text-gray-300';
-                return 'text-right text-amber-600';
             },
         },
         {

@@ -16,14 +16,6 @@ export {
     type CustomerStatsResult,
 } from './customersListKysely.js';
 
-// Inventory
-export {
-    listInventorySkusKysely,
-    calculateBalancesKysely,
-    type InventoryListParams,
-    type InventorySkuRow,
-} from './inventoryListKysely.js';
-
 // Production
 export {
     getTailorsKysely,

@@ -473,29 +473,6 @@ export const outward = createServerFn({ method: 'POST' })
             };
         }
 
-        // Check balance
-        const currentBalance = await calculateInventoryBalance(prisma, skuId);
-
-        if (currentBalance.currentBalance < 0) {
-            return {
-                success: false,
-                error: {
-                    code: 'BAD_REQUEST',
-                    message: 'Cannot create outward: inventory balance is already negative. Please reconcile inventory first.',
-                },
-            };
-        }
-
-        if (currentBalance.availableBalance < qty) {
-            return {
-                success: false,
-                error: {
-                    code: 'BAD_REQUEST',
-                    message: `Insufficient stock: available ${currentBalance.availableBalance}, requested ${qty}`,
-                },
-            };
-        }
-
         // Build enhanced notes for audit trail
         let auditNotes = notes || '';
         if (reason === 'adjustment' || reason === 'damage') {
@@ -503,22 +480,51 @@ export const outward = createServerFn({ method: 'POST' })
             auditNotes = `[MANUAL ${reason.toUpperCase()} by ${context.user.email} at ${timestamp}] ${adjustmentReason || ''} ${notes ? '| ' + notes : ''}`.trim();
         }
 
-        const transaction = await prisma.inventoryTransaction.create({
-            data: {
-                skuId,
-                txnType: TXN_TYPE.OUTWARD,
-                qty,
-                reason,
-                referenceId: referenceId || null,
-                notes: auditNotes || null,
-                warehouseLocation: warehouseLocation || null,
-                createdById: context.user.id,
-            },
-        });
+        // Atomic: balance check + create + recalculate inside transaction
+        let transaction: { id: string };
+        let newBalance: { currentBalance: number; availableBalance: number };
+        try {
+            const result = await prisma.$transaction(async (tx: PrismaTransaction) => {
+                const bal = await calculateInventoryBalance(tx, skuId);
+
+                if (bal.currentBalance < 0) {
+                    throw new Error('BAD_REQUEST:Cannot create outward: inventory balance is already negative. Please reconcile inventory first.');
+                }
+
+                if (bal.availableBalance < qty) {
+                    throw new Error(`BAD_REQUEST:Insufficient stock: available ${bal.availableBalance}, requested ${qty}`);
+                }
+
+                const txn = await tx.inventoryTransaction.create({
+                    data: {
+                        skuId,
+                        txnType: TXN_TYPE.OUTWARD,
+                        qty,
+                        reason,
+                        referenceId: referenceId || null,
+                        notes: auditNotes || null,
+                        warehouseLocation: warehouseLocation || null,
+                        createdById: context.user.id,
+                    },
+                });
+
+                const balance = await calculateInventoryBalance(tx, skuId);
+                return { transaction: txn, newBalance: balance };
+            });
+            transaction = result.transaction;
+            newBalance = result.newBalance;
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : 'Unknown error';
+            if (message.startsWith('BAD_REQUEST:')) {
+                return {
+                    success: false,
+                    error: { code: 'BAD_REQUEST' as const, message: message.slice('BAD_REQUEST:'.length) },
+                };
+            }
+            throw error;
+        }
 
         await invalidateCache([skuId]);
-
-        const newBalance = await calculateInventoryBalance(prisma, skuId);
 
         broadcastUpdate({
             type: 'inventory_updated',
@@ -936,35 +942,47 @@ export const adjust = createServerFn({ method: 'POST' })
         const txnType = adjustedQuantity > 0 ? TXN_TYPE.INWARD : TXN_TYPE.OUTWARD;
         const absQuantity = Math.abs(adjustedQuantity);
 
-        // Check balance for outward adjustments
-        if (txnType === TXN_TYPE.OUTWARD) {
-            const currentBalance = await calculateInventoryBalance(prisma, skuId);
+        // Atomic: balance check + create + recalculate inside transaction
+        let transaction: { id: string };
+        let balance: { currentBalance: number };
+        try {
+            const result = await prisma.$transaction(async (tx: PrismaTransaction) => {
+                // Check balance for outward adjustments
+                if (txnType === TXN_TYPE.OUTWARD) {
+                    const currentBalance = await calculateInventoryBalance(tx, skuId);
+                    if (currentBalance.availableBalance < absQuantity) {
+                        throw new Error(`BAD_REQUEST:Insufficient stock for adjustment: available=${currentBalance.availableBalance}, requested=${absQuantity}`);
+                    }
+                }
 
-            if (currentBalance.availableBalance < absQuantity) {
+                const txn = await tx.inventoryTransaction.create({
+                    data: {
+                        skuId,
+                        txnType,
+                        qty: absQuantity,
+                        reason: TXN_REASON.ADJUSTMENT,
+                        notes: notes ? `${reason}: ${notes}` : reason,
+                        createdById: context.user.id,
+                    },
+                });
+
+                const bal = await calculateInventoryBalance(tx, skuId);
+                return { transaction: txn, newBalance: bal };
+            });
+            transaction = result.transaction;
+            balance = result.newBalance;
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : 'Unknown error';
+            if (message.startsWith('BAD_REQUEST:')) {
                 return {
                     success: false,
-                    error: {
-                        code: 'BAD_REQUEST',
-                        message: `Insufficient stock for adjustment: available=${currentBalance.availableBalance}, requested=${absQuantity}`,
-                    },
+                    error: { code: 'BAD_REQUEST' as const, message: message.slice('BAD_REQUEST:'.length) },
                 };
             }
+            throw error;
         }
 
-        const transaction = await prisma.inventoryTransaction.create({
-            data: {
-                skuId,
-                txnType,
-                qty: absQuantity,
-                reason: TXN_REASON.ADJUSTMENT,
-                notes: notes ? `${reason}: ${notes}` : reason,
-                createdById: context.user.id,
-            },
-        });
-
         await invalidateCache([skuId]);
-
-        const balance = await calculateInventoryBalance(prisma, skuId);
 
         return {
             success: true,
@@ -1122,33 +1140,44 @@ export const allocateTransaction = createServerFn({ method: 'POST' })
             };
         }
 
-        // Check balance
-        const currentBalance = await calculateInventoryBalance(prisma, skuId);
+        // Atomic: balance check + create + recalculate inside transaction
+        let transaction: { id: string };
+        let newBalance: { currentBalance: number; availableBalance: number };
+        try {
+            const result = await prisma.$transaction(async (tx: PrismaTransaction) => {
+                const bal = await calculateInventoryBalance(tx, skuId);
 
-        if (currentBalance.availableBalance < quantity) {
-            return {
-                success: false,
-                error: {
-                    code: 'BAD_REQUEST',
-                    message: `Insufficient stock for allocation: available=${currentBalance.availableBalance}, requested=${quantity}`,
-                },
-            };
+                if (bal.availableBalance < quantity) {
+                    throw new Error(`BAD_REQUEST:Insufficient stock for allocation: available=${bal.availableBalance}, requested=${quantity}`);
+                }
+
+                const txn = await tx.inventoryTransaction.create({
+                    data: {
+                        skuId,
+                        txnType: TXN_TYPE.OUTWARD,
+                        qty: quantity,
+                        reason: reason || TXN_REASON.ORDER_ALLOCATION,
+                        createdById: context.user.id,
+                    },
+                });
+
+                const balance = await calculateInventoryBalance(tx, skuId);
+                return { transaction: txn, newBalance: balance };
+            });
+            transaction = result.transaction;
+            newBalance = result.newBalance;
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : 'Unknown error';
+            if (message.startsWith('BAD_REQUEST:')) {
+                return {
+                    success: false,
+                    error: { code: 'BAD_REQUEST' as const, message: message.slice('BAD_REQUEST:'.length) },
+                };
+            }
+            throw error;
         }
 
-        // Create outward transaction (allocation creates outward directly)
-        const transaction = await prisma.inventoryTransaction.create({
-            data: {
-                skuId,
-                txnType: TXN_TYPE.OUTWARD,
-                qty: quantity,
-                reason: reason || TXN_REASON.ORDER_ALLOCATION,
-                createdById: context.user.id,
-            },
-        });
-
         await invalidateCache([skuId]);
-
-        const newBalance = await calculateInventoryBalance(prisma, skuId);
 
         broadcastUpdate({
             type: 'inventory_updated',
@@ -1615,6 +1644,14 @@ export const allocateTransactionFn = createServerFn({ method: 'POST' })
                             data: { qtyCompleted: newQtyCompleted, status: newStatus, completedAt: null },
                         });
                     }
+                }
+
+                // Revert previous RTO allocation
+                if (previousAllocation?.type === 'rto_received' && previousAllocation.referenceId) {
+                    await tx.orderLine.update({
+                        where: { id: previousAllocation.referenceId },
+                        data: { rtoCondition: null, rtoInwardedAt: null, rtoInwardedById: null, rtoReceivedAt: null },
+                    });
                 }
 
                 // Get order line

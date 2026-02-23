@@ -84,7 +84,6 @@ export interface CatalogSkuItem {
     shopifyStatus: string;
     // Inventory
     currentBalance: number;
-    reservedBalance: number;
     availableBalance: number;
     totalInward: number;
     totalOutward: number;
@@ -463,7 +462,6 @@ export const getCatalogProducts = createServerFn({ method: 'GET' })
                             ? (shopifyStatusMap.get(product.shopifyProductId) || 'not_cached')
                             : 'not_linked',
                         currentBalance: balance.currentBalance,
-                        reservedBalance: 0,
                         availableBalance: balance.availableBalance,
                         totalInward: balance.totalInward,
                         totalOutward: balance.totalOutward,

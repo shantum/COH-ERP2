@@ -21,6 +21,7 @@ export {
 export {
     listInventorySkusKysely,
     calculateInventoryBalance,
+    calculateInventoryBalanceWithTotals,
     calculateAllInventoryBalances,
     type InventoryListParams,
     type InventoryBalanceWithSkuId,

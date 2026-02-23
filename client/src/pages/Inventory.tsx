@@ -199,13 +199,6 @@ export default function Inventory() {
             },
         },
         {
-            headerName: 'Reserved',
-            field: 'reservedBalance',
-            width: 100,
-            type: 'numericColumn' as const,
-            cellStyle: { color: '#6b7280' },
-        },
-        {
             headerName: 'Balance',
             field: 'currentBalance',
             width: 100,

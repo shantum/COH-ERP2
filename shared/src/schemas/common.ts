@@ -52,6 +52,4 @@ export const transactionTypeSchema = z.enum([
   'inward',
   'outward',
   'adjustment',
-  'reserved',
-  'unreserved',
 ]);

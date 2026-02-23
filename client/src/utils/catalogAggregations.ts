@@ -38,7 +38,6 @@ export function aggregateByVariation(items: CatalogRow[]): CatalogRow[] {
                 skuCode: `${item.styleCode}-${item.colorName}`,
                 size: '-',
                 currentBalance: 0,
-                reservedBalance: 0,
                 availableBalance: 0,
                 shopifyQty: null,
                 targetStockQty: null,
@@ -56,7 +55,7 @@ export function aggregateByVariation(items: CatalogRow[]): CatalogRow[] {
         const group = groups.get(key)!;
         group.skuIds.push(item.skuId); // Collect SKU IDs
         group.currentBalance += item.currentBalance || 0;
-        group.reservedBalance += item.reservedBalance || 0;
+
         group.availableBalance += item.availableBalance || 0;
         group.skuCount += 1;
         // Sum values for averaging
@@ -118,7 +117,6 @@ export function aggregateByProduct(items: CatalogRow[]): CatalogRow[] {
                 imageUrl: item.imageUrl || null,
                 size: '-',
                 currentBalance: 0,
-                reservedBalance: 0,
                 availableBalance: 0,
                 shopifyQty: null,
                 targetStockQty: null,
@@ -140,7 +138,7 @@ export function aggregateByProduct(items: CatalogRow[]): CatalogRow[] {
         group.skuIds.push(item.skuId); // Collect SKU IDs
         if (item.fabricId) group._uniqueFabricIds.add(item.fabricId); // Track unique fabrics
         group.currentBalance += item.currentBalance || 0;
-        group.reservedBalance += item.reservedBalance || 0;
+
         group.availableBalance += item.availableBalance || 0;
         group.skuCount += 1;
         // Track if any variation has lining
