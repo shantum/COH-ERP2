@@ -359,13 +359,14 @@ router.post(
             return;
         }
 
-        // Hash and update new password
+        // Hash and update new password, increment tokenVersion to invalidate all existing sessions
         const hashedPassword = await bcrypt.hash(newPassword, 10);
         await req.prisma.user.update({
             where: { id: user.id },
             data: {
                 password: hashedPassword,
-                mustChangePassword: false, // Clear forced password change flag
+                mustChangePassword: false,
+                tokenVersion: { increment: 1 },
             },
         });
 

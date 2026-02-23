@@ -86,17 +86,10 @@ async function getJwt() {
 async function verifyToken(token: string, secret: string): Promise<JwtPayload | null> {
     try {
         const jwt = await getJwt();
-        console.log('[AuthMiddleware] Verifying token with secret length:', secret.length);
         const decoded = jwt.verify(token, secret);
-        console.log('[AuthMiddleware] Token decoded successfully:', JSON.stringify(decoded).substring(0, 100));
         const parsed = JwtPayloadSchema.safeParse(decoded);
-        if (!parsed.success) {
-            console.log('[AuthMiddleware] Zod parse failed:', parsed.error.message);
-        }
         return parsed.success ? parsed.data : null;
-    } catch (error) {
-        console.log('[AuthMiddleware] JWT verify error:', error instanceof Error ? error.message : error);
-        console.log('[AuthMiddleware] Secret first 10 chars:', secret.substring(0, 10));
+    } catch {
         return null;
     }
 }
@@ -191,28 +184,18 @@ async function validateAuth(
     // 2. Get JWT secret
     const jwtSecret = process.env.JWT_SECRET;
     if (!jwtSecret) {
-        console.log('[AuthMiddleware] JWT_SECRET not found in env');
         throw new Error('JWT_SECRET not configured');
-    }
-
-    // Debug: log token and secret presence
-    if (process.env.NODE_ENV === 'production') {
-        console.log('[AuthMiddleware] JWT_SECRET present:', !!jwtSecret, 'length:', jwtSecret?.length);
-        console.log('[AuthMiddleware] Token length:', token?.length);
     }
 
     // 3. Verify and decode token
     const payload = await verifyToken(token, jwtSecret);
     if (!payload) {
-        console.log('[AuthMiddleware] Token verification failed');
         return { success: false, error: 'Invalid or expired token', code: 'INVALID_TOKEN' };
     }
 
     // 4. Validate token version (if present)
-    console.log('[AuthMiddleware] Checking token version:', payload.tokenVersion);
     if (payload.tokenVersion !== undefined) {
         const isValid = await validateTokenVersion(prisma, payload.id, payload.tokenVersion);
-        console.log('[AuthMiddleware] Token version valid:', isValid);
         if (!isValid) {
             return {
                 success: false,
@@ -223,12 +206,7 @@ async function validateAuth(
     }
 
     // 5. Load permissions and extraAccess
-    console.log('[AuthMiddleware] Loading permissions for user:', payload.id);
     const { permissions, extraAccess } = await getUserPermissionsAndAccess(prisma, payload.id);
-    console.log('[AuthMiddleware] Permissions loaded:', permissions.length, 'extraAccess:', extraAccess.length);
-
-    // 6. Return authenticated context
-    console.log('[AuthMiddleware] Auth successful for:', payload.email);
     return {
         success: true,
         user: {
@@ -278,11 +256,6 @@ function getAuthToken(): string | undefined {
     try {
         // Use TanStack Start's getCookie - works for SSR and client-initiated Server Functions
         const token = getCookie('auth_token');
-
-        // Debug logging
-        console.log('[AuthMiddleware] getCookie returned:', token ? `token-present (${token.substring(0, 20)}...)` : 'undefined');
-        console.log('[AuthMiddleware] JWT_SECRET present:', !!process.env.JWT_SECRET);
-
         return token;
     } catch (error) {
         // Fallback: try reading cookie header directly
@@ -291,18 +264,12 @@ function getAuthToken(): string | undefined {
             if (cookieHeader) {
                 const match = cookieHeader.match(/auth_token=([^;]+)/);
                 const token = match?.[1];
-                if (process.env.NODE_ENV === 'production') {
-                    console.log('[AuthMiddleware] Fallback cookie header:', token ? 'token-present' : 'undefined');
-                }
-                return token;
+                    return token;
             }
         } catch {
             // Ignore fallback errors
         }
 
-        if (process.env.NODE_ENV === 'production') {
-            console.log('[AuthMiddleware] Error getting auth token:', error);
-        }
         return undefined;
     }
 }

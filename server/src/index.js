@@ -101,8 +101,8 @@ app.use('/api/auth/register', authLimiter);
 // CORS configuration
 app.use(cors({
     origin: process.env.NODE_ENV === 'production'
-        ? process.env.CORS_ORIGIN || true  // Allow same origin in production
-        : ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:5175', 'http://127.0.0.1:5173', 'http://127.0.0.1:5174', 'http://localhost:3000', 'http://127.0.0.1:3000'], // Explicit origins for cookie auth in dev
+        ? process.env.CORS_ORIGIN || 'https://www.coh.one'
+        : ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:5175', 'http://127.0.0.1:5173', 'http://127.0.0.1:5174', 'http://localhost:3000', 'http://127.0.0.1:3000'],
     credentials: true,
 }));
 
