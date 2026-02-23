@@ -129,10 +129,40 @@ router.post('/push-order-to-sheet', verifyInternalRequest, (req: Request, res: R
 });
 
 /**
+ * Debounced SKU balance push — collects SKU IDs across rapid requests,
+ * then fires a single updateSheetBalances after 3s of quiet.
+ * Max wait 10s so balances aren't delayed indefinitely during sustained scanning.
+ */
+const DEBOUNCE_QUIET_MS = 3_000;  // wait 3s after last scan
+const DEBOUNCE_MAX_MS = 10_000;   // but never wait more than 10s from first scan
+
+let pendingSkuIds = new Set<string>();
+let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+let firstRequestAt: number | null = null;
+
+function flushSkuBalancePush(): void {
+    const skuIds = pendingSkuIds;
+    pendingSkuIds = new Set();
+    debounceTimer = null;
+    firstRequestAt = null;
+
+    if (skuIds.size === 0) return;
+
+    console.log(`[Internal API] Flushing sheet balance push for ${skuIds.size} SKUs`);
+    deferredExecutor.enqueue(
+        async () => {
+            await updateSheetBalances(skuIds, { errors: 0, skusUpdated: 0 });
+        },
+        { action: 'push_sku_balances' }
+    );
+}
+
+/**
  * POST /api/internal/push-sku-balances
  *
  * Pushes balance for specific SKUs to Google Sheets (Inventory col R + Balance Final col F).
  * Called by Server Functions after inventory mutations to keep sheets in sync.
+ * Debounced: collects SKU IDs for 3s of quiet (max 10s) then pushes once.
  *
  * Body: { skuIds: string[] }
  */
@@ -145,14 +175,23 @@ router.post('/push-sku-balances', verifyInternalRequest, (req: Request, res: Res
             return;
         }
 
-        deferredExecutor.enqueue(
-            async () => {
-                await updateSheetBalances(new Set(skuIds), { errors: 0, skusUpdated: 0 });
-            },
-            { action: 'push_sku_balances' }
-        );
+        // Accumulate SKU IDs
+        for (const id of skuIds) pendingSkuIds.add(id);
+        const now = Date.now();
+        if (!firstRequestAt) firstRequestAt = now;
 
-        res.json({ success: true, skuCount: skuIds.length });
+        // Clear existing quiet timer
+        if (debounceTimer) clearTimeout(debounceTimer);
+
+        // If we've been accumulating for too long, flush now
+        if (now - firstRequestAt >= DEBOUNCE_MAX_MS) {
+            flushSkuBalancePush();
+        } else {
+            // Otherwise reset the quiet timer
+            debounceTimer = setTimeout(flushSkuBalancePush, DEBOUNCE_QUIET_MS);
+        }
+
+        res.json({ success: true, skuCount: skuIds.length, pending: pendingSkuIds.size });
     } catch (error: unknown) {
         const message = error instanceof Error ? error.message : 'Unknown error';
         console.error('[Internal API] Push SKU balances error:', message);

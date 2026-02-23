@@ -368,7 +368,6 @@ export default function InventoryInward() {
 
     // State
     const [scanInput, setScanInput] = useState('');
-    const [isScanning, setIsScanning] = useState(false);
     const [successFlash, setSuccessFlash] = useState<SuccessFlash | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [sourceFilter, setSourceFilter] = useState<string>('all');
@@ -421,6 +420,9 @@ export default function InventoryInward() {
             .reduce((sum, i) => sum + i.qty, 0);
     }, [recentInwards]);
 
+    // Track in-flight mutation count for UI indicator
+    const [inflightCount, setInflightCount] = useState(0);
+
     // Instant inward mutation using Server Function
     const instantInwardMutation = useMutation({
         mutationFn: async (skuCode: string) => {
@@ -429,6 +431,9 @@ export default function InventoryInward() {
                 throw new Error(result.error?.message || 'Failed to inward SKU');
             }
             return result.data;
+        },
+        onMutate: () => {
+            setInflightCount(c => c + 1);
         },
         onSuccess: (data) => {
             if (data) {
@@ -441,15 +446,13 @@ export default function InventoryInward() {
                     newBalance: data.newBalance,
                 });
             }
-            setScanInput('');
             queryClient.invalidateQueries({ queryKey: ['recent-inwards'] });
         },
         onError: (err: Error) => {
             setError(err.message || 'Failed to inward SKU');
         },
         onSettled: () => {
-            setIsScanning(false);
-            inputRef.current?.focus();
+            setInflightCount(c => c - 1);
         },
     });
 
@@ -457,9 +460,11 @@ export default function InventoryInward() {
         const code = scanInput.trim();
         if (!code) return;
 
-        setIsScanning(true);
+        // Clear input immediately — don't wait for mutation response
+        setScanInput('');
         setError(null);
         instantInwardMutation.mutate(code);
+        // Input stays enabled + focused — ready for next scan instantly
     };
 
     const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -555,21 +560,22 @@ export default function InventoryInward() {
                                 onKeyDown={handleKeyDown}
                                 placeholder="Scan SKU barcode or enter code..."
                                 className="input text-2xl font-mono w-full py-4"
-                                disabled={isScanning}
                                 autoFocus
                             />
                         </div>
                         <button
                             onClick={handleScan}
-                            disabled={!scanInput.trim() || isScanning}
+                            disabled={!scanInput.trim()}
                             className="btn btn-primary text-lg px-8 py-4 h-auto"
                         >
-                            {isScanning ? 'Scanning...' : 'Scan'}
+                            {inflightCount > 0 ? `Scan (${inflightCount})` : 'Scan'}
                         </button>
                     </div>
                     <p className="text-sm text-gray-500 mt-3 flex items-center gap-2">
-                        <span className="inline-block w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
-                        Ready to scan. Items are instantly received and can be assigned to a source later.
+                        <span className={`inline-block w-2 h-2 rounded-full animate-pulse ${inflightCount > 0 ? 'bg-yellow-500' : 'bg-green-500'}`}></span>
+                        {inflightCount > 0
+                            ? `Processing ${inflightCount} scan${inflightCount > 1 ? 's' : ''}... Keep scanning.`
+                            : 'Ready to scan. Items are instantly received and can be assigned to a source later.'}
                     </p>
                 </div>
 
