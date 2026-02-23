@@ -28,25 +28,12 @@ const api = axios.create({
     withCredentials: true,
 });
 
-// Add auth token to requests (SSR-safe)
-api.interceptors.request.use((config) => {
-    if (typeof window !== 'undefined') {
-        const token = localStorage.getItem('token');
-        if (token) {
-            config.headers.Authorization = `Bearer ${token}`;
-        }
-    }
-    return config;
-});
-
 // Handle auth errors - dispatch event instead of forcing page reload
 // This allows React Router to handle navigation properly (SSR-safe)
 api.interceptors.response.use(
     (response) => response,
     (error) => {
         if (typeof window !== 'undefined' && error.response?.status === 401) {
-            localStorage.removeItem('token');
-            // Dispatch custom event for React app to handle via Router
             window.dispatchEvent(new CustomEvent('auth:unauthorized'));
         }
         return Promise.reject(error);

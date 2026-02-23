@@ -1,9 +1,9 @@
 /**
  * Express Auth Middleware
  *
- * Uses the unified auth core for validation logic.
- * This ensures Express API routes use the exact same auth logic
- * as TanStack Server Functions.
+ * Uses authCore for validation logic.
+ * NOTE: TanStack Server Functions middleware has its own copy
+ * (client/src/server/middleware/auth.ts) due to build boundary.
  */
 
 import type { Request, Response, NextFunction } from 'express';
@@ -17,12 +17,11 @@ import {
 export type { AuthenticatedUser, AuthContext, AuthResult } from '../utils/authCore.js';
 
 /**
- * Extract auth token from request
- * Supports both Authorization header and HttpOnly cookie
+ * Extract auth token from request — cookie-first, header fallback
  */
 function extractToken(req: Request): string | undefined {
     const authHeader = req.headers['authorization'];
-    return (authHeader && authHeader.split(' ')[1]) || req.cookies?.auth_token;
+    return req.cookies?.auth_token || (authHeader && authHeader.split(' ')[1]);
 }
 
 /**

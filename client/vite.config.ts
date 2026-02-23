@@ -100,6 +100,8 @@ export default defineConfig({
     exclude: ['pg', 'pg-pool'],
   },
   build: {
+    // AG-Grid alone is >1MB — suppress warning for known large vendor chunks
+    chunkSizeWarningLimit: 600,
     rollupOptions: {
       external: (id, parentId, isResolved) => {
         // Server packages
@@ -113,6 +115,16 @@ export default defineConfig({
         // Already resolved absolute path to server directory
         if (isResolved && id.includes(SERVER_SRC_PATH.replace(/\\/g, '/'))) return true;
         return false;
+      },
+      output: {
+        manualChunks(id) {
+          // Keep recharts in one chunk to avoid circular dependency between chunks
+          if (id.includes('recharts')) return 'recharts';
+          // AG-Grid is large — isolate it
+          if (id.includes('ag-grid')) return 'ag-grid';
+          // Tanstack libs used everywhere
+          if (id.includes('@tanstack')) return 'tanstack';
+        },
       },
     },
   },

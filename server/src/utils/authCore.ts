@@ -1,13 +1,10 @@
 /**
- * Unified Authentication Core
+ * Authentication Core for Express routes
  *
- * Single source of truth for auth validation logic.
- * Used by both:
- * - Express middleware (server/src/middleware/auth.ts)
- * - TanStack Server Functions middleware (client/src/server/middleware/auth.ts)
- *
- * This prevents "auth drift" where authentication behavior differs
- * between Express API routes and Server Functions.
+ * Used by Express middleware (server/src/middleware/auth.ts).
+ * NOTE: TanStack Server Functions middleware (client/src/server/middleware/auth.ts)
+ * has its own copy of this logic due to build boundary constraints.
+ * Keep both in sync when making auth changes.
  */
 
 import jwt from 'jsonwebtoken';
@@ -42,6 +39,7 @@ export interface AuthenticatedUser {
     role: string;
     roleId: string | null;
     tokenVersion?: number;
+    extraAccess?: string[];
 }
 
 /**
@@ -56,7 +54,7 @@ export interface AuthContext {
  * Auth validation result
  */
 export type AuthResult =
-    | { success: true; user: AuthenticatedUser; permissions: string[] }
+    | { success: true; user: AuthenticatedUser; permissions: string[]; extraAccess: string[] }
     | { success: false; error: string; code: 'NO_TOKEN' | 'INVALID_TOKEN' | 'EXPIRED_TOKEN' | 'SESSION_INVALIDATED' };
 
 // ============================================
@@ -121,10 +119,10 @@ export async function validateTokenVersion(
  * @param userId - User ID
  * @returns Array of permission strings
  */
-export async function getUserPermissions(
+export async function getUserPermissionsAndAccess(
     prisma: PrismaClient,
     userId: string
-): Promise<string[]> {
+): Promise<{ permissions: string[]; extraAccess: string[] }> {
     try {
         const user = await prisma.user.findUnique({
             where: { id: userId },
@@ -135,7 +133,7 @@ export async function getUserPermissions(
         });
 
         if (!user) {
-            return [];
+            return { permissions: [], extraAccess: [] };
         }
 
         // Start with role permissions (stored as JSON array)
@@ -161,10 +159,17 @@ export async function getUserPermissions(
             ...grantedOverrides,
         ];
 
-        // Deduplicate
-        return [...new Set(finalPermissions)];
+        // Get extraAccess
+        const extraAccess: string[] = Array.isArray(user.extraAccess)
+            ? (user.extraAccess as string[])
+            : [];
+
+        return {
+            permissions: [...new Set(finalPermissions)],
+            extraAccess,
+        };
     } catch {
-        return [];
+        return { permissions: [], extraAccess: [] };
     }
 }
 
@@ -216,8 +221,8 @@ export async function validateAuth(
         }
     }
 
-    // 5. Load permissions
-    const permissions = await getUserPermissions(prisma, payload.id);
+    // 5. Load permissions and extraAccess
+    const { permissions, extraAccess } = await getUserPermissionsAndAccess(prisma, payload.id);
 
     // 6. Return authenticated context
     return {
@@ -228,8 +233,10 @@ export async function validateAuth(
             role: payload.role,
             roleId: payload.roleId ?? null,
             tokenVersion: payload.tokenVersion,
+            extraAccess,
         },
         permissions,
+        extraAccess,
     };
 }
 

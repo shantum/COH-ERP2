@@ -53,6 +53,9 @@ const envSchema = z.object({
     /** CORS allowed origin (production only) */
     CORS_ORIGIN: z.string().optional(),
 
+    /** Shared secret for internal API calls (server-to-server) */
+    INTERNAL_API_SECRET: z.string().optional(),
+
     // ----------------------------------------
     // FEATURE FLAGS
     // ----------------------------------------

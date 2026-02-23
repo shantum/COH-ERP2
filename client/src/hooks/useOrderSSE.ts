@@ -453,28 +453,21 @@ export function useOrderSSE({
         // Don't connect if disabled
         if (!enabled) return;
 
-        // Get auth token from localStorage
-        const token = localStorage.getItem('token');
-        if (!token) {
-            console.log('SSE: No auth token, skipping connection');
-            return;
-        }
-
         // Close existing connection
         if (eventSourceRef.current) {
             eventSourceRef.current.close();
         }
 
-        // Build URL with token and optional lastEventId
+        // Build URL with optional lastEventId
         const url = new URL('/api/events', window.location.origin);
-        url.searchParams.set('token', token);
 
         // Include last event ID for replay on reconnect
         if (lastEventIdRef.current) {
             url.searchParams.set('lastEventId', lastEventIdRef.current);
         }
 
-        const es = new EventSource(url.toString());
+        // EventSource sends cookies automatically for same-origin
+        const es = new EventSource(url.toString(), { withCredentials: true });
 
         es.onmessage = handleEvent;
 

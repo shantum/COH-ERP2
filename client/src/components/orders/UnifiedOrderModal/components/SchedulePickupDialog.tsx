@@ -164,14 +164,9 @@ export function SchedulePickupDialog({
         setServiceability({ checking: true, serviceable: null });
         try {
             const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3001';
-            const token = localStorage.getItem('token');
-            const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-            if (token) {
-                headers['Authorization'] = `Bearer ${token}`;
-            }
             const response = await fetch(`${baseUrl}/api/returns/check-serviceability`, {
                 method: 'POST',
-                headers,
+                headers: { 'Content-Type': 'application/json' },
                 credentials: 'include',
                 body: JSON.stringify({ pincode: pin }),
             });

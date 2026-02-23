@@ -30,7 +30,7 @@ const router: Router = Router();
 
 // Shared secret for internal API calls
 // In production, this should be set via environment variable
-const INTERNAL_API_SECRET = process.env.INTERNAL_API_SECRET || 'coh-internal-api-secret-dev';
+const INTERNAL_API_SECRET = process.env.INTERNAL_API_SECRET;
 
 /**
  * Middleware to verify internal API calls
@@ -43,8 +43,8 @@ function verifyInternalRequest(req: Request, res: Response, next: NextFunction):
     const forwardedFor = req.headers['x-forwarded-for'];
     const remoteAddress = req.socket?.remoteAddress || req.ip;
 
-    // Check 1: Valid secret header
-    if (secret === INTERNAL_API_SECRET) {
+    // Check 1: Valid secret header (skip if no secret configured)
+    if (INTERNAL_API_SECRET && secret === INTERNAL_API_SECRET) {
         next();
         return;
     }

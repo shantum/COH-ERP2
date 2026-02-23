@@ -196,8 +196,6 @@ router.post(
             },
             // Include effective permissions (role + overrides) for frontend authorization
             permissions: Array.from(rolePermissions),
-            // Still return token in response for backward compatibility (tRPC still needs it during migration)
-            token,
         });
     })
 );
@@ -212,15 +210,14 @@ router.post(
 );
 
 // Get current user
-// Supports both Authorization header (legacy/tRPC) and auth_token cookie (SSR/Server Functions)
+// Cookie-first auth, with Authorization header fallback
 router.get(
     '/me',
     asyncHandler(async (req: Request, res: Response) => {
-        // Try Authorization header first (for tRPC/legacy), then cookie (for SSR)
+        const cookieToken = req.cookies?.auth_token;
         const authHeader = req.headers['authorization'];
         const headerToken = authHeader && authHeader.split(' ')[1];
-        const cookieToken = req.cookies?.auth_token;
-        const token = headerToken || cookieToken;
+        const token = cookieToken || headerToken;
 
         if (!token) {
             res.status(401).json({ error: 'No token provided' });

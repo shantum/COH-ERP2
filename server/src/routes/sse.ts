@@ -119,12 +119,10 @@ setInterval(cleanupOldEvents, 60000);
 const clients = new Map<string, Set<Response>>();
 
 /**
- * Custom auth for SSE since EventSource doesn't support custom headers
- * Accept token via query parameter
+ * Auth middleware for SSE - cookie-first, with query param fallback for legacy clients
  */
 const sseAuth = (req: Request, res: Response, next: NextFunction): void => {
-    // Try query param first (for EventSource), then header
-    const token = (req.query.token as string) || req.headers['authorization']?.split(' ')[1];
+    const token = req.cookies?.auth_token || (req.query.token as string) || req.headers['authorization']?.split(' ')[1];
 
     if (!token) {
         res.status(401).json({ error: 'Access token required' });

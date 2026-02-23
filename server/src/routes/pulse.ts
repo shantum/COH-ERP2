@@ -17,11 +17,10 @@ import { pulseBroadcaster } from '../services/pulseBroadcaster.js';
 const router: Router = Router();
 
 /**
- * Auth middleware - same pattern as sse.ts
- * Accept token via query parameter (EventSource doesn't support custom headers)
+ * Auth middleware - cookie-first, with query param fallback for legacy clients
  */
 const pulseAuth = (req: Request, res: Response, next: NextFunction): void => {
-    const token = (req.query.token as string) || req.headers['authorization']?.split(' ')[1];
+    const token = req.cookies?.auth_token || (req.query.token as string) || req.headers['authorization']?.split(' ')[1];
 
     if (!token) {
         res.status(401).json({ error: 'Access token required' });

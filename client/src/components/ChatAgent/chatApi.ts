@@ -8,10 +8,7 @@
 // Always use relative /api — Vite proxy handles dev routing to Express
 const API_BASE = '/api';
 
-function getAuthHeaders(): Record<string, string> {
-    const token = localStorage.getItem('token');
-    return token ? { Authorization: `Bearer ${token}` } : {};
-}
+// No manual auth headers needed — HttpOnly cookie sent automatically with credentials: 'include'
 
 // ============================================
 // TYPES
@@ -54,7 +51,7 @@ export async function streamMessage(
 
     const response = await fetch(`${API_BASE}/chat/message`, {
         method: 'POST',
-        headers: getAuthHeaders(),
+        credentials: 'include' as RequestCredentials,
         body: formData,
         signal,
     });
@@ -125,10 +122,8 @@ export async function confirmAction(
 ): Promise<ConfirmResult> {
     const response = await fetch(`${API_BASE}/chat/confirm`, {
         method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            ...getAuthHeaders(),
-        },
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ actionId, toolName, toolInput }),
     });
 

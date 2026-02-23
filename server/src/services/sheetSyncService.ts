@@ -355,15 +355,14 @@ async function runSteps(
             : `http://localhost:${port}`;
         const secret = process.env.INTERNAL_API_SECRET;
         if (secret) {
-            await fetch(`${baseUrl}/api/internal/broadcast`, {
+            await fetch(`${baseUrl}/api/internal/sse-broadcast`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'x-internal-secret': secret,
                 },
                 body: JSON.stringify({
-                    type: 'sheet_sync_complete',
-                    data: { jobId: job.id },
+                    event: { type: 'sheet_sync_complete', data: { jobId: job.id } },
                 }),
             });
         }

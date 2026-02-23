@@ -4,7 +4,7 @@
  * Used by both background jobs (syncWorker.ts) and direct sync routes (shopify.js)
  */
 
-import type { PrismaClient, Product } from '@prisma/client';
+import type { Prisma, PrismaClient, Product } from '@prisma/client';
 import type { ShopifyProduct, ShopifyVariant } from './shopify.js';
 import shopifyClient from './shopify.js';
 import { resolveProductCategory } from '../config/mappings/index.js';
@@ -280,7 +280,7 @@ export async function syncSingleProduct(
         result.created++;
     } else {
         // Product exists — refresh key fields from Shopify
-        const updates: Record<string, string | number | boolean> = {};
+        const updates: Prisma.ProductUpdateInput = {};
         if (mainImageUrl && mainImageUrl !== product.imageUrl) updates.imageUrl = mainImageUrl;
         if (shopifyProduct.handle && shopifyProduct.handle !== product.shopifyHandle) {
             updates.shopifyHandle = shopifyProduct.handle;

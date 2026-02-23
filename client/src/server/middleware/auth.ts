@@ -1,14 +1,9 @@
 /**
  * Auth Middleware for TanStack Start Server Functions
  *
- * Self-contained auth validation for Server Functions.
- * Uses the same logic as Express middleware but with inlined validation
- * to avoid cross-project import issues in production builds.
- *
- * Features:
- * - JWT validation
- * - Token version validation (session invalidation)
- * - Permission loading
+ * Duplicates logic from server/src/utils/authCore.ts because the client
+ * build cannot import from server/src/. Keep both in sync when making
+ * auth changes.
  */
 'use server';
 

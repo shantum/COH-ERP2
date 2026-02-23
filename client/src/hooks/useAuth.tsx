@@ -39,20 +39,9 @@ export const authQueryOptions = {
         }
 
         try {
-            const token = localStorage.getItem('token');
-            if (!token) {
-                return null;
-            }
-
             const res = await authApi.me();
             return res.data as AuthUser;
         } catch {
-            // Token invalid or expired - clean up
-            try {
-                localStorage.removeItem('token');
-            } catch {
-                // Ignore localStorage errors
-            }
             return null;
         }
     },
@@ -74,8 +63,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const login = async (email: string, password: string) => {
         const res = await authApi.login(email, password);
-        // Store token in localStorage
-        localStorage.setItem('token', res.data.token);
+        // Cookie is set automatically by the server (HttpOnly)
         // Update the query cache with the new user
         queryClient.setQueryData(authQueryKeys.user, res.data.user);
     };
@@ -87,8 +75,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } catch {
             // Continue with logout even if server call fails
         }
-        // Clear client-side token
-        localStorage.removeItem('token');
         // Clear the query cache
         queryClient.setQueryData(authQueryKeys.user, null);
         // Invalidate to ensure fresh state on next login

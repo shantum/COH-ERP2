@@ -68,16 +68,10 @@ export function usePulse(enabled = true) {
 
         if (!enabled) return;
 
-        const token = localStorage.getItem('token');
-        if (!token) {
-            console.log('[Pulse] No token available, skipping connection');
-            return;
-        }
-
         const url = new URL('/api/pulse', window.location.origin);
-        url.searchParams.set('token', token);
 
-        const es = new EventSource(url.toString());
+        // EventSource sends cookies automatically for same-origin
+        const es = new EventSource(url.toString(), { withCredentials: true });
 
         es.onmessage = (event) => {
             try {
