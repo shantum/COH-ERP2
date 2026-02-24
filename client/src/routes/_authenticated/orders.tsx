@@ -17,7 +17,19 @@ export const Route = createFileRoute('/_authenticated/orders')({
         page: search.page || 1,
         limit: search.limit || 250,
     }),
-    loader: async ({ deps }): Promise<OrdersLoaderData> => {
+    loader: async ({ deps, context }): Promise<OrdersLoaderData> => {
+        // Skip data fetch if auth failed during SSR — client will redirect to login
+        if (!context.user) {
+            return {
+                orders: {
+                    rows: [],
+                    view: deps.view,
+                    hasInventory: false,
+                    pagination: { total: 0, page: 1, limit: deps.limit, totalPages: 0, hasMore: false },
+                },
+                error: null,
+            };
+        }
         try {
             const orders = await getOrders({
                 data: {

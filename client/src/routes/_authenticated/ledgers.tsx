@@ -27,7 +27,11 @@ export const Route = createFileRoute('/_authenticated/ledgers')({
         page: search.page,
         limit: search.limit,
     }),
-    loader: async ({ deps }): Promise<LedgersLoaderData> => {
+    loader: async ({ deps, context }): Promise<LedgersLoaderData> => {
+        // Skip data fetch if auth failed during SSR — client will redirect to login
+        if (!context.user) {
+            return { ledger: null, error: null };
+        }
         try {
             const offset = (deps.page - 1) * deps.limit;
             const ledger = await getLedgerTransactions({

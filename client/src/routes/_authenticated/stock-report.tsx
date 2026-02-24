@@ -28,7 +28,11 @@ export const Route = createFileRoute('/_authenticated/stock-report')({
         page: search.page,
         limit: search.limit,
     }),
-    loader: async ({ deps }): Promise<StockReportLoaderData> => {
+    loader: async ({ deps, context }): Promise<StockReportLoaderData> => {
+        // Skip data fetch if auth failed during SSR — client will redirect to login
+        if (!context.user) {
+            return { snapshot: null, summary: null, error: null };
+        }
         // Default to current month in IST
         const now = new Date();
         const istNow = new Date(now.getTime() + 5.5 * 60 * 60 * 1000);

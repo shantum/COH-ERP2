@@ -27,7 +27,11 @@ export const Route = createFileRoute('/_authenticated/inventory')({
         stockFilter: search.stockFilter,
     }),
     // Pre-fetch paginated inventory data on server
-    loader: async ({ deps }): Promise<InventoryLoaderData> => {
+    loader: async ({ deps, context }): Promise<InventoryLoaderData> => {
+        // Skip data fetch if auth failed during SSR — client will redirect to login
+        if (!context.user) {
+            return { inventory: null, error: null };
+        }
         try {
             const { page, limit, search, stockFilter } = deps;
             const offset = (page - 1) * limit;

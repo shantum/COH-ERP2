@@ -21,7 +21,15 @@ export interface FabricsLoaderData {
 
 export const Route = createFileRoute('/_authenticated/fabrics')({
     validateSearch: (search) => FabricsSearchParams.parse(search),
-    loader: async (): Promise<FabricsLoaderData> => {
+    loader: async ({ context }): Promise<FabricsLoaderData> => {
+        // Skip data fetch if auth failed during SSR — client will redirect to login
+        if (!context.user) {
+            return {
+                analysis: { success: true, analysis: [] },
+                health: { data: [], totalBalance: 0 },
+                error: null,
+            };
+        }
         try {
             const [analysis, health] = await Promise.all([
                 getFabricColourStockAnalysis({ data: {} }),

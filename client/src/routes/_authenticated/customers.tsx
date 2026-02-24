@@ -26,7 +26,11 @@ export const Route = createFileRoute('/_authenticated/customers')({
         tab: search.tab || 'all',
     }),
     // Pre-fetch customers data on server
-    loader: async ({ deps }): Promise<CustomersLoaderData> => {
+    loader: async ({ deps, context }): Promise<CustomersLoaderData> => {
+        // Skip data fetch if auth failed during SSR — client will redirect to login
+        if (!context.user) {
+            return { customers: null, error: null };
+        }
         // Skip on special tabs (highValue, atRisk, returners tabs use different data sources)
         if (deps.tab !== 'all') {
             return { customers: null, error: null };

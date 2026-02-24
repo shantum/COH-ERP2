@@ -18,7 +18,11 @@ import Products from '../../pages/Products';
 export const Route = createFileRoute('/_authenticated/products')({
     validateSearch: (search) => ProductsSearchParams.parse(search),
     // Pre-fetch products tree data on server
-    loader: async (): Promise<ProductsLoaderData> => {
+    loader: async ({ context }): Promise<ProductsLoaderData> => {
+        // Skip data fetch if auth failed during SSR — client will redirect to login
+        if (!context.user) {
+            return { productsTree: null, error: null };
+        }
         try {
             const productsTree = await getProductsTree({ data: {} });
             return { productsTree, error: null };

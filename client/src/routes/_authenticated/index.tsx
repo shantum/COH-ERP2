@@ -16,7 +16,11 @@ import Dashboard from '../../pages/Dashboard';
 
 export const Route = createFileRoute('/_authenticated/')({
     // Pre-fetch dashboard analytics on server
-    loader: async (): Promise<DashboardLoaderData> => {
+    loader: async ({ context }): Promise<DashboardLoaderData> => {
+        // Skip data fetch if auth failed during SSR — client will redirect to login
+        if (!context.user) {
+            return { analytics: null, error: null };
+        }
         try {
             const analytics = await getOrdersAnalytics();
             return { analytics, error: null };
