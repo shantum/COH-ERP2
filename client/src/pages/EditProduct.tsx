@@ -10,13 +10,15 @@
  *     - Collapsible SKU table with inline editable rows (useSkuEditForm)
  */
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useNavigate } from '@tanstack/react-router';
-import { Route } from '../routes/_authenticated/products_/$productId/edit';
+import { useQuery } from '@tanstack/react-query';
+import { useServerFn } from '@tanstack/react-start';
+import { Route } from '../routes/_authenticated/products_/$productSlug/edit';
 import { useProductEditForm } from '../components/products/unified-edit/hooks/useProductEditForm';
 import { useVariationEditForm } from '../components/products/unified-edit/hooks/useVariationEditForm';
 import { useSkuEditForm } from '../components/products/unified-edit/hooks/useSkuEditForm';
-import { PRODUCT_CATEGORIES, GENDERS } from '../components/products/types';
+import { getCatalogFilters } from '../server/functions/products';
 import type { ProductDetailData, VariationDetailData, SkuDetailData } from '../components/products/unified-edit/types';
 
 import { Button } from '@/components/ui/button';
@@ -45,8 +47,21 @@ import {
 
 // ─── Main Page ───────────────────────────────────────────────
 
+/** Extract UUID from slug: "the-chino-shorts--1950fd4a-606e-..." → "1950fd4a-606e-..." */
+function extractProductId(slug: string): string {
+    const sepIdx = slug.indexOf('--');
+    return sepIdx !== -1 ? slug.slice(sepIdx + 2) : slug;
+}
+
+/** Build slug from product name + UUID: "The Chino Shorts" + id → "the-chino-shorts--1950fd4a-..." */
+export function buildProductSlug(name: string, id: string): string {
+    const nameSlug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    return `${nameSlug}--${id}`;
+}
+
 export default function EditProduct() {
-    const { productId } = Route.useParams();
+    const { productSlug } = Route.useParams();
+    const productId = extractProductId(productSlug);
     const navigate = useNavigate();
 
     const {
@@ -63,6 +78,30 @@ export default function EditProduct() {
             // Form auto-resets via react-query refetch
         },
     });
+
+    // Fetch catalog filters for category/gender dropdowns
+    const getCatalogFiltersFn = useServerFn(getCatalogFilters);
+    const { data: catalogFilters } = useQuery({
+        queryKey: ['products', 'catalogFilters'],
+        queryFn: () => getCatalogFiltersFn(),
+    });
+
+    // Build dropdown options from DB values, always including the current value
+    const categoryOptions = useMemo(() => {
+        const currentVal = form.watch('category');
+        const dbCategories = catalogFilters?.categories ?? [];
+        const set = new Set(dbCategories);
+        if (currentVal && !set.has(currentVal)) set.add(currentVal);
+        return Array.from(set).sort((a, b) => a.localeCompare(b));
+    }, [catalogFilters?.categories, form.watch('category')]);
+
+    const genderOptions = useMemo(() => {
+        const currentVal = form.watch('gender');
+        const dbGenders = catalogFilters?.genders ?? [];
+        const set = new Set(dbGenders);
+        if (currentVal && !set.has(currentVal)) set.add(currentVal);
+        return Array.from(set).sort((a, b) => a.localeCompare(b));
+    }, [catalogFilters?.genders, form.watch('gender')]);
 
     if (isLoading) {
         return (
@@ -167,7 +206,7 @@ export default function EditProduct() {
                                     <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    {PRODUCT_CATEGORIES.map(c => (
+                                    {categoryOptions.map(c => (
                                         <SelectItem key={c} value={c}>{c}</SelectItem>
                                     ))}
                                 </SelectContent>
@@ -185,7 +224,7 @@ export default function EditProduct() {
                                     <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    {GENDERS.map(g => (
+                                    {genderOptions.map(g => (
                                         <SelectItem key={g} value={g}>{g}</SelectItem>
                                     ))}
                                 </SelectContent>

@@ -31,6 +31,7 @@ import {
 import { SkuWiseDataTable } from './SkuWiseDataTable';
 import { BomDataTable } from './BomDataTable';
 import { useProductsTree } from './hooks/useProductsTree';
+import { buildProductSlug } from '../../pages/EditProduct';
 import type { ProductTreeNode } from './types';
 
 type ProductsView = 'catalog' | 'bom';
@@ -326,15 +327,19 @@ export function ProductsViewSwitcher({ searchQuery, onSearchChange, onViewProduc
     // Navigate to full-page edit for a product/variation/SKU
     const handleEditProduct = useCallback((node: ProductTreeNode) => {
         let productId = node.id;
+        let productName = node.name;
         if (node.type === 'variation') {
             productId = node.productId || '';
+            productName = node.productName || node.name;
         } else if (node.type === 'sku') {
             const productNode = treeData?.find(p =>
                 p.children?.some(v => v.children?.some(s => s.id === node.id))
             );
             productId = productNode?.id || '';
+            productName = productNode?.name || node.name;
         }
-        navigate({ to: '/products/$productId/edit', params: { productId } });
+        const productSlug = buildProductSlug(productName, productId);
+        navigate({ to: '/products/$productSlug/edit', params: { productSlug } });
     }, [treeData, navigate]);
 
     return (
