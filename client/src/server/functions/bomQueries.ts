@@ -123,6 +123,30 @@ export interface CostConfigResult {
     defaultPackagingCost: number;
 }
 
+/** Resolved BOM line with inherited values and computed cost */
+export interface ResolvedBomLine {
+    roleId: string;
+    roleCode: string;
+    roleName: string;
+    typeCode: string;
+    componentName: string;
+    colourHex: string | null;
+    /** Base quantity from product template (may be 0 if sizes override) */
+    quantity: number;
+    wastagePercent: number;
+    effectiveQty: number;
+    unitCost: number | null;
+    lineCost: number | null;
+    unit: string;
+    /** If SKUs override qty, shows min/max range and avg cost across sizes */
+    skuRange: { minQty: number; maxQty: number; avgCost: number } | null;
+}
+
+export interface ResolvedBomResult {
+    lines: ResolvedBomLine[];
+    totalCost: number;
+}
+
 // ============================================
 // QUERY SERVER FUNCTIONS
 // ============================================
@@ -515,4 +539,159 @@ export const getCostConfig = createServerFn({ method: 'GET' })
                 },
             };
         }
+    });
+
+/**
+ * Get RESOLVED BOM for a variation — merges Product template + Variation overrides.
+ * Returns each line with inherited qty/wastage, unit cost, and computed line cost.
+ */
+export const getResolvedBomForVariation = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => variationIdSchema.parse(input))
+    .handler(async ({ data }): Promise<MutationResult<ResolvedBomResult>> => {
+        const prisma = await getPrisma();
+        const { variationId } = data;
+
+        const variation = await prisma.variation.findUnique({
+            where: { id: variationId },
+            select: { id: true, productId: true, bomCost: true },
+        });
+
+        if (!variation) {
+            return { success: false, error: { code: 'NOT_FOUND', message: 'Variation not found' } };
+        }
+
+        // Load all 3 levels in parallel
+        const [productTemplates, variationLines, skuLines] = await Promise.all([
+            prisma.productBomTemplate.findMany({
+                where: { productId: variation.productId },
+                include: {
+                    role: { include: { type: true } },
+                    trimItem: true,
+                    serviceItem: true,
+                },
+                orderBy: { role: { sortOrder: 'asc' } },
+            }),
+            prisma.variationBomLine.findMany({
+                where: { variationId },
+                include: {
+                    role: { include: { type: true } },
+                    fabricColour: { include: { fabric: true } },
+                    trimItem: true,
+                    serviceItem: true,
+                },
+            }),
+            prisma.skuBomLine.findMany({
+                where: { sku: { variationId } },
+                include: {
+                    role: { include: { type: true } },
+                    fabricColour: { include: { fabric: true } },
+                    trimItem: true,
+                    serviceItem: true,
+                },
+            }),
+        ]);
+
+        const variationByRole = new Map(variationLines.map((l: DbRecord) => [l.roleId, l]));
+
+        // Group SKU BOM lines by roleId
+        const skuLinesByRole = new Map<string, DbRecord[]>();
+        for (const sl of skuLines) {
+            const arr = skuLinesByRole.get(sl.roleId) ?? [];
+            arr.push(sl);
+            skuLinesByRole.set(sl.roleId, arr);
+        }
+
+        let totalCost = 0;
+        const lines: ResolvedBomLine[] = [];
+
+        for (const tmpl of productTemplates) {
+            const role = tmpl.role;
+            const vLine: DbRecord = variationByRole.get(role.id);
+            const skuLinesForRole = skuLinesByRole.get(role.id) ?? [];
+
+            // Resolve base quantity: Variation → Product template
+            const baseQuantity = vLine?.quantity ?? tmpl.defaultQuantity ?? 0;
+            const wastagePercent = vLine?.wastagePercent ?? tmpl.wastagePercent ?? 0;
+
+            // Resolve unit cost by component type
+            let unitCost: number | null = null;
+            let componentName = '';
+            let colourHex: string | null = null;
+            const typeCode = role.type.code;
+
+            if (typeCode === 'FABRIC') {
+                const fc = vLine?.fabricColour;
+                if (fc) {
+                    componentName = `${fc.fabric.name} - ${fc.colourName}`;
+                    colourHex = fc.colourHex ?? null;
+                    unitCost = fc.costPerUnit ?? fc.fabric.costPerUnit ?? null;
+                }
+            } else if (typeCode === 'TRIM') {
+                const trim = vLine?.trimItem ?? tmpl.trimItem;
+                if (trim) {
+                    componentName = trim.name;
+                    unitCost = trim.costPerUnit;
+                }
+            } else if (typeCode === 'SERVICE') {
+                const svc = vLine?.serviceItem ?? tmpl.serviceItem;
+                if (svc) {
+                    componentName = svc.name;
+                    unitCost = svc.costPerJob;
+                }
+            }
+
+            // Check if SKUs override quantities for this role
+            let skuRange: ResolvedBomLine['skuRange'] = null;
+
+            if (skuLinesForRole.length > 0 && unitCost != null) {
+                // SKU-level overrides exist — compute range and average cost
+                const skuQtys = skuLinesForRole
+                    .map((sl: DbRecord) => sl.quantity ?? baseQuantity)
+                    .filter((q: number) => q > 0);
+
+                if (skuQtys.length > 0) {
+                    const minQty = Math.min(...skuQtys);
+                    const maxQty = Math.max(...skuQtys);
+                    const avgQty = skuQtys.reduce((a: number, b: number) => a + b, 0) / skuQtys.length;
+                    const avgEffQty = avgQty * (1 + wastagePercent / 100);
+                    const avgCost = unitCost * avgEffQty;
+                    skuRange = { minQty, maxQty, avgCost };
+
+                    // Use average for the line total
+                    totalCost += avgCost;
+                }
+            } else {
+                // No SKU overrides — use base quantity
+                const effectiveQty = baseQuantity * (1 + wastagePercent / 100);
+                const lineCost = unitCost != null ? unitCost * effectiveQty : null;
+                if (lineCost != null) totalCost += lineCost;
+            }
+
+            const effectiveQty = baseQuantity * (1 + wastagePercent / 100);
+            const lineCost = skuRange
+                ? skuRange.avgCost
+                : (unitCost != null ? unitCost * effectiveQty : null);
+
+            lines.push({
+                roleId: role.id,
+                roleCode: role.code,
+                roleName: role.name,
+                typeCode,
+                componentName,
+                colourHex,
+                quantity: baseQuantity,
+                wastagePercent,
+                effectiveQty,
+                unitCost,
+                lineCost,
+                unit: tmpl.quantityUnit || 'unit',
+                skuRange,
+            });
+        }
+
+        // Use stored bomCost if available (more accurate, trigger-computed)
+        const finalTotal = variation.bomCost ?? totalCost;
+
+        return { success: true, data: { lines, totalCost: finalTotal } };
     });

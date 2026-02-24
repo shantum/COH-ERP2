@@ -19,6 +19,7 @@ import { useProductEditForm } from '../components/products/unified-edit/hooks/us
 import { useVariationEditForm } from '../components/products/unified-edit/hooks/useVariationEditForm';
 import { useSkuEditForm } from '../components/products/unified-edit/hooks/useSkuEditForm';
 import { getCatalogFilters } from '../server/functions/products';
+import { getResolvedBomForVariation, type ResolvedBomLine } from '../server/functions/bomQueries';
 import type { ProductDetailData, VariationDetailData, SkuDetailData } from '../components/products/unified-edit/types';
 
 import { Button } from '@/components/ui/button';
@@ -281,6 +282,7 @@ function VariationCard({
     product: ProductDetailData;
 }) {
     const [showSkus, setShowSkus] = useState(false);
+    const [showBom, setShowBom] = useState(false);
 
     const {
         form,
@@ -291,6 +293,14 @@ function VariationCard({
     } = useVariationEditForm({
         variation,
         product,
+    });
+
+    // Fetch resolved BOM (product template + variation overrides merged, with costs)
+    const getResolvedBomFn = useServerFn(getResolvedBomForVariation);
+    const { data: bomResult, isLoading: bomLoading } = useQuery({
+        queryKey: ['bom', 'resolved', variation.id],
+        queryFn: () => getResolvedBomFn({ data: { variationId: variation.id } }),
+        enabled: showBom,
     });
 
     return (
@@ -338,6 +348,14 @@ function VariationCard({
                                 </Button>
                             </>
                         )}
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setShowBom(!showBom)}
+                        >
+                            {showBom ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                            <span className="ml-1 text-xs">BOM</span>
+                        </Button>
                         <Button
                             variant="ghost"
                             size="sm"
@@ -390,6 +408,104 @@ function VariationCard({
                         <Label className="text-xs">Active</Label>
                     </div>
                 </div>
+
+                {/* Collapsible BOM cost breakdown */}
+                {showBom && (
+                    <div className="mt-4 border rounded-md overflow-hidden">
+                        {bomLoading ? (
+                            <div className="flex items-center justify-center py-4">
+                                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                            </div>
+                        ) : bomResult?.success && bomResult.data && bomResult.data.lines.length > 0 ? (
+                            <>
+                                <table className="w-full text-sm">
+                                    <thead className="bg-muted/50">
+                                        <tr>
+                                            <th className="text-left px-3 py-2 font-medium text-xs">Type</th>
+                                            <th className="text-left px-3 py-2 font-medium text-xs">Role</th>
+                                            <th className="text-left px-3 py-2 font-medium text-xs">Component</th>
+                                            <th className="text-right px-3 py-2 font-medium text-xs">Qty</th>
+                                            <th className="text-right px-3 py-2 font-medium text-xs">Wastage</th>
+                                            <th className="text-right px-3 py-2 font-medium text-xs">Eff. Qty</th>
+                                            <th className="text-right px-3 py-2 font-medium text-xs">Unit Cost</th>
+                                            <th className="text-right px-3 py-2 font-medium text-xs">Line Total</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {bomResult.data.lines.map((line: ResolvedBomLine) => (
+                                            <tr key={line.roleId} className="border-t">
+                                                <td className="px-3 py-1.5 text-xs">
+                                                    <Badge variant="outline" className="text-[10px] font-normal">
+                                                        {line.typeCode}
+                                                    </Badge>
+                                                </td>
+                                                <td className="px-3 py-1.5 text-xs">{line.roleName}</td>
+                                                <td className="px-3 py-1.5 text-xs">
+                                                    {line.componentName ? (
+                                                        <span className="flex items-center gap-1.5">
+                                                            {line.colourHex && (
+                                                                <span
+                                                                    className="w-3 h-3 rounded-full border border-gray-300 flex-shrink-0"
+                                                                    style={{ backgroundColor: line.colourHex }}
+                                                                />
+                                                            )}
+                                                            {line.componentName}
+                                                        </span>
+                                                    ) : (
+                                                        <span className="text-muted-foreground italic">Not set</span>
+                                                    )}
+                                                </td>
+                                                <td className="px-3 py-1.5 text-xs text-right tabular-nums">
+                                                    {line.skuRange
+                                                        ? (line.skuRange.minQty === line.skuRange.maxQty
+                                                            ? `${line.skuRange.minQty} ${line.unit}`
+                                                            : `${line.skuRange.minQty}–${line.skuRange.maxQty} ${line.unit}`)
+                                                        : `${line.quantity} ${line.unit}`
+                                                    }
+                                                    {line.skuRange && line.skuRange.minQty !== line.skuRange.maxQty && (
+                                                        <span className="text-muted-foreground ml-1">(by size)</span>
+                                                    )}
+                                                </td>
+                                                <td className="px-3 py-1.5 text-xs text-right tabular-nums">
+                                                    {line.wastagePercent > 0 ? `${line.wastagePercent}%` : '—'}
+                                                </td>
+                                                <td className="px-3 py-1.5 text-xs text-right tabular-nums">
+                                                    {line.skuRange
+                                                        ? '(avg)'
+                                                        : line.effectiveQty.toFixed(2)
+                                                    }
+                                                </td>
+                                                <td className="px-3 py-1.5 text-xs text-right tabular-nums">
+                                                    {line.unitCost != null ? `₹${line.unitCost.toFixed(0)}` : '—'}
+                                                </td>
+                                                <td className="px-3 py-1.5 text-xs text-right tabular-nums font-medium">
+                                                    {line.lineCost != null ? `₹${line.lineCost.toFixed(0)}` : '—'}
+                                                    {line.skuRange && (
+                                                        <span className="text-muted-foreground font-normal ml-1">(avg)</span>
+                                                    )}
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                    <tfoot>
+                                        <tr className="border-t bg-muted/30">
+                                            <td colSpan={7} className="px-3 py-2 text-xs font-semibold text-right">
+                                                Total BOM Cost
+                                            </td>
+                                            <td className="px-3 py-2 text-xs font-semibold text-right tabular-nums">
+                                                ₹{bomResult.data.totalCost.toFixed(0)}
+                                            </td>
+                                        </tr>
+                                    </tfoot>
+                                </table>
+                            </>
+                        ) : (
+                            <div className="px-3 py-4 text-xs text-muted-foreground text-center">
+                                No BOM template defined for this product.
+                            </div>
+                        )}
+                    </div>
+                )}
 
                 {/* Collapsible SKU table */}
                 {showSkus && (
