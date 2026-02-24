@@ -6,6 +6,11 @@
  *   /*      → TanStack Start SSR (frontend + Server Functions)
  */
 
+// Force UTC before any imports — pg driver serializes Date objects using
+// process timezone. Without this, timestamps shift by the server's local
+// offset (e.g. CET +1h, IST +5.5h) when compared against timestamp columns.
+process.env.TZ = 'UTC';
+
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';

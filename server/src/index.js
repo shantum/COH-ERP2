@@ -1,6 +1,8 @@
+// Force UTC for consistent pg driver date serialization across all environments
+process.env.TZ = 'UTC';
+
 // Validate ALL environment variables using Zod schema
 // dotenv.config() is called inside env.ts before validation
-// This will fail fast with clear error messages if required vars are missing
 import './config/env.js';
 
 // Import logger EARLY to capture console.log/warn/error from all subsequent imports

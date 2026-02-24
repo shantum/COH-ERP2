@@ -6,6 +6,7 @@ module.exports = {
     cwd: '/app/COH-ERP2',
     env: {
       NODE_ENV: 'production',
+      TZ: 'UTC',
     },
     max_memory_restart: '1G',
     exp_backoff_restart_delay: 100,

@@ -1,3 +1,6 @@
+// Force UTC for consistent pg driver date serialization (SSR server functions)
+process.env.TZ = 'UTC'
+
 import { defineConfig, type Plugin } from 'vite'
 import tsConfigPaths from 'vite-tsconfig-paths'
 import { tanstackStart } from '@tanstack/react-start/plugin/vite'
