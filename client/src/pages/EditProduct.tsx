@@ -12,7 +12,7 @@
 
 import { useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
-import { Route } from '../routes/_authenticated/products_.$productId.edit';
+import { Route } from '../routes/_authenticated/products_/$productId/edit';
 import { useProductEditForm } from '../components/products/unified-edit/hooks/useProductEditForm';
 import { useVariationEditForm } from '../components/products/unified-edit/hooks/useVariationEditForm';
 import { useSkuEditForm } from '../components/products/unified-edit/hooks/useSkuEditForm';

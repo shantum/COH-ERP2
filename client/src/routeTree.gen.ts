@@ -47,7 +47,7 @@ import { Route as AuthenticatedChannelImportRouteImport } from './routes/_authen
 import { Route as AuthenticatedAnalyticsRouteImport } from './routes/_authenticated/analytics'
 import { Route as AuthenticatedBusinessIndexRouteImport } from './routes/_authenticated/business/index'
 import { Route as AuthenticatedProductsNewRouteImport } from './routes/_authenticated/products_.new'
-import { Route as AuthenticatedProductsProductIdEditRouteImport } from './routes/_authenticated/products_.$productId.edit'
+import { Route as AuthenticatedProductsProductIdEditRouteImport } from './routes/_authenticated/products_/$productId/edit'
 
 const ShipmentsRoute = ShipmentsRouteImport.update({
   id: '/shipments',
