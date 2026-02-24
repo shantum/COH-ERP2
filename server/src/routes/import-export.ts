@@ -19,6 +19,7 @@
 import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { authenticateToken } from '../middleware/auth.js';
+import { asyncHandler } from '../middleware/asyncHandler.js';
 import { parse, format } from 'fast-csv';
 import multer from 'multer';
 import { Readable } from 'stream';
@@ -105,7 +106,7 @@ const upload = multer({
 // PRODUCT EXPORT
 // ============================================
 
-router.get('/export/products', authenticateToken, async (req: Request, res: Response) => {
+router.get('/export/products', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
     try {
         // NOTE: fabric/fabricType removed from schema - fabric assignment now via BOM
         const products = await req.prisma.product.findMany({
@@ -158,13 +159,13 @@ router.get('/export/products', authenticateToken, async (req: Request, res: Resp
         console.error('Export products error:', error);
         res.status(500).json({ error: 'Failed to export products' });
     }
-});
+}));
 
 // ============================================
 // PRODUCT IMPORT
 // ============================================
 
-router.post('/import/products', authenticateToken, upload.single('file'), async (req: Request, res: Response) => {
+router.post('/import/products', authenticateToken, upload.single('file'), asyncHandler(async (req: Request, res: Response) => {
     try {
         const file = req.file as Express.Multer.File | undefined;
         if (!file) {
@@ -289,13 +290,13 @@ router.post('/import/products', authenticateToken, upload.single('file'), async 
         console.error('Import products error:', error);
         res.status(500).json({ error: 'Failed to import products' });
     }
-});
+}));
 
 // ============================================
 // FABRIC EXPORT
 // ============================================
 
-router.get('/export/fabrics', authenticateToken, async (req: Request, res: Response) => {
+router.get('/export/fabrics', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
     try {
         // NOTE: FabricType removed - now using Material > Fabric > FabricColour hierarchy
         // Export FabricColour with parent Fabric and Material info
@@ -336,13 +337,13 @@ router.get('/export/fabrics', authenticateToken, async (req: Request, res: Respo
         console.error('Export fabrics error:', error);
         res.status(500).json({ error: 'Failed to export fabrics' });
     }
-});
+}));
 
 // ============================================
 // FABRIC IMPORT
 // ============================================
 
-router.post('/import/fabrics', authenticateToken, upload.single('file'), async (req: Request, res: Response) => {
+router.post('/import/fabrics', authenticateToken, upload.single('file'), asyncHandler(async (req: Request, res: Response) => {
     try {
         const file = req.file as Express.Multer.File | undefined;
         if (!file) {
@@ -490,13 +491,13 @@ router.post('/import/fabrics', authenticateToken, upload.single('file'), async (
         console.error('Import fabrics error:', error);
         res.status(500).json({ error: 'Failed to import fabrics' });
     }
-});
+}));
 
 // ============================================
 // INVENTORY EXPORT
 // ============================================
 
-router.get('/export/inventory', authenticateToken, async (req: Request, res: Response) => {
+router.get('/export/inventory', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
     try {
         const transactions = await req.prisma.inventoryTransaction.findMany({
             include: {
@@ -539,6 +540,6 @@ router.get('/export/inventory', authenticateToken, async (req: Request, res: Res
         console.error('Export inventory error:', error);
         res.status(500).json({ error: 'Failed to export inventory' });
     }
-});
+}));
 
 export default router;

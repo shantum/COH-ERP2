@@ -10,7 +10,7 @@
  * - HALF_OPEN: Testing if service has recovered
  */
 
-import { CIRCUIT_BREAKER_CONFIG } from '../constants.js';
+import { CIRCUIT_BREAKER_CONFIG } from '../config/index.js';
 import { syncLogger } from './logger.js';
 
 // ============================================

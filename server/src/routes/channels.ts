@@ -17,6 +17,7 @@
 import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { authenticateToken } from '../middleware/auth.js';
+import { asyncHandler } from '../middleware/asyncHandler.js';
 import { parse } from 'fast-csv';
 import multer from 'multer';
 import { Readable } from 'stream';
@@ -384,7 +385,7 @@ interface PreviewResponse {
 // IMPORT CHANNEL DATA (analytics-only)
 // ============================================
 
-router.post('/import', authenticateToken, upload.single('file'), async (req: Request, res: Response) => {
+router.post('/import', authenticateToken, upload.single('file'), asyncHandler(async (req: Request, res: Response) => {
   try {
     const file = req.file as Express.Multer.File | undefined;
     if (!file) {
@@ -488,13 +489,13 @@ router.post('/import', authenticateToken, upload.single('file'), async (req: Req
     console.error('Channel import error:', error);
     res.status(500).json({ error: 'Failed to import channel data' });
   }
-});
+}));
 
 // ============================================
 // PREVIEW ORDER IMPORT
 // ============================================
 
-router.post('/preview-import', authenticateToken, upload.single('file'), async (req: Request, res: Response) => {
+router.post('/preview-import', authenticateToken, upload.single('file'), asyncHandler(async (req: Request, res: Response) => {
   try {
     const file = req.file as Express.Multer.File | undefined;
     if (!file) {
@@ -710,13 +711,13 @@ router.post('/preview-import', authenticateToken, upload.single('file'), async (
     console.error('Preview import error:', error);
     res.status(500).json({ error: 'Failed to preview import' });
   }
-});
+}));
 
 // ============================================
 // EXECUTE ORDER IMPORT
 // ============================================
 
-router.post('/execute-import', authenticateToken, async (req: Request, res: Response) => {
+router.post('/execute-import', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
   try {
     const { selectedOrders, cacheKey, filename } = req.body as {
       selectedOrders: PreviewOrder[];
@@ -1172,13 +1173,13 @@ router.post('/execute-import', authenticateToken, async (req: Request, res: Resp
     console.error('Execute import error:', error);
     res.status(500).json({ error: 'Failed to execute import' });
   }
-});
+}));
 
 // ============================================
 // GET IMPORT HISTORY
 // ============================================
 
-router.get('/import-history', authenticateToken, async (req: Request, res: Response) => {
+router.get('/import-history', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
   try {
     const batches = await req.prisma.channelImportBatch.findMany({
       orderBy: { importedAt: 'desc' },
@@ -1190,13 +1191,13 @@ router.get('/import-history', authenticateToken, async (req: Request, res: Respo
     console.error('Get import history error:', error);
     res.status(500).json({ error: 'Failed to get import history' });
   }
-});
+}));
 
 // ============================================
 // DELETE IMPORT BATCH
 // ============================================
 
-router.delete('/import-batch/:batchId', authenticateToken, async (req: Request, res: Response) => {
+router.delete('/import-batch/:batchId', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
   try {
     const batchIdParam = req.params.batchId;
     const batchId = Array.isArray(batchIdParam) ? batchIdParam[0] : batchIdParam;
@@ -1219,6 +1220,6 @@ router.delete('/import-batch/:batchId', authenticateToken, async (req: Request, 
     console.error('Delete import batch error:', error);
     res.status(500).json({ error: 'Failed to delete import batch' });
   }
-});
+}));
 
 export default router;

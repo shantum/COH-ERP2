@@ -17,7 +17,7 @@ import { cacheAndProcessOrder } from './shopifyOrderProcessor.js';
 import { syncSingleProduct } from './productSyncService.js';
 import { syncSingleCustomer } from './customerSyncService.js';
 import { syncLogger } from '../utils/logger.js';
-import { SYNC_WORKER_CONFIG } from '../constants.js';
+import { SYNC_WORKER_CONFIG } from '../config/index.js';
 
 // ============================================
 // TYPE DEFINITIONS

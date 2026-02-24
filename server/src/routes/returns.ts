@@ -13,6 +13,7 @@ import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { authenticateToken } from '../middleware/auth.js';
+import { asyncHandler } from '../middleware/asyncHandler.js';
 import ithinkLogistics from '../services/ithinkLogistics.js';
 import type { ProductInfo, ShipmentDimensions } from '../services/ithinkLogistics.js';
 import { shippingLogger } from '../utils/logger.js';
@@ -62,7 +63,7 @@ const CheckServiceabilitySchema = z.object({
  *
  * Check if a pincode supports reverse pickup
  */
-router.post('/check-serviceability', authenticateToken, async (req: Request, res: Response): Promise<void> => {
+router.post('/check-serviceability', authenticateToken, asyncHandler(async (req: Request, res: Response): Promise<void> => {
     try {
         const parseResult = CheckServiceabilitySchema.safeParse(req.body);
         if (!parseResult.success) {
@@ -89,7 +90,7 @@ router.post('/check-serviceability', authenticateToken, async (req: Request, res
             error: message,
         });
     }
-});
+}));
 
 /**
  * POST /api/returns/schedule-pickup
@@ -100,7 +101,7 @@ router.post('/check-serviceability', authenticateToken, async (req: Request, res
  * When a line has a returnBatchNumber, ALL lines in that batch with status='requested'
  * are included in the same pickup and share the AWB number.
  */
-router.post('/schedule-pickup', authenticateToken, async (req: Request, res: Response): Promise<void> => {
+router.post('/schedule-pickup', authenticateToken, asyncHandler(async (req: Request, res: Response): Promise<void> => {
     try {
         const parseResult = SchedulePickupSchema.safeParse(req.body);
         if (!parseResult.success) {
@@ -323,14 +324,14 @@ router.post('/schedule-pickup', authenticateToken, async (req: Request, res: Res
             error: message,
         });
     }
-});
+}));
 
 /**
  * GET /api/returns/tracking/:awbNumber
  *
  * Get tracking status for a return shipment AWB
  */
-router.get('/tracking/:awbNumber', authenticateToken, async (req: Request, res: Response): Promise<void> => {
+router.get('/tracking/:awbNumber', authenticateToken, asyncHandler(async (req: Request, res: Response): Promise<void> => {
     const awbNumber = req.params.awbNumber as string;
 
     if (!awbNumber) {
@@ -361,6 +362,6 @@ router.get('/tracking/:awbNumber', authenticateToken, async (req: Request, res: 
             error: message,
         });
     }
-});
+}));
 
 export default router;

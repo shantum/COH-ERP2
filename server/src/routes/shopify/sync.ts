@@ -12,7 +12,7 @@ import { syncCustomers, syncAllCustomers } from '../../services/customerSyncServ
 import { processFromCache, markCacheProcessed, markCacheError, cacheShopifyOrders, processCacheBatch, syncFulfillmentsToOrderLines } from '../../services/shopifyOrderProcessor.js';
 import { detectPaymentMethod } from '../../utils/shopifyHelpers.js';
 import { shopifyLogger } from '../../utils/logger.js';
-import { FULL_DUMP_CONFIG } from '../../constants.js';
+import { FULL_DUMP_CONFIG } from '../../config/index.js';
 import type { AxiosErrorLike, BackfillResult, BackfillPaymentMethodResult, BackfillOrderFieldsResult, OrderToBackfill } from './types.js';
 
 const router = Router();

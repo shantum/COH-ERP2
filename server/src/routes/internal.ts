@@ -11,6 +11,7 @@
 
 import { Router } from 'express';
 import type { Request, Response, NextFunction } from 'express';
+import { asyncHandler } from '../middleware/asyncHandler.js';
 import { broadcastOrderUpdate } from './sse.js';
 import type { OrderUpdateEvent } from './sse.js';
 import { deferredExecutor } from '../services/deferredExecutor.js';
@@ -205,7 +206,7 @@ router.post('/push-sku-balances', verifyInternalRequest, (req: Request, res: Res
  * Returns lightweight status for all background workers.
  * Called by the dashboard server function to show sync timestamps.
  */
-router.get('/worker-status', verifyInternalRequest, async (_req: Request, res: Response): Promise<void> => {
+router.get('/worker-status', verifyInternalRequest, asyncHandler(async (_req: Request, res: Response): Promise<void> => {
     try {
         const shopify = scheduledSync.getStatus();
         const tracking = trackingSync.getStatus();
@@ -307,6 +308,6 @@ router.get('/worker-status', verifyInternalRequest, async (_req: Request, res: R
         console.error('[Internal API] Worker status error:', message);
         res.status(500).json({ error: 'Failed to get worker status' });
     }
-});
+}));
 
 export default router;

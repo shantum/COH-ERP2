@@ -8,7 +8,7 @@
  * can modify an order at a time.
  */
 
-import { ORDER_LOCK_CONFIG } from '../constants.js';
+import { ORDER_LOCK_CONFIG } from '../config/index.js';
 
 // In-memory lock for lightweight operations (single-instance only)
 // For multi-instance deployments, use the database lock

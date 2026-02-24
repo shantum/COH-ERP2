@@ -9,6 +9,7 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { authenticateToken } from '../middleware/auth.js';
+import { asyncHandler } from '../middleware/asyncHandler.js';
 import {
     syncReturnPrimeRequests,
     getSyncStatus,
@@ -49,7 +50,7 @@ const SyncOptionsSchema = z.object({
  * - Date range of stored data
  * - Breakdown by type and status
  */
-router.get('/sync-status', async (req: Request, res: Response): Promise<void> => {
+router.get('/sync-status', asyncHandler(async (req: Request, res: Response): Promise<void> => {
     try {
         const status = await getDetailedSyncStatus();
         res.json({
@@ -64,7 +65,7 @@ router.get('/sync-status', async (req: Request, res: Response): Promise<void> =>
             error: message,
         });
     }
-});
+}));
 
 /**
  * POST /api/returnprime/admin/sync
@@ -76,7 +77,7 @@ router.get('/sync-status', async (req: Request, res: Response): Promise<void> =>
  * - dateTo: YYYY-MM-DD (optional, defaults to today)
  * - fullSync: boolean (optional, if true syncs 12 months of history)
  */
-router.post('/sync', async (req: Request, res: Response): Promise<void> => {
+router.post('/sync', asyncHandler(async (req: Request, res: Response): Promise<void> => {
     try {
         const validation = SyncOptionsSchema.safeParse(req.body);
         if (!validation.success) {
@@ -123,14 +124,14 @@ router.post('/sync', async (req: Request, res: Response): Promise<void> => {
             error: message,
         });
     }
-});
+}));
 
 /**
  * GET /api/returnprime/admin/sync-status/simple
  *
  * Get a simple sync status (faster, fewer queries)
  */
-router.get('/sync-status/simple', async (req: Request, res: Response): Promise<void> => {
+router.get('/sync-status/simple', asyncHandler(async (req: Request, res: Response): Promise<void> => {
     try {
         const status = await getSyncStatus();
         res.json({
@@ -149,6 +150,6 @@ router.get('/sync-status/simple', async (req: Request, res: Response): Promise<v
             error: message,
         });
     }
-});
+}));
 
 export default router;

@@ -14,6 +14,7 @@ import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { getReturnPrimeClient } from '../services/returnPrime.js';
 import { authenticateToken } from '../middleware/auth.js';
+import { asyncHandler } from '../middleware/asyncHandler.js';
 
 const router: Router = Router();
 
@@ -37,7 +38,7 @@ const SyncBatchInputSchema = z.object({
  * POST /api/returnprime/sync
  * Sync a single order line's return data to Return Prime
  */
-router.post('/sync', authenticateToken, async (req: Request, res: Response): Promise<void> => {
+router.post('/sync', authenticateToken, asyncHandler(async (req: Request, res: Response): Promise<void> => {
     const validation = SyncOrderLineInputSchema.safeParse(req.body);
     if (!validation.success) {
         res.status(400).json({
@@ -114,13 +115,13 @@ router.post('/sync', authenticateToken, async (req: Request, res: Response): Pro
 
         res.json({ success: false, error: message });
     }
-});
+}));
 
 /**
  * POST /api/returnprime/sync-batch
  * Sync all lines in a return batch to Return Prime
  */
-router.post('/sync-batch', authenticateToken, async (req: Request, res: Response): Promise<void> => {
+router.post('/sync-batch', authenticateToken, asyncHandler(async (req: Request, res: Response): Promise<void> => {
     const validation = SyncBatchInputSchema.safeParse(req.body);
     if (!validation.success) {
         res.status(400).json({
@@ -208,13 +209,13 @@ router.post('/sync-batch', authenticateToken, async (req: Request, res: Response
         console.error(`[ReturnPrime] Batch sync failed for ${batchNumber}:`, message);
         res.status(500).json({ success: false, error: message });
     }
-});
+}));
 
 /**
  * GET /api/returnprime/sync-status
  * Get sync status for lines with Return Prime integration
  */
-router.get('/sync-status', authenticateToken, async (req: Request, res: Response): Promise<void> => {
+router.get('/sync-status', authenticateToken, asyncHandler(async (req: Request, res: Response): Promise<void> => {
     try {
         const [pendingSync, failedSync, totalWithRp] = await Promise.all([
             // Lines that need syncing (received locally but not synced to RP)
@@ -253,6 +254,6 @@ router.get('/sync-status', authenticateToken, async (req: Request, res: Response
         const message = error instanceof Error ? error.message : 'Unknown error';
         res.status(500).json({ success: false, error: message });
     }
-});
+}));
 
 export default router;

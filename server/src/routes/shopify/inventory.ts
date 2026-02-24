@@ -7,6 +7,7 @@
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { authenticateToken } from '../../middleware/auth.js';
+import { asyncHandler } from '../../middleware/asyncHandler.js';
 import shopifyClient from '../../services/shopify.js';
 import { shopifyLogger } from '../../utils/logger.js';
 
@@ -35,7 +36,7 @@ const ZeroOutSkusSchema = z.object({
  * GET /api/shopify/inventory/locations
  * Get all Shopify inventory locations
  */
-router.get('/locations', authenticateToken, async (_req: Request, res: Response): Promise<void> => {
+router.get('/locations', authenticateToken, asyncHandler(async (_req: Request, res: Response): Promise<void> => {
     try {
         if (!shopifyClient.isConfigured()) {
             res.status(400).json({ error: 'Shopify is not configured' });
@@ -49,7 +50,7 @@ router.get('/locations', authenticateToken, async (_req: Request, res: Response)
         shopifyLogger.error({ error: message }, 'Failed to get locations');
         res.status(500).json({ error: message });
     }
-});
+}));
 
 /**
  * GET /api/shopify/inventory/item/:sku

@@ -3,6 +3,7 @@ import type { Request, Response, NextFunction } from 'express';
 import type { PrismaClient } from '@prisma/client';
 import crypto from 'crypto';
 import { requireAdmin } from '../middleware/auth.js';
+import { asyncHandler } from '../middleware/asyncHandler.js';
 import { cacheAndProcessOrder, type ProcessResult } from '../services/shopifyOrderProcessor.js';
 import { cacheAndProcessProduct, handleProductDeletion } from '../services/productSyncService.js';
 import {
@@ -200,7 +201,7 @@ const verifyWebhook = async (req: WebhookRequest, res: Response, next: NextFunct
  * Legacy endpoints (orders/create, orders/updated, orders/cancelled, orders/fulfilled)
  * have been consolidated into this single unified endpoint for simpler maintenance.
  */
-router.post('/shopify/orders', verifyWebhook, async (req: WebhookRequest, res: Response): Promise<void> => {
+router.post('/shopify/orders', verifyWebhook, asyncHandler(async (req: WebhookRequest, res: Response): Promise<void> => {
     const startTime = Date.now();
     const webhookId = req.get('X-Shopify-Webhook-Id') || undefined;
     const webhookTopic = req.get('X-Shopify-Topic') || 'orders/updated';
@@ -266,7 +267,7 @@ router.post('/shopify/orders', verifyWebhook, async (req: WebhookRequest, res: R
         await addToFailedQueue(req.prisma, 'order', body?.id, req.body, err.message);
         res.status(200).json({ received: true, error: err.message }); // Always return 200 to prevent Shopify retries
     }
-});
+}));
 
 // ============================================
 // PRODUCT WEBHOOKS
@@ -282,7 +283,7 @@ router.post('/shopify/orders', verifyWebhook, async (req: WebhookRequest, res: R
  * - Endpoint: POST /api/webhooks/shopify/products
  * - Supported topics: products/create, products/update, products/delete
  */
-router.post('/shopify/products', verifyWebhook, async (req: WebhookRequest, res: Response): Promise<void> => {
+router.post('/shopify/products', verifyWebhook, asyncHandler(async (req: WebhookRequest, res: Response): Promise<void> => {
     const startTime = Date.now();
     const webhookId = req.get('X-Shopify-Webhook-Id') || undefined;
     const webhookTopic = req.get('X-Shopify-Topic') || 'products/update';
@@ -333,7 +334,7 @@ router.post('/shopify/products', verifyWebhook, async (req: WebhookRequest, res:
         await addToFailedQueue(req.prisma, 'product', body?.id, req.body, err.message);
         res.status(200).json({ received: true, error: err.message });
     }
-});
+}));
 
 // ============================================
 // CUSTOMER WEBHOOKS
@@ -349,7 +350,7 @@ router.post('/shopify/products', verifyWebhook, async (req: WebhookRequest, res:
  * - Endpoint: POST /api/webhooks/shopify/customers
  * - Supported topics: customers/create, customers/update
  */
-router.post('/shopify/customers', verifyWebhook, async (req: WebhookRequest, res: Response): Promise<void> => {
+router.post('/shopify/customers', verifyWebhook, asyncHandler(async (req: WebhookRequest, res: Response): Promise<void> => {
     const startTime = Date.now();
     const webhookId = req.get('X-Shopify-Webhook-Id') || undefined;
     const webhookTopic = req.get('X-Shopify-Topic') || 'customers/update';
@@ -385,10 +386,10 @@ router.post('/shopify/customers', verifyWebhook, async (req: WebhookRequest, res
         await addToFailedQueue(req.prisma, 'customer', body?.id, req.body, err.message);
         res.status(200).json({ received: true, error: err.message });
     }
-});
+}));
 
 // Inventory Levels - Updated
-router.post('/shopify/inventory_levels/update', verifyWebhook, async (req: WebhookRequest, res: Response): Promise<void> => {
+router.post('/shopify/inventory_levels/update', verifyWebhook, asyncHandler(async (req: WebhookRequest, res: Response): Promise<void> => {
     const startTime = Date.now();
     const webhookId = req.get('X-Shopify-Webhook-Id') || undefined;
     try {
@@ -447,14 +448,14 @@ router.post('/shopify/inventory_levels/update', verifyWebhook, async (req: Webho
         await updateWebhookLog(req.prisma, webhookId, 'failed', err.message, Date.now() - startTime);
         res.status(200).json({ received: true, error: err.message });
     }
-});
+}));
 
 // ============================================
 // WEBHOOK MANAGEMENT
 // ============================================
 
 // Get webhook status
-router.get('/status', requireAdmin, async (req: Request, res: Response): Promise<void> => {
+router.get('/status', requireAdmin, asyncHandler(async (req: Request, res: Response): Promise<void> => {
     try {
         const secret = await loadWebhookSecret(req.prisma);
 
@@ -485,10 +486,10 @@ router.get('/status', requireAdmin, async (req: Request, res: Response): Promise
     } catch (error) {
         res.status(500).json({ error: 'Failed to get webhook status' });
     }
-});
+}));
 
 // Update webhook secret
-router.put('/secret', requireAdmin, async (req: Request, res: Response): Promise<void> => {
+router.put('/secret', requireAdmin, asyncHandler(async (req: Request, res: Response): Promise<void> => {
     try {
         const { secret } = req.body as { secret?: string };
 
@@ -502,7 +503,7 @@ router.put('/secret', requireAdmin, async (req: Request, res: Response): Promise
     } catch (error) {
         res.status(500).json({ error: 'Failed to update webhook secret' });
     }
-});
+}));
 
 // ============================================
 // HELPER FUNCTIONS
