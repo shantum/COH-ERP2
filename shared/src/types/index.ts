@@ -82,7 +82,7 @@ export interface Variation {
   colorName: string;
   standardColor: string | null;
   colorHex: string | null;
-  fabricId: string;
+  fabricId?: string | null; // Removed from schema — fabric assignment now via BOM (VariationBomLine)
   imageUrl: string | null;
   hasLining: boolean;
   isActive: boolean;
@@ -163,8 +163,8 @@ export interface Customer {
 // ORDERS
 // ============================================
 
-export type OrderStatus = 'open' | 'shipped' | 'delivered' | 'cancelled' | 'returned';
-export type LineStatus = 'pending' | 'allocated' | 'picked' | 'packed' | 'shipped' | 'cancelled';
+export type OrderStatus = 'open' | 'shipped' | 'partially_shipped' | 'delivered' | 'cancelled' | 'returned' | 'archived';
+export type LineStatus = 'pending' | 'allocated' | 'picked' | 'packed' | 'shipped' | 'delivered' | 'cancelled';
 export type FulfillmentStage = 'pending' | 'allocated' | 'in_progress' | 'ready_to_ship';
 
 /**
@@ -313,6 +313,7 @@ export interface InventoryBalance {
   totalOutward: number;
   currentBalance: number;
   availableBalance: number;
+  hasDataIntegrityIssue?: boolean;
   sku?: Sku;
 }
 
@@ -459,7 +460,7 @@ export interface CreateVariationData {
   colorName: string;
   standardColor?: string | null;
   colorHex?: string | null;
-  fabricId: string;
+  fabricId?: string | null; // Optional — fabric assignment now via BOM
   imageUrl?: string | null;
   hasLining?: boolean;
 }

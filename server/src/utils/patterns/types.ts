@@ -155,7 +155,7 @@ export interface TransactionDeletionValidation {
 // ORDER TYPES
 // ============================================
 
-export type LineStatus = 'pending' | 'allocated' | 'picked' | 'packed' | 'cancelled' | 'shipped';
+export type LineStatus = 'pending' | 'allocated' | 'picked' | 'packed' | 'shipped' | 'delivered' | 'cancelled';
 
 export type FulfillmentStage = 'pending' | 'allocated' | 'in_progress' | 'ready_to_ship';
 
