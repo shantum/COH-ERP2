@@ -114,18 +114,9 @@ function getDateRange(range: RangePreset, customStart?: string, customEnd?: stri
   return { startDate, endDate };
 }
 
+import { formatCurrency as _fmtShared, formatCurrencyFull } from '../utils/formatting';
 function formatCurrency(value: number, compact = false): string {
-  if (compact) {
-    if (Math.abs(value) >= 10000000) return `₹${(value / 10000000).toFixed(2)} Cr`;
-    if (Math.abs(value) >= 100000) return `₹${(value / 100000).toFixed(2)} L`;
-    if (Math.abs(value) >= 1000) return `₹${(value / 1000).toFixed(1)} K`;
-  }
-  return new Intl.NumberFormat('en-IN', {
-    style: 'currency',
-    currency: 'INR',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(value);
+  return compact ? _fmtShared(value) : formatCurrencyFull(value);
 }
 
 function formatNumber(value: number): string {

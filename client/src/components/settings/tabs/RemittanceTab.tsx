@@ -4,6 +4,7 @@
  */
 
 import React, { useState } from 'react';
+import { formatCurrencyFull } from '../../../utils/formatting';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { remittanceApi } from '../../../services/api';
 import { Upload, FileSpreadsheet, DollarSign, CheckCircle, AlertCircle, Clock, RefreshCw, ExternalLink, RotateCcw, Zap, Link2, ChevronDown, ChevronUp } from 'lucide-react';
@@ -154,13 +155,7 @@ export function RemittanceTab() {
         }
     };
 
-    const formatCurrency = (amount: number) => {
-        return new Intl.NumberFormat('en-IN', {
-            style: 'currency',
-            currency: 'INR',
-            maximumFractionDigits: 0,
-        }).format(amount);
-    };
+    const formatCurrency = formatCurrencyFull;
 
     const formatDate = (dateStr: string | null) => {
         if (!dateStr) return '-';

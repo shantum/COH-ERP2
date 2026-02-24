@@ -10,10 +10,10 @@
 import {
     TXN_TYPE,
     TXN_REASON,
-} from '../utils/queryPatterns.js';
+} from '../utils/patterns/index.js';
 import shopifyClient from '../services/shopify/index.js';
 import { validatePassword } from '../utils/validation.js';
-import { calculateTier, calculateLTV, DEFAULT_TIER_THRESHOLDS } from '../utils/tierUtils.js';
+import { calculateTierFromLtv as calculateTier, calculateLTV, DEFAULT_TIER_THRESHOLDS } from '../utils/tierUtils.js';
 import { encrypt, decrypt, isEncrypted } from '../utils/encryption.js';
 import { normalizeSize, buildVariantImageMap, groupVariantsByColor } from '../services/productSync/index.ts';
 import { buildCustomerData } from '../services/customerSyncService.ts';

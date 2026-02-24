@@ -29,7 +29,7 @@ import {
     releaseReservedInventory,
     TXN_TYPE,
     TXN_REASON,
-} from '../utils/queryPatterns.js';
+} from '../utils/patterns/index.js';
 
 // Increase timeout for performance tests
 jest.setTimeout(120000); // 2 minutes

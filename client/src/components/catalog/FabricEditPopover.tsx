@@ -57,26 +57,3 @@ export function FabricDisplayCell({
     );
 }
 
-// Legacy export for backward compatibility during migration
-// TODO: Remove after all usages are updated
-export interface FabricEditPopoverProps {
-    row: FabricRowData;
-    viewLevel: ViewLevel;
-    columnType: 'fabricType' | 'fabric';
-    fabricTypes?: Array<{ id: string; name: string }>;
-    fabrics?: Array<{ id: string; name: string; colorName: string; fabricTypeId: string | null; displayName: string }>;
-    onUpdateFabricType?: (productId: string, fabricTypeId: string | null, affectedCount: number) => void;
-    onUpdateFabric?: (variationId: string, fabricId: string, affectedCount: number) => void;
-    rawItems?: Array<{ id: string; name: string }>;
-}
-
-/**
- * @deprecated Use FabricDisplayCell instead. Fabric editing is now done via BOM Editor.
- */
-export function FabricEditPopover({
-    row,
-    viewLevel,
-    columnType,
-}: FabricEditPopoverProps) {
-    return <FabricDisplayCell row={row} viewLevel={viewLevel} columnType={columnType} />;
-}

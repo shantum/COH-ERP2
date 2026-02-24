@@ -25,10 +25,7 @@ interface BomDataTableProps {
 
 const BATCH_SIZE = 250;
 
-function formatCurrency(value: number | undefined | null): string {
-    if (value == null) return '-';
-    return `\u20B9${Math.round(value).toLocaleString('en-IN')}`;
-}
+import { formatCurrencyOrDash as formatCurrency } from '../../utils/formatting';
 
 function formatPercent(value: number | undefined | null): string {
     if (value == null) return '-';

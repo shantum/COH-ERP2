@@ -66,14 +66,8 @@ export interface PartyBalance {
   outstanding: number;
 }
 
-export function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat('en-IN', {
-    style: 'currency',
-    currency: 'INR',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  }).format(amount);
-}
+import { formatCurrency as _fmt } from '../../utils/formatting';
+export const formatCurrency = (amount: number) => _fmt(amount, { compact: false });
 
 /** "2026-01" -> "Jan 2026" */
 export function formatPeriod(period: string): string {

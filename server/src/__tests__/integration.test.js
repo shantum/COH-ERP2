@@ -14,7 +14,7 @@ import {
     createReservedTransaction,
     createSaleTransaction,
     deleteSaleTransactions,
-} from '../utils/queryPatterns.js';
+} from '../utils/patterns/index.js';
 import shopifyClient from '../services/shopify/index.js';
 
 // ============================================

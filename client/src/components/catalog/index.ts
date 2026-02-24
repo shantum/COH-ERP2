@@ -4,8 +4,8 @@
  * Centralized exports for all catalog-related components.
  */
 
-export { FabricDisplayCell, FabricEditPopover } from './FabricEditPopover';
-export type { FabricDisplayCellProps, FabricEditPopoverProps, ViewLevel } from './FabricEditPopover';
+export { FabricDisplayCell } from './FabricEditPopover';
+export type { FabricDisplayCellProps, ViewLevel } from './FabricEditPopover';
 
 export { EditModal } from './EditModal';
 export type { EditModalProps } from './EditModal';

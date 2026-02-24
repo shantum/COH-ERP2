@@ -29,13 +29,7 @@ import {
 // ============================================
 
 export type { CustomerTier, TierThresholds };
-export { DEFAULT_TIER_THRESHOLDS };
-
-/**
- * Calculate tier from LTV (alias for backward compatibility)
- * @deprecated Use calculateTierFromLtv from @coh/shared/domain directly
- */
-export const calculateTier = calculateTierFromLtv;
+export { DEFAULT_TIER_THRESHOLDS, calculateTierFromLtv };
 
 // ============================================
 // TYPES (server-specific)
@@ -102,7 +96,7 @@ export async function adjustCustomerLtv(
 
     const oldTier = (customer.tier || 'bronze') as CustomerTier;
     const newLtv = Math.max(0, (customer.ltv || 0) + delta); // Never go negative
-    const newTier = calculateTier(newLtv, thresholds);
+    const newTier = calculateTierFromLtv(newLtv, thresholds);
 
     // Single update with both ltv and tier
     await prisma.customer.update({
@@ -141,7 +135,7 @@ export async function updateCustomerTier(
 
     const oldTier = (customer.tier || 'bronze') as CustomerTier;
     const ltv = customer.ltv || 0;
-    const newTier = calculateTier(ltv, thresholds);
+    const newTier = calculateTierFromLtv(ltv, thresholds);
 
     if (newTier !== oldTier) {
         await prisma.customer.update({
@@ -196,7 +190,7 @@ export async function recalculateCustomerLtv(
     });
 
     const newLtv = stats._sum?.totalAmount || 0;
-    const newTier = calculateTier(newLtv, thresholds);
+    const newTier = calculateTierFromLtv(newLtv, thresholds);
 
     await prisma.customer.update({
         where: { id: customerId },
@@ -356,7 +350,7 @@ export async function recalculateAllCustomerLtvs(prisma: PrismaClient): Promise<
                 const orderCount = countMap.get(id) || 0;
                 await tx.customer.update({
                     where: { id },
-                    data: { ltv, orderCount, tier: calculateTier(ltv, thresholds) }
+                    data: { ltv, orderCount, tier: calculateTierFromLtv(ltv, thresholds) }
                 });
             }
         });
@@ -424,8 +418,6 @@ export async function getCustomerStatsMap(
     return statsMap;
 }
 
-// Alias for backward compatibility
-export const updateAllCustomerTiers = recalculateAllCustomerLtvs;
 
 /**
  * Startup check: backfill LTVs if needed

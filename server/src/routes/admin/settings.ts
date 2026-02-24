@@ -3,7 +3,7 @@ import type { Request, Response } from 'express';
 import { authenticateToken, requireAdmin } from '../../middleware/auth.js';
 import { asyncHandler } from '../../middleware/asyncHandler.js';
 import { ValidationError } from '../../utils/errors.js';
-import { DEFAULT_TIER_THRESHOLDS, updateAllCustomerTiers } from '../../utils/tierUtils.js';
+import { DEFAULT_TIER_THRESHOLDS, recalculateAllCustomerLtvs } from '../../utils/tierUtils.js';
 import type {
     Channel,
     TierThresholds,
@@ -250,7 +250,7 @@ router.put('/tier-thresholds', requireAdmin, asyncHandler(async (req: Request, r
  * @description Recalculates tier for all customers. Use after threshold changes or data migration.
  */
 router.post('/update-customer-tiers', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
-    const result = await updateAllCustomerTiers(req.prisma);
+    const result = await recalculateAllCustomerLtvs(req.prisma);
 
     res.json({
         message: `Updated ${result.updated} of ${result.total} customer tiers`,

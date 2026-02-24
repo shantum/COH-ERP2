@@ -27,11 +27,7 @@ interface SkuWiseDataTableProps {
 
 const BATCH_SIZE = 250;
 
-/** Format currency as Indian Rupees */
-function formatCurrency(value: number | undefined | null): string {
-    if (value == null) return '-';
-    return `\u20B9${Math.round(value).toLocaleString('en-IN')}`;
-}
+import { formatCurrencyOrDash as formatCurrency } from '../../utils/formatting';
 
 /**
  * Shopify status dot — compact inline indicator

@@ -71,10 +71,7 @@ interface LineFinancialInfo {
   preGstAmount: number;     // Line total excluding GST
 }
 
-// Format currency
-const formatCurrency = (amount: number) => {
-  return '₹' + amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-};
+import { formatCurrencyExact as formatCurrency } from '../../../../utils/formatting';
 
 // Single line item component
 function LineItem({

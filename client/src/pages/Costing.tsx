@@ -10,6 +10,7 @@
  */
 
 import { useState, useMemo, useCallback } from 'react';
+import { formatCurrency as _fmtCompact, formatCurrencyFull } from '../utils/formatting';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { useNavigate } from '@tanstack/react-router';
@@ -94,20 +95,9 @@ export default function Costing() {
         },
     });
 
-    // Format helpers
-    const formatCurrency = useCallback((value: number, compact = false) => {
-        if (compact) {
-            if (Math.abs(value) >= 10000000) return `${(value / 10000000).toFixed(2)} Cr`;
-            if (Math.abs(value) >= 100000) return `${(value / 100000).toFixed(2)} L`;
-            if (Math.abs(value) >= 1000) return `${(value / 1000).toFixed(1)} K`;
-        }
-        return new Intl.NumberFormat('en-IN', {
-            style: 'currency',
-            currency: 'INR',
-            minimumFractionDigits: 0,
-            maximumFractionDigits: 0,
-        }).format(value);
-    }, []);
+    // Format helpers — stable module-level imports, no useCallback needed
+    const formatCurrency = (value: number, compact = false) =>
+        compact ? _fmtCompact(value) : formatCurrencyFull(value);
 
     const formatPercent = useCallback((value: number) => {
         return `${value >= 0 ? '' : ''}${value.toFixed(1)}%`;
@@ -222,7 +212,7 @@ export default function Costing() {
             cellClass: 'text-right text-gray-500',
             headerClass: 'ag-right-aligned-header',
         },
-    ], [formatCurrency]);
+    ], []);
 
     const summary = dashboardData?.summary;
     const breakeven = dashboardData?.breakeven;

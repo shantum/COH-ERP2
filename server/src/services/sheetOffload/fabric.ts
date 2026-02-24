@@ -25,7 +25,7 @@ import {
     MAX_FUTURE_DAYS,
     MAX_PAST_DAYS,
 } from '../../config/sync/sheets/index.js';
-import { generateFabricColourCode } from '../../config/fabric/codes.js';
+import { generateFabricColourCode } from '@coh/shared/domain';
 import type {
     FabricInwardResult,
     FabricInwardPreviewResult,

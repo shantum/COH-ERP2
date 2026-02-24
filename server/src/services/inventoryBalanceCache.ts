@@ -21,7 +21,7 @@ import type { PrismaClient } from '@prisma/client';
 import {
     calculateAllInventoryBalances,
     type PrismaOrTransaction,
-} from '../utils/queryPatterns.js';
+} from '../utils/patterns/index.js';
 
 /**
  * Cached balance entry with timestamp

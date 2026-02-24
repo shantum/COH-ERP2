@@ -78,10 +78,7 @@ interface ReturnsSectionProps {
   isInitiating?: boolean;
 }
 
-// Format currency
-const formatCurrency = (amount: number) => {
-  return '₹' + amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-};
+import { formatCurrencyExact as formatCurrency } from '../../../../utils/formatting';
 
 // Eligibility display configuration with icons and colors
 const ELIGIBILITY_DISPLAY: Record<string, {

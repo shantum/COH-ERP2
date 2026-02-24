@@ -173,20 +173,6 @@ export const ORDERS_OUTWARD_COLS = {
 } as const;
 
 // ============================================
-// COLUMN MAPPINGS — Orders Outward 12728-41874 (Office Ledger)
-// ============================================
-
-/**
- * Old orders outward — ~37K rows, no headers, full order rows.
- * SKU in col N (index 13), Qty in col O (index 14).
- * Balance formula uses: SUMIF(N:N, A:A, O:O)
- */
-export const ORDERS_OUTWARD_OLD_COLS = {
-    SKU: 13,    // N
-    QTY: 14,    // O
-} as const;
-
-// ============================================
 // COLUMN MAPPINGS — Mastersheet Outward
 // ============================================
 

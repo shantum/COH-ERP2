@@ -11,6 +11,7 @@ import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community';
 import { TrendingUp, Package, ShoppingCart, DollarSign, Calendar } from 'lucide-react';
 import { useSalesAnalytics, getDateRange } from '../hooks/useSalesAnalytics';
 import { compactThemeSmall } from '../utils/agGridHelpers';
+import { formatCurrency } from '../utils/formatting';
 import type { SalesDimension, SalesBreakdownItem } from '../types';
 
 ModuleRegistry.registerModules([AllCommunityModule]);
@@ -79,12 +80,7 @@ export default function Analytics() {
         orderStatus: 'all',
     });
 
-    // Format currency
-    const formatCurrency = (value: number) => {
-        if (value >= 100000) return `₹${(value / 100000).toFixed(1)}L`;
-        if (value >= 1000) return `₹${(value / 1000).toFixed(1)}K`;
-        return `₹${value.toFixed(0)}`;
-    };
+    // formatCurrency imported from utils/formatting (compact by default)
 
     // Format number
     const formatNumber = (value: number) => {

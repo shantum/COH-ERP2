@@ -8,7 +8,7 @@
  * - Production-to-fabric linkage
  */
 
-import { FABRIC_TXN_TYPE } from '../utils/queryPatterns.js';
+import { FABRIC_TXN_TYPE } from '../utils/patterns/index.js';
 
 // ============================================
 // SECTION 1: FABRIC TRANSACTION TYPES

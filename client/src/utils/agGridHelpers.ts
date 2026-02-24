@@ -85,10 +85,7 @@ export function formatRelativeTime(date: string | Date | null | undefined): stri
 /**
  * Format currency in INR (e.g., "₹1,234")
  */
-export function formatCurrency(amount: number | null | undefined): string {
-    if (amount == null) return '-';
-    return `₹${amount.toLocaleString('en-IN')}`;
-}
+export { formatCurrencyOrDash as formatCurrency } from './formatting';
 
 /**
  * Generate tracking URL based on courier

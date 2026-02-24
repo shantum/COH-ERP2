@@ -8,7 +8,7 @@
  * - RTO status transitions
  */
 
-import { TXN_TYPE, TXN_REASON } from '../utils/queryPatterns.js';
+import { TXN_TYPE, TXN_REASON } from '../utils/patterns/index.js';
 
 // ============================================
 // SECTION 1: RTO STATUS DETECTION

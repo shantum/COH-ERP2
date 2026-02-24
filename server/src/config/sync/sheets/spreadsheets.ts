@@ -13,12 +13,6 @@
 export const ENABLE_SHEET_OFFLOAD = process.env.ENABLE_SHEET_OFFLOAD === 'true';
 
 /**
- * @deprecated No longer used by ingestion — replaced by non-destructive DONE marking.
- * Kept for reference only. Ingestion now writes "DONE:{referenceId}" to the status column.
- */
-export const ENABLE_SHEET_DELETION = process.env.ENABLE_SHEET_DELETION === 'true';
-
-/**
  * Prefix written to the Import Status column when a row is successfully ingested.
  * Format: "DONE:{referenceId}" — fully traceable back to the InventoryTransaction.
  */
@@ -78,7 +72,6 @@ export const LEDGER_TABS = {
     INWARD_ARCHIVE: 'Inward (Archive)',
     OUTWARD: 'Outward',
     ORDERS_OUTWARD: 'Orders Outward',
-    ORDERS_OUTWARD_OLD: 'Orders Outward 12728-41874',
     BALANCE_FINAL: 'Balance (Final)',
     RETURN_EXCHANGE_PENDING: 'Return & Exchange Pending Pieces',
 } as const;

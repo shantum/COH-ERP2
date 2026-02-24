@@ -14,15 +14,7 @@ interface Sales30DayCellProps {
     node: MaterialNode;
 }
 
-/**
- * Format currency for display in Indian format (lakhs/crores)
- */
-function formatCurrency(value: number): string {
-    if (value === 0) return '-';
-    return '₹' + value.toLocaleString('en-IN', {
-        maximumFractionDigits: 0,
-    });
-}
+import { formatCurrencyOrDash as formatCurrency } from '../../../utils/formatting';
 
 export const Sales30DayCell = React.memo(function Sales30DayCell({ node }: Sales30DayCellProps) {
     // Only show for fabric and colour rows

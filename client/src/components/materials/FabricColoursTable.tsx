@@ -104,13 +104,7 @@ function formatUnit(unit?: string | null): string {
     return unit;
 }
 
-/**
- * Format currency for display
- */
-function formatCurrency(value: number): string {
-    if (value === 0) return '-';
-    return '₹' + value.toLocaleString('en-IN', { maximumFractionDigits: 0 });
-}
+import { formatCurrencyOrDash as formatCurrency } from '../../utils/formatting';
 
 /**
  * Format consumption value

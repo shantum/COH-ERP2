@@ -86,7 +86,6 @@ export const REF_PREFIX = {
     INWARD_ARCHIVE: 'sheet:inward-archive',
     OUTWARD: 'sheet:outward',
     ORDERS_OUTWARD: 'sheet:orders-outward',
-    ORDERS_OUTWARD_OLD: 'sheet:orders-outward-old',
     MASTERSHEET_OUTWARD: 'sheet:ms-outward',
     INWARD_LIVE: 'sheet:inward-live',
     OUTWARD_LIVE: 'sheet:outward-live',
