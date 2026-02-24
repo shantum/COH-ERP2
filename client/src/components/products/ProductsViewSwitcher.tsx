@@ -116,7 +116,9 @@ export function ProductsViewSwitcher({ searchQuery, onSearchChange, onViewProduc
     const navigate = useNavigate();
 
     // Use initialData from route loader to prevent refetch after SSR hydration
-    const { data: treeData, summary } = useProductsTree({
+    // Pass debounced search to server for DB-level filtering
+    const { data: treeData, summary, isFetching } = useProductsTree({
+        search: debouncedSearchQuery || undefined,
         initialData: initialData ? { items: initialData.items, summary: initialData.summary } : undefined,
     });
 
@@ -375,6 +377,9 @@ export function ProductsViewSwitcher({ searchQuery, onSearchChange, onViewProduc
                     {summary && (
                         <div className="hidden lg:flex items-center text-sm text-muted-foreground mr-2">
                             <span>{filteredProducts.length} of {summary.products} products</span>
+                            {isFetching && debouncedSearchQuery && (
+                                <span className="ml-2 h-3 w-3 animate-spin rounded-full border-2 border-gray-300 border-t-gray-600" />
+                            )}
                         </div>
                     )}
 

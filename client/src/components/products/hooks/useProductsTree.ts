@@ -92,7 +92,7 @@ type CreateSkuData = {
 // Query key factory
 export const productsTreeKeys = {
     all: ['productsTree'] as const,
-    tree: () => [...productsTreeKeys.all, 'tree'] as const,
+    tree: (search?: string) => [...productsTreeKeys.all, 'tree', ...(search ? [search] : [])] as const,
     detail: (id: string) => [...productsTreeKeys.all, 'detail', id] as const,
 };
 
@@ -113,18 +113,22 @@ function mapToLegacyResponse(response: ProductsTreeResponse): ProductTreeRespons
  */
 export function useProductsTree(options?: {
     enabled?: boolean;
+    search?: string;
     initialData?: ProductTreeResponse | null;
 }) {
+    const search = options?.search || undefined;
     const query = useQuery<ProductTreeResponse>({
-        queryKey: productsTreeKeys.tree(),
+        queryKey: productsTreeKeys.tree(search),
         queryFn: async () => {
-            const response = await getProductsTree({ data: {} });
+            const response = await getProductsTree({ data: { ...(search ? { search } : {}) } });
             return mapToLegacyResponse(response);
         },
         staleTime: 30 * 1000, // 30 seconds
         enabled: options?.enabled !== false,
-        // Use initialData from route loader if available
-        initialData: options?.initialData ?? undefined,
+        // Use initialData from route loader if available (only when no search)
+        initialData: !search ? (options?.initialData ?? undefined) : undefined,
+        // Keep previous results visible while fetching new search results
+        placeholderData: (prev) => prev,
     });
 
     return {
