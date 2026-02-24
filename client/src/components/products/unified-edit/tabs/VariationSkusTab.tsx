@@ -4,7 +4,7 @@
 
 import { ChevronRight, Package } from 'lucide-react';
 import type { SkuDetailData } from '../types';
-import { SIZE_ORDER } from '../../types';
+import { sortBySizeOrder } from '@coh/shared/config/product';
 
 interface VariationSkusTabProps {
   skus: SkuDetailData[];
@@ -13,14 +13,7 @@ interface VariationSkusTabProps {
 
 export function VariationSkusTab({ skus, onNavigate }: VariationSkusTabProps) {
   // Sort SKUs by size order
-  const sortedSkus = [...skus].sort((a, b) => {
-    const indexA = SIZE_ORDER.indexOf(a.size);
-    const indexB = SIZE_ORDER.indexOf(b.size);
-    if (indexA === -1 && indexB === -1) return a.size.localeCompare(b.size);
-    if (indexA === -1) return 1;
-    if (indexB === -1) return -1;
-    return indexA - indexB;
-  });
+  const sortedSkus = [...skus].sort((a, b) => sortBySizeOrder(a.size, b.size));
 
   if (sortedSkus.length === 0) {
     return (

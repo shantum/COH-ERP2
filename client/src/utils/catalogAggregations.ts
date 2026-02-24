@@ -8,9 +8,10 @@
  */
 
 import { getGstRate } from '@coh/shared/domain/constants';
+import { SIZE_ORDER } from '@coh/shared/config/product';
 
-// Standard sizes for consumption matrix
-export const CONSUMPTION_SIZES = ['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL', 'Free'];
+// Standard sizes for consumption matrix (same as canonical SIZE_ORDER)
+export const CONSUMPTION_SIZES = [...SIZE_ORDER];
 
 /**
  * Catalog SKU item from server — dynamic row shape used across all aggregation levels.

@@ -226,11 +226,10 @@ type ProductQueryResult = {
     category: string | null;
 };
 
-// Size sort order for proper sorting (XS -> S -> M -> L -> XL -> 2XL -> etc)
-const SIZE_ORDER = ['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL', 'Free'];
+import { getSizeIndex as _getSizeIndex } from '@coh/shared/config/product';
 
 function getSizeIndex(size: string): number {
-    const idx = SIZE_ORDER.indexOf(size);
+    const idx = _getSizeIndex(size);
     return idx === -1 ? 999 : idx;
 }
 

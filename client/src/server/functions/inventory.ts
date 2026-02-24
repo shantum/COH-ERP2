@@ -518,7 +518,7 @@ export const getInventoryGrouped = createServerFn({ method: 'GET' })
         });
 
         // Size ordering for consistent display
-        const sizeOrder = ['XXS', 'XS', 'S', 'M', 'L', 'XL', 'XXL', '2XL', '3XL', '4XL', '5XL'];
+        const { sortBySizeOrder: sizeComparator } = await import('@coh/shared/config/product');
 
         // Group into Product > Variation > Size hierarchy
         const productMap = new Map<string, ProductGroup>();
@@ -634,14 +634,7 @@ export const getInventoryGrouped = createServerFn({ method: 'GET' })
         // Sort sizes within each color
         for (const product of productMap.values()) {
             for (const color of product.colors) {
-                color.sizes.sort((a, b) => {
-                    const aIdx = sizeOrder.indexOf(a.size);
-                    const bIdx = sizeOrder.indexOf(b.size);
-                    if (aIdx !== -1 && bIdx !== -1) return aIdx - bIdx;
-                    if (aIdx !== -1) return -1;
-                    if (bIdx !== -1) return 1;
-                    return a.size.localeCompare(b.size);
-                });
+                color.sizes.sort((a, b) => sizeComparator(a.size, b.size));
             }
         }
 

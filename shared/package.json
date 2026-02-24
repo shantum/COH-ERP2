@@ -57,6 +57,10 @@
     "./config/access": {
       "types": "./dist/config/access.d.ts",
       "import": "./dist/config/access.js"
+    },
+    "./config/product": {
+      "types": "./dist/config/product.d.ts",
+      "import": "./dist/config/product.js"
     }
   },
   "scripts": {

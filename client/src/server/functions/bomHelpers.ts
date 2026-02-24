@@ -14,9 +14,8 @@ export interface MutationResult<T> {
   };
 }
 
-export const SIZE_ORDER = [
-  'XXS', 'XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL', '2XL', '3XL', '4XL',
-] as const;
+export { SIZE_ORDER, sortBySizeOrder as _sortBySizeComparator } from '@coh/shared/config/product';
+import { sortBySizeOrder as _comparator } from '@coh/shared/config/product';
 
 export async function getMainFabricRole(prisma: PrismaClient) {
   return prisma.componentRole.findFirst({
@@ -27,13 +26,7 @@ export async function getMainFabricRole(prisma: PrismaClient) {
   });
 }
 
+/** Sort an array of size strings in standard order (mutates + returns) */
 export function sortBySizeOrder(sizes: string[]): string[] {
-  return sizes.sort((a, b) => {
-    const indexA = SIZE_ORDER.indexOf(a as (typeof SIZE_ORDER)[number]);
-    const indexB = SIZE_ORDER.indexOf(b as (typeof SIZE_ORDER)[number]);
-    if (indexA === -1 && indexB === -1) return a.localeCompare(b);
-    if (indexA === -1) return 1;
-    if (indexB === -1) return -1;
-    return indexA - indexB;
-  });
+  return sizes.sort(_comparator);
 }

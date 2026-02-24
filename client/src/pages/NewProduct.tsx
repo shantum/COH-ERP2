@@ -13,7 +13,7 @@ import { useQuery } from '@tanstack/react-query';
 import { createProductDraft, getNextSkuCode } from '../server/functions/productsMutations';
 import { getCatalogFilters } from '../server/functions/products';
 import { SIZE_ORDER } from '../constants/sizes';
-import { PRODUCT_CATEGORIES, GENDERS } from '../components/products/types';
+import { PRODUCT_CATEGORIES, GENDERS, GENDER_LABELS } from '../components/products/types';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -343,7 +343,7 @@ export default function NewProduct() {
     const [imageFile, setImageFile] = useState<File | null>(null);
     const [imagePreview, setImagePreview] = useState('');
     const [category, setCategory] = useState('');
-    const [gender, setGender] = useState('Women');
+    const [gender, setGender] = useState('women');
     const [fabricType, setFabricType] = useState<'woven' | 'knit'>('woven');
     const [selectedMaterialId, setSelectedMaterialId] = useState('');
     const [mrp, setMrp] = useState<string>('');
@@ -665,7 +665,7 @@ export default function NewProduct() {
                                 <SelectContent>
                                     {GENDERS.map((g) => (
                                         <SelectItem key={g} value={g}>
-                                            {g}
+                                            {GENDER_LABELS[g]}
                                         </SelectItem>
                                     ))}
                                 </SelectContent>

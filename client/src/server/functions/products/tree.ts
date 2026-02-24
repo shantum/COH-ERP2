@@ -450,11 +450,11 @@ export const getProductsTree = createServerFn({ method: 'GET' })
                 }
 
                 // Derive product-level Shopify status from variations
-                // Priority: archived > draft > active > not_cached > not_linked
+                // Priority: active > draft > archived (best status wins)
                 const statusPriority: Record<string, number> = {
-                    'archived': 5,
+                    'active': 5,
                     'draft': 4,
-                    'active': 3,
+                    'archived': 3,
                     'not_cached': 2,
                     'not_linked': 1,
                     'unknown': 0,

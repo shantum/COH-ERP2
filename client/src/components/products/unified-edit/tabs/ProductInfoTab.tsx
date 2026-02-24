@@ -4,7 +4,7 @@
 
 import { Controller, type UseFormReturn } from 'react-hook-form';
 import type { ProductFormData } from '../types';
-import { PRODUCT_CATEGORIES, GENDERS } from '../../types';
+import { PRODUCT_CATEGORIES, GENDERS, GENDER_LABELS } from '../../types';
 
 interface ProductInfoTabProps {
   form: UseFormReturn<ProductFormData>;
@@ -120,7 +120,7 @@ export function ProductInfoTab({ form, disabled = false }: ProductInfoTabProps) 
               className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50"
             >
               {GENDERS.map(g => (
-                <option key={g} value={g}>{g}</option>
+                <option key={g} value={g}>{GENDER_LABELS[g]}</option>
               ))}
             </select>
           )}

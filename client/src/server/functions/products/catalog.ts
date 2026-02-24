@@ -8,6 +8,7 @@
 import { createServerFn } from '@tanstack/react-start';
 import { authMiddleware } from '../../middleware/auth';
 import { getPrisma } from '@coh/shared/services/db';
+import { GENDERS, GENDER_LABELS } from '@coh/shared/config/product';
 
 /**
  * Catalog filters response for dropdowns
@@ -101,8 +102,8 @@ export const getCatalogFilters = createServerFn({ method: 'GET' })
             });
             const categories = categoriesResult.map((c: { category: string }) => c.category).filter(Boolean);
 
-            // Static gender options
-            const genders = ['Men', 'Women', 'Unisex', 'Kids'];
+            // Gender options from canonical source (display labels)
+            const genders = GENDERS.map(g => GENDER_LABELS[g]);
 
             return {
                 fabricTypes,

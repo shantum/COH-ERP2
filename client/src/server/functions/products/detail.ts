@@ -9,6 +9,7 @@ import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
 import { authMiddleware } from '../../middleware/auth';
 import { getPrisma } from '@coh/shared/services/db';
+import { getProductVariationsFabrics } from '@coh/shared/services/bom';
 
 const getProductByIdInputSchema = z.object({
     id: z.string().uuid('Invalid product ID'),
@@ -106,6 +107,12 @@ export const getProductById = createServerFn({ method: 'GET' })
                 throw new Error('Product not found');
             }
 
+            // Batch-fetch BOM fabric info for all variations (single query)
+            const fabricMap = await getProductVariationsFabrics(prisma, product.id);
+
+            // Derive product-level fabric type from first variation with fabric
+            const firstFabric = [...fabricMap.values()].find((f) => f !== null);
+
             // Transform to response type
             return {
                 id: product.id,
@@ -114,38 +121,41 @@ export const getProductById = createServerFn({ method: 'GET' })
                 category: product.category,
                 productType: product.productType,
                 gender: product.gender,
-                fabricTypeId: null,
-                fabricTypeName: null,
+                fabricTypeId: firstFabric?.materialId ?? null,
+                fabricTypeName: firstFabric?.materialName ?? null,
                 baseProductionTimeMins: product.baseProductionTimeMins,
                 defaultFabricConsumption: product.defaultFabricConsumption,
                 isActive: product.isActive,
                 imageUrl: product.imageUrl,
-                variations: product.variations.map((v) => ({
-                    id: v.id,
-                    productId: v.productId,
-                    colorName: v.colorName,
-                    colorHex: v.colorHex,
-                    fabricId: null,
-                    fabricName: null,
-                    fabricColourId: null,
-                    fabricColourName: null,
-                    materialName: null,
-                    hasLining: v.hasLining,
-                    bomCost: v.bomCost,
-                    isActive: v.isActive,
-                    imageUrl: v.imageUrl,
-                    skus: v.skus.map((s) => ({
-                        id: s.id,
-                        skuCode: s.skuCode,
-                        variationId: s.variationId,
-                        size: s.size,
-                        mrp: s.mrp,
-                        targetStockQty: s.targetStockQty,
-                        bomCost: s.bomCost,
-                        isActive: s.isActive,
-                        currentBalance: s.currentBalance ?? 0,
-                    })),
-                })),
+                variations: product.variations.map((v) => {
+                    const fabric = fabricMap.get(v.id) ?? null;
+                    return {
+                        id: v.id,
+                        productId: v.productId,
+                        colorName: v.colorName,
+                        colorHex: v.colorHex,
+                        fabricId: fabric?.fabricId ?? null,
+                        fabricName: fabric?.fabricName ?? null,
+                        fabricColourId: fabric?.fabricColourId ?? null,
+                        fabricColourName: fabric?.fabricColourName ?? null,
+                        materialName: fabric?.materialName ?? null,
+                        hasLining: v.hasLining,
+                        bomCost: v.bomCost,
+                        isActive: v.isActive,
+                        imageUrl: v.imageUrl,
+                        skus: v.skus.map((s) => ({
+                            id: s.id,
+                            skuCode: s.skuCode,
+                            variationId: s.variationId,
+                            size: s.size,
+                            mrp: s.mrp,
+                            targetStockQty: s.targetStockQty,
+                            bomCost: s.bomCost,
+                            isActive: s.isActive,
+                            currentBalance: s.currentBalance ?? 0,
+                        })),
+                    };
+                }),
             };
         } catch (error: unknown) {
             console.error('[Server Function] Error in getProductById:', error);

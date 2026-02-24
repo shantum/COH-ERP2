@@ -163,27 +163,15 @@ export const PRODUCT_CATEGORIES = [
 export type ProductCategory = typeof PRODUCT_CATEGORIES[number];
 
 /**
- * Gender options
+ * Gender options — display labels (title case) for UI.
+ * Canonical lowercase values live in @coh/shared/config/product.
  */
-export const GENDERS = ['Women', 'Men', 'Unisex'] as const;
-export type Gender = typeof GENDERS[number];
+export { GENDERS, GENDER_LABELS, type Gender } from '@coh/shared/config/product';
 
 /**
- * Size order for display
+ * Size order — canonical source in @coh/shared/config/product.
  */
-export const SIZE_ORDER = ['XXS', 'XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL'];
-
-/**
- * Sort sizes in standard order
- */
-export function sortBySizeOrder(a: string, b: string): number {
-    const indexA = SIZE_ORDER.indexOf(a);
-    const indexB = SIZE_ORDER.indexOf(b);
-    if (indexA === -1 && indexB === -1) return a.localeCompare(b);
-    if (indexA === -1) return 1;
-    if (indexB === -1) return -1;
-    return indexA - indexB;
-}
+export { SIZE_ORDER, sortBySizeOrder } from '@coh/shared/config/product';
 
 /**
  * Row type for variation view (flat table with mixed row types)

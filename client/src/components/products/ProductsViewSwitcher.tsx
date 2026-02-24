@@ -14,6 +14,7 @@ import { useState, useMemo, useCallback } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { Filter, X, Users, Shirt, Scissors, Search, Plus } from 'lucide-react';
 import { useDebounce } from '../../hooks/useDebounce';
+import { GENDER_LABELS, type Gender } from '@coh/shared/config/product';
 
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -105,7 +106,7 @@ export function ProductsViewSwitcher({ searchQuery, onSearchChange, onViewProduc
         gender: null,
         fabricFilter: { type: 'all' },
         category: null,
-        shopifyStatus: 'active',
+        shopifyStatus: 'all',
     });
     const [showFilters, setShowFilters] = useState(false);
 
@@ -458,7 +459,7 @@ export function ProductsViewSwitcher({ searchQuery, onSearchChange, onViewProduc
                                 <SelectItem value="all">All Genders</SelectItem>
                                 {filterOptions.genders.map(gender => (
                                     <SelectItem key={gender} value={gender}>
-                                        {gender}
+                                        {GENDER_LABELS[gender as Gender] ?? gender}
                                     </SelectItem>
                                 ))}
                             </SelectContent>
