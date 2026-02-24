@@ -26,7 +26,7 @@ import {
     INVENTORY_BALANCE_FORMULA_TEMPLATE,
     LIVE_BALANCE_FORMULA_V2_TEMPLATE,
     INGESTED_PREFIX,
-} from '../../config/sync/sheets.js';
+} from '../../config/sync/sheets/index.js';
 import type {
     BalanceSnapshot,
     BalanceVerificationResult,

@@ -11,10 +11,10 @@
 
 import type { SyncJob } from '@prisma/client';
 import prisma from '../lib/prisma.js';
-import type { ShopifyOrder } from './shopify.js';
-import shopifyClient from './shopify.js';
-import { cacheAndProcessOrder } from './shopifyOrderProcessor.js';
-import { syncSingleProduct } from './productSyncService.js';
+import type { ShopifyOrder } from './shopify/index.js';
+import shopifyClient from './shopify/index.js';
+import { cacheAndProcessOrder } from './shopifyOrderProcessor/index.js';
+import { syncSingleProduct } from './productSync/index.js';
 import { syncSingleCustomer } from './customerSyncService.js';
 import { syncLogger } from '../utils/logger.js';
 import { SYNC_WORKER_CONFIG } from '../config/index.js';

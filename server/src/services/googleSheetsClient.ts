@@ -20,7 +20,7 @@ import {
     SHEETS_API_SCOPE,
     API_CALL_DELAY_MS,
     API_MAX_RETRIES,
-} from '../config/sync/sheets.js';
+} from '../config/sync/sheets/index.js';
 
 // ============================================
 // TYPES

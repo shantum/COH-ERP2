@@ -5,7 +5,7 @@
  * Tests pure utility functions and status mapping logic.
  */
 
-import ithinkLogistics from '../services/ithinkLogistics.js';
+import ithinkLogistics from '../services/ithinkLogistics/index.js';
 
 // ============================================
 // ITHINK LOGISTICS STATUS MAPPING TESTS

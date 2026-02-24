@@ -13,7 +13,7 @@ import { z } from 'zod';
 import { authenticateToken, requireAdmin } from '../middleware/auth.js';
 import { getTrackingResponses, getStorageStats } from '../services/trackingResponseStorage.js';
 import { trackingLogger } from '../utils/logger.js';
-import ithinkLogistics from '../services/ithinkLogistics.js';
+import ithinkLogistics from '../services/ithinkLogistics/index.js';
 
 const router: Router = Router();
 

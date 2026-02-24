@@ -11,8 +11,8 @@
  */
 
 import prisma from '../lib/prisma.js';
-import ithinkClient from './ithinkLogistics.js';
-import shopifyClient from './shopify.js';
+import ithinkClient from './ithinkLogistics/index.js';
+import shopifyClient from './shopify/index.js';
 import { settleOrderInvoice } from './orderSettlement.js';
 import { remittanceLogger } from '../utils/logger.js';
 import { trackWorkerRun } from '../utils/workerRunTracker.js';

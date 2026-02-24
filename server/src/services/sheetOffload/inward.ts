@@ -17,7 +17,7 @@ import {
     OFFLOAD_NOTES_PREFIX,
     BATCH_SIZE,
     INGESTED_PREFIX,
-} from '../../config/sync/sheets.js';
+} from '../../config/sync/sheets/index.js';
 import type {
     IngestInwardResult,
     IngestPreviewResult,

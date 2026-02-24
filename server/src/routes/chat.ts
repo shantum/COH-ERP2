@@ -11,7 +11,7 @@ import multer from 'multer';
 import { z } from 'zod';
 import { authenticateToken } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
-import { streamChat, executeAction, type ChatMessage, type FileAttachment } from '../services/chatAgent.js';
+import { streamChat, executeAction, type ChatMessage, type FileAttachment } from '../services/chatAgent/index.js';
 import logger from '../utils/logger.js';
 
 const log = logger.child({ module: 'chatRoutes' });

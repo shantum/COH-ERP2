@@ -5,8 +5,8 @@
  */
 
 import { PrismaClient } from '@prisma/client';
-import shopifyClient from '../services/shopify.js';
-import { cacheShopifyOrders, processCacheBatch } from '../services/shopifyOrderProcessor.js';
+import shopifyClient from '../services/shopify/index.js';
+import { cacheShopifyOrders, processCacheBatch } from '../services/shopifyOrderProcessor/index.js';
 
 const prisma = new PrismaClient();
 const LOOKBACK_DAYS = 30;

@@ -25,7 +25,7 @@ import {
     MAX_PAST_DAYS,
     INWARD_LIVE_COLS,
     REF_PREFIX,
-} from '../../config/sync/sheets.js';
+} from '../../config/sync/sheets/index.js';
 import type {
     ParsedRow,
     SkuLookupInfo,

@@ -8,8 +8,8 @@
  * This catches any orders that webhooks might have missed.
  */
 
-import shopifyClient from './shopify.js';
-import { cacheShopifyOrders, processCacheBatch } from './shopifyOrderProcessor.js';
+import shopifyClient from './shopify/index.js';
+import { cacheShopifyOrders, processCacheBatch } from './shopifyOrderProcessor/index.js';
 import prisma from '../lib/prisma.js';
 import { syncLogger } from '../utils/logger.js';
 import { trackWorkerRun } from '../utils/workerRunTracker.js';

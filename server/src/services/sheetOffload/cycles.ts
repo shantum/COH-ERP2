@@ -14,7 +14,7 @@ import {
     INWARD_LIVE_COLS,
     OUTWARD_LIVE_COLS,
     INGESTED_PREFIX,
-} from '../../config/sync/sheets.js';
+} from '../../config/sync/sheets/index.js';
 import type {
     IngestInwardResult,
     IngestOutwardResult,

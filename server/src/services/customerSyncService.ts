@@ -5,8 +5,8 @@
  */
 
 import { PrismaClient } from '@prisma/client';
-import type { ShopifyCustomer } from './shopify.js';
-import shopifyClient from './shopify.js';
+import type { ShopifyCustomer } from './shopify/index.js';
+import shopifyClient from './shopify/index.js';
 import logger from '../utils/logger.js';
 
 const log = logger.child({ module: 'customer-sync' });

@@ -15,7 +15,7 @@ import {
     createSaleTransaction,
     deleteSaleTransactions,
 } from '../utils/queryPatterns.js';
-import shopifyClient from '../services/shopify.js';
+import shopifyClient from '../services/shopify/index.js';
 
 // ============================================
 // ORDER FULFILLMENT FLOW TESTS

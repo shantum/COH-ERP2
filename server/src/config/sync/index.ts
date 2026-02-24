@@ -78,7 +78,7 @@ export {
     RETURN_EXCHANGE_COLS,
     RETURN_SOURCE_MAP,
     DEFAULT_RETURN_SOURCE,
-} from './sheets.js';
+} from './sheets/index.js';
 
 // Google Drive Finance Sync
 export {

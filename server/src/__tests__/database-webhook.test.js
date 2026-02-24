@@ -15,7 +15,7 @@ import {
     shopifyInventoryLevelSchema,
     validateWebhookPayload,
 } from '../utils/webhookUtils.js';
-import shopifyClient from '../services/shopify.js';
+import shopifyClient from '../services/shopify/index.js';
 
 // ============================================
 // SECTION 1: DATABASE MODEL VALIDATION

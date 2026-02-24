@@ -14,8 +14,8 @@ import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { authenticateToken } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
-import ithinkLogistics from '../services/ithinkLogistics.js';
-import type { ProductInfo, ShipmentDimensions } from '../services/ithinkLogistics.js';
+import ithinkLogistics from '../services/ithinkLogistics/index.js';
+import type { ProductInfo, ShipmentDimensions } from '../services/ithinkLogistics/index.js';
 import { shippingLogger } from '../utils/logger.js';
 
 const router: Router = Router();

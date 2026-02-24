@@ -8,7 +8,7 @@
  */
 
 import prisma from '../lib/prisma.js';
-import ithinkClient from '../services/ithinkLogistics.js';
+import ithinkClient from '../services/ithinkLogistics/index.js';
 
 // RTO-related status keywords to find in scan history
 const RTO_KEYWORDS = ['rto', 'return to origin', 'return to shipper', 'rts'];

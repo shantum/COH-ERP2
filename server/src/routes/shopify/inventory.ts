@@ -8,7 +8,7 @@ import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { authenticateToken } from '../../middleware/auth.js';
 import { asyncHandler } from '../../middleware/asyncHandler.js';
-import shopifyClient from '../../services/shopify.js';
+import shopifyClient from '../../services/shopify/index.js';
 import { shopifyLogger } from '../../utils/logger.js';
 
 const router = Router();

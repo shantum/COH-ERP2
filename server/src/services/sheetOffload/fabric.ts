@@ -24,7 +24,7 @@ import {
     MAX_QTY_PER_ROW,
     MAX_FUTURE_DAYS,
     MAX_PAST_DAYS,
-} from '../../config/sync/sheets.js';
+} from '../../config/sync/sheets/index.js';
 import { generateFabricColourCode } from '../../config/fabric/codes.js';
 import type {
     FabricInwardResult,

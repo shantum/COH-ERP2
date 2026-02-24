@@ -18,7 +18,7 @@
  */
 
 import prisma from '../lib/prisma.js';
-import { processCacheBatch } from './shopifyOrderProcessor.js';
+import { processCacheBatch } from './shopifyOrderProcessor/index.js';
 import { syncLogger } from '../utils/logger.js';
 import shutdownCoordinator from '../utils/shutdownCoordinator.js';
 

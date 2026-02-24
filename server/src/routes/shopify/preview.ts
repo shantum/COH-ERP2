@@ -4,8 +4,8 @@ import type { Request, Response } from 'express';
 import { authenticateToken } from '../../middleware/auth.js';
 import asyncHandler from '../../middleware/asyncHandler.js';
 import { ValidationError, ExternalServiceError } from '../../utils/errors.js';
-import shopifyClient from '../../services/shopify.js';
-import type { ShopifyProduct } from '../../services/shopify.js';
+import shopifyClient from '../../services/shopify/index.js';
+import type { ShopifyProduct } from '../../services/shopify/index.js';
 import { shopifyLogger } from '../../utils/logger.js';
 import type { AxiosErrorLike } from './types.js';
 

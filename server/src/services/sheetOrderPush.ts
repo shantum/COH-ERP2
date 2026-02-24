@@ -16,9 +16,9 @@ import { appendRows, addBottomBorders, getSheetId, readRange, batchWriteRanges }
 import {
     ORDERS_MASTERSHEET_ID,
     MASTERSHEET_TABS,
-} from '../config/sync/sheets.js';
+} from '../config/sync/sheets/index.js';
 import prisma from '../lib/prisma.js';
-import iThinkService from './ithinkLogistics.js';
+import iThinkService from './ithinkLogistics/index.js';
 import { resolveTrackingStatus } from '../config/mappings/trackingStatus.js';
 import { recomputeOrderStatus } from '../utils/orderStatus.js';
 

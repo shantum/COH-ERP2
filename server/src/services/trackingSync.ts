@@ -10,7 +10,7 @@
 
 import { Prisma } from '@prisma/client';
 import prisma from '../lib/prisma.js';
-import ithinkClient from './ithinkLogistics.js';
+import ithinkClient from './ithinkLogistics/index.js';
 import { recomputeOrderStatus } from '../utils/orderStatus.js';
 import { updateCustomerTier } from '../utils/tierUtils.js';
 import { trackingLogger } from '../utils/logger.js';

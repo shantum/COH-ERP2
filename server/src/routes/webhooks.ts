@@ -4,8 +4,8 @@ import type { PrismaClient } from '@prisma/client';
 import crypto from 'crypto';
 import { requireAdmin } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
-import { cacheAndProcessOrder, type ProcessResult } from '../services/shopifyOrderProcessor.js';
-import { cacheAndProcessProduct, handleProductDeletion } from '../services/productSyncService.js';
+import { cacheAndProcessOrder, type ProcessResult } from '../services/shopifyOrderProcessor/index.js';
+import { cacheAndProcessProduct, handleProductDeletion } from '../services/productSync/index.js';
 import {
     shopifyOrderSchema,
     shopifyProductSchema,
