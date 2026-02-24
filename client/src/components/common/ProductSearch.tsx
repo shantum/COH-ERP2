@@ -85,6 +85,8 @@ export interface ProductSearchProps {
   maxResultsHeight?: string;
   /** Additional CSS classes for the container */
   className?: string;
+  /** Optional prefill for query when opening the search */
+  initialQuery?: string;
 }
 
 export function ProductSearch({
@@ -97,8 +99,9 @@ export function ProductSearch({
   onFetchBalances,
   maxResultsHeight = '18rem',
   className = '',
+  initialQuery = '',
 }: ProductSearchProps) {
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState(initialQuery);
   const [localBalances, setLocalBalances] = useState<Map<string, BalanceInfo>>(new Map());
   const [fetchingBalanceFor, setFetchingBalanceFor] = useState<Set<string>>(new Set());
   const inputRef = useRef<HTMLInputElement>(null);
@@ -107,7 +110,8 @@ export function ProductSearch({
   const useServerSearch = !propsSkus;
 
   // Debounce search query for server-side search (300ms)
-  const debouncedQuery = useDebounce(query, 300);
+  const normalizedQuery = query.trim();
+  const debouncedQuery = useDebounce(normalizedQuery, 300);
 
   // Server function for autocomplete search
   const searchSkusFn = useServerFn(searchSkusForAutocomplete);
@@ -119,7 +123,7 @@ export function ProductSearch({
   const serverSearchQuery = useQuery({
     queryKey: ['skus', 'autocomplete', debouncedQuery],
     queryFn: () => searchSkusFn({ data: { query: debouncedQuery, limit: 30 } }),
-    enabled: useServerSearch,
+    enabled: useServerSearch && debouncedQuery.length >= 2,
     staleTime: 30000, // Cache results for 30 seconds
     refetchOnWindowFocus: false,
   });
@@ -153,6 +157,10 @@ export function ProductSearch({
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
+
+  useEffect(() => {
+    setQuery(initialQuery);
+  }, [initialQuery]);
 
   // Client-side filtering (legacy mode only - when allSkus prop provided)
   const filteredSkus = useMemo(() => {
@@ -300,8 +308,9 @@ export function ProductSearch({
     return null; // Not yet fetched
   }, [inventoryBalance, fetchedBalances, localBalances, fetchingBalanceFor, useServerSearch]);
 
-  const isLoading = useServerSearch && serverSearchQuery.isLoading;
-  const isTyping = useServerSearch && query !== debouncedQuery;
+  const isLoading = useServerSearch && (serverSearchQuery.isLoading || serverSearchQuery.isFetching);
+  const isTyping = useServerSearch && normalizedQuery !== debouncedQuery;
+  const isQueryTooShort = useServerSearch && normalizedQuery.length > 0 && normalizedQuery.length < 2;
 
   return (
     <div className={`border border-slate-200 rounded-xl bg-white overflow-hidden shadow-sm ${className}`}>
@@ -335,7 +344,7 @@ export function ProductSearch({
           <div className="p-6 text-center">
             <Package size={24} className="mx-auto text-slate-300 mb-2" />
             <p className="text-sm text-slate-500">
-              {useServerSearch && query.length > 0 && query.length < 2
+              {isQueryTooShort
                 ? 'Type at least 2 characters to search'
                 : 'No products found'}
             </p>
