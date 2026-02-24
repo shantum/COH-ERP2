@@ -174,14 +174,26 @@ function parseDate(val: string | undefined, timeVal?: string): Date | null {
     }
   }
 
-  // Try ISO format (2024-01-15 or 2024-01-15T14:30:00Z)
-  let date = new Date(trimmed);
-  if (!isNaN(date.getTime())) return date;
+  // Try ISO-like format (2024-01-15, 2024-01-15 14:30:00, 2024-01-15T14:30:00Z)
+  // If no timezone info present, treat as IST (all BT report dates are IST)
+  const timeStr = time || '00:00:00';
+  const isoLike = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (isoLike) {
+    // If it already has timezone info (Z or +/-offset), parse as-is
+    if (/[Zz]|[+-]\d{2}:\d{2}$/.test(trimmed)) {
+      const date = new Date(trimmed);
+      if (!isNaN(date.getTime())) return date;
+    }
+    // Otherwise treat as IST
+    const datePart = `${isoLike[1]}-${isoLike[2]}-${isoLike[3]}`;
+    const date = new Date(`${datePart}T${timeStr}+05:30`);
+    if (!isNaN(date.getTime())) return date;
+  }
 
-  // Try DD-MM-YYYY format (numeric month)
+  // Try DD-MM-YYYY format (numeric month) — treat as IST
   const ddmmyyyy = trimmed.match(/^(\d{2})-(\d{2})-(\d{4})/);
   if (ddmmyyyy) {
-    date = new Date(`${ddmmyyyy[3]}-${ddmmyyyy[2]}-${ddmmyyyy[1]}`);
+    const date = new Date(`${ddmmyyyy[3]}-${ddmmyyyy[2]}-${ddmmyyyy[1]}T${timeStr}+05:30`);
     if (!isNaN(date.getTime())) return date;
   }
 
