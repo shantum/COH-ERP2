@@ -11,6 +11,7 @@
  */
 
 import { useState, useMemo, useCallback } from 'react';
+import { useNavigate } from '@tanstack/react-router';
 import { Filter, X, Users, Shirt, Scissors, Search, Plus } from 'lucide-react';
 import { useDebounce } from '../../hooks/useDebounce';
 
@@ -30,9 +31,7 @@ import {
 import { SkuWiseDataTable } from './SkuWiseDataTable';
 import { BomDataTable } from './BomDataTable';
 import { useProductsTree } from './hooks/useProductsTree';
-import { UnifiedProductEditModal } from './unified-edit';
 import type { ProductTreeNode } from './types';
-import type { EditLevel } from './unified-edit/types';
 
 type ProductsView = 'catalog' | 'bom';
 
@@ -112,17 +111,10 @@ export function ProductsViewSwitcher({ searchQuery, onSearchChange, onViewProduc
     // Debounce search to prevent expensive tree filtering on every keystroke
     const debouncedSearchQuery = useDebounce(searchQuery || '', 300);
 
-    // Edit modal state
-    const [editModalOpen, setEditModalOpen] = useState(false);
-    const [editTarget, setEditTarget] = useState<{
-        level: EditLevel;
-        productId: string;
-        variationId?: string;
-        skuId?: string;
-    } | null>(null);
+    const navigate = useNavigate();
 
     // Use initialData from route loader to prevent refetch after SSR hydration
-    const { data: treeData, summary, refetch } = useProductsTree({
+    const { data: treeData, summary } = useProductsTree({
         initialData: initialData ? { items: initialData.items, summary: initialData.summary } : undefined,
     });
 
@@ -331,44 +323,19 @@ export function ProductsViewSwitcher({ searchQuery, onSearchChange, onViewProduc
         setFilters(prev => ({ ...prev, [key]: value }));
     }, []);
 
-    // Open edit modal for a product/variation/SKU
+    // Navigate to full-page edit for a product/variation/SKU
     const handleEditProduct = useCallback((node: ProductTreeNode) => {
-        // Find the product ID for any level
         let productId = node.id;
-        let variationId: string | undefined;
-        let skuId: string | undefined;
-        let level: EditLevel = 'product';
-
         if (node.type === 'variation') {
             productId = node.productId || '';
-            variationId = node.id;
-            level = 'variation';
         } else if (node.type === 'sku') {
-            // Need to find product and variation from the tree
             const productNode = treeData?.find(p =>
                 p.children?.some(v => v.children?.some(s => s.id === node.id))
             );
-            const variationNode = productNode?.children?.find(v =>
-                v.children?.some(s => s.id === node.id)
-            );
             productId = productNode?.id || '';
-            variationId = variationNode?.id;
-            skuId = node.id;
-            level = 'sku';
         }
-
-        setEditTarget({ level, productId, variationId, skuId });
-        setEditModalOpen(true);
-    }, [treeData]);
-
-    const handleEditModalClose = useCallback(() => {
-        setEditModalOpen(false);
-        setEditTarget(null);
-    }, []);
-
-    const handleEditSuccess = useCallback(() => {
-        refetch();
-    }, [refetch]);
+        navigate({ to: '/products/$productId/edit', params: { productId } });
+    }, [treeData, navigate]);
 
     return (
         <div className="flex flex-col h-full">
@@ -691,18 +658,6 @@ export function ProductsViewSwitcher({ searchQuery, onSearchChange, onViewProduc
                 )}
             </div>
 
-            {/* Unified Edit Modal */}
-            {editTarget && (
-                <UnifiedProductEditModal
-                    isOpen={editModalOpen}
-                    onClose={handleEditModalClose}
-                    initialLevel={editTarget.level}
-                    productId={editTarget.productId}
-                    variationId={editTarget.variationId}
-                    skuId={editTarget.skuId}
-                    onSuccess={handleEditSuccess}
-                />
-            )}
         </div>
     );
 }
