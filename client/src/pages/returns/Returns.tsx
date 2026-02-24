@@ -277,9 +277,10 @@ export default function Returns() {
     // QUERIES
     // ============================================
 
+    const getDashboardFn = useServerFn(getReturnPrimeDashboard);
     const { data, isLoading, error, refetch } = useQuery({
         queryKey: returnPrimeQueryKeys.dashboard(filters),
-        queryFn: () => getReturnPrimeDashboard({ data: filters }),
+        queryFn: () => getDashboardFn({ data: filters }),
         staleTime: 60 * 1000,
         retry: 2,
     });
