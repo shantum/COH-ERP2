@@ -54,7 +54,13 @@ const TableRow = memo(function TableRow({
     (sum, li) => sum + (li.shop_price?.actual_amount || 0),
     0
   ) || 0;
-  const primaryReason = request.line_items?.[0]?.reason || 'N/A';
+  const firstLine = request.line_items?.[0];
+  const primaryReason =
+    firstLine?.reason_detail ||
+    firstLine?.customer_comment ||
+    firstLine?.reason ||
+    request.customer_comment ||
+    'N/A';
 
   return (
     <tr

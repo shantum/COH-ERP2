@@ -307,6 +307,8 @@ function LineItemsSection({ request }: { request: ReturnPrimeRequest }) {
           const exchangeProduct = item.exchange_product;
           const refund = item.refund;
           const shopPrice = item.shop_price;
+          const reasonDetail = item.reason_detail || item.customer_comment || request.customer_comment;
+          const inspectionNotes = item.inspection_notes || request.inspection_notes;
 
           return (
             <div
@@ -347,9 +349,24 @@ function LineItemsSection({ request }: { request: ReturnPrimeRequest }) {
                 </div>
 
                 {/* Reason */}
-                {item.reason && (
-                  <p className="mt-2 text-xs text-amber-700 bg-amber-50 px-2 py-1 rounded inline-block">
-                    Reason: {item.reason}
+                {(item.reason || reasonDetail) && (
+                  <div className="mt-2 space-y-1">
+                    {item.reason && (
+                      <p className="text-xs text-amber-700 bg-amber-50 px-2 py-1 rounded inline-block">
+                        Reason: {item.reason}
+                      </p>
+                    )}
+                    {reasonDetail && reasonDetail !== item.reason && (
+                      <p className="text-xs text-gray-700 bg-gray-100 px-2 py-1 rounded">
+                        Comment: {reasonDetail}
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {inspectionNotes && (
+                  <p className="mt-2 text-xs text-slate-700 bg-slate-100 px-2 py-1 rounded inline-block">
+                    Inspection: {inspectionNotes}
                   </p>
                 )}
 
@@ -472,6 +489,13 @@ export function ReturnPrimeDetailModal({ request, open, onOpenChange }: Props) {
 
           {/* Line Items */}
           <LineItemsSection request={request} />
+
+          {request.notes && (
+            <div className="bg-slate-50 rounded-lg border border-slate-200 p-4">
+              <h3 className="text-sm font-semibold text-slate-800 mb-2">Internal Notes</h3>
+              <p className="text-sm text-slate-700">{request.notes}</p>
+            </div>
+          )}
 
           {/* Incentive Info */}
           {request.incentive && (

@@ -21,6 +21,9 @@ export interface ReturnPrimeLineItem {
     quantity: number;
     price: number | undefined;
     reason: string | undefined;
+    reason_detail?: string | undefined;
+    customer_comment?: string | undefined;
+    inspection_notes?: string | undefined;
 }
 
 /**
@@ -431,6 +434,9 @@ export const ReturnPrimeApiLineItemSchema = z.object({
     id: z.number(),
     quantity: z.number(),
     reason: z.string().nullable().optional(),
+    reason_detail: z.string().nullable().optional(),
+    customer_comment: z.string().nullable().optional(),
+    inspection_notes: z.string().nullable().optional(),
     refund: LineItemRefundSchema.nullable().optional(),
     return_fee: FeeSchema.nullable().optional(),
     exchange_fee: FeeSchema.nullable().optional(),
@@ -470,6 +476,9 @@ export const ReturnPrimeRequestSchema = z.object({
     channel: z.number().optional(),
     smart_exchange: z.boolean().optional(),
     created_at: z.string(),
+    notes: z.string().nullable().optional(),
+    customer_comment: z.string().nullable().optional(),
+    inspection_notes: z.string().nullable().optional(),
 
     order: ReturnPrimeApiOrderSchema.optional(),
     customer: ReturnPrimeApiCustomerSchema.optional(),

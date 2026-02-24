@@ -1017,6 +1017,27 @@ export type RepackingQueueItem = {
     qcComments: string | null;
     orderLineId: string | null;
 };
+export type ReturnPrimeCsvEnrichment = {
+    id: Generated<string>;
+    requestNumber: string;
+    requestType: string | null;
+    status: string | null;
+    csvReason: string | null;
+    customerComment: string | null;
+    inspectionNotes: string | null;
+    notes: string | null;
+    refundStatus: string | null;
+    requestedRefundMode: string | null;
+    actualRefundMode: string | null;
+    refundedAtRaw: string | null;
+    pickupAwb: string | null;
+    pickupLogistics: string | null;
+    sourceFile: string | null;
+    rawRow: unknown | null;
+    importedAt: Generated<Timestamp>;
+    createdAt: Generated<Timestamp>;
+    updatedAt: Timestamp;
+};
 export type ReturnPrimeRequest = {
     id: Generated<string>;
     rpRequestId: string;
@@ -1475,6 +1496,7 @@ export type DB = {
     ProductBomTemplate: ProductBomTemplate;
     ProductionBatch: ProductionBatch;
     RepackingQueueItem: RepackingQueueItem;
+    ReturnPrimeCsvEnrichment: ReturnPrimeCsvEnrichment;
     ReturnPrimeRequest: ReturnPrimeRequest;
     ReturnSettings: ReturnSettings;
     Role: Role;

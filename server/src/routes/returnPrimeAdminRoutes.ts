@@ -15,6 +15,7 @@ import {
     getSyncStatus,
     getDetailedSyncStatus,
 } from '../services/returnPrimeInboundSync.js';
+import { importReturnPrimeCsvEnrichment } from '../services/returnPrimeCsvEnrichment.js';
 
 const router = Router();
 
@@ -35,6 +36,12 @@ const SyncOptionsSchema = z.object({
         .regex(/^\d{4}-\d{2}-\d{2}$/)
         .optional(),
     fullSync: z.boolean().optional(),
+});
+
+const CsvEnrichmentImportSchema = z.object({
+    csvPath: z.string().min(1),
+    dryRun: z.boolean().optional().default(false),
+    enrichOrderLines: z.boolean().optional().default(true),
 });
 
 // ============================================
@@ -145,6 +152,45 @@ router.get('/sync-status/simple', asyncHandler(async (req: Request, res: Respons
         });
     } catch (error: unknown) {
         const message = error instanceof Error ? error.message : 'Unknown error';
+        res.status(500).json({
+            success: false,
+            error: message,
+        });
+    }
+}));
+
+/**
+ * POST /api/returnprime/admin/csv-enrichment/import
+ *
+ * Upsert Return Prime CSV export data keyed by request number (RET/EXC serial),
+ * then optionally enrich OrderLine fields where data is missing.
+ */
+router.post('/csv-enrichment/import', asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    try {
+        const validation = CsvEnrichmentImportSchema.safeParse(req.body);
+        if (!validation.success) {
+            res.status(400).json({
+                success: false,
+                error: 'Invalid input',
+                details: validation.error.issues,
+            });
+            return;
+        }
+
+        const { csvPath, dryRun, enrichOrderLines } = validation.data;
+        const result = await importReturnPrimeCsvEnrichment({
+            csvPath,
+            dryRun,
+            enrichOrderLines,
+        });
+
+        res.json({
+            success: true,
+            data: result,
+        });
+    } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        console.error('[ReturnPrimeAdmin] CSV enrichment import failed:', message);
         res.status(500).json({
             success: false,
             error: message,

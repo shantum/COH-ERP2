@@ -48,6 +48,62 @@ const ReturnPrimeRequestIdSchema = z.object({
 
 /** Prisma-derived type for ReturnPrimeRequest rows */
 type LocalRequest = Prisma.ReturnPrimeRequestGetPayload<{}>;
+type CsvEnrichment = Prisma.ReturnPrimeCsvEnrichmentGetPayload<{}>;
+
+type ParsedLineItem = z.infer<typeof ReturnPrimeApiLineItemSchema>;
+
+function enrichLineItemsFromCsv(
+    lineItems: ParsedLineItem[],
+    enrichment: CsvEnrichment | undefined
+): ParsedLineItem[] {
+    if (!enrichment) return lineItems;
+
+    return lineItems.map((item) => {
+        const baseReason = (item.reason || '').trim().toLowerCase();
+        const isGenericReason = !baseReason || baseReason === 'others';
+        const customerComment = item.customer_comment ?? enrichment.customerComment ?? null;
+        const reasonDetail = item.reason_detail ?? enrichment.customerComment ?? null;
+        const inspectionNotes = item.inspection_notes ?? enrichment.inspectionNotes ?? null;
+
+        const shipping = (!item.shipping || item.shipping.length === 0) &&
+            (enrichment.pickupAwb || enrichment.pickupLogistics)
+            ? [{
+                awb: enrichment.pickupAwb ?? null,
+                shipping_company: enrichment.pickupLogistics ?? null,
+                tracking_url: null,
+                tracking_available: null,
+                labels: null,
+            }]
+            : item.shipping;
+
+        const hasRefundEnrichment = Boolean(
+            enrichment.requestedRefundMode ||
+            enrichment.actualRefundMode ||
+            enrichment.refundStatus ||
+            enrichment.refundedAtRaw
+        );
+
+        const refund = hasRefundEnrichment
+            ? {
+                ...(item.refund ?? {}),
+                requested_mode: item.refund?.requested_mode ?? enrichment.requestedRefundMode ?? null,
+                actual_mode: item.refund?.actual_mode ?? enrichment.actualRefundMode ?? null,
+                status: item.refund?.status ?? enrichment.refundStatus ?? null,
+                refunded_at: item.refund?.refunded_at ?? enrichment.refundedAtRaw ?? null,
+            }
+            : item.refund;
+
+        return {
+            ...item,
+            reason: isGenericReason && customerComment ? customerComment : item.reason,
+            reason_detail: reasonDetail,
+            customer_comment: customerComment,
+            inspection_notes: inspectionNotes,
+            shipping,
+            refund,
+        };
+    });
+}
 
 // ============================================
 // HELPER FUNCTIONS
@@ -56,10 +112,10 @@ type LocalRequest = Prisma.ReturnPrimeRequestGetPayload<{}>;
 /**
  * Transform local database record to API response format for UI compatibility
  */
-function transformLocalToApiFormat(local: LocalRequest): ReturnPrimeRequest {
+function transformLocalToApiFormat(local: LocalRequest, enrichment?: CsvEnrichment): ReturnPrimeRequest {
     // Validate lineItems JSON through Zod instead of blind cast
     const parsedLineItems = z.array(ReturnPrimeApiLineItemSchema).safeParse(local.lineItems);
-    const lineItems = parsedLineItems.success ? parsedLineItems.data : [];
+    const lineItems = enrichLineItemsFromCsv(parsedLineItems.success ? parsedLineItems.data : [], enrichment);
 
     // Validate requestType at runtime
     const requestType = local.requestType === 'return' || local.requestType === 'exchange'
@@ -74,6 +130,9 @@ function transformLocalToApiFormat(local: LocalRequest): ReturnPrimeRequest {
         id: local.rpRequestId,
         request_number: local.rpRequestNumber,
         request_type: requestType,
+        notes: enrichment?.notes ?? null,
+        customer_comment: enrichment?.customerComment ?? null,
+        inspection_notes: enrichment?.inspectionNotes ?? null,
         status: local.isRejected
             ? 'rejected'
             : local.isRefunded
@@ -200,7 +259,17 @@ async function fetchDashboardData(
         take: 500,
     });
 
-    const requests = localRequests.map(transformLocalToApiFormat);
+    const requestNumbers = Array.from(new Set(localRequests.map((r) => r.rpRequestNumber)));
+    const enrichments = requestNumbers.length > 0
+        ? await prisma.returnPrimeCsvEnrichment.findMany({
+            where: { requestNumber: { in: requestNumbers } },
+        })
+        : [];
+    const enrichmentMap = new Map(enrichments.map((e) => [e.requestNumber, e]));
+
+    const requests = localRequests.map((local) =>
+        transformLocalToApiFormat(local, enrichmentMap.get(local.rpRequestNumber))
+    );
     const stats = computeStats(requests);
 
     return { requests, stats, hasNextPage: false, hasPreviousPage: false };
@@ -240,7 +309,11 @@ export const getReturnPrimeRequest = createServerFn({ method: 'POST' })
                 return null;
             }
 
-            return transformLocalToApiFormat(local);
+            const enrichment = await prisma.returnPrimeCsvEnrichment.findUnique({
+                where: { requestNumber: local.rpRequestNumber },
+            });
+
+            return transformLocalToApiFormat(local, enrichment ?? undefined);
         } catch (error: unknown) {
             const message = error instanceof Error ? error.message : 'Unknown error';
             console.error('[Server Function] Error in getReturnPrimeRequest:', message);

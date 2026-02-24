@@ -1668,6 +1668,34 @@ model ReturnPrimeRequest {
   @@index([orderId])              // FK — return requests for an order
 }
 
+/// CSV-only enrichment for Return Prime requests (reason details, inspection notes, etc.)
+/// Keyed by request number because CSV export does not include Return Prime request ID.
+model ReturnPrimeCsvEnrichment {
+  id                  String   @id @default(uuid())
+  requestNumber       String   @unique   // serial_number, e.g. RET1234 / EXC1234
+  requestType         String?
+  status              String?
+  csvReason           String?            // Raw CSV reason column (often "Others")
+  customerComment     String?            // Detailed customer-provided reason text
+  inspectionNotes     String?            // QC/inspection notes from CSV
+  notes               String?            // Internal notes from CSV
+  refundStatus        String?
+  requestedRefundMode String?
+  actualRefundMode    String?
+  refundedAtRaw       String?            // Raw CSV date string
+  pickupAwb           String?
+  pickupLogistics     String?
+  sourceFile          String?
+  rawRow              Json?
+  importedAt          DateTime @default(now())
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@index([requestType])
+  @@index([status])
+  @@index([importedAt])
+}
+
 model MonthlyStockSnapshot {
   id               String   @id @default(uuid())
   skuId            String
