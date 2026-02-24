@@ -16,9 +16,12 @@ import { useRouterState, ClientOnly } from '@tanstack/react-router';
 
 function LoadingBarContent() {
   const isLoading = useRouterState({
-    select: (s) =>
-      s.status === 'pending' &&
-      s.location.pathname !== s.resolvedLocation?.pathname,
+    select: (s) => {
+      // `status` can temporarily remain "pending" after transition bookkeeping.
+      // Use `isLoading` + resolved location to represent active navigation only.
+      if (!s.isLoading || !s.resolvedLocation) return false;
+      return s.location.pathname !== s.resolvedLocation.pathname;
+    },
   });
 
   if (!isLoading) {
