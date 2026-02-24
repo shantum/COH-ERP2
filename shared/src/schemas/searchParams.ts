@@ -164,14 +164,18 @@ export type ProductionSearchParams = z.infer<typeof ProductionSearchParams>;
 
 /**
  * Returns page search params
+ * Unified returns dashboard with 3 tabs: overview, returns, analytics
+ * Data sourced from Return Prime integration
  */
 export const ReturnsSearchParams = z.object({
-    /** Filter by return status */
-    status: z.enum(['all', 'pending', 'approved', 'received', 'processed', 'rejected']).catch('all'),
-    /** Search query */
+    /** Active tab */
+    tab: z.enum(['overview', 'returns', 'analytics']).catch('overview'),
+    /** Filter by request type */
+    requestType: z.enum(['all', 'return', 'exchange']).catch('all'),
+    /** Search query (order, email, phone, RET/EXC number) */
     search: z.string().optional().catch(undefined),
-    /** Page number */
-    page: z.coerce.number().int().positive().catch(1),
+    /** Date range preset */
+    datePreset: z.enum(['7d', '30d', '90d', '1y', 'all']).catch('30d'),
 });
 export type ReturnsSearchParams = z.infer<typeof ReturnsSearchParams>;
 

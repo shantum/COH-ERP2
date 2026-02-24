@@ -43,6 +43,7 @@ async function main(): Promise<void> {
     console.log(`Existing enrichment rows: ${result.existingEnrichmentRows}`);
     console.log(`Created: ${result.created}`);
     console.log(`Updated: ${result.updated}`);
+    console.log(`Unchanged: ${result.unchanged}`);
     console.log(`Order lines enriched: ${result.orderLinesEnriched}`);
     console.log('=========================================\n');
 }

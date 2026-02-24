@@ -1,16 +1,14 @@
 /**
  * Return Prime Route - /return-prime
  *
- * Dashboard for customer returns and exchanges from Return Prime.
- * Displays stats, request list, and analytics.
+ * Redirects to unified /returns page.
+ * Kept for backwards compatibility with bookmarks/links.
  */
-import { createFileRoute } from '@tanstack/react-router';
-import { lazy } from 'react';
-import { ReturnPrimeSearchParamsSchema } from '@coh/shared/schemas/returnPrime';
-
-const ReturnPrimePage = lazy(() => import('../../pages/ReturnPrime'));
+import { createFileRoute, redirect } from '@tanstack/react-router';
 
 export const Route = createFileRoute('/_authenticated/return-prime')({
-    validateSearch: (search) => ReturnPrimeSearchParamsSchema.parse(search),
-    component: ReturnPrimePage,
+    beforeLoad: () => {
+        throw redirect({ to: '/returns', search: { tab: 'returns' as const, requestType: 'all' as const, datePreset: '30d' as const } });
+    },
+    component: () => null,
 });

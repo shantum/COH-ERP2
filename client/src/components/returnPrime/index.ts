@@ -8,3 +8,4 @@ export { ReturnPrimeStatsCards } from './ReturnPrimeStatsCards';
 export { ReturnPrimeTable } from './ReturnPrimeTable';
 export { ReturnPrimeDetailModal } from './ReturnPrimeDetailModal';
 export { ReturnPrimeAnalytics } from './ReturnPrimeAnalytics';
+export { ReturnPrimeCsvEnrichmentDialog } from './ReturnPrimeCsvEnrichmentDialog';
