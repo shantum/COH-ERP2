@@ -30,6 +30,8 @@ export type {
     OrderForExchange,
     GetOrderForExchangeResult,
     GetOrderForExchangeInput,
+    OrderSearchHit,
+    SearchOrdersForExchangeResult,
     CustomerStats,
     RevenueData,
     TopProduct,
@@ -51,7 +53,7 @@ import {
 
 // Re-export server functions from extracted files
 export { getOrdersAnalytics } from './ordersAnalytics';
-export { getOrderForExchange } from './orderExchange';
+export { getOrderForExchange, searchOrdersForExchange } from './orderExchange';
 
 // ============================================
 // INTERNAL TYPES (for Prisma query results)

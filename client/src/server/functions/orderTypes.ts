@@ -383,6 +383,32 @@ export interface GetOrderForExchangeResult {
 }
 
 // ============================================
+// SEARCH ORDERS FOR EXCHANGE
+// ============================================
+
+export const searchOrdersForExchangeSchema = z.object({
+    query: z.string().min(1),
+});
+
+export type SearchOrdersForExchangeInput = z.infer<typeof searchOrdersForExchangeSchema>;
+
+export interface OrderSearchHit {
+    id: string;
+    orderNumber: string;
+    customerName: string;
+    customerPhone: string | null;
+    orderDate: string;
+    totalAmount: number;
+    itemCount: number;
+}
+
+export interface SearchOrdersForExchangeResult {
+    success: boolean;
+    data?: OrderSearchHit[];
+    error?: string;
+}
+
+// ============================================
 // ANALYTICS TYPES
 // ============================================
 

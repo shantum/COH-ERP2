@@ -5,7 +5,7 @@
  * On submit: resolves any unresolved SKU codes → IDs, creates order in ERP, pushes to Google Sheet.
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { useNavigate } from '@tanstack/react-router';
@@ -14,7 +14,7 @@ import { computeOrderGst } from '@coh/shared';
 import { getChannels } from '../server/functions/admin';
 import { getCustomerAddresses, searchCustomers, type CustomerSearchItem } from '../server/functions/customers';
 import { resolveSkuCodes } from '../server/functions/products';
-import { getOrderForExchange, type OrderForExchange } from '../server/functions/orders';
+import { getOrderForExchange, searchOrdersForExchange, type OrderForExchange, type OrderSearchHit } from '../server/functions/orders';
 import { ProductSearch, type SKUData } from '../components/common/ProductSearch';
 import { useOrderCrudMutations } from '../hooks/orders/useOrderCrudMutations';
 import { getOptimizedImageUrl } from '../utils/imageOptimization';
@@ -186,6 +186,10 @@ export default function QuickOrder() {
     const [orderNumberSearch, setOrderNumberSearch] = useState('');
     const [isSearchingOrder, setIsSearchingOrder] = useState(false);
     const [orderSearchError, setOrderSearchError] = useState('');
+    const [orderSearchResults, setOrderSearchResults] = useState<OrderSearchHit[]>([]);
+    const [showOrderDropdown, setShowOrderDropdown] = useState(false);
+    const orderSearchRef = useRef<HTMLDivElement>(null);
+    const orderSearchDebounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
     const [isPhoneFieldFocused, setIsPhoneFieldFocused] = useState(false);
     const [phoneAutoMatchedKey, setPhoneAutoMatchedKey] = useState('');
 
@@ -204,6 +208,7 @@ export default function QuickOrder() {
     // Server functions
     const resolveSkuCodesFn = useServerFn(resolveSkuCodes);
     const getOrderForExchangeFn = useServerFn(getOrderForExchange);
+    const searchOrdersForExchangeFn = useServerFn(searchOrdersForExchange);
     const searchCustomersFn = useServerFn(searchCustomers);
     const getCustomerAddressesFn = useServerFn(getCustomerAddresses);
 
@@ -276,7 +281,7 @@ export default function QuickOrder() {
         if (isSearchingPhoneCustomers) {
             return { tone: 'muted' as const, text: 'Searching existing customers...' };
         }
-        if (customerId && exactPhoneMatch?.id === customerId) {
+        if (customerId && (exactPhoneMatch?.id === customerId || sourceOrder)) {
             return { tone: 'success' as const, text: 'Existing customer matched and auto-filled.' };
         }
         if (exactPhoneMatch) {
@@ -336,17 +341,58 @@ export default function QuickOrder() {
             setSourceOrder(null);
             setOrderNumberSearch('');
             setOrderSearchError('');
+            setOrderSearchResults([]);
+            setShowOrderDropdown(false);
             setPhoneAutoMatchedKey('');
         }
     };
 
-    const handleOrderLookup = async () => {
-        if (!orderNumberSearch.trim()) return;
+    const orderSearchSeqRef = useRef(0);
+
+    const handleOrderSearchChange = (value: string) => {
+        setOrderNumberSearch(value);
+        setOrderSearchError('');
+
+        if (orderSearchDebounceRef.current) clearTimeout(orderSearchDebounceRef.current);
+
+        if (value.trim().length < 2) {
+            setOrderSearchResults([]);
+            setShowOrderDropdown(false);
+            setIsSearchingOrder(false);
+            orderSearchSeqRef.current++;
+            return;
+        }
+
+        setIsSearchingOrder(true);
+        orderSearchDebounceRef.current = setTimeout(async () => {
+            const seq = ++orderSearchSeqRef.current;
+            const q = value.trim();
+            try {
+                const result = await searchOrdersForExchangeFn({ data: { query: q } });
+                // Only apply if no newer search has started
+                if (orderSearchSeqRef.current !== seq) return;
+                if (result.success && result.data) {
+                    setOrderSearchResults(result.data);
+                    setShowOrderDropdown(result.data.length > 0);
+                }
+            } catch {
+                // Silently fail for live search
+            } finally {
+                if (orderSearchSeqRef.current === seq) {
+                    setIsSearchingOrder(false);
+                }
+            }
+        }, 300);
+    };
+
+    const handleOrderSearchSelect = async (hit: OrderSearchHit) => {
+        setShowOrderDropdown(false);
+        setOrderNumberSearch(hit.orderNumber);
         setIsSearchingOrder(true);
         setOrderSearchError('');
 
         try {
-            const result = await getOrderForExchangeFn({ data: { orderNumber: orderNumberSearch.trim() } });
+            const result = await getOrderForExchangeFn({ data: { orderNumber: hit.orderNumber } });
             if (result.success && result.data) {
                 setSourceOrder(result.data);
                 setCustomerName(result.data.customerName);
@@ -354,7 +400,6 @@ export default function QuickOrder() {
                 setPhone(result.data.customerPhone || '');
                 setPhoneAutoMatchedKey(normalizePhone(result.data.customerPhone || ''));
                 setEmail(result.data.customerEmail || '');
-                // Parse city from shipping address
                 if (result.data.shippingAddress) {
                     try {
                         const addr = JSON.parse(result.data.shippingAddress);
@@ -372,10 +417,23 @@ export default function QuickOrder() {
         }
     };
 
+    // Close dropdown on outside click
+    useEffect(() => {
+        const handleClickOutside = (e: MouseEvent) => {
+            if (orderSearchRef.current && !orderSearchRef.current.contains(e.target as Node)) {
+                setShowOrderDropdown(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
+
     const handleClearSourceOrder = () => {
         setSourceOrder(null);
         setOrderNumberSearch('');
         setOrderSearchError('');
+        setOrderSearchResults([]);
+        setShowOrderDropdown(false);
         setCustomerName('');
         setCustomerId(null);
         setPhone('');
@@ -674,29 +732,49 @@ export default function QuickOrder() {
                             <CardContent className="space-y-3">
                                 {!sourceOrder ? (
                                     <>
-                                        <div className="flex gap-2">
-                                            <Input
-                                                placeholder="Enter order number..."
-                                                value={orderNumberSearch}
-                                                onChange={(e) => setOrderNumberSearch(e.target.value)}
-                                                onKeyDown={(e) => {
-                                                    if (e.key === 'Enter') {
-                                                        e.preventDefault();
-                                                        handleOrderLookup();
-                                                    }
-                                                }}
-                                                className="h-10 flex-1"
-                                            />
-                                            <Button
-                                                type="button"
-                                                variant="outline"
-                                                size="sm"
-                                                onClick={handleOrderLookup}
-                                                disabled={isSearchingOrder || !orderNumberSearch.trim()}
-                                                className="h-10 px-3"
-                                            >
-                                                {isSearchingOrder ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-                                            </Button>
+                                        <div className="relative" ref={orderSearchRef}>
+                                            <div className="relative">
+                                                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                                                <Input
+                                                    placeholder="Search by order number, customer name, or phone..."
+                                                    value={orderNumberSearch}
+                                                    onChange={(e) => handleOrderSearchChange(e.target.value)}
+                                                    onFocus={() => { if (orderSearchResults.length > 0) setShowOrderDropdown(true); }}
+                                                    className="h-10 pl-9 pr-9"
+                                                    autoComplete="off"
+                                                />
+                                                {isSearchingOrder && (
+                                                    <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground" />
+                                                )}
+                                            </div>
+                                            {showOrderDropdown && orderSearchResults.length > 0 && (
+                                                <div className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-lg">
+                                                    <ul className="max-h-64 overflow-auto py-1">
+                                                        {orderSearchResults.map((hit) => (
+                                                            <li key={hit.id}>
+                                                                <button
+                                                                    type="button"
+                                                                    className="flex w-full items-start gap-3 px-3 py-2.5 text-left hover:bg-accent transition-colors"
+                                                                    onClick={() => handleOrderSearchSelect(hit)}
+                                                                >
+                                                                    <div className="min-w-0 flex-1">
+                                                                        <div className="flex items-center gap-2">
+                                                                            <span className="font-medium text-sm">{hit.orderNumber}</span>
+                                                                            <span className="text-xs text-muted-foreground">· {hit.itemCount} items · ₹{hit.totalAmount.toLocaleString('en-IN')}</span>
+                                                                        </div>
+                                                                        <p className="text-xs text-muted-foreground mt-0.5">
+                                                                            {hit.customerName}
+                                                                            {hit.customerPhone ? ` · ${hit.customerPhone}` : ''}
+                                                                            {' · '}
+                                                                            {new Date(hit.orderDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                                                                        </p>
+                                                                    </div>
+                                                                </button>
+                                                            </li>
+                                                        ))}
+                                                    </ul>
+                                                </div>
+                                            )}
                                         </div>
                                         {orderSearchError && <p className="text-xs text-destructive">{orderSearchError}</p>}
                                     </>
