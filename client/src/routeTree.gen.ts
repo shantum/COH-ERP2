@@ -36,6 +36,7 @@ import { Route as AuthenticatedOrderSearchRouteImport } from './routes/_authenti
 import { Route as AuthenticatedLedgersRouteImport } from './routes/_authenticated/ledgers'
 import { Route as AuthenticatedInventoryInwardRouteImport } from './routes/_authenticated/inventory-inward'
 import { Route as AuthenticatedInventoryCountRouteImport } from './routes/_authenticated/inventory-count'
+import { Route as AuthenticatedInventoryAdjustmentsRouteImport } from './routes/_authenticated/inventory-adjustments'
 import { Route as AuthenticatedInventoryRouteImport } from './routes/_authenticated/inventory'
 import { Route as AuthenticatedFinanceRouteImport } from './routes/_authenticated/finance'
 import { Route as AuthenticatedFacebookFeedHealthRouteImport } from './routes/_authenticated/facebook-feed-health'
@@ -190,6 +191,12 @@ const AuthenticatedInventoryCountRoute =
     path: '/inventory-count',
     getParentRoute: () => AuthenticatedRoute,
   } as any)
+const AuthenticatedInventoryAdjustmentsRoute =
+  AuthenticatedInventoryAdjustmentsRouteImport.update({
+    id: '/inventory-adjustments',
+    path: '/inventory-adjustments',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
 const AuthenticatedInventoryRoute = AuthenticatedInventoryRouteImport.update({
   id: '/inventory',
   path: '/inventory',
@@ -274,6 +281,7 @@ export interface FileRoutesByFullPath {
   '/facebook-feed-health': typeof AuthenticatedFacebookFeedHealthRoute
   '/finance': typeof AuthenticatedFinanceRoute
   '/inventory': typeof AuthenticatedInventoryRoute
+  '/inventory-adjustments': typeof AuthenticatedInventoryAdjustmentsRoute
   '/inventory-count': typeof AuthenticatedInventoryCountRoute
   '/inventory-inward': typeof AuthenticatedInventoryInwardRoute
   '/ledgers': typeof AuthenticatedLedgersRoute
@@ -313,6 +321,7 @@ export interface FileRoutesByTo {
   '/facebook-feed-health': typeof AuthenticatedFacebookFeedHealthRoute
   '/finance': typeof AuthenticatedFinanceRoute
   '/inventory': typeof AuthenticatedInventoryRoute
+  '/inventory-adjustments': typeof AuthenticatedInventoryAdjustmentsRoute
   '/inventory-count': typeof AuthenticatedInventoryCountRoute
   '/inventory-inward': typeof AuthenticatedInventoryInwardRoute
   '/ledgers': typeof AuthenticatedLedgersRoute
@@ -355,6 +364,7 @@ export interface FileRoutesById {
   '/_authenticated/facebook-feed-health': typeof AuthenticatedFacebookFeedHealthRoute
   '/_authenticated/finance': typeof AuthenticatedFinanceRoute
   '/_authenticated/inventory': typeof AuthenticatedInventoryRoute
+  '/_authenticated/inventory-adjustments': typeof AuthenticatedInventoryAdjustmentsRoute
   '/_authenticated/inventory-count': typeof AuthenticatedInventoryCountRoute
   '/_authenticated/inventory-inward': typeof AuthenticatedInventoryInwardRoute
   '/_authenticated/ledgers': typeof AuthenticatedLedgersRoute
@@ -398,6 +408,7 @@ export interface FileRouteTypes {
     | '/facebook-feed-health'
     | '/finance'
     | '/inventory'
+    | '/inventory-adjustments'
     | '/inventory-count'
     | '/inventory-inward'
     | '/ledgers'
@@ -437,6 +448,7 @@ export interface FileRouteTypes {
     | '/facebook-feed-health'
     | '/finance'
     | '/inventory'
+    | '/inventory-adjustments'
     | '/inventory-count'
     | '/inventory-inward'
     | '/ledgers'
@@ -478,6 +490,7 @@ export interface FileRouteTypes {
     | '/_authenticated/facebook-feed-health'
     | '/_authenticated/finance'
     | '/_authenticated/inventory'
+    | '/_authenticated/inventory-adjustments'
     | '/_authenticated/inventory-count'
     | '/_authenticated/inventory-inward'
     | '/_authenticated/ledgers'
@@ -704,6 +717,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedInventoryCountRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/inventory-adjustments': {
+      id: '/_authenticated/inventory-adjustments'
+      path: '/inventory-adjustments'
+      fullPath: '/inventory-adjustments'
+      preLoaderRoute: typeof AuthenticatedInventoryAdjustmentsRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/inventory': {
       id: '/_authenticated/inventory'
       path: '/inventory'
@@ -801,6 +821,7 @@ interface AuthenticatedRouteChildren {
   AuthenticatedFacebookFeedHealthRoute: typeof AuthenticatedFacebookFeedHealthRoute
   AuthenticatedFinanceRoute: typeof AuthenticatedFinanceRoute
   AuthenticatedInventoryRoute: typeof AuthenticatedInventoryRoute
+  AuthenticatedInventoryAdjustmentsRoute: typeof AuthenticatedInventoryAdjustmentsRoute
   AuthenticatedInventoryCountRoute: typeof AuthenticatedInventoryCountRoute
   AuthenticatedInventoryInwardRoute: typeof AuthenticatedInventoryInwardRoute
   AuthenticatedLedgersRoute: typeof AuthenticatedLedgersRoute
@@ -835,6 +856,8 @@ const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedFacebookFeedHealthRoute: AuthenticatedFacebookFeedHealthRoute,
   AuthenticatedFinanceRoute: AuthenticatedFinanceRoute,
   AuthenticatedInventoryRoute: AuthenticatedInventoryRoute,
+  AuthenticatedInventoryAdjustmentsRoute:
+    AuthenticatedInventoryAdjustmentsRoute,
   AuthenticatedInventoryCountRoute: AuthenticatedInventoryCountRoute,
   AuthenticatedInventoryInwardRoute: AuthenticatedInventoryInwardRoute,
   AuthenticatedLedgersRoute: AuthenticatedLedgersRoute,

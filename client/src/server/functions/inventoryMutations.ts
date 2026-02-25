@@ -1782,3 +1782,267 @@ export const updateTransactionTailor = createServerFn({ method: 'POST' })
             };
         }
     });
+
+// ============================================
+// INVENTORY ADJUSTMENTS
+// ============================================
+
+const adjustInventorySchema = z.object({
+    skuCode: z.string().min(1, 'SKU code is required'),
+    qty: z.number().int().positive('Quantity must be positive'),
+    direction: z.enum(['add', 'remove']),
+    reason: z.string().min(1, 'Reason is required'),
+    notes: z.string().optional(),
+});
+
+export interface AdjustInventoryResult {
+    transactionId: string;
+    skuId: string;
+    skuCode: string;
+    productName: string;
+    colorName: string;
+    size: string;
+    qty: number;
+    direction: 'add' | 'remove';
+    newBalance: number;
+}
+
+/**
+ * Adjust inventory up or down by SKU code.
+ * Used by the Inventory Adjustments page for manual stock corrections.
+ */
+export const adjustInventory = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => adjustInventorySchema.parse(input))
+    .handler(async ({ data, context }): Promise<MutationResult<AdjustInventoryResult>> => {
+        const prisma = await getPrisma();
+        const { skuCode, qty, direction, reason, notes } = data;
+
+        // Find SKU by code
+        const sku = await prisma.sku.findFirst({
+            where: { skuCode },
+            select: {
+                id: true,
+                skuCode: true,
+                size: true,
+                isActive: true,
+                variation: {
+                    select: {
+                        colorName: true,
+                        product: { select: { name: true } },
+                    },
+                },
+            },
+        });
+
+        if (!sku) {
+            return {
+                success: false,
+                error: { code: 'NOT_FOUND', message: `SKU not found: ${skuCode}` },
+            };
+        }
+
+        if (!sku.isActive) {
+            return {
+                success: false,
+                error: { code: 'BAD_REQUEST', message: 'Cannot adjust inactive SKU' },
+            };
+        }
+
+        const { createInwardTransaction, createOutwardTransaction, InsufficientStockError } = await getMutationService();
+
+        let balance: { currentBalance: number; availableBalance: number };
+
+        if (direction === 'add') {
+            await prisma.$transaction(async (tx: PrismaTransaction) => {
+                await createInwardTransaction(tx, {
+                    skuId: sku.id,
+                    qty,
+                    reason,
+                    notes: notes || null,
+                    createdById: context.user.id,
+                });
+                balance = await recalcBalance(tx, sku.id);
+            });
+        } else {
+            try {
+                const result = await prisma.$transaction(async (tx: PrismaTransaction) => {
+                    return createOutwardTransaction(tx, {
+                        skuId: sku.id,
+                        qty,
+                        reason,
+                        notes: notes || null,
+                        warehouseLocation: null,
+                        createdById: context.user.id,
+                    });
+                });
+                balance = result.balance;
+            } catch (error: unknown) {
+                if (error instanceof InsufficientStockError) {
+                    return {
+                        success: false,
+                        error: { code: 'BAD_REQUEST', message: error.message },
+                    };
+                }
+                throw error;
+            }
+        }
+
+        await postMutationInvalidate([sku.id], new Map([[sku.id, balance!]]));
+
+        return {
+            success: true,
+            data: {
+                transactionId: sku.id, // transaction created inside $transaction
+                skuId: sku.id,
+                skuCode: sku.skuCode,
+                productName: sku.variation.product.name,
+                colorName: sku.variation.colorName,
+                size: sku.size,
+                qty,
+                direction,
+                newBalance: balance!.currentBalance,
+            },
+        };
+    });
+
+// ============================================
+// RECENT ADJUSTMENTS QUERY
+// ============================================
+
+const ADJUSTMENT_REASONS = [
+    'adjustment', 'found_stock', 'correction', 'return_unlinked',
+    'damaged', 'shrinkage', 'theft_loss', 'sample', 'other', 'write_off',
+] as const;
+
+const getRecentAdjustmentsSchema = z.object({
+    type: z.enum(['sku', 'fabric']),
+    limit: z.number().int().positive().default(20),
+});
+
+export interface RecentSkuAdjustment {
+    id: string;
+    txnType: string;
+    qty: number;
+    reason: string;
+    notes: string | null;
+    createdAt: string;
+    skuCode: string;
+    productName: string;
+    colorName: string;
+    size: string;
+}
+
+export interface RecentFabricAdjustment {
+    id: string;
+    txnType: string;
+    qty: number;
+    unit: string;
+    reason: string;
+    notes: string | null;
+    createdAt: string;
+    materialName: string;
+    fabricName: string;
+    colourName: string;
+}
+
+export type RecentAdjustmentsResult =
+    | { type: 'sku'; items: RecentSkuAdjustment[] }
+    | { type: 'fabric'; items: RecentFabricAdjustment[] };
+
+/**
+ * Get recent inventory adjustment transactions for SKU or fabric.
+ */
+export const getRecentAdjustments = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => getRecentAdjustmentsSchema.parse(input))
+    .handler(async ({ data }): Promise<RecentAdjustmentsResult> => {
+        const prisma = await getPrisma();
+        const { type, limit } = data;
+
+        if (type === 'sku') {
+            const transactions = await prisma.inventoryTransaction.findMany({
+                where: { reason: { in: [...ADJUSTMENT_REASONS] } },
+                orderBy: { createdAt: 'desc' },
+                take: limit,
+                select: {
+                    id: true,
+                    txnType: true,
+                    qty: true,
+                    reason: true,
+                    notes: true,
+                    createdAt: true,
+                    sku: {
+                        select: {
+                            skuCode: true,
+                            size: true,
+                            variation: {
+                                select: {
+                                    colorName: true,
+                                    product: { select: { name: true } },
+                                },
+                            },
+                        },
+                    },
+                },
+            });
+
+            return {
+                type: 'sku',
+                items: transactions.map((t) => ({
+                    id: t.id,
+                    txnType: t.txnType,
+                    qty: t.qty,
+                    reason: t.reason,
+                    notes: t.notes,
+                    createdAt: t.createdAt.toISOString(),
+                    skuCode: t.sku.skuCode,
+                    productName: t.sku.variation.product.name,
+                    colorName: t.sku.variation.colorName,
+                    size: t.sku.size,
+                })),
+            };
+        } else {
+            const transactions = await prisma.fabricColourTransaction.findMany({
+                where: { reason: { in: [...ADJUSTMENT_REASONS] } },
+                orderBy: { createdAt: 'desc' },
+                take: limit,
+                select: {
+                    id: true,
+                    txnType: true,
+                    qty: true,
+                    unit: true,
+                    reason: true,
+                    notes: true,
+                    createdAt: true,
+                    fabricColour: {
+                        select: {
+                            colourName: true,
+                            fabric: {
+                                select: {
+                                    name: true,
+                                    material: { select: { name: true } },
+                                },
+                            },
+                        },
+                    },
+                },
+            });
+
+            return {
+                type: 'fabric',
+                items: transactions.map((t) => ({
+                    id: t.id,
+                    txnType: t.txnType,
+                    qty: t.qty,
+                    unit: t.unit,
+                    reason: t.reason,
+                    notes: t.notes,
+                    createdAt: t.createdAt.toISOString(),
+                    materialName: t.fabricColour.fabric.material?.name ?? 'Unknown',
+                    fabricName: t.fabricColour.fabric.name,
+                    colourName: t.fabricColour.colourName,
+                })),
+            };
+        }
+    });
