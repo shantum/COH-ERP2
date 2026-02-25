@@ -72,6 +72,8 @@ export const returnPrimeQueryKeys = {
     ['returnPrime', 'dashboard', filters] as const,
   analytics: (filters: Record<string, unknown>) =>
     ['returnPrime', 'analytics', filters] as const,
+  returnsAnalytics: (period: string) =>
+    ['returnPrime', 'returnsAnalytics', period] as const,
   request: (requestId: string) =>
     ['returnPrime', 'request', requestId] as const,
   all: ['returnPrime'] as const,

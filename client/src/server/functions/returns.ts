@@ -1165,3 +1165,355 @@ export const updateReturnSettings = createServerFn({ method: 'POST' })
 
         return { success: true };
     });
+
+// ============================================
+// RETURNS ANALYTICS
+// ============================================
+
+export interface ReturnsAnalyticsData {
+    period: string;
+    summary: {
+        totalOrders: number;
+        returns: number;
+        exchanges: number;
+        totalRequests: number;
+        returnValue: number;
+        exchangeValue: number;
+        returnRatePct: number;
+    };
+    bySize: Array<{
+        size: string;
+        unitsSold: number;
+        returns: number;
+        exchanges: number;
+        total: number;
+        returnRate: number;
+    }>;
+    byProduct: Array<{
+        productName: string;
+        returns: number;
+        exchanges: number;
+        total: number;
+        unitsSold: number;
+        returnRate: number;
+        valueAtRisk: number;
+    }>;
+    byReason: Array<{
+        category: string;
+        label: string;
+        count: number;
+        pct: number;
+    }>;
+}
+
+const REASON_LABELS: Record<string, string> = {
+    fit_size: 'Size/Fit Issue',
+    product_quality: 'Quality Issue',
+    product_different: 'Different from Listing',
+    wrong_item_sent: 'Wrong Item Sent',
+    damaged_in_transit: 'Damaged in Transit',
+    changed_mind: 'Changed Mind',
+    other: 'Other',
+};
+
+const SIZE_ORDER = ['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL'];
+
+function getPeriodDate(period: string): Date | null {
+    const now = new Date();
+    switch (period) {
+        case '7d': return new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        case '30d': return new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+        case '90d': return new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+        case '1y': return new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
+        case 'all': return null;
+        default: return new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    }
+}
+
+/**
+ * Get returns analytics data for the dashboard
+ * Computes summary, by-size, by-product, and by-reason breakdowns
+ */
+export const getReturnsAnalytics = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) =>
+        z.object({
+            period: z.enum(['7d', '30d', '90d', '1y', 'all']),
+        }).parse(input)
+    )
+    .handler(async ({ data }): Promise<ReturnsAnalyticsData> => {
+        const prisma = await getPrisma();
+        const periodDate = getPeriodDate(data.period);
+
+        const dateFilter = periodDate ? { gte: periodDate } : undefined;
+
+        // ── 1. Summary ──────────────────────────────────────────────
+        const [totalOrders, returnRequests, exchangeRequests, returnValueAgg, exchangeValueAgg] = await Promise.all([
+            // Total orders (non-cancelled) in period
+            prisma.order.count({
+                where: {
+                    status: { not: 'cancelled' },
+                    ...(dateFilter ? { orderDate: dateFilter } : {}),
+                },
+            }),
+            // Return requests count
+            prisma.returnPrimeRequest.count({
+                where: {
+                    requestType: 'return',
+                    ...(dateFilter ? { rpCreatedAt: dateFilter } : {}),
+                },
+            }),
+            // Exchange requests count
+            prisma.returnPrimeRequest.count({
+                where: {
+                    requestType: 'exchange',
+                    ...(dateFilter ? { rpCreatedAt: dateFilter } : {}),
+                },
+            }),
+            // Return value sum
+            prisma.returnPrimeRequest.aggregate({
+                _sum: { totalValue: true },
+                where: {
+                    requestType: 'return',
+                    ...(dateFilter ? { rpCreatedAt: dateFilter } : {}),
+                },
+            }),
+            // Exchange value sum
+            prisma.returnPrimeRequest.aggregate({
+                _sum: { totalValue: true },
+                where: {
+                    requestType: 'exchange',
+                    ...(dateFilter ? { rpCreatedAt: dateFilter } : {}),
+                },
+            }),
+        ]);
+
+        const totalRequests = returnRequests + exchangeRequests;
+        const returnValue = Number(returnValueAgg._sum.totalValue ?? 0);
+        const exchangeValue = Number(exchangeValueAgg._sum.totalValue ?? 0);
+        const returnRatePct = totalOrders > 0 ? (totalRequests / totalOrders) * 100 : 0;
+
+        const summary = {
+            totalOrders,
+            returns: returnRequests,
+            exchanges: exchangeRequests,
+            totalRequests,
+            returnValue,
+            exchangeValue,
+            returnRatePct: Math.round(returnRatePct * 100) / 100,
+        };
+
+        // ── 2. By Size ─────────────────────────────────────────────
+        // Extract size from RP lineItems JSON and join with CSV enrichment
+        const dateClause = periodDate
+            ? `AND rpr."rpCreatedAt" >= $1`
+            : '';
+        const sizeParams = periodDate ? [periodDate] : [];
+
+        const sizeRows = await prisma.$queryRawUnsafe<
+            Array<{ size: string; request_type: string; cnt: string }>
+        >(
+            `SELECT
+                COALESCE(
+                    NULLIF(
+                        TRIM(
+                            SPLIT_PART(
+                                rpr."lineItems"->0->'original_product'->>'variant_title',
+                                ' / ',
+                                GREATEST(
+                                    ARRAY_LENGTH(
+                                        STRING_TO_ARRAY(rpr."lineItems"->0->'original_product'->>'variant_title', ' / '),
+                                        1
+                                    ),
+                                    1
+                                )
+                            )
+                        ),
+                        ''
+                    ),
+                    'Unknown'
+                ) AS size,
+                rpr."requestType" AS request_type,
+                COUNT(*)::text AS cnt
+            FROM "ReturnPrimeRequest" rpr
+            WHERE 1=1 ${dateClause}
+            GROUP BY size, rpr."requestType"
+            ORDER BY size`,
+            ...sizeParams
+        );
+
+        // Units sold per size in the same period
+        const soldDateClause = periodDate
+            ? `AND o."orderDate" >= $1`
+            : '';
+        const soldParams = periodDate ? [periodDate] : [];
+
+        const soldBySize = await prisma.$queryRawUnsafe<
+            Array<{ size: string; units_sold: string }>
+        >(
+            `SELECT
+                s.size,
+                SUM(ol.qty)::text AS units_sold
+            FROM "OrderLine" ol
+            JOIN "Sku" s ON s.id = ol."skuId"
+            JOIN "Order" o ON o.id = ol."orderId"
+            WHERE o.status != 'cancelled'
+            ${soldDateClause}
+            GROUP BY s.size`,
+            ...soldParams
+        );
+
+        const soldMap = new Map(soldBySize.map(r => [r.size, parseInt(r.units_sold, 10)]));
+
+        // Aggregate size data
+        const sizeMap = new Map<string, { returns: number; exchanges: number }>();
+        for (const row of sizeRows) {
+            const existing = sizeMap.get(row.size) ?? { returns: 0, exchanges: 0 };
+            if (row.request_type === 'return') {
+                existing.returns += parseInt(row.cnt, 10);
+            } else {
+                existing.exchanges += parseInt(row.cnt, 10);
+            }
+            sizeMap.set(row.size, existing);
+        }
+
+        const bySize = Array.from(sizeMap.entries())
+            .map(([size, counts]) => {
+                const total = counts.returns + counts.exchanges;
+                const unitsSold = soldMap.get(size) ?? 0;
+                return {
+                    size,
+                    unitsSold,
+                    returns: counts.returns,
+                    exchanges: counts.exchanges,
+                    total,
+                    returnRate: unitsSold > 0 ? Math.round((total / unitsSold) * 10000) / 100 : 0,
+                };
+            })
+            .sort((a, b) => {
+                const aIdx = SIZE_ORDER.indexOf(a.size);
+                const bIdx = SIZE_ORDER.indexOf(b.size);
+                // Unknown sizes go to the end
+                return (aIdx === -1 ? 999 : aIdx) - (bIdx === -1 ? 999 : bIdx);
+            });
+
+        // ── 3. By Product ───────────────────────────────────────────
+        const productDateClause = periodDate
+            ? `AND rpr."rpCreatedAt" >= $1`
+            : '';
+        const productParams = periodDate ? [periodDate] : [];
+
+        const productRows = await prisma.$queryRawUnsafe<
+            Array<{
+                product_name: string;
+                request_type: string;
+                cnt: string;
+                total_value: string;
+            }>
+        >(
+            `SELECT
+                COALESCE(
+                    NULLIF(
+                        TRIM(SPLIT_PART(rpr."lineItems"->0->'original_product'->>'title', ' - ', 1)),
+                        ''
+                    ),
+                    'Unknown'
+                ) AS product_name,
+                rpr."requestType" AS request_type,
+                COUNT(*)::text AS cnt,
+                COALESCE(SUM(rpr."totalValue"), 0)::text AS total_value
+            FROM "ReturnPrimeRequest" rpr
+            WHERE 1=1 ${productDateClause}
+            GROUP BY product_name, rpr."requestType"
+            ORDER BY product_name`,
+            ...productParams
+        );
+
+        // Units sold per product
+        const soldByProduct = await prisma.$queryRawUnsafe<
+            Array<{ product_name: string; units_sold: string }>
+        >(
+            `SELECT
+                p.name AS product_name,
+                SUM(ol.qty)::text AS units_sold
+            FROM "OrderLine" ol
+            JOIN "Sku" s ON s.id = ol."skuId"
+            JOIN "Variation" v ON v.id = s."variationId"
+            JOIN "Product" p ON p.id = v."productId"
+            JOIN "Order" o ON o.id = ol."orderId"
+            WHERE o.status != 'cancelled'
+            ${soldDateClause}
+            GROUP BY p.name`,
+            ...soldParams
+        );
+
+        const productSoldMap = new Map(soldByProduct.map(r => [r.product_name, parseInt(r.units_sold, 10)]));
+
+        // Aggregate product data
+        const productMap = new Map<string, { returns: number; exchanges: number; valueAtRisk: number }>();
+        for (const row of productRows) {
+            const existing = productMap.get(row.product_name) ?? { returns: 0, exchanges: 0, valueAtRisk: 0 };
+            const cnt = parseInt(row.cnt, 10);
+            const val = parseFloat(row.total_value);
+            if (row.request_type === 'return') {
+                existing.returns += cnt;
+            } else {
+                existing.exchanges += cnt;
+            }
+            existing.valueAtRisk += val;
+            productMap.set(row.product_name, existing);
+        }
+
+        const byProduct = Array.from(productMap.entries())
+            .map(([productName, counts]) => {
+                const total = counts.returns + counts.exchanges;
+                const unitsSold = productSoldMap.get(productName) ?? 0;
+                return {
+                    productName,
+                    returns: counts.returns,
+                    exchanges: counts.exchanges,
+                    total,
+                    unitsSold,
+                    returnRate: unitsSold > 0 ? Math.round((total / unitsSold) * 10000) / 100 : 0,
+                    valueAtRisk: Math.round(counts.valueAtRisk * 100) / 100,
+                };
+            })
+            .filter(p => p.total >= 5)
+            .sort((a, b) => b.returnRate - a.returnRate)
+            .slice(0, 20);
+
+        // ── 4. By Reason Category ───────────────────────────────────
+        const reasonRows = await prisma.orderLine.groupBy({
+            by: ['returnReasonCategory'],
+            _count: { id: true },
+            where: {
+                returnStatus: { not: null },
+                returnReasonCategory: { not: null },
+                ...(dateFilter ? { returnRequestedAt: dateFilter } : {}),
+            },
+        });
+
+        const totalReasonCount = reasonRows.reduce((sum, r) => sum + r._count.id, 0);
+
+        const byReason = reasonRows
+            .map(row => {
+                const category = row.returnReasonCategory ?? 'other';
+                return {
+                    category,
+                    label: REASON_LABELS[category] ?? category,
+                    count: row._count.id,
+                    pct: totalReasonCount > 0
+                        ? Math.round((row._count.id / totalReasonCount) * 10000) / 100
+                        : 0,
+                };
+            })
+            .sort((a, b) => b.count - a.count);
+
+        return {
+            period: data.period,
+            summary,
+            bySize,
+            byProduct,
+            byReason,
+        };
+    });

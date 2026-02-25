@@ -9,14 +9,15 @@ import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { useNavigate } from '@tanstack/react-router';
-import { ArrowLeft, Plus, Loader2, Zap, Trash2, Search, RefreshCw, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { ArrowLeft, Plus, Loader2, Zap, Trash2, Search, RefreshCw, AlertCircle, CheckCircle2, Package } from 'lucide-react';
 import { computeOrderGst } from '@coh/shared';
 import { getChannels } from '../server/functions/admin';
-import { searchCustomers, type CustomerSearchItem } from '../server/functions/customers';
+import { getCustomerAddresses, searchCustomers, type CustomerSearchItem } from '../server/functions/customers';
 import { resolveSkuCodes } from '../server/functions/products';
 import { getOrderForExchange, type OrderForExchange } from '../server/functions/orders';
 import { ProductSearch, type SKUData } from '../components/common/ProductSearch';
 import { useOrderCrudMutations } from '../hooks/orders/useOrderCrudMutations';
+import { getOptimizedImageUrl } from '../utils/imageOptimization';
 import { showSuccess, showError } from '../utils/toast';
 
 import { Badge } from '@/components/ui/badge';
@@ -42,6 +43,7 @@ interface SkuLine {
     productName?: string;
     colorName?: string;
     size?: string;
+    imageUrl?: string;
 }
 
 interface DraftOrderLine {
@@ -99,34 +101,6 @@ function applyDiscountToOrderLines(lines: DraftOrderLine[], discount: number): {
     };
 }
 
-// ============================================
-// CHANNEL COLORS
-// ============================================
-
-const CHANNEL_COLORS: Record<string, { active: string; inactive: string }> = {
-    offline: {
-        active: 'bg-slate-700 text-white border-slate-700',
-        inactive: 'hover:bg-slate-50 hover:border-slate-300',
-    },
-    nykaa: {
-        active: 'bg-pink-500 text-white border-pink-500',
-        inactive: 'hover:bg-pink-50 hover:border-pink-200',
-    },
-    myntra: {
-        active: 'bg-rose-500 text-white border-rose-500',
-        inactive: 'hover:bg-rose-50 hover:border-rose-200',
-    },
-    ajio: {
-        active: 'bg-violet-500 text-white border-violet-500',
-        inactive: 'hover:bg-violet-50 hover:border-violet-200',
-    },
-};
-
-const DEFAULT_CHANNEL_COLOR = {
-    active: 'bg-primary text-primary-foreground border-primary',
-    inactive: 'hover:bg-muted',
-};
-
 const INDIA_STATES = [
     'Andhra Pradesh',
     'Arunachal Pradesh',
@@ -167,6 +141,12 @@ const INDIA_STATES = [
 ] as const;
 
 const normalizePhone = (value: string) => value.replace(/\D/g, '');
+const normalizeStateName = (value: string) => {
+    const state = value.trim();
+    if (!state) return '';
+    const matched = INDIA_STATES.find((candidate) => candidate.toLowerCase() === state.toLowerCase());
+    return matched || state;
+};
 
 const getCustomerDisplayName = (customer: CustomerSearchItem): string => {
     const first = customer.firstName || '';
@@ -191,6 +171,7 @@ export default function QuickOrder() {
     const [city, setCity] = useState('');
     const [stateName, setStateName] = useState('');
     const [manualDiscount, setManualDiscount] = useState(0);
+    const [manualDiscountType, setManualDiscountType] = useState<'amount' | 'percent'>('amount');
     const [orderNote, setOrderNote] = useState('');
     const [paymentMethod, setPaymentMethod] = useState<'Prepaid' | 'COD'>('Prepaid');
     const [paymentStatus, setPaymentStatus] = useState<'pending' | 'paid'>('pending');
@@ -224,6 +205,7 @@ export default function QuickOrder() {
     const resolveSkuCodesFn = useServerFn(resolveSkuCodes);
     const getOrderForExchangeFn = useServerFn(getOrderForExchange);
     const searchCustomersFn = useServerFn(searchCustomers);
+    const getCustomerAddressesFn = useServerFn(getCustomerAddresses);
 
     // Create order mutation
     const { createOrder } = useOrderCrudMutations({
@@ -237,6 +219,18 @@ export default function QuickOrder() {
 
     const channelsWithoutShopify =
         channels?.filter((ch: { id: string; name: string }) => ch.name?.toLowerCase() !== 'shopify') || [];
+    const offlineChannel = useMemo(
+        () => channelsWithoutShopify.find((ch: { id: string; name: string }) => ch.name?.trim().toLowerCase() === 'offline')
+            || channelsWithoutShopify[0]
+            || null,
+        [channelsWithoutShopify],
+    );
+
+    useEffect(() => {
+        if (offlineChannel?.id && channel !== offlineChannel.id) {
+            setChannel(offlineChannel.id);
+        }
+    }, [offlineChannel?.id, channel]);
 
     const phoneDigits = normalizePhone(phone);
     const phoneLast10 = phoneDigits.slice(-10);
@@ -294,6 +288,25 @@ export default function QuickOrder() {
         return { tone: 'warning' as const, text: 'No existing customer found. Continue as a new customer.' };
     }, [phoneDigits, isSearchingPhoneCustomers, customerId, exactPhoneMatch, phoneMatches.length]);
 
+    const applyCustomerAddress = async (nextCustomerId: string) => {
+        try {
+            const addresses = await getCustomerAddressesFn({ data: { customerId: nextCustomerId } });
+            const latestAddress = addresses[0];
+            if (!latestAddress) return;
+
+            const detectedCity = latestAddress.city?.trim() || '';
+            if (detectedCity) {
+                setCity(detectedCity);
+            }
+            const detectedState = latestAddress.province?.trim() || '';
+            if (detectedState) {
+                setStateName(normalizeStateName(detectedState));
+            }
+        } catch {
+            // Address hydration failure should never block quick order flow.
+        }
+    };
+
     const handlePhoneMatchSelect = (customer: CustomerSearchItem) => {
         setCustomerId(customer.id);
         setCustomerName(getCustomerDisplayName(customer));
@@ -301,6 +314,7 @@ export default function QuickOrder() {
         setPhone(customer.phone || phone);
         setPhoneAutoMatchedKey(normalizePhone(customer.phone || phone));
         setIsPhoneFieldFocused(false);
+        void applyCustomerAddress(customer.id);
     };
 
     useEffect(() => {
@@ -318,12 +332,7 @@ export default function QuickOrder() {
     // Exchange handlers
     const handleExchangeToggle = (on: boolean) => {
         setIsExchange(on);
-        if (on) {
-            // Default channel to first available
-            if (!channel && channelsWithoutShopify.length > 0) {
-                setChannel(channelsWithoutShopify[0].id);
-            }
-        } else {
+        if (!on) {
             setSourceOrder(null);
             setOrderNumberSearch('');
             setOrderSearchError('');
@@ -350,7 +359,7 @@ export default function QuickOrder() {
                     try {
                         const addr = JSON.parse(result.data.shippingAddress);
                         setCity(addr.city || '');
-                        setStateName(addr.state || '');
+                        setStateName(normalizeStateName(addr.state || ''));
                     } catch { /* ignore */ }
                 }
             } else {
@@ -382,7 +391,7 @@ export default function QuickOrder() {
             if (i !== idx) return l;
             // If user manually edits the SKU code, clear all resolved details
             if (field === 'skuCode') {
-                return { ...l, skuCode: value as string, skuId: undefined, mrp: undefined, productName: undefined, colorName: undefined, size: undefined };
+                return { ...l, skuCode: value as string, skuId: undefined, mrp: undefined, productName: undefined, colorName: undefined, size: undefined, imageUrl: undefined };
             }
             return { ...l, [field]: value };
         }));
@@ -399,6 +408,7 @@ export default function QuickOrder() {
                     productName: sku.variation?.product?.name || 'Unknown',
                     colorName: sku.variation?.colorName || '',
                     size: sku.size || '',
+                    imageUrl: sku.variation?.imageUrl || sku.variation?.product?.imageUrl || undefined,
                 }
                 : l,
         ));
@@ -448,10 +458,14 @@ export default function QuickOrder() {
     const validLines = lines.filter((l) => l.skuCode.trim() && l.qty > 0);
     const isReady = Boolean(channel && phoneDigits.length >= 10 && customerName.trim() && validLines.length > 0);
     const isBusy = isResolving || createOrder.isPending;
-    const selectedChannelName = channelsWithoutShopify.find((ch: { id: string; name: string }) => ch.id === channel)?.name;
     const totalUnits = validLines.reduce((sum, line) => sum + line.qty, 0);
     const grossBeforeDiscount = validLines.reduce((sum, line) => sum + line.qty * (line.mrp ?? 0), 0);
-    const discountAppliedToPreview = round2(Math.min(Math.max(0, manualDiscount || 0), grossBeforeDiscount));
+    const discountInputValue = round2(Math.max(0, manualDiscount || 0));
+    const discountAppliedToPreview = round2(
+        manualDiscountType === 'percent'
+            ? Math.min(Math.max(0, grossBeforeDiscount * (discountInputValue / 100)), grossBeforeDiscount)
+            : Math.min(discountInputValue, grossBeforeDiscount),
+    );
     const grossAfterDiscount = round2(Math.max(0, grossBeforeDiscount - discountAppliedToPreview));
     const resolvedLines = validLines.filter((line) => Boolean(line.skuId)).length;
     const unresolvedLines = validLines.length - resolvedLines;
@@ -505,6 +519,7 @@ export default function QuickOrder() {
     const payableAmount = gstPreview?.total ?? grossAfterDiscount;
     const hasValidPayable = isExchange || payableAmount > 0;
     const canSubmit = isReady && hasValidPayable;
+    const taxModeLabel = gstPreview ? (gstPreview.gstType === 'cgst_sgst' ? 'CGST/SGST' : 'IGST') : '--';
     const payoutLabel = paymentMethod === 'COD'
         ? 'Cash To Collect'
         : paymentStatus === 'paid'
@@ -555,7 +570,7 @@ export default function QuickOrder() {
                 return { skuId: match.skuId, qty: l.qty, unitPrice: match.mrp ?? 0 };
             });
 
-            const discountedOrder = applyDiscountToOrderLines(baseOrderLines, manualDiscount);
+            const discountedOrder = applyDiscountToOrderLines(baseOrderLines, discountAppliedToPreview);
             const orderLines = discountedOrder.lines;
             const totalAmount = discountedOrder.netTotal;
 
@@ -566,7 +581,7 @@ export default function QuickOrder() {
             }
 
             const discountNote = discountedOrder.appliedDiscount > 0
-                ? `Manual discount applied: -${formatMoney(discountedOrder.appliedDiscount)}`
+                ? `Manual discount applied (${manualDiscountType === 'percent' ? `${discountInputValue}%` : 'fixed'}): -${formatMoney(discountedOrder.appliedDiscount)}`
                 : '';
             const combinedInternalNotes = [orderNote.trim(), discountNote].filter(Boolean).join('\n');
 
@@ -629,36 +644,12 @@ export default function QuickOrder() {
                         <CardHeader className="pb-3">
                             <div className="flex flex-wrap items-start justify-between gap-2">
                                 <div>
-                                    <CardTitle className="text-base">Order Channel</CardTitle>
-                                    <CardDescription>Pick a sales channel and order mode.</CardDescription>
+                                    <CardTitle className="text-base">Order Mode</CardTitle>
+                                    <CardDescription>Toggle exchange mode when linking to an existing order.</CardDescription>
                                 </div>
-                                <Badge variant="outline">
-                                    {selectedChannelName || 'Channel not selected'}
-                                </Badge>
                             </div>
                         </CardHeader>
                         <CardContent className="space-y-4">
-                            <div className="flex flex-wrap gap-2">
-                                {channelsWithoutShopify.map((ch: { id: string; name: string }) => {
-                                    const name = ch.name?.toLowerCase() || '';
-                                    const isSelected = channel === ch.id;
-                                    const colors = CHANNEL_COLORS[name] || DEFAULT_CHANNEL_COLOR;
-                                    return (
-                                        <button
-                                            key={ch.id}
-                                            type="button"
-                                            onClick={() => setChannel(ch.id)}
-                                            className={cn(
-                                                'rounded-md border border-border px-3.5 py-1.5 text-xs font-medium transition-colors',
-                                                isSelected ? colors.active : colors.inactive,
-                                            )}
-                                        >
-                                            {ch.name}
-                                        </button>
-                                    );
-                                })}
-                            </div>
-
                             <div className="flex items-center justify-between rounded-lg border border-amber-200/60 bg-amber-50/40 p-3">
                                 <div>
                                     <p className="text-sm font-medium text-amber-900">Exchange Order</p>
@@ -960,105 +951,130 @@ export default function QuickOrder() {
                                         </Button>
                                     </div>
 
-                                    <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_108px_96px_42px] sm:items-center">
-                                        <div className="relative">
-                                            <Input
-                                                placeholder="e.g. COH-ABC-M"
-                                                value={line.skuCode}
-                                                onChange={(e) => updateLine(idx, 'skuCode', e.target.value)}
-                                                onBlur={() => void handleSkuBlur(idx)}
-                                                onKeyDown={(e) => {
-                                                    if (e.key === 'Enter') {
-                                                        e.preventDefault();
-                                                        void handleSkuBlur(idx, true);
-                                                    }
-                                                }}
-                                                className={cn(
-                                                    'h-10 font-mono text-sm',
-                                                    line.skuId && 'border-emerald-300 bg-emerald-50/50',
+                                    <div className="grid gap-3 sm:grid-cols-[168px_minmax(0,1fr)]">
+                                        <div className="overflow-hidden rounded-xl border border-border/70 bg-background">
+                                            <div className="relative h-40 w-full bg-slate-50 p-1.5">
+                                                {line.imageUrl ? (
+                                                    <img
+                                                        src={getOptimizedImageUrl(line.imageUrl, 'lg') || line.imageUrl}
+                                                        alt={line.productName || line.skuCode || 'Variation'}
+                                                        className="h-full w-full object-contain"
+                                                        loading="lazy"
+                                                    />
+                                                ) : (
+                                                    <div className="flex h-full w-full flex-col items-center justify-center gap-1 text-muted-foreground">
+                                                        <Package className="h-6 w-6" />
+                                                        <span className="text-[11px]">No preview</span>
+                                                    </div>
                                                 )}
-                                            />
+                                            </div>
+                                            <div className="border-t border-border/70 bg-muted/30 px-2 py-1 text-center text-[10px] text-muted-foreground">
+                                                Variation Preview
+                                            </div>
                                         </div>
-                                        <Button
-                                            type="button"
-                                            variant="outline"
-                                            size="sm"
-                                            disabled={!line.skuCode.trim() || Boolean(line.skuId) || resolvingSkuIdx === idx}
-                                            onClick={() => void handleSkuBlur(idx, true)}
-                                            className="h-10 text-xs"
-                                        >
-                                            {resolvingSkuIdx === idx ? (
-                                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                            ) : (
-                                                'Resolve'
+
+                                        <div className="flex h-full flex-col gap-2">
+                                            <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_108px_96px_42px] sm:items-center">
+                                                <div className="relative">
+                                                    <Input
+                                                        placeholder="e.g. COH-ABC-M"
+                                                        value={line.skuCode}
+                                                        onChange={(e) => updateLine(idx, 'skuCode', e.target.value)}
+                                                        onBlur={() => void handleSkuBlur(idx)}
+                                                        onKeyDown={(e) => {
+                                                            if (e.key === 'Enter') {
+                                                                e.preventDefault();
+                                                                void handleSkuBlur(idx, true);
+                                                            }
+                                                        }}
+                                                        className={cn(
+                                                            'h-10 font-mono text-sm',
+                                                            line.skuId && 'border-emerald-300 bg-emerald-50/50',
+                                                        )}
+                                                    />
+                                                </div>
+                                                <Button
+                                                    type="button"
+                                                    variant="outline"
+                                                    size="sm"
+                                                    disabled={!line.skuCode.trim() || Boolean(line.skuId) || resolvingSkuIdx === idx}
+                                                    onClick={() => void handleSkuBlur(idx, true)}
+                                                    className="h-10 text-xs"
+                                                >
+                                                    {resolvingSkuIdx === idx ? (
+                                                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                                    ) : (
+                                                        'Resolve'
+                                                    )}
+                                                </Button>
+                                                <Input
+                                                    type="number"
+                                                    min={1}
+                                                    value={line.qty}
+                                                    onChange={(e) =>
+                                                        updateLine(idx, 'qty', Math.max(1, Number(e.target.value) || 1))
+                                                    }
+                                                    className="h-10 text-center"
+                                                />
+                                                <button
+                                                    type="button"
+                                                    onClick={() => removeLine(idx)}
+                                                    disabled={lines.length <= 1}
+                                                    className={cn(
+                                                        'flex h-10 w-10 items-center justify-center rounded-md border transition-colors',
+                                                        lines.length <= 1
+                                                            ? 'cursor-not-allowed border-border/40 text-muted-foreground/40'
+                                                            : 'border-border text-muted-foreground hover:border-destructive/40 hover:bg-destructive/10 hover:text-destructive',
+                                                    )}
+                                                    aria-label={`Remove line ${idx + 1}`}
+                                                >
+                                                    <Trash2 className="h-3.5 w-3.5" />
+                                                </button>
+                                            </div>
+
+                                            {line.productName && (
+                                                <p className="rounded-md bg-emerald-50 px-2 py-1 text-xs text-emerald-700">
+                                                    <span className="font-medium">{line.productName}</span>
+                                                    {line.colorName ? ` · ${line.colorName}` : ''}
+                                                    {line.size ? ` · ${line.size}` : ''}
+                                                </p>
                                             )}
-                                        </Button>
-                                        <Input
-                                            type="number"
-                                            min={1}
-                                            value={line.qty}
-                                            onChange={(e) =>
-                                                updateLine(idx, 'qty', Math.max(1, Number(e.target.value) || 1))
-                                            }
-                                            className="h-10 text-center"
-                                        />
-                                        <button
-                                            type="button"
-                                            onClick={() => removeLine(idx)}
-                                            disabled={lines.length <= 1}
-                                            className={cn(
-                                                'flex h-10 w-10 items-center justify-center rounded-md border transition-colors',
-                                                lines.length <= 1
-                                                    ? 'cursor-not-allowed border-border/40 text-muted-foreground/40'
-                                                    : 'border-border text-muted-foreground hover:border-destructive/40 hover:bg-destructive/10 hover:text-destructive',
-                                            )}
-                                            aria-label={`Remove line ${idx + 1}`}
-                                        >
-                                            <Trash2 className="h-3.5 w-3.5" />
-                                        </button>
-                                    </div>
 
-                                    <div className="mt-1 flex flex-wrap items-center justify-between gap-2 px-0.5 text-[11px] text-muted-foreground">
-                                        <span>Enter SKU and press Enter to resolve quickly.</span>
-                                        {!line.skuId && line.skuCode.trim() && (
-                                            <button
-                                                type="button"
-                                                className="text-sky-700 hover:text-sky-800"
-                                                onClick={() => setSearchingIdx(idx)}
-                                            >
-                                                Search by product name instead
-                                            </button>
-                                        )}
-                                    </div>
+                                            <div className="flex flex-wrap items-center justify-between gap-2 px-0.5 text-[11px] text-muted-foreground">
+                                                <span>Enter SKU and press Enter to resolve quickly.</span>
+                                                {!line.skuId && line.skuCode.trim() && (
+                                                    <button
+                                                        type="button"
+                                                        className="text-sky-700 hover:text-sky-800"
+                                                        onClick={() => setSearchingIdx(idx)}
+                                                    >
+                                                        Search by product name instead
+                                                    </button>
+                                                )}
+                                            </div>
 
-                                    <div className="mt-2 grid grid-cols-2 gap-2 rounded-md bg-background px-2.5 py-2 text-xs sm:grid-cols-4">
-                                        <div>
-                                            <p className="text-[10px] uppercase tracking-wide text-muted-foreground">MRP</p>
-                                            <p className="font-medium">{line.mrp ? formatMoney(line.mrp) : '--'}</p>
-                                        </div>
-                                        <div>
-                                            <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Qty</p>
-                                            <p className="font-medium">{line.qty}</p>
-                                        </div>
-                                        <div>
-                                            <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Tax Slab</p>
-                                            <p className="font-medium">
-                                                {line.mrp ? (line.mrp > 2500 ? '18%' : '5%') : '--'}
-                                            </p>
-                                        </div>
-                                        <div>
-                                            <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Line Total</p>
-                                            <p className="font-semibold">{line.mrp ? formatMoney(line.qty * line.mrp) : '--'}</p>
+                                            <div className="grid grid-cols-2 gap-2 rounded-md bg-background px-2.5 py-2 text-xs sm:grid-cols-4">
+                                                <div>
+                                                    <p className="text-[10px] uppercase tracking-wide text-muted-foreground">MRP</p>
+                                                    <p className="font-medium">{line.mrp ? formatMoney(line.mrp) : '--'}</p>
+                                                </div>
+                                                <div>
+                                                    <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Qty</p>
+                                                    <p className="font-medium">{line.qty}</p>
+                                                </div>
+                                                <div>
+                                                    <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Tax Slab</p>
+                                                    <p className="font-medium">
+                                                        {line.mrp ? (line.mrp > 2500 ? '18%' : '5%') : '--'}
+                                                    </p>
+                                                </div>
+                                                <div>
+                                                    <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Line Total</p>
+                                                    <p className="font-semibold">{line.mrp ? formatMoney(line.qty * line.mrp) : '--'}</p>
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
-
-                                    {line.productName && (
-                                        <p className="mt-2 rounded-md bg-emerald-50 px-2 py-1 text-xs text-emerald-700">
-                                            {line.productName}
-                                            {line.colorName ? ` · ${line.colorName}` : ''}
-                                            {line.size ? ` · ${line.size}` : ''}
-                                        </p>
-                                    )}
 
                                     {searchingIdx === idx && (
                                         <div className="mt-2">
@@ -1145,10 +1161,38 @@ export default function QuickOrder() {
 
                             <div className="space-y-1.5">
                                 <div className="flex items-center justify-between">
-                                    <Label htmlFor="quick-order-discount">Manual Discount (₹)</Label>
+                                    <Label htmlFor="quick-order-discount">
+                                        Manual Discount ({manualDiscountType === 'percent' ? '%' : '₹'})
+                                    </Label>
                                     <span className="text-xs text-muted-foreground">
                                         Applied: {formatMoney(discountAppliedToPreview)}
                                     </span>
+                                </div>
+                                <div className="grid grid-cols-2 overflow-hidden rounded-md border border-border">
+                                    <button
+                                        type="button"
+                                        onClick={() => setManualDiscountType('amount')}
+                                        className={cn(
+                                            'px-3 py-2 text-xs font-medium transition-colors',
+                                            manualDiscountType === 'amount'
+                                                ? 'bg-sky-600 text-white'
+                                                : 'bg-muted/50 text-muted-foreground hover:bg-muted',
+                                        )}
+                                    >
+                                        Amount (₹)
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setManualDiscountType('percent')}
+                                        className={cn(
+                                            'border-l px-3 py-2 text-xs font-medium transition-colors',
+                                            manualDiscountType === 'percent'
+                                                ? 'bg-sky-600 text-white'
+                                                : 'bg-muted/50 text-muted-foreground hover:bg-muted',
+                                        )}
+                                    >
+                                        Percent (%)
+                                    </button>
                                 </div>
                                 <Input
                                     id="quick-order-discount"
@@ -1158,12 +1202,15 @@ export default function QuickOrder() {
                                     value={manualDiscount}
                                     onChange={(e) => {
                                         const raw = Number(e.target.value);
-                                        setManualDiscount(Number.isFinite(raw) ? Math.max(0, raw) : 0);
+                                        const nextValue = Number.isFinite(raw) ? Math.max(0, raw) : 0;
+                                        setManualDiscount(manualDiscountType === 'percent' ? Math.min(100, nextValue) : nextValue);
                                     }}
                                     className="h-10"
                                 />
                                 <p className="text-xs text-muted-foreground">
-                                    Discount is proportionally distributed across line prices before saving.
+                                    {manualDiscountType === 'percent'
+                                        ? 'Percent discount is calculated on gross amount and distributed proportionally across lines.'
+                                        : 'Discount is proportionally distributed across line prices before saving.'}
                                 </p>
                             </div>
 
@@ -1259,8 +1306,8 @@ export default function QuickOrder() {
                                 </div>
                                 <div className="rounded-lg border border-border/70 bg-muted/20 p-2.5">
                                     <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Tax Mode</p>
-                                    <p className="text-sm font-semibold uppercase">
-                                        {gstPreview ? (gstPreview.gstType === 'cgst_sgst' ? 'CGST+SGST' : 'IGST') : '--'}
+                                    <p className="text-xs font-semibold leading-tight">
+                                        {taxModeLabel}
                                     </p>
                                 </div>
                                 <div className="rounded-lg border border-border/70 bg-muted/20 p-2.5">
@@ -1277,14 +1324,6 @@ export default function QuickOrder() {
                                     </Badge>
                                 </div>
                                 <div className="space-y-1.5 text-muted-foreground">
-                                    <div className="flex items-center gap-2">
-                                        {channel ? (
-                                            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
-                                        ) : (
-                                            <AlertCircle className="h-3.5 w-3.5 text-amber-600" />
-                                        )}
-                                        <span>Channel selected</span>
-                                    </div>
                                     <div className="flex items-center gap-2">
                                         {phoneDigits.length >= 10 ? (
                                             <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />

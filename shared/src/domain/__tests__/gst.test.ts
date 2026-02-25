@@ -29,14 +29,14 @@ describe('getGstRateForMrp', () => {
 });
 
 describe('determineGstType', () => {
-    it('returns cgst_sgst for Maharashtra (intra-state)', () => {
-        expect(determineGstType('Maharashtra')).toBe('cgst_sgst');
+    it('returns cgst_sgst for Goa (intra-state)', () => {
+        expect(determineGstType('Goa')).toBe('cgst_sgst');
     });
 
     it('is case-insensitive for state comparison', () => {
-        expect(determineGstType('maharashtra')).toBe('cgst_sgst');
-        expect(determineGstType('MAHARASHTRA')).toBe('cgst_sgst');
-        expect(determineGstType('  Maharashtra  ')).toBe('cgst_sgst');
+        expect(determineGstType('goa')).toBe('cgst_sgst');
+        expect(determineGstType('GOA')).toBe('cgst_sgst');
+        expect(determineGstType('  Goa  ')).toBe('cgst_sgst');
     });
 
     it('returns igst for other states (inter-state)', () => {
@@ -59,7 +59,7 @@ describe('computeOrderGst', () => {
             const lines: GstLineInput[] = [
                 { amount: 525, mrp: 800, qty: 1 },
             ];
-            const result = computeOrderGst(lines, 'Maharashtra');
+            const result = computeOrderGst(lines, 'Goa');
 
             // B2C: ₹525 inclusive of 5% GST
             // taxableValue = 525 / 1.05 = 500
@@ -76,7 +76,7 @@ describe('computeOrderGst', () => {
             const lines: GstLineInput[] = [
                 { amount: 2950, mrp: 3500, qty: 1 },
             ];
-            const result = computeOrderGst(lines, 'Maharashtra');
+            const result = computeOrderGst(lines, 'Goa');
 
             // B2C: ₹2950 inclusive of 18% GST
             // taxableValue = 2950 / 1.18 = 2500
@@ -90,12 +90,12 @@ describe('computeOrderGst', () => {
         });
     });
 
-    describe('intra-state (Maharashtra → CGST + SGST)', () => {
+    describe('intra-state (Goa → CGST + SGST)', () => {
         it('splits GST 50/50 into CGST and SGST', () => {
             const lines: GstLineInput[] = [
                 { amount: 2950, mrp: 3500, qty: 1 },
             ];
-            const result = computeOrderGst(lines, 'Maharashtra');
+            const result = computeOrderGst(lines, 'Goa');
 
             expect(result.gstType).toBe('cgst_sgst');
             expect(result.cgstAmount).toBe(225);
@@ -145,7 +145,7 @@ describe('computeOrderGst', () => {
             const lines: GstLineInput[] = [
                 { amount: 1050, mrp: 800, qty: 2, hsnCode: '6109' },
             ];
-            const result = computeOrderGst(lines, 'Maharashtra');
+            const result = computeOrderGst(lines, 'Goa');
 
             // taxableValue = 1050 / 1.05 = 1000
             // gstAmount = 1050 - 1000 = 50
@@ -159,7 +159,7 @@ describe('computeOrderGst', () => {
 
     describe('edge cases', () => {
         it('handles empty lines array', () => {
-            const result = computeOrderGst([], 'Maharashtra');
+            const result = computeOrderGst([], 'Goa');
             expect(result.lines).toEqual([]);
             expect(result.subtotal).toBe(0);
             expect(result.gstAmount).toBe(0);
@@ -180,7 +180,7 @@ describe('computeOrderGst', () => {
             const lines: GstLineInput[] = [
                 { amount: 525, mrp: 800, qty: 1 },
             ];
-            const result = computeOrderGst(lines, 'Maharashtra');
+            const result = computeOrderGst(lines, 'Goa');
             expect(result.lines[0].hsnCode).toBe('6109');
         });
 
@@ -188,7 +188,7 @@ describe('computeOrderGst', () => {
             const lines: GstLineInput[] = [
                 { amount: 525, mrp: 800, qty: 1, hsnCode: '6110' },
             ];
-            const result = computeOrderGst(lines, 'Maharashtra');
+            const result = computeOrderGst(lines, 'Goa');
             expect(result.lines[0].hsnCode).toBe('6110');
         });
 
@@ -196,7 +196,7 @@ describe('computeOrderGst', () => {
             const lines: GstLineInput[] = [
                 { amount: 0, mrp: 800, qty: 1 },
             ];
-            const result = computeOrderGst(lines, 'Maharashtra');
+            const result = computeOrderGst(lines, 'Goa');
             expect(result.subtotal).toBe(0);
             expect(result.gstAmount).toBe(0);
             expect(result.total).toBe(0);
@@ -207,7 +207,7 @@ describe('computeOrderGst', () => {
             const lines: GstLineInput[] = [
                 { amount: 105, mrp: 800, qty: 1 }, // 5% → taxable=100, gst=5 → cgst=2.5, sgst=2.5
             ];
-            const result = computeOrderGst(lines, 'Maharashtra');
+            const result = computeOrderGst(lines, 'Goa');
             expect(result.cgstAmount + result.sgstAmount).toBe(result.gstAmount);
         });
 
@@ -215,7 +215,7 @@ describe('computeOrderGst', () => {
             const lines: GstLineInput[] = [
                 { amount: 2500, mrp: 2500, qty: 1 },
             ];
-            const result = computeOrderGst(lines, 'Maharashtra');
+            const result = computeOrderGst(lines, 'Goa');
             expect(result.lines[0].gstRate).toBe(5);
         });
 
@@ -223,7 +223,7 @@ describe('computeOrderGst', () => {
             const lines: GstLineInput[] = [
                 { amount: 2501, mrp: 2501, qty: 1 },
             ];
-            const result = computeOrderGst(lines, 'Maharashtra');
+            const result = computeOrderGst(lines, 'Goa');
             expect(result.lines[0].gstRate).toBe(18);
         });
     });
@@ -233,7 +233,7 @@ describe('computeOrderGst', () => {
             const lines: GstLineInput[] = [
                 { amount: 2950, mrp: 3500, qty: 1 },
             ];
-            const result = computeOrderGst(lines, 'Maharashtra');
+            const result = computeOrderGst(lines, 'Goa');
             expect(result.effectiveGstRate).toBe(18);
         });
 
@@ -242,7 +242,7 @@ describe('computeOrderGst', () => {
                 { amount: 525, mrp: 800, qty: 1 },    // 5% → taxable=500, gst=25
                 { amount: 2950, mrp: 3500, qty: 1 },  // 18% → taxable=2500, gst=450
             ];
-            const result = computeOrderGst(lines, 'Maharashtra');
+            const result = computeOrderGst(lines, 'Goa');
             // weighted avg = 475/3000 * 100 = 15.83%
             expect(result.effectiveGstRate).toBeCloseTo(15.83, 1);
         });
@@ -255,7 +255,7 @@ describe('computeOrderGst', () => {
                 { amount: 599, mrp: 799, qty: 1, hsnCode: '6109' },
                 { amount: 599, mrp: 799, qty: 1, hsnCode: '6109' },
             ];
-            const result = computeOrderGst(lines, 'Maharashtra');
+            const result = computeOrderGst(lines, 'Goa');
 
             expect(result.gstType).toBe('cgst_sgst');
             expect(result.lines.every(l => l.gstRate === 5)).toBe(true);

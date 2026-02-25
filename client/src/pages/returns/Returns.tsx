@@ -54,9 +54,9 @@ import {
     ReturnPrimeStatsCards,
     ReturnPrimeTable,
     ReturnPrimeDetailModal,
-    ReturnPrimeAnalytics,
     ReturnPrimeCsvEnrichmentDialog,
 } from '../../components/returnPrime';
+import { AnalyticsTab } from './tabs/AnalyticsTab';
 import type { ReturnPrimeRequest, ReturnPrimeStats } from '@coh/shared/schemas/returnPrime';
 
 // ============================================
@@ -573,10 +573,7 @@ export default function Returns() {
                         </Select>
                     </div>
 
-                    <ReturnPrimeAnalytics
-                        requests={data?.requests || []}
-                        isLoading={isLoading}
-                    />
+                    <AnalyticsTab period={search.datePreset} />
                 </TabsContent>
             </Tabs>
 

@@ -161,7 +161,7 @@ export default function Costing() {
         },
         {
             field: 'avgBomCost',
-            headerName: 'BOM Cost',
+            headerName: 'Material Cost',
             width: 100,
             valueFormatter: (params: ValueFormatterParams) => formatCurrency(params.value || 0),
             cellClass: 'text-right',
@@ -274,7 +274,7 @@ export default function Costing() {
                 ) : (
                     <div className="space-y-6">
                         {/* Config Panel + P&L Summary Row */}
-                        <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
+                        <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
                             {/* Config Panel */}
                             <div className="bg-white rounded-xl p-4 shadow-sm">
                                 <div className="flex items-center justify-between mb-3">
@@ -348,12 +348,19 @@ export default function Costing() {
                             <PLCard
                                 label="Revenue"
                                 value={formatCurrency(summary?.revenue ?? 0, true)}
-                                subValue="100%"
+                                subValue={`${summary?.unitsSold?.toLocaleString('en-IN') ?? 0} units`}
                                 icon={<DollarSign size={20} />}
                                 color="blue"
                             />
                             <PLCard
-                                label="Gross Profit"
+                                label="Material Cost"
+                                value={formatCurrency(summary?.bomCost ?? 0, true)}
+                                subValue={summary?.revenue ? `${((summary.bomCost / summary.revenue) * 100).toFixed(1)}% of revenue` : '0%'}
+                                icon={<DollarSign size={20} />}
+                                color="amber"
+                            />
+                            <PLCard
+                                label="Contribution"
                                 value={formatCurrency(summary?.grossProfit ?? 0, true)}
                                 subValue={formatPercent(summary?.grossMarginPct ?? 0)}
                                 icon={<TrendingUp size={20} />}
@@ -375,9 +382,9 @@ export default function Costing() {
                                 value={formatCurrency(summary?.avgSellingPrice ?? 0)}
                             />
                             <UnitCard
-                                label="Avg BOM Cost"
+                                label="Avg Material Cost"
                                 value={formatCurrency(summary?.avgBomCost ?? 0)}
-                                subValue={summary?.avgSellingPrice ? `${((summary?.avgBomCost ?? 0) / summary.avgSellingPrice * 100).toFixed(1)}%` : undefined}
+                                subValue={summary?.avgSellingPrice ? `${((summary?.avgBomCost ?? 0) / summary.avgSellingPrice * 100).toFixed(1)}% of ASP` : undefined}
                             />
                             <UnitCard
                                 label="Contribution/Unit"

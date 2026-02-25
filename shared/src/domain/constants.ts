@@ -13,7 +13,7 @@
  */
 export const GST_CONFIG = {
   /** Company's registered state (determines intra vs inter-state) */
-  companyState: 'Maharashtra',
+  companyState: 'Goa',
   /** MRP threshold for rate slab (₹) */
   threshold: 2500,
   /** GST rate (%) for MRP up to threshold */

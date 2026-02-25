@@ -329,6 +329,23 @@ async function handleRequestApproved(
     const batchNumber = await generateBatchNumber(prisma, order.id, order.orderNumber);
     const now = new Date();
 
+    // 5b. Look up CSV enrichment for customer comment (RP reason is always "Others")
+    const csvEnrichment = payload.request_number
+        ? await prisma.returnPrimeCsvEnrichment.findFirst({
+              where: { requestNumber: payload.request_number },
+              select: { customerComment: true },
+          })
+        : null;
+
+    // Resolve reason: prefer customer comment over generic "Others"
+    const rpReason = payload.reason;
+    const customerComment = csvEnrichment?.customerComment || null;
+    const isGenericReason = !rpReason || rpReason.toLowerCase().trim() === 'others' || rpReason.toLowerCase().trim() === 'na';
+    const reasonDetail = payload.reason_details || (isGenericReason ? customerComment : null);
+    const reasonCategory = isGenericReason && customerComment
+        ? mapReturnPrimeReason(customerComment)
+        : mapReturnPrimeReason(rpReason);
+
     // 6. Create line-level returns in transaction
     await prisma.$transaction(async (tx) => {
         for (const { orderLine, rpLine } of matched) {
@@ -341,9 +358,9 @@ async function handleRequestApproved(
                     returnQty: rpLine.quantity,
                     returnRequestedAt: now,
 
-                    // Reason from RP
-                    returnReasonCategory: mapReturnPrimeReason(payload.reason),
-                    returnReasonDetail: payload.reason_details || null,
+                    // Reason from RP (enriched with CSV customer comment)
+                    returnReasonCategory: reasonCategory,
+                    returnReasonDetail: reasonDetail,
 
                     // Resolution based on request type
                     returnResolution: payload.request_type === 'exchange' ? 'exchange' : 'refund',
