@@ -27,6 +27,7 @@ import { findPartyByNarration } from '../services/transactionTypeResolver.js';
 import { deferredExecutor } from '../services/deferredExecutor.js';
 import { uploadInvoiceFile } from '../services/driveFinanceSync.js';
 import { sendEmail } from '../services/emailService.js';
+import { saveFile, buildInvoicePath } from '../services/fileStorageService.js';
 
 const log = logger.child({ module: 'resendWebhook' });
 const router = Router();
@@ -315,6 +316,7 @@ async function processAttachment(
 
     // 4. Match supplier to Party (alias + GSTIN)
     let partyId: string | undefined;
+    let matchedPartyName: string | undefined;
     let matchedCategory = 'other';
 
     if (parsed?.supplierName || parsed?.supplierGstin) {
@@ -337,6 +339,7 @@ async function processAttachment(
         const matched = findPartyByNarration(parsed.supplierName, allParties);
         if (matched) {
           partyId = matched.id;
+          matchedPartyName = matched.name;
           matchedCategory = matched.category;
         }
       }
@@ -345,6 +348,7 @@ async function processAttachment(
         const gstinParty = allParties.find(p => p.gstin === parsed!.supplierGstin);
         if (gstinParty) {
           partyId = gstinParty.id;
+          matchedPartyName = gstinParty.name;
           matchedCategory = gstinParty.category;
         }
       }
@@ -385,7 +389,22 @@ async function processAttachment(
     const failNote = !parsed ? 'AI parsing failed — fill in manually' : null;
     const notes = [emailNote, partyNote, failNote].filter(Boolean).join('\n');
 
-    // 8. Create draft Invoice + lines
+    // 8. Save file to disk (dual-write: disk + DB blob)
+    const effectiveFileName = filename ?? `email-attachment-${attachmentId}`;
+    let filePath: string | null = null;
+    try {
+      filePath = buildInvoicePath(
+        matchedPartyName ?? parsed?.supplierName,
+        invoiceDate ?? new Date(),
+        effectiveFileName,
+      );
+      await saveFile(filePath, buffer);
+    } catch (err: unknown) {
+      log.error({ error: err instanceof Error ? err.message : err }, 'Failed to save email attachment to disk');
+      filePath = null;
+    }
+
+    // 9. Create draft Invoice + lines
     let invoice = await prisma.invoice.create({
       data: {
         type: 'payable',
@@ -413,8 +432,9 @@ async function processAttachment(
         balanceDue: parsed?.totalAmount ?? 0,
         ...(partyId ? { partyId } : {}),
         fileData: buffer,
+        ...(filePath ? { filePath } : {}),
         fileHash,
-        fileName: filename ?? `email-attachment-${attachmentId}`,
+        fileName: effectiveFileName,
         fileMimeType: contentType,
         fileSizeBytes: buffer.length,
         ...(rawResponse ? { aiRawResponse: rawResponse } : {}),

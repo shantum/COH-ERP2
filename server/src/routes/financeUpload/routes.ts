@@ -20,6 +20,7 @@ import { matchInvoiceLines } from '../../services/invoiceMatcher.js';
 import { findPartyByNarration } from '../../services/transactionTypeResolver.js';
 import { randomUUID } from 'crypto';
 import * as previewCache from '../../services/invoicePreviewCache.js';
+import { saveFile, buildInvoicePath, readFile } from '../../services/fileStorageService.js';
 import { computeFileHash, checkExactDuplicate, checkNearDuplicates } from '../../services/invoiceDuplicateCheck.js';
 import { validateInvoice } from '../../services/invoiceValidator.js';
 import { enrichPartyFromInvoice, createPartyFromInvoice, type EnrichmentResult } from './partyEnricher.js';
@@ -85,11 +86,32 @@ export function registerRoutes(router: Router): void {
 
     log.info({ fileName: originalname, mimeType: mimetype, size, invoiceId }, 'Finance file upload received');
 
+    // Look up party name for file path
+    const existing = await req.prisma.invoice.findUnique({
+      where: { id: invoiceId },
+      select: { invoiceDate: true, party: { select: { name: true } } },
+    });
+
+    // Save file to disk (dual-write: disk + DB blob)
+    let filePath: string | null = null;
+    try {
+      filePath = buildInvoicePath(
+        existing?.party?.name,
+        existing?.invoiceDate ?? new Date(),
+        originalname,
+      );
+      await saveFile(filePath, buffer);
+    } catch (err: unknown) {
+      log.error({ error: err instanceof Error ? err.message : err }, 'Failed to save file to disk');
+      filePath = null;
+    }
+
     // Attach file to invoice
     const invoice = await req.prisma.invoice.update({
       where: { id: invoiceId },
       data: {
         fileData: buffer,
+        ...(filePath ? { filePath } : {}),
         fileName: originalname,
         fileMimeType: mimetype,
         fileSizeBytes: size,
@@ -152,6 +174,7 @@ export function registerRoutes(router: Router): void {
 
     // 2. Try to match supplier to a Party (alias-based + GSTIN fallback)
     let partyId: string | undefined;
+    let matchedPartyName: string | undefined;
     let matchedCategory = 'other';
     if (parsed?.supplierName || parsed?.supplierGstin) {
       const allParties = await req.prisma.party.findMany({
@@ -173,6 +196,7 @@ export function registerRoutes(router: Router): void {
         const matched = findPartyByNarration(parsed.supplierName, allParties);
         if (matched) {
           partyId = matched.id;
+          matchedPartyName = matched.name;
           matchedCategory = matched.category;
         }
       }
@@ -181,6 +205,7 @@ export function registerRoutes(router: Router): void {
         const gstinParty = allParties.find(p => p.gstin === parsed!.supplierGstin);
         if (gstinParty) {
           partyId = gstinParty.id;
+          matchedPartyName = gstinParty.name;
           matchedCategory = gstinParty.category;
         }
       }
@@ -200,6 +225,7 @@ export function registerRoutes(router: Router): void {
       prisma: req.prisma,
       parsed,
       partyId,
+      partyName: matchedPartyName,
       category: matchedCategory,
       userId,
       file: { buffer, fileHash, originalname, mimetype, size },
@@ -440,6 +466,7 @@ export function registerRoutes(router: Router): void {
       parsed,
       mergedParsed,
       partyId,
+      partyName: partyMatch?.partyName,
       category: finalCategory,
       userId,
       file: { buffer, fileHash: fileHash ?? '', originalname, mimetype, size },
@@ -494,17 +521,33 @@ export function registerRoutes(router: Router): void {
   router.get('/:id/file', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
     const invoice = await req.prisma.invoice.findUnique({
       where: { id: req.params.id as string },
-      select: { fileData: true, fileName: true, fileMimeType: true },
+      select: { filePath: true, fileData: true, fileName: true, fileMimeType: true },
     });
 
-    if (!invoice || !invoice.fileData) {
+    if (!invoice || (!invoice.filePath && !invoice.fileData)) {
       res.status(404).json({ error: 'File not found' });
       return;
     }
 
     res.setHeader('Content-Type', invoice.fileMimeType!);
     res.setHeader('Content-Disposition', `inline; filename="${invoice.fileName}"`);
-    res.send(Buffer.from(invoice.fileData));
+
+    // Prefer disk, fallback to DB blob
+    if (invoice.filePath) {
+      const diskBuffer = await readFile(invoice.filePath);
+      if (diskBuffer) {
+        res.send(diskBuffer);
+        return;
+      }
+      log.warn({ invoiceId: req.params.id, filePath: invoice.filePath }, 'File missing on disk, falling back to DB blob');
+    }
+
+    if (invoice.fileData) {
+      res.send(Buffer.from(invoice.fileData));
+      return;
+    }
+
+    res.status(404).json({ error: 'File not found' });
   }));
 
   // ============================================
@@ -514,17 +557,33 @@ export function registerRoutes(router: Router): void {
   router.get('/bank-transaction/:id/file', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
     const bankTxn = await req.prisma.bankTransaction.findUnique({
       where: { id: req.params.id as string },
-      select: { fileData: true, fileName: true, fileMimeType: true },
+      select: { filePath: true, fileData: true, fileName: true, fileMimeType: true },
     });
 
-    if (!bankTxn || !bankTxn.fileData) {
+    if (!bankTxn || (!bankTxn.filePath && !bankTxn.fileData)) {
       res.status(404).json({ error: 'File not found' });
       return;
     }
 
     res.setHeader('Content-Type', bankTxn.fileMimeType!);
     res.setHeader('Content-Disposition', `inline; filename="${bankTxn.fileName}"`);
-    res.send(Buffer.from(bankTxn.fileData));
+
+    // Prefer disk, fallback to DB blob
+    if (bankTxn.filePath) {
+      const diskBuffer = await readFile(bankTxn.filePath);
+      if (diskBuffer) {
+        res.send(diskBuffer);
+        return;
+      }
+      log.warn({ bankTxnId: req.params.id, filePath: bankTxn.filePath }, 'File missing on disk, falling back to DB blob');
+    }
+
+    if (bankTxn.fileData) {
+      res.send(Buffer.from(bankTxn.fileData));
+      return;
+    }
+
+    res.status(404).json({ error: 'File not found' });
   }));
 
   // ============================================

@@ -670,6 +670,7 @@ model OrderLine {
   // === CONDITION & QC ===
   returnCondition           String?       // 'good', 'damaged', 'defective', 'wrong_item', 'used'
   returnConditionNotes      String?
+  returnQcResult            String?       // 'approved', 'written_off' — set by repacking QC cascade
 
   // === REASON ===
   returnReasonCategory      String?       // 'fit_size', 'product_quality', 'product_different', 'wrong_item_sent', 'damaged_in_transit', 'changed_mind', 'other'
@@ -1822,6 +1823,7 @@ model Invoice {
 
   // File attachment
   fileData         Bytes?
+  filePath         String?   // Relative path on server filesystem (e.g. invoices/party/FY/file.pdf)
   fileName         String?
   fileMimeType     String?
   fileSizeBytes    Int?
@@ -1937,6 +1939,7 @@ model Payment {
 
   // File attachment
   fileData      Bytes?
+  filePath      String?   // Relative path on server filesystem
   fileName      String?
   fileMimeType  String?
   fileSizeBytes Int?
@@ -2287,6 +2290,7 @@ model BankTransaction {
 
   // File attachment (migrated from Payment model)
   fileData          Bytes?
+  filePath          String?   // Relative path on server filesystem
   fileName          String?
   fileMimeType      String?
   fileSizeBytes     Int?

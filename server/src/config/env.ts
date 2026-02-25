@@ -150,6 +150,13 @@ const envSchema = z.object({
 
     /** API URL for client-side requests */
     VITE_API_URL: z.string().optional(),
+
+    // ----------------------------------------
+    // FILE STORAGE
+    // ----------------------------------------
+
+    /** Root directory for file storage (invoices, bank transactions) */
+    FILE_STORAGE_ROOT: z.string().default('./data/files'),
 });
 
 // ============================================

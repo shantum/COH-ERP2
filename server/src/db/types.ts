@@ -69,6 +69,7 @@ export type BankTransaction = {
     unmatchedAmount: Generated<number>;
     notes: string | null;
     fileData: Buffer | null;
+    filePath: string | null;
     fileName: string | null;
     fileMimeType: string | null;
     fileSizeBytes: number | null;
@@ -524,6 +525,7 @@ export type Invoice = {
     balanceDue: Generated<number>;
     orderId: string | null;
     fileData: Buffer | null;
+    filePath: string | null;
     fileName: string | null;
     fileMimeType: string | null;
     fileSizeBytes: number | null;
@@ -845,6 +847,7 @@ export type Payment = {
     partyId: string | null;
     customerId: string | null;
     fileData: Buffer | null;
+    filePath: string | null;
     fileName: string | null;
     fileMimeType: string | null;
     fileSizeBytes: number | null;

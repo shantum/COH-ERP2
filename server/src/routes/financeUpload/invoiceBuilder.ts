@@ -7,6 +7,8 @@ import type { Request } from 'express';
 import type { ParsedInvoice } from '../../services/invoiceParser.js';
 import { parseIndianDate } from '../../services/invoiceParser.js';
 import { matchInvoiceLines } from '../../services/invoiceMatcher.js';
+import { saveFile, buildInvoicePath } from '../../services/fileStorageService.js';
+import logger from '../../utils/logger.js';
 
 /** The select clause used for invoice creation responses. */
 export const INVOICE_SELECT = {
@@ -54,6 +56,8 @@ export interface CreateInvoiceParams {
   /** Merged parsed data (with user overrides applied, if any) */
   mergedParsed?: Record<string, unknown> | null;
   partyId?: string;
+  /** Party name for file path building (avoids extra DB lookup) */
+  partyName?: string | null;
   category: string;
   userId: string;
   file: {
@@ -73,7 +77,7 @@ export interface CreateInvoiceParams {
  * Used by both upload-and-parse and confirm-preview routes.
  */
 export async function createDraftInvoice(params: CreateInvoiceParams) {
-  const { prisma, parsed, partyId, category, userId, file, rawResponse, aiModel, aiConfidence } = params;
+  const { prisma, parsed, partyId, partyName, category, userId, file, rawResponse, aiModel, aiConfidence } = params;
   const mp = params.mergedParsed ?? parsed;
 
   const invoiceDate = mp ? parseIndianDate(mp.invoiceDate as string | null | undefined) : null;
@@ -84,6 +88,23 @@ export async function createDraftInvoice(params: CreateInvoiceParams) {
   const fabricMatches: Awaited<ReturnType<typeof matchInvoiceLines>> = [];
 
   const supplierName = parsed?.supplierName ?? null;
+
+  // Save file to disk (dual-write: disk + DB blob)
+  let filePath: string | null = null;
+  try {
+    filePath = buildInvoicePath(
+      partyName ?? supplierName,
+      invoiceDate ?? new Date(),
+      file.originalname,
+    );
+    await saveFile(filePath, file.buffer);
+  } catch (err: unknown) {
+    logger.child({ module: 'invoiceBuilder' }).error(
+      { error: err instanceof Error ? err.message : err },
+      'Failed to save file to disk — continuing with DB blob only',
+    );
+    filePath = null;
+  }
 
   const invoice = await prisma.invoice.create({
     data: {
@@ -105,6 +126,7 @@ export async function createDraftInvoice(params: CreateInvoiceParams) {
       balanceDue: (mp?.totalAmount as number | null) ?? 0,
       ...(partyId ? { partyId } : {}),
       fileData: file.buffer,
+      ...(filePath ? { filePath } : {}),
       fileHash: file.fileHash || undefined,
       fileName: file.originalname,
       fileMimeType: file.mimetype,

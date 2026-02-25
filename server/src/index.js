@@ -25,6 +25,10 @@ const __dirname = path.dirname(__filename);
 // Initialize database if needed
 await initDb();
 
+// Initialize file storage directories
+import { init as initFileStorage } from './services/fileStorageService.js';
+await initFileStorage();
+
 // Import routes
 // Products, orders, materials, fabrics, BOM routes migrated to TanStack Start Server Functions
 import inventoryReconciliationRoutes from './routes/inventory-reconciliation.js';

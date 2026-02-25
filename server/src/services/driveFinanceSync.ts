@@ -30,6 +30,7 @@ import {
     DRIVE_VENDOR_INVOICES_FOLDER_NAME,
     getFinancialYear,
 } from '../config/sync/drive.js';
+import { readFile as readFileFromDisk } from './fileStorageService.js';
 
 // ============================================
 // MODULE STATE
@@ -142,6 +143,7 @@ export async function uploadInvoiceFile(invoiceId: string): Promise<boolean> {
             invoiceNumber: true,
             invoiceDate: true,
             createdAt: true,
+            filePath: true,
             fileData: true,
             fileName: true,
             fileMimeType: true,
@@ -150,13 +152,26 @@ export async function uploadInvoiceFile(invoiceId: string): Promise<boolean> {
         },
     });
 
-    if (!invoice || !invoice.fileData) {
+    if (!invoice || (!invoice.filePath && !invoice.fileData)) {
         driveLogger.debug({ invoiceId }, 'No file data — skipping');
         return false;
     }
 
     if (invoice.driveFileId) {
         driveLogger.debug({ invoiceId }, 'Already uploaded — skipping');
+        return false;
+    }
+
+    // Prefer disk read, fallback to DB blob
+    let fileBuffer: Buffer | null = null;
+    if (invoice.filePath) {
+        fileBuffer = await readFileFromDisk(invoice.filePath);
+    }
+    if (!fileBuffer && invoice.fileData) {
+        fileBuffer = Buffer.from(invoice.fileData);
+    }
+    if (!fileBuffer) {
+        driveLogger.warn({ invoiceId }, 'File missing on disk and DB — skipping');
         return false;
     }
 
@@ -176,7 +191,7 @@ export async function uploadInvoiceFile(invoiceId: string): Promise<boolean> {
         folderId,
         driveName,
         invoice.fileMimeType ?? 'application/octet-stream',
-        Buffer.from(invoice.fileData)
+        fileBuffer
     );
 
     await prisma.invoice.update({
@@ -205,6 +220,7 @@ export async function uploadBankTxnFile(bankTxnId: string): Promise<boolean> {
             id: true,
             reference: true,
             txnDate: true,
+            filePath: true,
             fileData: true,
             fileName: true,
             fileMimeType: true,
@@ -213,13 +229,26 @@ export async function uploadBankTxnFile(bankTxnId: string): Promise<boolean> {
         },
     });
 
-    if (!bankTxn || !bankTxn.fileData) {
+    if (!bankTxn || (!bankTxn.filePath && !bankTxn.fileData)) {
         driveLogger.debug({ bankTxnId }, 'No file data — skipping');
         return false;
     }
 
     if (bankTxn.driveFileId) {
         driveLogger.debug({ bankTxnId }, 'Already uploaded — skipping');
+        return false;
+    }
+
+    // Prefer disk read, fallback to DB blob
+    let fileBuffer: Buffer | null = null;
+    if (bankTxn.filePath) {
+        fileBuffer = await readFileFromDisk(bankTxn.filePath);
+    }
+    if (!fileBuffer && bankTxn.fileData) {
+        fileBuffer = Buffer.from(bankTxn.fileData);
+    }
+    if (!fileBuffer) {
+        driveLogger.warn({ bankTxnId }, 'File missing on disk and DB — skipping');
         return false;
     }
 
@@ -238,7 +267,7 @@ export async function uploadBankTxnFile(bankTxnId: string): Promise<boolean> {
         folderId,
         driveName,
         bankTxn.fileMimeType ?? 'application/octet-stream',
-        Buffer.from(bankTxn.fileData)
+        fileBuffer
     );
 
     await prisma.bankTransaction.update({
@@ -280,10 +309,13 @@ export async function syncAllPendingFiles(): Promise<{ uploaded: number; errors:
     let errors = 0;
 
     try {
-        // Pending invoices
+        // Pending invoices (have file on disk or in DB, not yet uploaded to Drive)
         const pendingInvoices = await prisma.invoice.findMany({
             where: {
-                fileData: { not: null },
+                OR: [
+                    { fileData: { not: null } },
+                    { filePath: { not: null } },
+                ],
                 driveFileId: null,
             },
             select: { id: true },
@@ -305,10 +337,13 @@ export async function syncAllPendingFiles(): Promise<{ uploaded: number; errors:
             }
         }
 
-        // Pending bank transaction files
+        // Pending bank transaction files (have file on disk or in DB, not yet uploaded to Drive)
         const pendingBankTxns = await prisma.bankTransaction.findMany({
             where: {
-                fileData: { not: null },
+                OR: [
+                    { fileData: { not: null } },
+                    { filePath: { not: null } },
+                ],
                 driveFileId: null,
             },
             select: { id: true },
