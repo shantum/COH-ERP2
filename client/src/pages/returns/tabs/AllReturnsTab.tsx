@@ -1,17 +1,13 @@
-import { useState, useMemo, useCallback, useRef } from 'react';
+import { useState, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
-import { AgGridReact } from 'ag-grid-react';
-import type { ColDef, ICellRendererParams, ValueFormatterParams } from 'ag-grid-community';
-import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community';
 import { Search, ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react';
 import { getAllReturns } from '../../../server/functions/returns';
-import { compactTheme, defaultColDef, formatDate, formatRelativeTime } from '../../../utils/agGridHelpers';
+import { formatDate, formatRelativeTime } from '../../../utils/agGridHelpers';
 import { getStatusBadge, getResolutionBadge } from '../types';
+import { ReturnTrackingStatus } from '../ReturnTrackingStatus';
 import { RETURN_REASONS } from '@coh/shared/domain/returns';
 import type { ActiveReturnLine } from '@coh/shared/schemas/returns';
-
-ModuleRegistry.registerModules([AllCommunityModule]);
 
 const STATUS_OPTIONS = [
     { value: '', label: 'All Statuses' },
@@ -34,7 +30,6 @@ const RESOLUTION_OPTIONS = [
 const PAGE_SIZE = 100;
 
 export function AllReturnsTab() {
-    const gridRef = useRef<AgGridReact>(null);
     const [page, setPage] = useState(1);
     const [statusFilter, setStatusFilter] = useState('');
     const [resolutionFilter, setResolutionFilter] = useState('');
@@ -66,171 +61,11 @@ export function AllReturnsTab() {
     }, [handleSearch]);
 
     const totalPages = data ? Math.ceil(data.total / data.limit) : 0;
-
-    const columnDefs = useMemo((): ColDef<ActiveReturnLine>[] => [
-        {
-            headerName: 'Order',
-            field: 'orderNumber',
-            width: 120,
-            pinned: 'left' as const,
-            cellRenderer: (params: ICellRendererParams<ActiveReturnLine>) => {
-                if (!params.data) return null;
-                return (
-                    <a
-                        href={`/orders?modal=view&orderId=${params.data.orderId}`}
-                        className="text-blue-600 hover:underline font-medium"
-                    >
-                        {params.value}
-                    </a>
-                );
-            },
-        },
-        {
-            headerName: 'Batch',
-            field: 'returnBatchNumber',
-            width: 100,
-            valueFormatter: (p: ValueFormatterParams) => p.value || '-',
-        },
-        {
-            headerName: 'SKU',
-            field: 'skuCode',
-            width: 130,
-            cellStyle: { fontFamily: 'monospace', fontSize: '11px' },
-        },
-        {
-            headerName: 'Product',
-            field: 'productName',
-            width: 180,
-            cellRenderer: (params: ICellRendererParams<ActiveReturnLine>) => {
-                if (!params.data) return null;
-                return (
-                    <div className="leading-tight py-1">
-                        <div className="text-xs font-medium truncate">{params.data.productName}</div>
-                        <div className="text-[10px] text-gray-500">{params.data.colorName} / {params.data.size}</div>
-                    </div>
-                );
-            },
-        },
-        {
-            headerName: 'Qty',
-            field: 'returnQty',
-            width: 60,
-            type: 'numericColumn',
-        },
-        {
-            headerName: 'Status',
-            field: 'returnStatus',
-            width: 130,
-            cellRenderer: (params: ICellRendererParams<ActiveReturnLine>) => {
-                if (!params.value) return null;
-                return (
-                    <span className={`px-2 py-0.5 text-xs font-medium rounded ${getStatusBadge(params.value)}`}>
-                        {params.value.replace(/_/g, ' ')}
-                    </span>
-                );
-            },
-        },
-        {
-            headerName: 'Resolution',
-            field: 'returnResolution',
-            width: 100,
-            cellRenderer: (params: ICellRendererParams<ActiveReturnLine>) => {
-                const badge = getResolutionBadge(params.value || null);
-                return (
-                    <span className={`px-2 py-0.5 text-xs font-medium rounded ${badge.color}`}>
-                        {badge.label}
-                    </span>
-                );
-            },
-        },
-        {
-            headerName: 'QC',
-            field: 'returnQcResult',
-            width: 90,
-            cellRenderer: (params: ICellRendererParams<ActiveReturnLine>) => {
-                if (!params.value) return <span className="text-gray-400 text-xs">-</span>;
-                const isApproved = params.value === 'approved';
-                return (
-                    <span className={`px-2 py-0.5 text-xs font-medium rounded ${
-                        isApproved ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
-                    }`}>
-                        {isApproved ? 'Approved' : 'Written Off'}
-                    </span>
-                );
-            },
-        },
-        {
-            headerName: 'Reason',
-            field: 'returnReasonCategory',
-            width: 140,
-            valueFormatter: (p: ValueFormatterParams) => {
-                if (!p.value) return '-';
-                return RETURN_REASONS[p.value as keyof typeof RETURN_REASONS] || p.value;
-            },
-        },
-        {
-            headerName: 'AWB',
-            field: 'returnAwbNumber',
-            width: 130,
-            cellStyle: { fontFamily: 'monospace', fontSize: '11px' },
-            valueFormatter: (p: ValueFormatterParams) => p.value || '-',
-        },
-        {
-            headerName: 'Customer',
-            field: 'customerName',
-            width: 140,
-        },
-        {
-            headerName: 'Requested',
-            field: 'returnRequestedAt',
-            width: 100,
-            valueFormatter: (p: ValueFormatterParams) => formatDate(p.value),
-        },
-        {
-            headerName: 'Age',
-            field: 'returnRequestedAt',
-            width: 80,
-            colId: 'age',
-            valueFormatter: (p: ValueFormatterParams) => formatRelativeTime(p.value),
-        },
-        {
-            headerName: 'Refund',
-            field: 'returnNetAmount',
-            width: 90,
-            type: 'numericColumn',
-            valueFormatter: (p: ValueFormatterParams) => {
-                if (p.value == null) return '-';
-                return `\u20B9${Number(p.value).toLocaleString()}`;
-            },
-        },
-        {
-            headerName: 'Exchange',
-            field: 'returnExchangeOrderId',
-            width: 90,
-            cellRenderer: (params: ICellRendererParams<ActiveReturnLine>) => {
-                if (!params.value) return <span className="text-gray-400 text-xs">-</span>;
-                return (
-                    <a
-                        href={`/orders?modal=view&orderId=${params.value}`}
-                        className="text-blue-600 hover:underline text-xs flex items-center gap-1"
-                    >
-                        <ExternalLink size={10} />
-                        View
-                    </a>
-                );
-            },
-        },
-        {
-            headerName: 'Notes',
-            field: 'returnNotes',
-            width: 150,
-            valueFormatter: (p: ValueFormatterParams) => p.value || '',
-        },
-    ], []);
+    const items = data?.items || [];
 
     return (
         <div className="space-y-4">
-            {/* Filters Bar */}
+            {/* Filters */}
             <div className="flex flex-col sm:flex-row gap-3 p-4 bg-white rounded-lg border border-gray-200">
                 <div className="flex-1 flex gap-2">
                     <div className="relative flex-1">
@@ -271,34 +106,51 @@ export function AllReturnsTab() {
                 </select>
             </div>
 
-            {/* Grid */}
-            <div className="bg-white rounded-lg border border-gray-200 overflow-hidden" style={{ height: 'calc(100vh - 320px)', minHeight: '400px' }}>
-                <AgGridReact<ActiveReturnLine>
-                    ref={gridRef}
-                    theme={compactTheme}
-                    rowData={data?.items || []}
-                    columnDefs={columnDefs}
-                    loading={isLoading}
-                    defaultColDef={defaultColDef}
-                    animateRows={false}
-                    suppressCellFocus={false}
-                    getRowId={(params) => params.data.id}
-                    pagination={false}
-                    enableCellTextSelection={true}
-                    ensureDomOrder={true}
-                />
+            {/* Table */}
+            <div className="bg-white rounded-lg border border-gray-200 overflow-x-auto">
+                <table className="w-full text-sm">
+                    <thead className="bg-gray-50 border-b border-gray-200">
+                        <tr className="text-xs text-gray-500 font-medium">
+                            <th className="text-left px-3 py-2.5">Order</th>
+                            <th className="text-left px-3 py-2.5">Batch</th>
+                            <th className="text-left px-3 py-2.5">SKU</th>
+                            <th className="text-left px-3 py-2.5">Product</th>
+                            <th className="text-right px-3 py-2.5">Qty</th>
+                            <th className="text-left px-3 py-2.5">Status</th>
+                            <th className="text-left px-3 py-2.5">Resolution</th>
+                            <th className="text-left px-3 py-2.5">QC</th>
+                            <th className="text-left px-3 py-2.5">Reason</th>
+                            <th className="text-left px-3 py-2.5">AWB / Tracking</th>
+                            <th className="text-left px-3 py-2.5">Customer</th>
+                            <th className="text-left px-3 py-2.5">Requested</th>
+                            <th className="text-left px-3 py-2.5">Age</th>
+                            <th className="text-right px-3 py-2.5">Refund</th>
+                            <th className="text-left px-3 py-2.5">Exchange</th>
+                            <th className="text-left px-3 py-2.5">Notes</th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                        {isLoading ? (
+                            <tr>
+                                <td colSpan={16} className="text-center py-12 text-gray-400">Loading...</td>
+                            </tr>
+                        ) : items.length === 0 ? (
+                            <tr>
+                                <td colSpan={16} className="text-center py-12 text-gray-400">No returns found</td>
+                            </tr>
+                        ) : (
+                            items.map((row) => <ReturnRow key={row.id} row={row} />)
+                        )}
+                    </tbody>
+                </table>
             </div>
 
             {/* Pagination */}
             <div className="flex items-center justify-between px-4 py-2 bg-white rounded-lg border border-gray-200">
                 <div className="text-sm text-gray-600">
                     {data ? (
-                        <>
-                            Showing {((page - 1) * PAGE_SIZE) + 1}–{Math.min(page * PAGE_SIZE, data.total)} of {data.total.toLocaleString()} returns
-                        </>
-                    ) : (
-                        'Loading...'
-                    )}
+                        <>Showing {((page - 1) * PAGE_SIZE) + 1}–{Math.min(page * PAGE_SIZE, data.total)} of {data.total.toLocaleString()} returns</>
+                    ) : 'Loading...'}
                 </div>
                 <div className="flex items-center gap-2">
                     <button
@@ -308,9 +160,7 @@ export function AllReturnsTab() {
                     >
                         <ChevronLeft size={16} />
                     </button>
-                    <span className="text-sm text-gray-600">
-                        Page {page} of {totalPages || 1}
-                    </span>
+                    <span className="text-sm text-gray-600">Page {page} of {totalPages || 1}</span>
                     <button
                         onClick={() => setPage(p => Math.min(totalPages, p + 1))}
                         disabled={page >= totalPages}
@@ -321,5 +171,83 @@ export function AllReturnsTab() {
                 </div>
             </div>
         </div>
+    );
+}
+
+function ReturnRow({ row }: { row: ActiveReturnLine }) {
+    const badge = getResolutionBadge(row.returnResolution || null);
+    const reason = row.returnReasonCategory
+        ? (RETURN_REASONS[row.returnReasonCategory as keyof typeof RETURN_REASONS] || row.returnReasonCategory)
+        : '-';
+
+    return (
+        <tr className="hover:bg-gray-50">
+            <td className="px-3 py-2">
+                <a
+                    href={`/orders?modal=view&orderId=${row.orderId}`}
+                    className="text-blue-600 hover:underline font-medium"
+                >
+                    {row.orderNumber}
+                </a>
+            </td>
+            <td className="px-3 py-2 text-gray-600">{row.returnBatchNumber || '-'}</td>
+            <td className="px-3 py-2 font-mono text-xs text-gray-600">{row.skuCode}</td>
+            <td className="px-3 py-2">
+                <div className="leading-tight">
+                    <div className="text-xs font-medium truncate max-w-[180px]">{row.productName}</div>
+                    <div className="text-[10px] text-gray-500">{row.colorName} / {row.size}</div>
+                </div>
+            </td>
+            <td className="px-3 py-2 text-right">{row.returnQty}</td>
+            <td className="px-3 py-2">
+                <span className={`px-2 py-0.5 text-xs font-medium rounded whitespace-nowrap ${getStatusBadge(row.returnStatus)}`}>
+                    {row.returnStatus.replace(/_/g, ' ')}
+                </span>
+            </td>
+            <td className="px-3 py-2">
+                <span className={`px-2 py-0.5 text-xs font-medium rounded ${badge.color}`}>
+                    {badge.label}
+                </span>
+            </td>
+            <td className="px-3 py-2">
+                {row.returnQcResult ? (
+                    <span className={`px-2 py-0.5 text-xs font-medium rounded ${
+                        row.returnQcResult === 'approved' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                    }`}>
+                        {row.returnQcResult === 'approved' ? 'Approved' : 'Written Off'}
+                    </span>
+                ) : <span className="text-gray-400 text-xs">-</span>}
+            </td>
+            <td className="px-3 py-2 text-xs text-gray-600 whitespace-nowrap">{reason}</td>
+            <td className="px-3 py-2">
+                {row.returnAwbNumber ? (
+                    <div>
+                        <div className="font-mono text-xs text-gray-600">{row.returnAwbNumber}</div>
+                        {row.returnCourier && (
+                            <div className="text-[10px] text-gray-400">{row.returnCourier}</div>
+                        )}
+                        <ReturnTrackingStatus awbNumber={row.returnAwbNumber} />
+                    </div>
+                ) : <span className="text-gray-400 text-xs">-</span>}
+            </td>
+            <td className="px-3 py-2 text-xs text-gray-700 whitespace-nowrap">{row.customerName}</td>
+            <td className="px-3 py-2 text-xs text-gray-600 whitespace-nowrap">{formatDate(row.returnRequestedAt)}</td>
+            <td className="px-3 py-2 text-xs text-gray-500 whitespace-nowrap">{formatRelativeTime(row.returnRequestedAt)}</td>
+            <td className="px-3 py-2 text-right text-xs">
+                {row.returnNetAmount != null ? `₹${Number(row.returnNetAmount).toLocaleString()}` : '-'}
+            </td>
+            <td className="px-3 py-2">
+                {row.returnExchangeOrderId ? (
+                    <a
+                        href={`/orders?modal=view&orderId=${row.returnExchangeOrderId}`}
+                        className="text-blue-600 hover:underline text-xs flex items-center gap-1"
+                    >
+                        <ExternalLink size={10} />
+                        View
+                    </a>
+                ) : <span className="text-gray-400 text-xs">-</span>}
+            </td>
+            <td className="px-3 py-2 text-xs text-gray-500 truncate max-w-[150px]">{row.returnNotes || ''}</td>
+        </tr>
     );
 }
