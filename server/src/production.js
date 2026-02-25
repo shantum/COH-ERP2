@@ -162,6 +162,12 @@ async function start() {
     await backfillLtvsIfNeeded(prisma);
     await startAllWorkers();
     logger.info('Background workers started');
+
+    // Signal PM2 that this process is ready to accept traffic.
+    // PM2 keeps the old process alive until this fires (zero-downtime reload).
+    if (process.send) {
+      process.send('ready');
+    }
   });
 
   server.on('error', (error) => {

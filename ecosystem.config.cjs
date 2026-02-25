@@ -10,5 +10,10 @@ module.exports = {
     },
     max_memory_restart: '1G',
     exp_backoff_restart_delay: 100,
+    // Zero-downtime reload: old process stays alive until new one signals ready
+    wait_ready: true,
+    listen_timeout: 30000,
+    // Graceful shutdown: give connections time to drain
+    kill_timeout: 10000,
   }],
 };
