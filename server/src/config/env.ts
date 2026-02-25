@@ -112,7 +112,7 @@ const envSchema = z.object({
     RETURNPRIME_WEBHOOK_SECRET: z.string().optional(),
 
     // ----------------------------------------
-    // RESEND
+    // RESEND (internal emails via coh.one)
     // ----------------------------------------
 
     /** Resend API key for sending emails */
@@ -120,6 +120,19 @@ const envSchema = z.object({
 
     /** Resend webhook signing secret for inbound email verification (from Resend dashboard, starts with whsec_) */
     RESEND_WEBHOOK_SECRET: z.string().optional(),
+
+    // ----------------------------------------
+    // AWS SES (customer-facing emails via creaturesofhabit.in)
+    // ----------------------------------------
+
+    /** AWS access key ID with SES send permissions */
+    AWS_SES_ACCESS_KEY_ID: z.string().optional(),
+
+    /** AWS secret access key */
+    AWS_SES_SECRET_ACCESS_KEY: z.string().optional(),
+
+    /** AWS SES region */
+    AWS_SES_REGION: z.string().default('eu-north-1'),
 
     // ----------------------------------------
     // AI / ANTHROPIC

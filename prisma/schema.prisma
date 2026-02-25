@@ -2496,3 +2496,48 @@ model DomainEvent {
   @@index([createdAt])
   @@index([actorId])
 }
+
+// ============================================
+// EMAIL LOG
+// ============================================
+
+/// Tracks every email sent from the system — delivery status, content, domain linking
+model EmailLog {
+  id            String    @id @default(uuid())
+  messageId     String?   @unique // Provider message ID (SES/Resend) for tracking
+
+  // Recipients & Content
+  toEmail       String
+  fromEmail     String
+  subject       String
+  htmlContent   String    // Full HTML body
+  textContent   String?   // Plain text alternative
+
+  // Provider & Routing
+  provider      String    // "ses" | "resend"
+  templateKey   String?   // "return-created", "order-confirmation", "shipping-update"
+
+  // Status tracking
+  status        String    @default("pending") // pending → sent → delivered → bounced → failed → complained
+  sentAt        DateTime?
+  deliveredAt   DateTime?
+  error         String?   // Error message if failed
+
+  // Domain linking (polymorphic)
+  entityType    String?   // "Order", "ReturnPrimeRequest", "Invoice", "Customer"
+  entityId      String?   // UUID of the linked entity
+
+  metadata      Json?     // Extra context: { retryCount, source, etc. }
+
+  // Audit
+  createdById   String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([toEmail])
+  @@index([status])
+  @@index([templateKey])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@index([messageId])
+}

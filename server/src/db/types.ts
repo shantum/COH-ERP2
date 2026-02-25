@@ -236,6 +236,27 @@ export type DomainEvent = {
     actorId: string | null;
     createdAt: Generated<Timestamp>;
 };
+export type EmailLog = {
+    id: Generated<string>;
+    messageId: string | null;
+    toEmail: string;
+    fromEmail: string;
+    subject: string;
+    htmlContent: string;
+    textContent: string | null;
+    provider: string;
+    templateKey: string | null;
+    status: Generated<string>;
+    sentAt: Timestamp | null;
+    deliveredAt: Timestamp | null;
+    error: string | null;
+    entityType: string | null;
+    entityId: string | null;
+    metadata: unknown | null;
+    createdById: string | null;
+    createdAt: Generated<Timestamp>;
+    updatedAt: Timestamp;
+};
 export type Employee = {
     id: Generated<string>;
     name: string;
@@ -1485,6 +1506,7 @@ export type DB = {
     CostConfig: CostConfig;
     Customer: Customer;
     DomainEvent: DomainEvent;
+    EmailLog: EmailLog;
     Employee: Employee;
     Fabric: Fabric;
     FabricColour: FabricColour;

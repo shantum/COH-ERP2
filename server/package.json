@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.74.0",
+    "@aws-sdk/client-ses": "^3.997.0",
     "@coh/shared": "file:../shared",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
