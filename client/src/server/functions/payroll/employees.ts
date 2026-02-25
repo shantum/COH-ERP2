@@ -146,6 +146,15 @@ export const createEmployee = createServerFn({ method: 'POST' })
         employeeCode,
         phone: data.phone,
         email: data.email || null,
+        dateOfBirth: data.dateOfBirth ? new Date(data.dateOfBirth) : null,
+        gender: data.gender ?? null,
+        fatherOrSpouseName: data.fatherOrSpouseName ?? null,
+        maritalStatus: data.maritalStatus ?? null,
+        currentAddress: data.currentAddress ?? null,
+        permanentAddress: data.permanentAddress ?? null,
+        emergencyContactName: data.emergencyContactName ?? null,
+        emergencyContactPhone: data.emergencyContactPhone ?? null,
+        emergencyContactRelation: data.emergencyContactRelation ?? null,
         dateOfJoining: data.dateOfJoining ? new Date(data.dateOfJoining) : null,
         department: data.department,
         designation: data.designation,
@@ -160,6 +169,7 @@ export const createEmployee = createServerFn({ method: 'POST' })
         pan: data.pan,
         aadhaar: data.aadhaar,
         uan: data.uan,
+        pfNumber: data.pfNumber ?? null,
         esicNumber: data.esicNumber,
         partyId: party.id,
         ...(data.tailorId ? { tailorId: data.tailorId } : {}),
@@ -176,7 +186,7 @@ export const createEmployee = createServerFn({ method: 'POST' })
 export const updateEmployee = createServerFn({ method: 'POST' })
   .middleware([authMiddleware])
   .inputValidator((input: unknown) => UpdateEmployeeSchema.parse(input))
-  .handler(async ({ data }) => {
+  .handler(async ({ data, context }) => {
     const prisma = await getPrisma();
     const { id, ...updates } = data;
 
@@ -187,7 +197,7 @@ export const updateEmployee = createServerFn({ method: 'POST' })
     const updateData: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(updates)) {
       if (value === undefined) continue;
-      if (key === 'dateOfJoining' || key === 'dateOfExit') {
+      if (key === 'dateOfJoining' || key === 'dateOfExit' || key === 'dateOfBirth') {
         updateData[key] = value ? new Date(value as string) : null;
       } else if (key === 'email') {
         updateData[key] = value || null;
@@ -197,6 +207,29 @@ export const updateEmployee = createServerFn({ method: 'POST' })
     }
 
     const employee = await prisma.employee.update({ where: { id }, data: updateData });
+
+    // Auto-create SalaryRevision if salary or statutory flags changed
+    const salaryFields = ['basicSalary', 'pfApplicable', 'esicApplicable', 'ptApplicable'] as const;
+    const salaryChanged = salaryFields.some((field) => {
+      if (updates[field] === undefined) return false;
+      return updates[field] !== existing[field];
+    });
+
+    if (salaryChanged) {
+      await prisma.salaryRevision.create({
+        data: {
+          employeeId: id,
+          basicSalary: employee.basicSalary,
+          pfApplicable: employee.pfApplicable,
+          esicApplicable: employee.esicApplicable,
+          ptApplicable: employee.ptApplicable,
+          effectiveFrom: new Date(),
+          reason: 'Updated via employee edit',
+          createdById: context.user.id,
+        },
+      });
+    }
+
     return { success: true as const, employee };
   });
 

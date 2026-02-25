@@ -37,14 +37,17 @@ import {
   getDepartmentLabel,
   GROSS_MULTIPLIER,
   calculateSlip,
+  GENDER_LABELS,
+  MARITAL_STATUS_LABELS,
 } from '@coh/shared';
 import { formatINR, LoadingState, Pagination } from './shared';
 
 const CREATE_EMPLOYEE_STEPS = [
   { id: 1, label: 'Basic' },
-  { id: 2, label: 'Salary' },
-  { id: 3, label: 'Bank & KYC' },
-  { id: 4, label: 'Review' },
+  { id: 2, label: 'Personal' },
+  { id: 3, label: 'Salary' },
+  { id: 4, label: 'Bank & KYC' },
+  { id: 5, label: 'Review' },
 ] as const;
 
 type StatutoryFlags = {
@@ -278,7 +281,17 @@ function EmployeeModal({
     ptApplicable: true,
     phone: '',
     email: '',
+    dateOfBirth: '',
+    gender: '',
+    fatherOrSpouseName: '',
+    maritalStatus: '',
+    currentAddress: '',
+    permanentAddress: '',
+    emergencyContactName: '',
+    emergencyContactPhone: '',
+    emergencyContactRelation: '',
     dateOfJoining: '',
+    dateOfExit: '',
     bankAccountName: '',
     bankAccountNumber: '',
     bankIfsc: '',
@@ -286,6 +299,7 @@ function EmployeeModal({
     pan: '',
     aadhaar: '',
     uan: '',
+    pfNumber: '',
     esicNumber: '',
     tailorId: '',
     isActive: true,
@@ -304,7 +318,17 @@ function EmployeeModal({
       ptApplicable: emp.ptApplicable,
       phone: emp.phone ?? '',
       email: emp.email ?? '',
+      dateOfBirth: emp.dateOfBirth ? new Date(emp.dateOfBirth).toISOString().split('T')[0] : '',
+      gender: emp.gender ?? '',
+      fatherOrSpouseName: emp.fatherOrSpouseName ?? '',
+      maritalStatus: emp.maritalStatus ?? '',
+      currentAddress: emp.currentAddress ?? '',
+      permanentAddress: emp.permanentAddress ?? '',
+      emergencyContactName: emp.emergencyContactName ?? '',
+      emergencyContactPhone: emp.emergencyContactPhone ?? '',
+      emergencyContactRelation: emp.emergencyContactRelation ?? '',
       dateOfJoining: emp.dateOfJoining ? new Date(emp.dateOfJoining).toISOString().split('T')[0] : '',
+      dateOfExit: emp.dateOfExit ? new Date(emp.dateOfExit).toISOString().split('T')[0] : '',
       bankAccountName: emp.bankAccountName ?? '',
       bankAccountNumber: emp.bankAccountNumber ?? '',
       bankIfsc: emp.bankIfsc ?? '',
@@ -312,6 +336,7 @@ function EmployeeModal({
       pan: emp.pan ?? '',
       aadhaar: emp.aadhaar ?? '',
       uan: emp.uan ?? '',
+      pfNumber: emp.pfNumber ?? '',
       esicNumber: emp.esicNumber ?? '',
       tailorId: emp.tailorId ?? '',
       isActive: emp.isActive,
@@ -321,12 +346,12 @@ function EmployeeModal({
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const [createStep, setCreateStep] = useState<1 | 2 | 3 | 4>(1);
+  const [createStep, setCreateStep] = useState<1 | 2 | 3 | 4 | 5>(1);
   const [inHandSalary, setInHandSalary] = useState('');
 
-  const validateCreateStep = (step: 1 | 2 | 3 | 4): string | null => {
+  const validateCreateStep = (step: 1 | 2 | 3 | 4 | 5): string | null => {
     if (step === 1 && !form.name.trim()) return 'Name is required';
-    if (step === 2) {
+    if (step === 3) {
       const inHand = parseFloat(inHandSalary);
       if (isNaN(inHand) || inHand <= 0) return 'Enter a valid in-hand salary';
       const basicSalary = parseFloat(form.basicSalary);
@@ -342,15 +367,15 @@ function EmployeeModal({
       return;
     }
     setError('');
-    if (createStep < 4) {
-      setCreateStep((prev) => (prev + 1) as 1 | 2 | 3 | 4);
+    if (createStep < 5) {
+      setCreateStep((prev) => (prev + 1) as 1 | 2 | 3 | 4 | 5);
     }
   };
 
   const goPrevStep = () => {
     setError('');
     if (createStep > 1) {
-      setCreateStep((prev) => (prev - 1) as 1 | 2 | 3 | 4);
+      setCreateStep((prev) => (prev - 1) as 1 | 2 | 3 | 4 | 5);
     }
   };
 
@@ -384,7 +409,17 @@ function EmployeeModal({
             ptApplicable: form.ptApplicable,
             phone: form.phone || null,
             email: form.email || null,
+            dateOfBirth: form.dateOfBirth || null,
+            gender: (form.gender || null) as 'male' | 'female' | 'other' | null,
+            fatherOrSpouseName: form.fatherOrSpouseName || null,
+            maritalStatus: (form.maritalStatus || null) as 'single' | 'married' | 'divorced' | 'widowed' | null,
+            currentAddress: form.currentAddress || null,
+            permanentAddress: form.permanentAddress || null,
+            emergencyContactName: form.emergencyContactName || null,
+            emergencyContactPhone: form.emergencyContactPhone || null,
+            emergencyContactRelation: form.emergencyContactRelation || null,
             dateOfJoining: form.dateOfJoining || null,
+            dateOfExit: form.dateOfExit || null,
             bankAccountName: form.bankAccountName || null,
             bankAccountNumber: form.bankAccountNumber || null,
             bankIfsc: form.bankIfsc || null,
@@ -392,6 +427,7 @@ function EmployeeModal({
             pan: form.pan || null,
             aadhaar: form.aadhaar || null,
             uan: form.uan || null,
+            pfNumber: form.pfNumber || null,
             esicNumber: form.esicNumber || null,
             tailorId: form.tailorId || null,
             isActive: form.isActive,
@@ -411,6 +447,15 @@ function EmployeeModal({
             ptApplicable: form.ptApplicable,
             ...(form.phone ? { phone: form.phone } : {}),
             ...(form.email ? { email: form.email } : {}),
+            ...(form.dateOfBirth ? { dateOfBirth: form.dateOfBirth } : {}),
+            ...(form.gender ? { gender: form.gender as 'male' | 'female' | 'other' } : {}),
+            ...(form.fatherOrSpouseName ? { fatherOrSpouseName: form.fatherOrSpouseName } : {}),
+            ...(form.maritalStatus ? { maritalStatus: form.maritalStatus as 'single' | 'married' | 'divorced' | 'widowed' } : {}),
+            ...(form.currentAddress ? { currentAddress: form.currentAddress } : {}),
+            ...(form.permanentAddress ? { permanentAddress: form.permanentAddress } : {}),
+            ...(form.emergencyContactName ? { emergencyContactName: form.emergencyContactName } : {}),
+            ...(form.emergencyContactPhone ? { emergencyContactPhone: form.emergencyContactPhone } : {}),
+            ...(form.emergencyContactRelation ? { emergencyContactRelation: form.emergencyContactRelation } : {}),
             ...(form.dateOfJoining ? { dateOfJoining: form.dateOfJoining } : {}),
             ...(form.bankAccountName ? { bankAccountName: form.bankAccountName } : {}),
             ...(form.bankAccountNumber ? { bankAccountNumber: form.bankAccountNumber } : {}),
@@ -419,6 +464,7 @@ function EmployeeModal({
             ...(form.pan ? { pan: form.pan } : {}),
             ...(form.aadhaar ? { aadhaar: form.aadhaar } : {}),
             ...(form.uan ? { uan: form.uan } : {}),
+            ...(form.pfNumber ? { pfNumber: form.pfNumber } : {}),
             ...(form.esicNumber ? { esicNumber: form.esicNumber } : {}),
             ...(form.tailorId ? { tailorId: form.tailorId } : {}),
           },
@@ -455,7 +501,7 @@ function EmployeeModal({
           <DialogDescription>
             {isEdit
               ? 'Update employee details and salary structure.'
-              : `Step ${createStep} of 4: ${CREATE_EMPLOYEE_STEPS[createStep - 1].label}`}
+              : `Step ${createStep} of 5: ${CREATE_EMPLOYEE_STEPS[createStep - 1].label}`}
           </DialogDescription>
         </DialogHeader>
 
@@ -464,7 +510,7 @@ function EmployeeModal({
         ) : (
           <div className="space-y-4">
             {!isEdit && (
-              <div className="grid grid-cols-4 gap-2">
+              <div className="grid grid-cols-5 gap-2">
                 {CREATE_EMPLOYEE_STEPS.map((step) => {
                   const isCurrent = createStep === step.id;
                   const isDone = createStep > step.id;
@@ -522,6 +568,72 @@ function EmployeeModal({
             )}
 
             {(isEdit || createStep === 2) && (
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Date of Birth</Label>
+                <Input type="date" value={form.dateOfBirth} onChange={(e) => setForm({ ...form, dateOfBirth: e.target.value })} />
+              </div>
+              <div>
+                <Label>Gender</Label>
+                <Select value={form.gender || 'none'} onValueChange={(v) => setForm({ ...form, gender: v === 'none' ? '' : v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Not specified</SelectItem>
+                    <SelectItem value="male">Male</SelectItem>
+                    <SelectItem value="female">Female</SelectItem>
+                    <SelectItem value="other">Other</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Father / Spouse Name</Label>
+                <Input value={form.fatherOrSpouseName} onChange={(e) => setForm({ ...form, fatherOrSpouseName: e.target.value })} />
+              </div>
+              <div>
+                <Label>Marital Status</Label>
+                <Select value={form.maritalStatus || 'none'} onValueChange={(v) => setForm({ ...form, maritalStatus: v === 'none' ? '' : v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Not specified</SelectItem>
+                    <SelectItem value="single">Single</SelectItem>
+                    <SelectItem value="married">Married</SelectItem>
+                    <SelectItem value="divorced">Divorced</SelectItem>
+                    <SelectItem value="widowed">Widowed</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="col-span-2">
+                <Label>Current Address</Label>
+                <textarea
+                  className="flex min-h-[60px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  value={form.currentAddress}
+                  onChange={(e) => setForm({ ...form, currentAddress: e.target.value })}
+                />
+              </div>
+              <div className="col-span-2">
+                <Label>Permanent Address</Label>
+                <textarea
+                  className="flex min-h-[60px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  value={form.permanentAddress}
+                  onChange={(e) => setForm({ ...form, permanentAddress: e.target.value })}
+                />
+              </div>
+              <div>
+                <Label>Emergency Contact Name</Label>
+                <Input value={form.emergencyContactName} onChange={(e) => setForm({ ...form, emergencyContactName: e.target.value })} />
+              </div>
+              <div>
+                <Label>Emergency Contact Phone</Label>
+                <Input value={form.emergencyContactPhone} onChange={(e) => setForm({ ...form, emergencyContactPhone: e.target.value })} />
+              </div>
+              <div>
+                <Label>Emergency Contact Relation</Label>
+                <Input value={form.emergencyContactRelation} onChange={(e) => setForm({ ...form, emergencyContactRelation: e.target.value })} />
+              </div>
+            </div>
+            )}
+
+            {(isEdit || createStep === 3) && (
             <div className="border rounded-lg p-3 bg-muted/30">
               <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Salary Structure</Label>
               <div className="grid grid-cols-2 gap-3 mt-2">
@@ -676,6 +788,12 @@ function EmployeeModal({
                 <Label>Date of Joining</Label>
                 <Input type="date" value={form.dateOfJoining} onChange={(e) => setForm({ ...form, dateOfJoining: e.target.value })} />
               </div>
+              {isEdit && (
+              <div>
+                <Label>Date of Exit</Label>
+                <Input type="date" value={form.dateOfExit} onChange={(e) => setForm({ ...form, dateOfExit: e.target.value })} />
+              </div>
+              )}
               <div>
                 <Label>Link to Tailor</Label>
                 <Select value={form.tailorId || 'none'} onValueChange={(v) => setForm({ ...form, tailorId: v === 'none' ? '' : v })}>
@@ -694,7 +812,7 @@ function EmployeeModal({
             </div>
             )}
 
-            {(isEdit || createStep === 3) && (
+            {(isEdit || createStep === 4) && (
             <details className="border rounded-lg p-3" open={!isEdit}>
               <summary className="text-sm font-medium cursor-pointer text-muted-foreground">
                 Bank & Statutory Details
@@ -707,12 +825,13 @@ function EmployeeModal({
                 <div><Label>PAN</Label><Input value={form.pan} onChange={(e) => setForm({ ...form, pan: e.target.value })} /></div>
                 <div><Label>Aadhaar</Label><Input value={form.aadhaar} onChange={(e) => setForm({ ...form, aadhaar: e.target.value })} /></div>
                 <div><Label>UAN (PF)</Label><Input value={form.uan} onChange={(e) => setForm({ ...form, uan: e.target.value })} /></div>
+                <div><Label>PF Number</Label><Input value={form.pfNumber} onChange={(e) => setForm({ ...form, pfNumber: e.target.value })} /></div>
                 <div><Label>ESIC Number</Label><Input value={form.esicNumber} onChange={(e) => setForm({ ...form, esicNumber: e.target.value })} /></div>
               </div>
             </details>
             )}
 
-            {!isEdit && createStep === 4 && (
+            {!isEdit && createStep === 5 && (
               <div className="border rounded-lg p-3 space-y-3 bg-muted/20">
                 <div>
                   <div className="text-xs text-muted-foreground">Name</div>
@@ -732,6 +851,22 @@ function EmployeeModal({
                     <div>{form.designation || '-'}</div>
                   </div>
                   <div>
+                    <div className="text-xs text-muted-foreground">Date of Birth</div>
+                    <div>{form.dateOfBirth || '-'}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">Gender</div>
+                    <div>{form.gender ? GENDER_LABELS[form.gender] : '-'}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">Father / Spouse</div>
+                    <div>{form.fatherOrSpouseName || '-'}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">Marital Status</div>
+                    <div>{form.maritalStatus ? MARITAL_STATUS_LABELS[form.maritalStatus] : '-'}</div>
+                  </div>
+                  <div>
                     <div className="text-xs text-muted-foreground">Basic Salary</div>
                     <div className="font-mono">{form.basicSalary ? formatINR(parseFloat(form.basicSalary)) : '-'}</div>
                   </div>
@@ -745,6 +880,12 @@ function EmployeeModal({
                   <Badge variant={form.esicApplicable ? 'default' : 'secondary'}>ESIC {form.esicApplicable ? 'On' : 'Off'}</Badge>
                   <Badge variant={form.ptApplicable ? 'default' : 'secondary'}>PT {form.ptApplicable ? 'On' : 'Off'}</Badge>
                 </div>
+                {form.emergencyContactName && (
+                  <div>
+                    <div className="text-xs text-muted-foreground">Emergency Contact</div>
+                    <div>{form.emergencyContactName} ({form.emergencyContactRelation}) — {form.emergencyContactPhone}</div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -773,7 +914,7 @@ function EmployeeModal({
                   Back
                 </Button>
               )}
-              {createStep < 4 ? (
+              {createStep < 5 ? (
                 <Button onClick={goNextStep} disabled={saving}>
                   Next
                 </Button>
