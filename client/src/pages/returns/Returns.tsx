@@ -140,6 +140,10 @@ export default function Returns() {
     const search = Route.useSearch();
     const navigate = useNavigate({ from: Route.fullPath });
     const queryClient = useQueryClient();
+    const invalidateReturns = useCallback(
+        () => queryClient.invalidateQueries({ queryKey: ['returns'] }),
+        [queryClient]
+    );
 
     // Local state
     const [searchInput, setSearchInput] = useState(search.search || '');
@@ -196,7 +200,7 @@ export default function Returns() {
             schedulePickupFn({ data: { orderLineId: lineId, pickupType: 'manual' } }),
         onSuccess: () => {
             toast.success('Pickup scheduled');
-            queryClient.invalidateQueries({ queryKey: ['returns'] });
+            invalidateReturns();
         },
         onError: (err: unknown) =>
             toast.error(err instanceof Error ? err.message : 'Failed to schedule pickup'),
@@ -208,7 +212,7 @@ export default function Returns() {
             receiveReturnFn({ data: { orderLineId: lineId, condition } }),
         onSuccess: () => {
             toast.success('Return received — item queued for QC');
-            queryClient.invalidateQueries({ queryKey: ['returns'] });
+            invalidateReturns();
         },
         onError: (err: unknown) =>
             toast.error(err instanceof Error ? err.message : 'Failed to receive return'),
@@ -227,7 +231,7 @@ export default function Returns() {
         onSuccess: () => {
             toast.success('Refund processed');
             setRefundModalItem(null);
-            queryClient.invalidateQueries({ queryKey: ['returns'] });
+            invalidateReturns();
         },
         onError: (err: unknown) =>
             toast.error(err instanceof Error ? err.message : 'Failed to process refund'),
@@ -241,7 +245,7 @@ export default function Returns() {
             if (res.success) {
                 toast.success(`Exchange order created: ${res.data?.exchangeOrderNumber}`);
             }
-            queryClient.invalidateQueries({ queryKey: ['returns'] });
+            invalidateReturns();
         },
         onError: (err: unknown) =>
             toast.error(err instanceof Error ? err.message : 'Failed to create exchange'),
@@ -253,7 +257,7 @@ export default function Returns() {
             completeReturnFn({ data: { orderLineId: lineId } }),
         onSuccess: () => {
             toast.success('Return completed');
-            queryClient.invalidateQueries({ queryKey: ['returns'] });
+            invalidateReturns();
         },
         onError: (err: unknown) =>
             toast.error(err instanceof Error ? err.message : 'Failed to complete return'),
@@ -265,7 +269,7 @@ export default function Returns() {
             cancelReturnFn({ data: { orderLineId: lineId, reason: 'Cancelled by staff' } }),
         onSuccess: () => {
             toast.success('Return cancelled');
-            queryClient.invalidateQueries({ queryKey: ['returns'] });
+            invalidateReturns();
         },
         onError: (err: unknown) =>
             toast.error(err instanceof Error ? err.message : 'Failed to cancel return'),
@@ -275,9 +279,7 @@ export default function Returns() {
     const updateNotesMutation = useMutation({
         mutationFn: ({ lineId, notes }: { lineId: string; notes: string }) =>
             updateNotesFn({ data: { orderLineId: lineId, notes } }),
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['returns'] });
-        },
+        onSuccess: () => invalidateReturns(),
         onError: (err: unknown) =>
             toast.error(err instanceof Error ? err.message : 'Failed to update notes'),
     });

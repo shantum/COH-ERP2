@@ -43,7 +43,8 @@ echo "🗄️  Running Prisma generate + migrate..."
 npx prisma generate
 npx prisma migrate deploy --schema=prisma/schema.prisma
 
-echo "🔨 Building client..."
+echo "🔨 Building shared + client..."
+cd shared && pnpm build && cd ..
 cd client && pnpm build && cd ..
 
 # Write version file for health endpoint

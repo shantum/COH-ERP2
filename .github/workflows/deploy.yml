@@ -27,6 +27,7 @@ jobs:
             pnpm install --frozen-lockfile
             npx prisma generate
             npx prisma migrate deploy --schema=prisma/schema.prisma
+            cd shared && pnpm build && cd ..
             cd client && pnpm build && cd ..
             EXPECTED_COMMIT=$(git rev-parse --short HEAD)
             echo "$EXPECTED_COMMIT" > VERSION
