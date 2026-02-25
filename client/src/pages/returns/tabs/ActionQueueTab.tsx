@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import type { ReturnActionQueueItem as ServerReturnActionQueueItem } from '@coh/shared/schemas/returns';
 import { getStatusBadge, getResolutionBadge, conditionOptions } from '../types';
-import { ReturnTrackingStatus } from '../ReturnTrackingStatus';
+import { AwbTrackingCell } from '../../../components/AwbTrackingCell';
 import { getOptimizedImageUrl } from '../../../utils/imageOptimization';
 
 export interface ActionQueueTabProps {
@@ -185,16 +185,12 @@ export function ActionQueueTab({
                                                     </a>
                                                 )}
                                                 {item.returnAwbNumber && (
-                                                    <span className="px-2 py-0.5 text-xs bg-gray-100 text-gray-600 rounded">
-                                                        AWB: {item.returnAwbNumber}
-                                                    </span>
+                                                    <AwbTrackingCell
+                                                        awbNumber={item.returnAwbNumber}
+                                                        courier={item.returnCourier}
+                                                    />
                                                 )}
                                             </div>
-
-                                            {/* iThink Tracking Status */}
-                                            {item.returnAwbNumber && (
-                                                <ReturnTrackingStatus awbNumber={item.returnAwbNumber} />
-                                            )}
 
                                             {/* Product name */}
                                             <div className="text-sm font-medium text-gray-800 truncate">

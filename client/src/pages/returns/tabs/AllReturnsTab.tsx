@@ -5,7 +5,7 @@ import { Search, ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react';
 import { getAllReturns } from '../../../server/functions/returns';
 import { formatDate, formatRelativeTime } from '../../../utils/agGridHelpers';
 import { getStatusBadge, getResolutionBadge } from '../types';
-import { ReturnTrackingStatus } from '../ReturnTrackingStatus';
+import { AwbTrackingCell } from '../../../components/AwbTrackingCell';
 import { RETURN_REASONS } from '@coh/shared/domain/returns';
 import type { ActiveReturnLine } from '@coh/shared/schemas/returns';
 
@@ -220,15 +220,7 @@ function ReturnRow({ row }: { row: ActiveReturnLine }) {
             </td>
             <td className="px-3 py-2 text-xs text-gray-600 whitespace-nowrap">{reason}</td>
             <td className="px-3 py-2">
-                {row.returnAwbNumber ? (
-                    <div>
-                        <div className="font-mono text-xs text-gray-600">{row.returnAwbNumber}</div>
-                        {row.returnCourier && (
-                            <div className="text-[10px] text-gray-400">{row.returnCourier}</div>
-                        )}
-                        <ReturnTrackingStatus awbNumber={row.returnAwbNumber} />
-                    </div>
-                ) : <span className="text-gray-400 text-xs">-</span>}
+                <AwbTrackingCell awbNumber={row.returnAwbNumber} courier={row.returnCourier} />
             </td>
             <td className="px-3 py-2 text-xs text-gray-700 whitespace-nowrap">{row.customerName}</td>
             <td className="px-3 py-2 text-xs text-gray-600 whitespace-nowrap">{formatDate(row.returnRequestedAt)}</td>
