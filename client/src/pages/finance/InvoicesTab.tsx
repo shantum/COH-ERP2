@@ -18,7 +18,7 @@ import { Textarea } from '@/components/ui/textarea';
 import {
   Plus, ArrowUpRight, ArrowDownLeft, Check, X, Loader2, AlertCircle,
   ExternalLink, CloudUpload, Link2, Download, Upload, AlertTriangle, Pencil,
-  ArrowUpDown, ArrowUp, ArrowDown, RotateCcw,
+  ArrowUpDown, ArrowUp, ArrowDown, RotateCcw, Send, Banknote,
 } from 'lucide-react';
 import { PartySearch } from '../../components/finance/PartySearch';
 import { showSuccess, showError } from '../../utils/toast';
@@ -358,6 +358,116 @@ export default function InvoicesTab({ search: rawSearch }: { search: FinanceSear
     URL.revokeObjectURL(url);
   }, [selectedIds, data?.invoices]);
 
+  // ============================================
+  // PAY VIA RAZORPAYX
+  // ============================================
+
+  const [showPayoutDialog, setShowPayoutDialog] = useState(false);
+  const [payoutMode, setPayoutMode] = useState<'IMPS' | 'NEFT' | 'RTGS' | 'UPI'>('IMPS');
+  const [payoutProcessing, setPayoutProcessing] = useState(false);
+
+  const handlePayViaRazorpayX = useCallback(async () => {
+    if (selectedIds.size === 0 || !data?.invoices) return;
+
+    const selected = data.invoices.filter((inv) =>
+      selectedIds.has(inv.id) &&
+      inv.type === 'payable' &&
+      (inv.status === 'confirmed' || inv.status === 'partially_paid') &&
+      inv.balanceDue > 0,
+    );
+
+    if (selected.length === 0) {
+      showError('No confirmed payable invoices with balance due selected');
+      return;
+    }
+
+    // Check for missing bank details
+    const missingBank = selected.filter(
+      (inv) => !inv.party?.bankAccountNumber || !inv.party?.bankIfsc,
+    );
+    if (missingBank.length > 0 && missingBank.length === selected.length) {
+      showError('All selected invoices are missing bank details');
+      return;
+    }
+
+    setShowPayoutDialog(true);
+  }, [selectedIds, data?.invoices]);
+
+  const confirmPayViaRazorpayX = useCallback(async () => {
+    if (selectedIds.size === 0 || !data?.invoices) return;
+
+    const selected = data.invoices.filter((inv) =>
+      selectedIds.has(inv.id) &&
+      inv.type === 'payable' &&
+      (inv.status === 'confirmed' || inv.status === 'partially_paid') &&
+      inv.balanceDue > 0 &&
+      inv.party?.bankAccountNumber &&
+      inv.party?.bankIfsc,
+    );
+
+    if (selected.length === 0) return;
+
+    setPayoutProcessing(true);
+
+    try {
+      const res = await fetch('/api/razorpayx/payout/bulk', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          invoiceIds: selected.map((inv) => inv.id),
+          mode: payoutMode,
+          queueIfLowBalance: true,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Request failed' }));
+        throw new Error(err.error || `HTTP ${res.status}`);
+      }
+
+      const result = await res.json() as {
+        succeeded: number;
+        failed: number;
+        results: Array<{ invoiceNumber: string | null; partyName: string | null; success: boolean; error?: string; status?: string }>;
+      };
+
+      setShowPayoutDialog(false);
+      setSelectedIds(new Set());
+      queryClient.invalidateQueries({ queryKey: ['finance'] });
+
+      if (result.succeeded > 0) {
+        showSuccess(`${result.succeeded} payout${result.succeeded !== 1 ? 's' : ''} initiated via RazorpayX`);
+      }
+      if (result.failed > 0) {
+        const failedNames = result.results
+          .filter((r) => !r.success)
+          .map((r) => `${r.partyName || r.invoiceNumber}: ${r.error}`)
+          .join('\n');
+        showError(`${result.failed} payout${result.failed !== 1 ? 's' : ''} failed`, { description: failedNames });
+      }
+    } catch (err) {
+      showError('Payout failed', { description: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setPayoutProcessing(false);
+    }
+  }, [selectedIds, data?.invoices, payoutMode, queryClient]);
+
+  // Pre-compute payout summary for the dialog
+  const payoutSummary = useMemo(() => {
+    if (!data?.invoices || selectedIds.size === 0) return null;
+    const selected = data.invoices.filter((inv) =>
+      selectedIds.has(inv.id) &&
+      inv.type === 'payable' &&
+      (inv.status === 'confirmed' || inv.status === 'partially_paid') &&
+      inv.balanceDue > 0,
+    );
+    const withBank = selected.filter((inv) => inv.party?.bankAccountNumber && inv.party?.bankIfsc);
+    const withoutBank = selected.filter((inv) => !inv.party?.bankAccountNumber || !inv.party?.bankIfsc);
+    const totalAmount = withBank.reduce((sum, inv) => sum + inv.balanceDue, 0);
+    return { total: selected.length, withBank, withoutBank, totalAmount };
+  }, [selectedIds, data?.invoices]);
+
   const handleConfirmClick = useCallback((inv: NonNullable<typeof data>['invoices'][number]) => {
     if (inv.type === 'payable') {
       setConfirmingInvoice({
@@ -471,7 +581,20 @@ export default function InvoicesTab({ search: rawSearch }: { search: FinanceSear
                 Confirm Selected
               </Button>
               <Button variant="outline" onClick={handleDownloadPayoutCsv}>
-                <Download className="h-4 w-4 mr-1" /> Download Payout CSV ({selectedIds.size})
+                <Download className="h-4 w-4 mr-1" /> Payout CSV ({selectedIds.size})
+              </Button>
+              <Button
+                variant="default"
+                onClick={handlePayViaRazorpayX}
+                disabled={!data?.invoices?.some(
+                  (inv) =>
+                    selectedIds.has(inv.id) &&
+                    inv.type === 'payable' &&
+                    (inv.status === 'confirmed' || inv.status === 'partially_paid') &&
+                    inv.balanceDue > 0,
+                )}
+              >
+                <Send className="h-4 w-4 mr-1" /> Pay via RazorpayX ({selectedIds.size})
               </Button>
             </>
           )}
@@ -799,6 +922,87 @@ export default function InvoicesTab({ search: rawSearch }: { search: FinanceSear
           onClose={() => navigate({ to: '/finance', search: { ...search, modal: undefined, modalId: undefined }, replace: true })}
         />
       )}
+
+      {/* Pay via RazorpayX confirmation dialog */}
+      <Dialog open={showPayoutDialog} onOpenChange={(o) => { if (!o && !payoutProcessing) setShowPayoutDialog(false); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Banknote className="h-5 w-5" />
+              Pay via RazorpayX
+            </DialogTitle>
+            <DialogDescription>
+              Initiate payouts for the selected invoices. Funds will be debited from your RazorpayX account.
+            </DialogDescription>
+          </DialogHeader>
+
+          {payoutSummary && (
+            <div className="space-y-3 text-sm">
+              <div className="rounded-md bg-muted p-3 space-y-1.5">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Invoices to pay</span>
+                  <span className="font-medium">{payoutSummary.withBank.length}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Total amount</span>
+                  <span className="font-semibold text-base">{formatCurrency(payoutSummary.totalAmount)}</span>
+                </div>
+              </div>
+
+              {payoutSummary.withoutBank.length > 0 && (
+                <div className="flex items-start gap-2 text-amber-600 bg-amber-50 p-2 rounded text-xs">
+                  <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+                  <span>
+                    {payoutSummary.withoutBank.length} invoice{payoutSummary.withoutBank.length !== 1 ? 's' : ''} skipped (missing bank details):
+                    {' '}{payoutSummary.withoutBank.map((inv) => inv.party?.name ?? 'Unknown').join(', ')}
+                  </span>
+                </div>
+              )}
+
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">Transfer mode</Label>
+                <Select value={payoutMode} onValueChange={(v) => setPayoutMode(v as typeof payoutMode)}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="IMPS">IMPS (Instant)</SelectItem>
+                    <SelectItem value="NEFT">NEFT (30 min batches)</SelectItem>
+                    <SelectItem value="RTGS">RTGS (Real-time, min 2L)</SelectItem>
+                    <SelectItem value="UPI">UPI</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {payoutSummary.withBank.length > 0 && (
+                <div className="text-xs text-muted-foreground border rounded p-2 max-h-32 overflow-y-auto space-y-1">
+                  {payoutSummary.withBank.map((inv) => (
+                    <div key={inv.id} className="flex justify-between">
+                      <span className="truncate mr-2">{inv.party?.name ?? 'Unknown'} — {inv.invoiceNumber || inv.id.slice(0, 8)}</span>
+                      <span className="shrink-0 font-mono">{formatCurrency(inv.balanceDue)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowPayoutDialog(false)} disabled={payoutProcessing}>
+              Cancel
+            </Button>
+            <Button
+              onClick={confirmPayViaRazorpayX}
+              disabled={payoutProcessing || !payoutSummary || payoutSummary.withBank.length === 0}
+            >
+              {payoutProcessing ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Send className="h-4 w-4 mr-1" />}
+              {payoutProcessing
+                ? 'Processing...'
+                : `Pay ${payoutSummary ? formatCurrency(payoutSummary.totalAmount) : ''}`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

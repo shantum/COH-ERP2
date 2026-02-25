@@ -58,6 +58,8 @@ import resendWebhookRoutes from './routes/resendWebhook.js';
 import returnPrimeWebhooks from './routes/returnPrimeWebhooks.js';
 import returnPrimeSync from './routes/returnPrimeSync.js';
 import returnPrimeAdminRoutes from './routes/returnPrimeAdminRoutes.js';
+import razorpayxWebhookRoutes from './routes/razorpayxWebhook.js';
+import razorpayxPayoutRoutes from './routes/razorpayxPayout.js';
 import { startAllWorkers, stopAllWorkers } from './services/workerRegistry.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import shutdownCoordinator from './utils/shutdownCoordinator.js';
@@ -159,6 +161,7 @@ app.use('/api/bank-import', bankImportRoutes);
 app.use('/api/attendance-import', attendanceImportRoutes);
 app.use('/api/marketplace-payout', marketplacePayoutRoutes);
 app.use('/api/razorpay-settlement', razorpaySettlementRoutes);
+app.use('/api/razorpayx', razorpayxPayoutRoutes);
 app.use('/api/chat', chatRoutes);
 
 // Image uploads
@@ -182,6 +185,9 @@ app.get('/api/employee-documents-list/:slug', async (req, res) => {
 
 // Resend inbound email webhook
 app.use('/api/webhooks/resend', resendWebhookRoutes);
+
+// RazorpayX payout & transaction webhooks
+app.use('/api/webhooks/razorpayx', razorpayxWebhookRoutes);
 
 // Return Prime integration
 app.use('/api/webhooks/returnprime', returnPrimeWebhooks);

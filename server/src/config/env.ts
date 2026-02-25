@@ -129,6 +129,22 @@ const envSchema = z.object({
     ANTHROPIC_API_KEY: z.string().optional(),
 
     // ----------------------------------------
+    // RAZORPAYX INTEGRATION
+    // ----------------------------------------
+
+    /** RazorpayX API key ID */
+    RAZORPAYX_KEY_ID: z.string().optional(),
+
+    /** RazorpayX API key secret */
+    RAZORPAYX_KEY_SECRET: z.string().optional(),
+
+    /** RazorpayX current account number */
+    RAZORPAYX_ACCOUNT_NUMBER: z.string().optional(),
+
+    /** RazorpayX webhook secret for HMAC verification */
+    RAZORPAYX_WEBHOOK_SECRET: z.string().optional(),
+
+    // ----------------------------------------
     // VITE (passed through to client build)
     // ----------------------------------------
 
