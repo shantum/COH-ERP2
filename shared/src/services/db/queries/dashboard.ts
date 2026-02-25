@@ -17,7 +17,7 @@
  */
 
 import { getKysely } from '../kysely.js';
-import { getISTMidnightAsUTC, getISTMonthStartAsUTC, getISTMonthEndAsUTC } from '../../../utils/dateHelpers.js';
+import { getISTMidnightAsUTC, getISTMonthStartAsUTC, getISTMonthEndAsUTC, getISTDayOfMonth, getISTDaysInMonth } from '../../../utils/dateHelpers.js';
 
 // ============================================
 // OUTPUT TYPES
@@ -51,7 +51,7 @@ export interface AllRevenueMetrics {
     yesterday: RevenueMetrics;
     last7Days: RevenueMetrics;
     last30Days: RevenueMetrics;
-    thisMonth: RevenueMetrics;
+    thisMonth: RevenueMetrics & { change: number | null };
     lastMonth: RevenueMetrics;
 }
 
@@ -238,15 +238,26 @@ export async function getAllRevenueMetrics(): Promise<AllRevenueMetrics> {
             sql<number>`COUNT(DISTINCT "Order"."id") FILTER (WHERE "Order"."orderDate" >= ${lastMonthStart} AND "Order"."orderDate" <= ${lastMonthEnd} AND "Customer"."orderCount" > 1)::int`.as('lastMonthReturning'),
         ])
         .where('Order.releasedToCancelled', '=', false)
+        .where('Order.totalAmount', '>', 0)
         .executeTakeFirst();
 
     const todayTotal = Number(result?.todayTotal ?? 0);
     const yesterdayTotal = Number(result?.yesterdayTotal ?? 0);
+    const thisMonthTotal = Number(result?.thisMonthTotal ?? 0);
+    const lastMonthTotal = Number(result?.lastMonthTotal ?? 0);
 
-    // Calculate change percentage
-    const change = yesterdayTotal > 0
-        ? Math.round(((todayTotal - yesterdayTotal) / yesterdayTotal) * 100)
-        : null;
+    // Calculate change percentages (vs comparable prior period)
+    const pctChange = (current: number, previous: number) =>
+        previous > 0 ? Math.round(((current - previous) / previous) * 100) : null;
+
+    const todayChange = pctChange(todayTotal, yesterdayTotal);
+
+    // This month vs last month (pro-rated: compare daily run rate)
+    const daysElapsed = getISTDayOfMonth();
+    const daysInPrevMonth = getISTDaysInMonth(-1);
+    const thisMonthDailyRate = daysElapsed > 0 ? thisMonthTotal / daysElapsed : 0;
+    const lastMonthDailyRate = daysInPrevMonth > 0 ? lastMonthTotal / daysInPrevMonth : 0;
+    const thisMonthChange = pctChange(thisMonthDailyRate, lastMonthDailyRate);
 
     return {
         today: {
@@ -254,7 +265,7 @@ export async function getAllRevenueMetrics(): Promise<AllRevenueMetrics> {
             orderCount: result?.todayCount ?? 0,
             newCustomers: result?.todayNew ?? 0,
             returningCustomers: result?.todayReturning ?? 0,
-            change,
+            change: todayChange,
         },
         yesterday: {
             total: yesterdayTotal,
@@ -275,13 +286,14 @@ export async function getAllRevenueMetrics(): Promise<AllRevenueMetrics> {
             returningCustomers: result?.last30Returning ?? 0,
         },
         thisMonth: {
-            total: Number(result?.thisMonthTotal ?? 0),
+            total: thisMonthTotal,
             orderCount: result?.thisMonthCount ?? 0,
             newCustomers: result?.thisMonthNew ?? 0,
             returningCustomers: result?.thisMonthReturning ?? 0,
+            change: thisMonthChange,
         },
         lastMonth: {
-            total: Number(result?.lastMonthTotal ?? 0),
+            total: lastMonthTotal,
             orderCount: result?.lastMonthCount ?? 0,
             newCustomers: result?.lastMonthNew ?? 0,
             returningCustomers: result?.lastMonthReturning ?? 0,

@@ -260,7 +260,7 @@ export const getOrdersAnalytics = createServerFn({ method: 'GET' })
                     thisMonth: {
                         total: revenueData.thisMonth.total,
                         orderCount: revenueData.thisMonth.orderCount,
-                        change: null,
+                        change: revenueData.thisMonth.change,
                         customers: buildCustomerStats(revenueData.thisMonth.newCustomers, revenueData.thisMonth.returningCustomers),
                     },
                 },
