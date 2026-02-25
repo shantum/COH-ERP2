@@ -516,7 +516,6 @@ export default function QuickOrder() {
     const validLines = lines.filter((l) => l.skuCode.trim() && l.qty > 0);
     const isReady = Boolean(channel && phoneDigits.length >= 10 && customerName.trim() && validLines.length > 0);
     const isBusy = isResolving || createOrder.isPending;
-    const totalUnits = validLines.reduce((sum, line) => sum + line.qty, 0);
     const grossBeforeDiscount = validLines.reduce((sum, line) => sum + line.qty * (line.mrp ?? 0), 0);
     const discountInputValue = round2(Math.max(0, manualDiscount || 0));
     const discountAppliedToPreview = round2(

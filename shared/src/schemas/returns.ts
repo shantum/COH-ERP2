@@ -19,6 +19,7 @@ export const LineReturnStatusSchema = z.enum([
     'pickup_scheduled',
     'in_transit',
     'received',
+    'qc_inspected',
     'complete',
     'cancelled',
 ]);
@@ -311,7 +312,14 @@ export const ActiveReturnLineSchema = z.object({
     returnReceivedAt: z.coerce.date().nullable(),
     returnCondition: z.string().nullable(),
     returnExchangeOrderId: z.string().nullable(),
+    returnExchangeSkuId: z.string().nullable(),
+    returnExchangePriceDiff: z.number().nullable(),
+    returnQcResult: z.string().nullable(),
     returnNotes: z.string().nullable(),
+    // Refund info
+    returnRefundCompletedAt: z.coerce.date().nullable(),
+    returnNetAmount: z.number().nullable(),
+    returnRefundMethod: z.string().nullable(),
     // Customer info
     customerId: z.string().nullable(),
     customerName: z.string(),
@@ -332,11 +340,16 @@ export const ReturnActionQueueItemSchema = ActiveReturnLineSchema.extend({
     actionNeeded: z.enum([
         'schedule_pickup',
         'receive',
+        'awaiting_qc',
         'process_refund',
         'create_exchange',
         'complete',
     ]),
     daysSinceRequest: z.number(),
+    // QC result from repacking cascade
+    returnQcResult: z.string().nullable().optional(),
+    // Exchange order info (for display after auto-creation)
+    returnExchangeOrderNumber: z.string().nullable().optional(),
 });
 export type ReturnActionQueueItem = z.infer<typeof ReturnActionQueueItemSchema>;
 

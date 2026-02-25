@@ -8,7 +8,7 @@ import { createFileRoute, redirect } from '@tanstack/react-router';
 
 export const Route = createFileRoute('/_authenticated/return-prime')({
     beforeLoad: () => {
-        throw redirect({ to: '/returns', search: { tab: 'returns' as const, requestType: 'all' as const, datePreset: '30d' as const } });
+        throw redirect({ to: '/returns', search: { tab: 'return_prime' as const, requestType: 'all' as const, datePreset: '30d' as const } });
     },
     component: () => null,
 });

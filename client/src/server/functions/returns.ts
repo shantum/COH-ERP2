@@ -853,7 +853,13 @@ export const getActiveLineReturns = createServerFn({ method: 'GET' })
             returnReceivedAt: line.returnReceivedAt,
             returnCondition: line.returnCondition,
             returnExchangeOrderId: line.returnExchangeOrderId,
+            returnExchangeSkuId: line.returnExchangeSkuId,
+            returnExchangePriceDiff: line.returnExchangePriceDiff?.toNumber() ?? null,
+            returnQcResult: line.returnQcResult,
             returnNotes: line.returnNotes,
+            returnRefundCompletedAt: line.returnRefundCompletedAt,
+            returnNetAmount: line.returnNetAmount?.toNumber() ?? null,
+            returnRefundMethod: line.returnRefundMethod,
             customerId: line.order.customerId,
             customerName: line.order.customerName,
             customerEmail: line.order.customerEmail,
@@ -863,6 +869,126 @@ export const getActiveLineReturns = createServerFn({ method: 'GET' })
             colorName: line.sku.variation.colorName,
             imageUrl: line.sku.variation.imageUrl || line.sku.variation.product.imageUrl,
         }));
+    });
+
+/**
+ * Get ALL returns (active + completed + cancelled) with pagination and filters
+ * For the All Returns AG-Grid tab
+ */
+export interface AllReturnsResponse {
+    items: ActiveReturnLine[];
+    total: number;
+    page: number;
+    limit: number;
+}
+
+const getAllReturnsInputSchema = z.object({
+    page: z.number().int().positive().default(1),
+    limit: z.number().int().positive().max(500).default(100),
+    status: z.string().optional(),
+    resolution: z.string().optional(),
+    search: z.string().optional(),
+});
+
+export const getAllReturns = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => getAllReturnsInputSchema.parse(input))
+    .handler(async ({ data }): Promise<AllReturnsResponse> => {
+        const prisma = await getPrisma();
+        const { page, limit, status, resolution, search } = data;
+        const skip = (page - 1) * limit;
+
+        // Build where clause — must have a return status (i.e. was ever a return)
+        const where: Record<string, unknown> = {
+            returnStatus: status ? status : { not: null },
+        };
+
+        if (resolution) {
+            where.returnResolution = resolution;
+        }
+
+        if (search) {
+            where.OR = [
+                { order: { orderNumber: { contains: search, mode: 'insensitive' } } },
+                { order: { customerName: { contains: search, mode: 'insensitive' } } },
+                { sku: { skuCode: { contains: search, mode: 'insensitive' } } },
+                { returnAwbNumber: { contains: search, mode: 'insensitive' } },
+                { returnBatchNumber: { contains: search, mode: 'insensitive' } },
+            ];
+        }
+
+        const [lines, total] = await Promise.all([
+            prisma.orderLine.findMany({
+                where,
+                include: {
+                    order: {
+                        select: {
+                            id: true,
+                            orderNumber: true,
+                            customerId: true,
+                            customerName: true,
+                            customerEmail: true,
+                            customerPhone: true,
+                        },
+                    },
+                    sku: {
+                        include: {
+                            variation: {
+                                include: {
+                                    product: true,
+                                },
+                            },
+                        },
+                    },
+                },
+                orderBy: { returnRequestedAt: 'desc' },
+                skip,
+                take: limit,
+            }),
+            prisma.orderLine.count({ where }),
+        ]);
+
+        const items: ActiveReturnLine[] = lines.map((line: (typeof lines)[number]) => ({
+            id: line.id,
+            orderId: line.orderId,
+            orderNumber: line.order.orderNumber,
+            skuId: line.skuId,
+            skuCode: line.sku.skuCode,
+            size: line.sku.size,
+            qty: line.qty,
+            unitPrice: line.unitPrice,
+            returnBatchNumber: line.returnBatchNumber,
+            returnStatus: line.returnStatus!,
+            returnQty: line.returnQty!,
+            returnRequestedAt: line.returnRequestedAt,
+            returnReasonCategory: line.returnReasonCategory,
+            returnReasonDetail: line.returnReasonDetail,
+            returnResolution: line.returnResolution,
+            returnPickupType: line.returnPickupType,
+            returnAwbNumber: line.returnAwbNumber,
+            returnCourier: line.returnCourier,
+            returnPickupScheduledAt: line.returnPickupScheduledAt,
+            returnReceivedAt: line.returnReceivedAt,
+            returnCondition: line.returnCondition,
+            returnExchangeOrderId: line.returnExchangeOrderId,
+            returnExchangeSkuId: line.returnExchangeSkuId,
+            returnExchangePriceDiff: line.returnExchangePriceDiff?.toNumber() ?? null,
+            returnQcResult: line.returnQcResult,
+            returnNotes: line.returnNotes,
+            returnRefundCompletedAt: line.returnRefundCompletedAt,
+            returnNetAmount: line.returnNetAmount?.toNumber() ?? null,
+            returnRefundMethod: line.returnRefundMethod,
+            customerId: line.order.customerId,
+            customerName: line.order.customerName,
+            customerEmail: line.order.customerEmail,
+            customerPhone: line.order.customerPhone,
+            productId: line.sku.variation.product.id,
+            productName: line.sku.variation.product.name,
+            colorName: line.sku.variation.colorName,
+            imageUrl: line.sku.variation.imageUrl || line.sku.variation.product.imageUrl,
+        }));
+
+        return { items, total, page, limit };
     });
 
 /**
@@ -877,7 +1003,7 @@ export const getLineReturnActionQueue = createServerFn({ method: 'GET' })
         const lines = await prisma.orderLine.findMany({
             where: {
                 returnStatus: {
-                    in: ['requested', 'pickup_scheduled', 'in_transit', 'received'],
+                    in: ['requested', 'pickup_scheduled', 'in_transit', 'received', 'qc_inspected'],
                 },
             },
             include: {
@@ -908,7 +1034,7 @@ export const getLineReturnActionQueue = createServerFn({ method: 'GET' })
 
         for (const line of lines) {
             // Determine action needed based on status and resolution
-            let actionNeeded: 'schedule_pickup' | 'receive' | 'process_refund' | 'create_exchange' | 'complete';
+            let actionNeeded: 'schedule_pickup' | 'receive' | 'awaiting_qc' | 'process_refund' | 'create_exchange' | 'complete';
 
             switch (line.returnStatus) {
                 case 'requested':
@@ -919,6 +1045,9 @@ export const getLineReturnActionQueue = createServerFn({ method: 'GET' })
                     actionNeeded = 'receive';
                     break;
                 case 'received':
+                    actionNeeded = 'awaiting_qc';
+                    break;
+                case 'qc_inspected':
                     if (line.returnResolution === 'refund' && !line.returnRefundCompletedAt) {
                         actionNeeded = 'process_refund';
                     } else if (line.returnResolution === 'exchange' && !line.returnExchangeOrderId) {
@@ -958,7 +1087,13 @@ export const getLineReturnActionQueue = createServerFn({ method: 'GET' })
                 returnReceivedAt: line.returnReceivedAt,
                 returnCondition: line.returnCondition,
                 returnExchangeOrderId: line.returnExchangeOrderId,
+                returnExchangeSkuId: line.returnExchangeSkuId,
+                returnExchangePriceDiff: line.returnExchangePriceDiff?.toNumber() ?? null,
+                returnQcResult: line.returnQcResult,
                 returnNotes: line.returnNotes,
+                returnRefundCompletedAt: line.returnRefundCompletedAt,
+                returnNetAmount: line.returnNetAmount?.toNumber() ?? null,
+                returnRefundMethod: line.returnRefundMethod,
                 customerId: line.order.customerId,
                 customerName: line.order.customerName,
                 customerEmail: line.order.customerEmail,
@@ -974,7 +1109,7 @@ export const getLineReturnActionQueue = createServerFn({ method: 'GET' })
 
         // Sort by priority: receive first, then by age
         actionItems.sort((a, b) => {
-            const priorityOrder = ['receive', 'schedule_pickup', 'process_refund', 'create_exchange', 'complete'];
+            const priorityOrder = ['process_refund', 'create_exchange', 'complete', 'receive', 'schedule_pickup', 'awaiting_qc'];
             const aPriority = priorityOrder.indexOf(a.actionNeeded);
             const bPriority = priorityOrder.indexOf(b.actionNeeded);
             if (aPriority !== bPriority) return aPriority - bPriority;
@@ -1515,5 +1650,184 @@ export const getReturnsAnalytics = createServerFn({ method: 'POST' })
             bySize,
             byProduct,
             byReason,
+        };
+    });
+
+// ============================================
+// INTERNAL RETURNS ANALYTICS (from OrderLine data)
+// ============================================
+
+export interface InternalReturnAnalytics {
+    summary: {
+        totalReturns: number;
+        activeReturns: number;
+        completedReturns: number;
+        cancelledReturns: number;
+        refunds: number;
+        exchanges: number;
+        totalRefundValue: number;
+        avgResolutionDays: number;
+    };
+    byStatus: Array<{ status: string; count: number }>;
+    byReason: Array<{ category: string; label: string; count: number; pct: number }>;
+    topReturnedSkus: Array<{
+        skuCode: string;
+        productName: string;
+        colorName: string;
+        size: string;
+        count: number;
+    }>;
+    monthlyTrend: Array<{ month: string; returns: number; exchanges: number }>;
+}
+
+export const getInternalReturnAnalytics = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) =>
+        z.object({
+            period: z.enum(['7d', '30d', '90d', '1y', 'all']),
+        }).parse(input)
+    )
+    .handler(async ({ data }): Promise<InternalReturnAnalytics> => {
+        const prisma = await getPrisma();
+        const periodDate = getPeriodDate(data.period);
+        const dateFilter = periodDate ? { gte: periodDate } : undefined;
+
+        const baseWhere = {
+            returnStatus: { not: null } as const,
+            ...(dateFilter ? { returnRequestedAt: dateFilter } : {}),
+        };
+
+        // Summary counts
+        const [total, active, completed, cancelled, refunds, exchanges, refundValueAgg] = await Promise.all([
+            prisma.orderLine.count({ where: baseWhere }),
+            prisma.orderLine.count({
+                where: { ...baseWhere, returnStatus: { notIn: ['complete', 'cancelled'] } },
+            }),
+            prisma.orderLine.count({
+                where: { ...baseWhere, returnStatus: 'complete' },
+            }),
+            prisma.orderLine.count({
+                where: { ...baseWhere, returnStatus: 'cancelled' },
+            }),
+            prisma.orderLine.count({
+                where: { ...baseWhere, returnResolution: 'refund' },
+            }),
+            prisma.orderLine.count({
+                where: { ...baseWhere, returnResolution: 'exchange' },
+            }),
+            prisma.orderLine.aggregate({
+                _sum: { returnNetAmount: true },
+                where: { ...baseWhere, returnNetAmount: { not: null } },
+            }),
+        ]);
+
+        // Avg resolution days (for completed returns)
+        const avgDaysRows = await prisma.$queryRawUnsafe<Array<{ avg_days: string }>>(
+            `SELECT COALESCE(AVG(
+                EXTRACT(EPOCH FROM ("updatedAt" - "returnRequestedAt")) / 86400
+            ), 0)::text AS avg_days
+            FROM "OrderLine"
+            WHERE "returnStatus" = 'complete'
+            AND "returnRequestedAt" IS NOT NULL
+            ${periodDate ? `AND "returnRequestedAt" >= $1` : ''}`,
+            ...(periodDate ? [periodDate] : [])
+        );
+        const avgDays = Math.round(parseFloat(avgDaysRows[0]?.avg_days || '0') * 10) / 10;
+
+        // By status
+        const statusGroups = await prisma.orderLine.groupBy({
+            by: ['returnStatus'],
+            _count: { id: true },
+            where: baseWhere,
+        });
+        const byStatus = statusGroups
+            .filter(g => g.returnStatus)
+            .map(g => ({ status: g.returnStatus!, count: g._count.id }))
+            .sort((a, b) => b.count - a.count);
+
+        // By reason
+        const reasonGroups = await prisma.orderLine.groupBy({
+            by: ['returnReasonCategory'],
+            _count: { id: true },
+            where: { ...baseWhere, returnReasonCategory: { not: null } },
+        });
+        const totalReasonCount = reasonGroups.reduce((s, g) => s + g._count.id, 0);
+        const byReason = reasonGroups
+            .filter(g => g.returnReasonCategory)
+            .map(g => ({
+                category: g.returnReasonCategory!,
+                label: REASON_LABELS[g.returnReasonCategory!] || g.returnReasonCategory!,
+                count: g._count.id,
+                pct: totalReasonCount > 0 ? Math.round((g._count.id / totalReasonCount) * 10000) / 100 : 0,
+            }))
+            .sort((a, b) => b.count - a.count);
+
+        // Top returned SKUs
+        const topSkuRows = await prisma.$queryRawUnsafe<
+            Array<{ sku_code: string; product_name: string; color_name: string; size: string; cnt: string }>
+        >(
+            `SELECT s."skuCode" AS sku_code, p.name AS product_name, v."colorName" AS color_name, s.size,
+                    COUNT(*)::text AS cnt
+            FROM "OrderLine" ol
+            JOIN "Sku" s ON s.id = ol."skuId"
+            JOIN "Variation" v ON v.id = s."variationId"
+            JOIN "Product" p ON p.id = v."productId"
+            WHERE ol."returnStatus" IS NOT NULL
+            ${periodDate ? `AND ol."returnRequestedAt" >= $1` : ''}
+            GROUP BY s."skuCode", p.name, v."colorName", s.size
+            ORDER BY COUNT(*) DESC
+            LIMIT 10`,
+            ...(periodDate ? [periodDate] : [])
+        );
+        const topReturnedSkus = topSkuRows.map(r => ({
+            skuCode: r.sku_code,
+            productName: r.product_name,
+            colorName: r.color_name,
+            size: r.size,
+            count: parseInt(r.cnt, 10),
+        }));
+
+        // Monthly trend (last 6 months)
+        const trendRows = await prisma.$queryRawUnsafe<
+            Array<{ month: string; resolution: string; cnt: string }>
+        >(
+            `SELECT TO_CHAR("returnRequestedAt", 'YYYY-MM') AS month,
+                    COALESCE("returnResolution", 'refund') AS resolution,
+                    COUNT(*)::text AS cnt
+            FROM "OrderLine"
+            WHERE "returnStatus" IS NOT NULL
+            AND "returnRequestedAt" >= NOW() - INTERVAL '6 months'
+            GROUP BY month, resolution
+            ORDER BY month`,
+        );
+        const trendMap = new Map<string, { returns: number; exchanges: number }>();
+        for (const r of trendRows) {
+            const existing = trendMap.get(r.month) ?? { returns: 0, exchanges: 0 };
+            if (r.resolution === 'exchange') {
+                existing.exchanges += parseInt(r.cnt, 10);
+            } else {
+                existing.returns += parseInt(r.cnt, 10);
+            }
+            trendMap.set(r.month, existing);
+        }
+        const monthlyTrend = Array.from(trendMap.entries())
+            .map(([month, counts]) => ({ month, ...counts }))
+            .sort((a, b) => a.month.localeCompare(b.month));
+
+        return {
+            summary: {
+                totalReturns: total,
+                activeReturns: active,
+                completedReturns: completed,
+                cancelledReturns: cancelled,
+                refunds,
+                exchanges,
+                totalRefundValue: Number(refundValueAgg._sum.returnNetAmount ?? 0),
+                avgResolutionDays: avgDays,
+            },
+            byStatus,
+            byReason,
+            topReturnedSkus,
+            monthlyTrend,
         };
     });

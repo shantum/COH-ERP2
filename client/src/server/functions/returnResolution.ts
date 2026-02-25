@@ -22,6 +22,31 @@ import {
     returnError,
     type ReturnResult,
 } from '@coh/shared/errors';
+import { getInternalApiBaseUrl } from '../utils';
+
+// ============================================
+// SSE BROADCAST HELPER
+// ============================================
+
+async function broadcastReturnUpdate(
+    type: string,
+    data: Record<string, unknown>,
+    excludeUserId: string
+): Promise<void> {
+    try {
+        const baseUrl = getInternalApiBaseUrl();
+        await fetch(`${baseUrl}/api/internal/sse-broadcast`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                event: { type, ...data },
+                excludeUserId,
+            }),
+        });
+    } catch {
+        // Non-critical
+    }
+}
 
 /**
  * Process refund for a return
@@ -46,6 +71,15 @@ export const processLineReturnRefund = createServerFn({ method: 'POST' })
             return returnError(RETURN_ERROR_CODES.NOT_REFUND_RESOLUTION);
         }
 
+        // 1D: Refund status guard — must be received or QC'd first
+        const refundAllowedStatuses = ['received', 'qc_inspected'];
+        if (!refundAllowedStatuses.includes(line.returnStatus || '')) {
+            return returnError(
+                RETURN_ERROR_CODES.WRONG_STATUS,
+                `Cannot process refund: item must be received first (current: '${line.returnStatus}')`
+            );
+        }
+
         const netAmount = grossAmount - discountClawback - deductions;
 
         await prisma.orderLine.update({
@@ -61,6 +95,11 @@ export const processLineReturnRefund = createServerFn({ method: 'POST' })
                 refundReason: 'customer_return',
             },
         });
+
+        broadcastReturnUpdate('return_refund_processed', {
+            lineId: orderLineId,
+            changes: { returnNetAmount: netAmount },
+        }, '');
 
         return returnSuccess(
             { orderLineId, netAmount },
@@ -120,6 +159,16 @@ export const completeLineReturnRefund = createServerFn({ method: 'POST' })
 
         const now = new Date();
 
+        // Fetch line with order to check refund method + customer
+        const line = await prisma.orderLine.findUnique({
+            where: { id: orderLineId },
+            select: {
+                returnRefundMethod: true,
+                returnNetAmount: true,
+                order: { select: { customerId: true } },
+            },
+        });
+
         await prisma.orderLine.update({
             where: { id: orderLineId },
             data: {
@@ -128,6 +177,16 @@ export const completeLineReturnRefund = createServerFn({ method: 'POST' })
                 refundedAt: now,
             },
         });
+
+        // If store credit, increment customer balance
+        if (line?.returnRefundMethod === 'store_credit' && line.returnNetAmount && line.order.customerId) {
+            await prisma.customer.update({
+                where: { id: line.order.customerId },
+                data: {
+                    storeCreditBalance: { increment: line.returnNetAmount },
+                },
+            });
+        }
 
         return { success: true, message: 'Refund completed', orderLineId };
     });
@@ -157,10 +216,12 @@ export const completeLineReturn = createServerFn({ method: 'POST' })
             return returnError(RETURN_ERROR_CODES.LINE_NOT_FOUND);
         }
 
-        if (line.returnStatus !== 'received') {
+        // 1N: Allow completion from 'received' or 'qc_inspected'
+        const completableStatuses = ['received', 'qc_inspected'];
+        if (!completableStatuses.includes(line.returnStatus || '')) {
             return returnError(
                 RETURN_ERROR_CODES.WRONG_STATUS,
-                `Cannot complete: current status is '${line.returnStatus}', expected 'received'`
+                `Cannot complete: current status is '${line.returnStatus}', expected 'received' or 'qc_inspected'`
             );
         }
 
@@ -176,6 +237,8 @@ export const completeLineReturn = createServerFn({ method: 'POST' })
             where: { id: orderLineId },
             data: { returnStatus: 'complete' },
         });
+
+        broadcastReturnUpdate('return_completed', { lineId: orderLineId }, '');
 
         return returnSuccess({ orderLineId }, 'Return completed');
     });
@@ -195,7 +258,7 @@ export const createExchangeOrder = createServerFn({ method: 'POST' })
             where: { id: orderLineId },
             include: {
                 order: true,
-                sku: { select: { mrp: true } },
+                sku: { select: { mrp: true, variationId: true } },
             },
         });
 
@@ -213,21 +276,34 @@ export const createExchangeOrder = createServerFn({ method: 'POST' })
 
         const exchangeSku = await prisma.sku.findUnique({
             where: { id: exchangeSkuId },
-            select: { id: true, skuCode: true, mrp: true },
+            select: { id: true, skuCode: true, mrp: true, variationId: true },
         });
 
         if (!exchangeSku) {
             return returnError(RETURN_ERROR_CODES.EXCHANGE_SKU_NOT_FOUND);
         }
 
+        // 1E: Fix exchange pricing — same product preserves original discount
+        const isSameProduct = line.sku.variationId === exchangeSku.variationId;
+        const exchangeUnitPrice = isSameProduct ? line.unitPrice : exchangeSku.mrp;
         const originalValue = line.unitPrice * (line.returnQty || line.qty);
-        const exchangeValue = exchangeSku.mrp * exchangeQty;
+        const exchangeValue = exchangeUnitPrice * exchangeQty;
         const priceDiff = exchangeValue - originalValue;
 
-        const count = await prisma.order.count({ where: { isExchange: true } });
-        const exchangeOrderNumber = `EXC${String(count + 1).padStart(5, '0')}`;
-
         const exchangeOrder = await prisma.$transaction(async (tx: PrismaTransaction) => {
+            // 1I: Race-safe order number generation — EXC-MMYYXXXX format
+            const now = new Date();
+            const mm = String(now.getMonth() + 1).padStart(2, '0');
+            const yy = String(now.getFullYear()).slice(-2);
+            const monthPrefix = `EXC-${mm}${yy}`;
+
+            const [maxResult] = await tx.$queryRaw<[{ max_seq: number | null }]>`
+                SELECT MAX(CAST(SUBSTRING("orderNumber" FROM ${monthPrefix.length + 1}) AS INTEGER)) as max_seq
+                FROM "Order" WHERE "orderNumber" LIKE ${monthPrefix + '%'}
+            `;
+            const nextSeq = (maxResult?.max_seq || 0) + 1;
+            const exchangeOrderNumber = `${monthPrefix}${String(nextSeq).padStart(4, '0')}`;
+
             const newOrder = await tx.order.create({
                 data: {
                     orderNumber: exchangeOrderNumber,
@@ -246,7 +322,7 @@ export const createExchangeOrder = createServerFn({ method: 'POST' })
                         create: {
                             skuId: exchangeSkuId,
                             qty: exchangeQty,
-                            unitPrice: exchangeSku.mrp,
+                            unitPrice: exchangeUnitPrice,
                             lineStatus: 'pending',
                         },
                     },
@@ -272,20 +348,37 @@ export const createExchangeOrder = createServerFn({ method: 'POST' })
             return newOrder;
         });
 
+        const baseUrl = getInternalApiBaseUrl();
+
         // Push exchange order to "Orders from COH" sheet (fire-and-forget)
-        const PORT = process.env.PORT || 3001;
-        fetch(`http://127.0.0.1:${PORT}/api/internal/push-order-to-sheet`, {
+        fetch(`${baseUrl}/api/internal/push-order-to-sheet`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ orderId: exchangeOrder.id }),
         }).catch(() => {});
 
+        // SSE broadcast exchange creation
+        broadcastReturnUpdate('return_exchange_created', {
+            lineId: orderLineId,
+            exchangeOrderId: exchangeOrder.id,
+            exchangeOrderNumber: exchangeOrder.orderNumber,
+        }, '');
+
+        // Also broadcast the new order creation for the Orders page
+        fetch(`${baseUrl}/api/internal/sse-broadcast`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                event: { type: 'order_created', orderId: exchangeOrder.id },
+            }),
+        }).catch(() => {});
+
         return returnSuccess(
             {
                 exchangeOrderId: exchangeOrder.id,
-                exchangeOrderNumber,
+                exchangeOrderNumber: exchangeOrder.orderNumber,
                 priceDiff,
             },
-            `Exchange order ${exchangeOrderNumber} created`
+            `Exchange order ${exchangeOrder.orderNumber} created`
         );
     });

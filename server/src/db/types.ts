@@ -223,6 +223,7 @@ export type Customer = {
     orderCount: Generated<number>;
     tier: Generated<string>;
     ltv: Generated<number>;
+    storeCreditBalance: Generated<string>;
 };
 export type DomainEvent = {
     id: Generated<string>;
@@ -757,6 +758,7 @@ export type OrderLine = {
     returnReceivedById: string | null;
     returnCondition: string | null;
     returnConditionNotes: string | null;
+    returnQcResult: string | null;
     returnReasonCategory: string | null;
     returnReasonDetail: string | null;
     returnResolution: string | null;

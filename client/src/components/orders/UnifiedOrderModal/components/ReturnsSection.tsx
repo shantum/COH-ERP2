@@ -20,10 +20,13 @@ import {
   MessageSquare,
   Pencil,
   Save,
+  ExternalLink,
+  AlertTriangle,
 } from 'lucide-react';
 import type { Order, OrderLine } from '../../../../types';
 import { getOptimizedImageUrl } from '../../../../utils/imageOptimization';
 import type { ReturnFormState, LineReturnEligibility } from '../types';
+import { ProductSearch, type SKUData } from '../../../common/ProductSearch';
 
 // Return conditions for receive action
 const RETURN_CONDITIONS = [
@@ -51,6 +54,7 @@ const RETURN_STATUS_CONFIG: Record<string, { label: string; color: string; icon:
   pickup_scheduled: { label: 'Pickup Scheduled', color: 'text-blue-600 bg-blue-50', icon: Truck },
   in_transit: { label: 'In Transit', color: 'text-indigo-600 bg-indigo-50', icon: Truck },
   received: { label: 'Received', color: 'text-violet-600 bg-violet-50', icon: PackageCheck },
+  qc_inspected: { label: 'QC Inspected', color: 'text-teal-600 bg-teal-50', icon: CheckCircle2 },
   complete: { label: 'Complete', color: 'text-green-600 bg-green-50', icon: CheckCircle2 },
   cancelled: { label: 'Cancelled', color: 'text-slate-500 bg-slate-100', icon: XCircle },
 };
@@ -454,7 +458,7 @@ function ReturnInitiationForm({
         </div>
         {form.returnResolution === 'exchange' && (
           <p className="mt-2 text-xs text-slate-500">
-            Exchange order will be created after the return is received.
+            Exchange order will be created immediately for JIT production.
           </p>
         )}
       </div>
@@ -531,6 +535,8 @@ function ActiveReturnCard({
       case 'in_transit':
         return 'receive';
       case 'received':
+        return 'awaiting_qc';
+      case 'qc_inspected':
         if (line.returnResolution === 'refund' && !line.returnRefundCompletedAt) {
           return 'process_refund';
         } else if (line.returnResolution === 'exchange' && !line.returnExchangeOrderId) {
@@ -564,13 +570,13 @@ function ActiveReturnCard({
     }
   };
 
-  const handleCreateExchange = () => {
+  const [showExchangeSearch, setShowExchangeSearch] = useState(false);
+
+  const handleExchangeSkuSelect = (sku: SKUData, _stock: number) => {
     if (onCreateExchange) {
-      const skuId = prompt('Enter exchange SKU ID:');
-      if (skuId) {
-        onCreateExchange(skuId, line.returnQty || 1);
-      }
+      onCreateExchange(sku.id, line.returnQty || 1);
     }
+    setShowExchangeSearch(false);
   };
 
   // Calculate days since request
@@ -603,6 +609,29 @@ function ActiveReturnCard({
               <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${line.returnResolution === 'refund' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>
                 {line.returnResolution === 'refund' ? 'Refund' : 'Exchange'}
               </span>
+              {line.returnQcResult && (
+                <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                  line.returnQcResult === 'approved' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                }`}>
+                  QC: {line.returnQcResult === 'approved' ? 'Approved' : 'Written Off'}
+                </span>
+              )}
+              {line.returnQcResult === 'written_off' && line.returnResolution === 'exchange' && (
+                <span className="px-2 py-0.5 text-xs bg-orange-100 text-orange-700 rounded-full flex items-center gap-1">
+                  <AlertTriangle size={10} />
+                  QC failed — review exchange
+                </span>
+              )}
+              {line.returnExchangeOrderId && (
+                <a
+                  href={`/orders?modal=view&orderId=${line.returnExchangeOrderId}`}
+                  className="px-2 py-0.5 text-xs bg-blue-100 text-blue-700 rounded-full flex items-center gap-1 hover:bg-blue-200"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <ExternalLink size={10} />
+                  Exchange Order
+                </a>
+              )}
               {daysSinceRequest > 0 && (
                 <span className="text-xs text-slate-400">
                   {daysSinceRequest}d ago
@@ -718,9 +747,16 @@ function ActiveReturnCard({
           </button>
         )}
 
-        {actionNeeded === 'create_exchange' && onCreateExchange && (
+        {actionNeeded === 'awaiting_qc' && (
+          <span className="px-3 py-1.5 bg-amber-50 text-amber-700 text-xs rounded-lg flex items-center gap-1 border border-amber-200">
+            <Clock size={14} />
+            Awaiting QC
+          </span>
+        )}
+
+        {actionNeeded === 'create_exchange' && onCreateExchange && !showExchangeSearch && (
           <button
-            onClick={handleCreateExchange}
+            onClick={() => setShowExchangeSearch(true)}
             className="px-3 py-1.5 bg-indigo-600 text-white text-xs rounded-lg hover:bg-indigo-700 flex items-center gap-1"
           >
             <ArrowRight size={14} />
@@ -748,6 +784,19 @@ function ActiveReturnCard({
           </button>
         )}
       </div>
+
+      {/* Exchange SKU search (inline) */}
+      {showExchangeSearch && (
+        <div className="mt-3 pt-3 border-t border-slate-100">
+          <p className="text-xs text-slate-600 mb-2 font-medium">Select exchange product:</p>
+          <ProductSearch
+            onSelect={handleExchangeSkuSelect}
+            onCancel={() => setShowExchangeSearch(false)}
+            placeholder="Search for exchange SKU..."
+            maxResultsHeight="14rem"
+          />
+        </div>
+      )}
     </div>
   );
 }

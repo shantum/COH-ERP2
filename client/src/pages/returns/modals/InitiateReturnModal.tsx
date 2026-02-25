@@ -1,6 +1,9 @@
-import { X, Search, Truck, Package, AlertCircle } from 'lucide-react';
+import { useState } from 'react';
+import { X, Search, Truck, Package, AlertCircle, CheckCircle2 } from 'lucide-react';
 import type { OrderForReturn } from '@coh/shared/schemas/returns';
 import { reasonOptions, resolutionOptions } from '../types';
+import { ProductSearch, type SKUData } from '../../../components/common/ProductSearch';
+import { getOptimizedImageUrl } from '../../../utils/imageOptimization';
 
 export interface InitiateReturnModalProps {
     orderSearchTerm: string;
@@ -51,10 +54,79 @@ export function InitiateReturnModal({
     onInitiate,
     onClose,
 }: InitiateReturnModalProps) {
+    // Track selected exchange SKU details for display
+    const [exchangeSkuInfo, setExchangeSkuInfo] = useState<{
+        name: string;
+        color: string;
+        size: string;
+        skuCode: string;
+        mrp: number;
+        stock: number;
+        imageUrl: string | null;
+    } | null>(null);
+
+    const handleExchangeSkuSelect = (sku: SKUData, stock: number) => {
+        setExchangeSkuId(sku.id);
+        setExchangeSkuInfo({
+            name: sku.variation?.product?.name || 'Unknown',
+            color: sku.variation?.colorName || '',
+            size: sku.size || '',
+            skuCode: sku.skuCode || '',
+            mrp: Number(sku.mrp) || 0,
+            stock,
+            imageUrl: sku.variation?.imageUrl || sku.variation?.product?.imageUrl || null,
+        });
+    };
+
+    const clearExchangeSku = () => {
+        setExchangeSkuId('');
+        setExchangeSkuInfo(null);
+    };
+
+    // When resolution changes away from exchange, clear exchange SKU
+    const handleResolutionChange = (val: 'refund' | 'exchange' | 'rejected') => {
+        setReturnResolution(val);
+        if (val !== 'exchange') {
+            clearExchangeSku();
+        }
+    };
+
+    // Calculate price diff for exchange
+    const getExchangePriceDiff = () => {
+        if (!exchangeSkuInfo || selectedLines.size === 0 || !searchedOrder) return null;
+
+        const selectedLineData = searchedOrder.lines.filter(l => selectedLines.has(l.id));
+        if (selectedLineData.length === 0) return null;
+
+        const totalReturnQty = selectedLineData.reduce((sum, l) => sum + (returnQtyMap[l.id] || l.qty), 0);
+        const totalReturnValue = selectedLineData.reduce(
+            (sum, l) => sum + (returnQtyMap[l.id] || l.qty) * l.unitPrice,
+            0
+        );
+
+        // Same product = same productName (size swap). Server does precise variationId check.
+        const firstLine = selectedLineData[0];
+        const isSameProduct = firstLine.productName === exchangeSkuInfo.name;
+
+        if (isSameProduct) {
+            return { diff: 0, exchangeValue: totalReturnValue, returnValue: totalReturnValue, isSameProduct: true };
+        }
+
+        const exchangeValue = exchangeSkuInfo.mrp * totalReturnQty;
+        const diff = exchangeValue - totalReturnValue;
+        return { diff, exchangeValue, returnValue: totalReturnValue, isSameProduct: false };
+    };
+
+    const priceDiff = returnResolution === 'exchange' && exchangeSkuInfo ? getExchangePriceDiff() : null;
+
+    const canInitiate = selectedLines.size > 0 &&
+        returnReasonCategory &&
+        (returnResolution !== 'exchange' || exchangeSkuId);
+
     return (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto">
-                <div className="p-6 border-b border-gray-200 flex items-center justify-between sticky top-0 bg-white">
+                <div className="p-6 border-b border-gray-200 flex items-center justify-between sticky top-0 bg-white z-10">
                     <h2 className="text-xl font-bold">Initiate Return</h2>
                     <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
                         <X size={24} />
@@ -71,7 +143,7 @@ export function InitiateReturnModal({
                                 placeholder="Enter order number..."
                                 value={orderSearchTerm}
                                 onChange={(e) => setOrderSearchTerm(e.target.value)}
-                                onKeyPress={(e) => e.key === 'Enter' && onSearchOrder()}
+                                onKeyDown={(e) => e.key === 'Enter' && onSearchOrder()}
                                 className="flex-1 px-4 py-2 border border-gray-300 rounded-lg"
                             />
                             <button
@@ -118,7 +190,7 @@ export function InitiateReturnModal({
                                                         {line.productName} - {line.colorName} - {line.size}
                                                     </div>
                                                     <div className="text-sm text-gray-500">
-                                                        SKU: {line.skuCode} | Qty: {line.qty}
+                                                        SKU: {line.skuCode} | Qty: {line.qty} | {'\u20B9'}{line.unitPrice.toLocaleString()}
                                                         {line.eligibility.daysRemaining !== null && (
                                                             <span className="ml-2">
                                                                 ({line.eligibility.daysRemaining >= 0
@@ -198,7 +270,7 @@ export function InitiateReturnModal({
                                     {resolutionOptions.map((res) => (
                                         <button
                                             key={res.value}
-                                            onClick={() => setReturnResolution(res.value)}
+                                            onClick={() => handleResolutionChange(res.value)}
                                             className={`px-4 py-2 rounded-lg border ${
                                                 returnResolution === res.value
                                                     ? 'border-blue-600 bg-blue-50 text-blue-700'
@@ -249,16 +321,109 @@ export function InitiateReturnModal({
                                 </div>
                             </div>
 
+                            {/* Exchange SKU Picker */}
                             {returnResolution === 'exchange' && (
                                 <div>
-                                    <label className="block text-sm font-medium mb-2">Exchange SKU ID</label>
-                                    <input
-                                        type="text"
-                                        value={exchangeSkuId}
-                                        onChange={(e) => setExchangeSkuId(e.target.value)}
-                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg"
-                                        placeholder="Enter SKU ID for exchange..."
-                                    />
+                                    <label className="block text-sm font-medium mb-2">
+                                        Exchange SKU <span className="text-red-500">*</span>
+                                    </label>
+                                    <p className="text-xs text-gray-500 mb-3">
+                                        Exchange order will be created immediately for JIT production.
+                                    </p>
+
+                                    {exchangeSkuInfo ? (
+                                        /* Selected exchange SKU display */
+                                        <div className="border border-blue-200 bg-blue-50 rounded-lg p-4">
+                                            <div className="flex items-start gap-3">
+                                                <div className="w-12 h-12 bg-white rounded-lg overflow-hidden shrink-0">
+                                                    {exchangeSkuInfo.imageUrl ? (
+                                                        <img
+                                                            src={getOptimizedImageUrl(exchangeSkuInfo.imageUrl, 'sm') || exchangeSkuInfo.imageUrl}
+                                                            alt=""
+                                                            className="w-full h-full object-cover"
+                                                            loading="lazy"
+                                                        />
+                                                    ) : (
+                                                        <div className="w-full h-full flex items-center justify-center text-gray-400">
+                                                            <Package size={20} />
+                                                        </div>
+                                                    )}
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="font-medium text-sm text-gray-800">
+                                                        {exchangeSkuInfo.name}
+                                                    </div>
+                                                    <div className="text-xs text-gray-600 mt-0.5">
+                                                        {exchangeSkuInfo.color} / {exchangeSkuInfo.size} — {exchangeSkuInfo.skuCode}
+                                                    </div>
+                                                    <div className="flex items-center gap-3 mt-1.5">
+                                                        <span className="text-xs font-medium text-gray-700">
+                                                            MRP: {'\u20B9'}{exchangeSkuInfo.mrp.toLocaleString()}
+                                                        </span>
+                                                        <span className={`text-xs px-1.5 py-0.5 rounded ${
+                                                            exchangeSkuInfo.stock <= 0
+                                                                ? 'bg-red-100 text-red-700'
+                                                                : exchangeSkuInfo.stock <= 3
+                                                                ? 'bg-amber-100 text-amber-700'
+                                                                : 'bg-green-100 text-green-700'
+                                                        }`}>
+                                                            Stock: {exchangeSkuInfo.stock}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                                <button
+                                                    onClick={clearExchangeSku}
+                                                    className="text-gray-400 hover:text-red-600 p-1"
+                                                    title="Change exchange SKU"
+                                                >
+                                                    <X size={16} />
+                                                </button>
+                                            </div>
+
+                                            {/* Price diff */}
+                                            {priceDiff && (
+                                                <div className="mt-3 pt-3 border-t border-blue-200">
+                                                    {priceDiff.isSameProduct ? (
+                                                        <div className="flex items-center gap-2 text-sm">
+                                                            <CheckCircle2 size={14} className="text-green-600" />
+                                                            <span className="text-green-700 font-medium">
+                                                                Same product size swap — no price difference
+                                                            </span>
+                                                        </div>
+                                                    ) : (
+                                                        <div className="space-y-1 text-xs">
+                                                            <div className="flex justify-between text-gray-600">
+                                                                <span>Return value</span>
+                                                                <span>{'\u20B9'}{priceDiff.returnValue.toLocaleString()}</span>
+                                                            </div>
+                                                            <div className="flex justify-between text-gray-600">
+                                                                <span>Exchange value</span>
+                                                                <span>{'\u20B9'}{priceDiff.exchangeValue.toLocaleString()}</span>
+                                                            </div>
+                                                            <div className={`flex justify-between font-semibold pt-1 border-t border-blue-200 ${
+                                                                priceDiff.diff > 0 ? 'text-red-700' : priceDiff.diff < 0 ? 'text-green-700' : 'text-gray-700'
+                                                            }`}>
+                                                                <span>
+                                                                    {priceDiff.diff > 0 ? 'Customer pays extra' : priceDiff.diff < 0 ? 'Customer gets credit' : 'No difference'}
+                                                                </span>
+                                                                <span>
+                                                                    {priceDiff.diff > 0 ? '+' : ''}{'\u20B9'}{priceDiff.diff.toLocaleString()}
+                                                                </span>
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
+                                        </div>
+                                    ) : (
+                                        /* Search for exchange SKU */
+                                        <ProductSearch
+                                            onSelect={handleExchangeSkuSelect}
+                                            onCancel={() => {}}
+                                            placeholder="Search for exchange product..."
+                                            maxResultsHeight="16rem"
+                                        />
+                                    )}
                                 </div>
                             )}
 
@@ -281,7 +446,7 @@ export function InitiateReturnModal({
                     </button>
                     <button
                         onClick={onInitiate}
-                        disabled={selectedLines.size === 0 || !returnReasonCategory}
+                        disabled={!canInitiate}
                         className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
                     >
                         Initiate Return

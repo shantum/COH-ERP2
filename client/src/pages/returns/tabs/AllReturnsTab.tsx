@@ -1,223 +1,325 @@
-import { useState } from 'react';
-import { X, Save, Pencil } from 'lucide-react';
-import type { ActiveReturnLine } from '../types';
+import { useState, useMemo, useCallback, useRef } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { useServerFn } from '@tanstack/react-start';
+import { AgGridReact } from 'ag-grid-react';
+import type { ColDef, ICellRendererParams, ValueFormatterParams } from 'ag-grid-community';
+import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community';
+import { Search, ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react';
+import { getAllReturns } from '../../../server/functions/returns';
+import { compactTheme, defaultColDef, formatDate, formatRelativeTime } from '../../../utils/agGridHelpers';
 import { getStatusBadge, getResolutionBadge } from '../types';
 import { RETURN_REASONS } from '@coh/shared/domain/returns';
-import { ReturnTrackingStatus } from '../ReturnTrackingStatus';
+import type { ActiveReturnLine } from '@coh/shared/schemas/returns';
 
-export interface AllReturnsTabProps {
-    returns: ActiveReturnLine[];
-    loading: boolean;
-    onViewCustomer: (customerId: string) => void;
-    onCancel: (lineId: string) => void;
-    onUpdateNotes: (lineId: string, notes: string) => void;
-}
+ModuleRegistry.registerModules([AllCommunityModule]);
 
-export function AllReturnsTab({ returns, loading, onViewCustomer, onCancel, onUpdateNotes }: AllReturnsTabProps) {
-    const [statusFilter, setStatusFilter] = useState<string>('all');
+const STATUS_OPTIONS = [
+    { value: '', label: 'All Statuses' },
+    { value: 'requested', label: 'Requested' },
+    { value: 'pickup_scheduled', label: 'Pickup Scheduled' },
+    { value: 'in_transit', label: 'In Transit' },
+    { value: 'received', label: 'Received' },
+    { value: 'qc_inspected', label: 'QC Inspected' },
+    { value: 'complete', label: 'Complete' },
+    { value: 'cancelled', label: 'Cancelled' },
+];
+
+const RESOLUTION_OPTIONS = [
+    { value: '', label: 'All Resolutions' },
+    { value: 'refund', label: 'Refund' },
+    { value: 'exchange', label: 'Exchange' },
+    { value: 'rejected', label: 'Rejected' },
+];
+
+const PAGE_SIZE = 100;
+
+export function AllReturnsTab() {
+    const gridRef = useRef<AgGridReact>(null);
+    const [page, setPage] = useState(1);
+    const [statusFilter, setStatusFilter] = useState('');
+    const [resolutionFilter, setResolutionFilter] = useState('');
     const [searchTerm, setSearchTerm] = useState('');
-    const [editingNotesId, setEditingNotesId] = useState<string | null>(null);
-    const [editingNotesValue, setEditingNotesValue] = useState('');
+    const [searchInput, setSearchInput] = useState('');
 
-    const startEditNotes = (lineId: string, currentNotes: string | null) => {
-        setEditingNotesId(lineId);
-        setEditingNotesValue(currentNotes || '');
-    };
-
-    const saveNotes = (lineId: string) => {
-        onUpdateNotes(lineId, editingNotesValue);
-        setEditingNotesId(null);
-        setEditingNotesValue('');
-    };
-
-    const cancelEditNotes = () => {
-        setEditingNotesId(null);
-        setEditingNotesValue('');
-    };
-
-    if (loading) {
-        return <div className="text-center py-12">Loading returns...</div>;
-    }
-
-    const filteredReturns = returns.filter((ret) => {
-        if (statusFilter !== 'all' && ret.returnStatus !== statusFilter) return false;
-        if (searchTerm) {
-            const term = searchTerm.toLowerCase();
-            return (
-                ret.orderNumber.toLowerCase().includes(term) ||
-                ret.skuCode.toLowerCase().includes(term) ||
-                ret.customerName.toLowerCase().includes(term) ||
-                (ret.returnReasonDetail || '').toLowerCase().includes(term)
-            );
-        }
-        return true;
+    const getAllReturnsFn = useServerFn(getAllReturns);
+    const { data, isLoading } = useQuery({
+        queryKey: ['returns', 'all', { page, status: statusFilter, resolution: resolutionFilter, search: searchTerm }],
+        queryFn: () => getAllReturnsFn({
+            data: {
+                page,
+                limit: PAGE_SIZE,
+                ...(statusFilter ? { status: statusFilter } : {}),
+                ...(resolutionFilter ? { resolution: resolutionFilter } : {}),
+                ...(searchTerm ? { search: searchTerm } : {}),
+            },
+        }),
+        staleTime: 30_000,
     });
 
+    const handleSearch = useCallback(() => {
+        setSearchTerm(searchInput);
+        setPage(1);
+    }, [searchInput]);
+
+    const handleSearchKeyDown = useCallback((e: React.KeyboardEvent) => {
+        if (e.key === 'Enter') handleSearch();
+    }, [handleSearch]);
+
+    const totalPages = data ? Math.ceil(data.total / data.limit) : 0;
+
+    const columnDefs = useMemo((): ColDef<ActiveReturnLine>[] => [
+        {
+            headerName: 'Order',
+            field: 'orderNumber',
+            width: 120,
+            pinned: 'left' as const,
+            cellRenderer: (params: ICellRendererParams<ActiveReturnLine>) => {
+                if (!params.data) return null;
+                return (
+                    <a
+                        href={`/orders?modal=view&orderId=${params.data.orderId}`}
+                        className="text-blue-600 hover:underline font-medium"
+                    >
+                        {params.value}
+                    </a>
+                );
+            },
+        },
+        {
+            headerName: 'Batch',
+            field: 'returnBatchNumber',
+            width: 100,
+            valueFormatter: (p: ValueFormatterParams) => p.value || '-',
+        },
+        {
+            headerName: 'SKU',
+            field: 'skuCode',
+            width: 130,
+            cellStyle: { fontFamily: 'monospace', fontSize: '11px' },
+        },
+        {
+            headerName: 'Product',
+            field: 'productName',
+            width: 180,
+            cellRenderer: (params: ICellRendererParams<ActiveReturnLine>) => {
+                if (!params.data) return null;
+                return (
+                    <div className="leading-tight py-1">
+                        <div className="text-xs font-medium truncate">{params.data.productName}</div>
+                        <div className="text-[10px] text-gray-500">{params.data.colorName} / {params.data.size}</div>
+                    </div>
+                );
+            },
+        },
+        {
+            headerName: 'Qty',
+            field: 'returnQty',
+            width: 60,
+            type: 'numericColumn',
+        },
+        {
+            headerName: 'Status',
+            field: 'returnStatus',
+            width: 130,
+            cellRenderer: (params: ICellRendererParams<ActiveReturnLine>) => {
+                if (!params.value) return null;
+                return (
+                    <span className={`px-2 py-0.5 text-xs font-medium rounded ${getStatusBadge(params.value)}`}>
+                        {params.value.replace(/_/g, ' ')}
+                    </span>
+                );
+            },
+        },
+        {
+            headerName: 'Resolution',
+            field: 'returnResolution',
+            width: 100,
+            cellRenderer: (params: ICellRendererParams<ActiveReturnLine>) => {
+                const badge = getResolutionBadge(params.value || null);
+                return (
+                    <span className={`px-2 py-0.5 text-xs font-medium rounded ${badge.color}`}>
+                        {badge.label}
+                    </span>
+                );
+            },
+        },
+        {
+            headerName: 'QC',
+            field: 'returnQcResult',
+            width: 90,
+            cellRenderer: (params: ICellRendererParams<ActiveReturnLine>) => {
+                if (!params.value) return <span className="text-gray-400 text-xs">-</span>;
+                const isApproved = params.value === 'approved';
+                return (
+                    <span className={`px-2 py-0.5 text-xs font-medium rounded ${
+                        isApproved ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                    }`}>
+                        {isApproved ? 'Approved' : 'Written Off'}
+                    </span>
+                );
+            },
+        },
+        {
+            headerName: 'Reason',
+            field: 'returnReasonCategory',
+            width: 140,
+            valueFormatter: (p: ValueFormatterParams) => {
+                if (!p.value) return '-';
+                return RETURN_REASONS[p.value as keyof typeof RETURN_REASONS] || p.value;
+            },
+        },
+        {
+            headerName: 'AWB',
+            field: 'returnAwbNumber',
+            width: 130,
+            cellStyle: { fontFamily: 'monospace', fontSize: '11px' },
+            valueFormatter: (p: ValueFormatterParams) => p.value || '-',
+        },
+        {
+            headerName: 'Customer',
+            field: 'customerName',
+            width: 140,
+        },
+        {
+            headerName: 'Requested',
+            field: 'returnRequestedAt',
+            width: 100,
+            valueFormatter: (p: ValueFormatterParams) => formatDate(p.value),
+        },
+        {
+            headerName: 'Age',
+            field: 'returnRequestedAt',
+            width: 80,
+            colId: 'age',
+            valueFormatter: (p: ValueFormatterParams) => formatRelativeTime(p.value),
+        },
+        {
+            headerName: 'Refund',
+            field: 'returnNetAmount',
+            width: 90,
+            type: 'numericColumn',
+            valueFormatter: (p: ValueFormatterParams) => {
+                if (p.value == null) return '-';
+                return `\u20B9${Number(p.value).toLocaleString()}`;
+            },
+        },
+        {
+            headerName: 'Exchange',
+            field: 'returnExchangeOrderId',
+            width: 90,
+            cellRenderer: (params: ICellRendererParams<ActiveReturnLine>) => {
+                if (!params.value) return <span className="text-gray-400 text-xs">-</span>;
+                return (
+                    <a
+                        href={`/orders?modal=view&orderId=${params.value}`}
+                        className="text-blue-600 hover:underline text-xs flex items-center gap-1"
+                    >
+                        <ExternalLink size={10} />
+                        View
+                    </a>
+                );
+            },
+        },
+        {
+            headerName: 'Notes',
+            field: 'returnNotes',
+            width: 150,
+            valueFormatter: (p: ValueFormatterParams) => p.value || '',
+        },
+    ], []);
+
     return (
-        <div>
-            {/* Filters */}
-            <div className="flex gap-4 mb-4">
-                <input
-                    type="text"
-                    placeholder="Search order, SKU, customer..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="flex-1 px-4 py-2 border border-gray-300 rounded-lg"
-                />
+        <div className="space-y-4">
+            {/* Filters Bar */}
+            <div className="flex flex-col sm:flex-row gap-3 p-4 bg-white rounded-lg border border-gray-200">
+                <div className="flex-1 flex gap-2">
+                    <div className="relative flex-1">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                        <input
+                            type="text"
+                            placeholder="Search order, SKU, customer, AWB..."
+                            value={searchInput}
+                            onChange={(e) => setSearchInput(e.target.value)}
+                            onKeyDown={handleSearchKeyDown}
+                            className="w-full pl-10 pr-4 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                    </div>
+                    <button
+                        onClick={handleSearch}
+                        className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 text-sm"
+                    >
+                        Search
+                    </button>
+                </div>
                 <select
                     value={statusFilter}
-                    onChange={(e) => setStatusFilter(e.target.value)}
-                    className="px-4 py-2 border border-gray-300 rounded-lg"
+                    onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
+                    className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
                 >
-                    <option value="all">All Statuses</option>
-                    <option value="requested">Requested</option>
-                    <option value="pickup_scheduled">Pickup Scheduled</option>
-                    <option value="in_transit">In Transit</option>
-                    <option value="received">Received</option>
+                    {STATUS_OPTIONS.map(o => (
+                        <option key={o.value} value={o.value}>{o.label}</option>
+                    ))}
+                </select>
+                <select
+                    value={resolutionFilter}
+                    onChange={(e) => { setResolutionFilter(e.target.value); setPage(1); }}
+                    className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                >
+                    {RESOLUTION_OPTIONS.map(o => (
+                        <option key={o.value} value={o.value}>{o.label}</option>
+                    ))}
                 </select>
             </div>
 
-            {/* Table */}
-            {filteredReturns.length === 0 ? (
-                <div className="text-center py-12 text-gray-500">No returns found</div>
-            ) : (
-                <div className="border border-gray-200 rounded-lg overflow-hidden">
-                    <table className="w-full">
-                        <thead className="bg-gray-50">
-                            <tr>
-                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Order</th>
-                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Product</th>
-                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Qty</th>
-                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Resolution</th>
-                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Reason</th>
-                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">AWB / Tracking</th>
-                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Customer</th>
-                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Age</th>
-                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Notes</th>
-                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-200">
-                            {filteredReturns.map((ret) => (
-                                <tr key={ret.id} className="hover:bg-gray-50">
-                                    <td className="px-4 py-3 text-sm">{ret.orderNumber}</td>
-                                    <td className="px-4 py-3 text-sm">
-                                        <div>{ret.productName}</div>
-                                        <div className="text-xs text-gray-500">
-                                            {ret.colorName} - {ret.size} ({ret.skuCode})
-                                        </div>
-                                    </td>
-                                    <td className="px-4 py-3 text-sm">{ret.returnQty}</td>
-                                    <td className="px-4 py-3 text-sm">
-                                        <span className={`px-2 py-1 text-xs rounded ${getStatusBadge(ret.returnStatus)}`}>
-                                            {ret.returnStatus}
-                                        </span>
-                                    </td>
-                                    <td className="px-4 py-3 text-sm">
-                                        <span className={`px-2 py-1 text-xs rounded ${getResolutionBadge(ret.returnResolution).color}`}>
-                                            {getResolutionBadge(ret.returnResolution).label}
-                                        </span>
-                                    </td>
-                                    <td className="px-4 py-3 text-sm max-w-[220px]">
-                                        {ret.returnReasonDetail ? (
-                                            <div>
-                                                <div className="text-gray-700 text-xs leading-snug" title={ret.returnReasonDetail}>
-                                                    {ret.returnReasonDetail}
-                                                </div>
-                                                {ret.returnReasonCategory && ret.returnReasonCategory !== 'other' && (
-                                                    <span className="text-[10px] text-gray-400 mt-0.5 inline-block">
-                                                        {RETURN_REASONS[ret.returnReasonCategory as keyof typeof RETURN_REASONS] || ret.returnReasonCategory}
-                                                    </span>
-                                                )}
-                                            </div>
-                                        ) : ret.returnReasonCategory && ret.returnReasonCategory !== 'other' ? (
-                                            <span className="text-xs text-gray-500">
-                                                {RETURN_REASONS[ret.returnReasonCategory as keyof typeof RETURN_REASONS] || ret.returnReasonCategory}
-                                            </span>
-                                        ) : (
-                                            <span className="text-gray-400">-</span>
-                                        )}
-                                    </td>
-                                    <td className="px-4 py-3 text-sm">
-                                        {ret.returnAwbNumber ? (
-                                            <div>
-                                                <div className="text-xs text-gray-600 font-mono">
-                                                    {ret.returnAwbNumber}
-                                                </div>
-                                                <ReturnTrackingStatus awbNumber={ret.returnAwbNumber} />
-                                            </div>
-                                        ) : (
-                                            <span className="text-gray-400">-</span>
-                                        )}
-                                    </td>
-                                    <td className="px-4 py-3 text-sm">
-                                        <button
-                                            onClick={() => ret.customerId && onViewCustomer(ret.customerId)}
-                                            className="text-blue-600 hover:underline"
-                                        >
-                                            {ret.customerName}
-                                        </button>
-                                    </td>
-                                    <td className="px-4 py-3 text-sm text-gray-500">{ret.ageDays}d</td>
-                                    <td className="px-4 py-3 text-sm max-w-[200px]">
-                                        {editingNotesId === ret.id ? (
-                                            <div className="flex gap-1">
-                                                <input
-                                                    type="text"
-                                                    value={editingNotesValue}
-                                                    onChange={(e) => setEditingNotesValue(e.target.value)}
-                                                    className="flex-1 px-2 py-1 border border-gray-300 rounded text-sm min-w-0"
-                                                    autoFocus
-                                                    onKeyDown={(e) => {
-                                                        if (e.key === 'Enter') saveNotes(ret.id);
-                                                        if (e.key === 'Escape') cancelEditNotes();
-                                                    }}
-                                                />
-                                                <button
-                                                    onClick={() => saveNotes(ret.id)}
-                                                    className="p-1 text-green-600 hover:bg-green-50 rounded"
-                                                    title="Save"
-                                                >
-                                                    <Save size={14} />
-                                                </button>
-                                                <button
-                                                    onClick={cancelEditNotes}
-                                                    className="p-1 text-gray-400 hover:bg-gray-100 rounded"
-                                                    title="Cancel"
-                                                >
-                                                    <X size={14} />
-                                                </button>
-                                            </div>
-                                        ) : (
-                                            <div className="flex items-center gap-1 group">
-                                                <span className="truncate text-gray-600">
-                                                    {ret.returnNotes || <span className="text-gray-400 italic">-</span>}
-                                                </span>
-                                                <button
-                                                    onClick={() => startEditNotes(ret.id, ret.returnNotes)}
-                                                    className="p-1 text-gray-400 hover:text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity"
-                                                    title="Edit notes"
-                                                >
-                                                    <Pencil size={12} />
-                                                </button>
-                                            </div>
-                                        )}
-                                    </td>
-                                    <td className="px-4 py-3 text-sm">
-                                        <button
-                                            onClick={() => onCancel(ret.id)}
-                                            className="text-red-600 hover:underline text-xs"
-                                        >
-                                            Cancel
-                                        </button>
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
+            {/* Grid */}
+            <div className="bg-white rounded-lg border border-gray-200 overflow-hidden" style={{ height: 'calc(100vh - 320px)', minHeight: '400px' }}>
+                <AgGridReact<ActiveReturnLine>
+                    ref={gridRef}
+                    theme={compactTheme}
+                    rowData={data?.items || []}
+                    columnDefs={columnDefs}
+                    loading={isLoading}
+                    defaultColDef={defaultColDef}
+                    animateRows={false}
+                    suppressCellFocus={false}
+                    getRowId={(params) => params.data.id}
+                    pagination={false}
+                    enableCellTextSelection={true}
+                    ensureDomOrder={true}
+                />
+            </div>
+
+            {/* Pagination */}
+            <div className="flex items-center justify-between px-4 py-2 bg-white rounded-lg border border-gray-200">
+                <div className="text-sm text-gray-600">
+                    {data ? (
+                        <>
+                            Showing {((page - 1) * PAGE_SIZE) + 1}–{Math.min(page * PAGE_SIZE, data.total)} of {data.total.toLocaleString()} returns
+                        </>
+                    ) : (
+                        'Loading...'
+                    )}
                 </div>
-            )}
+                <div className="flex items-center gap-2">
+                    <button
+                        onClick={() => setPage(p => Math.max(1, p - 1))}
+                        disabled={page <= 1}
+                        className="p-2 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        <ChevronLeft size={16} />
+                    </button>
+                    <span className="text-sm text-gray-600">
+                        Page {page} of {totalPages || 1}
+                    </span>
+                    <button
+                        onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                        disabled={page >= totalPages}
+                        className="p-2 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        <ChevronRight size={16} />
+                    </button>
+                </div>
+            </div>
         </div>
     );
 }

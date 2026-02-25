@@ -196,6 +196,59 @@ export const processRepackingItem = createServerFn({ method: 'POST' })
         const { inventoryBalanceCache } = await import('@coh/shared/services/inventory');
         inventoryBalanceCache.invalidate([item.skuId]);
 
+        // 1J: Cascade QC result back to linked return OrderLine
+        if (item.orderLineId) {
+            const qcResult = normalizedAction === 'approve' ? 'approved' : 'written_off';
+            const prismaForCascade = await getPrisma();
+
+            // Load the linked OrderLine to check resolution
+            const linkedLine = await prismaForCascade.orderLine.findUnique({
+                where: { id: item.orderLineId },
+                select: {
+                    id: true,
+                    returnStatus: true,
+                    returnResolution: true,
+                    returnExchangeSkuId: true,
+                    returnExchangeOrderId: true,
+                    returnQty: true,
+                    qty: true,
+                },
+            });
+
+            if (linkedLine && linkedLine.returnStatus === 'received') {
+                await prismaForCascade.orderLine.update({
+                    where: { id: item.orderLineId },
+                    data: {
+                        returnStatus: 'qc_inspected',
+                        returnQcResult: qcResult,
+                    },
+                });
+
+                // Note: Exchange orders are created immediately at initiation (JIT production).
+                // QC result just updates the return line status — no auto-exchange needed here.
+
+                // SSE broadcast for return status change
+                try {
+                    const { getInternalApiBaseUrl } = await import('../utils');
+                    const baseUrl = getInternalApiBaseUrl();
+                    fetch(`${baseUrl}/api/internal/sse-broadcast`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            event: {
+                                type: 'return_status_updated',
+                                lineId: item.orderLineId,
+                                changes: { returnStatus: 'qc_inspected', returnQcResult: qcResult },
+                            },
+                            excludeUserId: context.user.id,
+                        }),
+                    }).catch(() => {});
+                } catch {
+                    // Non-critical
+                }
+            }
+        }
+
         return {
             success: true,
             message: normalizedAction === 'approve'

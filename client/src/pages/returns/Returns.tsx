@@ -1,14 +1,16 @@
 /**
  * Unified Returns Dashboard
  *
- * Merges Returns Management + Return Prime into a single page.
- * Return Prime handles all operations; the ERP mirrors data for analytics.
- *
- * 3 tabs: Overview | All Returns | Analytics
+ * 5 tabs:
+ * - Action Queue (default): internal line-level returns needing action
+ * - All Returns: all active internal returns in a table
+ * - Return Prime: legacy RP data (kept for reference)
+ * - Analytics: return analytics (from RP data + internal)
+ * - Settings: return policy config
  */
 
 import { useState, useCallback } from 'react';
-import { useQuery, useMutation } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { useNavigate } from '@tanstack/react-router';
 import { Route } from '../../routes/_authenticated/returns';
@@ -17,19 +19,14 @@ import {
     Calendar,
     Filter,
     RefreshCw,
-    AlertCircle,
     Download,
     Upload,
     BarChart3,
     Package,
-    LayoutDashboard,
-    Clock,
-    Database,
-    LinkIcon,
-    TrendingUp,
-    Timer,
-    Tag,
+    ListTodo,
+    Settings,
     CheckCircle2,
+    Inbox,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -43,9 +40,10 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
+
+// Return Prime imports
 import {
     getReturnPrimeDashboard,
-    getReturnPrimeSyncStatus,
     triggerReturnPrimeSync,
     autoCompleteReceivedReturns,
 } from '../../server/functions/returnPrime';
@@ -56,8 +54,33 @@ import {
     ReturnPrimeDetailModal,
     ReturnPrimeCsvEnrichmentDialog,
 } from '../../components/returnPrime';
+
+// Internal returns imports
+import {
+    getLineReturnActionQueue,
+    getReturnConfig,
+} from '../../server/functions/returns';
+import { updateReturnNotes } from '../../server/functions/returnLifecycle';
+import {
+    cancelLineReturn,
+    receiveLineReturn,
+    scheduleReturnPickup,
+} from '../../server/functions/returnLifecycle';
+import {
+    processLineReturnRefund,
+    createExchangeOrder,
+    completeLineReturn,
+} from '../../server/functions/returnResolution';
+
+// Tab components
+import { ActionQueueTab } from './tabs/ActionQueueTab';
+import { AllReturnsTab } from './tabs/AllReturnsTab';
 import { AnalyticsTab } from './tabs/AnalyticsTab';
-import type { ReturnPrimeRequest, ReturnPrimeStats } from '@coh/shared/schemas/returnPrime';
+import { SettingsTab } from './tabs/SettingsTab';
+import { ProcessRefundModal } from './modals/ProcessRefundModal';
+
+import type { ReturnPrimeRequest } from '@coh/shared/schemas/returnPrime';
+import type { ReturnActionQueueItem as ServerReturnActionQueueItem } from '@coh/shared/schemas/returns';
 
 // ============================================
 // CONSTANTS
@@ -109,149 +132,6 @@ function getDateRange(preset: string): { dateFrom?: string; dateTo?: string } {
     }
 }
 
-function formatRelativeTime(isoString: string | null): string {
-    if (!isoString) return 'Never';
-    const date = new Date(isoString);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-    if (diffMins < 1) return 'Just now';
-    if (diffMins < 60) return `${diffMins}m ago`;
-    const diffHours = Math.floor(diffMins / 60);
-    if (diffHours < 24) return `${diffHours}h ago`;
-    const diffDays = Math.floor(diffHours / 24);
-    return `${diffDays}d ago`;
-}
-
-// ============================================
-// OVERVIEW TAB
-// ============================================
-
-function OverviewTab({
-    stats,
-    syncStatus,
-    isLoading,
-    isSyncLoading,
-}: {
-    stats: ReturnPrimeStats | undefined;
-    syncStatus: SyncStatus | undefined;
-    isLoading: boolean;
-    isSyncLoading: boolean;
-}) {
-    return (
-        <div className="space-y-6">
-            {/* Stats Cards */}
-            <ReturnPrimeStatsCards stats={stats} isLoading={isLoading} />
-
-            {/* Sync Health Bar */}
-            <div className="bg-white rounded-lg border border-gray-200 p-4">
-                <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
-                    <Database className="w-4 h-4" />
-                    Sync Health
-                </h3>
-                {isSyncLoading ? (
-                    <div className="flex gap-4">
-                        {[1, 2, 3].map((i) => (
-                            <div key={i} className="h-16 bg-gray-100 rounded-lg animate-pulse flex-1" />
-                        ))}
-                    </div>
-                ) : syncStatus ? (
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                        <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
-                            <Clock className="w-5 h-5 text-blue-500 shrink-0" />
-                            <div>
-                                <p className="text-xs text-gray-500">Last Sync</p>
-                                <p className="text-sm font-medium">
-                                    {formatRelativeTime(syncStatus.lastSyncedAt)}
-                                </p>
-                            </div>
-                        </div>
-                        <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
-                            <Database className="w-5 h-5 text-green-500 shrink-0" />
-                            <div>
-                                <p className="text-xs text-gray-500">Total Records</p>
-                                <p className="text-sm font-medium">
-                                    {syncStatus.totalRecords.toLocaleString()}
-                                </p>
-                            </div>
-                        </div>
-                        <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
-                            <LinkIcon className="w-5 h-5 text-amber-500 shrink-0" />
-                            <div>
-                                <p className="text-xs text-gray-500">Date Range</p>
-                                <p className="text-sm font-medium">
-                                    {syncStatus.oldestRecord
-                                        ? new Date(syncStatus.oldestRecord).toLocaleDateString()
-                                        : 'N/A'}
-                                    {' - '}
-                                    {syncStatus.newestRecord
-                                        ? new Date(syncStatus.newestRecord).toLocaleDateString()
-                                        : 'N/A'}
-                                </p>
-                            </div>
-                        </div>
-                    </div>
-                ) : (
-                    <p className="text-sm text-gray-500">No sync data available</p>
-                )}
-            </div>
-
-            {/* Quick Stats */}
-            {stats && (
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                    <div className="bg-white rounded-lg border border-gray-200 p-4">
-                        <div className="flex items-center gap-2 mb-2">
-                            <TrendingUp className="w-4 h-4 text-blue-500" />
-                            <h4 className="text-sm font-medium text-gray-600">Return Rate</h4>
-                        </div>
-                        <p className="text-2xl font-bold text-gray-900">
-                            {stats.total > 0
-                                ? `${((stats.returns / stats.total) * 100).toFixed(1)}%`
-                                : '0%'}
-                        </p>
-                        <p className="text-xs text-gray-500 mt-1">Returns vs total requests</p>
-                    </div>
-                    <div className="bg-white rounded-lg border border-gray-200 p-4">
-                        <div className="flex items-center gap-2 mb-2">
-                            <Timer className="w-4 h-4 text-purple-500" />
-                            <h4 className="text-sm font-medium text-gray-600">Active Requests</h4>
-                        </div>
-                        <p className="text-2xl font-bold text-gray-900">
-                            {stats.pending + stats.approved}
-                        </p>
-                        <p className="text-xs text-gray-500 mt-1">Pending + approved</p>
-                    </div>
-                    <div className="bg-white rounded-lg border border-gray-200 p-4">
-                        <div className="flex items-center gap-2 mb-2">
-                            <Tag className="w-4 h-4 text-orange-500" />
-                            <h4 className="text-sm font-medium text-gray-600">Exchanges</h4>
-                        </div>
-                        <p className="text-2xl font-bold text-gray-900">
-                            {stats.exchanges}
-                        </p>
-                        <p className="text-xs text-gray-500 mt-1">
-                            {stats.total > 0
-                                ? `${((stats.exchanges / stats.total) * 100).toFixed(0)}% of total`
-                                : 'No data'}
-                        </p>
-                    </div>
-                </div>
-            )}
-        </div>
-    );
-}
-
-// ============================================
-// TYPES
-// ============================================
-
-type SyncStatus = {
-    totalRecords: number;
-    lastSyncedAt: string | null;
-    oldestRecord: string | null;
-    newestRecord: string | null;
-};
-
 // ============================================
 // MAIN COMPONENT
 // ============================================
@@ -259,42 +139,151 @@ type SyncStatus = {
 export default function Returns() {
     const search = Route.useSearch();
     const navigate = useNavigate({ from: Route.fullPath });
+    const queryClient = useQueryClient();
 
     // Local state
     const [searchInput, setSearchInput] = useState(search.search || '');
-    const [selectedRequest, setSelectedRequest] = useState<ReturnPrimeRequest | null>(null);
+    const [selectedRpRequest, setSelectedRpRequest] = useState<ReturnPrimeRequest | null>(null);
     const [csvDialogOpen, setCsvDialogOpen] = useState(false);
+    const [refundModalItem, setRefundModalItem] = useState<ServerReturnActionQueueItem | null>(null);
 
-    // Compute API filters from URL search params
+    // ============================================
+    // INTERNAL RETURNS QUERIES
+    // ============================================
+
+    const getActionQueueFn = useServerFn(getLineReturnActionQueue);
+    const { data: actionQueue, isLoading: actionQueueLoading } = useQuery({
+        queryKey: ['returns', 'actionQueue'],
+        queryFn: () => getActionQueueFn(),
+        staleTime: 30 * 1000,
+        enabled: search.tab === 'actions',
+    });
+
+    const getConfigFn = useServerFn(getReturnConfig);
+    const { data: returnConfig, isLoading: configLoading, refetch: refetchConfig } = useQuery({
+        queryKey: ['returns', 'config'],
+        queryFn: () => getConfigFn(),
+        staleTime: 5 * 60 * 1000,
+        enabled: search.tab === 'settings',
+    });
+
+    // ============================================
+    // RETURN PRIME QUERIES (for RP tab)
+    // ============================================
+
     const dateRange = getDateRange(search.datePreset);
-    const filters = {
+    const rpFilters = {
         ...dateRange,
         ...(search.requestType !== 'all' ? { requestType: search.requestType } : {}),
         ...(search.search ? { search: search.search } : {}),
     };
 
-    // ============================================
-    // QUERIES
-    // ============================================
-
     const getDashboardFn = useServerFn(getReturnPrimeDashboard);
-    const { data, isLoading, error, refetch } = useQuery({
-        queryKey: returnPrimeQueryKeys.dashboard(filters),
-        queryFn: () => getDashboardFn({ data: filters }),
+    const { data: rpData, isLoading: rpLoading, refetch: rpRefetch } = useQuery({
+        queryKey: returnPrimeQueryKeys.dashboard(rpFilters),
+        queryFn: () => getDashboardFn({ data: rpFilters }),
         staleTime: 60 * 1000,
-        retry: 2,
-    });
-
-    const getSyncStatusFn = useServerFn(getReturnPrimeSyncStatus);
-    const { data: syncStatus, isLoading: isSyncLoading } = useQuery({
-        queryKey: ['returnPrime', 'syncStatus'],
-        queryFn: () => getSyncStatusFn(),
-        staleTime: 30 * 1000,
-        enabled: search.tab === 'overview',
+        enabled: search.tab === 'return_prime',
     });
 
     // ============================================
-    // MUTATIONS
+    // INTERNAL RETURN MUTATIONS
+    // ============================================
+
+    const schedulePickupFn = useServerFn(scheduleReturnPickup);
+    const schedulePickupMutation = useMutation({
+        mutationFn: (lineId: string) =>
+            schedulePickupFn({ data: { orderLineId: lineId, pickupType: 'manual' } }),
+        onSuccess: () => {
+            toast.success('Pickup scheduled');
+            queryClient.invalidateQueries({ queryKey: ['returns'] });
+        },
+        onError: (err: unknown) =>
+            toast.error(err instanceof Error ? err.message : 'Failed to schedule pickup'),
+    });
+
+    const receiveReturnFn = useServerFn(receiveLineReturn);
+    const receiveMutation = useMutation({
+        mutationFn: ({ lineId, condition }: { lineId: string; condition: 'good' | 'damaged' | 'defective' | 'wrong_item' | 'used' }) =>
+            receiveReturnFn({ data: { orderLineId: lineId, condition } }),
+        onSuccess: () => {
+            toast.success('Return received — item queued for QC');
+            queryClient.invalidateQueries({ queryKey: ['returns'] });
+        },
+        onError: (err: unknown) =>
+            toast.error(err instanceof Error ? err.message : 'Failed to receive return'),
+    });
+
+    const processRefundFn = useServerFn(processLineReturnRefund);
+    const processRefundMutation = useMutation({
+        mutationFn: (params: {
+            orderLineId: string;
+            grossAmount: number;
+            discountClawback: number;
+            deductions: number;
+            deductionNotes?: string;
+            refundMethod?: 'payment_link' | 'bank_transfer' | 'store_credit';
+        }) => processRefundFn({ data: params }),
+        onSuccess: () => {
+            toast.success('Refund processed');
+            setRefundModalItem(null);
+            queryClient.invalidateQueries({ queryKey: ['returns'] });
+        },
+        onError: (err: unknown) =>
+            toast.error(err instanceof Error ? err.message : 'Failed to process refund'),
+    });
+
+    const createExchangeFn = useServerFn(createExchangeOrder);
+    const createExchangeMutation = useMutation({
+        mutationFn: (lineId: string) =>
+            createExchangeFn({ data: { orderLineId: lineId } }),
+        onSuccess: (res) => {
+            if (res.success) {
+                toast.success(`Exchange order created: ${res.data?.exchangeOrderNumber}`);
+            }
+            queryClient.invalidateQueries({ queryKey: ['returns'] });
+        },
+        onError: (err: unknown) =>
+            toast.error(err instanceof Error ? err.message : 'Failed to create exchange'),
+    });
+
+    const completeReturnFn = useServerFn(completeLineReturn);
+    const completeMutation = useMutation({
+        mutationFn: (lineId: string) =>
+            completeReturnFn({ data: { orderLineId: lineId } }),
+        onSuccess: () => {
+            toast.success('Return completed');
+            queryClient.invalidateQueries({ queryKey: ['returns'] });
+        },
+        onError: (err: unknown) =>
+            toast.error(err instanceof Error ? err.message : 'Failed to complete return'),
+    });
+
+    const cancelReturnFn = useServerFn(cancelLineReturn);
+    const cancelMutation = useMutation({
+        mutationFn: (lineId: string) =>
+            cancelReturnFn({ data: { orderLineId: lineId, reason: 'Cancelled by staff' } }),
+        onSuccess: () => {
+            toast.success('Return cancelled');
+            queryClient.invalidateQueries({ queryKey: ['returns'] });
+        },
+        onError: (err: unknown) =>
+            toast.error(err instanceof Error ? err.message : 'Failed to cancel return'),
+    });
+
+    const updateNotesFn = useServerFn(updateReturnNotes);
+    const updateNotesMutation = useMutation({
+        mutationFn: ({ lineId, notes }: { lineId: string; notes: string }) =>
+            updateNotesFn({ data: { orderLineId: lineId, notes } }),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['returns'] });
+        },
+        onError: (err: unknown) =>
+            toast.error(err instanceof Error ? err.message : 'Failed to update notes'),
+    });
+
+    // ============================================
+    // RETURN PRIME MUTATIONS
     // ============================================
 
     const triggerSyncFn = useServerFn(triggerReturnPrimeSync);
@@ -303,7 +292,7 @@ export default function Returns() {
         onSuccess: (res) => {
             if (res.success) {
                 toast.success(res.message);
-                refetch();
+                rpRefetch();
             } else {
                 toast.error(res.message);
             }
@@ -320,12 +309,11 @@ export default function Returns() {
                     toast.info('All return statuses are already in sync');
                 } else {
                     toast.info(`Preview: ${res.message}. Run again to apply.`);
-                    // Auto-run the real update
                     autoCompleteMutation.mutate(false);
                 }
             } else {
                 toast.success(res.message);
-                refetch();
+                rpRefetch();
             }
         },
         onError: () => toast.error('Auto-complete failed'),
@@ -334,6 +322,18 @@ export default function Returns() {
     // ============================================
     // HANDLERS
     // ============================================
+
+    const handleTabChange = useCallback(
+        (value: string) => {
+            navigate({
+                search: (prev) => ({
+                    ...prev,
+                    tab: value as 'actions' | 'all' | 'return_prime' | 'analytics' | 'settings',
+                }),
+            });
+        },
+        [navigate]
+    );
 
     const handleSearch = useCallback(() => {
         navigate({
@@ -372,41 +372,30 @@ export default function Returns() {
         [navigate]
     );
 
-    const handleTabChange = useCallback(
-        (value: string) => {
-            navigate({
-                search: (prev) => ({
-                    ...prev,
-                    tab: value as 'overview' | 'returns' | 'analytics',
-                }),
+    const handleProcessRefund = useCallback((_lineId: string, item: ServerReturnActionQueueItem) => {
+        setRefundModalItem(item);
+    }, []);
+
+    const handleRefundSubmit = useCallback(
+        (
+            lineId: string,
+            grossAmount: number,
+            discountClawback: number,
+            deductions: number,
+            deductionNotes?: string,
+            refundMethod?: 'payment_link' | 'bank_transfer' | 'store_credit'
+        ) => {
+            processRefundMutation.mutate({
+                orderLineId: lineId,
+                grossAmount,
+                discountClawback,
+                deductions,
+                deductionNotes,
+                refundMethod,
             });
         },
-        [navigate]
+        [processRefundMutation]
     );
-
-    // ============================================
-    // ERROR STATE
-    // ============================================
-
-    if (error) {
-        return (
-            <div className="p-6">
-                <div className="bg-red-50 border border-red-200 rounded-lg p-6 text-center">
-                    <AlertCircle className="w-12 h-12 text-red-400 mx-auto mb-3" />
-                    <h3 className="text-lg font-semibold text-red-800 mb-2">
-                        Failed to load returns data
-                    </h3>
-                    <p className="text-red-600 mb-4">
-                        {error instanceof Error ? error.message : 'Unknown error occurred'}
-                    </p>
-                    <Button onClick={() => refetch()} variant="outline">
-                        <RefreshCw className="w-4 h-4 mr-2" />
-                        Try again
-                    </Button>
-                </div>
-            </div>
-        );
-    }
 
     // ============================================
     // RENDER
@@ -419,86 +408,100 @@ export default function Returns() {
                 <div>
                     <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Returns</h1>
                     <p className="text-sm text-gray-500 mt-1">
-                        Customer returns and exchanges synced from Return Prime
+                        Returns & exchanges management
                     </p>
                 </div>
-                <div className="flex flex-wrap gap-2">
-                    <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => autoCompleteMutation.mutate(true)}
-                        disabled={autoCompleteMutation.isPending}
-                    >
-                        <CheckCircle2 className={`w-4 h-4 mr-2 ${autoCompleteMutation.isPending ? 'animate-pulse' : ''}`} />
-                        <span className="hidden sm:inline">Sync Statuses</span>
-                        <span className="sm:hidden">Sync</span>
-                    </Button>
-                    <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setCsvDialogOpen(true)}
-                    >
-                        <Upload className="w-4 h-4 mr-2" />
-                        <span className="hidden sm:inline">Upload CSV</span>
-                        <span className="sm:hidden">CSV</span>
-                    </Button>
-                    <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => syncMutation.mutate()}
-                        disabled={syncMutation.isPending}
-                    >
-                        <Download className={`w-4 h-4 mr-2 ${syncMutation.isPending ? 'animate-pulse' : ''}`} />
-                        {syncMutation.isPending ? 'Syncing...' : 'Sync from RP'}
-                    </Button>
-                    <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => refetch()}
-                        disabled={isLoading}
-                    >
-                        <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
-                    </Button>
-                </div>
+                {/* RP-specific actions (only show on RP tab) */}
+                {search.tab === 'return_prime' && (
+                    <div className="flex flex-wrap gap-2">
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => autoCompleteMutation.mutate(true)}
+                            disabled={autoCompleteMutation.isPending}
+                        >
+                            <CheckCircle2 className={`w-4 h-4 mr-2 ${autoCompleteMutation.isPending ? 'animate-pulse' : ''}`} />
+                            <span className="hidden sm:inline">Sync Statuses</span>
+                            <span className="sm:hidden">Sync</span>
+                        </Button>
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setCsvDialogOpen(true)}
+                        >
+                            <Upload className="w-4 h-4 mr-2" />
+                            <span className="hidden sm:inline">Upload CSV</span>
+                            <span className="sm:hidden">CSV</span>
+                        </Button>
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => syncMutation.mutate()}
+                            disabled={syncMutation.isPending}
+                        >
+                            <Download className={`w-4 h-4 mr-2 ${syncMutation.isPending ? 'animate-pulse' : ''}`} />
+                            {syncMutation.isPending ? 'Syncing...' : 'Sync from RP'}
+                        </Button>
+                    </div>
+                )}
             </div>
 
             {/* Tabs */}
             <Tabs value={search.tab} onValueChange={handleTabChange}>
                 <TabsList>
-                    <TabsTrigger value="overview" className="flex items-center gap-1.5">
-                        <LayoutDashboard className="w-4 h-4" />
-                        Overview
+                    <TabsTrigger value="actions" className="flex items-center gap-1.5">
+                        <ListTodo className="w-4 h-4" />
+                        Action Queue
+                        {actionQueue && actionQueue.length > 0 && (
+                            <Badge variant="secondary" className="ml-1 text-xs">
+                                {actionQueue.length}
+                            </Badge>
+                        )}
                     </TabsTrigger>
-                    <TabsTrigger value="returns" className="flex items-center gap-1.5">
+                    <TabsTrigger value="all" className="flex items-center gap-1.5">
                         <Package className="w-4 h-4" />
                         All Returns
-                        {data?.stats?.total ? (
-                            <Badge variant="secondary" className="ml-1 text-xs">
-                                {data.stats.total}
-                            </Badge>
-                        ) : null}
+                    </TabsTrigger>
+                    <TabsTrigger value="return_prime" className="flex items-center gap-1.5">
+                        <Inbox className="w-4 h-4" />
+                        Return Prime
                     </TabsTrigger>
                     <TabsTrigger value="analytics" className="flex items-center gap-1.5">
                         <BarChart3 className="w-4 h-4" />
                         Analytics
                     </TabsTrigger>
+                    <TabsTrigger value="settings" className="flex items-center gap-1.5">
+                        <Settings className="w-4 h-4" />
+                        Settings
+                    </TabsTrigger>
                 </TabsList>
 
-                {/* Overview Tab */}
-                <TabsContent value="overview" className="mt-4">
-                    <OverviewTab
-                        stats={data?.stats}
-                        syncStatus={syncStatus}
-                        isLoading={isLoading}
-                        isSyncLoading={isSyncLoading}
+                {/* Action Queue Tab */}
+                <TabsContent value="actions" className="mt-4">
+                    <ActionQueueTab
+                        items={actionQueue || []}
+                        loading={actionQueueLoading}
+                        onSchedulePickup={(lineId) => schedulePickupMutation.mutate(lineId)}
+                        onReceive={(lineId, condition) => receiveMutation.mutate({ lineId, condition })}
+                        onProcessRefund={handleProcessRefund}
+                        onCreateExchange={(lineId) => createExchangeMutation.mutate(lineId)}
+                        onComplete={(lineId) => completeMutation.mutate(lineId)}
+                        onCancel={(lineId) => {
+                            if (confirm('Cancel this return?')) cancelMutation.mutate(lineId);
+                        }}
+                        onUpdateNotes={(lineId, notes) => updateNotesMutation.mutate({ lineId, notes })}
                     />
                 </TabsContent>
 
                 {/* All Returns Tab */}
-                <TabsContent value="returns" className="mt-4 space-y-4">
-                    {/* Filters Bar */}
+                <TabsContent value="all" className="mt-4">
+                    <AllReturnsTab />
+                </TabsContent>
+
+                {/* Return Prime Tab */}
+                <TabsContent value="return_prime" className="mt-4 space-y-4">
+                    {/* RP Filters Bar */}
                     <div className="flex flex-col sm:flex-row gap-3 p-4 bg-white rounded-lg border border-gray-200">
-                        {/* Search */}
                         <div className="flex-1 flex gap-2">
                             <div className="relative flex-1">
                                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -515,8 +518,6 @@ export default function Returns() {
                                 Search
                             </Button>
                         </div>
-
-                        {/* Type Filter */}
                         <Select value={search.requestType} onValueChange={handleTypeChange}>
                             <SelectTrigger className="w-[140px]">
                                 <Filter className="w-4 h-4 mr-2" />
@@ -528,8 +529,6 @@ export default function Returns() {
                                 <SelectItem value="exchange">Exchanges</SelectItem>
                             </SelectContent>
                         </Select>
-
-                        {/* Date Range */}
                         <Select value={search.datePreset} onValueChange={handleDatePresetChange}>
                             <SelectTrigger className="w-[150px]">
                                 <Calendar className="w-4 h-4 mr-2" />
@@ -543,19 +542,29 @@ export default function Returns() {
                                 ))}
                             </SelectContent>
                         </Select>
+                        <Button
+                            variant="outline"
+                            size="icon"
+                            onClick={() => rpRefetch()}
+                            disabled={rpLoading}
+                        >
+                            <RefreshCw className={`w-4 h-4 ${rpLoading ? 'animate-spin' : ''}`} />
+                        </Button>
                     </div>
 
-                    {/* Table */}
+                    {/* RP Stats */}
+                    <ReturnPrimeStatsCards stats={rpData?.stats} isLoading={rpLoading} />
+
+                    {/* RP Table */}
                     <ReturnPrimeTable
-                        requests={data?.requests || []}
-                        isLoading={isLoading}
-                        onRowClick={setSelectedRequest}
+                        requests={rpData?.requests || []}
+                        isLoading={rpLoading}
+                        onRowClick={setSelectedRpRequest}
                     />
                 </TabsContent>
 
                 {/* Analytics Tab */}
                 <TabsContent value="analytics" className="mt-4 space-y-4">
-                    {/* Date filter for analytics */}
                     <div className="flex items-center gap-3 p-4 bg-white rounded-lg border border-gray-200">
                         <span className="text-sm text-gray-600 font-medium">Period:</span>
                         <Select value={search.datePreset} onValueChange={handleDatePresetChange}>
@@ -572,25 +581,42 @@ export default function Returns() {
                             </SelectContent>
                         </Select>
                     </div>
-
                     <AnalyticsTab period={search.datePreset} />
+                </TabsContent>
+
+                {/* Settings Tab */}
+                <TabsContent value="settings" className="mt-4">
+                    <SettingsTab
+                        config={returnConfig}
+                        loading={configLoading}
+                        onRefresh={() => refetchConfig()}
+                    />
                 </TabsContent>
             </Tabs>
 
-            {/* Detail Modal */}
+            {/* Refund Modal */}
+            {refundModalItem && (
+                <ProcessRefundModal
+                    item={refundModalItem}
+                    onSubmit={handleRefundSubmit}
+                    onClose={() => setRefundModalItem(null)}
+                />
+            )}
+
+            {/* Return Prime Detail Modal */}
             <ReturnPrimeDetailModal
-                request={selectedRequest}
-                open={!!selectedRequest}
+                request={selectedRpRequest}
+                open={!!selectedRpRequest}
                 onOpenChange={(open) => {
-                    if (!open) setSelectedRequest(null);
+                    if (!open) setSelectedRpRequest(null);
                 }}
             />
 
-            {/* CSV Enrichment Dialog */}
+            {/* Return Prime CSV Dialog */}
             <ReturnPrimeCsvEnrichmentDialog
                 open={csvDialogOpen}
                 onOpenChange={setCsvDialogOpen}
-                onImported={() => refetch()}
+                onImported={() => rpRefetch()}
             />
         </div>
     );

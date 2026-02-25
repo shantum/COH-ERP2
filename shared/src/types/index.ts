@@ -275,10 +275,14 @@ export interface OrderLine {
   returnReceivedAt?: string | null;
   returnCondition?: string | null; // 'good'|'damaged'|'defective'|'wrong_item'|'used'
   returnConditionNotes?: string | null;
+  returnQcResult?: string | null; // 'approved'|'written_off' — from repacking QC cascade
   returnPickupAt?: string | null; // When pickup actually occurred
   returnExchangeOrderId?: string | null;
   returnExchangeSkuId?: string | null; // SKU they're exchanging to
+  returnExchangePriceDiff?: number | null; // Price difference for exchange
   returnRefundCompletedAt?: string | null; // When refund was completed
+  returnNetAmount?: number | null; // Net refund amount
+  returnRefundMethod?: string | null; // 'payment_link'|'bank_transfer'|'store_credit'
   returnNotes?: string | null; // Internal notes about the return
   sku?: Sku;
   productionBatch?: ProductionBatch;

@@ -51,6 +51,13 @@ interface SSEEvent {
         | 'production_batch_created'
         | 'production_batch_updated'
         | 'production_batch_deleted'
+        // Return events
+        | 'return_initiated'
+        | 'return_status_updated'
+        | 'return_refund_processed'
+        | 'return_exchange_created'
+        | 'return_completed'
+        | 'return_cancelled'
         // Buffer overflow (client should refetch)
         | 'buffer_overflow';
     view?: string;
@@ -228,6 +235,12 @@ export function useOrderSSE({
             if (data.type === 'connected') {
                 console.log('SSE: Connected to real-time updates');
                 reconnectAttempts.current = 0;
+                return;
+            }
+
+            // Handle return events — invalidate all return queries
+            if (data.type.startsWith('return_')) {
+                queryClient.invalidateQueries({ queryKey: ['returns'] });
                 return;
             }
 

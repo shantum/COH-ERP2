@@ -66,6 +66,7 @@ export const RETURN_STATUSES = {
     pickup_scheduled: 'Pickup Scheduled',
     in_transit: 'In Transit',
     received: 'Received',
+    qc_inspected: 'QC Inspected',
     complete: 'Complete',
     cancelled: 'Cancelled',
 } as const satisfies Record<z.infer<typeof LineReturnStatusSchema>, string>;

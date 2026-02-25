@@ -169,13 +169,17 @@ export type ProductionSearchParams = z.infer<typeof ProductionSearchParams>;
  */
 export const ReturnsSearchParams = z.object({
     /** Active tab */
-    tab: z.enum(['overview', 'returns', 'analytics']).catch('overview'),
-    /** Filter by request type */
+    tab: z.enum(['actions', 'all', 'return_prime', 'analytics', 'settings']).catch('actions'),
+    /** Filter by request type (Return Prime tab) */
     requestType: z.enum(['all', 'return', 'exchange']).catch('all'),
-    /** Search query (order, email, phone, RET/EXC number) */
+    /** Search query */
     search: z.string().optional().catch(undefined),
     /** Date range preset */
     datePreset: z.enum(['7d', '30d', '90d', '1y', 'all']).catch('30d'),
+    /** Status filter (All Returns tab) */
+    status: z.string().optional().catch(undefined),
+    /** Resolution filter (All Returns tab) */
+    resolution: z.string().optional().catch(undefined),
 });
 export type ReturnsSearchParams = z.infer<typeof ReturnsSearchParams>;
 

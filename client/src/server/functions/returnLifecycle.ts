@@ -34,6 +34,30 @@ import {
     type ReturnResult,
 } from '@coh/shared/errors';
 
+// ============================================
+// SSE BROADCAST HELPER
+// ============================================
+
+async function broadcastReturnUpdate(
+    type: string,
+    data: Record<string, unknown>,
+    excludeUserId: string
+): Promise<void> {
+    try {
+        const baseUrl = getInternalApiBaseUrl();
+        await fetch(`${baseUrl}/api/internal/sse-broadcast`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                event: { type, ...data },
+                excludeUserId,
+            }),
+        });
+    } catch {
+        // Non-critical — fire and forget
+    }
+}
+
 /**
  * Generate the next batch number for an order
  * Format: "{orderNumber}/{sequence}" e.g., "64168/1", "64168/2"
@@ -66,11 +90,28 @@ export const initiateLineReturn = createServerFn({ method: 'POST' })
         const prisma = await getPrisma();
         const { lines, returnReasonCategory, returnReasonDetail, returnResolution, returnNotes, exchangeSkuId, pickupType } = data;
 
+        // Exchange resolution requires exchangeSkuId
+        if (returnResolution === 'exchange' && !exchangeSkuId) {
+            return returnError(
+                RETURN_ERROR_CODES.EXCHANGE_SKU_NOT_FOUND,
+                'Exchange SKU is required when resolution is exchange'
+            );
+        }
+
         const orderLines = await prisma.orderLine.findMany({
             where: { id: { in: lines.map(l => l.orderLineId) } },
             include: {
                 order: true,
-                sku: true,
+                sku: {
+                    include: {
+                        variation: {
+                            select: {
+                                id: true,
+                                product: { select: { isReturnable: true, nonReturnableReason: true } },
+                            },
+                        },
+                    },
+                },
             },
         });
 
@@ -86,6 +127,7 @@ export const initiateLineReturn = createServerFn({ method: 'POST' })
             );
         }
 
+        // Validate active return status
         for (const line of orderLines) {
             if (line.returnStatus && !['cancelled', 'complete'].includes(line.returnStatus)) {
                 return returnError(
@@ -95,6 +137,7 @@ export const initiateLineReturn = createServerFn({ method: 'POST' })
             }
         }
 
+        // Validate quantities
         const qtyMap = new Map(lines.map(l => [l.orderLineId, l.returnQty]));
         for (const line of orderLines) {
             const returnQty = qtyMap.get(line.id) || line.qty;
@@ -106,14 +149,52 @@ export const initiateLineReturn = createServerFn({ method: 'POST' })
             }
         }
 
+        // Server-side eligibility enforcement (1C)
+        const { checkEligibility } = await import('@coh/shared/domain/returns/eligibility.js');
+        let eligibilitySettings: { windowDays: number; windowWarningDays: number } | undefined;
+        const dbSettings = await prisma.returnSettings.findUnique({ where: { id: 'default' } });
+        if (dbSettings) {
+            eligibilitySettings = { windowDays: dbSettings.windowDays, windowWarningDays: dbSettings.windowWarningDays };
+        }
+
+        for (const line of orderLines) {
+            const result = checkEligibility({
+                deliveredAt: line.deliveredAt ?? null,
+                returnStatus: line.returnStatus,
+                isNonReturnable: line.isNonReturnable,
+                productIsReturnable: line.sku.variation?.product?.isReturnable ?? true,
+                productNonReturnableReason: line.sku.variation?.product?.nonReturnableReason ?? null,
+            }, eligibilitySettings);
+
+            // Block hard ineligible (already_active, line_blocked, not_delivered)
+            if (!result.eligible && result.reason !== 'expired_override') {
+                return returnError(RETURN_ERROR_CODES.WINDOW_EXPIRED, `${line.sku.skuCode}: ${result.reason}`);
+            }
+            // expired_override is allowed (staff can override) — eligibility returns eligible=true with reason='expired_override'
+        }
+
+        // Validate and capture exchange SKU + price diff at initiation
+        let exchangePriceDiff: number | null = null;
+        let exchangeSkuVariationId: string | null = null;
         if (returnResolution === 'exchange' && exchangeSkuId) {
             const exchangeSku = await prisma.sku.findUnique({
                 where: { id: exchangeSkuId },
-                select: { id: true },
+                select: { id: true, skuCode: true, mrp: true, variationId: true },
             });
             if (!exchangeSku) {
                 return returnError(RETURN_ERROR_CODES.EXCHANGE_SKU_NOT_FOUND);
             }
+            exchangeSkuVariationId = exchangeSku.variationId;
+
+            // Calculate price diff per line (using first line's pricing as representative)
+            const firstLine = orderLines[0];
+            const firstLineReturnQty = qtyMap.get(firstLine.id) || firstLine.qty;
+            const originalValue = firstLine.unitPrice * firstLineReturnQty;
+            // Same product (same variation) = honour original discount; different product = MRP
+            const isSameProduct = firstLine.sku.variationId === exchangeSkuVariationId;
+            const exchangeUnitPrice = isSameProduct ? firstLine.unitPrice : exchangeSku.mrp;
+            const exchangeValue = exchangeUnitPrice * firstLineReturnQty;
+            exchangePriceDiff = exchangeValue - originalValue;
         }
 
         const order = orderLines[0].order;
@@ -137,7 +218,10 @@ export const initiateLineReturn = createServerFn({ method: 'POST' })
                         returnResolution,
                         returnNotes: returnNotes || null,
                         returnExchangeSkuId: exchangeSkuId || null,
+                        ...(exchangePriceDiff !== null ? { returnExchangePriceDiff: exchangePriceDiff } : {}),
                         returnPickupType: pickupType || null,
+                        // Reset QC fields from any previous return
+                        returnQcResult: null,
                     },
                 });
 
@@ -156,13 +240,54 @@ export const initiateLineReturn = createServerFn({ method: 'POST' })
         });
 
         const skuCodes = orderLines.map((l: typeof orderLines[number]) => l.sku.skuCode).join(', ');
+        let exchangeOrderNumber: string | undefined;
+
+        // Immediately create exchange order at initiation (JIT production needs lead time)
+        if (returnResolution === 'exchange' && exchangeSkuId) {
+            try {
+                const { createExchangeOrder } = await import('./returnResolution');
+                // Use first line as the anchor for the exchange order
+                const firstLineId = orderLines[0].id;
+                const firstLineReturnQty = qtyMap.get(firstLineId) || orderLines[0].qty;
+                const exchangeResult = await createExchangeOrder({
+                    data: {
+                        orderLineId: firstLineId,
+                        exchangeSkuId,
+                        exchangeQty: firstLineReturnQty,
+                    },
+                });
+
+                if (exchangeResult.success && exchangeResult.data) {
+                    exchangeOrderNumber = exchangeResult.data.exchangeOrderNumber;
+                } else {
+                    console.warn('[initiateLineReturn] Exchange order creation failed:', exchangeResult);
+                }
+            } catch (exchangeError: unknown) {
+                console.error('[initiateLineReturn] Exchange order error:', exchangeError);
+                // Non-fatal: return batch is created, exchange can be retried manually
+            }
+        }
+
+        // SSE broadcast
+        broadcastReturnUpdate('return_initiated', {
+            orderLineIds: orderLines.map((l: typeof orderLines[number]) => l.id),
+            batchNumber,
+            orderId: order.id,
+            ...(exchangeOrderNumber ? { exchangeOrderNumber } : {}),
+        }, context.user.id);
+
+        const message = exchangeOrderNumber
+            ? `Return batch ${batchNumber} created for ${skuCodes} — exchange order ${exchangeOrderNumber} sent to production`
+            : `Return batch ${batchNumber} created for ${skuCodes}`;
+
         return returnSuccess(
             {
                 batchNumber,
                 lineCount: orderLines.length,
                 orderLineIds: orderLines.map((l: typeof orderLines[number]) => l.id),
+                ...(exchangeOrderNumber ? { exchangeOrderNumber } : {}),
             },
-            `Return batch ${batchNumber} created for ${skuCodes}`
+            message
         );
         } catch (error: unknown) {
             console.error('[initiateLineReturn] Error:', error);
@@ -266,16 +391,37 @@ export const scheduleReturnPickup = createServerFn({ method: 'POST' })
             }
         }
 
-        await prisma.orderLine.update({
-            where: { id: orderLineId },
-            data: {
-                returnStatus: 'pickup_scheduled',
-                returnPickupType: pickupType,
-                returnCourier: courier || null,
-                returnAwbNumber: awbNumber || null,
-                returnPickupScheduledAt: scheduledAt || new Date(),
-            },
-        });
+        // Manual pickup — update all lines in batch (1F fix)
+        const pickupData = {
+            returnStatus: 'pickup_scheduled' as const,
+            returnPickupType: pickupType,
+            returnCourier: courier || null,
+            returnAwbNumber: awbNumber || null,
+            returnPickupScheduledAt: scheduledAt || new Date(),
+        };
+
+        if (line.returnBatchNumber) {
+            // Update all batch siblings still in 'requested' status
+            await prisma.orderLine.updateMany({
+                where: {
+                    returnBatchNumber: line.returnBatchNumber,
+                    returnStatus: 'requested',
+                },
+                data: pickupData,
+            });
+        } else {
+            await prisma.orderLine.update({
+                where: { id: orderLineId },
+                data: pickupData,
+            });
+        }
+
+        // SSE broadcast
+        broadcastReturnUpdate('return_status_updated', {
+            lineId: orderLineId,
+            batchNumber: line.returnBatchNumber,
+            changes: { returnStatus: 'pickup_scheduled' },
+        }, '');
 
         return returnSuccess(
             {
@@ -326,6 +472,11 @@ export const markReturnInTransit = createServerFn({ method: 'POST' })
             where: { id: orderLineId },
             data: updateData,
         });
+
+        broadcastReturnUpdate('return_status_updated', {
+            lineId: orderLineId,
+            changes: { returnStatus: 'in_transit' },
+        }, '');
 
         return returnSuccess({ orderLineId }, 'Marked as in transit');
     });
@@ -388,6 +539,11 @@ export const receiveLineReturn = createServerFn({ method: 'POST' })
             });
         });
 
+        broadcastReturnUpdate('return_status_updated', {
+            lineId: orderLineId,
+            changes: { returnStatus: 'received' },
+        }, context.user.id);
+
         return returnSuccess({ orderLineId }, 'Return received and added to QC queue');
     });
 
@@ -410,6 +566,7 @@ export const cancelLineReturn = createServerFn({ method: 'POST' })
                 id: true,
                 returnStatus: true,
                 returnQty: true,
+                returnBatchNumber: true,
                 skuId: true,
                 order: { select: { customerId: true } },
             },
@@ -436,11 +593,26 @@ export const cancelLineReturn = createServerFn({ method: 'POST' })
                 },
             });
 
+            // Fix 1B: Only decrement customer.returnCount when this is the LAST active line in the batch
+            // (Initiation increments by 1 per batch, so cancellation should only decrement when batch is fully cancelled)
             if (line.order.customerId) {
-                await tx.customer.update({
-                    where: { id: line.order.customerId },
-                    data: { returnCount: { decrement: 1 } },
-                });
+                let shouldDecrementCustomer = true;
+                if (line.returnBatchNumber) {
+                    const otherActiveInBatch = await tx.orderLine.count({
+                        where: {
+                            returnBatchNumber: line.returnBatchNumber,
+                            id: { not: orderLineId },
+                            returnStatus: { notIn: ['cancelled', 'complete'] },
+                        },
+                    });
+                    shouldDecrementCustomer = otherActiveInBatch === 0;
+                }
+                if (shouldDecrementCustomer) {
+                    await tx.customer.update({
+                        where: { id: line.order.customerId },
+                        data: { returnCount: { decrement: 1 } },
+                    });
+                }
             }
 
             await tx.sku.update({
@@ -448,6 +620,11 @@ export const cancelLineReturn = createServerFn({ method: 'POST' })
                 data: { returnCount: { decrement: line.returnQty || 1 } },
             });
         });
+
+        broadcastReturnUpdate('return_cancelled', {
+            lineId: orderLineId,
+            batchNumber: line.returnBatchNumber,
+        }, context.user.id);
 
         return returnSuccess({ orderLineId }, 'Return cancelled');
     });
@@ -462,6 +639,24 @@ export const closeLineReturnManually = createServerFn({ method: 'POST' })
         const prisma = await getPrisma();
         const { orderLineId, reason } = data;
 
+        // Validate line exists and has active return (1G fix)
+        const line = await prisma.orderLine.findUnique({
+            where: { id: orderLineId },
+            select: { id: true, returnStatus: true },
+        });
+
+        if (!line) {
+            return returnError(RETURN_ERROR_CODES.LINE_NOT_FOUND);
+        }
+
+        if (!line.returnStatus) {
+            return returnError(RETURN_ERROR_CODES.NO_ACTIVE_RETURN, 'No return to close');
+        }
+
+        if (['complete', 'cancelled'].includes(line.returnStatus)) {
+            return returnError(RETURN_ERROR_CODES.ALREADY_TERMINAL);
+        }
+
         await prisma.orderLine.update({
             where: { id: orderLineId },
             data: {
@@ -472,6 +667,8 @@ export const closeLineReturnManually = createServerFn({ method: 'POST' })
                 returnClosedReason: reason,
             },
         });
+
+        broadcastReturnUpdate('return_completed', { lineId: orderLineId }, context.user.id);
 
         return returnSuccess({ orderLineId }, 'Return closed manually');
     });

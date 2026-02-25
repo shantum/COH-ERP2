@@ -3,6 +3,7 @@ import {
     Package, Truck, Check,
     PackageCheck, DollarSign, XCircle,
     MessageSquare, Pencil, Save, CheckCircle, ArrowRight,
+    Clock, ExternalLink, AlertTriangle,
 } from 'lucide-react';
 import type { ReturnActionQueueItem as ServerReturnActionQueueItem } from '@coh/shared/schemas/returns';
 import { getStatusBadge, getResolutionBadge, conditionOptions } from '../types';
@@ -159,6 +160,30 @@ export function ActionQueueTab({
                                                 <span className={`px-2 py-0.5 text-xs font-medium rounded ${getResolutionBadge(item.returnResolution).color}`}>
                                                     {getResolutionBadge(item.returnResolution).label}
                                                 </span>
+                                                {item.returnQcResult && (
+                                                    <span className={`px-2 py-0.5 text-xs font-medium rounded ${
+                                                        item.returnQcResult === 'approved'
+                                                            ? 'bg-green-100 text-green-700'
+                                                            : 'bg-red-100 text-red-700'
+                                                    }`}>
+                                                        QC: {item.returnQcResult === 'approved' ? 'Approved' : 'Written Off'}
+                                                    </span>
+                                                )}
+                                                {item.returnQcResult === 'written_off' && item.returnResolution === 'exchange' && (
+                                                    <span className="px-2 py-0.5 text-xs bg-orange-100 text-orange-700 rounded flex items-center gap-1">
+                                                        <AlertTriangle size={10} />
+                                                        QC failed — review exchange
+                                                    </span>
+                                                )}
+                                                {item.returnExchangeOrderId && (
+                                                    <a
+                                                        href={`/orders?modal=view&orderId=${item.returnExchangeOrderId}`}
+                                                        className="px-2 py-0.5 text-xs bg-blue-100 text-blue-700 rounded flex items-center gap-1 hover:bg-blue-200"
+                                                    >
+                                                        <ExternalLink size={10} />
+                                                        Exchange: {item.returnExchangeOrderNumber || 'View'}
+                                                    </a>
+                                                )}
                                                 {item.returnAwbNumber && (
                                                     <span className="px-2 py-0.5 text-xs bg-gray-100 text-gray-600 rounded">
                                                         AWB: {item.returnAwbNumber}
@@ -246,6 +271,13 @@ export function ActionQueueTab({
                                                     <DollarSign size={14} />
                                                     Process Refund
                                                 </button>
+                                            )}
+
+                                            {item.actionNeeded === 'awaiting_qc' && (
+                                                <span className="px-3 py-1.5 bg-amber-50 text-amber-700 rounded-lg flex items-center gap-1.5 text-sm font-medium border border-amber-200">
+                                                    <Clock size={14} />
+                                                    Awaiting QC
+                                                </span>
                                             )}
 
                                             {item.actionNeeded === 'create_exchange' && (

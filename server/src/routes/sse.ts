@@ -47,6 +47,13 @@ export interface OrderUpdateEvent {
         | 'production_batch_created'
         | 'production_batch_updated'
         | 'production_batch_deleted'
+        // Return events
+        | 'return_initiated'
+        | 'return_status_updated'
+        | 'return_refund_processed'
+        | 'return_exchange_created'
+        | 'return_completed'
+        | 'return_cancelled'
         // Buffer overflow (client should refetch)
         | 'buffer_overflow';
     view?: string;

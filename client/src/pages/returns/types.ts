@@ -64,6 +64,7 @@ export const getStatusBadge = (status: string) => {
         pickup_scheduled: 'bg-blue-100 text-blue-800',
         in_transit: 'bg-purple-100 text-purple-800',
         received: 'bg-green-100 text-green-800',
+        qc_inspected: 'bg-teal-100 text-teal-800',
         complete: 'bg-gray-100 text-gray-800',
         cancelled: 'bg-red-100 text-red-800',
     };

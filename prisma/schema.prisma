@@ -490,6 +490,7 @@ model Customer {
   orderCount        Int             @default(0)  // Denormalized count of non-cancelled orders (for fast stats lookup)
   tier              String          @default("bronze")
   ltv               Int             @default(0)  // Stored LTV, updated incrementally on order changes
+  storeCreditBalance Decimal        @default(0)  @db.Decimal(12, 2) // Store credit from return refunds
   feedback          Feedback[]
   orders            Order[]
   financeInvoices   Invoice[] @relation("InvoiceCustomer")
