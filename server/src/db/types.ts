@@ -240,6 +240,18 @@ export type Employee = {
     employeeCode: string | null;
     phone: string | null;
     email: string | null;
+    /**
+     * Personal details (compliance: PF Form 11, ESIC Form 1)
+     */
+    dateOfBirth: Timestamp | null;
+    gender: string | null;
+    fatherOrSpouseName: string | null;
+    maritalStatus: string | null;
+    currentAddress: string | null;
+    permanentAddress: string | null;
+    emergencyContactName: string | null;
+    emergencyContactPhone: string | null;
+    emergencyContactRelation: string | null;
     dateOfJoining: Timestamp | null;
     dateOfExit: Timestamp | null;
     department: string;
@@ -267,6 +279,7 @@ export type Employee = {
     pan: string | null;
     aadhaar: string | null;
     uan: string | null;
+    pfNumber: string | null;
     esicNumber: string | null;
     /**
      * Links to other models
@@ -1109,6 +1122,18 @@ export type Role = {
     createdAt: Generated<Timestamp>;
     updatedAt: Timestamp;
 };
+export type SalaryRevision = {
+    id: Generated<string>;
+    employeeId: string;
+    basicSalary: number;
+    pfApplicable: boolean;
+    esicApplicable: boolean;
+    ptApplicable: boolean;
+    effectiveFrom: Timestamp;
+    reason: string | null;
+    createdById: string;
+    createdAt: Generated<Timestamp>;
+};
 export type ServiceItem = {
     id: Generated<string>;
     code: string;
@@ -1500,6 +1525,7 @@ export type DB = {
     ReturnPrimeRequest: ReturnPrimeRequest;
     ReturnSettings: ReturnSettings;
     Role: Role;
+    SalaryRevision: SalaryRevision;
     ServiceItem: ServiceItem;
     ShopifyInventoryCache: ShopifyInventoryCache;
     ShopifyOrderCache: ShopifyOrderCache;

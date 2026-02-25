@@ -67,6 +67,7 @@ model User {
   transactionTypeChangeLogs TransactionTypeChangeLog[] @relation("TxnTypeChangeUser")
   partyChangeLogs           PartyChangeLog[]           @relation("PartyChangeUser")
   leaveRecordsCreated       LeaveRecord[]              @relation("LeaveRecordCreator")
+  salaryRevisions           SalaryRevision[]           @relation("SalaryRevisionCreator")
 
   @@index([roleId])
 }
@@ -2030,10 +2031,21 @@ model WorkerRun {
 /// Employee record with salary structure and statutory details
 model Employee {
   id               String    @id @default(uuid())
-  name             String    @unique
+  name             String
   employeeCode     String?
   phone            String?
   email            String?
+
+  /// Personal details (compliance: PF Form 11, ESIC Form 1)
+  dateOfBirth              DateTime?
+  gender                   String?   // male, female, other
+  fatherOrSpouseName       String?
+  maritalStatus            String?   // single, married, divorced, widowed
+  currentAddress           String?   @db.Text
+  permanentAddress         String?   @db.Text
+  emergencyContactName     String?
+  emergencyContactPhone    String?
+  emergencyContactRelation String?
 
   dateOfJoining    DateTime?
   dateOfExit       DateTime?
@@ -2059,6 +2071,7 @@ model Employee {
   pan              String?
   aadhaar          String?
   uan              String?
+  pfNumber         String?   // PF member ID (distinct from UAN)
   esicNumber       String?
 
   /// Links to other models
@@ -2074,9 +2087,31 @@ model Employee {
   payrollSlips      PayrollSlip[]
   leaveRecords      LeaveRecord[]
   attendanceRecords AttendanceRecord[]
+  salaryRevisions   SalaryRevision[]
 
   @@index([department])
   @@index([isActive])
+}
+
+/// Salary revision audit trail — auto-created when salary or statutory flags change
+model SalaryRevision {
+  id              String    @id @default(uuid())
+  employeeId      String
+  basicSalary     Float
+  pfApplicable    Boolean
+  esicApplicable  Boolean
+  ptApplicable    Boolean
+  effectiveFrom   DateTime
+  reason          String?
+  createdById     String
+  createdAt       DateTime  @default(now())
+
+  employee        Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  createdBy       User      @relation("SalaryRevisionCreator", fields: [createdById], references: [id])
+
+  @@index([employeeId])
+  @@index([effectiveFrom])
+  @@index([createdById])
 }
 
 /// Exception-based leave record — only absences and half-days are stored

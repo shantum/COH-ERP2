@@ -48,14 +48,23 @@ export const ESIC_EMPLOYER_PERCENT = 3.25;
 export const ESIC_GROSS_THRESHOLD = 21_000;
 
 // ============================================
-// PROFESSIONAL TAX (Maharashtra)
+// PROFESSIONAL TAX (Goa)
 // ============================================
 
-/** Flat PT amount per month */
-export const PT_AMOUNT = 200;
+/** Goa PT slabs: monthly gross -> PT amount */
+export const PT_SLABS: readonly { upTo: number; amount: number }[] = [
+  { upTo: 15_000, amount: 0 },
+  { upTo: 25_000, amount: 150 },
+  { upTo: Infinity, amount: 200 },
+] as const;
 
-/** PT only applies if gross (fixed) > this threshold */
-export const PT_GROSS_THRESHOLD = 10_000;
+/** Calculate PT based on Goa slabs */
+export function calculatePT(grossFixed: number): number {
+  for (const slab of PT_SLABS) {
+    if (grossFixed <= slab.upTo) return slab.amount;
+  }
+  return 0;
+}
 
 // ============================================
 // DEPARTMENTS & STATUSES
@@ -218,8 +227,8 @@ export function calculateSlip(input: SlipInput): SlipResult {
   }
 
   let professionalTax = 0;
-  if (ptApplicable && grossFixed > PT_GROSS_THRESHOLD) {
-    professionalTax = PT_AMOUNT;
+  if (ptApplicable) {
+    professionalTax = calculatePT(grossFixed);
   }
 
   const totalDeductions = round2(pfEmployee + esicEmployee + professionalTax + advances + otherDeductions);

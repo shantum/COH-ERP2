@@ -34,6 +34,15 @@ export const CreateEmployeeSchema = z.object({
   employeeCode: z.string().optional(),
   phone: z.string().optional(),
   email: z.string().email().optional().or(z.literal('')),
+  dateOfBirth: z.string().optional(),
+  gender: z.enum(['male', 'female', 'other']).optional(),
+  fatherOrSpouseName: z.string().optional(),
+  maritalStatus: z.enum(['single', 'married', 'divorced', 'widowed']).optional(),
+  currentAddress: z.string().optional(),
+  permanentAddress: z.string().optional(),
+  emergencyContactName: z.string().optional(),
+  emergencyContactPhone: z.string().optional(),
+  emergencyContactRelation: z.string().optional(),
   dateOfJoining: z.string().optional(),
   department: z.enum(['production', 'office']),
   designation: z.string().optional(),
@@ -48,6 +57,7 @@ export const CreateEmployeeSchema = z.object({
   pan: z.string().optional(),
   aadhaar: z.string().optional(),
   uan: z.string().optional(),
+  pfNumber: z.string().optional(),
   esicNumber: z.string().optional(),
   tailorId: z.string().uuid().optional(),
 });
@@ -59,6 +69,15 @@ export const UpdateEmployeeSchema = z.object({
   employeeCode: z.string().nullable().optional(),
   phone: z.string().nullable().optional(),
   email: z.string().email().nullable().optional().or(z.literal('')),
+  dateOfBirth: z.string().nullable().optional(),
+  gender: z.enum(['male', 'female', 'other']).nullable().optional(),
+  fatherOrSpouseName: z.string().nullable().optional(),
+  maritalStatus: z.enum(['single', 'married', 'divorced', 'widowed']).nullable().optional(),
+  currentAddress: z.string().nullable().optional(),
+  permanentAddress: z.string().nullable().optional(),
+  emergencyContactName: z.string().nullable().optional(),
+  emergencyContactPhone: z.string().nullable().optional(),
+  emergencyContactRelation: z.string().nullable().optional(),
   dateOfJoining: z.string().nullable().optional(),
   dateOfExit: z.string().nullable().optional(),
   department: z.enum(['production', 'office']).optional(),
@@ -74,6 +93,7 @@ export const UpdateEmployeeSchema = z.object({
   pan: z.string().nullable().optional(),
   aadhaar: z.string().nullable().optional(),
   uan: z.string().nullable().optional(),
+  pfNumber: z.string().nullable().optional(),
   esicNumber: z.string().nullable().optional(),
   tailorId: z.string().uuid().nullable().optional(),
   isActive: z.boolean().optional(),
@@ -195,4 +215,17 @@ export const PAYROLL_STATUS_LABELS: Record<string, string> = {
   draft: 'Draft',
   confirmed: 'Confirmed',
   cancelled: 'Cancelled',
+};
+
+export const GENDER_LABELS: Record<string, string> = {
+  male: 'Male',
+  female: 'Female',
+  other: 'Other',
+};
+
+export const MARITAL_STATUS_LABELS: Record<string, string> = {
+  single: 'Single',
+  married: 'Married',
+  divorced: 'Divorced',
+  widowed: 'Widowed',
 };
