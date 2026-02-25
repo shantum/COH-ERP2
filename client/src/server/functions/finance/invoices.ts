@@ -412,39 +412,14 @@ export const confirmInvoice = createServerFn({ method: 'POST' })
       }
     }
 
+    // ---- INVENTORY: Create fabric inward transactions for matched lines ----
+    // Runs for ALL confirm paths (normal AP and linked bank txn).
+    // Only creates txns for lines we haven't already linked (matchType: 'new_entry').
+    await createFabricInwardTransactions(prisma, invoice, userId);
+
     // ---- LINKED BANK TXN PATH (already-paid bill) ----
     if (data.linkedBankTransactionId && invoice.type === 'payable') {
       return confirmInvoiceWithLinkedBankTxn(prisma, invoice, data.linkedBankTransactionId, tdsAmount, userId, expenseAccountOverride, partyName, periodOffset, party);
-    }
-
-    // ---- FABRIC: Create FabricColourTransactions for matched lines ----
-    if (invoice.category === 'fabric' && invoice.lines) {
-      for (const line of invoice.lines) {
-        if (!line.fabricColourId) continue;
-        if (line.matchedTxnId) continue; // Already linked to an existing transaction
-
-        // Create new inward transaction for unmatched fabric lines
-        const newTxn = await prisma.fabricColourTransaction.create({
-          data: {
-            fabricColourId: line.fabricColourId,
-            txnType: 'inward',
-            qty: line.qty ?? 0,
-            unit: line.unit ?? 'meter',
-            reason: 'supplier_receipt',
-            costPerUnit: line.rate ?? undefined,
-            ...(invoice.partyId ? { partyId: invoice.partyId } : {}),
-            referenceId: `invoice:${invoice.id}`,
-            notes: `From invoice ${invoice.invoiceNumber ?? invoice.id}${line.description ? ` — ${line.description}` : ''}`,
-            createdById: userId,
-          },
-        });
-
-        // Link the transaction to the invoice line
-        await prisma.invoiceLine.update({
-          where: { id: line.id },
-          data: { matchedTxnId: newTxn.id, matchType: 'new_entry' },
-        });
-      }
     }
 
     // ---- NORMAL AP PATH (invoice first, pay later) ----
@@ -467,6 +442,110 @@ export const confirmInvoice = createServerFn({ method: 'POST' })
 
     return { success: true as const };
   });
+
+// ============================================
+// INVENTORY HELPERS — Fabric stock from invoices
+// ============================================
+
+/**
+ * Create inward FabricColourTransactions for unmatched fabric invoice lines.
+ *
+ * Called during invoice confirmation. For each line that has a fabricColourId
+ * but no matchedTxnId, creates an inward transaction and links it back.
+ *
+ * The DB trigger on FabricColourTransaction automatically updates
+ * FabricColour.currentBalance. We also invalidate the in-memory balance cache.
+ */
+async function createFabricInwardTransactions(
+  db: Awaited<ReturnType<typeof getPrisma>>,
+  invoice: { id: string; category: string; invoiceNumber: string | null; partyId: string | null; lines: Array<{ id: string; fabricColourId: string | null; matchedTxnId: string | null; qty: number | null; unit: string | null; rate: number | null; description: string | null }> | null },
+  userId: string,
+) {
+  if (invoice.category !== 'fabric' || !invoice.lines) return;
+
+  const affectedColourIds: string[] = [];
+
+  for (const line of invoice.lines) {
+    if (!line.fabricColourId) continue;
+    if (line.matchedTxnId) continue; // Already linked to a pre-existing transaction
+    if (!line.qty || line.qty <= 0) continue; // Skip lines with no meaningful quantity
+
+    const newTxn = await db.fabricColourTransaction.create({
+      data: {
+        fabricColourId: line.fabricColourId,
+        txnType: 'inward',
+        qty: line.qty,
+        unit: line.unit ?? 'meter',
+        reason: 'supplier_receipt',
+        costPerUnit: line.rate ?? null,
+        ...(invoice.partyId ? { partyId: invoice.partyId } : {}),
+        referenceId: `invoice:${invoice.id}`,
+        notes: `From invoice ${invoice.invoiceNumber ?? invoice.id}${line.description ? ` — ${line.description}` : ''}`,
+        createdById: userId,
+      },
+    });
+
+    await db.invoiceLine.update({
+      where: { id: line.id },
+      data: { matchedTxnId: newTxn.id, matchType: 'new_entry' },
+    });
+
+    affectedColourIds.push(line.fabricColourId);
+  }
+
+  // Invalidate in-memory balance cache so queries reflect new stock immediately
+  if (affectedColourIds.length > 0) {
+    const { fabricColourBalanceCache } = await import('@coh/shared/services/inventory');
+    fabricColourBalanceCache.invalidate(affectedColourIds);
+  }
+}
+
+/**
+ * Reverse fabric inward transactions that were created during invoice confirmation.
+ *
+ * Only reverses transactions we created (matchType: 'new_entry'). Pre-existing
+ * transactions that were manually matched (matchType: 'auto_matched' | 'manual_matched')
+ * are unlinked but NOT deleted — they existed before the invoice.
+ *
+ * The DB trigger on FabricColourTransaction automatically updates
+ * FabricColour.currentBalance when transactions are deleted.
+ */
+async function reverseFabricInwardTransactions(
+  tx: Parameters<Parameters<Awaited<ReturnType<typeof getPrisma>>['$transaction']>[0]>[0],
+  invoiceId: string,
+) {
+  // Find all invoice lines that have fabric transaction links
+  const lines = await tx.invoiceLine.findMany({
+    where: { invoiceId, matchedTxnId: { not: null } },
+    select: { id: true, matchedTxnId: true, matchType: true, fabricColourId: true },
+  });
+
+  if (lines.length === 0) return;
+
+  const affectedColourIds: string[] = [];
+
+  for (const line of lines) {
+    if (line.matchType === 'new_entry' && line.matchedTxnId) {
+      // We created this transaction on confirm → delete it to reverse the stock
+      await tx.fabricColourTransaction.delete({
+        where: { id: line.matchedTxnId },
+      });
+    }
+    // For all match types: unlink the invoice line from the transaction
+    await tx.invoiceLine.update({
+      where: { id: line.id },
+      data: { matchedTxnId: null, matchType: null },
+    });
+
+    if (line.fabricColourId) affectedColourIds.push(line.fabricColourId);
+  }
+
+  // Invalidate balance cache (DB trigger already updated currentBalance)
+  if (affectedColourIds.length > 0) {
+    const { fabricColourBalanceCache } = await import('@coh/shared/services/inventory');
+    fabricColourBalanceCache.invalidate(affectedColourIds);
+  }
+}
 
 /**
  * Confirm an invoice and link it to an existing bank transaction.
@@ -687,7 +766,11 @@ export const cancelInvoice = createServerFn({ method: 'POST' })
         await tx.allocation.deleteMany({ where: { invoiceId: data.id } });
       }
 
-      // 2. Cancel the invoice and reset paid amounts
+      // 2. Reverse fabric inward transactions created during confirmation
+      //    (only 'new_entry' txns are deleted; pre-existing matched txns are just unlinked)
+      await reverseFabricInwardTransactions(tx, data.id);
+
+      // 3. Cancel the invoice and reset paid amounts
       await tx.invoice.update({
         where: { id: data.id },
         data: { status: 'cancelled', paidAmount: 0, balanceDue: 0 },

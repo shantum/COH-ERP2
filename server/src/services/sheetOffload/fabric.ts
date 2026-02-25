@@ -934,8 +934,11 @@ export async function triggerImportFabricBalances(): Promise<ImportFabricBalance
             }, 'importFabricBalances: created adjustment');
         }
 
-        // 6. Wait for DB triggers, then refresh balances
+        // 6. Invalidate balance cache + wait for DB triggers, then refresh balances
         if (pendingAdjustments.length > 0) {
+            const affectedIds = [...new Set(pendingAdjustments.map(a => a.fabricColourId))];
+            const { fabricColourBalanceCache } = await import('@coh/shared/services/inventory');
+            fabricColourBalanceCache.invalidate(affectedIds);
             await new Promise(r => setTimeout(r, 2000));
         }
 

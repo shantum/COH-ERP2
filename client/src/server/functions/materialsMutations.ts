@@ -901,35 +901,6 @@ export const deleteService = createServerFn({ method: 'POST' })
     });
 
 // ============================================
-// COLOUR TRANSACTION MUTATIONS
-// ============================================
-
-const createColourTransactionSchema = z.object({
-    colourId: z.string().uuid('Invalid colour ID'),
-    qty: z.number().positive('Quantity must be positive'),
-    reason: z.string().min(1, 'Reason is required'),
-    notes: z.string().optional().nullable(),
-    costPerUnit: z.number().nonnegative().optional().nullable(),
-    partyId: z.string().uuid().optional().nullable(),
-});
-
-/**
- * Create a fabric colour transaction (inward/outward)
- *
- * NOTE: FabricColour inventory tracking is not yet implemented.
- * The FabricColour model doesn't have a separate transaction table.
- * This function is stubbed to allow the UI to compile and show a proper error.
- */
-export const createColourTransaction = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
-    .inputValidator((input: unknown) => createColourTransactionSchema.parse(input))
-    .handler(async (): Promise<never> => {
-        // FabricColour transactions are not implemented yet
-        // The schema only has FabricTransaction which links to the legacy Fabric model
-        throw new Error('Colour inventory tracking is not yet implemented. Please use the Fabrics page for inventory transactions.');
-    });
-
-// ============================================
 // PARTIES SERVER FUNCTION
 // ============================================
 

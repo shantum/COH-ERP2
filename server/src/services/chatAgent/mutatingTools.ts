@@ -10,9 +10,15 @@ import type { ToolInput } from './types.js';
 export async function execAddFabricInward(input: ToolInput, userId: string) {
     const fabricColourId = String(input.fabricColourId);
     const qty = Number(input.qty);
-    const unit = String(input.unit);
-    const costPerUnit = input.costPerUnit != null ? Number(input.costPerUnit) : undefined;
-    const notes = input.notes ? String(input.notes) : undefined;
+    const rawUnit = String(input.unit ?? 'meter');
+    const validUnits = ['meter', 'kg', 'yard'] as const;
+    const unit = validUnits.includes(rawUnit as typeof validUnits[number]) ? rawUnit : 'meter';
+    const costPerUnit = input.costPerUnit != null ? Number(input.costPerUnit) : null;
+    const notes = input.notes ? String(input.notes) : null;
+    const partyId = input.partyId ? String(input.partyId) : null;
+
+    // Validate qty
+    if (!qty || qty <= 0) return { error: 'Quantity must be a positive number' };
 
     // Verify the fabric colour exists
     const fc = await prisma.fabricColour.findUnique({
@@ -27,12 +33,18 @@ export async function execAddFabricInward(input: ToolInput, userId: string) {
             txnType: 'inward',
             qty,
             unit,
-            reason: 'receipt',
+            reason: 'supplier_receipt',
+            referenceId: `chat:${new Date().toISOString()}`,
             ...(costPerUnit != null ? { costPerUnit } : {}),
             ...(notes ? { notes } : {}),
+            ...(partyId ? { partyId } : {}),
             createdById: userId,
         },
     });
+
+    // Invalidate balance cache so reads reflect new stock immediately
+    const { fabricColourBalanceCache } = await import('@coh/shared/services/inventory');
+    fabricColourBalanceCache.invalidate([fabricColourId]);
 
     return {
         transactionId: txn.id,

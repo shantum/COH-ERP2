@@ -6,7 +6,8 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { MaterialsTreeView } from '../../components/materials/MaterialsTreeView';
-import { createColourTransaction, getParties } from '@/server/functions/materialsMutations';
+import { createFabricColourTransaction } from '@/server/functions/fabricColourMutations';
+import { getParties } from '@/server/functions/materialsMutations';
 import type { MaterialNode } from '../../components/materials/types';
 import type { Party } from '@/server/functions/materialsMutations';
 import type { FabricsLoaderData } from '../../routes/_authenticated/fabrics';
@@ -215,7 +216,7 @@ export default function OverviewTab({
     });
 
     // Server functions
-    const createColourTxnFn = useServerFn(createColourTransaction);
+    const createColourTxnFn = useServerFn(createFabricColourTransaction);
     const getPartiesFn = useServerFn(getParties);
 
     // Fetch parties for inward modal
@@ -228,8 +229,10 @@ export default function OverviewTab({
     // Inward mutation
     const createInwardMutation = useMutation({
         mutationFn: (data: {
-            colourId: string;
+            fabricColourId: string;
+            txnType: 'inward';
             qty: number;
+            unit: 'meter' | 'kg' | 'yard';
             reason: string;
             notes?: string | null;
             costPerUnit?: number | null;
@@ -237,6 +240,7 @@ export default function OverviewTab({
         }) => createColourTxnFn({ data }),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['materialsTree'] });
+            queryClient.invalidateQueries({ queryKey: ['fabricColour'] });
             setShowInward(null);
             setInwardForm({ qty: '', notes: '', costPerUnit: '', partyId: '' });
         },
@@ -246,9 +250,12 @@ export default function OverviewTab({
     const handleSubmitInward = useCallback((e: React.FormEvent) => {
         e.preventDefault();
         if (!showInward) return;
+        const unit = (showInward.unit === 'kg' || showInward.unit === 'yard') ? showInward.unit : 'meter' as const;
         createInwardMutation.mutate({
-            colourId: showInward.id,
+            fabricColourId: showInward.id,
+            txnType: 'inward',
             qty: parseFloat(inwardForm.qty),
+            unit,
             reason: 'supplier_receipt',
             ...(inwardForm.notes ? { notes: inwardForm.notes } : {}),
             ...(inwardForm.costPerUnit ? { costPerUnit: parseFloat(inwardForm.costPerUnit) } : {}),
