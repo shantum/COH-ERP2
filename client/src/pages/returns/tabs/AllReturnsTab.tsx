@@ -1,11 +1,12 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
-import { Search, ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react';
+import { Search, ChevronLeft, ChevronRight, ExternalLink, RefreshCw } from 'lucide-react';
 import { getAllReturns } from '../../../server/functions/returns';
 import { formatDate, formatRelativeTime } from '../../../utils/agGridHelpers';
 import { getStatusBadge, getResolutionBadge } from '../types';
 import { AwbTrackingCell } from '../../../components/AwbTrackingCell';
+import { useBatchTracking } from '../../../hooks/useIThinkTracking';
 import { RETURN_REASONS } from '@coh/shared/domain/returns';
 import type { ActiveReturnLine } from '@coh/shared/schemas/returns';
 
@@ -63,6 +64,13 @@ export function AllReturnsTab() {
     const totalPages = data ? Math.ceil(data.total / data.limit) : 0;
     const items = data?.items || [];
 
+    // Batch-fetch tracking for all AWBs on this page (single API call instead of N)
+    const awbNumbers = useMemo(
+        () => items.map(r => r.returnAwbNumber).filter((a): a is string => !!a),
+        [items]
+    );
+    const { data: trackingMap, isLoading: trackingLoading, refresh: refreshTracking } = useBatchTracking(awbNumbers);
+
     return (
         <div className="space-y-4">
             {/* Filters */}
@@ -104,6 +112,15 @@ export function AllReturnsTab() {
                         <option key={o.value} value={o.value}>{o.label}</option>
                     ))}
                 </select>
+                <button
+                    onClick={refreshTracking}
+                    disabled={trackingLoading}
+                    className="px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-50 flex items-center gap-1.5"
+                    title="Refresh tracking data"
+                >
+                    <RefreshCw size={14} className={trackingLoading ? 'animate-spin' : ''} />
+                    Tracking
+                </button>
             </div>
 
             {/* Table */}
@@ -139,7 +156,7 @@ export function AllReturnsTab() {
                                 <td colSpan={16} className="text-center py-12 text-gray-400">No returns found</td>
                             </tr>
                         ) : (
-                            items.map((row) => <ReturnRow key={row.id} row={row} />)
+                            items.map((row) => <ReturnRow key={row.id} row={row} trackingMap={trackingMap} />)
                         )}
                     </tbody>
                 </table>
@@ -174,7 +191,7 @@ export function AllReturnsTab() {
     );
 }
 
-function ReturnRow({ row }: { row: ActiveReturnLine }) {
+function ReturnRow({ row, trackingMap }: { row: ActiveReturnLine; trackingMap?: Record<string, import('../../../hooks/useIThinkTracking').IThinkTrackingData> }) {
     const badge = getResolutionBadge(row.returnResolution || null);
     const reason = row.returnReasonCategory
         ? (RETURN_REASONS[row.returnReasonCategory as keyof typeof RETURN_REASONS] || row.returnReasonCategory)
@@ -220,7 +237,11 @@ function ReturnRow({ row }: { row: ActiveReturnLine }) {
             </td>
             <td className="px-3 py-2 text-xs text-gray-600 whitespace-nowrap">{reason}</td>
             <td className="px-3 py-2">
-                <AwbTrackingCell awbNumber={row.returnAwbNumber} courier={row.returnCourier} />
+                <AwbTrackingCell
+                    awbNumber={row.returnAwbNumber}
+                    courier={row.returnCourier}
+                    tracking={row.returnAwbNumber && trackingMap ? trackingMap[row.returnAwbNumber] ?? null : undefined}
+                />
             </td>
             <td className="px-3 py-2 text-xs text-gray-700 whitespace-nowrap">{row.customerName}</td>
             <td className="px-3 py-2 text-xs text-gray-600 whitespace-nowrap">{formatDate(row.returnRequestedAt)}</td>

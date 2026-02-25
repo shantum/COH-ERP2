@@ -359,6 +359,49 @@ export const getAwbTracking = createServerFn({ method: 'GET' })
     });
 
 // ============================================
+// BATCH AWB TRACKING - For table views
+// ============================================
+
+const getBatchAwbTrackingInputSchema = z.object({
+    awbNumbers: z.array(z.string()).min(1).max(50),
+});
+
+export type GetBatchAwbTrackingInput = z.infer<typeof getBatchAwbTrackingInputSchema>;
+
+/**
+ * Fetch tracking data for multiple AWBs in one call.
+ * Server batches into iThink API calls of 10 each.
+ */
+export const getBatchAwbTracking = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => getBatchAwbTrackingInputSchema.parse(input))
+    .handler(async ({ data }): Promise<Record<string, AwbTrackingResponse>> => {
+        try {
+            const baseUrl = getApiBaseUrl();
+            const authToken = getCookie('auth_token');
+            const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+            if (authToken) {
+                headers['Authorization'] = `Bearer ${authToken}`;
+            }
+
+            const response = await fetch(`${baseUrl}/returns/tracking/batch`, {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({ awbNumbers: data.awbNumbers }),
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to fetch batch tracking');
+            }
+
+            return await response.json();
+        } catch (error: unknown) {
+            console.error('[Server Function] Error in getBatchAwbTracking:', error);
+            throw error;
+        }
+    });
+
+// ============================================
 // TRACK SHIPMENT LOOKUP - For Tracking Page
 // ============================================
 

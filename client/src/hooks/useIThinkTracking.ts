@@ -1,47 +1,31 @@
 /**
- * iThink Tracking Hook
- * TanStack Query hook for fetching iThink Logistics tracking data
+ * iThink Tracking Hooks
  *
- * Migrated to use Server Functions instead of Axios API calls.
+ * - useIThinkTracking: single AWB (for modals, detail views)
+ * - useBatchTracking: multiple AWBs in one call (for table views)
  */
 
-import { useQuery } from '@tanstack/react-query';
-import { getAwbTracking } from '../server/functions/tracking';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useCallback } from 'react';
+import { getAwbTracking, getBatchAwbTracking } from '../server/functions/tracking';
 import type { AwbTrackingResponse, TrackingLastScan, TrackingScan } from '../server/functions/tracking';
 
-/**
- * Last scan details from iThink tracking
- * Re-export from server function types for backwards compatibility
- */
+// Re-exports for backwards compatibility
 export type IThinkLastScan = TrackingLastScan;
-
-/**
- * Scan history item from iThink tracking
- * Re-export from server function types for backwards compatibility
- */
 export type IThinkScanHistoryItem = TrackingScan;
-
-/**
- * Full tracking data from iThink Logistics
- * Re-export from server function types for backwards compatibility
- */
 export type IThinkTrackingData = AwbTrackingResponse;
 
+const STALE_TIME = 15 * 60 * 1000; // 15 minutes
+const GC_TIME = 30 * 60 * 1000;    // 30 minutes
+
 export interface UseIThinkTrackingOptions {
-    /** AWB number to track */
     awbNumber: string;
-    /** Whether to fetch data (useful for lazy loading) */
     enabled?: boolean;
 }
 
 /**
- * Hook to fetch iThink tracking data for an AWB
- *
- * @example
- * const { data, isLoading, error } = useIThinkTracking({
- *   awbNumber: '21025852704255',
- *   enabled: isExpanded,
- * });
+ * Single AWB tracking — for modals and detail views.
+ * For table views with many AWBs, use useBatchTracking instead.
  */
 export function useIThinkTracking({
     awbNumber,
@@ -56,8 +40,53 @@ export function useIThinkTracking({
             return result;
         },
         enabled: enabled && !!awbNumber,
-        staleTime: 2 * 60 * 1000, // 2 minutes - tracking updates frequently
-        gcTime: 5 * 60 * 1000, // Keep in cache for 5 minutes
-        retry: 1, // Only retry once on failure
+        staleTime: STALE_TIME,
+        gcTime: GC_TIME,
+        retry: 1,
     });
+}
+
+/**
+ * Batch tracking — fetches all AWBs in one server call, populates individual query caches.
+ * Use this in table views to avoid N+1 API calls.
+ *
+ * Returns the batch data + a manual refresh function.
+ */
+export function useBatchTracking(awbNumbers: string[]) {
+    const queryClient = useQueryClient();
+
+    // Dedupe
+    const unique = [...new Set(awbNumbers.filter(Boolean))];
+
+    const query = useQuery<Record<string, AwbTrackingResponse>>({
+        queryKey: ['ithink-tracking-batch', unique.sort().join(',')],
+        queryFn: async () => {
+            if (unique.length === 0) return {};
+
+            const result = await getBatchAwbTracking({
+                data: { awbNumbers: unique },
+            });
+
+            // Populate individual AWB caches so useIThinkTracking reads from cache
+            for (const [awb, data] of Object.entries(result)) {
+                queryClient.setQueryData(['ithink-tracking', awb], data);
+            }
+
+            return result;
+        },
+        enabled: unique.length > 0,
+        staleTime: STALE_TIME,
+        gcTime: GC_TIME,
+        retry: 1,
+    });
+
+    const refresh = useCallback(() => {
+        queryClient.invalidateQueries({ queryKey: ['ithink-tracking-batch'] });
+        // Also invalidate individual caches so they re-read
+        for (const awb of unique) {
+            queryClient.invalidateQueries({ queryKey: ['ithink-tracking', awb] });
+        }
+    }, [queryClient, unique]);
+
+    return { ...query, refresh };
 }
