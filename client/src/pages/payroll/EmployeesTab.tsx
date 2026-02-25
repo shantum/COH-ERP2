@@ -30,7 +30,7 @@ import {
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Plus, Loader2, Check, X, Pencil } from 'lucide-react';
+import { Plus, Loader2, Check, X, Pencil, FolderOpen } from 'lucide-react';
 import {
   type PayrollSearchParams,
   DEPARTMENTS,
@@ -41,6 +41,59 @@ import {
   MARITAL_STATUS_LABELS,
 } from '@coh/shared';
 import { formatINR, LoadingState, Pagination } from './shared';
+
+function nameToSlug(name: string): string {
+  return name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+}
+
+function EmployeeDocsViewer({ name, onClose }: { name: string; onClose: () => void }) {
+  const slug = nameToSlug(name);
+  const { data, isLoading } = useQuery({
+    queryKey: ['payroll', 'employee-docs', slug],
+    queryFn: async () => {
+      const res = await fetch(`/api/employee-documents-list/${slug}`);
+      return res.json() as Promise<{ files: string[] }>;
+    },
+  });
+
+  return (
+    <Dialog open onOpenChange={() => onClose()}>
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Documents — {name}</DialogTitle>
+          <DialogDescription>Aadhaar, PAN and other ID documents on file.</DialogDescription>
+        </DialogHeader>
+        {isLoading ? (
+          <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin" /></div>
+        ) : !data?.files?.length ? (
+          <p className="text-sm text-muted-foreground py-8 text-center">No documents found for this employee.</p>
+        ) : (
+          <div className="grid grid-cols-2 gap-3">
+            {data.files.map((file) => (
+              <a
+                key={file}
+                href={`/api/employee-documents/${slug}/${file}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="border rounded-lg overflow-hidden hover:ring-2 hover:ring-primary/50 transition-all"
+              >
+                <img
+                  src={`/api/employee-documents/${slug}/${file}`}
+                  alt={file}
+                  className="w-full h-auto object-contain bg-muted/30"
+                  loading="lazy"
+                />
+                <div className="px-2 py-1.5 text-xs text-muted-foreground truncate border-t bg-muted/20">
+                  {file.replace(/\.(jpe?g|png|pdf)$/i, '').replace(/-/g, ' ')}
+                </div>
+              </a>
+            ))}
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 const CREATE_EMPLOYEE_STEPS = [
   { id: 1, label: 'Basic' },
@@ -125,6 +178,7 @@ export default function EmployeesTab() {
 
   const [showModal, setShowModal] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
+  const [docsName, setDocsName] = useState<string | null>(null);
 
   return (
     <div>
@@ -200,7 +254,10 @@ export default function EmployeesTab() {
                         {emp.isActive ? 'Active' : 'Inactive'}
                       </Badge>
                     </td>
-                    <td className="p-3">
+                    <td className="p-3 flex gap-1">
+                      <Button variant="ghost" size="sm" onClick={() => setDocsName(emp.name)} title="View documents">
+                        <FolderOpen className="h-3.5 w-3.5" />
+                      </Button>
                       <Button variant="ghost" size="sm" onClick={() => { setEditId(emp.id); setShowModal(true); }}>
                         <Pencil className="h-3.5 w-3.5" />
                       </Button>
@@ -236,6 +293,10 @@ export default function EmployeesTab() {
             queryClient.invalidateQueries({ queryKey: ['payroll'] });
           }}
         />
+      )}
+
+      {docsName && (
+        <EmployeeDocsViewer name={docsName} onClose={() => setDocsName(null)} />
       )}
     </div>
   );

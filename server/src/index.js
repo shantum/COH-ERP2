@@ -165,6 +165,21 @@ app.use('/api/chat', chatRoutes);
 app.use('/api/uploads', imageUploadRoutes);
 app.use('/api/uploads/products', express.static(path.join(process.cwd(), 'uploads', 'products')));
 
+// Employee documents (static files + listing API)
+const employeeDocsDir = path.join(process.cwd(), 'employee-documents');
+app.use('/api/employee-documents', express.static(employeeDocsDir));
+app.get('/api/employee-documents-list/:slug', async (req, res) => {
+  const fs = await import('fs/promises');
+  const slug = req.params.slug.replace(/[^a-z0-9-]/gi, '');
+  const dir = path.join(employeeDocsDir, slug);
+  try {
+    const files = await fs.readdir(dir);
+    res.json({ files: files.filter(f => /\.(jpe?g|png|pdf)$/i.test(f)) });
+  } catch {
+    res.json({ files: [] });
+  }
+});
+
 // Resend inbound email webhook
 app.use('/api/webhooks/resend', resendWebhookRoutes);
 

@@ -82,3 +82,7 @@ VERSION
 
 # AI Project Manager folder
 gemini-assistant/
+
+# Employee ID documents (sensitive - stored on server only)
+server/employee-documents/
+employee-documents/

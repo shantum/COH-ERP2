@@ -281,6 +281,7 @@ export type Employee = {
     uan: string | null;
     pfNumber: string | null;
     esicNumber: string | null;
+    notes: string | null;
     /**
      * Links to other models
      */

@@ -2073,6 +2073,7 @@ model Employee {
   uan              String?
   pfNumber         String?   // PF member ID (distinct from UAN)
   esicNumber       String?
+  notes            String?   @db.Text  // Free-text notes (DOB discrepancies, etc.)
 
   /// Links to other models
   partyId          String?   @unique
