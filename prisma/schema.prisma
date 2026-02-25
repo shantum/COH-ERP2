@@ -1426,6 +1426,7 @@ model FabricColourTransaction {
   partyId         String?
   referenceId     String?
   notes           String?
+  receiptDate     DateTime?
   createdById     String
   createdAt       DateTime      @default(now())
 

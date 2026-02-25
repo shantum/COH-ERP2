@@ -359,6 +359,7 @@ export type FabricColourTransaction = {
     partyId: string | null;
     referenceId: string | null;
     notes: string | null;
+    receiptDate: Timestamp | null;
     createdById: string;
     createdAt: Generated<Timestamp>;
 };

@@ -202,7 +202,7 @@ export function DetailPanel({ item, type, isOpen, onClose, onEdit }: DetailPanel
                                         Recent Transactions
                                     </h3>
                                     <div className="space-y-2">
-                                        {transactions.items.slice(0, 10).map((txn: { id: string; txnType: string; reason?: string; createdAt: string; qty: number }) => (
+                                        {transactions.items.slice(0, 10).map((txn: { id: string; txnType: string; reason: string; createdAt: Date; qty: number }) => (
                                             <div
                                                 key={txn.id}
                                                 className="flex items-center justify-between p-3 bg-gray-50 rounded-lg text-sm"

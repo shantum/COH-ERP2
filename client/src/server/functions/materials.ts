@@ -1034,26 +1034,46 @@ export const getColourTransactions = createServerFn({ method: 'GET' })
     .inputValidator((input: unknown) => getColourTransactionsSchema.parse(input))
     .handler(async ({ data }) => {
         const prisma = await getPrisma();
-            // Verify colour exists
-            const colour = await prisma.fabricColour.findUnique({
-                where: { id: data.colourId },
-                select: { id: true, colourName: true },
-            });
+        const colour = await prisma.fabricColour.findUnique({
+            where: { id: data.colourId },
+            select: { id: true, colourName: true, currentBalance: true },
+        });
 
-            if (!colour) {
-                return {
-                    success: false,
-                    error: 'Colour not found',
-                };
-            }
+        if (!colour) {
+            return { success: false as const, error: 'Colour not found' };
+        }
 
-            // FabricColour inventory transactions are not yet implemented
-            // Return empty items with a message
-            return {
-                success: true,
-                items: [],
-                message: 'Colour inventory tracking is not yet implemented',
-            };
+        const transactions = await prisma.fabricColourTransaction.findMany({
+            where: { fabricColourId: data.colourId },
+            select: {
+                id: true,
+                txnType: true,
+                qty: true,
+                unit: true,
+                reason: true,
+                costPerUnit: true,
+                referenceId: true,
+                notes: true,
+                createdAt: true,
+                party: { select: { id: true, name: true } },
+                createdBy: { select: { id: true, name: true } },
+                invoiceLine: {
+                    select: {
+                        id: true,
+                        invoiceId: true,
+                        invoice: { select: { invoiceNumber: true, status: true } },
+                    },
+                },
+            },
+            orderBy: { createdAt: 'desc' },
+            take: data.limit,
+        });
+
+        return {
+            success: true as const,
+            items: transactions,
+            currentBalance: colour.currentBalance,
+        };
     });
 
 // ============================================

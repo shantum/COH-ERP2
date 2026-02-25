@@ -918,6 +918,110 @@ interface GetPartiesResult {
     parties: Party[];
 }
 
+// ============================================
+// COLOUR TRANSACTION MUTATIONS
+// ============================================
+
+const createColourTransactionSchema = z.object({
+    fabricColourId: z.string().uuid(),
+    txnType: z.enum(['inward', 'outward']),
+    qty: z.number().positive('Quantity must be positive'),
+    unit: z.string().default('meter'),
+    reason: z.string().min(1, 'Reason is required'),
+    costPerUnit: z.number().nonnegative().optional().nullable(),
+    partyId: z.string().uuid().optional().nullable(),
+    referenceId: z.string().optional().nullable(),
+    notes: z.string().optional().nullable(),
+    receiptDate: z.string().optional().nullable(),
+});
+
+interface CreateColourTransactionResult {
+    success: true;
+    transaction: {
+        id: string;
+        fabricColourId: string;
+        txnType: string;
+        qty: number;
+        unit: string;
+        reason: string;
+        costPerUnit: number | null;
+        createdAt: Date;
+    };
+    newBalance: number;
+}
+
+/**
+ * Create a fabric colour inventory transaction (inward/outward)
+ * DB trigger automatically updates FabricColour.currentBalance
+ */
+export const createColourTransaction = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => createColourTransactionSchema.parse(input))
+    .handler(async ({ data, context }): Promise<CreateColourTransactionResult> => {
+        try {
+            const prisma = await getPrisma();
+
+            // Verify fabricColour exists
+            const fabricColour = await prisma.fabricColour.findUnique({
+                where: { id: data.fabricColourId },
+                include: { fabric: { include: { material: true } } },
+            });
+
+            if (!fabricColour) {
+                throw new Error('Fabric colour not found');
+            }
+
+            // Create the transaction
+            const newTxn = await prisma.fabricColourTransaction.create({
+                data: {
+                    fabricColourId: data.fabricColourId,
+                    txnType: data.txnType,
+                    qty: data.qty,
+                    unit: data.unit,
+                    reason: data.reason,
+                    createdById: context.user.id,
+                    ...(data.costPerUnit != null ? { costPerUnit: data.costPerUnit } : {}),
+                    ...(data.partyId ? { partyId: data.partyId } : {}),
+                    ...(data.referenceId ? { referenceId: data.referenceId } : {}),
+                    ...(data.notes ? { notes: data.notes } : {}),
+                    ...(data.receiptDate ? { receiptDate: new Date(data.receiptDate) } : {}),
+                },
+            });
+
+            // Invalidate fabric colour balance cache
+            const { fabricColourBalanceCache } = await import('@coh/shared/services/inventory');
+            fabricColourBalanceCache.invalidate([data.fabricColourId]);
+
+            // Query updated balance
+            const updated = await prisma.fabricColour.findUnique({
+                where: { id: data.fabricColourId },
+                select: { currentBalance: true },
+            });
+
+            return {
+                success: true,
+                transaction: {
+                    id: newTxn.id,
+                    fabricColourId: newTxn.fabricColourId,
+                    txnType: newTxn.txnType,
+                    qty: newTxn.qty,
+                    unit: newTxn.unit,
+                    reason: newTxn.reason,
+                    costPerUnit: newTxn.costPerUnit,
+                    createdAt: newTxn.createdAt,
+                },
+                newBalance: updated?.currentBalance ?? 0,
+            };
+        } catch (error: unknown) {
+            if (isPrismaError(error)) {
+                if (error.code === 'P2003') {
+                    throw new Error('Invalid reference: fabric colour or party not found');
+                }
+            }
+            throw error;
+        }
+    });
+
 /**
  * Get all parties
  * Returns a list of all active parties for dropdowns
