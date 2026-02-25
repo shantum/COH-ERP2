@@ -337,7 +337,7 @@ async function handleRequestApproved(
           })
         : null;
 
-    // Resolve reason: prefer customer comment over generic "Others"
+    // Resolve reason: webhook has generic "Others" — real classification happens on CSV import
     const rpReason = payload.reason;
     const customerComment = csvEnrichment?.customerComment || null;
     const isGenericReason = !rpReason || rpReason.toLowerCase().trim() === 'others' || rpReason.toLowerCase().trim() === 'na';

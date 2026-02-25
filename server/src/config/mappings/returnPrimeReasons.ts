@@ -75,19 +75,23 @@ const KEYWORD_RULES: Array<{ category: ReturnReasonCategory; patterns: RegExp }>
     { category: 'damaged_in_transit', patterns: /\b(damaged|torn|ripped|broken|hole)\b/i },
 
     // Wrong item
-    { category: 'wrong_item_sent', patterns: /\b(wrong item|wrong product|incorrect item|received wrong|sent wrong)\b/i },
+    { category: 'wrong_item_sent', patterns: /\b(wrong item|wrong product|incorrect item|received wrong|sent wrong|received\s+\w+\.?\s*need\s+\w+)\b/i },
 
     // Quality — check before fit (some comments mention both)
-    { category: 'product_quality', patterns: /\b(quality|defect|faded|thin fabric|pilling|stain|stitching issue|poor.*fabric|fabric.*thin|colour.*fad|color.*fad|washed out)\b/i },
+    { category: 'product_quality', patterns: /\b(quality|defect|faded|thin fabric|pilling|stain|stitching|poor.*fabric|fabric.*thin|colour.*fad|color.*fad|washed out|not good fabric|fabric.*not good|pocket.*not proper|not proper|not comfortable|uncomfortable)\b/i },
 
     // Different from listing
-    { category: 'product_different', patterns: /\b(different.*image|not as (shown|described|expected)|colour.*different|color.*different|colour.*mismatch|looks different|doesn.t look|transparent)\b/i },
+    { category: 'product_different', patterns: /\b(different.*image|not as (shown|described|expected)|colou?r.*(different|problem|issue|mismatch)|looks different|doesn.t look|transparent|not.*shown|not.*catalogue|not.*catalog|not a fan of the colo|backside cut)\b/i },
 
     // Size/Fit — broadest category, lots of keywords
-    { category: 'fit_size', patterns: /\b(fit|size|sizing|loose|tight|big|small|large|short|long|oversiz|doesn.t fit|does not fit|fitting|need.*(s|m|l|xl|xxl|2xl|3xl)|want.*(s|m|l|xl)|too (big|small|large|tight|loose|long|short))\b/i },
+    { category: 'fit_size', patterns: /\b(fit|size|sizing|loose|tight|big|small|large|short|long|oversiz|doesn.t fit|does not fit|fitting|too (big|small|large|tight|loose|long|short|baggy|deep)|baggy|deep neck|neck.*deep)\b/i },
+    // Size requests: "L Needed", "Need XL", "I need xl", "M Needed", "2XL needed"
+    { category: 'fit_size', patterns: /\b(need\s*(xs|s|m|l|xl|xxl|2xl|3xl)\b|(xs|s|m|l|xl|xxl|2xl|3xl)\s*needed)\b/i },
+    // Body fit comments
+    { category: 'fit_size', patterns: /(doesn.t suit|doesn.t match.*body|not suit|suits? on me|my body type|fitnot|fi issue)/i },
 
     // Changed mind
-    { category: 'changed_mind', patterns: /\b(changed? mind|don.t want|do not want|no longer|cancel|mistake|didn.t like|did not like|not happy|don.t like|do not like)\b/i },
+    { category: 'changed_mind', patterns: /\b(changed? mind|don.t want|do not want|no longer|cancel|mistake|didn.t like|did not like|not happy|don.t like|do not like|not satisfied|not what i wanted|inadvertently ordered|ordered.*return|want to return)\b/i },
 ];
 
 /**

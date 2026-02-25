@@ -12,6 +12,7 @@ import path from 'path';
 import { parse } from 'csv-parse/sync';
 import { Prisma, type ReturnPrimeCsvEnrichment } from '@prisma/client';
 import { getPrisma } from '@coh/shared/services/db';
+import { classifyReturnCommentsBatch } from './aiClassifier.js';
 import logger from '../utils/logger.js';
 
 const log = logger.child({ module: 'returnprime-csv-enrichment' });
@@ -376,6 +377,44 @@ async function enrichOrderLinesFromCsv(
               )
           )
     `;
+
+    // AI-classify return reasons for lines that now have a customer comment
+    // but still have 'other' or null category
+    const linesToClassify = await prisma.orderLine.findMany({
+        where: {
+            returnPrimeRequestNumber: { in: requestNumbers },
+            returnReasonDetail: { not: null },
+            OR: [
+                { returnReasonCategory: 'other' },
+                { returnReasonCategory: null },
+            ],
+        },
+        select: { id: true, returnReasonDetail: true },
+    });
+
+    const classifiable = linesToClassify.filter(l => {
+        const comment = l.returnReasonDetail?.trim().toLowerCase();
+        return comment && comment !== 'others' && comment !== 'na' && comment !== 'n/a' && comment.length > 2;
+    });
+
+    if (classifiable.length > 0) {
+        const classifications = await classifyReturnCommentsBatch(
+            classifiable.map(l => ({ id: l.id, comment: l.returnReasonDetail! }))
+        );
+
+        const updates = [...classifications.entries()].filter(([, cat]) => cat !== 'other');
+        if (updates.length > 0) {
+            await prisma.$transaction(
+                updates.map(([id, category]) =>
+                    prisma.orderLine.update({
+                        where: { id },
+                        data: { returnReasonCategory: category },
+                    })
+                )
+            );
+            log.info({ classified: updates.length, total: classifiable.length }, 'AI-classified return reasons from CSV enrichment');
+        }
+    }
 
     return Number(enrichedCount);
 }

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { X, Save, Pencil } from 'lucide-react';
 import type { ActiveReturnLine } from '../types';
 import { getStatusBadge, getResolutionBadge } from '../types';
+import { RETURN_REASONS } from '@coh/shared/domain/returns';
 import { ReturnTrackingStatus } from '../ReturnTrackingStatus';
 
 export interface AllReturnsTabProps {
@@ -45,7 +46,8 @@ export function AllReturnsTab({ returns, loading, onViewCustomer, onCancel, onUp
             return (
                 ret.orderNumber.toLowerCase().includes(term) ||
                 ret.skuCode.toLowerCase().includes(term) ||
-                ret.customerName.toLowerCase().includes(term)
+                ret.customerName.toLowerCase().includes(term) ||
+                (ret.returnReasonDetail || '').toLowerCase().includes(term)
             );
         }
         return true;
@@ -88,6 +90,7 @@ export function AllReturnsTab({ returns, loading, onViewCustomer, onCancel, onUp
                                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Qty</th>
                                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
                                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Resolution</th>
+                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Reason</th>
                                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">AWB / Tracking</th>
                                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Customer</th>
                                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Age</th>
@@ -115,6 +118,26 @@ export function AllReturnsTab({ returns, loading, onViewCustomer, onCancel, onUp
                                         <span className={`px-2 py-1 text-xs rounded ${getResolutionBadge(ret.returnResolution).color}`}>
                                             {getResolutionBadge(ret.returnResolution).label}
                                         </span>
+                                    </td>
+                                    <td className="px-4 py-3 text-sm max-w-[220px]">
+                                        {ret.returnReasonDetail ? (
+                                            <div>
+                                                <div className="text-gray-700 text-xs leading-snug" title={ret.returnReasonDetail}>
+                                                    {ret.returnReasonDetail}
+                                                </div>
+                                                {ret.returnReasonCategory && ret.returnReasonCategory !== 'other' && (
+                                                    <span className="text-[10px] text-gray-400 mt-0.5 inline-block">
+                                                        {RETURN_REASONS[ret.returnReasonCategory as keyof typeof RETURN_REASONS] || ret.returnReasonCategory}
+                                                    </span>
+                                                )}
+                                            </div>
+                                        ) : ret.returnReasonCategory && ret.returnReasonCategory !== 'other' ? (
+                                            <span className="text-xs text-gray-500">
+                                                {RETURN_REASONS[ret.returnReasonCategory as keyof typeof RETURN_REASONS] || ret.returnReasonCategory}
+                                            </span>
+                                        ) : (
+                                            <span className="text-gray-400">-</span>
+                                        )}
                                     </td>
                                     <td className="px-4 py-3 text-sm">
                                         {ret.returnAwbNumber ? (
