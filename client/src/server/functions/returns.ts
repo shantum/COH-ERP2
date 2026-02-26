@@ -933,6 +933,13 @@ export interface ReturnDetailResponse {
     orderDate: Date;
     paymentMethod: string | null;
     totalAmount: number;
+    // Extra fields for parity
+    shopifyOrderId: string | null;
+    deliveredAt: Date | null;
+    returnPickupAt: Date | null;
+    lineDiscount: number;
+    lineTax: number;
+    shopifyOrderTags: string | null;
 }
 
 /**
@@ -959,6 +966,10 @@ export const getReturnDetail = createServerFn({ method: 'POST' })
                         totalAmount: true,
                         orderDate: true,
                         paymentMethod: true,
+                        shopifyOrderId: true,
+                        shopifyCache: {
+                            select: { tags: true, discountCodes: true },
+                        },
                     },
                 },
                 sku: {
@@ -1024,6 +1035,12 @@ export const getReturnDetail = createServerFn({ method: 'POST' })
             orderDate: line.order.orderDate,
             paymentMethod: line.order.paymentMethod,
             totalAmount: line.order.totalAmount,
+            shopifyOrderId: line.order.shopifyOrderId,
+            deliveredAt: line.deliveredAt,
+            returnPickupAt: line.returnPickupAt,
+            lineDiscount: Math.max(0, (line.sku.mrp - line.unitPrice) * (line.returnQty ?? line.qty)),
+            lineTax: 0, // Tax is inclusive in our pricing
+            shopifyOrderTags: line.order.shopifyCache?.tags || null,
         };
     });
 

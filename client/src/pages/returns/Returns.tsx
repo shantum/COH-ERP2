@@ -20,6 +20,7 @@ import {
     Settings,
     Package,
     X,
+    Plus,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
@@ -332,7 +333,16 @@ export default function Returns() {
             <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-5">
                 {/* Header */}
                 <div className="flex items-center justify-between">
-                    <h1 className="text-2xl font-bold text-gray-900">Returns</h1>
+                    <div className="flex items-center gap-4">
+                        <h1 className="text-2xl font-bold text-gray-900">Returns</h1>
+                        <a
+                            href="/orders"
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 transition-colors"
+                        >
+                            <Plus size={14} />
+                            Create new request
+                        </a>
+                    </div>
                     {/* View switcher as small text links */}
                     <div className="flex items-center gap-4">
                         <div className="flex items-center gap-1 text-sm">

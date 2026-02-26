@@ -33,6 +33,8 @@ import {
     User,
     AlertCircle,
     RefreshCw,
+    ExternalLink,
+    Tag,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
@@ -485,6 +487,17 @@ export default function ReturnDetail() {
                             >
                                 #{detail.orderNumber}
                             </a>
+                            {detail.shopifyOrderId && (
+                                <a
+                                    href={`https://admin.shopify.com/store/creatures-of-habit-india/orders/${detail.shopifyOrderId}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-gray-400 hover:text-blue-500 transition-colors"
+                                    title="View on Shopify"
+                                >
+                                    <ExternalLink size={14} />
+                                </a>
+                            )}
                             <span className={`inline-flex px-2.5 py-0.5 text-xs font-semibold rounded-full ${statusBadgeClass}`}>
                                 {detail.returnStatus.replace(/_/g, ' ')}
                             </span>
@@ -575,8 +588,16 @@ export default function ReturnDetail() {
                                 }`}
                             >
                                 <Clock size={16} />
-                                Customer raised this request {ageDays} day{ageDays !== 1 ? 's' : ''} ago
+                                <span>
+                                    Customer raised this request {ageDays} day{ageDays !== 1 ? 's' : ''} ago
+                                    {detail.returnStatus !== 'refunded' && ageDays > 3 && ' but has not received their refund yet'}
+                                </span>
                             </div>
+                        )}
+                        {detail.deliveredAt && (
+                            <p className="text-xs text-gray-500 -mt-2">
+                                Delivered on {formatDate(detail.deliveredAt)}
+                            </p>
                         )}
 
                         {/* Product card */}
@@ -626,40 +647,55 @@ export default function ReturnDetail() {
                             </div>
                         </div>
 
-                        {/* Price breakdown */}
+                        {/* Price breakdown — RP style */}
                         <div className="bg-white rounded-lg border border-gray-200 p-5">
                             <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-4">
                                 Price Breakdown
                             </h3>
-                            <div className="space-y-2.5">
+                            <div className="space-y-2">
                                 <div className="flex justify-between text-sm">
                                     <span className="text-gray-600">Item Price ({detail.returnQty} x {formatCurrency(detail.unitPrice)})</span>
                                     <span className="text-gray-900">{formatCurrency(lineTotal)}</span>
                                 </div>
+                                <div className="flex justify-between text-sm">
+                                    <span className="text-gray-600">Incentive</span>
+                                    <span className="text-gray-500">+ {formatCurrency(0)}</span>
+                                </div>
+                                <div className="flex justify-between text-sm">
+                                    <span className="text-gray-600">Tax</span>
+                                    <span className="text-gray-500">+ {formatCurrency(detail.lineTax)}</span>
+                                </div>
+                                {detail.lineDiscount > 0 && (
+                                    <div className="flex justify-between text-sm">
+                                        <span className="text-gray-600">Discount</span>
+                                        <span className="text-red-600">- {formatCurrency(detail.lineDiscount)}</span>
+                                    </div>
+                                )}
                                 {discountClawback > 0 && (
                                     <div className="flex justify-between text-sm">
                                         <span className="text-gray-600">Discount Clawback</span>
-                                        <span className="text-red-600">-{formatCurrency(discountClawback)}</span>
+                                        <span className="text-red-600">- {formatCurrency(discountClawback)}</span>
                                     </div>
                                 )}
                                 {deductions > 0 && (
                                     <div className="flex justify-between text-sm">
                                         <span className="text-gray-600">
-                                            Deductions
+                                            Return Fee / Deductions
                                             {detail.returnDeductionNotes && (
                                                 <span className="text-gray-400 ml-1">({detail.returnDeductionNotes})</span>
                                             )}
                                         </span>
-                                        <span className="text-red-600">-{formatCurrency(deductions)}</span>
+                                        <span className="text-red-600">- {formatCurrency(deductions)}</span>
                                     </div>
                                 )}
                                 <div className="border-t border-gray-200 pt-2.5 flex justify-between">
                                     <span className="text-sm font-semibold text-gray-900">
-                                        {detail.returnRefundCompletedAt ? 'Refunded Amount' : 'To Be Refunded'}
+                                        {detail.returnRefundCompletedAt ? 'Refunded Amount' : 'Total (To be refunded)'}
                                     </span>
                                     <span className="text-base font-bold text-gray-900">{formatCurrency(netAmount)}</span>
                                 </div>
                             </div>
+                            <p className="text-[10px] text-gray-400 mt-2">Price incl. of discount & taxes</p>
                         </div>
 
                         {/* Pickup / Logistics */}
@@ -668,6 +704,27 @@ export default function ReturnDetail() {
                                 <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-4">
                                     Logistics
                                 </h3>
+                                {/* Shipment status sub-state */}
+                                <div className="mb-4 flex items-center gap-2">
+                                    <span className="text-xs text-gray-500">Shipment Status:</span>
+                                    <span className={`inline-flex px-2 py-0.5 text-xs font-semibold rounded-full ${
+                                        detail.returnReceivedAt
+                                            ? 'bg-green-100 text-green-700'
+                                            : detail.returnPickupAt
+                                            ? 'bg-blue-100 text-blue-700'
+                                            : detail.returnPickupScheduledAt
+                                            ? 'bg-yellow-100 text-yellow-700'
+                                            : 'bg-gray-100 text-gray-600'
+                                    }`}>
+                                        {detail.returnReceivedAt
+                                            ? 'Returned to warehouse'
+                                            : detail.returnPickupAt
+                                            ? 'Picked up from customer'
+                                            : detail.returnPickupScheduledAt
+                                            ? 'On the way to warehouse'
+                                            : 'Requested'}
+                                    </span>
+                                </div>
                                 <div className="grid grid-cols-2 gap-4 text-sm">
                                     {detail.returnPickupType && (
                                         <div>
@@ -679,13 +736,13 @@ export default function ReturnDetail() {
                                     )}
                                     {detail.returnCourier && (
                                         <div>
-                                            <span className="text-gray-500">Courier</span>
+                                            <span className="text-gray-500">Logistic Partner</span>
                                             <p className="font-medium text-gray-900 mt-0.5">{detail.returnCourier}</p>
                                         </div>
                                     )}
                                     {detail.returnAwbNumber && (
                                         <div>
-                                            <span className="text-gray-500">AWB Number</span>
+                                            <span className="text-gray-500">Tracking ID</span>
                                             <p className="font-mono text-gray-900 mt-0.5">{detail.returnAwbNumber}</p>
                                         </div>
                                     )}
@@ -952,6 +1009,26 @@ export default function ReturnDetail() {
                                 )}
                             </div>
                         </div>
+
+                        {/* Shopify Order Tags */}
+                        {detail.shopifyOrderTags && (
+                            <div className="bg-white rounded-lg border border-gray-200 p-5">
+                                <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">
+                                    <Tag size={14} className="inline mr-1.5" />
+                                    Shopify Order Tags
+                                </h3>
+                                <div className="flex flex-wrap gap-1.5">
+                                    {detail.shopifyOrderTags.split(',').map((tag: string) => tag.trim()).filter(Boolean).map((tag: string) => (
+                                        <span
+                                            key={tag}
+                                            className="inline-flex px-2 py-0.5 text-xs font-medium rounded bg-gray-100 text-gray-600 border border-gray-200"
+                                        >
+                                            {tag}
+                                        </span>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
 
                         {/* Notes */}
                         <div className="bg-white rounded-lg border border-gray-200 p-5">
