@@ -126,16 +126,19 @@ export default function Layout() {
     // Auto-update document title based on current route
     useDocumentTitle();
     const [sidebarOpen, setSidebarOpen] = useState(false);
-    const [collapsed, setCollapsed] = useState(() => {
-        if (typeof window === 'undefined') return false;
-        return localStorage.getItem('sidebar-collapsed') === 'true';
-    });
+    const [collapsed, setCollapsed] = useState(false);
     const [isHovering, setIsHovering] = useState(false);
-    const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>(() => {
-        if (typeof window === 'undefined') return {};
-        const saved = localStorage.getItem('sidebar-collapsed-groups');
-        return saved ? JSON.parse(saved) : {};
-    });
+    const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
+
+    // Hydrate from localStorage after mount to avoid SSR mismatch
+    useEffect(() => {
+        const savedCollapsed = localStorage.getItem('sidebar-collapsed');
+        if (savedCollapsed === 'true') setCollapsed(true);
+        const savedGroups = localStorage.getItem('sidebar-collapsed-groups');
+        if (savedGroups) {
+            try { setCollapsedGroups(JSON.parse(savedGroups)); } catch { /* ignore */ }
+        }
+    }, []);
 
     // Fetch admin-configured sidebar order (client-only to avoid SSR 401)
     const getSidebarOrderFn = useServerFn(getSidebarOrder);

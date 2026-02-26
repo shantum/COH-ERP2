@@ -3,7 +3,7 @@
  * Shows sales metrics with charts and breakdowns by various dimensions
  */
 
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import { BarChart, Bar, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { AgGridReact } from 'ag-grid-react';
 import type { ColDef, ValueFormatterParams, ColumnResizedEvent, Column } from 'ag-grid-community';
@@ -48,13 +48,12 @@ export default function Analytics() {
     const [dimension, setDimension] = useState<SalesDimension>('summary');
     const [activeMetric, setActiveMetric] = useState<'revenue' | 'units' | 'orders'>('revenue');
 
-    // Column widths state for grid (SSR-safe initialization)
-    const [columnWidths, setColumnWidths] = useState<Record<string, number>>(() => {
-        if (typeof window === 'undefined') return {};
+    // Column widths state for grid - hydrate after mount to avoid SSR mismatch
+    const [columnWidths, setColumnWidths] = useState<Record<string, number>>({});
+    useEffect(() => {
         const saved = localStorage.getItem('analyticsGridColumnWidths');
-        if (saved) { try { return JSON.parse(saved); } catch { return {}; } }
-        return {};
-    });
+        if (saved) { try { setColumnWidths(JSON.parse(saved)); } catch { /* ignore */ } }
+    }, []);
 
     const handleColumnResized = useCallback((event: ColumnResizedEvent) => {
         if (event.finished && event.columns?.length) {

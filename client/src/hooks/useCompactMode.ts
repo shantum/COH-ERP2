@@ -14,13 +14,13 @@ import { useState, useEffect, useCallback } from 'react';
 const STORAGE_KEY = 'coh-compact-mode';
 
 export function useCompactMode() {
-    const [isCompact, setIsCompact] = useState(() => {
-        // Initialize from localStorage
-        if (typeof window !== 'undefined') {
-            return localStorage.getItem(STORAGE_KEY) === 'true';
-        }
-        return false;
-    });
+    const [isCompact, setIsCompact] = useState(false);
+
+    // Hydrate from localStorage after mount to avoid SSR mismatch
+    useEffect(() => {
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if (saved === 'true') setIsCompact(true);
+    }, []);
 
     // Sync class with state
     useEffect(() => {

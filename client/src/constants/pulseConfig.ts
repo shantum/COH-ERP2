@@ -9,6 +9,10 @@
 // Prevents UI thrashing during bulk operations (Shopify sync, batch updates)
 export const DEBOUNCE_MS = 1500;
 
+// Tables whose invalidation is handled by a dedicated SSE hook (e.g. useOrderSSE).
+// Pulse skips these to avoid redundant refetches that overwrite optimistic cache updates.
+export const suppressedTables = new Set<string>();
+
 // Maps database tables to TanStack Query keys to invalidate
 // Note: During tRPC → Server Functions migration, both key patterns are listed
 // to ensure SSE invalidation works for both code paths

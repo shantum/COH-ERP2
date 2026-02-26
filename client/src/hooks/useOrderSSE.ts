@@ -6,18 +6,21 @@
  *
  * Features:
  * - Last-Event-ID tracking for resumable connections
- * - Connection health monitoring
+ * - Connection health monitoring (ref-based to avoid re-render storms)
  * - Automatic reconnection with exponential backoff
  * - Support for expanded event types (shipping, delivery, cancel)
+ * - Pulse suppression: registers Order/OrderLine so Pulse skips redundant invalidations
+ * - Stale-marks non-active views so navigation always shows fresh data
  *
  * Note: Own actions use optimistic updates for instant feedback.
  * SSE is for updates made by OTHER users or external systems (Shopify webhooks).
  */
 
 import { useEffect, useRef, useCallback, useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { ORDERS_PAGE_SIZE } from '../constants/queryKeys';
 import { getOrdersListQueryKey, invalidateAllOrderViewsStale } from './orders/orderMutationUtils';
+import { suppressedTables } from '../constants/pulseConfig';
 import type { FlattenedOrderRow } from '../server/functions/orders';
 
 // Cache data structure for orders list queries
@@ -91,17 +94,17 @@ interface UseOrderSSEOptions {
     enabled?: boolean;
 }
 
+const INITIAL_HEALTH: ConnectionHealth = {
+    isConnected: false,
+    lastHeartbeat: null,
+    missedHeartbeats: 0,
+    reconnectAttempts: 0,
+    quality: 'unknown',
+};
 
 // Heartbeat monitoring interval
 const HEARTBEAT_CHECK_INTERVAL = 15000; // 15 seconds
 const HEARTBEAT_TIMEOUT = 45000; // 1.5x the 30s heartbeat interval
-
-// ============================================================================
-// BATCHING STATE FOR LINE UPDATES (Module-level)
-// Accumulates lineId -> changes during a single animation frame
-// ============================================================================
-let pendingLineUpdates: Map<string, Record<string, unknown>> | null = null;
-let flushScheduled = false;
 
 // ============================================================================
 // REFERENTIAL STABILITY HELPERS
@@ -155,6 +158,48 @@ function applyLineUpdates(
     return { ...old, rows: newRows };
 }
 
+/**
+ * Apply batch changes to rows matching a set of lineIds, with referential stability.
+ * Returns SAME reference if no rows actually changed.
+ */
+function applyBatchLineChanges(
+    old: OrderListCacheData,
+    lineIdSet: Set<string>,
+    changes: Record<string, unknown>
+): OrderListCacheData {
+    let hasChanges = false;
+    for (const row of old.rows) {
+        if (row.lineId && lineIdSet.has(row.lineId) && wouldChange(row, changes)) {
+            hasChanges = true;
+            break;
+        }
+    }
+    if (!hasChanges) return old;
+
+    const newRows = old.rows.map((row) =>
+        row.lineId && lineIdSet.has(row.lineId) && wouldChange(row, changes)
+            ? { ...row, ...changes }
+            : row
+    );
+    return { ...old, rows: newRows };
+}
+
+/**
+ * Mark all order list queries EXCEPT the current view as stale (no immediate refetch).
+ * This ensures other views show fresh data when navigated to, without wasting bandwidth now.
+ */
+function staleOtherOrderViews(queryClient: QueryClient, currentView: string): void {
+    queryClient.invalidateQueries({
+        predicate: (query) => {
+            const key = query.queryKey;
+            if (key[0] !== 'orders' || key[1] !== 'list' || key[2] !== 'server-fn') return false;
+            const params = key[3] as { view?: string } | undefined;
+            return params?.view != null && params.view !== currentView;
+        },
+        refetchType: 'none', // Just mark stale, don't refetch
+    });
+}
+
 export function useOrderSSE({
     currentView,
     page = 1,
@@ -167,7 +212,7 @@ export function useOrderSSE({
     const reconnectAttempts = useRef(0);
     const lastEventIdRef = useRef<string | null>(null);
 
-    // Refs to avoid reconnection when view/page/limit changes (Issue 3 fix)
+    // Refs to avoid reconnection when view/page/limit changes
     const currentViewRef = useRef(currentView);
     const pageRef = useRef(page);
     const limitRef = useRef(limit);
@@ -180,25 +225,37 @@ export function useOrderSSE({
     }, [currentView, page, limit]);
 
     const [isConnected, setIsConnected] = useState(false);
-    const [connectionHealth, setConnectionHealth] = useState<ConnectionHealth>({
-        isConnected: false,
-        lastHeartbeat: null,
-        missedHeartbeats: 0,
-        reconnectAttempts: 0,
-        quality: 'unknown',
-    });
+
+    // Connection health lives in a ref to avoid re-renders on every SSE event.
+    // State is only updated when visible properties change (isConnected, quality).
+    const healthRef = useRef<ConnectionHealth>({ ...INITIAL_HEALTH });
+    const [connectionHealth, setConnectionHealth] = useState<ConnectionHealth>({ ...INITIAL_HEALTH });
+
+    const updateHealth = useCallback((updater: (prev: ConnectionHealth) => ConnectionHealth) => {
+        const prev = healthRef.current;
+        const next = updater(prev);
+        healthRef.current = next;
+        // Only trigger re-render when user-visible properties change
+        if (prev.isConnected !== next.isConnected || prev.quality !== next.quality) {
+            setConnectionHealth(next);
+        }
+    }, []);
+
+    // Batching state for line updates — instance-scoped refs instead of module-level vars
+    const pendingLineUpdatesRef = useRef<Map<string, Record<string, unknown>> | null>(null);
+    const flushScheduledRef = useRef(false);
 
     // Schedule flush of pending line updates to run once per animation frame
     const scheduleFlush = useCallback(() => {
-        if (flushScheduled) return;
-        flushScheduled = true;
+        if (flushScheduledRef.current) return;
+        flushScheduledRef.current = true;
 
         requestAnimationFrame(() => {
-            flushScheduled = false;
-            if (!pendingLineUpdates || pendingLineUpdates.size === 0) return;
+            flushScheduledRef.current = false;
+            if (!pendingLineUpdatesRef.current || pendingLineUpdatesRef.current.size === 0) return;
 
-            const updates = pendingLineUpdates;
-            pendingLineUpdates = null;
+            const updates = pendingLineUpdatesRef.current;
+            pendingLineUpdatesRef.current = null;
 
             const queryKey = getOrdersListQueryKey({
                 view: currentViewRef.current,
@@ -222,8 +279,8 @@ export function useOrderSSE({
 
             const data: SSEEvent = JSON.parse(event.data);
 
-            // Update connection health on any event
-            setConnectionHealth(prev => ({
+            // Update connection health via ref (no re-render unless quality changes)
+            updateHealth(prev => ({
                 ...prev,
                 isConnected: true,
                 lastHeartbeat: new Date(),
@@ -263,30 +320,23 @@ export function useOrderSSE({
             // Returns same cache reference if no rows actually changed
             // ================================================================
             if (data.type === 'line_status' && data.lineId) {
-                if (!pendingLineUpdates) pendingLineUpdates = new Map();
+                if (!pendingLineUpdatesRef.current) pendingLineUpdatesRef.current = new Map();
 
                 // Merge with any pending update for same lineId
-                const existing = pendingLineUpdates.get(data.lineId) || {};
+                const existing = pendingLineUpdatesRef.current.get(data.lineId) || {};
                 const changes = data.rowData || data.changes || {};
-                pendingLineUpdates.set(data.lineId, { ...existing, ...changes });
+                pendingLineUpdatesRef.current.set(data.lineId, { ...existing, ...changes });
 
                 scheduleFlush();
                 return; // Don't fall through to other handlers
             }
 
-            // Handle batch line updates
+            // Handle batch line updates (with referential stability)
             if (data.type === 'lines_batch_update' && data.lineIds && data.changes) {
                 const lineIdSet = new Set(data.lineIds);
                 queryClient.setQueryData<OrderListCacheData>(queryKey, (old) => {
                     if (!old) return old;
-
-                    const newRows = old.rows.map((row) =>
-                        row.lineId && lineIdSet.has(row.lineId)
-                            ? { ...row, ...data.changes }
-                            : row
-                    );
-
-                    return { ...old, rows: newRows };
+                    return applyBatchLineChanges(old, lineIdSet, data.changes!);
                 });
             }
 
@@ -305,6 +355,7 @@ export function useOrderSSE({
                         rows: old.rows.filter((row) => row.orderId !== data.orderId),
                     };
                 });
+                staleOtherOrderViews(queryClient, currentViewRef.current);
             }
 
             // Handle inventory updates - update skuStock in-place instead of full refetch
@@ -336,6 +387,7 @@ export function useOrderSSE({
 
                     return { ...old, rows: newRows };
                 });
+                staleOtherOrderViews(queryClient, currentViewRef.current);
             }
 
             // Handle order shipped - remove from current view if it's 'all'
@@ -350,6 +402,7 @@ export function useOrderSSE({
                     });
                 }
                 queryClient.invalidateQueries({ queryKey: ['orders', 'viewCounts'] });
+                staleOtherOrderViews(queryClient, currentViewRef.current);
             }
 
             // Handle lines shipped
@@ -357,15 +410,9 @@ export function useOrderSSE({
                 const lineIdSet = new Set(data.lineIds);
                 queryClient.setQueryData<OrderListCacheData>(queryKey, (old) => {
                     if (!old) return old;
-
-                    const newRows = old.rows.map((row) =>
-                        row.lineId && lineIdSet.has(row.lineId)
-                            ? { ...row, ...data.changes }
-                            : row
-                    );
-
-                    return { ...old, rows: newRows };
+                    return applyBatchLineChanges(old, lineIdSet, data.changes!);
                 });
+                staleOtherOrderViews(queryClient, currentViewRef.current);
             }
 
             // Handle order delivered - update tracking status in current view
@@ -377,6 +424,7 @@ export function useOrderSSE({
                     );
                     return { ...old, rows: newRows };
                 });
+                staleOtherOrderViews(queryClient, currentViewRef.current);
             }
 
             // Handle order RTO - update tracking status in current view
@@ -388,6 +436,7 @@ export function useOrderSSE({
                     );
                     return { ...old, rows: newRows };
                 });
+                staleOtherOrderViews(queryClient, currentViewRef.current);
             }
 
             // Handle order RTO received - remove from in_transit view
@@ -402,6 +451,7 @@ export function useOrderSSE({
                     });
                 }
                 queryClient.invalidateQueries({ queryKey: ['orders', 'viewCounts'] });
+                staleOtherOrderViews(queryClient, currentViewRef.current);
             }
 
             // Handle order cancelled - remove from all view
@@ -416,6 +466,7 @@ export function useOrderSSE({
                     });
                 }
                 queryClient.invalidateQueries({ queryKey: ['orders', 'viewCounts'] });
+                staleOtherOrderViews(queryClient, currentViewRef.current);
             }
 
             // Handle order uncancelled - remove from cancelled view
@@ -430,6 +481,7 @@ export function useOrderSSE({
                     });
                 }
                 queryClient.invalidateQueries({ queryKey: ['orders', 'viewCounts'] });
+                staleOtherOrderViews(queryClient, currentViewRef.current);
             }
 
             // Handle production batch created/updated/deleted
@@ -456,8 +508,8 @@ export function useOrderSSE({
         } catch (err) {
             console.error('SSE: Failed to parse event', err);
         }
-    // Using refs for currentView/page to avoid reconnection on navigation (Issue 3 fix)
-    }, [queryClient, scheduleFlush]);
+    // Using refs for currentView/page to avoid reconnection on navigation
+    }, [queryClient, scheduleFlush, updateHealth]);
 
     const connect = useCallback(() => {
         // Skip during SSR (no window/EventSource available)
@@ -487,7 +539,7 @@ export function useOrderSSE({
         es.onerror = () => {
             console.log('SSE: Connection error, will reconnect...');
             setIsConnected(false);
-            setConnectionHealth(prev => ({
+            updateHealth(prev => ({
                 ...prev,
                 isConnected: false,
                 quality: 'poor',
@@ -507,7 +559,7 @@ export function useOrderSSE({
         es.onopen = () => {
             console.log('SSE: Connection opened');
             setIsConnected(true);
-            setConnectionHealth(prev => ({
+            updateHealth(prev => ({
                 ...prev,
                 isConnected: true,
                 reconnectAttempts: 0,
@@ -516,14 +568,21 @@ export function useOrderSSE({
         };
 
         eventSourceRef.current = es;
-    }, [enabled, handleEvent]);
+    }, [enabled, handleEvent, updateHealth]);
 
-    // Initial connection
+    // Initial connection + Pulse suppression registration
     useEffect(() => {
+        // Tell Pulse to skip Order/OrderLine — this hook handles them
+        suppressedTables.add('Order');
+        suppressedTables.add('OrderLine');
+
         connect();
 
         // Cleanup on unmount
         return () => {
+            suppressedTables.delete('Order');
+            suppressedTables.delete('OrderLine');
+
             if (eventSourceRef.current) {
                 eventSourceRef.current.close();
             }
@@ -534,12 +593,14 @@ export function useOrderSSE({
     }, [connect]);
 
     // Health monitoring - check for missed heartbeats
+    // Uses ref for health state so the interval stays stable (no teardown/recreate on every event)
     useEffect(() => {
         const checker = setInterval(() => {
-            if (connectionHealth.isConnected && connectionHealth.lastHeartbeat) {
-                const elapsed = Date.now() - connectionHealth.lastHeartbeat.getTime();
+            const health = healthRef.current;
+            if (health.isConnected && health.lastHeartbeat) {
+                const elapsed = Date.now() - health.lastHeartbeat.getTime();
                 if (elapsed > HEARTBEAT_TIMEOUT) {
-                    setConnectionHealth(prev => {
+                    updateHealth(prev => {
                         const newMissed = prev.missedHeartbeats + 1;
                         return {
                             ...prev,
@@ -552,7 +613,7 @@ export function useOrderSSE({
         }, HEARTBEAT_CHECK_INTERVAL);
 
         return () => clearInterval(checker);
-    }, [connectionHealth.isConnected, connectionHealth.lastHeartbeat]);
+    }, [updateHealth]);
 
     return {
         isConnected,

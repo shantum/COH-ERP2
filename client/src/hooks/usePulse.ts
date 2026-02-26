@@ -10,7 +10,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { TABLE_INVALIDATION_MAP, DEBOUNCE_MS } from '../constants/pulseConfig';
+import { TABLE_INVALIDATION_MAP, DEBOUNCE_MS, suppressedTables } from '../constants/pulseConfig';
 
 interface PulseSignal {
     type: 'connected' | 'disconnected' | 'signal';
@@ -31,6 +31,9 @@ export function usePulse(enabled = true) {
 
     // Debounced invalidation - collects signals then fires once after debounce window
     const scheduleInvalidation = useCallback((table: string, id: string) => {
+        // Skip tables handled by a dedicated SSE hook (e.g. useOrderSSE)
+        if (suppressedTables.has(table)) return;
+
         // Add to pending set (tracks IDs during debounce window)
         if (!pendingInvalidationsRef.current.has(table)) {
             pendingInvalidationsRef.current.set(table, new Set());
@@ -90,6 +93,11 @@ export function usePulse(enabled = true) {
             } catch (err) {
                 console.error('[Pulse] Parse error:', err);
             }
+        };
+
+        es.onopen = () => {
+            setIsConnected(true);
+            reconnectAttempts.current = 0;
         };
 
         es.onerror = () => {
