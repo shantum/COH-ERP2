@@ -2,7 +2,7 @@
  * Tracking Routes
  *
  * API endpoints for tracking shipments and debugging iThink tracking data.
- * Provides tracking lookup and access to stored raw API responses.
+ * All tracking reads go through the TrackingCacheService.
  *
  * @module routes/tracking
  */
@@ -13,7 +13,8 @@ import { z } from 'zod';
 import { authenticateToken, requireAdmin } from '../middleware/auth.js';
 import { getTrackingResponses, getStorageStats } from '../services/trackingResponseStorage.js';
 import { trackingLogger } from '../utils/logger.js';
-import ithinkLogistics from '../services/ithinkLogistics/index.js';
+import trackingCacheService from '../services/trackingCacheService.js';
+import { formatRawToTrackingData } from '../services/ithinkLogistics/tracking.js';
 
 const router: Router = Router();
 
@@ -54,27 +55,22 @@ router.get(
                 return;
             }
 
-            // Get raw tracking data from iThink
-            const rawData = await ithinkLogistics.trackShipments(awbNumber, true);
-            const rawResponse = rawData[awbNumber];
+            const entry = await trackingCacheService.get(awbNumber);
 
-            if (!rawResponse || rawResponse.message !== 'success') {
+            if (!entry || !entry.rawResponse?.message) {
                 res.status(404).json({
                     success: false,
                     error: 'Tracking data not found for this AWB',
-                    rawApiResponse: rawResponse || null,
+                    rawApiResponse: null,
                 });
                 return;
             }
 
-            // Get formatted tracking data
-            const trackingData = await ithinkLogistics.getTrackingStatus(awbNumber);
-
             res.json({
                 success: true,
                 awbNumber,
-                trackingData,
-                rawApiResponse: rawResponse,
+                trackingData: formatRawToTrackingData(entry.rawResponse),
+                rawApiResponse: entry.rawResponse,
             });
         } catch (error: unknown) {
             const message = error instanceof Error ? error.message : 'Unknown error';
@@ -241,7 +237,10 @@ router.get(
     requireAdmin,
     async (_req: Request, res: Response): Promise<void> => {
         try {
-            const stats = await getStorageStats();
+            const [stats, cacheStatus] = await Promise.all([
+                getStorageStats(),
+                Promise.resolve(trackingCacheService.getStatus()),
+            ]);
 
             res.json({
                 success: true,
@@ -249,6 +248,12 @@ router.get(
                     totalResponses: stats.totalResponses,
                     uniqueAwbs: stats.uniqueAwbs,
                     maxResponsesPerAwb: 5,
+                },
+                cache: {
+                    entryCount: cacheStatus.entryCount,
+                    isRefreshing: cacheStatus.isRefreshing,
+                    oldestEntryAge: cacheStatus.oldestEntryAge,
+                    lastRefreshAt: cacheStatus.lastRefreshAt?.toISOString() ?? null,
                 },
             });
         } catch (error: unknown) {

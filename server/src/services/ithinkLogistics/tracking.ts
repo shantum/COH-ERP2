@@ -157,3 +157,61 @@ export async function getTrackingStatus(
 export function mapToInternalStatus(statusCode: string, statusText: string = ''): TrackingStatus {
     return resolveTrackingStatusFromConfig(statusCode, statusText);
 }
+
+/**
+ * Format a raw iThink tracking response into the UI-friendly TrackingData shape.
+ *
+ * This is the single source of truth for raw → formatted transformation.
+ * Used by the cache service and Express routes.
+ */
+export function formatRawToTrackingData(tracking: IThinkRawTrackingResponse): TrackingData {
+    return {
+        awbNumber: tracking.awb_no,
+        courier: tracking.logistic,
+        currentStatus: tracking.current_status,
+        statusCode: tracking.current_status_code,
+        expectedDeliveryDate: tracking.expected_delivery_date,
+        promiseDeliveryDate: tracking.promise_delivery_date,
+        ofdCount: parseInt(String(tracking.ofd_count)) || 0,
+        isRto: tracking.return_tracking_no ? true : false,
+        rtoAwb: tracking.return_tracking_no || null,
+        orderType: tracking.order_type || null,
+        cancelStatus: tracking.cancel_status || null,
+        lastScan: tracking.last_scan_details ? {
+            status: tracking.last_scan_details.status,
+            statusCode: tracking.last_scan_details.status_code,
+            location: tracking.last_scan_details.scan_location,
+            datetime: tracking.last_scan_details.status_date_time,
+            remark: tracking.last_scan_details.remark,
+            reason: tracking.last_scan_details.reason,
+        } : null,
+        orderDetails: tracking.order_details ? {
+            orderNumber: tracking.order_details.order_number,
+            subOrderNumber: tracking.order_details.sub_order_number,
+            orderType: tracking.order_details.order_type,
+            weight: tracking.order_details.phy_weight,
+            length: tracking.order_details.ship_length,
+            breadth: tracking.order_details.ship_width,
+            height: tracking.order_details.ship_height,
+            netPayment: tracking.order_details.net_payment,
+        } : null,
+        customerDetails: tracking.customer_details ? {
+            name: tracking.customer_details.customer_name,
+            phone: tracking.customer_details.customer_mobile || tracking.customer_details.customer_phone || '',
+            address1: tracking.customer_details.customer_address1,
+            address2: tracking.customer_details.customer_address2,
+            city: tracking.customer_details.customer_city,
+            state: tracking.customer_details.customer_state,
+            country: tracking.customer_details.customer_country,
+            pincode: tracking.customer_details.customer_pincode,
+        } : null,
+        scanHistory: (tracking.scan_details || []).map((scan) => ({
+            status: scan.status,
+            statusCode: scan.status_code,
+            location: scan.status_location,
+            datetime: scan.status_date_time,
+            remark: scan.status_remark,
+            reason: scan.status_reason,
+        })),
+    };
+}

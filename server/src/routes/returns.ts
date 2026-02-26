@@ -17,6 +17,8 @@ import { asyncHandler } from '../middleware/asyncHandler.js';
 import ithinkLogistics from '../services/ithinkLogistics/index.js';
 import type { ProductInfo, ShipmentDimensions } from '../services/ithinkLogistics/index.js';
 import { shippingLogger } from '../utils/logger.js';
+import trackingCacheService from '../services/trackingCacheService.js';
+import { formatRawToTrackingData } from '../services/ithinkLogistics/tracking.js';
 
 const router: Router = Router();
 
@@ -330,7 +332,7 @@ router.post('/schedule-pickup', authenticateToken, asyncHandler(async (req: Requ
  * POST /api/returns/tracking/batch
  *
  * Batch fetch tracking status for multiple AWBs (max 50).
- * iThink API supports 10 per call, so we chunk internally.
+ * Reads from TrackingCacheService — cache handles batching to iThink API.
  * Returns: Record<awbNumber, TrackingData>
  */
 router.post('/tracking/batch', authenticateToken, asyncHandler(async (req: Request, res: Response): Promise<void> => {
@@ -345,71 +347,14 @@ router.post('/tracking/batch', authenticateToken, asyncHandler(async (req: Reque
     const unique = [...new Set(awbNumbers)].slice(0, 50);
 
     try {
-        const results: Record<string, ReturnType<typeof ithinkLogistics.getTrackingStatus> extends Promise<infer T> ? T : never> = {};
+        const entries = await trackingCacheService.getMany(unique);
+        const results: Record<string, unknown> = {};
 
-        // iThink API supports 10 per call — chunk
-        const chunks: string[][] = [];
-        for (let i = 0; i < unique.length; i += 10) {
-            chunks.push(unique.slice(i, i + 10));
-        }
-
-        await Promise.all(chunks.map(async (chunk) => {
-            const rawData = await ithinkLogistics.trackShipments(chunk);
-            for (const awb of chunk) {
-                const tracking = rawData[awb];
-                if (tracking && tracking.message === 'success') {
-                    results[awb] = {
-                        awbNumber: tracking.awb_no,
-                        courier: tracking.logistic,
-                        currentStatus: tracking.current_status,
-                        statusCode: tracking.current_status_code,
-                        expectedDeliveryDate: tracking.expected_delivery_date,
-                        promiseDeliveryDate: tracking.promise_delivery_date,
-                        ofdCount: parseInt(String(tracking.ofd_count)) || 0,
-                        isRto: tracking.return_tracking_no ? true : false,
-                        rtoAwb: tracking.return_tracking_no || null,
-                        orderType: tracking.order_type || null,
-                        cancelStatus: tracking.cancel_status || null,
-                        lastScan: tracking.last_scan_details ? {
-                            status: tracking.last_scan_details.status,
-                            statusCode: tracking.last_scan_details.status_code,
-                            location: tracking.last_scan_details.scan_location,
-                            datetime: tracking.last_scan_details.status_date_time,
-                            remark: tracking.last_scan_details.remark,
-                            reason: tracking.last_scan_details.reason,
-                        } : null,
-                        orderDetails: tracking.order_details ? {
-                            orderNumber: tracking.order_details.order_number,
-                            subOrderNumber: tracking.order_details.sub_order_number,
-                            orderType: tracking.order_details.order_type,
-                            weight: tracking.order_details.phy_weight,
-                            length: tracking.order_details.ship_length,
-                            breadth: tracking.order_details.ship_width,
-                            height: tracking.order_details.ship_height,
-                            netPayment: tracking.order_details.net_payment,
-                        } : null,
-                        customerDetails: tracking.customer_details ? {
-                            name: tracking.customer_details.customer_name,
-                            phone: tracking.customer_details.customer_mobile || tracking.customer_details.customer_phone || '',
-                            address1: tracking.customer_details.customer_address1,
-                            address2: tracking.customer_details.customer_address2,
-                            city: tracking.customer_details.customer_city,
-                            state: tracking.customer_details.customer_state,
-                            country: tracking.customer_details.customer_country,
-                            pincode: tracking.customer_details.customer_pincode,
-                        } : null,
-                        scanHistory: (tracking.scan_details || []).map((scan) => ({
-                            status: scan.status,
-                            statusCode: scan.status_code,
-                            location: scan.status_location,
-                            datetime: scan.status_date_time,
-                            remark: scan.status_remark,
-                            reason: scan.status_reason,
-                        })),
-                    };
-                }
+        for (const [awb, entry] of entries) {
+            if (entry.rawResponse?.message === 'success') {
+                results[awb] = formatRawToTrackingData(entry.rawResponse);
             }
-        }));
+        }
 
         res.json(results);
     } catch (error: unknown) {
@@ -422,7 +367,8 @@ router.post('/tracking/batch', authenticateToken, asyncHandler(async (req: Reque
 /**
  * GET /api/returns/tracking/:awbNumber
  *
- * Get tracking status for a return shipment AWB
+ * Get tracking status for a return shipment AWB.
+ * Reads from TrackingCacheService.
  */
 router.get('/tracking/:awbNumber', authenticateToken, asyncHandler(async (req: Request, res: Response): Promise<void> => {
     const awbNumber = req.params.awbNumber as string;
@@ -436,9 +382,9 @@ router.get('/tracking/:awbNumber', authenticateToken, asyncHandler(async (req: R
     }
 
     try {
-        const trackingData = await ithinkLogistics.getTrackingStatus(awbNumber);
+        const entry = await trackingCacheService.get(awbNumber);
 
-        if (!trackingData) {
+        if (!entry || !entry.rawResponse?.message) {
             res.status(404).json({
                 success: false,
                 error: 'Tracking data not found',
@@ -446,7 +392,7 @@ router.get('/tracking/:awbNumber', authenticateToken, asyncHandler(async (req: R
             return;
         }
 
-        res.json(trackingData);
+        res.json(formatRawToTrackingData(entry.rawResponse));
     } catch (error: unknown) {
         const message = error instanceof Error ? error.message : 'Unknown error';
         shippingLogger.error({ error: message, awbNumber }, 'Tracking fetch failed');

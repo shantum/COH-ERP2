@@ -18,7 +18,7 @@ import {
     MASTERSHEET_TABS,
 } from '../config/sync/sheets/index.js';
 import prisma from '../lib/prisma.js';
-import iThinkService from './ithinkLogistics/index.js';
+import trackingCacheService from './trackingCacheService.js';
 import { resolveTrackingStatus } from '../config/mappings/trackingStatus.js';
 import { recomputeOrderStatus } from '../utils/orderStatus.js';
 
@@ -948,6 +948,8 @@ export async function syncSheetAwb(): Promise<SyncSheetAwbResult> {
                 id: true,
                 orderNumber: true,
                 channel: true,
+                paymentMethod: true,
+                customerId: true,
                 orderLines: {
                     select: {
                         id: true,
@@ -969,6 +971,9 @@ export async function syncSheetAwb(): Promise<SyncSheetAwbResult> {
             awbNumber: string | null;
             trackingStatus: string | null;
             channel: string;
+            orderNumber: string;
+            paymentMethod: string | null;
+            customerId: string | null;
         }>();
         for (const order of orders) {
             for (const line of order.orderLines) {
@@ -979,6 +984,9 @@ export async function syncSheetAwb(): Promise<SyncSheetAwbResult> {
                     awbNumber: line.awbNumber,
                     trackingStatus: line.trackingStatus,
                     channel: order.channel,
+                    orderNumber: order.orderNumber,
+                    paymentMethod: order.paymentMethod,
+                    customerId: order.customerId,
                 });
             }
         }
@@ -992,29 +1000,25 @@ export async function syncSheetAwb(): Promise<SyncSheetAwbResult> {
             }
         }
 
-        // Batch validate only iThink AWBs (max 10 per call)
+        // Batch validate only iThink AWBs via tracking cache
         const validatedAwbs = new Map<string, { logistic: string; statusCode: string; statusText: string }>();
         const ithinkAwbList = [...ithinkAwbs];
 
-        for (let i = 0; i < ithinkAwbList.length; i += 10) {
-            const batch = ithinkAwbList.slice(i, i + 10);
-            try {
-                const data = await iThinkService.trackShipments(batch, true);
-                for (const awb of batch) {
-                    const tracking = data[awb];
-                    if (tracking && tracking.message === 'success') {
-                        validatedAwbs.set(awb, {
-                            logistic: tracking.logistic,
-                            statusCode: tracking.current_status_code,
-                            statusText: tracking.current_status,
-                        });
-                    }
+        try {
+            const entries = await trackingCacheService.getMany(ithinkAwbList);
+            for (const [awb, entry] of entries) {
+                if (entry.rawResponse?.message === 'success') {
+                    validatedAwbs.set(awb, {
+                        logistic: entry.rawResponse.logistic,
+                        statusCode: entry.rawResponse.current_status_code,
+                        statusText: entry.rawResponse.current_status,
+                    });
                 }
-            } catch (err: unknown) {
-                const message = err instanceof Error ? err.message : String(err);
-                result.errors.push(`iThink batch error: ${message}`);
-                log.error({ batch, err: message }, 'iThink batch validation failed');
             }
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            result.errors.push(`iThink batch error: ${message}`);
+            log.error({ err: message }, 'iThink batch validation failed');
         }
 
         // Process each sheet row: update DB + collect sheet write-backs
@@ -1067,6 +1071,15 @@ export async function syncSheetAwb(): Promise<SyncSheetAwbResult> {
                 });
                 recomputeOrderIds.add(line.orderId);
                 result.linked++;
+
+                // Register AWB in tracking cache for automatic refresh
+                trackingCacheService.register(row.awb, {
+                    orderId: line.orderId,
+                    orderNumber: line.orderNumber,
+                    paymentMethod: (line.paymentMethod || 'Prepaid') as 'COD' | 'Prepaid',
+                    customerId: line.customerId,
+                    rtoInitiatedAt: null,
+                });
 
                 // Queue sheet write-back: status (Y), courier (Z), AWB (AA)
                 const displayStatus = buildDisplayStatus(line.channel, 'shipped', trackingStatus);

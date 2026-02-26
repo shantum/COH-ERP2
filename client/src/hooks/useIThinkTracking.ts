@@ -15,8 +15,8 @@ export type IThinkLastScan = TrackingLastScan;
 export type IThinkScanHistoryItem = TrackingScan;
 export type IThinkTrackingData = AwbTrackingResponse;
 
-const STALE_TIME = 15 * 60 * 1000; // 15 minutes
-const GC_TIME = 30 * 60 * 1000;    // 30 minutes
+const STALE_TIME = 2 * 60 * 1000; // 2 minutes (server cache keeps data fresh)
+const GC_TIME = 10 * 60 * 1000;   // 10 minutes
 
 export interface UseIThinkTrackingOptions {
     awbNumber: string;
