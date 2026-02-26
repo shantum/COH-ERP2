@@ -162,22 +162,61 @@ export async function resolveSkuBom(prisma: PrismaClient, skuId: string): Promis
   const variationLinesByRole = new Map(variationLines.map((l) => [l.roleId, l]));
   const skuLinesByRole = new Map(skuLines.map((l) => [l.roleId, l]));
 
-  // Resolve each component role
-  const resolvedLines: ResolvedBomLine[] = [];
-
-  for (const productTemplate of productTemplates) {
+  // First pass: resolve all components and quantities (no DB calls)
+  const resolvedData = productTemplates.map((productTemplate) => {
     const { role } = productTemplate;
     const variationLine = variationLinesByRole.get(role.id);
     const skuLine = skuLinesByRole.get(role.id);
-
-    // Resolve component (3-level cascade: SKU → Variation → Product)
     const resolvedComponent = resolveComponent(productTemplate, variationLine, skuLine);
-
-    // Resolve quantity (3-level cascade: SKU → Variation → Product)
     const resolvedQuantity = resolveQuantity(productTemplate, variationLine, skuLine);
+    return { productTemplate, role, resolvedComponent, resolvedQuantity, skuLine };
+  });
 
-    // Get component details and cost
-    const componentDetails = await getComponentDetails(prisma, resolvedComponent, role.type.code);
+  // Collect IDs and batch-fetch all component details in 3 queries
+  const fabricColourIds = resolvedData
+    .map((d) => d.resolvedComponent.fabricColourId)
+    .filter((id): id is string => id != null);
+  const trimItemIds = resolvedData
+    .map((d) => d.resolvedComponent.trimItemId)
+    .filter((id): id is string => id != null);
+  const serviceItemIds = resolvedData
+    .map((d) => d.resolvedComponent.serviceItemId)
+    .filter((id): id is string => id != null);
+
+  const [fabricColours, trimItems, serviceItems] = await Promise.all([
+    fabricColourIds.length > 0
+      ? prisma.fabricColour.findMany({
+          where: { id: { in: fabricColourIds } },
+          include: { fabric: true },
+        })
+      : Promise.resolve([]),
+    trimItemIds.length > 0
+      ? prisma.trimItem.findMany({
+          where: { id: { in: trimItemIds } },
+        })
+      : Promise.resolve([]),
+    serviceItemIds.length > 0
+      ? prisma.serviceItem.findMany({
+          where: { id: { in: serviceItemIds } },
+        })
+      : Promise.resolve([]),
+  ]);
+
+  const fabricColourMap = new Map(fabricColours.map((c) => [c.id, c]));
+  const trimItemMap = new Map(trimItems.map((t) => [t.id, t]));
+  const serviceItemMap = new Map(serviceItems.map((s) => [s.id, s]));
+
+  // Second pass: build resolved lines using cached data (no DB calls)
+  const resolvedLines: ResolvedBomLine[] = [];
+
+  for (const { role, resolvedComponent, resolvedQuantity, skuLine } of resolvedData) {
+    const componentDetails = getComponentDetailsFromCache(
+      resolvedComponent,
+      role.type.code,
+      fabricColourMap,
+      trimItemMap,
+      serviceItemMap,
+    );
 
     // Calculate total cost
     const unitCost = skuLine?.overrideCost ?? componentDetails.cost;
@@ -367,6 +406,53 @@ async function getComponentDetails(
     const service = await prisma.serviceItem.findUnique({
       where: { id: component.serviceItemId },
     });
+    if (service) {
+      return {
+        name: service.name,
+        code: service.code,
+        cost: service.costPerJob,
+      };
+    }
+  }
+
+  return { name: null, code: null, cost: null };
+}
+
+/**
+ * Synchronous version of getComponentDetails that reads from pre-fetched maps
+ * instead of making individual DB queries. Used by resolveSkuBom to avoid N+1.
+ */
+function getComponentDetailsFromCache(
+  component: ResolvedComponentResult,
+  typeCode: string,
+  fabricColourMap: Map<string, { id: string; colourName: string; costPerUnit: number | null; fabric: { name: string; costPerUnit: number | null } }>,
+  trimItemMap: Map<string, { id: string; name: string; code: string | null; costPerUnit: number | null }>,
+  serviceItemMap: Map<string, { id: string; name: string; code: string | null; costPerJob: number | null }>,
+): ComponentDetails {
+  if (typeCode === 'FABRIC' && component.fabricColourId) {
+    const colour = fabricColourMap.get(component.fabricColourId);
+    if (colour) {
+      return {
+        name: `${colour.fabric.name} - ${colour.colourName}`,
+        code: null,
+        cost: colour.costPerUnit ?? colour.fabric.costPerUnit ?? null,
+      };
+    }
+  }
+
+  if (typeCode === 'TRIM' && component.trimItemId) {
+    const trim = trimItemMap.get(component.trimItemId);
+    if (trim) {
+      return {
+        name: trim.name,
+        code: trim.code,
+        cost: trim.costPerUnit,
+      };
+    }
+  }
+
+  if (typeCode === 'SERVICE' && component.serviceItemId) {
+    const service = serviceItemMap.get(component.serviceItemId);
     if (service) {
       return {
         name: service.name,

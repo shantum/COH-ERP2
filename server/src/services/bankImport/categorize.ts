@@ -333,6 +333,27 @@ export async function categorizeTransactions(options?: { bank?: string }): Promi
   const invoiceByNumber = new Map(openInvoices.filter(i => i.invoiceNumber).map(i => [i.invoiceNumber!, i]));
   const invoiceById = new Map(openInvoices.map(i => [i.id, i]));
 
+  // Pre-fetch unlinked PayU settlements for UTR matching
+  const unlinkedPayuSettlements = await prisma.payuSettlement.findMany({
+    where: { bankTransactionId: null },
+    select: { id: true, utrNumber: true },
+  });
+  // Build UTR -> settlement lookup (strip leading zeros for matching)
+  const payuByUtr = new Map<string, typeof unlinkedPayuSettlements[0]>();
+  for (const s of unlinkedPayuSettlements) {
+    if (s.utrNumber) {
+      payuByUtr.set(s.utrNumber, s);
+      payuByUtr.set(s.utrNumber.replace(/^0+/, ''), s);
+    }
+  }
+
+  // Pre-fetch unlinked COD remittances for amount+date matching
+  const unlinkedCodRemittances = await prisma.codRemittance.findMany({
+    where: { bankTransactionId: null },
+    select: { id: true, codRemitted: true, remittanceDate: true },
+    orderBy: { remittanceDate: 'desc' },
+  });
+
   const breakdown: Record<string, { count: number; total: number }> = {};
   let categorized = 0;
   let skipped = 0;
@@ -450,13 +471,11 @@ export async function categorizeTransactions(options?: { bank?: string }): Promi
     if (txn.reference) { candidates.push(txn.reference); candidates.push(txn.reference.replace(/^0+/, '')); }
     const uniqueCandidates = [...new Set(candidates)];
 
-    // Find any unlinked settlement matching this UTR (multiple settlements can share one UTR)
-    const payuMatch = await prisma.payuSettlement.findFirst({
-      where: {
-        bankTransactionId: null,
-        utrNumber: { in: uniqueCandidates },
-      },
-    });
+    // Find any unlinked settlement matching this UTR from pre-fetched index
+    const payuMatch = uniqueCandidates.reduce<typeof unlinkedPayuSettlements[0] | undefined>(
+      (found, candidate) => found || payuByUtr.get(candidate),
+      undefined,
+    );
 
     if (payuMatch) {
       const payuData: Prisma.BankTransactionUncheckedUpdateInput = {
@@ -482,6 +501,12 @@ export async function categorizeTransactions(options?: { bank?: string }): Promi
         where: { utrNumber: utrValue, bankTransactionId: null },
         data: { bankTransactionId: txn.id, matchedAt: new Date(), matchConfidence: 'utr_exact' },
       });
+
+      // Remove matched UTR entries so the same settlement isn't matched twice
+      if (utrValue) {
+        payuByUtr.delete(utrValue);
+        payuByUtr.delete(utrValue.replace(/^0+/, ''));
+      }
     }
   }
 
@@ -494,18 +519,15 @@ export async function categorizeTransactions(options?: { bank?: string }): Promi
     const creditAcct = existingUpdate?.data?.creditAccountCode as string | undefined;
     if (creditAcct && creditAcct !== 'UNMATCHED_PAYMENTS') continue;
 
-    // Try matching to CodRemittance by amount (±Rs 1) + date (±3 days)
-    const match = await prisma.codRemittance.findFirst({
-      where: {
-        bankTransactionId: null,
-        codRemitted: { gte: txn.amount - 1, lte: txn.amount + 1 },
-        remittanceDate: {
-          gte: new Date(txn.txnDate.getTime() - 3 * 86400000),
-          lte: new Date(txn.txnDate.getTime() + 3 * 86400000),
-        },
-      },
-      orderBy: { remittanceDate: 'desc' },
-    });
+    // Try matching to CodRemittance by amount (±Rs 1) + date (±3 days) from pre-fetched list
+    const matchIdx = unlinkedCodRemittances.findIndex(r =>
+      r.codRemitted >= txn.amount - 1 && r.codRemitted <= txn.amount + 1 &&
+      r.remittanceDate.getTime() >= txn.txnDate.getTime() - 3 * 86400000 &&
+      r.remittanceDate.getTime() <= txn.txnDate.getTime() + 3 * 86400000
+    );
+    const match = matchIdx >= 0 ? unlinkedCodRemittances[matchIdx] : null;
+    // Remove matched entry so it's not matched twice
+    if (matchIdx >= 0) unlinkedCodRemittances.splice(matchIdx, 1);
 
     if (match) {
       // Override or set categorization for this txn

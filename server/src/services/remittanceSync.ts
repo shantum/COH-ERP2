@@ -122,7 +122,8 @@ async function processDate(
     result.remittancesFound += summaries.length;
 
     // Check which summaries are new (not yet processed)
-    const newSummaries = [];
+    // Collect keys, logging parse failures
+    const keysToCheck: Array<{ summary: typeof summaries[0]; remittanceDate: Date; remittanceId: string }> = [];
     for (const summary of summaries) {
         const remittanceDate = parseIThinkDate(summary.remittance_date);
         if (!remittanceDate) {
@@ -130,22 +131,26 @@ async function processDate(
             result.errors++;
             continue;
         }
-
-        const remittanceId = String(summary.remittance_id);
-
-        const existing = await prisma.codRemittance.findUnique({
-            where: {
-                remittanceId_remittanceDate: {
-                    remittanceId,
-                    remittanceDate,
-                },
-            },
-        });
-
-        if (!existing) {
-            newSummaries.push({ summary, remittanceDate, remittanceId });
-        }
+        keysToCheck.push({ summary, remittanceDate, remittanceId: String(summary.remittance_id) });
     }
+
+    // Batch check existence instead of N individual findUnique calls
+    const existingRecords = keysToCheck.length > 0
+        ? await prisma.codRemittance.findMany({
+            where: {
+                OR: keysToCheck.map(k => ({
+                    remittanceId: k.remittanceId,
+                    remittanceDate: k.remittanceDate,
+                })),
+            },
+            select: { remittanceId: true, remittanceDate: true },
+        })
+        : [];
+    const existingSet = new Set(existingRecords.map(r => `${r.remittanceId}-${r.remittanceDate.toISOString()}`));
+
+    const newSummaries = keysToCheck.filter(k =>
+        !existingSet.has(`${k.remittanceId}-${k.remittanceDate.toISOString()}`),
+    );
 
     if (newSummaries.length === 0) return;
 
@@ -209,27 +214,27 @@ async function matchOrdersForDetails(
     interface ShopifyJob { orderId: string; shopifyOrderId: string; amount: number }
     const shopifyJobs: ShopifyJob[] = [];
 
+    // Batch-fetch all orders by order number instead of N individual findFirst calls
+    const orderNumbers = details.map(d => d.order_no.replace(/^#/, ''));
+    const allVariants = orderNumbers.flatMap(n => [n, `#${n}`]);
+    const matchedOrders = allVariants.length > 0
+        ? await prisma.order.findMany({
+            where: { orderNumber: { in: allVariants } },
+            select: { id: true, orderNumber: true, shopifyOrderId: true, totalAmount: true, codRemittedAt: true, paymentMethod: true },
+        })
+        : [];
+    const orderMap = new Map<string, typeof matchedOrders[0]>();
+    for (const o of matchedOrders) {
+        const normalized = o.orderNumber.replace(/^#/, '');
+        if (!orderMap.has(normalized)) orderMap.set(normalized, o);
+    }
+
     for (const detail of details) {
         try {
             const orderNumber = detail.order_no.replace(/^#/, '');
             const amount = parseFloat(detail.netpayment) || 0;
 
-            const order = await prisma.order.findFirst({
-                where: {
-                    OR: [
-                        { orderNumber },
-                        { orderNumber: `#${orderNumber}` },
-                    ],
-                },
-                select: {
-                    id: true,
-                    orderNumber: true,
-                    shopifyOrderId: true,
-                    totalAmount: true,
-                    codRemittedAt: true,
-                    paymentMethod: true,
-                },
-            });
+            const order = orderMap.get(orderNumber) || null;
 
             if (!order) {
                 result.ordersNotFound++;

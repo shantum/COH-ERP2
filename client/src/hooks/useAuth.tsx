@@ -10,7 +10,7 @@
  * 3. Subsequent navigations hit cache (staleTime: 5 min)
  */
 
-import { createContext, useContext, useEffect, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, type ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { authApi } from '../services/api';
 import { authQueryKeys } from '../constants/queryKeys';
@@ -61,14 +61,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         enabled: typeof window !== 'undefined',
     });
 
-    const login = async (email: string, password: string) => {
+    const login = useCallback(async (email: string, password: string) => {
         const res = await authApi.login(email, password);
         // Cookie is set automatically by the server (HttpOnly)
         // Update the query cache with the new user
         queryClient.setQueryData(authQueryKeys.user, res.data.user);
-    };
+    }, [queryClient]);
 
-    const logout = async () => {
+    const logout = useCallback(async () => {
         // Clear server-side cookie
         try {
             await authApi.logout();
@@ -79,7 +79,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         queryClient.setQueryData(authQueryKeys.user, null);
         // Invalidate to ensure fresh state on next login
         queryClient.invalidateQueries({ queryKey: authQueryKeys.user });
-    };
+    }, [queryClient]);
 
     // Listen for unauthorized events from API interceptor
     // This handles 401 responses without forcing a full page reload
@@ -95,16 +95,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return () => window.removeEventListener('auth:unauthorized', handleUnauthorized);
     }, [queryClient]);
 
+    const value = useMemo<AuthContextType>(() => ({
+        user: user ?? null,
+        isAuthenticated: !!user,
+        isLoading: typeof window === 'undefined' ? false : isLoading,
+        login,
+        logout,
+    }), [user, isLoading, login, logout]);
+
     return (
-        <AuthContext.Provider
-            value={{
-                user: user ?? null,
-                isAuthenticated: !!user,
-                isLoading: typeof window === 'undefined' ? false : isLoading,
-                login,
-                logout,
-            }}
-        >
+        <AuthContext.Provider value={value}>
             {children}
         </AuthContext.Provider>
     );

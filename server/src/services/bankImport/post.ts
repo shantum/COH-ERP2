@@ -184,19 +184,27 @@ export async function confirmBatch(txnIds: string[]): Promise<BatchConfirmResult
   let errors = 0;
   const errorDetails: string[] = [];
 
-  for (const txnId of txnIds) {
-    try {
-      const result = await confirmSingleTransaction(txnId);
-      if (result.success) {
+  // Process in parallel batches for performance
+  const BATCH_SIZE = 10;
+  for (let i = 0; i < txnIds.length; i += BATCH_SIZE) {
+    const batch = txnIds.slice(i, i + BATCH_SIZE);
+    const results = await Promise.allSettled(
+      batch.map(async (txnId) => {
+        const result = await confirmSingleTransaction(txnId);
+        if (!result.success) {
+          throw new Error(result.error || 'Unknown error');
+        }
+      })
+    );
+
+    for (let j = 0; j < results.length; j++) {
+      const r = results[j];
+      if (r.status === 'fulfilled') {
         confirmed++;
       } else {
         errors++;
-        errorDetails.push(`${txnId}: ${result.error}`);
+        errorDetails.push(`${batch[j]}: ${r.reason?.message || String(r.reason)}`);
       }
-    } catch (err) {
-      errors++;
-      const msg = err instanceof Error ? err.message : String(err);
-      errorDetails.push(`${txnId}: ${msg}`);
     }
   }
 

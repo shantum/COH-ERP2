@@ -52,6 +52,10 @@ export default function Inventory() {
     const search = Route.useSearch();
     const navigate = useNavigate();
 
+    // Ref for search to avoid unstable object dep in callbacks/effects
+    const searchRef = useRef(search);
+    searchRef.current = search;
+
     // Pagination from URL
     const page = search.page;
     const limit = search.limit;
@@ -74,41 +78,40 @@ export default function Inventory() {
 
     // Sync debounced search to URL (resets to page 1)
     useEffect(() => {
-        // Only update URL if debounced value differs from URL search param
-        const currentUrlSearch = search.search || '';
+        const currentUrlSearch = searchRef.current.search || '';
         if (debouncedSearch !== currentUrlSearch) {
             navigate({
                 to: '/inventory',
                 search: {
-                    ...search,
+                    ...searchRef.current,
                     search: debouncedSearch || undefined,
-                    page: 1, // Reset to page 1 on search change
+                    page: 1,
                 },
                 replace: true,
             });
         }
-    }, [debouncedSearch, search, navigate]);
+    }, [debouncedSearch, navigate]);
 
     // Page navigation
     const setPage = useCallback((newPage: number) => {
         navigate({
             to: '/inventory',
-            search: { ...search, page: newPage },
+            search: { ...searchRef.current, page: newPage },
             replace: true,
         });
-    }, [navigate, search]);
+    }, [navigate]);
 
     const setStockFilter = useCallback((value: StockFilter) => {
         navigate({
             to: '/inventory',
             search: {
-                ...search,
+                ...searchRef.current,
                 stockFilter: value === 'all' ? undefined : value,
-                page: 1, // Reset to page 1 on filter change
+                page: 1,
             },
             replace: true,
         });
-    }, [navigate, search]);
+    }, [navigate]);
 
     // Get Server Function reference
     const getInventoryAllFn = useServerFn(getInventoryAll);

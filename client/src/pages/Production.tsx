@@ -598,14 +598,18 @@ function ProductionContent() {
         setExpandedDates(newSet);
     };
 
-    const dateGroups = groupBatchesByDate(batches || []);
+    const dateGroups = useMemo(() => groupBatchesByDate(batches || []), [batches]);
 
-    // Today's date for UI - use local date to match batch dates
-    const todayDate = new Date();
-    const today = `${todayDate.getFullYear()}-${String(todayDate.getMonth() + 1).padStart(2, '0')}-${String(todayDate.getDate()).padStart(2, '0')}`;
-    const tomorrowDate = new Date(todayDate);
-    tomorrowDate.setDate(tomorrowDate.getDate() + 1);
-    const tomorrow = `${tomorrowDate.getFullYear()}-${String(tomorrowDate.getMonth() + 1).padStart(2, '0')}-${String(tomorrowDate.getDate()).padStart(2, '0')}`;
+    // Today's date for UI - use local date to match batch dates (stable across renders within a day)
+    const today = useMemo(() => {
+        const d = new Date();
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    }, []);
+    const tomorrow = useMemo(() => {
+        const d = new Date();
+        d.setDate(d.getDate() + 1);
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    }, []);
 
     // Expand today and tomorrow by default
     useEffect(() => {
