@@ -604,6 +604,7 @@ export default function Returns() {
                 {refundModalItem && (
                     <ProcessRefundModal
                         item={refundModalItem}
+                        config={returnConfig}
                         onSubmit={handleRefundSubmit}
                         onClose={() => setRefundModalItem(null)}
                     />

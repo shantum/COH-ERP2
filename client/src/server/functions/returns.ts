@@ -1503,6 +1503,9 @@ export interface ReturnConfigResponse {
     windowWarningDays: number;
     autoRejectAfterDays: number | null;
     allowExpiredOverride: boolean;
+    returnShippingFee: number | null;
+    restockingFeeType: 'flat' | 'percent' | null;
+    restockingFeeValue: number | null;
     reasonCategories: Array<{ value: string; label: string }>;
     conditions: Array<{ value: string; label: string }>;
     resolutions: Array<{ value: string; label: string }>;
@@ -1514,7 +1517,15 @@ export interface ReturnConfigResponse {
 /**
  * Get return settings from DB with fallback to code defaults
  */
-async function getReturnSettingsFromDb(): Promise<EligibilitySettings & { autoRejectAfterDays: number | null; allowExpiredOverride: boolean }> {
+interface ReturnSettingsFromDb extends EligibilitySettings {
+    autoRejectAfterDays: number | null;
+    allowExpiredOverride: boolean;
+    returnShippingFee: number | null;
+    restockingFeeType: 'flat' | 'percent' | null;
+    restockingFeeValue: number | null;
+}
+
+async function getReturnSettingsFromDb(): Promise<ReturnSettingsFromDb> {
     try {
         const prisma = await getPrisma();
 
@@ -1529,6 +1540,9 @@ async function getReturnSettingsFromDb(): Promise<EligibilitySettings & { autoRe
                 windowWarningDays: dbSettings.windowWarningDays,
                 autoRejectAfterDays: dbSettings.autoRejectAfterDays,
                 allowExpiredOverride: dbSettings.allowExpiredOverride,
+                returnShippingFee: dbSettings.returnShippingFee?.toNumber() ?? null,
+                restockingFeeType: (dbSettings.restockingFeeType as 'flat' | 'percent') ?? null,
+                restockingFeeValue: dbSettings.restockingFeeValue?.toNumber() ?? null,
             };
         }
     } catch (error) {
@@ -1542,6 +1556,9 @@ async function getReturnSettingsFromDb(): Promise<EligibilitySettings & { autoRe
         windowWarningDays: RETURN_POLICY.windowWarningDays,
         autoRejectAfterDays: RETURN_POLICY.autoRejectAfterDays,
         allowExpiredOverride: RETURN_POLICY.allowExpiredWithOverride,
+        returnShippingFee: null,
+        restockingFeeType: null,
+        restockingFeeValue: null,
     };
 }
 
@@ -1559,6 +1576,9 @@ export const getReturnConfig = createServerFn({ method: 'GET' })
             windowWarningDays: settings.windowWarningDays,
             autoRejectAfterDays: settings.autoRejectAfterDays,
             allowExpiredOverride: settings.allowExpiredOverride,
+            returnShippingFee: settings.returnShippingFee,
+            restockingFeeType: settings.restockingFeeType,
+            restockingFeeValue: settings.restockingFeeValue,
             reasonCategories: toOptions(RETURN_REASONS),
             conditions: toOptions(RETURN_CONDITIONS),
             resolutions: toOptions(RETURN_RESOLUTIONS),
@@ -1579,6 +1599,9 @@ export const updateReturnSettings = createServerFn({ method: 'POST' })
             windowWarningDays: z.number().int().min(0).max(365),
             autoRejectAfterDays: z.number().int().min(1).max(365).nullable(),
             allowExpiredOverride: z.boolean(),
+            returnShippingFee: z.number().min(0).nullable(),
+            restockingFeeType: z.enum(['flat', 'percent']).nullable(),
+            restockingFeeValue: z.number().min(0).nullable(),
         }).parse(input)
     )
     .handler(async ({ data, context }): Promise<{ success: boolean }> => {
@@ -1590,23 +1613,26 @@ export const updateReturnSettings = createServerFn({ method: 'POST' })
             throw new Error('Warning threshold must be less than return window');
         }
 
+        // Validation: restocking fee percent must be 0-100
+        if (data.restockingFeeType === 'percent' && data.restockingFeeValue != null && data.restockingFeeValue > 100) {
+            throw new Error('Restocking fee percentage cannot exceed 100%');
+        }
+
+        const feeData = {
+            windowDays: data.windowDays,
+            windowWarningDays: data.windowWarningDays,
+            autoRejectAfterDays: data.autoRejectAfterDays,
+            allowExpiredOverride: data.allowExpiredOverride,
+            returnShippingFee: data.returnShippingFee,
+            restockingFeeType: data.restockingFeeType,
+            restockingFeeValue: data.restockingFeeValue,
+            updatedById: userId,
+        };
+
         await prisma.returnSettings.upsert({
             where: { id: 'default' },
-            create: {
-                id: 'default',
-                windowDays: data.windowDays,
-                windowWarningDays: data.windowWarningDays,
-                autoRejectAfterDays: data.autoRejectAfterDays,
-                allowExpiredOverride: data.allowExpiredOverride,
-                updatedById: userId,
-            },
-            update: {
-                windowDays: data.windowDays,
-                windowWarningDays: data.windowWarningDays,
-                autoRejectAfterDays: data.autoRejectAfterDays,
-                allowExpiredOverride: data.allowExpiredOverride,
-                updatedById: userId,
-            },
+            create: { id: 'default', ...feeData },
+            update: feeData,
         });
 
         return { success: true };

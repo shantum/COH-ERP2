@@ -16,14 +16,20 @@ export function SettingsTab({ config, loading, onRefresh }: SettingsTabProps) {
     const queryClient = useQueryClient();
     const updateSettingsFn = useServerFn(updateReturnSettings);
 
-    // Editable state
+    // Editable state — policy
     const [windowDays, setWindowDays] = useState(config?.windowDays ?? 14);
     const [windowWarningDays, setWindowWarningDays] = useState(config?.windowWarningDays ?? 12);
     const [autoRejectAfterDays, setAutoRejectAfterDays] = useState<number | null>(config?.autoRejectAfterDays ?? null);
     const [allowExpiredOverride, setAllowExpiredOverride] = useState(config?.allowExpiredOverride ?? true);
+
+    // Editable state — fees
+    const [returnShippingFee, setReturnShippingFee] = useState<number | null>(config?.returnShippingFee ?? null);
+    const [restockingFeeType, setRestockingFeeType] = useState<'flat' | 'percent' | null>(config?.restockingFeeType ?? null);
+    const [restockingFeeValue, setRestockingFeeValue] = useState<number | null>(config?.restockingFeeValue ?? null);
+
     const [hasChanges, setHasChanges] = useState(false);
 
-    // Sync local state when config actually changes from server (not just on hasChanges toggle)
+    // Sync local state when config actually changes from server
     const prevConfigRef = useRef<string>('');
     useEffect(() => {
         if (!config) return;
@@ -32,6 +38,9 @@ export function SettingsTab({ config, loading, onRefresh }: SettingsTabProps) {
             ww: config.windowWarningDays,
             ar: config.autoRejectAfterDays,
             ae: config.allowExpiredOverride,
+            rsf: config.returnShippingFee,
+            rft: config.restockingFeeType,
+            rfv: config.restockingFeeValue,
         });
         if (configKey !== prevConfigRef.current) {
             prevConfigRef.current = configKey;
@@ -40,6 +49,9 @@ export function SettingsTab({ config, loading, onRefresh }: SettingsTabProps) {
                 setWindowWarningDays(config.windowWarningDays);
                 setAutoRejectAfterDays(config.autoRejectAfterDays);
                 setAllowExpiredOverride(config.allowExpiredOverride ?? true);
+                setReturnShippingFee(config.returnShippingFee);
+                setRestockingFeeType(config.restockingFeeType);
+                setRestockingFeeValue(config.restockingFeeValue);
             }
         }
     }, [config, hasChanges]);
@@ -51,6 +63,9 @@ export function SettingsTab({ config, loading, onRefresh }: SettingsTabProps) {
                 windowWarningDays,
                 autoRejectAfterDays,
                 allowExpiredOverride,
+                returnShippingFee,
+                restockingFeeType,
+                restockingFeeValue,
             },
         }),
         onSuccess: () => {
@@ -71,6 +86,9 @@ export function SettingsTab({ config, loading, onRefresh }: SettingsTabProps) {
             setWindowWarningDays(config.windowWarningDays);
             setAutoRejectAfterDays(config.autoRejectAfterDays);
             setAllowExpiredOverride(config.allowExpiredOverride ?? true);
+            setReturnShippingFee(config.returnShippingFee);
+            setRestockingFeeType(config.restockingFeeType);
+            setRestockingFeeValue(config.restockingFeeValue);
             setHasChanges(false);
         }
     };
@@ -87,28 +105,31 @@ export function SettingsTab({ config, loading, onRefresh }: SettingsTabProps) {
 
     return (
         <div className="space-y-6">
-            {/* Return Window Settings - Editable */}
-            <div className="bg-white border border-gray-200 rounded-lg p-6">
-                <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-lg font-semibold">Return Policy</h3>
-                    {hasChanges && (
-                        <div className="flex items-center gap-2">
-                            <button
-                                onClick={handleReset}
-                                className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800"
-                            >
-                                Reset
-                            </button>
-                            <button
-                                onClick={() => saveMutation.mutate()}
-                                disabled={saveMutation.isPending}
-                                className="px-4 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-                            >
-                                {saveMutation.isPending ? 'Saving...' : 'Save Changes'}
-                            </button>
-                        </div>
-                    )}
+            {/* Save Bar */}
+            {hasChanges && (
+                <div className="sticky top-0 z-10 bg-blue-50 border border-blue-200 rounded-lg p-3 flex items-center justify-between">
+                    <span className="text-sm text-blue-700">You have unsaved changes</span>
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={handleReset}
+                            className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800"
+                        >
+                            Reset
+                        </button>
+                        <button
+                            onClick={() => saveMutation.mutate()}
+                            disabled={saveMutation.isPending}
+                            className="px-4 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                        >
+                            {saveMutation.isPending ? 'Saving...' : 'Save Changes'}
+                        </button>
+                    </div>
                 </div>
+            )}
+
+            {/* Return Policy */}
+            <div className="bg-white border border-gray-200 rounded-lg p-6">
+                <h3 className="text-lg font-semibold mb-4">Return Policy</h3>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                     <div>
@@ -191,13 +212,155 @@ export function SettingsTab({ config, loading, onRefresh }: SettingsTabProps) {
                         </label>
                     </div>
                 </div>
+            </div>
 
-                {saveMutation.isError && (
-                    <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
-                        {(saveMutation.error as Error)?.message || 'Failed to save settings'}
+            {/* Fees & Deductions */}
+            <div className="bg-white border border-gray-200 rounded-lg p-6">
+                <h3 className="text-lg font-semibold mb-1">Fees & Deductions</h3>
+                <p className="text-sm text-gray-500 mb-4">
+                    Auto-applied when processing refunds. Staff can override per return.
+                </p>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {/* Return Shipping Fee */}
+                    <div className="border border-gray-100 rounded-lg p-4 bg-gray-50">
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Return Shipping Fee
+                        </label>
+                        <p className="text-xs text-gray-500 mb-3">
+                            Flat fee deducted from refund to cover reverse logistics
+                        </p>
+                        <div className="flex items-center gap-2">
+                            <span className="text-sm text-gray-500">₹</span>
+                            <input
+                                type="number"
+                                value={returnShippingFee ?? ''}
+                                onChange={(e) => handleChange(
+                                    setReturnShippingFee,
+                                    e.target.value ? Number(e.target.value) : null
+                                )}
+                                placeholder="0"
+                                min={0}
+                                step={10}
+                                className="w-28 px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                            />
+                        </div>
+                        {returnShippingFee ? (
+                            <p className="text-xs text-green-600 mt-2">
+                                ₹{returnShippingFee} will be deducted from every refund
+                            </p>
+                        ) : (
+                            <p className="text-xs text-gray-400 mt-2">No shipping fee charged</p>
+                        )}
+                    </div>
+
+                    {/* Restocking Fee */}
+                    <div className="border border-gray-100 rounded-lg p-4 bg-gray-50">
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Restocking Fee
+                        </label>
+                        <p className="text-xs text-gray-500 mb-3">
+                            Fee for processing and repackaging returned items
+                        </p>
+
+                        {/* Type selector */}
+                        <div className="flex items-center gap-2 mb-3">
+                            <button
+                                onClick={() => {
+                                    handleChange(setRestockingFeeType, restockingFeeType === 'flat' ? null : 'flat');
+                                    if (restockingFeeType === 'flat') handleChange(setRestockingFeeValue, null);
+                                }}
+                                className={`px-3 py-1.5 text-xs rounded-lg border ${
+                                    restockingFeeType === 'flat'
+                                        ? 'border-blue-600 bg-blue-50 text-blue-700'
+                                        : 'border-gray-300 hover:border-gray-400'
+                                }`}
+                            >
+                                Flat (₹)
+                            </button>
+                            <button
+                                onClick={() => {
+                                    handleChange(setRestockingFeeType, restockingFeeType === 'percent' ? null : 'percent');
+                                    if (restockingFeeType === 'percent') handleChange(setRestockingFeeValue, null);
+                                }}
+                                className={`px-3 py-1.5 text-xs rounded-lg border ${
+                                    restockingFeeType === 'percent'
+                                        ? 'border-blue-600 bg-blue-50 text-blue-700'
+                                        : 'border-gray-300 hover:border-gray-400'
+                                }`}
+                            >
+                                Percentage (%)
+                            </button>
+                        </div>
+
+                        {restockingFeeType && (
+                            <div className="flex items-center gap-2">
+                                {restockingFeeType === 'flat' && <span className="text-sm text-gray-500">₹</span>}
+                                <input
+                                    type="number"
+                                    value={restockingFeeValue ?? ''}
+                                    onChange={(e) => handleChange(
+                                        setRestockingFeeValue,
+                                        e.target.value ? Number(e.target.value) : null
+                                    )}
+                                    placeholder="0"
+                                    min={0}
+                                    max={restockingFeeType === 'percent' ? 100 : undefined}
+                                    step={restockingFeeType === 'percent' ? 5 : 10}
+                                    className="w-28 px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                                />
+                                {restockingFeeType === 'percent' && <span className="text-sm text-gray-500">%</span>}
+                            </div>
+                        )}
+
+                        {restockingFeeType && restockingFeeValue ? (
+                            <p className="text-xs text-green-600 mt-2">
+                                {restockingFeeType === 'flat'
+                                    ? `₹${restockingFeeValue} per return`
+                                    : `${restockingFeeValue}% of gross refund amount`
+                                }
+                            </p>
+                        ) : (
+                            <p className="text-xs text-gray-400 mt-2">No restocking fee charged</p>
+                        )}
+                    </div>
+                </div>
+
+                {/* Example calculation */}
+                {(returnShippingFee || (restockingFeeType && restockingFeeValue)) && (
+                    <div className="mt-4 p-3 bg-purple-50 border border-purple-100 rounded-lg">
+                        <p className="text-xs font-medium text-purple-700 mb-1">Example: ₹2,000 item refund</p>
+                        <div className="text-xs text-purple-600 space-y-0.5">
+                            <div className="flex justify-between">
+                                <span>Gross amount</span>
+                                <span>₹2,000</span>
+                            </div>
+                            {returnShippingFee ? (
+                                <div className="flex justify-between text-red-600">
+                                    <span>Return shipping</span>
+                                    <span>- ₹{returnShippingFee}</span>
+                                </div>
+                            ) : null}
+                            {restockingFeeType && restockingFeeValue ? (
+                                <div className="flex justify-between text-red-600">
+                                    <span>Restocking fee{restockingFeeType === 'percent' ? ` (${restockingFeeValue}%)` : ''}</span>
+                                    <span>- ₹{restockingFeeType === 'flat' ? restockingFeeValue : Math.round(2000 * restockingFeeValue / 100)}</span>
+                                </div>
+                            ) : null}
+                            <div className="flex justify-between font-medium border-t border-purple-200 pt-1 mt-1">
+                                <span>Net refund</span>
+                                <span>₹{2000 - (returnShippingFee ?? 0) - (restockingFeeType === 'flat' ? (restockingFeeValue ?? 0) : Math.round(2000 * (restockingFeeValue ?? 0) / 100))}</span>
+                            </div>
+                        </div>
                     </div>
                 )}
             </div>
+
+            {saveMutation.isError && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+                    {(saveMutation.error as Error)?.message || 'Failed to save settings'}
+                </div>
+            )}
 
             {/* Read-only Options Display */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

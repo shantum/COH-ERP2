@@ -1137,6 +1137,18 @@ export type ReturnSettings = {
      * Allow returns after window expires with manual override
      */
     allowExpiredOverride: Generated<boolean>;
+    /**
+     * Return shipping fee (flat amount in INR, deducted from refund)
+     */
+    returnShippingFee: string | null;
+    /**
+     * Restocking fee type: 'flat' or 'percent'
+     */
+    restockingFeeType: string | null;
+    /**
+     * Restocking fee value (flat INR amount or percentage 0-100)
+     */
+    restockingFeeValue: string | null;
     updatedAt: Timestamp;
     updatedById: string | null;
 };

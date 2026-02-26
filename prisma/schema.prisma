@@ -962,6 +962,12 @@ model ReturnSettings {
   autoRejectAfterDays   Int?
   /// Allow returns after window expires with manual override
   allowExpiredOverride  Boolean  @default(true)
+  /// Return shipping fee (flat amount in INR, deducted from refund)
+  returnShippingFee     Decimal? @db.Decimal(10, 2)
+  /// Restocking fee type: 'flat' or 'percent'
+  restockingFeeType     String?
+  /// Restocking fee value (flat INR amount or percentage 0-100)
+  restockingFeeValue    Decimal? @db.Decimal(10, 2)
   updatedAt             DateTime @updatedAt
   updatedById           String?
   updatedBy             User?    @relation(fields: [updatedById], references: [id])
