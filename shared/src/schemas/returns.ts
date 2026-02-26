@@ -330,6 +330,11 @@ export const ActiveReturnLineSchema = z.object({
     productName: z.string().nullable(),
     colorName: z.string().nullable(),
     imageUrl: z.string().nullable(),
+    // Return Prime integration
+    returnPrimeRequestId: z.string().nullable(),
+    returnPrimeRequestNumber: z.string().nullable(),
+    returnPrimeSyncedAt: z.coerce.date().nullable(),
+    returnPrimeSyncError: z.string().nullable(),
 });
 export type ActiveReturnLine = z.infer<typeof ActiveReturnLineSchema>;
 

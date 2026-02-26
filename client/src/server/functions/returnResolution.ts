@@ -57,6 +57,18 @@ async function broadcastReturnUpdate(
 }
 
 /**
+ * Fire-and-forget: push ERP status change to Return Prime.
+ */
+function pushToReturnPrime(orderLineId: string, erpStatus: string): void {
+    const baseUrl = getInternalApiBaseUrl();
+    fetch(`${baseUrl}/api/returnprime/push-status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderLineId, erpStatus }),
+    }).catch(() => {});
+}
+
+/**
  * Process refund for a return
  */
 export const processLineReturnRefund = createServerFn({ method: 'POST' })
@@ -122,18 +134,39 @@ export const processLineReturnRefund = createServerFn({ method: 'POST' })
     });
 
 /**
- * Send refund link to customer
+ * Execute refund for a return line.
+ * Routes to the correct refund method:
+ * - bank_transfer / payment_link: Creates a RazorpayX Payout Link — customer
+ *   receives the link and enters their own bank/UPI details (no bank info collected).
+ * - store_credit: Increment customer balance + mark complete immediately.
  */
 export const sendReturnRefundLink = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
-    .inputValidator((input: unknown) => z.object({ orderLineId: z.string().uuid() }).parse(input))
-    .handler(async ({ data }: { data: { orderLineId: string } }): Promise<ReturnResult<{ orderLineId: string; linkId: string }>> => {
+    .inputValidator((input: unknown) => z.object({
+        orderLineId: z.string().uuid(),
+        refundMethod: z.enum(['payment_link', 'bank_transfer', 'store_credit']).optional(),
+    }).parse(input))
+    .handler(async ({ data }: { data: { orderLineId: string; refundMethod?: string } }): Promise<ReturnResult<{ orderLineId: string; refundRef: string; method: string }>> => {
         const prisma = await getPrisma();
         const { orderLineId } = data;
 
         const line = await prisma.orderLine.findUnique({
             where: { id: orderLineId },
-            select: { id: true, returnNetAmount: true, returnRefundMethod: true },
+            select: {
+                id: true,
+                returnNetAmount: true,
+                returnRefundMethod: true,
+                returnBatchNumber: true,
+                order: {
+                    select: {
+                        customerId: true,
+                        customerName: true,
+                        customerEmail: true,
+                        customerPhone: true,
+                        orderNumber: true,
+                    },
+                },
+            },
         });
 
         if (!line) {
@@ -144,18 +177,87 @@ export const sendReturnRefundLink = createServerFn({ method: 'POST' })
             return returnError(RETURN_ERROR_CODES.REFUND_NOT_CALCULATED);
         }
 
-        // TODO: Integrate with Razorpay to create payment link
-        const linkId = `REFUND_LINK_${Date.now()}`;
+        const method = data.refundMethod || line.returnRefundMethod || 'payment_link';
+        const amountInr = Number(line.returnNetAmount);
+        const now = new Date();
+
+        // Store credit — immediate balance increment, no external call
+        if (method === 'store_credit') {
+            if (!line.order.customerId) {
+                return returnError(RETURN_ERROR_CODES.REFUND_FAILED, 'No customer linked to order');
+            }
+
+            const refundRef = `SC-${line.returnBatchNumber || orderLineId.slice(0, 8)}`;
+
+            await prisma.$transaction(async (tx: PrismaTransaction) => {
+                await tx.orderLine.update({
+                    where: { id: orderLineId },
+                    data: {
+                        returnRefundMethod: 'store_credit',
+                        returnRefundCompletedAt: now,
+                        returnRefundReference: refundRef,
+                        refundedAt: now,
+                    },
+                });
+                await tx.customer.update({
+                    where: { id: line.order.customerId! },
+                    data: { storeCreditBalance: { increment: amountInr } },
+                });
+            });
+
+            logReturnEvent('return.refund_completed', orderLineId,
+                `Store credit ₹${amountInr.toLocaleString('en-IN')} added to customer balance`,
+                undefined, { method: 'store_credit', refundRef, amount: amountInr }
+            );
+            pushToReturnPrime(orderLineId, 'refunded');
+
+            return returnSuccess({ orderLineId, refundRef, method: 'store_credit' }, 'Store credit applied');
+        }
+
+        // bank_transfer / payment_link — both create a RazorpayX Payout Link.
+        // Customer receives the link and enters their own bank/UPI details.
+        const baseUrl = getInternalApiBaseUrl();
+        const payoutRes = await fetch(`${baseUrl}/api/razorpayx/payout/refund`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                orderLineId,
+                amount: Math.round(amountInr * 100), // paise
+                customerName: line.order.customerName,
+                customerEmail: line.order.customerEmail,
+                customerPhone: line.order.customerPhone,
+                orderNumber: line.order.orderNumber,
+                batchNumber: line.returnBatchNumber,
+            }),
+        });
+
+        if (!payoutRes.ok) {
+            const errBody = await payoutRes.text();
+            return returnError(RETURN_ERROR_CODES.REFUND_FAILED, `RazorpayX payout link failed: ${errBody}`);
+        }
+
+        const linkData = await payoutRes.json() as { payoutLinkId: string; shortUrl: string };
+        const refundRef = linkData.payoutLinkId;
 
         await prisma.orderLine.update({
             where: { id: orderLineId },
             data: {
-                returnRefundLinkSentAt: new Date(),
-                returnRefundLinkId: linkId,
+                returnRefundMethod: method === 'bank_transfer' ? 'bank_transfer' : 'payment_link',
+                returnRefundLinkSentAt: now,
+                returnRefundLinkId: refundRef,
+                returnRefundLinkUrl: linkData.shortUrl,
             },
         });
 
-        return returnSuccess({ orderLineId, linkId }, 'Refund link sent');
+        logReturnEvent('return.refund_link_sent', orderLineId,
+            `Payout link sent — ₹${amountInr.toLocaleString('en-IN')}`,
+            undefined, { method, refundRef, shortUrl: linkData.shortUrl, amount: amountInr }
+        );
+
+        return returnSuccess(
+            { orderLineId, refundRef, method: method === 'bank_transfer' ? 'bank_transfer' : 'payment_link' },
+            'Refund payout link sent to customer'
+        );
     });
 
 /**
@@ -207,6 +309,9 @@ export const completeLineReturnRefund = createServerFn({ method: 'POST' })
             undefined,
             { refundMethod: line?.returnRefundMethod, netAmount: line?.returnNetAmount, reference }
         );
+
+        // Sync refund completion to Return Prime (fire-and-forget)
+        pushToReturnPrime(orderLineId, 'refunded');
 
         return { success: true, message: 'Refund completed', orderLineId };
     });
@@ -265,6 +370,9 @@ export const completeLineReturn = createServerFn({ method: 'POST' })
         );
 
         broadcastReturnUpdate('return_completed', { lineId: orderLineId }, '');
+
+        // Sync final completion to Return Prime (fire-and-forget)
+        pushToReturnPrime(orderLineId, 'refunded');
 
         return returnSuccess({ orderLineId }, 'Return completed');
     });

@@ -67,6 +67,19 @@ async function broadcastReturnUpdate(
 }
 
 /**
+ * Fire-and-forget: push ERP status change to Return Prime.
+ * Calls the Express endpoint which handles RP API + error capture for retry.
+ */
+function pushToReturnPrime(orderLineId: string, erpStatus: string): void {
+    const baseUrl = getInternalApiBaseUrl();
+    fetch(`${baseUrl}/api/returnprime/push-status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderLineId, erpStatus }),
+    }).catch(() => {});
+}
+
+/**
  * Generate the next batch number for an order
  * Format: "{orderNumber}/{sequence}" e.g., "64168/1", "64168/2"
  */
@@ -580,6 +593,9 @@ export const receiveLineReturn = createServerFn({ method: 'POST' })
             changes: { returnStatus: 'inspected' },
         }, context.user.id);
 
+        // Sync to Return Prime (fire-and-forget)
+        pushToReturnPrime(orderLineId, 'inspected');
+
         return returnSuccess({ orderLineId }, 'Return received and added to QC queue');
     });
 
@@ -668,6 +684,9 @@ export const cancelLineReturn = createServerFn({ method: 'POST' })
             batchNumber: line.returnBatchNumber,
         }, context.user.id);
 
+        // Sync to Return Prime (fire-and-forget)
+        pushToReturnPrime(orderLineId, 'cancelled');
+
         return returnSuccess({ orderLineId }, 'Return cancelled');
     });
 
@@ -717,6 +736,9 @@ export const closeLineReturnManually = createServerFn({ method: 'POST' })
         );
 
         broadcastReturnUpdate('return_completed', { lineId: orderLineId }, context.user.id);
+
+        // Sync to Return Prime — manually closed = "refunded" status in ERP
+        pushToReturnPrime(orderLineId, 'refunded');
 
         return returnSuccess({ orderLineId }, 'Return closed manually');
     });

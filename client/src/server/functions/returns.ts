@@ -872,6 +872,11 @@ export const getActiveLineReturns = createServerFn({ method: 'GET' })
             productName: line.sku.variation.product.name,
             colorName: line.sku.variation.colorName,
             imageUrl: line.sku.variation.imageUrl || line.sku.variation.product.imageUrl,
+            // Return Prime
+            returnPrimeRequestId: line.returnPrimeRequestId,
+            returnPrimeRequestNumber: line.returnPrimeRequestNumber,
+            returnPrimeSyncedAt: line.returnPrimeSyncedAt,
+            returnPrimeSyncError: line.returnPrimeSyncError,
         }));
     });
 
@@ -940,6 +945,12 @@ export interface ReturnDetailResponse {
     lineDiscount: number;
     lineTax: number;
     shopifyOrderTags: string | null;
+    // Return Prime integration
+    returnPrimeRequestId: string | null;
+    returnPrimeRequestNumber: string | null;
+    returnPrimeSyncedAt: Date | null;
+    returnPrimeSyncError: string | null;
+    returnRefundRequestedMode: string | null;
 }
 
 /**
@@ -1041,6 +1052,12 @@ export const getReturnDetail = createServerFn({ method: 'POST' })
             lineDiscount: Math.max(0, (line.sku.mrp - line.unitPrice) * (line.returnQty ?? line.qty)),
             lineTax: 0, // Tax is inclusive in our pricing
             shopifyOrderTags: line.order.shopifyCache?.tags || null,
+            // Return Prime
+            returnPrimeRequestId: line.returnPrimeRequestId,
+            returnPrimeRequestNumber: line.returnPrimeRequestNumber,
+            returnPrimeSyncedAt: line.returnPrimeSyncedAt,
+            returnPrimeSyncError: line.returnPrimeSyncError,
+            returnRefundRequestedMode: line.returnRefundRequestedMode || null,
         };
     });
 
@@ -1096,6 +1113,7 @@ export const getAllReturns = createServerFn({ method: 'POST' })
                 { sku: { skuCode: { contains: search, mode: 'insensitive' } } },
                 { returnAwbNumber: { contains: search, mode: 'insensitive' } },
                 { returnBatchNumber: { contains: search, mode: 'insensitive' } },
+                { returnPrimeRequestNumber: { contains: search, mode: 'insensitive' } },
             ];
         }
 
@@ -1168,6 +1186,11 @@ export const getAllReturns = createServerFn({ method: 'POST' })
             productName: line.sku.variation.product.name,
             colorName: line.sku.variation.colorName,
             imageUrl: line.sku.variation.imageUrl || line.sku.variation.product.imageUrl,
+            // Return Prime
+            returnPrimeRequestId: line.returnPrimeRequestId,
+            returnPrimeRequestNumber: line.returnPrimeRequestNumber,
+            returnPrimeSyncedAt: line.returnPrimeSyncedAt,
+            returnPrimeSyncError: line.returnPrimeSyncError,
         }));
 
         return { items, total, page, limit };
@@ -1413,6 +1436,11 @@ export const getLineReturnActionQueue = createServerFn({ method: 'GET' })
                 productName: line.sku.variation.product.name,
                 colorName: line.sku.variation.colorName,
                 imageUrl: line.sku.variation.imageUrl || line.sku.variation.product.imageUrl,
+                // Return Prime
+                returnPrimeRequestId: line.returnPrimeRequestId,
+                returnPrimeRequestNumber: line.returnPrimeRequestNumber,
+                returnPrimeSyncedAt: line.returnPrimeSyncedAt,
+                returnPrimeSyncError: line.returnPrimeSyncError,
                 actionNeeded,
                 daysSinceRequest,
             });

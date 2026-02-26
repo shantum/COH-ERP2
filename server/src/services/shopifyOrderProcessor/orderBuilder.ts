@@ -391,6 +391,34 @@ export async function createNewOrderWithLines(
         }
     }
 
+    // Lazy-link RP exchange orders: if any return lines reference this Shopify order as an exchange,
+    // mark this order as exchange and link it back
+    const shopifyId = String(shopifyOrder.id);
+    deferredExecutor.enqueue(async () => {
+        try {
+            const rpExchangeLines = await prisma.orderLine.findMany({
+                where: { returnPrimeExchangeShopifyOrderId: shopifyId, returnExchangeOrderId: null },
+                select: { id: true, orderId: true },
+            });
+            if (rpExchangeLines.length > 0) {
+                const originalOrderId = rpExchangeLines[0].orderId;
+                await prisma.order.update({
+                    where: { id: newOrder.id },
+                    data: { isExchange: true, originalOrderId, channel: 'exchange' },
+                });
+                await prisma.orderLine.updateMany({
+                    where: { id: { in: rpExchangeLines.map(l => l.id) } },
+                    data: { returnExchangeOrderId: newOrder.id },
+                });
+                syncLogger.info({ orderId: newOrder.id, shopifyId, lines: rpExchangeLines.length },
+                    'Lazy-linked RP exchange order to return lines');
+            }
+        } catch (err: unknown) {
+            syncLogger.warn({ orderId: newOrder.id, error: err instanceof Error ? err.message : String(err) },
+                'Failed to lazy-link RP exchange order');
+        }
+    });
+
     return {
         action: 'created',
         orderId: newOrder.id,

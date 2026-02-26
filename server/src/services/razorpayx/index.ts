@@ -33,6 +33,10 @@ export {
   listTransactions,
   fetchTransaction,
 
+  // Payout Links
+  createPayoutLink,
+  fetchPayoutLink,
+
   // Balance
   fetchBalance,
 
@@ -43,5 +47,6 @@ export {
   type RazorpayXPayoutStatus,
   type RazorpayXTransaction,
   type RazorpayXBalance,
+  type RazorpayXPayoutLinkResponse,
   type CreatePayoutParams,
 } from './client.js';

@@ -24,6 +24,17 @@ export interface ReturnPrimeLineItem {
     reason_detail?: string | undefined;
     customer_comment?: string | undefined;
     inspection_notes?: string | undefined;
+    /** Return fee applied to this line (in shop currency) */
+    return_fee?: number | undefined;
+    /** Exchange product info (for exchange requests) */
+    exchange_product?: {
+        title?: string;
+        variant_title?: string;
+        sku?: string;
+        price?: number;
+        product_id?: number;
+        variant_id?: number;
+    } | undefined;
 }
 
 /**
@@ -56,10 +67,47 @@ export interface ReturnPrimeWebhookPayload {
     created_at: string | undefined;
     updated_at: string | undefined;
     order: ReturnPrimeOrder | undefined;
-    customer: { email?: string; phone?: string; name?: string } | undefined;
+    customer: {
+        email?: string;
+        phone?: string;
+        name?: string;
+        bank?: {
+            account_holder_name?: string;
+            account_number?: string;
+            ifsc_code?: string;
+        };
+    } | undefined;
     line_items: ReturnPrimeLineItem[];
     shipping: ReturnPrimeShipping | undefined;
-    refund: { id?: string; amount?: number; transaction_id?: string; method?: string } | undefined;
+    refund: {
+        id?: string;
+        amount?: number;
+        transaction_id?: string;
+        method?: string;
+        /** Customer's requested refund mode (e.g., 'Original Payment Method', 'Store Credit') */
+        requested_mode?: string;
+        /** How merchant actually refunded */
+        actual_mode?: string;
+        /** Amount customer was eligible for (before adjustments) */
+        eligible_amount?: number;
+        /** Amount actually refunded */
+        refunded_amount?: number;
+    } | undefined;
+    /** Exchange order created by RP on Shopify */
+    exchange: {
+        shopify_order_id?: string;
+        order_name?: string;
+        type?: string;
+        total_price?: number;
+    } | undefined;
+    /** Payment details for price difference (exchange) */
+    payment_details: {
+        transaction_id?: string;
+        amount?: number;
+        currency?: string;
+        gateway?: string;
+        status?: string;
+    } | undefined;
 }
 
 // ============================================
@@ -80,14 +128,42 @@ const RawLineShippingSchema = z.object({
  * Raw line item from Return Prime webhook
  * id = Shopify line item ID (number), SKU nested in original_product
  */
+/**
+ * Raw exchange product info
+ */
+const RawExchangeProductSchema = z.object({
+    title: z.string().nullable().optional(),
+    variant_title: z.string().nullable().optional(),
+    sku: z.string().nullable().optional(),
+    price: z.number().nullable().optional(),
+    product_id: z.number().nullable().optional(),
+    variant_id: z.number().nullable().optional(),
+}).passthrough();
+
+/**
+ * Raw return fee per line item
+ */
+const RawReturnFeeSchema = z.object({
+    price_set: z.object({
+        shop_money: z.object({
+            amount: z.number().nullable().optional(),
+        }).passthrough().nullable().optional(),
+    }).passthrough().nullable().optional(),
+}).passthrough();
+
 const RawLineItemSchema = z.object({
     id: z.union([z.number(), z.string()]),
     quantity: z.number().int().positive().max(1000),
     reason: z.string().nullable().optional(),
+    reason_detail: z.string().nullable().optional(),
+    customer_comment: z.string().nullable().optional(),
+    inspection_notes: z.string().nullable().optional(),
     original_product: z.object({
         sku: z.string().nullable().optional(),
         price: z.number().nullable().optional(),
     }).passthrough().nullable().optional(),
+    exchange_product: RawExchangeProductSchema.nullable().optional(),
+    return_fee: RawReturnFeeSchema.nullable().optional(),
     shipping: z.array(RawLineShippingSchema).nullable().optional(),
 }).passthrough();
 
@@ -106,6 +182,12 @@ const RawCustomerSchema = z.object({
     email: z.string().optional(),
     phone: z.string().optional(),
     name: z.string().optional(),
+    bank: z.object({
+        account_holder_name: z.string().nullable().optional(),
+        account_number: z.string().nullable().optional(),
+        confirm_account_number: z.string().nullable().optional(),
+        ifsc_code: z.string().nullable().optional(),
+    }).passthrough().nullable().optional(),
 }).passthrough();
 
 /**
@@ -116,6 +198,19 @@ const RawRefundSchema = z.object({
     amount: z.number().nonnegative().optional(),
     transaction_id: z.string().optional(),
     method: z.string().optional(),
+    requested_mode: z.string().nullable().optional(),
+    actual_mode: z.string().nullable().optional(),
+    status: z.string().nullable().optional(),
+    eligible_refund_amount: z.object({
+        shop_money: z.object({
+            amount: z.number().nullable().optional(),
+        }).passthrough().nullable().optional(),
+    }).passthrough().nullable().optional(),
+    refunded_amount: z.object({
+        shop_money: z.object({
+            amount: z.number().nullable().optional(),
+        }).passthrough().nullable().optional(),
+    }).passthrough().nullable().optional(),
 }).passthrough();
 
 /**
@@ -132,6 +227,28 @@ const RawRequestSchema = z.object({
     customer: RawCustomerSchema.optional(),
     line_items: z.array(RawLineItemSchema).default([]),
     refund: RawRefundSchema.nullable().optional(),
+    reject: z.object({
+        status: z.boolean().optional(),
+        comment: z.string().nullable().optional(),
+        created_at: z.string().nullable().optional(),
+    }).passthrough().nullable().optional(),
+    exchange: z.object({
+        order: z.object({
+            id: z.number().or(z.string()).optional(),
+            name: z.string().optional(),
+            type: z.string().optional(),
+            total_price: z.object({
+                shop_money: z.object({ amount: z.number().optional() }).passthrough().optional(),
+            }).passthrough().optional(),
+        }).passthrough().optional(),
+    }).passthrough().nullable().optional(),
+    payment_details: z.object({
+        transaction_id: z.string().nullable().optional(),
+        amount: z.number().nullable().optional(),
+        currency: z.string().nullable().optional(),
+        gateway: z.string().nullable().optional(),
+        status: z.string().nullable().optional(),
+    }).passthrough().nullable().optional(),
 }).passthrough();
 
 // ============================================
@@ -167,14 +284,22 @@ export const ReturnPrimeWebhookPayloadSchema = z.object({
         .filter((r): r is string => !!r);
     const reason = reasons.length > 0 ? reasons[0] : undefined;
 
+    // Extract reason_details from first line item that has one
+    const reasonDetails = req.line_items
+        .map(li => li.reason_detail)
+        .find((r): r is string => !!r);
+
+    // Extract rejection reason from reject object
+    const rejectionReason = req.reject?.comment ?? undefined;
+
     return {
         id: req.id,
         request_number: req.request_number,
         request_type: req.request_type,
         status: req.status,
         reason,
-        reason_details: undefined,
-        rejection_reason: undefined,
+        reason_details: reasonDetails,
+        rejection_reason: rejectionReason,
         created_at: req.created_at,
         updated_at: req.updated_at,
         order: req.order ? {
@@ -185,6 +310,13 @@ export const ReturnPrimeWebhookPayloadSchema = z.object({
             email: req.customer.email,
             phone: req.customer.phone,
             name: req.customer.name,
+            ...(req.customer.bank?.account_number ? {
+                bank: {
+                    account_holder_name: req.customer.bank.account_holder_name ?? undefined,
+                    account_number: req.customer.bank.account_number ?? undefined,
+                    ifsc_code: req.customer.bank.ifsc_code ?? undefined,
+                },
+            } : {}),
         } : undefined,
         line_items: req.line_items.map(li => ({
             id: String(li.id),
@@ -193,6 +325,18 @@ export const ReturnPrimeWebhookPayloadSchema = z.object({
             quantity: li.quantity,
             price: li.original_product?.price ?? undefined,
             reason: li.reason ?? undefined,
+            reason_detail: li.reason_detail ?? undefined,
+            customer_comment: li.customer_comment ?? undefined,
+            inspection_notes: li.inspection_notes ?? undefined,
+            return_fee: li.return_fee?.price_set?.shop_money?.amount ?? undefined,
+            exchange_product: li.exchange_product ? {
+                title: li.exchange_product.title ?? undefined,
+                variant_title: li.exchange_product.variant_title ?? undefined,
+                sku: li.exchange_product.sku ?? undefined,
+                price: li.exchange_product.price ?? undefined,
+                product_id: li.exchange_product.product_id ?? undefined,
+                variant_id: li.exchange_product.variant_id ?? undefined,
+            } : undefined,
         })),
         shipping,
         refund: req.refund ? {
@@ -200,6 +344,23 @@ export const ReturnPrimeWebhookPayloadSchema = z.object({
             amount: req.refund.amount,
             transaction_id: req.refund.transaction_id,
             method: req.refund.method,
+            requested_mode: req.refund.requested_mode ?? undefined,
+            actual_mode: req.refund.actual_mode ?? undefined,
+            eligible_amount: req.refund.eligible_refund_amount?.shop_money?.amount ?? undefined,
+            refunded_amount: req.refund.refunded_amount?.shop_money?.amount ?? undefined,
+        } : undefined,
+        exchange: req.exchange?.order ? {
+            shopify_order_id: req.exchange.order.id != null ? String(req.exchange.order.id) : undefined,
+            order_name: req.exchange.order.name,
+            type: req.exchange.order.type,
+            total_price: req.exchange.order.total_price?.shop_money?.amount,
+        } : undefined,
+        payment_details: req.payment_details ? {
+            transaction_id: req.payment_details.transaction_id ?? undefined,
+            amount: req.payment_details.amount ?? undefined,
+            currency: req.payment_details.currency ?? undefined,
+            gateway: req.payment_details.gateway ?? undefined,
+            status: req.payment_details.status ?? undefined,
         } : undefined,
     };
 });

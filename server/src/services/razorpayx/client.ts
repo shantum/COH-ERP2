@@ -434,6 +434,61 @@ export async function fetchTransaction(transactionId: string): Promise<RazorpayX
 }
 
 // ============================================
+// PAYOUT LINKS API
+// ============================================
+
+export interface RazorpayXPayoutLinkResponse {
+  id: string;
+  entity: 'payout_link';
+  amount: number; // paise
+  currency: string;
+  status: string;
+  purpose: string;
+  description: string | null;
+  short_url: string; // The link to send to recipient
+  contact: { name: string; email: string | null; contact: string | null };
+  receipt: string | null;
+  notes: Record<string, string>;
+  created_at: number;
+}
+
+export async function createPayoutLink(params: {
+  amount: number; // paise
+  currency?: string;
+  purpose: string;
+  description?: string;
+  contact: {
+    name: string;
+    email?: string;
+    contact?: string; // phone
+  };
+  receipt?: string;
+  notes?: Record<string, string>;
+  send_sms?: boolean;
+  send_email?: boolean;
+}): Promise<RazorpayXPayoutLinkResponse> {
+  const config = getConfig();
+  if (!config) throw new Error('RazorpayX not configured');
+
+  return request<RazorpayXPayoutLinkResponse>({
+    method: 'POST',
+    path: '/payout-links',
+    body: {
+      ...params,
+      currency: params.currency || 'INR',
+      account_number: config.accountNumber,
+    },
+  });
+}
+
+export async function fetchPayoutLink(linkId: string): Promise<RazorpayXPayoutLinkResponse> {
+  return request<RazorpayXPayoutLinkResponse>({
+    method: 'GET',
+    path: `/payout-links/${linkId}`,
+  });
+}
+
+// ============================================
 // BALANCE API
 // ============================================
 

@@ -363,7 +363,9 @@ export default function ReturnDetail() {
 
     const handleCopyId = useCallback(() => {
         if (!detail) return;
-        const text = detail.returnBatchNumber
+        const text = detail.returnPrimeRequestNumber
+            ? detail.returnPrimeRequestNumber
+            : detail.returnBatchNumber
             ? `RET${detail.returnBatchNumber}`
             : detail.id;
         navigator.clipboard.writeText(text).then(() => {
@@ -414,9 +416,20 @@ export default function ReturnDetail() {
     // DERIVED
     // ============================================
 
-    const requestId = detail.returnBatchNumber
+    const requestId = detail.returnPrimeRequestNumber
+        ? `#${detail.returnPrimeRequestNumber}`
+        : detail.returnBatchNumber
         ? `#RET${detail.returnBatchNumber}`
         : `#${detail.id.slice(0, 8)}`;
+
+    const isFromRP = !!detail.returnPrimeRequestId;
+    const rpSyncStatus = detail.returnPrimeSyncError
+        ? 'error'
+        : detail.returnPrimeSyncedAt
+        ? 'synced'
+        : isFromRP
+        ? 'pending'
+        : null;
 
     const ageDays = computeAgeDays(detail.returnRequestedAt);
     const statusBadgeClass = getStatusBadge(detail.returnStatus);
@@ -501,6 +514,29 @@ export default function ReturnDetail() {
                             <span className={`inline-flex px-2.5 py-0.5 text-xs font-semibold rounded-full ${statusBadgeClass}`}>
                                 {detail.returnStatus.replace(/_/g, ' ')}
                             </span>
+                            {isFromRP && (
+                                <span className="inline-flex px-2 py-0.5 text-[11px] font-medium rounded-full bg-violet-100 text-violet-700">
+                                    Return Prime
+                                </span>
+                            )}
+                            {rpSyncStatus === 'synced' && (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded-full bg-green-50 text-green-700" title={`Synced ${formatDateTime(detail.returnPrimeSyncedAt)}`}>
+                                    <CheckCircle2 size={10} />
+                                    RP Synced
+                                </span>
+                            )}
+                            {rpSyncStatus === 'error' && (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded-full bg-red-50 text-red-700" title={detail.returnPrimeSyncError || 'Sync error'}>
+                                    <AlertCircle size={10} />
+                                    Sync Error
+                                </span>
+                            )}
+                            {rpSyncStatus === 'pending' && (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded-full bg-yellow-50 text-yellow-700">
+                                    <Clock size={10} />
+                                    Sync Pending
+                                </span>
+                            )}
                         </div>
 
                         {/* Action buttons */}
@@ -934,6 +970,11 @@ export default function ReturnDetail() {
                                     ? detail.returnRefundMethod.replace(/_/g, ' ')
                                     : 'Pending'}
                             </p>
+                            {detail.returnRefundRequestedMode && detail.returnRefundRequestedMode !== detail.returnRefundMethod && (
+                                <p className="text-xs text-gray-500 mt-1">
+                                    Customer requested: <span className="font-medium">{detail.returnRefundRequestedMode.replace(/_/g, ' ')}</span>
+                                </p>
+                            )}
                             {detail.returnRefundReference && (
                                 <p className="text-xs text-gray-500 mt-1">
                                     Ref: {detail.returnRefundReference}

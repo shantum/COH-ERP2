@@ -224,6 +224,9 @@ export type Customer = {
     tier: Generated<string>;
     ltv: Generated<number>;
     storeCreditBalance: Generated<string>;
+    bankAccountName: string | null;
+    bankAccountNumber: string | null;
+    bankIfsc: string | null;
 };
 export type DomainEvent = {
     id: Generated<string>;
@@ -788,11 +791,14 @@ export type OrderLine = {
     returnDeductions: string | null;
     returnDeductionNotes: string | null;
     returnNetAmount: string | null;
+    returnRefundRequestedMode: string | null;
     returnRefundLinkSentAt: Timestamp | null;
     returnRefundLinkId: string | null;
+    returnRefundLinkUrl: string | null;
     returnRefundCompletedAt: Timestamp | null;
     returnRefundMethod: string | null;
     returnRefundReference: string | null;
+    returnShippingFee: string | null;
     returnExchangeOrderId: string | null;
     returnExchangeSkuId: string | null;
     returnExchangePriceDiff: string | null;
@@ -808,6 +814,7 @@ export type OrderLine = {
     returnPrimeUpdatedAt: Timestamp | null;
     returnPrimeSyncedAt: Timestamp | null;
     returnPrimeSyncError: string | null;
+    returnPrimeExchangeShopifyOrderId: string | null;
 };
 export type OrderPayment = {
     id: Generated<string>;

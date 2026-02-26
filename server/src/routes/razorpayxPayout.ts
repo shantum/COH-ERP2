@@ -21,6 +21,8 @@ import { asyncHandler } from '../middleware/asyncHandler.js';
 import {
   isConfigured,
   createPayout,
+  createCompositePayout,
+  createPayoutLink,
   createContact,
   createFundAccount,
   fetchBalance,
@@ -408,6 +410,85 @@ router.get('/payout/:payoutId', requireAdmin, asyncHandler(async (req: Request, 
     failureReason: payout.failure_reason,
     createdAt: payout.created_at,
   });
+}));
+
+// ============================================
+// REFUND PAYOUT LINK (for return refunds)
+// ============================================
+
+const RefundPayoutLinkSchema = z.object({
+  orderLineId: z.string().min(1),
+  amount: z.number().int().positive(), // paise
+  customerName: z.string().min(1),
+  customerEmail: z.string().nullable().optional(),
+  customerPhone: z.string().nullable().optional(),
+  orderNumber: z.string().optional(),
+  batchNumber: z.string().nullable().optional(),
+  sendSms: z.boolean().optional(),
+  sendEmail: z.boolean().optional(),
+});
+
+/**
+ * POST /api/razorpayx/payout/refund — Create a payout link for a return refund.
+ * Customer receives the link and enters their own bank/UPI details.
+ * Called internally by sendReturnRefundLink server function.
+ */
+router.post('/payout/refund', asyncHandler(async (req: Request, res: Response) => {
+  const parsed = RefundPayoutLinkSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.issues[0]?.message || 'Invalid request' });
+    return;
+  }
+
+  if (!isConfigured()) {
+    res.status(400).json({ error: 'RazorpayX is not configured' });
+    return;
+  }
+
+  const { orderLineId, amount, customerName, customerEmail, customerPhone, orderNumber, batchNumber, sendSms, sendEmail } = parsed.data;
+  const description = `Refund for order ${orderNumber || ''}${batchNumber ? ` (${batchNumber})` : ''}`.trim();
+
+  try {
+    const payoutLink = await createPayoutLink({
+      amount,
+      purpose: 'refund',
+      description,
+      contact: {
+        name: customerName,
+        ...(customerEmail ? { email: customerEmail } : {}),
+        ...(customerPhone ? { contact: customerPhone } : {}),
+      },
+      receipt: orderLineId,
+      notes: {
+        type: 'return_refund',
+        orderLineId,
+        ...(orderNumber ? { orderNumber } : {}),
+        ...(batchNumber ? { batchNumber } : {}),
+      },
+      send_sms: sendSms ?? !!customerPhone,
+      send_email: sendEmail ?? !!customerEmail,
+    });
+
+    log.info({
+      orderLineId,
+      payoutLinkId: payoutLink.id,
+      shortUrl: payoutLink.short_url,
+      amount: amount / 100,
+      status: payoutLink.status,
+    }, 'Created refund payout link');
+
+    res.json({
+      success: true,
+      payoutLinkId: payoutLink.id,
+      shortUrl: payoutLink.short_url,
+      status: payoutLink.status,
+      amount: payoutLink.amount / 100,
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Unknown error';
+    log.error({ orderLineId, amount, error: message }, 'Refund payout link creation failed');
+    res.status(500).json({ error: message });
+  }
 }));
 
 export default router;

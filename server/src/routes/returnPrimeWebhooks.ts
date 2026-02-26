@@ -25,6 +25,7 @@ import {
 import { matchReturnPrimeLinesToOrderLines, getMatchSummary } from '../utils/returnPrimeLineMatching.js';
 import { mapReturnPrimeReason } from '../config/mappings/returnPrimeReasons.js';
 import type { PrismaClient } from '@prisma/client';
+import { broadcastOrderUpdate } from './sse.js';
 
 const router = Router();
 
@@ -195,6 +196,14 @@ router.post('/', verifyReturnPrimeWebhook, async (req: WebhookRequest, res: Resp
         const processingTime = Date.now() - startTime;
         await updateWebhookLog(req.prisma, webhookId, 'processed', null, processingTime, result);
 
+        // 6. Broadcast SSE for real-time UI updates
+        if (result.action !== 'logged' && result.action !== 'skipped') {
+            const eventType = result.action === 'created'
+                ? 'return_initiated' as const
+                : 'return_status_updated' as const;
+            broadcastOrderUpdate({ type: eventType }, null);
+        }
+
         console.log(`[ReturnPrime] Processed ${topic} in ${processingTime}ms:`, result);
         res.status(200).json({ received: true, ...result });
 
@@ -337,11 +346,13 @@ async function handleRequestApproved(
           })
         : null;
 
-    // Resolve reason: webhook has generic "Others" — real classification happens on CSV import
+    // Resolve reason: webhook may have generic "Others" — check line-level details + CSV enrichment
     const rpReason = payload.reason;
-    const customerComment = csvEnrichment?.customerComment || null;
+    const firstLineComment = payload.line_items[0]?.customer_comment;
+    const customerComment = firstLineComment || csvEnrichment?.customerComment || null;
+    const firstLineReasonDetail = payload.line_items[0]?.reason_detail;
     const isGenericReason = !rpReason || rpReason.toLowerCase().trim() === 'others' || rpReason.toLowerCase().trim() === 'na';
-    const reasonDetail = payload.reason_details || (isGenericReason ? customerComment : null);
+    const reasonDetail = payload.reason_details || firstLineReasonDetail || (isGenericReason ? customerComment : null);
     const reasonCategory = isGenericReason && customerComment
         ? mapReturnPrimeReason(customerComment)
         : mapReturnPrimeReason(rpReason);
@@ -358,12 +369,32 @@ async function handleRequestApproved(
                     returnQty: rpLine.quantity,
                     returnRequestedAt: now,
 
-                    // Reason from RP (enriched with CSV customer comment)
+                    // Reason from RP (enriched with CSV customer comment + line-level details)
                     returnReasonCategory: reasonCategory,
                     returnReasonDetail: reasonDetail,
+                    ...(rpLine.customer_comment ? { returnNotes: rpLine.customer_comment } : {}),
 
                     // Resolution based on request type
                     returnResolution: payload.request_type === 'exchange' ? 'exchange' : 'refund',
+
+                    // Customer's requested refund mode from RP
+                    ...(payload.refund?.requested_mode ? { returnRefundRequestedMode: payload.refund.requested_mode } : {}),
+
+                    // Return fee from RP (per-line shipping fee)
+                    ...(rpLine.return_fee ? { returnShippingFee: rpLine.return_fee } : {}),
+
+                    // Exchange product info — store exchange SKU if matched
+                    ...(rpLine.exchange_product?.sku ? await matchExchangeSku(tx, rpLine.exchange_product.sku) : {}),
+
+                    // Exchange price diff from RP (exchange product price - original price)
+                    ...(rpLine.exchange_product?.price && rpLine.price
+                        ? { returnExchangePriceDiff: rpLine.exchange_product.price - rpLine.price }
+                        : {}),
+
+                    // RP-created exchange Shopify order ID (for linking when order syncs)
+                    ...(payload.exchange?.shopify_order_id
+                        ? { returnPrimeExchangeShopifyOrderId: payload.exchange.shopify_order_id }
+                        : {}),
 
                     // AWB if provided by Return Prime
                     ...(payload.shipping?.awb_number && {
@@ -389,14 +420,31 @@ async function handleRequestApproved(
             });
         }
 
-        // Update customer return count (once per batch)
+        // Update customer return count + save bank details from RP
         if (order.customerId) {
             await tx.customer.update({
                 where: { id: order.customerId },
-                data: { returnCount: { increment: 1 } },
+                data: {
+                    returnCount: { increment: 1 },
+                    // Save bank details from RP if provided and not already stored
+                    ...(payload.customer?.bank?.account_number ? {
+                        bankAccountName: payload.customer.bank.account_holder_name || undefined,
+                        bankAccountNumber: payload.customer.bank.account_number,
+                        bankIfsc: payload.customer.bank.ifsc_code || undefined,
+                    } : {}),
+                },
             });
         }
     });
+
+    // 7. Eager-link RP exchange order if it already exists in our DB
+    if (payload.exchange?.shopify_order_id) {
+        try {
+            await linkRpExchangeOrder(prisma, payload.exchange.shopify_order_id, order.id, matched.map(m => m.orderLine.id));
+        } catch (err) {
+            console.warn(`[ReturnPrime] Failed to eager-link exchange order:`, err instanceof Error ? err.message : err);
+        }
+    }
 
     console.log(`[ReturnPrime] Created return batch ${batchNumber} with ${matched.length} lines for order ${order.orderNumber}`);
 
@@ -464,6 +512,14 @@ async function handleRequestRefunded(
 ): Promise<HandlerResult> {
     const now = new Date();
 
+    // Use the most specific refund amount available
+    const refundAmount = payload.refund?.refunded_amount
+        ?? payload.refund?.amount
+        ?? null;
+
+    // Map RP actual_mode to our refund method
+    const refundMethod = payload.refund?.actual_mode || 'payment_link';
+
     // Update lines that haven't been refunded locally
     await prisma.orderLine.updateMany({
         where: {
@@ -472,10 +528,12 @@ async function handleRequestRefunded(
         },
         data: {
             returnRefundCompletedAt: now,
-            returnRefundMethod: 'payment_link', // RP handles via their system
+            returnRefundMethod: refundMethod,
             returnRefundReference: payload.refund?.transaction_id || null,
             refundedAt: now,
-            refundAmount: payload.refund?.amount || null,
+            refundAmount,
+            ...(payload.refund?.eligible_amount ? { returnGrossAmount: payload.refund.eligible_amount } : {}),
+            ...(refundAmount ? { returnNetAmount: refundAmount } : {}),
             returnPrimeStatus: 'refunded',
             returnPrimeUpdatedAt: now,
         },
@@ -560,6 +618,28 @@ async function handleRequestUpdated(
 // ============================================
 
 /**
+ * Try to match an exchange product SKU from RP to a COH SKU ID.
+ * Returns { returnExchangeSkuId } if found, empty object otherwise.
+ */
+async function matchExchangeSku(
+    tx: { sku: PrismaClient['sku'] },
+    skuCode: string
+): Promise<{ returnExchangeSkuId: string } | Record<string, never>> {
+    try {
+        const sku = await tx.sku.findFirst({
+            where: { skuCode },
+            select: { id: true },
+        });
+        if (sku) {
+            return { returnExchangeSkuId: sku.id };
+        }
+    } catch {
+        // Non-fatal — exchange SKU matching is best-effort
+    }
+    return {};
+}
+
+/**
  * Generate a batch number for grouped returns
  * Format: {orderNumber}/{sequence}
  */
@@ -580,6 +660,45 @@ async function generateBatchNumber(
 
     const sequence = existingBatches.length + 1;
     return `${orderNumber}/${sequence}`;
+}
+
+/**
+ * Link an RP-created exchange Shopify order to the return lines.
+ * Finds the order by shopifyOrderId and marks it as exchange + links to original.
+ */
+async function linkRpExchangeOrder(
+    prisma: PrismaClient,
+    shopifyOrderId: string,
+    originalOrderId: string,
+    returnLineIds: string[],
+): Promise<boolean> {
+    const exchangeOrder = await prisma.order.findUnique({
+        where: { shopifyOrderId },
+        select: { id: true, isExchange: true },
+    });
+
+    if (!exchangeOrder) return false; // Not synced yet — will be linked lazily
+
+    // Mark the Shopify order as an exchange order
+    if (!exchangeOrder.isExchange) {
+        await prisma.order.update({
+            where: { id: exchangeOrder.id },
+            data: {
+                isExchange: true,
+                originalOrderId,
+                channel: 'exchange',
+            },
+        });
+    }
+
+    // Link return lines to the exchange order
+    await prisma.orderLine.updateMany({
+        where: { id: { in: returnLineIds } },
+        data: { returnExchangeOrderId: exchangeOrder.id },
+    });
+
+    console.log(`[ReturnPrime] Linked exchange order ${exchangeOrder.id} (Shopify ${shopifyOrderId}) to ${returnLineIds.length} return lines`);
+    return true;
 }
 
 export default router;

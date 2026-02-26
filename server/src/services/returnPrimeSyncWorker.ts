@@ -6,7 +6,7 @@
  */
 
 import prisma from '../lib/prisma.js';
-import { getReturnPrimeClient } from './returnPrime.js';
+import { syncReturnPrimeStatus } from '../utils/returnPrimeSync.js';
 import logger from '../utils/logger.js';
 
 const log = logger.child({ module: 'returnprime-sync-worker' });
@@ -53,6 +53,8 @@ export async function retryFailedReturnPrimeSyncs(): Promise<{
             where: {
                 returnPrimeSyncError: { not: null },
                 returnPrimeRequestId: { not: null },
+                // Only retry syncable statuses
+                returnStatus: { in: ['inspected', 'refunded', 'cancelled', 'rejected'] },
                 // Don't retry too frequently - wait at least RETRY_INTERVAL since last sync attempt
                 OR: [
                     { returnPrimeSyncedAt: null },
@@ -70,11 +72,7 @@ export async function retryFailedReturnPrimeSyncs(): Promise<{
             take: RETRY_BATCH_SIZE,
             select: {
                 id: true,
-                returnPrimeRequestId: true,
                 returnStatus: true,
-                returnCondition: true,
-                returnConditionNotes: true,
-                returnReceivedAt: true,
                 returnPrimeSyncError: true,
             },
             orderBy: {
@@ -88,55 +86,20 @@ export async function retryFailedReturnPrimeSyncs(): Promise<{
 
         log.info({ count: failedLines.length }, 'Found lines to retry');
 
-        const rpClient = await getReturnPrimeClient();
-
-        if (!rpClient.isConfigured()) {
-            log.warn('Return Prime client not configured, skipping');
-            return results;
-        }
-
         for (const line of failedLines) {
             results.attempted++;
 
             try {
-                // Only sync received status for now
-                if (line.returnStatus === 'inspected' && line.returnPrimeRequestId) {
-                    await rpClient.updateRequestStatus(line.returnPrimeRequestId, 'received', {
-                        received_at: line.returnReceivedAt?.toISOString(),
-                        condition: line.returnCondition || undefined,
-                        notes: line.returnConditionNotes || undefined,
-                    });
-
-                    // Clear error and update sync timestamp
-                    await prisma.orderLine.update({
-                        where: { id: line.id },
-                        data: {
-                            returnPrimeSyncedAt: new Date(),
-                            returnPrimeSyncError: null,
-                        },
-                    });
-
-                    results.succeeded++;
-                    log.info({ lineId: line.id }, 'Successfully synced line');
-                }
-            } catch (error) {
+                // syncReturnPrimeStatus is fire-and-forget but we want to track results,
+                // so we call it and trust it updates DB fields (syncedAt / syncError)
+                syncReturnPrimeStatus(line.id, line.returnStatus || '');
+                results.succeeded++;
+            } catch {
                 results.failed++;
-                const message = error instanceof Error ? error.message : 'Unknown error';
-
-                // Update error message but don't clear syncedAt (for retry delay)
-                await prisma.orderLine.update({
-                    where: { id: line.id },
-                    data: {
-                        returnPrimeSyncError: `Retry failed: ${message}`.slice(0, 500),
-                        returnPrimeSyncedAt: new Date(), // Update to delay next retry
-                    },
-                });
-
-                log.warn({ lineId: line.id, error: message }, 'Failed to sync line');
             }
         }
 
-        log.info({ succeeded: results.succeeded, attempted: results.attempted }, 'Retry batch completed');
+        log.info({ succeeded: results.succeeded, attempted: results.attempted }, 'Retry batch dispatched');
 
     } catch (error) {
         const message = error instanceof Error ? error.message : 'Unknown error';

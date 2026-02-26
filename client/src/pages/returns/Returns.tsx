@@ -619,20 +619,31 @@ export default function Returns() {
 // ============================================
 
 function ReturnRow({ row }: { row: ActiveReturnLine }) {
-    const requestId = row.returnBatchNumber
+    const requestId = row.returnPrimeRequestNumber
+        ? `#${row.returnPrimeRequestNumber}`
+        : row.returnBatchNumber
         ? `#${row.returnBatchNumber}`
         : `#${row.id.slice(0, 6)}`;
+
+    const isFromRP = !!row.returnPrimeRequestId;
 
     return (
         <tr className="hover:bg-gray-50/60 transition-colors">
             {/* Request */}
             <td className="px-4 py-3">
-                <a
-                    href={`/returns/${row.id}`}
-                    className="text-emerald-600 hover:text-emerald-700 font-semibold text-sm hover:underline"
-                >
-                    {requestId}
-                </a>
+                <div className="flex items-center gap-2">
+                    <a
+                        href={`/returns/${row.id}`}
+                        className="text-emerald-600 hover:text-emerald-700 font-semibold text-sm hover:underline"
+                    >
+                        {requestId}
+                    </a>
+                    {isFromRP && (
+                        <span className="inline-flex px-1.5 py-0.5 text-[10px] font-medium rounded bg-violet-100 text-violet-700" title="Created via Return Prime">
+                            RP
+                        </span>
+                    )}
+                </div>
             </td>
 
             {/* Product */}

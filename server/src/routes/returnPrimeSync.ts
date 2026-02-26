@@ -12,7 +12,7 @@
 import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { z } from 'zod';
-import { getReturnPrimeClient } from '../services/returnPrime.js';
+import { syncReturnPrimeStatus } from '../utils/returnPrimeSync.js';
 import { authenticateToken } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 
@@ -30,9 +30,35 @@ const SyncBatchInputSchema = z.object({
     batchNumber: z.string(),
 });
 
+const PushStatusInputSchema = z.object({
+    orderLineId: z.string().uuid(),
+    erpStatus: z.string(),
+    extraData: z.record(z.string(), z.unknown()).optional(),
+});
+
 // ============================================
 // ROUTES
 // ============================================
+
+/**
+ * POST /api/returnprime/push-status
+ * Fire-and-forget endpoint called by server functions after status transitions.
+ * Dispatches async sync to Return Prime — returns immediately.
+ */
+router.post('/push-status', asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    const validation = PushStatusInputSchema.safeParse(req.body);
+    if (!validation.success) {
+        res.status(400).json({ success: false, error: 'Invalid input' });
+        return;
+    }
+
+    const { orderLineId, erpStatus, extraData } = validation.data;
+
+    // Fire-and-forget — syncReturnPrimeStatus handles errors internally
+    syncReturnPrimeStatus(orderLineId, erpStatus, extraData);
+
+    res.json({ success: true, dispatched: true });
+}));
 
 /**
  * POST /api/returnprime/sync
@@ -74,45 +100,14 @@ router.post('/sync', authenticateToken, asyncHandler(async (req: Request, res: R
             return;
         }
 
-        const rpClient = await getReturnPrimeClient();
+        // Dispatch sync for the line's current status (handles config check internally)
+        syncReturnPrimeStatus(orderLineId, line.returnStatus || '');
 
-        if (!rpClient.isConfigured()) {
-            console.warn('[ReturnPrime] Sync skipped - client not configured');
-            res.json({ success: true, skipped: true, reason: 'client_not_configured' });
-            return;
-        }
-
-        // Sync based on current status
-        if (line.returnStatus === 'inspected') {
-            await rpClient.updateRequestStatus(line.returnPrimeRequestId, 'received', {
-                received_at: line.returnReceivedAt?.toISOString() || new Date().toISOString(),
-                condition: line.returnCondition || undefined,
-                notes: line.returnConditionNotes || undefined,
-            });
-        }
-
-        // Update sync timestamp
-        await req.prisma.orderLine.update({
-            where: { id: orderLineId },
-            data: {
-                returnPrimeSyncedAt: new Date(),
-                returnPrimeSyncError: null,
-            },
-        });
-
-        console.log(`[ReturnPrime] Synced order line ${orderLineId} to Return Prime`);
-        res.json({ success: true });
+        res.json({ success: true, dispatched: true });
 
     } catch (error: unknown) {
         const message = error instanceof Error ? error.message : 'Unknown error';
         console.error(`[ReturnPrime] Sync failed for ${orderLineId}:`, message);
-
-        // Store error for retry
-        await req.prisma.orderLine.update({
-            where: { id: orderLineId },
-            data: { returnPrimeSyncError: message.slice(0, 500) },
-        });
-
         res.json({ success: false, error: message });
     }
 }));
@@ -155,53 +150,14 @@ router.post('/sync-batch', authenticateToken, asyncHandler(async (req: Request, 
             return;
         }
 
-        const rpClient = await getReturnPrimeClient();
-
-        if (!rpClient.isConfigured()) {
-            res.json({ success: true, skipped: true, reason: 'client_not_configured' });
-            return;
-        }
-
-        const results: { lineId: string; success: boolean; error?: string }[] = [];
-
+        // Dispatch sync for each line's current status
         for (const line of lines) {
-            try {
-                if (line.returnStatus === 'inspected' && line.returnPrimeRequestId) {
-                    await rpClient.updateRequestStatus(line.returnPrimeRequestId, 'received', {
-                        received_at: line.returnReceivedAt?.toISOString() || new Date().toISOString(),
-                        condition: line.returnCondition || undefined,
-                        notes: line.returnConditionNotes || undefined,
-                    });
-
-                    await req.prisma.orderLine.update({
-                        where: { id: line.id },
-                        data: {
-                            returnPrimeSyncedAt: new Date(),
-                            returnPrimeSyncError: null,
-                        },
-                    });
-
-                    results.push({ lineId: line.id, success: true });
-                }
-            } catch (error: unknown) {
-                const message = error instanceof Error ? error.message : 'Unknown error';
-                await req.prisma.orderLine.update({
-                    where: { id: line.id },
-                    data: { returnPrimeSyncError: message.slice(0, 500) },
-                });
-                results.push({ lineId: line.id, success: false, error: message });
-            }
+            syncReturnPrimeStatus(line.id, line.returnStatus || '');
         }
-
-        const successCount = results.filter(r => r.success).length;
-        console.log(`[ReturnPrime] Batch sync complete: ${successCount}/${lines.length} succeeded`);
 
         res.json({
             success: true,
-            total: lines.length,
-            synced: successCount,
-            failed: lines.length - successCount,
-            results,
+            dispatched: lines.length,
         });
 
     } catch (error: unknown) {
@@ -218,11 +174,11 @@ router.post('/sync-batch', authenticateToken, asyncHandler(async (req: Request, 
 router.get('/sync-status', authenticateToken, asyncHandler(async (req: Request, res: Response): Promise<void> => {
     try {
         const [pendingSync, failedSync, totalWithRp] = await Promise.all([
-            // Lines that need syncing (received locally but not synced to RP)
+            // Lines that need syncing (status changed locally but not synced to RP)
             req.prisma.orderLine.count({
                 where: {
                     returnPrimeRequestId: { not: null },
-                    returnStatus: 'inspected',
+                    returnStatus: { in: ['inspected', 'refunded', 'cancelled', 'rejected'] },
                     returnPrimeSyncedAt: null,
                 },
             }),

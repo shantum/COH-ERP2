@@ -491,6 +491,9 @@ model Customer {
   tier              String          @default("bronze")
   ltv               Int             @default(0)  // Stored LTV, updated incrementally on order changes
   storeCreditBalance Decimal        @default(0)  @db.Decimal(12, 2) // Store credit from return refunds
+  bankAccountName   String?        // For return refund bank transfers
+  bankAccountNumber String?
+  bankIfsc          String?
   feedback          Feedback[]
   orders            Order[]
   financeInvoices   Invoice[] @relation("InvoiceCustomer")
@@ -688,11 +691,14 @@ model OrderLine {
   returnNetAmount           Decimal?      @db.Decimal(10, 2)
 
   // === REFUND EXECUTION (enhances existing refund fields) ===
+  returnRefundRequestedMode String?       // Customer's preferred refund mode from RP (e.g., 'Original Payment Method', 'Store Credit')
   returnRefundLinkSentAt    DateTime?
   returnRefundLinkId        String?
+  returnRefundLinkUrl       String?       // RazorpayX payout link short URL
   returnRefundCompletedAt   DateTime?
   returnRefundMethod        String?       // 'payment_link', 'bank_transfer', 'store_credit'
   returnRefundReference     String?
+  returnShippingFee         Decimal?      @db.Decimal(10, 2) // RP return fee per line
 
   // === EXCHANGE ===
   returnExchangeOrderId     String?       // FK to the exchange Order
@@ -716,6 +722,7 @@ model OrderLine {
   returnPrimeUpdatedAt        DateTime?
   returnPrimeSyncedAt         DateTime?  // Last sync TO Return Prime
   returnPrimeSyncError        String?    // For retry logic
+  returnPrimeExchangeShopifyOrderId String? // Shopify order ID of RP-created exchange order
 
   // Relations
   customizedBy         User?               @relation("CustomizedBy", fields: [customizedById], references: [id])
