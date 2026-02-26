@@ -1,270 +1,56 @@
 /**
  * Auth Middleware for TanStack Start Server Functions
  *
- * Duplicates logic from server/src/utils/authCore.ts because the client
- * build cannot import from server/src/. Keep both in sync when making
- * auth changes.
+ * Thin wrappers around @coh/shared/services/auth — the single source of truth.
+ * This file only handles token extraction (TanStack getCookie) and
+ * TanStack createMiddleware integration.
  */
 'use server';
 
 import { createMiddleware } from '@tanstack/react-start';
 import { getCookie, getRequestHeader } from '@tanstack/react-start/server';
-import { z } from 'zod';
-import { getPrisma, type PrismaInstance } from '@coh/shared/services/db';
+import { getPrisma } from '@coh/shared/services/db';
 
-// ============================================
-// TYPES
-// ============================================
+// Re-export types so existing imports keep working
+export type {
+    AuthenticatedUser,
+    AuthUser,
+    AuthContext,
+    OptionalAuthContext,
+    AuthResult,
+} from '@coh/shared/services/auth';
 
-export interface AuthenticatedUser {
-    id: string;
-    email: string;
-    role: string;
-    roleId: string | null;
-    tokenVersion?: number;
-    extraAccess?: string[]; // Additional feature access beyond role
-}
+// Re-export permission helpers
+export { hasPermission, hasAdminAccess } from '@coh/shared/services/auth';
 
-// Backward compatibility alias
-export type AuthUser = AuthenticatedUser;
-
-export interface AuthContext {
-    user: AuthenticatedUser;
-    permissions: string[];
-}
-
-// Optional auth context (user can be null)
-export interface OptionalAuthContext {
-    user: AuthenticatedUser | null;
-    permissions: string[];
-}
-
-export type AuthResult =
-    | { success: true; user: AuthenticatedUser; permissions: string[]; extraAccess: string[] }
-    | { success: false; error: string; code: 'NO_TOKEN' | 'INVALID_TOKEN' | 'EXPIRED_TOKEN' | 'SESSION_INVALIDATED' };
-
-// ============================================
-// JWT PAYLOAD SCHEMA
-// ============================================
-
-const JwtPayloadSchema = z.object({
-    id: z.string(),
-    email: z.string().email(),
-    role: z.string(),
-    roleId: z.string().nullable().optional(), // Can be null if user has no role
-    tokenVersion: z.number().optional(),
-    iat: z.number().optional(),
-    exp: z.number().optional(),
-});
-
-type JwtPayload = z.infer<typeof JwtPayloadSchema>;
-
-// ============================================
-// LAZY IMPORTS (avoid bundling server code)
-// ============================================
-
-/**
- * Lazy import jsonwebtoken
- */
-async function getJwt() {
-    const jwt = await import('jsonwebtoken');
-    return jwt.default || jwt;
-}
-
-// ============================================
-// VALIDATION FUNCTIONS (inlined from authCore)
-// ============================================
-
-/**
- * Verify and decode a JWT token
- */
-async function verifyToken(token: string, secret: string): Promise<JwtPayload | null> {
-    try {
-        const jwt = await getJwt();
-        const decoded = jwt.verify(token, secret);
-        const parsed = JwtPayloadSchema.safeParse(decoded);
-        return parsed.success ? parsed.data : null;
-    } catch {
-        return null;
-    }
-}
-
-/**
- * Validate token version against database
- */
-async function validateTokenVersion(
-    prisma: PrismaInstance,
-    userId: string,
-    tokenVersion: number
-): Promise<boolean> {
-    try {
-        const user = await prisma.user.findUnique({
-            where: { id: userId },
-            select: { tokenVersion: true },
-        });
-        if (!user) return false;
-        return user.tokenVersion === tokenVersion;
-    } catch {
-        return false;
-    }
-}
-
-/**
- * Get user permissions and extraAccess from database
- */
-async function getUserPermissionsAndAccess(
-    prisma: PrismaInstance,
-    userId: string
-): Promise<{ permissions: string[]; extraAccess: string[] }> {
-    try {
-        const user = await prisma.user.findUnique({
-            where: { id: userId },
-            include: {
-                userRole: true,
-                permissionOverrides: true,
-            },
-        });
-
-        if (!user) return { permissions: [], extraAccess: [] };
-
-        // Start with role permissions (stored as JSON array)
-        const rolePermissions: string[] = [];
-        if (user.userRole?.permissions && Array.isArray(user.userRole.permissions)) {
-            rolePermissions.push(...(user.userRole.permissions as string[]));
-        }
-
-        // Apply individual overrides (legacy system)
-        const grantedOverrides = user.permissionOverrides
-            .filter((o: { granted: boolean; permission: string }) => o.granted)
-            .map((o: { permission: string }) => o.permission);
-
-        const revokedOverrides = new Set(
-            user.permissionOverrides
-                .filter((o: { granted: boolean }) => !o.granted)
-                .map((o: { permission: string }) => o.permission)
-        );
-
-        // Combine: (role permissions - revoked) + granted overrides
-        const finalPermissions = [
-            ...rolePermissions.filter((p) => !revokedOverrides.has(p)),
-            ...grantedOverrides,
-        ];
-
-        // Get extraAccess (new simplified system)
-        const extraAccess: string[] = Array.isArray(user.extraAccess)
-            ? (user.extraAccess as string[])
-            : [];
-
-        return {
-            permissions: [...new Set(finalPermissions)],
-            extraAccess,
-        };
-    } catch {
-        return { permissions: [], extraAccess: [] };
-    }
-}
-
-/**
- * Full authentication validation
- */
-async function validateAuth(
-    token: string | undefined,
-    prisma: PrismaInstance
-): Promise<AuthResult> {
-    // 1. Check token exists
-    if (!token) {
-        return { success: false, error: 'Access token required', code: 'NO_TOKEN' };
-    }
-
-    // 2. Get JWT secret
-    const jwtSecret = process.env.JWT_SECRET;
-    if (!jwtSecret) {
-        throw new Error('JWT_SECRET not configured');
-    }
-
-    // 3. Verify and decode token
-    const payload = await verifyToken(token, jwtSecret);
-    if (!payload) {
-        return { success: false, error: 'Invalid or expired token', code: 'INVALID_TOKEN' };
-    }
-
-    // 4. Validate token version (if present)
-    if (payload.tokenVersion !== undefined) {
-        const isValid = await validateTokenVersion(prisma, payload.id, payload.tokenVersion);
-        if (!isValid) {
-            return {
-                success: false,
-                error: 'Session invalidated. Please login again.',
-                code: 'SESSION_INVALIDATED',
-            };
-        }
-    }
-
-    // 5. Load permissions and extraAccess
-    const { permissions, extraAccess } = await getUserPermissionsAndAccess(prisma, payload.id);
-    return {
-        success: true,
-        user: {
-            id: payload.id,
-            email: payload.email,
-            role: payload.role,
-            roleId: payload.roleId ?? null,
-            tokenVersion: payload.tokenVersion,
-            extraAccess,
-        },
-        permissions,
-        extraAccess,
-    };
-}
-
-// ============================================
-// PERMISSION HELPERS
-// ============================================
-
-/**
- * Check if user has a specific permission
- */
-export function hasPermission(permissions: string[], required: string): boolean {
-    if (permissions.includes(required)) return true;
-    const [domain] = required.split(':');
-    return permissions.includes(`${domain}:*`);
-}
-
-/**
- * Check if user has admin-level access
- */
-export function hasAdminAccess(user: AuthenticatedUser, permissions: string[]): boolean {
-    return user.role === 'admin' || permissions.includes('users:create');
-}
+// Import core validation (dynamic import at module level is fine — this is 'use server')
+const getValidateAuth = async () => {
+    const { validateAuth } = await import('@coh/shared/services/auth');
+    return validateAuth;
+};
 
 // ============================================
 // TOKEN EXTRACTION
 // ============================================
 
 /**
- * Helper to extract auth token from cookie
- *
- * Uses TanStack Start's getCookie utility which works for both
- * SSR requests and client-side Server Function calls.
+ * Extract auth token from cookie using TanStack Start's getCookie.
  */
 function getAuthToken(): string | undefined {
     try {
-        // Use TanStack Start's getCookie - works for SSR and client-initiated Server Functions
         const token = getCookie('auth_token');
         return token;
-    } catch (error) {
+    } catch {
         // Fallback: try reading cookie header directly
         try {
             const cookieHeader = getRequestHeader('cookie');
             if (cookieHeader) {
                 const match = cookieHeader.match(/auth_token=([^;]+)/);
-                const token = match?.[1];
-                    return token;
+                return match?.[1];
             }
         } catch {
             // Ignore fallback errors
         }
-
         return undefined;
     }
 }
@@ -275,20 +61,12 @@ function getAuthToken(): string | undefined {
 
 /**
  * Auth middleware that validates JWT from auth_token cookie
- *
- * Usage:
- * ```ts
- * export const protectedFn = createServerFn({ method: 'GET' })
- *   .middleware([authMiddleware])
- *   .handler(async ({ context }) => {
- *     const { user, permissions } = context;
- *   });
- * ```
  */
 export const authMiddleware = createMiddleware({ type: 'function' }).server(
     async ({ next }) => {
         const token = getAuthToken();
         const prisma = await getPrisma();
+        const validateAuth = await getValidateAuth();
 
         const result = await validateAuth(token, prisma);
 
@@ -300,7 +78,7 @@ export const authMiddleware = createMiddleware({ type: 'function' }).server(
             context: {
                 user: result.user,
                 permissions: result.permissions,
-            } satisfies AuthContext,
+            },
         });
     }
 );
@@ -312,11 +90,12 @@ export const optionalAuthMiddleware = createMiddleware({ type: 'function' }).ser
     async ({ next }) => {
         const token = getAuthToken();
 
-        let user: AuthenticatedUser | null = null;
+        let user: import('@coh/shared/services/auth').AuthenticatedUser | null = null;
         let permissions: string[] = [];
 
         if (token) {
             const prisma = await getPrisma();
+            const validateAuth = await getValidateAuth();
             const result = await validateAuth(token, prisma);
 
             if (result.success) {
@@ -326,7 +105,7 @@ export const optionalAuthMiddleware = createMiddleware({ type: 'function' }).ser
         }
 
         return next({
-            context: { user, permissions } satisfies OptionalAuthContext,
+            context: { user, permissions },
         });
     }
 );
@@ -338,6 +117,9 @@ export const adminMiddleware = createMiddleware({ type: 'function' }).server(
     async ({ next }) => {
         const token = getAuthToken();
         const prisma = await getPrisma();
+        const validateAuth = await getValidateAuth();
+        const { hasAdminAccess } = await import('@coh/shared/services/auth');
+
         const result = await validateAuth(token, prisma);
 
         if (!result.success) {
@@ -352,7 +134,7 @@ export const adminMiddleware = createMiddleware({ type: 'function' }).server(
             context: {
                 user: result.user,
                 permissions: result.permissions,
-            } satisfies AuthContext,
+            },
         });
     }
 );
@@ -364,6 +146,9 @@ export function requirePermission(permission: string) {
     return createMiddleware({ type: 'function' }).server(async ({ next }) => {
         const token = getAuthToken();
         const prisma = await getPrisma();
+        const validateAuth = await getValidateAuth();
+        const { hasPermission } = await import('@coh/shared/services/auth');
+
         const result = await validateAuth(token, prisma);
 
         if (!result.success) {
@@ -378,7 +163,7 @@ export function requirePermission(permission: string) {
             context: {
                 user: result.user,
                 permissions: result.permissions,
-            } satisfies AuthContext,
+            },
         });
     });
 }

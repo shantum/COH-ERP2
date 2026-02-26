@@ -20,9 +20,11 @@
  * If you need to refactor, see CLAUDE.md for architecture notes.
  */
 
+export * from './auth/index.js';
 export * from './bom/index.js';
 export * from './dashboard/index.js';
 export * from './db/index.js';
 export * from './inventory/index.js';
 export * from './orders/index.js';
 export * from './eventLog.js';
+export { notifySSE, type SSEEvent } from './sseBroadcast.js';

@@ -1,6 +1,6 @@
 // src/types/express.d.ts
 import type { PrismaClient } from '@prisma/client';
-import type { AuthenticatedUser } from '../utils/authCore.js';
+import type { AuthenticatedUser } from '@coh/shared/services/auth';
 
 /**
  * @deprecated Use AuthenticatedUser from utils/authCore.js
