@@ -3,7 +3,7 @@ import {
     Package, Truck, Check,
     PackageCheck, DollarSign,
     MessageSquare, Pencil, CheckCircle, ArrowRight,
-    Clock, ExternalLink, AlertTriangle, ListTodo,
+    ExternalLink, AlertTriangle, ListTodo,
 } from 'lucide-react';
 import type { ReturnActionQueueItem as ServerReturnActionQueueItem } from '@coh/shared/schemas/returns';
 import { getStatusBadge, getResolutionBadge, conditionOptions } from '../types';
@@ -27,7 +27,6 @@ const ACTION_FILTERS = [
     { value: 'all', label: 'All', icon: null },
     { value: 'schedule_pickup', label: 'Pickup', icon: Truck },
     { value: 'receive', label: 'Receive', icon: PackageCheck },
-    { value: 'awaiting_qc', label: 'QC', icon: Clock },
     { value: 'process_refund', label: 'Refund', icon: DollarSign },
     { value: 'create_exchange', label: 'Exchange', icon: ArrowRight },
     { value: 'complete', label: 'Complete', icon: Check },
@@ -442,12 +441,6 @@ export function ActionQueueTab({
                                                     </button>
                                                 )}
 
-                                                {item.actionNeeded === 'awaiting_qc' && (
-                                                    <span className="h-9 px-4 bg-amber-50 text-amber-700 rounded-lg flex items-center gap-1.5 text-sm font-medium border border-amber-200">
-                                                        <Clock size={15} />
-                                                        Awaiting QC
-                                                    </span>
-                                                )}
 
                                                 {item.actionNeeded === 'create_exchange' && (
                                                     <button

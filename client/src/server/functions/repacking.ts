@@ -215,11 +215,11 @@ export const processRepackingItem = createServerFn({ method: 'POST' })
                 },
             });
 
-            if (linkedLine && linkedLine.returnStatus === 'received') {
+            if (linkedLine && linkedLine.returnStatus === 'inspected') {
                 await prismaForCascade.orderLine.update({
                     where: { id: item.orderLineId },
                     data: {
-                        returnStatus: 'qc_inspected',
+                        returnStatus: 'inspected',
                         returnQcResult: qcResult,
                     },
                 });
@@ -233,7 +233,7 @@ export const processRepackingItem = createServerFn({ method: 'POST' })
                     notifySSE({
                         type: 'return_status_updated',
                         lineId: item.orderLineId,
-                        changes: { returnStatus: 'qc_inspected', returnQcResult: qcResult },
+                        changes: { returnStatus: 'inspected', returnQcResult: qcResult },
                     }, context.user.id);
                 } catch {
                     // Non-critical

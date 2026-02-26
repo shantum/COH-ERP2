@@ -33,12 +33,12 @@ async function main(): Promise<void> {
             ? `SELECT COUNT(*) as count
                FROM "OrderLine" ol
                JOIN "ReturnPrimeRequest" rp ON rp."rpRequestId" = ol."returnPrimeRequestId"
-               WHERE ol."returnStatus" = 'received'
+               WHERE ol."returnStatus" = 'inspected'
                  AND ol."returnPrimeRequestId" IS NOT NULL
                  AND (rp."isRefunded" = true OR rp."isArchived" = true OR rp."isRejected" = true)`
             : `WITH updated AS (
                    UPDATE "OrderLine" ol
-                   SET "returnStatus" = 'complete',
+                   SET "returnStatus" = 'refunded',
                        "returnPrimeStatus" = CASE
                            WHEN rp."isRefunded" = true THEN 'refunded'
                            WHEN rp."isRejected" = true THEN 'rejected'
@@ -47,7 +47,7 @@ async function main(): Promise<void> {
                        "returnPrimeUpdatedAt" = NOW()
                    FROM "ReturnPrimeRequest" rp
                    WHERE rp."rpRequestId" = ol."returnPrimeRequestId"
-                     AND ol."returnStatus" = 'received'
+                     AND ol."returnStatus" = 'inspected'
                      AND ol."returnPrimeRequestId" IS NOT NULL
                      AND (rp."isRefunded" = true OR rp."isArchived" = true OR rp."isRejected" = true)
                    RETURNING ol.id
@@ -55,7 +55,7 @@ async function main(): Promise<void> {
                SELECT COUNT(*) as count FROM updated`
     );
     const receivedToComplete = Number(receivedToCompleteResult[0].count);
-    console.log(`Step 1: 'received' → 'complete': ${receivedToComplete} lines`);
+    console.log(`Step 1: 'inspected' → 'refunded': ${receivedToComplete} lines`);
 
     // --- Step 2: 'requested'/'pickup_scheduled'/'in_transit' → 'received' ---
     // Where RP shows isReceived or isInspected (but NOT refunded/archived/rejected — handled in step 3)
@@ -64,13 +64,13 @@ async function main(): Promise<void> {
             ? `SELECT COUNT(*) as count
                FROM "OrderLine" ol
                JOIN "ReturnPrimeRequest" rp ON rp."rpRequestId" = ol."returnPrimeRequestId"
-               WHERE ol."returnStatus" IN ('requested', 'pickup_scheduled', 'in_transit')
+               WHERE ol."returnStatus" IN ('requested', 'approved')
                  AND ol."returnPrimeRequestId" IS NOT NULL
                  AND (rp."isReceived" = true OR rp."isInspected" = true)
                  AND rp."isRefunded" = false AND rp."isArchived" = false AND rp."isRejected" = false`
             : `WITH updated AS (
                    UPDATE "OrderLine" ol
-                   SET "returnStatus" = 'received',
+                   SET "returnStatus" = 'inspected',
                        "returnPrimeStatus" = CASE
                            WHEN rp."isInspected" = true THEN 'inspected'
                            WHEN rp."isReceived" = true THEN 'received'
@@ -79,7 +79,7 @@ async function main(): Promise<void> {
                        "returnReceivedAt" = COALESCE(ol."returnReceivedAt", rp."receivedAt", NOW())
                    FROM "ReturnPrimeRequest" rp
                    WHERE rp."rpRequestId" = ol."returnPrimeRequestId"
-                     AND ol."returnStatus" IN ('requested', 'pickup_scheduled', 'in_transit')
+                     AND ol."returnStatus" IN ('requested', 'approved')
                      AND ol."returnPrimeRequestId" IS NOT NULL
                      AND (rp."isReceived" = true OR rp."isInspected" = true)
                      AND rp."isRefunded" = false AND rp."isArchived" = false AND rp."isRejected" = false
@@ -88,7 +88,7 @@ async function main(): Promise<void> {
                SELECT COUNT(*) as count FROM updated`
     );
     const earlyToReceived = Number(earlyToReceivedResult[0].count);
-    console.log(`Step 2: 'requested/pickup_scheduled/in_transit' → 'received': ${earlyToReceived} lines`);
+    console.log(`Step 2: 'requested/approved' → 'inspected': ${earlyToReceived} lines`);
 
     // --- Step 3: 'requested'/'pickup_scheduled'/'in_transit' → 'complete' ---
     // Where RP is already refunded/archived/rejected (skip straight to complete)
@@ -97,12 +97,12 @@ async function main(): Promise<void> {
             ? `SELECT COUNT(*) as count
                FROM "OrderLine" ol
                JOIN "ReturnPrimeRequest" rp ON rp."rpRequestId" = ol."returnPrimeRequestId"
-               WHERE ol."returnStatus" IN ('requested', 'pickup_scheduled', 'in_transit')
+               WHERE ol."returnStatus" IN ('requested', 'approved')
                  AND ol."returnPrimeRequestId" IS NOT NULL
                  AND (rp."isRefunded" = true OR rp."isArchived" = true OR rp."isRejected" = true)`
             : `WITH updated AS (
                    UPDATE "OrderLine" ol
-                   SET "returnStatus" = 'complete',
+                   SET "returnStatus" = 'refunded',
                        "returnPrimeStatus" = CASE
                            WHEN rp."isRefunded" = true THEN 'refunded'
                            WHEN rp."isRejected" = true THEN 'rejected'
@@ -112,7 +112,7 @@ async function main(): Promise<void> {
                        "returnReceivedAt" = COALESCE(ol."returnReceivedAt", rp."receivedAt", NOW())
                    FROM "ReturnPrimeRequest" rp
                    WHERE rp."rpRequestId" = ol."returnPrimeRequestId"
-                     AND ol."returnStatus" IN ('requested', 'pickup_scheduled', 'in_transit')
+                     AND ol."returnStatus" IN ('requested', 'approved')
                      AND ol."returnPrimeRequestId" IS NOT NULL
                      AND (rp."isRefunded" = true OR rp."isArchived" = true OR rp."isRejected" = true)
                    RETURNING ol.id
@@ -120,15 +120,15 @@ async function main(): Promise<void> {
                SELECT COUNT(*) as count FROM updated`
     );
     const earlyToComplete = Number(earlyToCompleteResult[0].count);
-    console.log(`Step 3: 'requested/pickup_scheduled/in_transit' → 'complete': ${earlyToComplete} lines`);
+    console.log(`Step 3: 'requested/approved' → 'refunded': ${earlyToComplete} lines`);
 
     // --- Summary ---
     const totalComplete = receivedToComplete + earlyToComplete;
     const totalUpdated = totalComplete + earlyToReceived;
 
     console.log('\n=== Summary ===');
-    console.log(`Total → complete:  ${totalComplete}`);
-    console.log(`Total → received:  ${earlyToReceived}`);
+    console.log(`Total → refunded:  ${totalComplete}`);
+    console.log(`Total → inspected: ${earlyToReceived}`);
     console.log(`Total updated:     ${totalUpdated}`);
     console.log(DRY_RUN ? '\nRe-run with --execute to apply changes.' : '\nDone!');
 }

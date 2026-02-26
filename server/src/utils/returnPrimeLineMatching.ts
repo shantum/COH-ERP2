@@ -46,9 +46,8 @@ export interface MatchResult {
  */
 const ACTIVE_RETURN_STATUSES = [
     'requested',
-    'pickup_scheduled',
-    'in_transit',
-    'received',
+    'approved',
+    'inspected',
 ];
 
 /**
@@ -56,7 +55,9 @@ const ACTIVE_RETURN_STATUSES = [
  */
 const INACTIVE_RETURN_STATUSES = [
     'cancelled',
-    'complete',
+    'refunded',
+    'archived',
+    'rejected',
 ];
 
 /**

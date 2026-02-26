@@ -83,7 +83,7 @@ router.post('/sync', authenticateToken, asyncHandler(async (req: Request, res: R
         }
 
         // Sync based on current status
-        if (line.returnStatus === 'received') {
+        if (line.returnStatus === 'inspected') {
             await rpClient.updateRequestStatus(line.returnPrimeRequestId, 'received', {
                 received_at: line.returnReceivedAt?.toISOString() || new Date().toISOString(),
                 condition: line.returnCondition || undefined,
@@ -166,7 +166,7 @@ router.post('/sync-batch', authenticateToken, asyncHandler(async (req: Request, 
 
         for (const line of lines) {
             try {
-                if (line.returnStatus === 'received' && line.returnPrimeRequestId) {
+                if (line.returnStatus === 'inspected' && line.returnPrimeRequestId) {
                     await rpClient.updateRequestStatus(line.returnPrimeRequestId, 'received', {
                         received_at: line.returnReceivedAt?.toISOString() || new Date().toISOString(),
                         condition: line.returnCondition || undefined,
@@ -222,7 +222,7 @@ router.get('/sync-status', authenticateToken, asyncHandler(async (req: Request, 
             req.prisma.orderLine.count({
                 where: {
                     returnPrimeRequestId: { not: null },
-                    returnStatus: 'received',
+                    returnStatus: 'inspected',
                     returnPrimeSyncedAt: null,
                 },
             }),

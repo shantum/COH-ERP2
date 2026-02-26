@@ -60,8 +60,8 @@ export const processLineReturnRefund = createServerFn({ method: 'POST' })
             return returnError(RETURN_ERROR_CODES.NOT_REFUND_RESOLUTION);
         }
 
-        // 1D: Refund status guard — must be received or QC'd first
-        const refundAllowedStatuses = ['received', 'qc_inspected'];
+        // 1D: Refund status guard — must be inspected first
+        const refundAllowedStatuses = ['inspected'];
         if (!refundAllowedStatuses.includes(line.returnStatus || '')) {
             return returnError(
                 RETURN_ERROR_CODES.WRONG_STATUS,
@@ -205,12 +205,12 @@ export const completeLineReturn = createServerFn({ method: 'POST' })
             return returnError(RETURN_ERROR_CODES.LINE_NOT_FOUND);
         }
 
-        // 1N: Allow completion from 'received' or 'qc_inspected'
-        const completableStatuses = ['received', 'qc_inspected'];
+        // Allow completion from 'inspected'
+        const completableStatuses = ['inspected'];
         if (!completableStatuses.includes(line.returnStatus || '')) {
             return returnError(
                 RETURN_ERROR_CODES.WRONG_STATUS,
-                `Cannot complete: current status is '${line.returnStatus}', expected 'received' or 'qc_inspected'`
+                `Cannot complete: current status is '${line.returnStatus}', expected 'inspected'`
             );
         }
 
@@ -224,7 +224,7 @@ export const completeLineReturn = createServerFn({ method: 'POST' })
 
         await prisma.orderLine.update({
             where: { id: orderLineId },
-            data: { returnStatus: 'complete' },
+            data: { returnStatus: 'refunded' },
         });
 
         broadcastReturnUpdate('return_completed', { lineId: orderLineId }, '');

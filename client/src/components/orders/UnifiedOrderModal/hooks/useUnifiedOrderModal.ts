@@ -506,7 +506,7 @@ export function useUnifiedOrderModal({ order, initialMode, onNavigateToOrder }: 
     const warnings: string[] = [];
 
     // HARD BLOCK: already has active return - cannot initiate another
-    if (line.returnStatus && !['cancelled', 'complete'].includes(line.returnStatus)) {
+    if (line.returnStatus && !['cancelled', 'refunded', 'archived', 'rejected'].includes(line.returnStatus)) {
       return {
         eligible: false,
         reason: 'active_return',

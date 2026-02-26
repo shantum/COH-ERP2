@@ -63,11 +63,11 @@ export type ReturnResolution = keyof typeof RETURN_RESOLUTIONS;
 
 export const RETURN_STATUSES = {
     requested: 'Requested',
-    pickup_scheduled: 'Pickup Scheduled',
-    in_transit: 'In Transit',
-    received: 'Received',
-    qc_inspected: 'QC Inspected',
-    complete: 'Complete',
+    approved: 'Approved',
+    inspected: 'Inspected',
+    refunded: 'Refunded',
+    archived: 'Archived',
+    rejected: 'Rejected',
     cancelled: 'Cancelled',
 } as const satisfies Record<z.infer<typeof LineReturnStatusSchema>, string>;
 

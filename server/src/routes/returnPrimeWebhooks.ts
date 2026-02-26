@@ -354,7 +354,7 @@ async function handleRequestApproved(
                 data: {
                     // Return lifecycle
                     returnBatchNumber: batchNumber,
-                    returnStatus: payload.shipping?.awb_number ? 'pickup_scheduled' : 'requested',
+                    returnStatus: payload.shipping?.awb_number ? 'approved' : 'requested',
                     returnQty: rpLine.quantity,
                     returnRequestedAt: now,
 
@@ -493,13 +493,13 @@ async function handleRequestRefunded(
         },
     });
 
-    // Complete returns that were received
+    // Complete returns that were inspected
     await prisma.orderLine.updateMany({
         where: {
             returnPrimeRequestId: payload.id,
-            returnStatus: 'received',
+            returnStatus: { in: ['inspected', 'approved'] },
         },
-        data: { returnStatus: 'complete' },
+        data: { returnStatus: 'refunded' },
     });
 
     return { action: 'refunded', refundId: payload.refund?.id };

@@ -288,7 +288,7 @@ router.post('/schedule-pickup', authenticateToken, asyncHandler(async (req: Requ
         await prisma.orderLine.updateMany({
             where: { id: { in: lineIds } },
             data: {
-                returnStatus: 'pickup_scheduled',
+                returnStatus: 'approved',
                 returnPickupType: 'arranged_by_us',
                 returnCourier: pickupResult.logistics,
                 returnAwbNumber: pickupResult.awbNumber,

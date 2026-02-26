@@ -85,7 +85,7 @@ export function checkEligibility(
     const warningThreshold = windowDays - windowWarningDays;
 
     // Hard block: already has active return
-    if (input.returnStatus && !['cancelled', 'complete'].includes(input.returnStatus)) {
+    if (input.returnStatus && !['cancelled', 'refunded', 'archived', 'rejected'].includes(input.returnStatus)) {
         return {
             eligible: false,
             reason: 'already_active',

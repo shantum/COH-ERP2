@@ -51,11 +51,11 @@ const RETURN_REASON_CATEGORIES = [
 // Return statuses for display
 const RETURN_STATUS_CONFIG: Record<string, { label: string; color: string; icon: typeof Clock }> = {
   requested: { label: 'Requested', color: 'text-amber-600 bg-amber-50', icon: Clock },
-  pickup_scheduled: { label: 'Pickup Scheduled', color: 'text-blue-600 bg-blue-50', icon: Truck },
-  in_transit: { label: 'In Transit', color: 'text-indigo-600 bg-indigo-50', icon: Truck },
-  received: { label: 'Received', color: 'text-violet-600 bg-violet-50', icon: PackageCheck },
-  qc_inspected: { label: 'QC Inspected', color: 'text-teal-600 bg-teal-50', icon: CheckCircle2 },
-  complete: { label: 'Complete', color: 'text-green-600 bg-green-50', icon: CheckCircle2 },
+  approved: { label: 'Approved', color: 'text-blue-600 bg-blue-50', icon: Truck },
+  inspected: { label: 'Inspected', color: 'text-teal-600 bg-teal-50', icon: CheckCircle2 },
+  refunded: { label: 'Refunded', color: 'text-green-600 bg-green-50', icon: CheckCircle2 },
+  archived: { label: 'Archived', color: 'text-slate-500 bg-slate-100', icon: CheckCircle2 },
+  rejected: { label: 'Rejected', color: 'text-red-600 bg-red-50', icon: XCircle },
   cancelled: { label: 'Cancelled', color: 'text-slate-500 bg-slate-100', icon: XCircle },
 };
 
@@ -178,7 +178,7 @@ function ReturnLineItem({
   const imageUrl = sku?.variation?.imageUrl || sku?.variation?.product?.imageUrl;
 
   // Active return status
-  const hasActiveReturn = !!(line.returnStatus && !['cancelled', 'complete'].includes(line.returnStatus));
+  const hasActiveReturn = !!(line.returnStatus && !['cancelled', 'refunded', 'archived', 'rejected'].includes(line.returnStatus));
   const returnStatusConfig = line.returnStatus ? RETURN_STATUS_CONFIG[line.returnStatus] : null;
   const StatusIcon = returnStatusConfig?.icon || Clock;
 
@@ -531,12 +531,9 @@ function ActiveReturnCard({
     switch (line.returnStatus) {
       case 'requested':
         return 'schedule_pickup';
-      case 'pickup_scheduled':
-      case 'in_transit':
+      case 'approved':
         return 'receive';
-      case 'received':
-        return 'awaiting_qc';
-      case 'qc_inspected':
+      case 'inspected':
         if (line.returnResolution === 'refund' && !line.returnRefundCompletedAt) {
           return 'process_refund';
         } else if (line.returnResolution === 'exchange' && !line.returnExchangeOrderId) {
@@ -747,13 +744,6 @@ function ActiveReturnCard({
           </button>
         )}
 
-        {actionNeeded === 'awaiting_qc' && (
-          <span className="px-3 py-1.5 bg-amber-50 text-amber-700 text-xs rounded-lg flex items-center gap-1 border border-amber-200">
-            <Clock size={14} />
-            Awaiting QC
-          </span>
-        )}
-
         {actionNeeded === 'create_exchange' && onCreateExchange && !showExchangeSearch && (
           <button
             onClick={() => setShowExchangeSearch(true)}
@@ -843,7 +833,7 @@ export function ReturnsSection({
       // Skip cancelled lines
       if (line.lineStatus === 'cancelled') continue;
 
-      const hasActiveReturn = line.returnStatus && !['cancelled', 'complete'].includes(line.returnStatus);
+      const hasActiveReturn = line.returnStatus && !['cancelled', 'refunded', 'archived', 'rejected'].includes(line.returnStatus);
 
       if (hasActiveReturn) {
         active.push(line);

@@ -511,21 +511,21 @@ export const autoCompleteReceivedReturns = createServerFn({ method: 'POST' })
         const dryRun = data.dryRun ?? false;
 
         try {
-            // Step 1: Advance stuck 'received' lines to 'complete'
+            // Step 1: Advance stuck 'inspected' lines to 'refunded'
             // when their RP request is refunded, archived, or rejected
             const completeCountResult = dryRun
                 ? await prisma.$queryRawUnsafe<[{ count: bigint }]>(`
                     SELECT COUNT(*) as count
                     FROM "OrderLine" ol
                     JOIN "ReturnPrimeRequest" rp ON rp."rpRequestId" = ol."returnPrimeRequestId"
-                    WHERE ol."returnStatus" = 'received'
+                    WHERE ol."returnStatus" = 'inspected'
                       AND ol."returnPrimeRequestId" IS NOT NULL
                       AND (rp."isRefunded" = true OR rp."isArchived" = true OR rp."isRejected" = true)
                 `)
                 : await prisma.$queryRawUnsafe<[{ count: bigint }]>(`
                     WITH updated AS (
                         UPDATE "OrderLine" ol
-                        SET "returnStatus" = 'complete',
+                        SET "returnStatus" = 'refunded',
                             "returnPrimeStatus" = CASE
                                 WHEN rp."isRefunded" = true THEN 'refunded'
                                 WHEN rp."isRejected" = true THEN 'rejected'
@@ -534,7 +534,7 @@ export const autoCompleteReceivedReturns = createServerFn({ method: 'POST' })
                             "returnPrimeUpdatedAt" = NOW()
                         FROM "ReturnPrimeRequest" rp
                         WHERE rp."rpRequestId" = ol."returnPrimeRequestId"
-                          AND ol."returnStatus" = 'received'
+                          AND ol."returnStatus" = 'inspected'
                           AND ol."returnPrimeRequestId" IS NOT NULL
                           AND (rp."isRefunded" = true OR rp."isArchived" = true OR rp."isRejected" = true)
                         RETURNING ol.id
@@ -544,21 +544,21 @@ export const autoCompleteReceivedReturns = createServerFn({ method: 'POST' })
 
             const advancedToComplete = Number(completeCountResult[0].count);
 
-            // Step 2: Advance 'requested' or 'pickup_scheduled' lines to 'received'
+            // Step 2: Advance 'requested' or 'approved' lines to 'inspected'
             // when their RP request shows isReceived or isInspected
             const receivedCountResult = dryRun
                 ? await prisma.$queryRawUnsafe<[{ count: bigint }]>(`
                     SELECT COUNT(*) as count
                     FROM "OrderLine" ol
                     JOIN "ReturnPrimeRequest" rp ON rp."rpRequestId" = ol."returnPrimeRequestId"
-                    WHERE ol."returnStatus" IN ('requested', 'pickup_scheduled', 'in_transit')
+                    WHERE ol."returnStatus" IN ('requested', 'approved')
                       AND ol."returnPrimeRequestId" IS NOT NULL
                       AND (rp."isReceived" = true OR rp."isInspected" = true)
                 `)
                 : await prisma.$queryRawUnsafe<[{ count: bigint }]>(`
                     WITH updated AS (
                         UPDATE "OrderLine" ol
-                        SET "returnStatus" = 'received',
+                        SET "returnStatus" = 'inspected',
                             "returnPrimeStatus" = CASE
                                 WHEN rp."isInspected" = true THEN 'inspected'
                                 WHEN rp."isReceived" = true THEN 'received'
@@ -567,7 +567,7 @@ export const autoCompleteReceivedReturns = createServerFn({ method: 'POST' })
                             "returnReceivedAt" = COALESCE(ol."returnReceivedAt", rp."receivedAt", NOW())
                         FROM "ReturnPrimeRequest" rp
                         WHERE rp."rpRequestId" = ol."returnPrimeRequestId"
-                          AND ol."returnStatus" IN ('requested', 'pickup_scheduled', 'in_transit')
+                          AND ol."returnStatus" IN ('requested', 'approved')
                           AND ol."returnPrimeRequestId" IS NOT NULL
                           AND (rp."isReceived" = true OR rp."isInspected" = true)
                         RETURNING ol.id
@@ -577,21 +577,21 @@ export const autoCompleteReceivedReturns = createServerFn({ method: 'POST' })
 
             const advancedToReceived = Number(receivedCountResult[0].count);
 
-            // Step 3: Also advance 'requested'/'pickup_scheduled' directly to 'complete'
+            // Step 3: Also advance 'requested'/'approved' directly to 'refunded'
             // if their RP request is already refunded/archived/rejected (skips received step)
             const directCompleteResult = dryRun
                 ? await prisma.$queryRawUnsafe<[{ count: bigint }]>(`
                     SELECT COUNT(*) as count
                     FROM "OrderLine" ol
                     JOIN "ReturnPrimeRequest" rp ON rp."rpRequestId" = ol."returnPrimeRequestId"
-                    WHERE ol."returnStatus" IN ('requested', 'pickup_scheduled', 'in_transit')
+                    WHERE ol."returnStatus" IN ('requested', 'approved')
                       AND ol."returnPrimeRequestId" IS NOT NULL
                       AND (rp."isRefunded" = true OR rp."isArchived" = true OR rp."isRejected" = true)
                 `)
                 : await prisma.$queryRawUnsafe<[{ count: bigint }]>(`
                     WITH updated AS (
                         UPDATE "OrderLine" ol
-                        SET "returnStatus" = 'complete',
+                        SET "returnStatus" = 'refunded',
                             "returnPrimeStatus" = CASE
                                 WHEN rp."isRefunded" = true THEN 'refunded'
                                 WHEN rp."isRejected" = true THEN 'rejected'
@@ -601,7 +601,7 @@ export const autoCompleteReceivedReturns = createServerFn({ method: 'POST' })
                             "returnReceivedAt" = COALESCE(ol."returnReceivedAt", rp."receivedAt", NOW())
                         FROM "ReturnPrimeRequest" rp
                         WHERE rp."rpRequestId" = ol."returnPrimeRequestId"
-                          AND ol."returnStatus" IN ('requested', 'pickup_scheduled', 'in_transit')
+                          AND ol."returnStatus" IN ('requested', 'approved')
                           AND ol."returnPrimeRequestId" IS NOT NULL
                           AND (rp."isRefunded" = true OR rp."isArchived" = true OR rp."isRejected" = true)
                         RETURNING ol.id
@@ -614,7 +614,7 @@ export const autoCompleteReceivedReturns = createServerFn({ method: 'POST' })
             const totalUpdated = totalComplete + advancedToReceived;
 
             const prefix = dryRun ? '[DRY RUN] ' : '';
-            const message = `${prefix}${totalComplete} lines → complete, ${advancedToReceived} lines → received (${totalUpdated} total)`;
+            const message = `${prefix}${totalComplete} lines → refunded, ${advancedToReceived} lines → inspected (${totalUpdated} total)`;
             console.log(`[autoCompleteReceivedReturns] ${message}`);
 
             return {

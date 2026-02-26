@@ -35,8 +35,9 @@ function mapRpStatusToErp(rp: {
     isInspected: boolean;
     isApproved: boolean;
 }): string {
-    if (rp.isRefunded || rp.isRejected) return 'complete';
-    if (rp.isReceived || rp.isInspected) return 'received';
+    if (rp.isRefunded) return 'refunded';
+    if (rp.isRejected) return 'rejected';
+    if (rp.isReceived || rp.isInspected) return 'inspected';
     if (rp.isApproved) return 'requested';
     return 'requested';
 }

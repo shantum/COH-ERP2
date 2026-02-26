@@ -14,10 +14,11 @@ interface ReturnStatusCellProps {
 // Return status configuration
 const RETURN_STATUS_CONFIG: Record<string, { label: string; color: string; bgColor: string }> = {
     requested: { label: 'Requested', color: 'text-amber-700', bgColor: 'bg-amber-100' },
-    pickup_scheduled: { label: 'Pickup', color: 'text-blue-700', bgColor: 'bg-blue-100' },
-    in_transit: { label: 'In Transit', color: 'text-indigo-700', bgColor: 'bg-indigo-100' },
-    received: { label: 'Received', color: 'text-violet-700', bgColor: 'bg-violet-100' },
-    complete: { label: 'Complete', color: 'text-green-700', bgColor: 'bg-green-100' },
+    approved: { label: 'Approved', color: 'text-blue-700', bgColor: 'bg-blue-100' },
+    inspected: { label: 'Inspected', color: 'text-violet-700', bgColor: 'bg-violet-100' },
+    refunded: { label: 'Refunded', color: 'text-green-700', bgColor: 'bg-green-100' },
+    archived: { label: 'Archived', color: 'text-slate-500', bgColor: 'bg-slate-100' },
+    rejected: { label: 'Rejected', color: 'text-red-700', bgColor: 'bg-red-100' },
     cancelled: { label: 'Cancelled', color: 'text-slate-500', bgColor: 'bg-slate-100' },
 };
 
@@ -25,7 +26,7 @@ export const ReturnStatusCell = memo(function ReturnStatusCell({ row }: ReturnSt
     // Only show for lines with active returns (not cancelled/complete)
     const returnStatus = row.returnStatus;
 
-    if (!returnStatus || returnStatus === 'cancelled' || returnStatus === 'complete') {
+    if (!returnStatus || returnStatus === 'cancelled' || returnStatus === 'refunded' || returnStatus === 'archived' || returnStatus === 'rejected') {
         return null;
     }
 

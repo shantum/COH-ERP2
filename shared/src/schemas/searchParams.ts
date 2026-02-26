@@ -164,22 +164,24 @@ export type ProductionSearchParams = z.infer<typeof ProductionSearchParams>;
 
 /**
  * Returns page search params
- * Unified returns dashboard with 3 tabs: overview, returns, analytics
- * Data sourced from Return Prime integration
+ * Redesigned to match Return Prime UI:
+ * - Status pill tabs filter by returnStatus
+ * - Date presets for quick filtering
+ * - Secondary view switcher (returns / analytics / settings)
  */
 export const ReturnsSearchParams = z.object({
-    /** Active tab */
-    tab: z.enum(['actions', 'all', 'return_prime', 'analytics', 'settings']).catch('actions'),
-    /** Filter by request type (Return Prime tab) */
-    requestType: z.enum(['all', 'return', 'exchange']).catch('all'),
+    /** Status filter (maps to returnStatus) */
+    status: z.enum(['requested', 'approved', 'inspected', 'refunded', 'archived', 'rejected', 'all']).catch('requested'),
+    /** Secondary view */
+    view: z.enum(['returns', 'analytics', 'settings']).catch('returns'),
     /** Search query */
     search: z.string().optional().catch(undefined),
-    /** Date range preset */
-    datePreset: z.enum(['7d', '30d', '90d', '1y', 'all']).catch('30d'),
-    /** Status filter (All Returns tab) */
-    status: z.string().optional().catch(undefined),
-    /** Resolution filter (All Returns tab) */
-    resolution: z.string().optional().catch(undefined),
+    /** Date filter preset */
+    datePreset: z.enum(['custom', 'today', 'yesterday', '7d', '30d']).catch('7d'),
+    /** Page number */
+    page: z.coerce.number().int().positive().catch(1),
+    /** Request type filter */
+    requestType: z.enum(['all', 'return', 'exchange']).catch('all'),
 });
 export type ReturnsSearchParams = z.infer<typeof ReturnsSearchParams>;
 

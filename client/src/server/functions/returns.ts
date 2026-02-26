@@ -17,6 +17,10 @@ import { getPrisma } from '@coh/shared/services/db';
 // INPUT SCHEMAS
 // ============================================
 
+const getReturnDetailInputSchema = z.object({
+    orderLineId: z.string().uuid(),
+});
+
 const findBySkuCodeInputSchema = z.object({
     code: z.string().min(1, 'SKU code is required'),
 });
@@ -98,7 +102,7 @@ export const getPendingSources = createServerFn({ method: 'GET' })
         const returnsCount = await prisma.orderLine.count({
             where: {
                 returnStatus: {
-                    in: ['requested', 'pickup_scheduled', 'in_transit'],
+                    in: ['requested', 'approved'],
                 },
                 returnReceivedAt: null,
             },
@@ -199,7 +203,7 @@ export const getPendingQueue = createServerFn({ method: 'GET' })
             const returnLines = await prisma.orderLine.findMany({
                 where: {
                     returnStatus: {
-                        in: ['requested', 'pickup_scheduled', 'in_transit'],
+                        in: ['requested', 'approved'],
                     },
                     returnReceivedAt: null,
                 },
@@ -432,7 +436,7 @@ export const scanLookup = createServerFn({ method: 'GET' })
             where: {
                 skuId: sku.id,
                 returnStatus: {
-                    in: ['requested', 'pickup_scheduled', 'in_transit'],
+                    in: ['requested', 'approved'],
                 },
                 returnReceivedAt: null,
             },
@@ -803,7 +807,7 @@ export const getActiveLineReturns = createServerFn({ method: 'GET' })
         const lines = await prisma.orderLine.findMany({
             where: {
                 returnStatus: {
-                    notIn: ['complete', 'cancelled'],
+                    notIn: ['refunded', 'archived', 'rejected', 'cancelled'],
                 },
             },
             include: {
@@ -872,6 +876,158 @@ export const getActiveLineReturns = createServerFn({ method: 'GET' })
     });
 
 /**
+ * Return detail response shape (superset of ActiveReturnLine with extra fields)
+ */
+export interface ReturnDetailResponse {
+    // Line info
+    id: string;
+    orderId: string;
+    orderNumber: string;
+    skuId: string;
+    skuCode: string;
+    size: string;
+    qty: number;
+    unitPrice: number;
+    // Return info
+    returnBatchNumber: string | null;
+    returnStatus: string;
+    returnQty: number;
+    returnRequestedAt: Date | null;
+    returnReasonCategory: string | null;
+    returnReasonDetail: string | null;
+    returnResolution: string | null;
+    returnNotes: string | null;
+    // Pickup
+    returnPickupType: string | null;
+    returnAwbNumber: string | null;
+    returnCourier: string | null;
+    returnPickupScheduledAt: Date | null;
+    returnReceivedAt: Date | null;
+    // Condition & QC
+    returnCondition: string | null;
+    returnConditionNotes: string | null;
+    returnQcResult: string | null;
+    // Refund
+    returnGrossAmount: number | null;
+    returnDiscountClawback: number | null;
+    returnDeductions: number | null;
+    returnDeductionNotes: string | null;
+    returnNetAmount: number | null;
+    returnRefundMethod: string | null;
+    returnRefundCompletedAt: Date | null;
+    returnRefundReference: string | null;
+    // Exchange
+    returnExchangeOrderId: string | null;
+    returnExchangeSkuId: string | null;
+    returnExchangePriceDiff: number | null;
+    // Product info
+    productId: string;
+    productName: string;
+    colorName: string;
+    imageUrl: string | null;
+    // Order/customer info
+    customerName: string;
+    customerEmail: string | null;
+    customerPhone: string | null;
+    shippingAddress: Record<string, unknown> | string | null;
+    orderDate: Date;
+    paymentMethod: string | null;
+    totalAmount: number;
+}
+
+/**
+ * Get detailed return info for a single order line
+ */
+export const getReturnDetail = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => getReturnDetailInputSchema.parse(input))
+    .handler(async ({ data }) => {
+        const prisma = await getPrisma();
+
+        const line = await prisma.orderLine.findUnique({
+            where: { id: data.orderLineId },
+            include: {
+                order: {
+                    select: {
+                        id: true,
+                        orderNumber: true,
+                        customerId: true,
+                        customerName: true,
+                        customerEmail: true,
+                        customerPhone: true,
+                        shippingAddress: true,
+                        totalAmount: true,
+                        orderDate: true,
+                        paymentMethod: true,
+                    },
+                },
+                sku: {
+                    include: {
+                        variation: {
+                            include: {
+                                product: true,
+                            },
+                        },
+                    },
+                },
+            },
+        });
+
+        if (!line || !line.returnStatus) {
+            throw new Error('Return not found');
+        }
+
+        return {
+            id: line.id,
+            orderId: line.orderId,
+            orderNumber: line.order.orderNumber,
+            skuId: line.skuId,
+            skuCode: line.sku.skuCode,
+            size: line.sku.size,
+            qty: line.qty,
+            unitPrice: line.unitPrice,
+            returnBatchNumber: line.returnBatchNumber,
+            returnStatus: line.returnStatus,
+            returnQty: line.returnQty!,
+            returnRequestedAt: line.returnRequestedAt,
+            returnReasonCategory: line.returnReasonCategory,
+            returnReasonDetail: line.returnReasonDetail,
+            returnResolution: line.returnResolution,
+            returnNotes: line.returnNotes,
+            returnPickupType: line.returnPickupType,
+            returnAwbNumber: line.returnAwbNumber,
+            returnCourier: line.returnCourier,
+            returnPickupScheduledAt: line.returnPickupScheduledAt,
+            returnReceivedAt: line.returnReceivedAt,
+            returnCondition: line.returnCondition,
+            returnConditionNotes: line.returnConditionNotes || null,
+            returnQcResult: line.returnQcResult,
+            returnGrossAmount: line.returnGrossAmount?.toNumber() ?? null,
+            returnDiscountClawback: line.returnDiscountClawback?.toNumber() ?? null,
+            returnDeductions: line.returnDeductions?.toNumber() ?? null,
+            returnDeductionNotes: line.returnDeductionNotes || null,
+            returnNetAmount: line.returnNetAmount?.toNumber() ?? null,
+            returnRefundMethod: line.returnRefundMethod,
+            returnRefundCompletedAt: line.returnRefundCompletedAt,
+            returnRefundReference: line.returnRefundReference || null,
+            returnExchangeOrderId: line.returnExchangeOrderId,
+            returnExchangeSkuId: line.returnExchangeSkuId,
+            returnExchangePriceDiff: line.returnExchangePriceDiff?.toNumber() ?? null,
+            productId: line.sku.variation.product.id,
+            productName: line.sku.variation.product.name,
+            colorName: line.sku.variation.colorName,
+            imageUrl: line.sku.variation.imageUrl || line.sku.variation.product.imageUrl,
+            customerName: line.order.customerName,
+            customerEmail: line.order.customerEmail,
+            customerPhone: line.order.customerPhone,
+            shippingAddress: line.order.shippingAddress,
+            orderDate: line.order.orderDate,
+            paymentMethod: line.order.paymentMethod,
+            totalAmount: line.order.totalAmount,
+        };
+    });
+
+/**
  * Get ALL returns (active + completed + cancelled) with pagination and filters
  * For the All Returns AG-Grid tab
  */
@@ -888,6 +1044,8 @@ const getAllReturnsInputSchema = z.object({
     status: z.string().optional(),
     resolution: z.string().optional(),
     search: z.string().optional(),
+    dateFrom: z.string().optional(),
+    dateTo: z.string().optional(),
 });
 
 export const getAllReturns = createServerFn({ method: 'POST' })
@@ -895,7 +1053,7 @@ export const getAllReturns = createServerFn({ method: 'POST' })
     .inputValidator((input: unknown) => getAllReturnsInputSchema.parse(input))
     .handler(async ({ data }): Promise<AllReturnsResponse> => {
         const prisma = await getPrisma();
-        const { page, limit, status, resolution, search } = data;
+        const { page, limit, status, resolution, search, dateFrom, dateTo } = data;
         const skip = (page - 1) * limit;
 
         // Build where clause — must have a return status (i.e. was ever a return)
@@ -905,6 +1063,13 @@ export const getAllReturns = createServerFn({ method: 'POST' })
 
         if (resolution) {
             where.returnResolution = resolution;
+        }
+
+        if (dateFrom || dateTo) {
+            const dateFilter: Record<string, Date> = {};
+            if (dateFrom) dateFilter.gte = new Date(dateFrom);
+            if (dateTo) dateFilter.lte = new Date(dateTo + 'T23:59:59Z');
+            where.returnRequestedAt = dateFilter;
         }
 
         if (search) {
@@ -992,6 +1157,55 @@ export const getAllReturns = createServerFn({ method: 'POST' })
     });
 
 /**
+ * Get return status counts for pill tab badges
+ * Groups by returnStatus, returns counts per status + total
+ */
+const getReturnStatusCountsInputSchema = z.object({
+    dateFrom: z.string().optional(),
+    dateTo: z.string().optional(),
+    search: z.string().optional(),
+});
+
+export const getReturnStatusCounts = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => getReturnStatusCountsInputSchema.parse(input))
+    .handler(async ({ data }): Promise<Record<string, number>> => {
+        const prisma = await getPrisma();
+        const where: Record<string, unknown> = { returnStatus: { not: null } };
+
+        if (data.dateFrom || data.dateTo) {
+            const dateFilter: Record<string, Date> = {};
+            if (data.dateFrom) dateFilter.gte = new Date(data.dateFrom);
+            if (data.dateTo) dateFilter.lte = new Date(data.dateTo + 'T23:59:59Z');
+            where.returnRequestedAt = dateFilter;
+        }
+
+        if (data.search) {
+            where.OR = [
+                { order: { orderNumber: { contains: data.search, mode: 'insensitive' } } },
+                { order: { customerName: { contains: data.search, mode: 'insensitive' } } },
+                { sku: { skuCode: { contains: data.search, mode: 'insensitive' } } },
+                { returnBatchNumber: { contains: data.search, mode: 'insensitive' } },
+            ];
+        }
+
+        const counts = await prisma.orderLine.groupBy({
+            by: ['returnStatus'],
+            where,
+            _count: true,
+        });
+
+        const result: Record<string, number> = { all: 0 };
+        for (const c of counts) {
+            if (c.returnStatus) {
+                result[c.returnStatus] = c._count;
+                result.all += c._count;
+            }
+        }
+        return result;
+    });
+
+/**
  * Get return action queue (lines needing action)
  * Prioritized list for staff to process
  */
@@ -1003,7 +1217,7 @@ export const getLineReturnActionQueue = createServerFn({ method: 'GET' })
         const lines = await prisma.orderLine.findMany({
             where: {
                 returnStatus: {
-                    in: ['requested', 'pickup_scheduled', 'in_transit', 'received', 'qc_inspected'],
+                    in: ['requested', 'approved', 'inspected'],
                 },
             },
             include: {
@@ -1034,20 +1248,16 @@ export const getLineReturnActionQueue = createServerFn({ method: 'GET' })
 
         for (const line of lines) {
             // Determine action needed based on status and resolution
-            let actionNeeded: 'schedule_pickup' | 'receive' | 'awaiting_qc' | 'process_refund' | 'create_exchange' | 'complete';
+            let actionNeeded: 'schedule_pickup' | 'receive' | 'process_refund' | 'create_exchange' | 'complete';
 
             switch (line.returnStatus) {
                 case 'requested':
                     actionNeeded = 'schedule_pickup';
                     break;
-                case 'pickup_scheduled':
-                case 'in_transit':
+                case 'approved':
                     actionNeeded = 'receive';
                     break;
-                case 'received':
-                    actionNeeded = 'awaiting_qc';
-                    break;
-                case 'qc_inspected':
+                case 'inspected':
                     if (line.returnResolution === 'refund' && !line.returnRefundCompletedAt) {
                         actionNeeded = 'process_refund';
                     } else if (line.returnResolution === 'exchange' && !line.returnExchangeOrderId) {
@@ -1109,7 +1319,7 @@ export const getLineReturnActionQueue = createServerFn({ method: 'GET' })
 
         // Sort by priority: receive first, then by age
         actionItems.sort((a, b) => {
-            const priorityOrder = ['process_refund', 'create_exchange', 'complete', 'receive', 'schedule_pickup', 'awaiting_qc'];
+            const priorityOrder = ['process_refund', 'create_exchange', 'complete', 'receive', 'schedule_pickup'];
             const aPriority = priorityOrder.indexOf(a.actionNeeded);
             const bPriority = priorityOrder.indexOf(b.actionNeeded);
             if (aPriority !== bPriority) return aPriority - bPriority;
@@ -1701,10 +1911,10 @@ export const getInternalReturnAnalytics = createServerFn({ method: 'POST' })
         const [total, active, completed, cancelled, refunds, exchanges, refundValueAgg] = await Promise.all([
             prisma.orderLine.count({ where: baseWhere }),
             prisma.orderLine.count({
-                where: { ...baseWhere, returnStatus: { notIn: ['complete', 'cancelled'] } },
+                where: { ...baseWhere, returnStatus: { notIn: ['refunded', 'archived', 'rejected', 'cancelled'] } },
             }),
             prisma.orderLine.count({
-                where: { ...baseWhere, returnStatus: 'complete' },
+                where: { ...baseWhere, returnStatus: { in: ['refunded', 'archived', 'rejected'] } },
             }),
             prisma.orderLine.count({
                 where: { ...baseWhere, returnStatus: 'cancelled' },
@@ -1727,7 +1937,7 @@ export const getInternalReturnAnalytics = createServerFn({ method: 'POST' })
                 EXTRACT(EPOCH FROM ("updatedAt" - "returnRequestedAt")) / 86400
             ), 0)::text AS avg_days
             FROM "OrderLine"
-            WHERE "returnStatus" = 'complete'
+            WHERE "returnStatus" IN ('refunded', 'archived', 'rejected')
             AND "returnRequestedAt" IS NOT NULL
             ${periodDate ? `AND "returnRequestedAt" >= $1` : ''}`,
             ...(periodDate ? [periodDate] : [])

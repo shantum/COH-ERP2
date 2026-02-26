@@ -1,98 +1,72 @@
 /**
- * Unified Returns Dashboard
+ * Returns Dashboard — Return Prime-style UI
  *
- * 5 tabs:
- * - Action Queue (default): internal line-level returns needing action
- * - All Returns: all active internal returns in a table
- * - Return Prime: legacy RP data (kept for reference)
- * - Analytics: return analytics (from RP data + internal)
- * - Settings: return policy config
+ * Status pill tabs filter by returnStatus.
+ * Date presets for quick filtering.
+ * Clean table with product images.
+ * Secondary view switcher for analytics/settings.
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { useNavigate } from '@tanstack/react-router';
 import { Route } from '../../routes/_authenticated/returns';
 import {
     Search,
-    Calendar,
-    Filter,
-    RefreshCw,
-    Download,
-    Upload,
+    ChevronLeft,
+    ChevronRight,
     BarChart3,
-    Package,
-    ListTodo,
     Settings,
-    CheckCircle2,
-    Inbox,
+    Package,
+    X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from '@/components/ui/select';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 
-// Return Prime imports
+// Server functions
 import {
-    getReturnPrimeDashboard,
-    triggerReturnPrimeSync,
-    autoCompleteReceivedReturns,
-} from '../../server/functions/returnPrime';
-import { returnPrimeQueryKeys } from '../../constants/queryKeys';
-import {
-    ReturnPrimeStatsCards,
-    ReturnPrimeTable,
-    ReturnPrimeDetailModal,
-    ReturnPrimeCsvEnrichmentDialog,
-} from '../../components/returnPrime';
-
-// Internal returns imports
-import {
-    getLineReturnActionQueue,
+    getAllReturns,
+    getReturnStatusCounts,
     getReturnConfig,
 } from '../../server/functions/returns';
-import { updateReturnNotes } from '../../server/functions/returnLifecycle';
-import {
-    cancelLineReturn,
-    receiveLineReturn,
-    scheduleReturnPickup,
-} from '../../server/functions/returnLifecycle';
 import {
     processLineReturnRefund,
-    createExchangeOrder,
-    completeLineReturn,
 } from '../../server/functions/returnResolution';
 
 // Tab components
-import { ActionQueueTab } from './tabs/ActionQueueTab';
-import { AllReturnsTab } from './tabs/AllReturnsTab';
 import { AnalyticsTab } from './tabs/AnalyticsTab';
 import { SettingsTab } from './tabs/SettingsTab';
 import { ProcessRefundModal } from './modals/ProcessRefundModal';
 
-import type { ReturnPrimeRequest } from '@coh/shared/schemas/returnPrime';
+import { getOptimizedImageUrl } from '../../utils/imageOptimization';
+import { getStatusBadge } from './types';
+import type { ActiveReturnLine } from '@coh/shared/schemas/returns';
 import type { ReturnActionQueueItem as ServerReturnActionQueueItem } from '@coh/shared/schemas/returns';
 
 // ============================================
 // CONSTANTS
 // ============================================
 
+const STATUS_TABS = [
+    { value: 'requested', label: 'Requested' },
+    { value: 'approved', label: 'Approved' },
+    { value: 'inspected', label: 'Inspected' },
+    { value: 'refunded', label: 'Refunded' },
+    { value: 'archived', label: 'Archived' },
+    { value: 'rejected', label: 'Rejected' },
+    { value: 'all', label: 'All' },
+] as const;
+
 const DATE_PRESETS = [
+    { value: 'custom', label: 'Custom' },
+    { value: 'today', label: 'Today' },
+    { value: 'yesterday', label: 'Yesterday' },
     { value: '7d', label: 'Last 7 days' },
     { value: '30d', label: 'Last 30 days' },
-    { value: '90d', label: 'Last 90 days' },
-    { value: '1y', label: 'Last 1 year' },
-    { value: 'all', label: 'All time' },
 ] as const;
+
+const PAGE_SIZE = 50;
 
 // ============================================
 // HELPERS
@@ -107,6 +81,14 @@ function getDateRange(preset: string): { dateFrom?: string; dateTo?: string } {
     const dateTo = formatDateForApi(today);
 
     switch (preset) {
+        case 'today':
+            return { dateFrom: dateTo, dateTo };
+        case 'yesterday': {
+            const yesterday = new Date(today);
+            yesterday.setDate(yesterday.getDate() - 1);
+            const d = formatDateForApi(yesterday);
+            return { dateFrom: d, dateTo: d };
+        }
         case '7d': {
             const from = new Date(today);
             from.setDate(from.getDate() - 7);
@@ -117,19 +99,19 @@ function getDateRange(preset: string): { dateFrom?: string; dateTo?: string } {
             from.setDate(from.getDate() - 30);
             return { dateFrom: formatDateForApi(from), dateTo };
         }
-        case '90d': {
-            const from = new Date(today);
-            from.setDate(from.getDate() - 90);
-            return { dateFrom: formatDateForApi(from), dateTo };
-        }
-        case '1y': {
-            const from = new Date(today);
-            from.setFullYear(from.getFullYear() - 1);
-            return { dateFrom: formatDateForApi(from), dateTo };
-        }
         default:
             return {};
     }
+}
+
+function formatDisplayDate(date: Date | string | null): string {
+    if (!date) return '-';
+    const d = new Date(date);
+    return d.toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+    });
 }
 
 // ============================================
@@ -147,76 +129,73 @@ export default function Returns() {
 
     // Local state
     const [searchInput, setSearchInput] = useState(search.search || '');
-    const [selectedRpRequest, setSelectedRpRequest] = useState<ReturnPrimeRequest | null>(null);
-    const [csvDialogOpen, setCsvDialogOpen] = useState(false);
     const [refundModalItem, setRefundModalItem] = useState<ServerReturnActionQueueItem | null>(null);
 
+    // Computed date range
+    const dateRange = useMemo(() => getDateRange(search.datePreset), [search.datePreset]);
+
     // ============================================
-    // INTERNAL RETURNS QUERIES
+    // QUERIES
     // ============================================
 
-    const getActionQueueFn = useServerFn(getLineReturnActionQueue);
-    const { data: actionQueue, isLoading: actionQueueLoading } = useQuery({
-        queryKey: ['returns', 'actionQueue'],
-        queryFn: () => getActionQueueFn(),
-        staleTime: 30 * 1000,
-        enabled: search.tab === 'actions',
+    // Status counts for pill badges
+    const getStatusCountsFn = useServerFn(getReturnStatusCounts);
+    const { data: statusCounts } = useQuery({
+        queryKey: ['returns', 'statusCounts', { ...dateRange, search: search.search }],
+        queryFn: () =>
+            getStatusCountsFn({
+                data: {
+                    ...dateRange,
+                    ...(search.search ? { search: search.search } : {}),
+                },
+            }),
+        staleTime: 30_000,
+        enabled: search.view === 'returns',
     });
 
+    // Returns table data
+    const getAllReturnsFn = useServerFn(getAllReturns);
+    const { data: returnsData, isLoading: returnsLoading } = useQuery({
+        queryKey: [
+            'returns',
+            'all',
+            {
+                page: search.page,
+                status: search.status,
+                search: search.search,
+                ...dateRange,
+            },
+        ],
+        queryFn: () =>
+            getAllReturnsFn({
+                data: {
+                    page: search.page,
+                    limit: PAGE_SIZE,
+                    ...(search.status !== 'all' ? { status: search.status } : {}),
+                    ...(search.search ? { search: search.search } : {}),
+                    ...dateRange,
+                },
+            }),
+        staleTime: 30_000,
+        enabled: search.view === 'returns',
+    });
+
+    // Settings config (only when settings view is active)
     const getConfigFn = useServerFn(getReturnConfig);
-    const { data: returnConfig, isLoading: configLoading, refetch: refetchConfig } = useQuery({
+    const {
+        data: returnConfig,
+        isLoading: configLoading,
+        refetch: refetchConfig,
+    } = useQuery({
         queryKey: ['returns', 'config'],
         queryFn: () => getConfigFn(),
         staleTime: 5 * 60 * 1000,
-        enabled: search.tab === 'settings',
+        enabled: search.view === 'settings',
     });
 
     // ============================================
-    // RETURN PRIME QUERIES (for RP tab)
+    // MUTATIONS
     // ============================================
-
-    const dateRange = getDateRange(search.datePreset);
-    const rpFilters = {
-        ...dateRange,
-        ...(search.requestType !== 'all' ? { requestType: search.requestType } : {}),
-        ...(search.search ? { search: search.search } : {}),
-    };
-
-    const getDashboardFn = useServerFn(getReturnPrimeDashboard);
-    const { data: rpData, isLoading: rpLoading, refetch: rpRefetch } = useQuery({
-        queryKey: returnPrimeQueryKeys.dashboard(rpFilters),
-        queryFn: () => getDashboardFn({ data: rpFilters }),
-        staleTime: 60 * 1000,
-        enabled: search.tab === 'return_prime',
-    });
-
-    // ============================================
-    // INTERNAL RETURN MUTATIONS
-    // ============================================
-
-    const schedulePickupFn = useServerFn(scheduleReturnPickup);
-    const schedulePickupMutation = useMutation({
-        mutationFn: (lineId: string) =>
-            schedulePickupFn({ data: { orderLineId: lineId, pickupType: 'manual' } }),
-        onSuccess: () => {
-            toast.success('Pickup scheduled');
-            invalidateReturns();
-        },
-        onError: (err: unknown) =>
-            toast.error(err instanceof Error ? err.message : 'Failed to schedule pickup'),
-    });
-
-    const receiveReturnFn = useServerFn(receiveLineReturn);
-    const receiveMutation = useMutation({
-        mutationFn: ({ lineId, condition }: { lineId: string; condition: 'good' | 'damaged' | 'defective' | 'wrong_item' | 'used' }) =>
-            receiveReturnFn({ data: { orderLineId: lineId, condition } }),
-        onSuccess: () => {
-            toast.success('Return received — item queued for QC');
-            invalidateReturns();
-        },
-        onError: (err: unknown) =>
-            toast.error(err instanceof Error ? err.message : 'Failed to receive return'),
-    });
 
     const processRefundFn = useServerFn(processLineReturnRefund);
     const processRefundMutation = useMutation({
@@ -237,100 +216,42 @@ export default function Returns() {
             toast.error(err instanceof Error ? err.message : 'Failed to process refund'),
     });
 
-    const createExchangeFn = useServerFn(createExchangeOrder);
-    const createExchangeMutation = useMutation({
-        mutationFn: (lineId: string) =>
-            createExchangeFn({ data: { orderLineId: lineId } }),
-        onSuccess: (res) => {
-            if (res.success) {
-                toast.success(`Exchange order created: ${res.data?.exchangeOrderNumber}`);
-            }
-            invalidateReturns();
-        },
-        onError: (err: unknown) =>
-            toast.error(err instanceof Error ? err.message : 'Failed to create exchange'),
-    });
-
-    const completeReturnFn = useServerFn(completeLineReturn);
-    const completeMutation = useMutation({
-        mutationFn: (lineId: string) =>
-            completeReturnFn({ data: { orderLineId: lineId } }),
-        onSuccess: () => {
-            toast.success('Return completed');
-            invalidateReturns();
-        },
-        onError: (err: unknown) =>
-            toast.error(err instanceof Error ? err.message : 'Failed to complete return'),
-    });
-
-    const cancelReturnFn = useServerFn(cancelLineReturn);
-    const cancelMutation = useMutation({
-        mutationFn: (lineId: string) =>
-            cancelReturnFn({ data: { orderLineId: lineId, reason: 'Cancelled by staff' } }),
-        onSuccess: () => {
-            toast.success('Return cancelled');
-            invalidateReturns();
-        },
-        onError: (err: unknown) =>
-            toast.error(err instanceof Error ? err.message : 'Failed to cancel return'),
-    });
-
-    const updateNotesFn = useServerFn(updateReturnNotes);
-    const updateNotesMutation = useMutation({
-        mutationFn: ({ lineId, notes }: { lineId: string; notes: string }) =>
-            updateNotesFn({ data: { orderLineId: lineId, notes } }),
-        onSuccess: () => invalidateReturns(),
-        onError: (err: unknown) =>
-            toast.error(err instanceof Error ? err.message : 'Failed to update notes'),
-    });
-
-    // ============================================
-    // RETURN PRIME MUTATIONS
-    // ============================================
-
-    const triggerSyncFn = useServerFn(triggerReturnPrimeSync);
-    const syncMutation = useMutation({
-        mutationFn: () => triggerSyncFn(),
-        onSuccess: (res) => {
-            if (res.success) {
-                toast.success(res.message);
-                rpRefetch();
-            } else {
-                toast.error(res.message);
-            }
-        },
-        onError: () => toast.error('Sync failed'),
-    });
-
-    const autoCompleteFn = useServerFn(autoCompleteReceivedReturns);
-    const autoCompleteMutation = useMutation({
-        mutationFn: (dryRun: boolean) => autoCompleteFn({ data: { dryRun } }),
-        onSuccess: (res) => {
-            if (res.dryRun) {
-                if (res.totalUpdated === 0) {
-                    toast.info('All return statuses are already in sync');
-                } else {
-                    toast.info(`Preview: ${res.message}. Run again to apply.`);
-                    autoCompleteMutation.mutate(false);
-                }
-            } else {
-                toast.success(res.message);
-                rpRefetch();
-            }
-        },
-        onError: () => toast.error('Auto-complete failed'),
-    });
-
     // ============================================
     // HANDLERS
     // ============================================
 
-    const handleTabChange = useCallback(
-        (value: string) => {
+    const handleStatusChange = useCallback(
+        (status: string) => {
             navigate({
                 search: (prev) => ({
                     ...prev,
-                    tab: value as 'actions' | 'all' | 'return_prime' | 'analytics' | 'settings',
+                    status: status as typeof search.status,
+                    page: 1,
+                }),
+            });
+        },
+        [navigate]
+    );
+
+    const handleViewChange = useCallback(
+        (view: string) => {
+            navigate({
+                search: (prev) => ({
+                    ...prev,
+                    view: view as typeof search.view,
+                }),
+            });
+        },
+        [navigate]
+    );
+
+    const handleDatePresetChange = useCallback(
+        (preset: string) => {
+            navigate({
+                search: (prev) => ({
+                    ...prev,
+                    datePreset: preset as typeof search.datePreset,
+                    page: 1,
                 }),
             });
         },
@@ -339,7 +260,11 @@ export default function Returns() {
 
     const handleSearch = useCallback(() => {
         navigate({
-            search: (prev) => ({ ...prev, search: searchInput || undefined }),
+            search: (prev) => ({
+                ...prev,
+                search: searchInput || undefined,
+                page: 1,
+            }),
         });
     }, [navigate, searchInput]);
 
@@ -350,33 +275,27 @@ export default function Returns() {
         [handleSearch]
     );
 
-    const handleTypeChange = useCallback(
-        (value: string) => {
+    const handleClearFilters = useCallback(() => {
+        setSearchInput('');
+        navigate({
+            search: (prev) => ({
+                ...prev,
+                search: undefined,
+                datePreset: '7d' as const,
+                requestType: 'all' as const,
+                page: 1,
+            }),
+        });
+    }, [navigate]);
+
+    const handlePageChange = useCallback(
+        (newPage: number) => {
             navigate({
-                search: (prev) => ({
-                    ...prev,
-                    requestType: value as 'all' | 'return' | 'exchange',
-                }),
+                search: (prev) => ({ ...prev, page: newPage }),
             });
         },
         [navigate]
     );
-
-    const handleDatePresetChange = useCallback(
-        (value: string) => {
-            navigate({
-                search: (prev) => ({
-                    ...prev,
-                    datePreset: value as '7d' | '30d' | '90d' | '1y' | 'all',
-                }),
-            });
-        },
-        [navigate]
-    );
-
-    const handleProcessRefund = useCallback((_lineId: string, item: ServerReturnActionQueueItem) => {
-        setRefundModalItem(item);
-    }, []);
 
     const handleRefundSubmit = useCallback(
         (
@@ -399,227 +318,379 @@ export default function Returns() {
         [processRefundMutation]
     );
 
+    const totalPages = returnsData
+        ? Math.ceil(returnsData.total / returnsData.limit)
+        : 0;
+    const items = returnsData?.items || [];
+
     // ============================================
     // RENDER
     // ============================================
 
     return (
-        <div className="space-y-4 sm:space-y-6 px-2 sm:px-4 md:px-6 py-4">
-            {/* Header */}
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                <div>
-                    <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Returns</h1>
-                    <p className="text-sm text-gray-500 mt-1">
-                        Returns & exchanges management
-                    </p>
-                </div>
-                {/* RP-specific actions (only show on RP tab) */}
-                {search.tab === 'return_prime' && (
-                    <div className="flex flex-wrap gap-2">
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => autoCompleteMutation.mutate(true)}
-                            disabled={autoCompleteMutation.isPending}
-                        >
-                            <CheckCircle2 className={`w-4 h-4 mr-2 ${autoCompleteMutation.isPending ? 'animate-pulse' : ''}`} />
-                            <span className="hidden sm:inline">Sync Statuses</span>
-                            <span className="sm:hidden">Sync</span>
-                        </Button>
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setCsvDialogOpen(true)}
-                        >
-                            <Upload className="w-4 h-4 mr-2" />
-                            <span className="hidden sm:inline">Upload CSV</span>
-                            <span className="sm:hidden">CSV</span>
-                        </Button>
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => syncMutation.mutate()}
-                            disabled={syncMutation.isPending}
-                        >
-                            <Download className={`w-4 h-4 mr-2 ${syncMutation.isPending ? 'animate-pulse' : ''}`} />
-                            {syncMutation.isPending ? 'Syncing...' : 'Sync from RP'}
-                        </Button>
+        <div className="min-h-screen bg-gray-50">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-5">
+                {/* Header */}
+                <div className="flex items-center justify-between">
+                    <h1 className="text-2xl font-bold text-gray-900">Returns</h1>
+                    {/* View switcher as small text links */}
+                    <div className="flex items-center gap-4">
+                        <div className="flex items-center gap-1 text-sm">
+                            <button
+                                onClick={() => handleViewChange('returns')}
+                                className={`px-3 py-1.5 rounded-md font-medium transition-colors ${
+                                    search.view === 'returns'
+                                        ? 'bg-gray-900 text-white'
+                                        : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
+                                }`}
+                            >
+                                Returns
+                            </button>
+                            <button
+                                onClick={() => handleViewChange('analytics')}
+                                className={`px-3 py-1.5 rounded-md font-medium transition-colors flex items-center gap-1.5 ${
+                                    search.view === 'analytics'
+                                        ? 'bg-gray-900 text-white'
+                                        : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
+                                }`}
+                            >
+                                <BarChart3 size={14} />
+                                Analytics
+                            </button>
+                            <button
+                                onClick={() => handleViewChange('settings')}
+                                className={`px-3 py-1.5 rounded-md font-medium transition-colors flex items-center gap-1.5 ${
+                                    search.view === 'settings'
+                                        ? 'bg-gray-900 text-white'
+                                        : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
+                                }`}
+                            >
+                                <Settings size={14} />
+                                Settings
+                            </button>
+                        </div>
                     </div>
-                )}
-            </div>
+                </div>
 
-            {/* Tabs */}
-            <Tabs value={search.tab} onValueChange={handleTabChange}>
-                <TabsList>
-                    <TabsTrigger value="actions" className="flex items-center gap-1.5">
-                        <ListTodo className="w-4 h-4" />
-                        Action Queue
-                        {actionQueue && actionQueue.length > 0 && (
-                            <Badge variant="secondary" className="ml-1 text-xs">
-                                {actionQueue.length}
-                            </Badge>
-                        )}
-                    </TabsTrigger>
-                    <TabsTrigger value="all" className="flex items-center gap-1.5">
-                        <Package className="w-4 h-4" />
-                        All Returns
-                    </TabsTrigger>
-                    <TabsTrigger value="return_prime" className="flex items-center gap-1.5">
-                        <Inbox className="w-4 h-4" />
-                        Return Prime
-                    </TabsTrigger>
-                    <TabsTrigger value="analytics" className="flex items-center gap-1.5">
-                        <BarChart3 className="w-4 h-4" />
-                        Analytics
-                    </TabsTrigger>
-                    <TabsTrigger value="settings" className="flex items-center gap-1.5">
-                        <Settings className="w-4 h-4" />
-                        Settings
-                    </TabsTrigger>
-                </TabsList>
+                {search.view === 'returns' && (
+                    <>
+                        {/* Status Pill Tabs */}
+                        <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                            {STATUS_TABS.map(({ value, label }) => {
+                                const count = statusCounts?.[value] ?? 0;
+                                const isActive = search.status === value;
+                                return (
+                                    <button
+                                        key={value}
+                                        onClick={() => handleStatusChange(value)}
+                                        className={`relative px-4 py-2 text-sm font-medium rounded-full whitespace-nowrap transition-all ${
+                                            isActive
+                                                ? 'bg-emerald-600 text-white shadow-sm'
+                                                : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50 hover:border-gray-300'
+                                        }`}
+                                    >
+                                        {label}
+                                        {count > 0 && (
+                                            <span
+                                                className={`ml-2 inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 text-xs font-semibold rounded-full ${
+                                                    isActive
+                                                        ? 'bg-white/20 text-white'
+                                                        : 'bg-gray-100 text-gray-600'
+                                                }`}
+                                            >
+                                                {count}
+                                            </span>
+                                        )}
+                                    </button>
+                                );
+                            })}
+                        </div>
 
-                {/* Action Queue Tab */}
-                <TabsContent value="actions" className="mt-4">
-                    <ActionQueueTab
-                        items={actionQueue || []}
-                        loading={actionQueueLoading}
-                        onSchedulePickup={(lineId) => schedulePickupMutation.mutate(lineId)}
-                        onReceive={(lineId, condition) => receiveMutation.mutate({ lineId, condition })}
-                        onProcessRefund={handleProcessRefund}
-                        onCreateExchange={(lineId) => createExchangeMutation.mutate(lineId)}
-                        onComplete={(lineId) => completeMutation.mutate(lineId)}
-                        onCancel={(lineId) => {
-                            if (confirm('Cancel this return?')) cancelMutation.mutate(lineId);
-                        }}
-                        onUpdateNotes={(lineId, notes) => updateNotesMutation.mutate({ lineId, notes })}
-                    />
-                </TabsContent>
+                        {/* Date Filter Row */}
+                        <div className="flex items-center gap-3 flex-wrap">
+                            <div className="flex items-center gap-1">
+                                {DATE_PRESETS.map(({ value, label }) => (
+                                    <button
+                                        key={value}
+                                        onClick={() => handleDatePresetChange(value)}
+                                        className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                                            search.datePreset === value
+                                                ? 'bg-gray-900 text-white'
+                                                : 'bg-white text-gray-500 border border-gray-200 hover:bg-gray-50'
+                                        }`}
+                                    >
+                                        {label}
+                                    </button>
+                                ))}
+                            </div>
+                            <div className="h-4 w-px bg-gray-200" />
+                            <button
+                                onClick={handleClearFilters}
+                                className="text-xs text-gray-400 hover:text-red-500 transition-colors"
+                            >
+                                Remove all filters
+                            </button>
+                        </div>
 
-                {/* All Returns Tab */}
-                <TabsContent value="all" className="mt-4">
-                    <AllReturnsTab />
-                </TabsContent>
-
-                {/* Return Prime Tab */}
-                <TabsContent value="return_prime" className="mt-4 space-y-4">
-                    {/* RP Filters Bar */}
-                    <div className="flex flex-col sm:flex-row gap-3 p-4 bg-white rounded-lg border border-gray-200">
-                        <div className="flex-1 flex gap-2">
-                            <div className="relative flex-1">
+                        {/* Search Bar */}
+                        <div className="flex gap-2">
+                            <div className="relative flex-1 max-w-md">
                                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                                <Input
+                                <input
                                     type="text"
-                                    placeholder="Search by order, email, phone, RET/EXC number..."
+                                    placeholder="Search by order, customer, SKU, batch number..."
                                     value={searchInput}
                                     onChange={(e) => setSearchInput(e.target.value)}
                                     onKeyDown={handleSearchKeyDown}
-                                    className="pl-10"
+                                    className="w-full pl-10 pr-4 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-400"
                                 />
+                                {searchInput && (
+                                    <button
+                                        onClick={() => {
+                                            setSearchInput('');
+                                            navigate({
+                                                search: (prev) => ({
+                                                    ...prev,
+                                                    search: undefined,
+                                                    page: 1,
+                                                }),
+                                            });
+                                        }}
+                                        className="absolute right-3 top-1/2 -translate-y-1/2"
+                                    >
+                                        <X size={14} className="text-gray-400 hover:text-gray-600" />
+                                    </button>
+                                )}
                             </div>
-                            <Button onClick={handleSearch} variant="secondary">
+                            <Button
+                                onClick={handleSearch}
+                                size="sm"
+                                className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                            >
                                 Search
                             </Button>
                         </div>
-                        <Select value={search.requestType} onValueChange={handleTypeChange}>
-                            <SelectTrigger className="w-[140px]">
-                                <Filter className="w-4 h-4 mr-2" />
-                                <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="all">All Types</SelectItem>
-                                <SelectItem value="return">Returns</SelectItem>
-                                <SelectItem value="exchange">Exchanges</SelectItem>
-                            </SelectContent>
-                        </Select>
-                        <Select value={search.datePreset} onValueChange={handleDatePresetChange}>
-                            <SelectTrigger className="w-[150px]">
-                                <Calendar className="w-4 h-4 mr-2" />
-                                <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                                {DATE_PRESETS.map(({ value, label }) => (
-                                    <SelectItem key={value} value={value}>
-                                        {label}
-                                    </SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
-                        <Button
-                            variant="outline"
-                            size="icon"
-                            onClick={() => rpRefetch()}
-                            disabled={rpLoading}
-                        >
-                            <RefreshCw className={`w-4 h-4 ${rpLoading ? 'animate-spin' : ''}`} />
-                        </Button>
-                    </div>
 
-                    {/* RP Stats */}
-                    <ReturnPrimeStatsCards stats={rpData?.stats} isLoading={rpLoading} />
+                        {/* Returns Table */}
+                        <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+                            <table className="w-full text-sm">
+                                <thead className="bg-gray-50 border-b border-gray-200">
+                                    <tr className="text-xs text-gray-500 font-medium uppercase tracking-wider">
+                                        <th className="text-left px-4 py-3">Request</th>
+                                        <th className="text-left px-4 py-3">Product</th>
+                                        <th className="text-left px-4 py-3">Order</th>
+                                        <th className="text-left px-4 py-3">Customer</th>
+                                        <th className="text-left px-4 py-3">Status</th>
+                                        <th className="text-left px-4 py-3">Date</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-100">
+                                    {returnsLoading ? (
+                                        <tr>
+                                            <td
+                                                colSpan={6}
+                                                className="text-center py-16 text-gray-400"
+                                            >
+                                                <div className="flex flex-col items-center gap-2">
+                                                    <div className="w-6 h-6 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+                                                    <span>Loading returns...</span>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    ) : items.length === 0 ? (
+                                        <tr>
+                                            <td
+                                                colSpan={6}
+                                                className="text-center py-16 text-gray-400"
+                                            >
+                                                <Package
+                                                    size={40}
+                                                    className="mx-auto mb-3 text-gray-300"
+                                                />
+                                                <p className="text-sm font-medium">
+                                                    No returns found
+                                                </p>
+                                                <p className="text-xs mt-1">
+                                                    Try adjusting your filters or date range.
+                                                </p>
+                                            </td>
+                                        </tr>
+                                    ) : (
+                                        items.map((row) => (
+                                            <ReturnRow key={row.id} row={row} />
+                                        ))
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
 
-                    {/* RP Table */}
-                    <ReturnPrimeTable
-                        requests={rpData?.requests || []}
-                        isLoading={rpLoading}
-                        onRowClick={setSelectedRpRequest}
-                    />
-                </TabsContent>
+                        {/* Pagination */}
+                        {returnsData && returnsData.total > 0 && (
+                            <div className="flex items-center justify-between px-1">
+                                <div className="text-sm text-gray-500">
+                                    Showing{' '}
+                                    {(search.page - 1) * PAGE_SIZE + 1}
+                                    &ndash;
+                                    {Math.min(
+                                        search.page * PAGE_SIZE,
+                                        returnsData.total
+                                    )}{' '}
+                                    of {returnsData.total.toLocaleString()}{' '}
+                                    returns
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        onClick={() =>
+                                            handlePageChange(
+                                                Math.max(1, search.page - 1)
+                                            )
+                                        }
+                                        disabled={search.page <= 1}
+                                        className="p-2 rounded-lg hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                                    >
+                                        <ChevronLeft size={16} />
+                                    </button>
+                                    <span className="text-sm text-gray-600 tabular-nums">
+                                        Page {search.page} of{' '}
+                                        {totalPages || 1}
+                                    </span>
+                                    <button
+                                        onClick={() =>
+                                            handlePageChange(
+                                                Math.min(
+                                                    totalPages,
+                                                    search.page + 1
+                                                )
+                                            )
+                                        }
+                                        disabled={search.page >= totalPages}
+                                        className="p-2 rounded-lg hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                                    >
+                                        <ChevronRight size={16} />
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                    </>
+                )}
 
-                {/* Analytics Tab */}
-                <TabsContent value="analytics" className="mt-4 space-y-4">
-                    <div className="flex items-center gap-3 p-4 bg-white rounded-lg border border-gray-200">
-                        <span className="text-sm text-gray-600 font-medium">Period:</span>
-                        <Select value={search.datePreset} onValueChange={handleDatePresetChange}>
-                            <SelectTrigger className="w-[150px]">
-                                <Calendar className="w-4 h-4 mr-2" />
-                                <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                                {DATE_PRESETS.map(({ value, label }) => (
-                                    <SelectItem key={value} value={value}>
-                                        {label}
-                                    </SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
-                    </div>
-                    <AnalyticsTab period={search.datePreset} />
-                </TabsContent>
+                {search.view === 'analytics' && (
+                    <AnalyticsTab period={
+                        search.datePreset === '7d' || search.datePreset === '30d'
+                            ? search.datePreset
+                            : '30d'
+                    } />
+                )}
 
-                {/* Settings Tab */}
-                <TabsContent value="settings" className="mt-4">
+                {search.view === 'settings' && (
                     <SettingsTab
                         config={returnConfig}
                         loading={configLoading}
                         onRefresh={() => refetchConfig()}
                     />
-                </TabsContent>
-            </Tabs>
+                )}
 
-            {/* Refund Modal */}
-            {refundModalItem && (
-                <ProcessRefundModal
-                    item={refundModalItem}
-                    onSubmit={handleRefundSubmit}
-                    onClose={() => setRefundModalItem(null)}
-                />
-            )}
-
-            {/* Return Prime Detail Modal */}
-            <ReturnPrimeDetailModal
-                request={selectedRpRequest}
-                open={!!selectedRpRequest}
-                onOpenChange={(open) => {
-                    if (!open) setSelectedRpRequest(null);
-                }}
-            />
-
-            {/* Return Prime CSV Dialog */}
-            <ReturnPrimeCsvEnrichmentDialog
-                open={csvDialogOpen}
-                onOpenChange={setCsvDialogOpen}
-                onImported={() => rpRefetch()}
-            />
+                {/* Refund Modal */}
+                {refundModalItem && (
+                    <ProcessRefundModal
+                        item={refundModalItem}
+                        onSubmit={handleRefundSubmit}
+                        onClose={() => setRefundModalItem(null)}
+                    />
+                )}
+            </div>
         </div>
+    );
+}
+
+// ============================================
+// TABLE ROW
+// ============================================
+
+function ReturnRow({ row }: { row: ActiveReturnLine }) {
+    const requestId = row.returnBatchNumber
+        ? `#${row.returnBatchNumber}`
+        : `#${row.id.slice(0, 6)}`;
+
+    return (
+        <tr className="hover:bg-gray-50/60 transition-colors">
+            {/* Request */}
+            <td className="px-4 py-3">
+                <a
+                    href={`/returns/${row.id}`}
+                    className="text-emerald-600 hover:text-emerald-700 font-semibold text-sm hover:underline"
+                >
+                    {requestId}
+                </a>
+            </td>
+
+            {/* Product */}
+            <td className="px-4 py-3">
+                <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-lg bg-gray-100 flex-shrink-0 overflow-hidden ring-1 ring-gray-200/60">
+                        {row.imageUrl ? (
+                            <img
+                                src={
+                                    getOptimizedImageUrl(row.imageUrl, 'sm') ||
+                                    row.imageUrl
+                                }
+                                alt={row.productName || ''}
+                                className="w-full h-full object-cover"
+                                loading="lazy"
+                            />
+                        ) : (
+                            <div className="w-full h-full flex items-center justify-center">
+                                <Package
+                                    size={16}
+                                    className="text-gray-300"
+                                />
+                            </div>
+                        )}
+                    </div>
+                    <div className="min-w-0">
+                        <div className="text-sm font-medium text-gray-900 truncate max-w-[220px]">
+                            {row.productName}
+                        </div>
+                        <div className="text-xs text-gray-500">
+                            {row.colorName} / {row.size}
+                            {row.returnQty > 1 && (
+                                <span className="ml-1 text-gray-400">
+                                    x{row.returnQty}
+                                </span>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            </td>
+
+            {/* Order */}
+            <td className="px-4 py-3">
+                <a
+                    href={`/orders?modal=view&orderId=${row.orderId}`}
+                    className="text-sm text-blue-600 hover:underline font-medium"
+                >
+                    #{row.orderNumber}
+                </a>
+            </td>
+
+            {/* Customer */}
+            <td className="px-4 py-3 text-sm text-gray-600">
+                {row.customerEmail || row.customerName || '-'}
+            </td>
+
+            {/* Status */}
+            <td className="px-4 py-3">
+                <span
+                    className={`inline-flex px-2.5 py-0.5 text-xs font-semibold rounded-full ${getStatusBadge(row.returnStatus)}`}
+                >
+                    {row.returnStatus.replace(/_/g, ' ')}
+                </span>
+            </td>
+
+            {/* Date */}
+            <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">
+                {formatDisplayDate(row.returnRequestedAt)}
+            </td>
+        </tr>
     );
 }

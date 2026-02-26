@@ -21,7 +21,7 @@ export interface ActiveReturnLine extends ServerActiveReturnLine {
     ageDays?: number;
 }
 
-export type TabType = 'actions' | 'all' | 'analytics' | 'settings';
+export type ViewType = 'returns' | 'analytics' | 'settings';
 
 // ============================================
 // CONSTANTS & UI STYLING
@@ -61,11 +61,11 @@ export const REFUND_METHODS = [
 export const getStatusBadge = (status: string) => {
     const colors: Record<string, string> = {
         requested: 'bg-yellow-100 text-yellow-800',
-        pickup_scheduled: 'bg-blue-100 text-blue-800',
-        in_transit: 'bg-purple-100 text-purple-800',
-        received: 'bg-green-100 text-green-800',
-        qc_inspected: 'bg-teal-100 text-teal-800',
-        complete: 'bg-gray-100 text-gray-800',
+        approved: 'bg-blue-100 text-blue-800',
+        inspected: 'bg-teal-100 text-teal-800',
+        refunded: 'bg-green-100 text-green-800',
+        archived: 'bg-gray-100 text-gray-800',
+        rejected: 'bg-red-100 text-red-800',
         cancelled: 'bg-red-100 text-red-800',
     };
     return colors[status] || 'bg-gray-100 text-gray-800';

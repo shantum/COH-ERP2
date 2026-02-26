@@ -16,11 +16,11 @@ import { z } from 'zod';
  */
 export const LineReturnStatusSchema = z.enum([
     'requested',
-    'pickup_scheduled',
-    'in_transit',
-    'received',
-    'qc_inspected',
-    'complete',
+    'approved',
+    'inspected',
+    'refunded',
+    'archived',
+    'rejected',
     'cancelled',
 ]);
 export type LineReturnStatus = z.infer<typeof LineReturnStatusSchema>;
@@ -340,7 +340,6 @@ export const ReturnActionQueueItemSchema = ActiveReturnLineSchema.extend({
     actionNeeded: z.enum([
         'schedule_pickup',
         'receive',
-        'awaiting_qc',
         'process_refund',
         'create_exchange',
         'complete',

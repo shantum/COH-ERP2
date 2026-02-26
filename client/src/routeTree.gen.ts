@@ -47,6 +47,7 @@ import { Route as AuthenticatedChannelsRouteImport } from './routes/_authenticat
 import { Route as AuthenticatedChannelImportRouteImport } from './routes/_authenticated/channel-import'
 import { Route as AuthenticatedAnalyticsRouteImport } from './routes/_authenticated/analytics'
 import { Route as AuthenticatedBusinessIndexRouteImport } from './routes/_authenticated/business/index'
+import { Route as AuthenticatedReturnsReturnIdRouteImport } from './routes/_authenticated/returns_.$returnId'
 import { Route as AuthenticatedProductsNewRouteImport } from './routes/_authenticated/products_.new'
 import { Route as AuthenticatedProductsProductSlugEditRouteImport } from './routes/_authenticated/products_/$productSlug/edit'
 
@@ -250,6 +251,12 @@ const AuthenticatedBusinessIndexRoute =
     path: '/business/',
     getParentRoute: () => AuthenticatedRoute,
   } as any)
+const AuthenticatedReturnsReturnIdRoute =
+  AuthenticatedReturnsReturnIdRouteImport.update({
+    id: '/returns_/$returnId',
+    path: '/returns/$returnId',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
 const AuthenticatedProductsNewRoute =
   AuthenticatedProductsNewRouteImport.update({
     id: '/products_/new',
@@ -301,6 +308,7 @@ export interface FileRoutesByFullPath {
   '/tracking': typeof AuthenticatedTrackingRoute
   '/users': typeof AuthenticatedUsersRoute
   '/products/new': typeof AuthenticatedProductsNewRoute
+  '/returns/$returnId': typeof AuthenticatedReturnsReturnIdRoute
   '/business/': typeof AuthenticatedBusinessIndexRoute
   '/products/$productSlug/edit': typeof AuthenticatedProductsProductSlugEditRoute
 }
@@ -342,6 +350,7 @@ export interface FileRoutesByTo {
   '/users': typeof AuthenticatedUsersRoute
   '/': typeof AuthenticatedIndexRoute
   '/products/new': typeof AuthenticatedProductsNewRoute
+  '/returns/$returnId': typeof AuthenticatedReturnsReturnIdRoute
   '/business': typeof AuthenticatedBusinessIndexRoute
   '/products/$productSlug/edit': typeof AuthenticatedProductsProductSlugEditRoute
 }
@@ -385,6 +394,7 @@ export interface FileRoutesById {
   '/_authenticated/users': typeof AuthenticatedUsersRoute
   '/_authenticated/': typeof AuthenticatedIndexRoute
   '/_authenticated/products_/new': typeof AuthenticatedProductsNewRoute
+  '/_authenticated/returns_/$returnId': typeof AuthenticatedReturnsReturnIdRoute
   '/_authenticated/business/': typeof AuthenticatedBusinessIndexRoute
   '/_authenticated/products_/$productSlug/edit': typeof AuthenticatedProductsProductSlugEditRoute
 }
@@ -428,6 +438,7 @@ export interface FileRouteTypes {
     | '/tracking'
     | '/users'
     | '/products/new'
+    | '/returns/$returnId'
     | '/business/'
     | '/products/$productSlug/edit'
   fileRoutesByTo: FileRoutesByTo
@@ -469,6 +480,7 @@ export interface FileRouteTypes {
     | '/users'
     | '/'
     | '/products/new'
+    | '/returns/$returnId'
     | '/business'
     | '/products/$productSlug/edit'
   id:
@@ -511,6 +523,7 @@ export interface FileRouteTypes {
     | '/_authenticated/users'
     | '/_authenticated/'
     | '/_authenticated/products_/new'
+    | '/_authenticated/returns_/$returnId'
     | '/_authenticated/business/'
     | '/_authenticated/products_/$productSlug/edit'
   fileRoutesById: FileRoutesById
@@ -794,6 +807,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedBusinessIndexRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/returns_/$returnId': {
+      id: '/_authenticated/returns_/$returnId'
+      path: '/returns/$returnId'
+      fullPath: '/returns/$returnId'
+      preLoaderRoute: typeof AuthenticatedReturnsReturnIdRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/products_/new': {
       id: '/_authenticated/products_/new'
       path: '/products/new'
@@ -842,6 +862,7 @@ interface AuthenticatedRouteChildren {
   AuthenticatedUsersRoute: typeof AuthenticatedUsersRoute
   AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
   AuthenticatedProductsNewRoute: typeof AuthenticatedProductsNewRoute
+  AuthenticatedReturnsReturnIdRoute: typeof AuthenticatedReturnsReturnIdRoute
   AuthenticatedBusinessIndexRoute: typeof AuthenticatedBusinessIndexRoute
   AuthenticatedProductsProductSlugEditRoute: typeof AuthenticatedProductsProductSlugEditRoute
 }
@@ -878,6 +899,7 @@ const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedUsersRoute: AuthenticatedUsersRoute,
   AuthenticatedIndexRoute: AuthenticatedIndexRoute,
   AuthenticatedProductsNewRoute: AuthenticatedProductsNewRoute,
+  AuthenticatedReturnsReturnIdRoute: AuthenticatedReturnsReturnIdRoute,
   AuthenticatedBusinessIndexRoute: AuthenticatedBusinessIndexRoute,
   AuthenticatedProductsProductSlugEditRoute:
     AuthenticatedProductsProductSlugEditRoute,

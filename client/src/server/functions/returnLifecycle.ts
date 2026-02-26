@@ -118,7 +118,7 @@ export const initiateLineReturn = createServerFn({ method: 'POST' })
 
         // Validate active return status
         for (const line of orderLines) {
-            if (line.returnStatus && !['cancelled', 'complete'].includes(line.returnStatus)) {
+            if (line.returnStatus && !['cancelled', 'refunded', 'archived', 'rejected'].includes(line.returnStatus)) {
                 return returnError(
                     RETURN_ERROR_CODES.ALREADY_ACTIVE,
                     `Line ${line.sku.skuCode} already has an active return`
@@ -382,7 +382,7 @@ export const scheduleReturnPickup = createServerFn({ method: 'POST' })
 
         // Manual pickup — update all lines in batch (1F fix)
         const pickupData = {
-            returnStatus: 'pickup_scheduled' as const,
+            returnStatus: 'approved' as const,
             returnPickupType: pickupType,
             returnCourier: courier || null,
             returnAwbNumber: awbNumber || null,
@@ -409,7 +409,7 @@ export const scheduleReturnPickup = createServerFn({ method: 'POST' })
         broadcastReturnUpdate('return_status_updated', {
             lineId: orderLineId,
             batchNumber: line.returnBatchNumber,
-            changes: { returnStatus: 'pickup_scheduled' },
+            changes: { returnStatus: 'approved' },
         }, '');
 
         return returnSuccess(
@@ -442,7 +442,7 @@ export const markReturnInTransit = createServerFn({ method: 'POST' })
             return returnError(RETURN_ERROR_CODES.LINE_NOT_FOUND);
         }
 
-        const allowedStatuses = ['requested', 'pickup_scheduled'];
+        const allowedStatuses = ['requested', 'approved'];
         if (!allowedStatuses.includes(line.returnStatus || '')) {
             return returnError(
                 RETURN_ERROR_CODES.WRONG_STATUS,
@@ -451,7 +451,7 @@ export const markReturnInTransit = createServerFn({ method: 'POST' })
         }
 
         const updateData: Record<string, unknown> = {
-            returnStatus: 'in_transit',
+            returnStatus: 'approved',
             returnPickupAt: new Date(),
         };
         if (awbNumber) updateData.returnAwbNumber = awbNumber;
@@ -464,10 +464,10 @@ export const markReturnInTransit = createServerFn({ method: 'POST' })
 
         broadcastReturnUpdate('return_status_updated', {
             lineId: orderLineId,
-            changes: { returnStatus: 'in_transit' },
+            changes: { returnStatus: 'approved' },
         }, '');
 
-        return returnSuccess({ orderLineId }, 'Marked as in transit');
+        return returnSuccess({ orderLineId }, 'Marked as approved');
     });
 
 /**
@@ -494,7 +494,7 @@ export const receiveLineReturn = createServerFn({ method: 'POST' })
             return returnError(RETURN_ERROR_CODES.LINE_NOT_FOUND);
         }
 
-        const allowedStatuses = ['requested', 'pickup_scheduled', 'in_transit'];
+        const allowedStatuses = ['requested', 'approved'];
         if (!allowedStatuses.includes(line.returnStatus || '')) {
             return returnError(
                 RETURN_ERROR_CODES.WRONG_STATUS,
@@ -508,7 +508,7 @@ export const receiveLineReturn = createServerFn({ method: 'POST' })
             await tx.orderLine.update({
                 where: { id: orderLineId },
                 data: {
-                    returnStatus: 'received',
+                    returnStatus: 'inspected',
                     returnReceivedAt: now,
                     returnReceivedById: context.user.id,
                     returnCondition: condition,
@@ -530,7 +530,7 @@ export const receiveLineReturn = createServerFn({ method: 'POST' })
 
         broadcastReturnUpdate('return_status_updated', {
             lineId: orderLineId,
-            changes: { returnStatus: 'received' },
+            changes: { returnStatus: 'inspected' },
         }, context.user.id);
 
         return returnSuccess({ orderLineId }, 'Return received and added to QC queue');
@@ -565,7 +565,7 @@ export const cancelLineReturn = createServerFn({ method: 'POST' })
             return returnError(RETURN_ERROR_CODES.LINE_NOT_FOUND);
         }
 
-        const terminalStatuses = ['complete', 'cancelled'];
+        const terminalStatuses = ['refunded', 'archived', 'rejected', 'cancelled'];
         if (terminalStatuses.includes(line.returnStatus || '')) {
             return returnError(RETURN_ERROR_CODES.ALREADY_TERMINAL);
         }
@@ -591,7 +591,7 @@ export const cancelLineReturn = createServerFn({ method: 'POST' })
                         where: {
                             returnBatchNumber: line.returnBatchNumber,
                             id: { not: orderLineId },
-                            returnStatus: { notIn: ['cancelled', 'complete'] },
+                            returnStatus: { notIn: ['cancelled', 'refunded', 'archived', 'rejected'] },
                         },
                     });
                     shouldDecrementCustomer = otherActiveInBatch === 0;
@@ -642,14 +642,14 @@ export const closeLineReturnManually = createServerFn({ method: 'POST' })
             return returnError(RETURN_ERROR_CODES.NO_ACTIVE_RETURN, 'No return to close');
         }
 
-        if (['complete', 'cancelled'].includes(line.returnStatus)) {
+        if (['refunded', 'archived', 'rejected', 'cancelled'].includes(line.returnStatus)) {
             return returnError(RETURN_ERROR_CODES.ALREADY_TERMINAL);
         }
 
         await prisma.orderLine.update({
             where: { id: orderLineId },
             data: {
-                returnStatus: 'complete',
+                returnStatus: 'refunded',
                 returnClosedManually: true,
                 returnClosedManuallyAt: new Date(),
                 returnClosedManuallyById: context.user.id,
@@ -685,7 +685,7 @@ export const updateReturnNotes = createServerFn({ method: 'POST' })
             return returnError(RETURN_ERROR_CODES.LINE_NOT_FOUND);
         }
 
-        if (!line.returnStatus || ['cancelled', 'complete'].includes(line.returnStatus)) {
+        if (!line.returnStatus || ['cancelled', 'refunded', 'archived', 'rejected'].includes(line.returnStatus)) {
             return returnError(RETURN_ERROR_CODES.NO_ACTIVE_RETURN, 'No active return on this line');
         }
 

@@ -160,7 +160,7 @@ export interface FlattenedOrderRow {
     rtoStatus?: string | null;
 
     // Return status fields
-    returnStatus?: string | null; // 'requested'|'pickup_scheduled'|'in_transit'|'received'|'complete'|'cancelled'
+    returnStatus?: string | null; // 'requested'|'approved'|'inspected'|'refunded'|'archived'|'rejected'|'cancelled'
     returnQty?: number | null;
 
     // Shopify cache fields (for columns)

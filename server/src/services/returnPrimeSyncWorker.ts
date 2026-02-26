@@ -100,7 +100,7 @@ export async function retryFailedReturnPrimeSyncs(): Promise<{
 
             try {
                 // Only sync received status for now
-                if (line.returnStatus === 'received' && line.returnPrimeRequestId) {
+                if (line.returnStatus === 'inspected' && line.returnPrimeRequestId) {
                     await rpClient.updateRequestStatus(line.returnPrimeRequestId, 'received', {
                         received_at: line.returnReceivedAt?.toISOString(),
                         condition: line.returnCondition || undefined,

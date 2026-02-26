@@ -13,11 +13,11 @@ import type { ActiveReturnLine } from '@coh/shared/schemas/returns';
 const STATUS_OPTIONS = [
     { value: '', label: 'All Statuses' },
     { value: 'requested', label: 'Requested' },
-    { value: 'pickup_scheduled', label: 'Pickup Scheduled' },
-    { value: 'in_transit', label: 'In Transit' },
-    { value: 'received', label: 'Received' },
-    { value: 'qc_inspected', label: 'QC Inspected' },
-    { value: 'complete', label: 'Complete' },
+    { value: 'approved', label: 'Approved' },
+    { value: 'inspected', label: 'Inspected' },
+    { value: 'refunded', label: 'Refunded' },
+    { value: 'archived', label: 'Archived' },
+    { value: 'rejected', label: 'Rejected' },
     { value: 'cancelled', label: 'Cancelled' },
 ];
 
