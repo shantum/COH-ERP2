@@ -18,7 +18,9 @@
     "test:production": "playwright test tests/orders-production.spec.ts",
     "test:production:har": "RECORD_HAR=true playwright test tests/orders-production.spec.ts",
     "test:network": "playwright test tests/orders-production.spec.ts --grep 'Network'",
-    "test:report": "playwright show-report playwright-report"
+    "test:report": "playwright show-report playwright-report",
+    "browse": "playwright test tests/browse.spec.ts --headed --project=chromium",
+    "browse:returns": "PAGE=/returns playwright test tests/browse.spec.ts --headed --project=chromium"
   },
   "dependencies": {
     "@coh/shared": "file:../shared",

@@ -47,8 +47,17 @@ Thumbs.db
 # Debug
 *.trace
 
-# Testing screenshots
+# Testing screenshots & artifacts
 .playwright-mcp/
+client/playwright-report/
+client/test-output/
+client/test-results/
+
+# TanStack temp files
+client/.tanstack/tmp/
+
+# Codex
+.codex/
 
 # Coverage
 coverage/

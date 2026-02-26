@@ -32,11 +32,11 @@ setup('authenticate', async ({ page }) => {
   // Submit
   await page.click('button[type="submit"]');
 
-  // Wait for successful redirect
-  await page.waitForURL(/\/(orders|dashboard)?$/, { timeout: 30000 });
+  // Wait for redirect away from login (any authenticated page)
+  await page.waitForURL((url) => !url.pathname.includes('/login'), { timeout: 30000 });
 
-  // Verify we're logged in
-  await expect(page.locator('h1:has-text("Orders"), h1:has-text("Dashboard")')).toBeVisible({ timeout: 10000 });
+  // Verify we're logged in by checking sidebar nav is visible
+  await expect(page.locator('nav').first()).toBeVisible({ timeout: 10000 });
 
   // Save auth state
   await page.context().storageState({ path: AUTH_FILE });
