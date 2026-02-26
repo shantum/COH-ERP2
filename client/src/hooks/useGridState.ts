@@ -84,50 +84,32 @@ export function useGridState({
         allColumnIds.filter(id => !defaultHiddenColumns.includes(id))
     ), [allColumnIds, defaultHiddenColumns]);
 
-    // Column visibility state
-    const [visibleColumns, setVisibleColumns] = useState<Set<string>>(() => {
-        const saved = localStorage.getItem(visibilityKey);
-        if (saved) {
-            try {
-                return new Set(JSON.parse(saved));
-            } catch {
-                return defaultVisibleColumns;
-            }
-        }
-        return defaultVisibleColumns;
-    });
+    // Column visibility state — SSR-safe defaults, hydrate from localStorage after mount
+    const [visibleColumns, setVisibleColumns] = useState<Set<string>>(defaultVisibleColumns);
+    const [columnOrder, setColumnOrder] = useState<string[]>(allColumnIds);
+    const [columnWidths, setColumnWidths] = useState<Record<string, number>>({});
+    const [pageSize, setPageSize] = useState<number>(defaultPageSize);
 
-    // Column order state
-    const [columnOrder, setColumnOrder] = useState<string[]>(() => {
-        const saved = localStorage.getItem(orderKey);
-        if (saved) {
-            try {
-                return JSON.parse(saved);
-            } catch {
-                return allColumnIds;
-            }
+    // Hydrate from localStorage after mount to avoid SSR crashes
+    useEffect(() => {
+        const savedVis = localStorage.getItem(visibilityKey);
+        if (savedVis) {
+            try { setVisibleColumns(new Set(JSON.parse(savedVis))); } catch { /* ignore */ }
         }
-        return allColumnIds;
-    });
-
-    // Column widths state
-    const [columnWidths, setColumnWidths] = useState<Record<string, number>>(() => {
-        const saved = localStorage.getItem(widthsKey);
-        if (saved) {
-            try {
-                return JSON.parse(saved);
-            } catch {
-                return {};
-            }
+        const savedOrder = localStorage.getItem(orderKey);
+        if (savedOrder) {
+            try { setColumnOrder(JSON.parse(savedOrder)); } catch { /* ignore */ }
         }
-        return {};
-    });
-
-    // Page size state
-    const [pageSize, setPageSize] = useState<number>(() => {
-        const saved = localStorage.getItem(pageSizeKey);
-        return saved ? parseInt(saved, 10) : defaultPageSize;
-    });
+        const savedWidths = localStorage.getItem(widthsKey);
+        if (savedWidths) {
+            try { setColumnWidths(JSON.parse(savedWidths)); } catch { /* ignore */ }
+        }
+        const savedPageSize = localStorage.getItem(pageSizeKey);
+        if (savedPageSize) {
+            const parsed = parseInt(savedPageSize, 10);
+            if (!isNaN(parsed)) setPageSize(parsed);
+        }
+    }, [visibilityKey, orderKey, widthsKey, pageSizeKey]);
 
     // Debounce timer for width changes
     const widthSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);

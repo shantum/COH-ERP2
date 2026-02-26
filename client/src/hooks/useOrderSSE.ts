@@ -338,6 +338,7 @@ export function useOrderSSE({
                     if (!old) return old;
                     return applyBatchLineChanges(old, lineIdSet, data.changes!);
                 });
+                return;
             }
 
             // Handle new order created
@@ -363,9 +364,19 @@ export function useOrderSSE({
                 queryClient.setQueryData<OrderListCacheData>(queryKey, (old) => {
                     if (!old) return old;
                     const balance = (data.changes as { balance?: number }).balance;
+                    if (balance === undefined) return old;
+                    // Referential stability: only create new objects if skuStock actually changed
+                    let hasChanges = false;
+                    for (const row of old.rows) {
+                        if (row.skuId === data.skuId && row.skuStock !== balance) {
+                            hasChanges = true;
+                            break;
+                        }
+                    }
+                    if (!hasChanges) return old;
                     const newRows = old.rows.map((row) =>
-                        row.skuId === data.skuId
-                            ? { ...row, skuStock: balance ?? row.skuStock }
+                        row.skuId === data.skuId && row.skuStock !== balance
+                            ? { ...row, skuStock: balance }
                             : row
                     );
                     return { ...old, rows: newRows };
@@ -380,11 +391,19 @@ export function useOrderSSE({
                     const newRows = old.rows.map((row) => {
                         if (row.orderId !== data.orderId) return row;
                         const updates: Partial<FlattenedOrderRow> = {};
-                        if (data.changes?.status) updates.orderStatus = data.changes.status as string;
-                        if (data.changes?.lineStatus) updates.lineStatus = data.changes.lineStatus as string;
+                        if (data.changes?.status && row.orderStatus !== data.changes.status) {
+                            updates.orderStatus = data.changes.status as string;
+                        }
+                        if (data.changes?.lineStatus && row.lineStatus !== data.changes.lineStatus) {
+                            updates.lineStatus = data.changes.lineStatus as string;
+                        }
+                        // Referential stability: return same row if nothing changed
+                        if (Object.keys(updates).length === 0) return row;
                         return { ...row, ...updates };
                     });
 
+                    // Return same reference if no rows changed
+                    if (newRows.every((row, i) => row === old.rows[i])) return old;
                     return { ...old, rows: newRows };
                 });
                 staleOtherOrderViews(queryClient, currentViewRef.current);
@@ -419,9 +438,14 @@ export function useOrderSSE({
             if (data.type === 'order_delivered' && data.orderId && data.changes) {
                 queryClient.setQueryData<OrderListCacheData>(queryKey, (old) => {
                     if (!old) return old;
-                    const newRows = old.rows.map((row) =>
-                        row.orderId === data.orderId ? { ...row, ...data.changes } : row
-                    );
+                    let hasChanges = false;
+                    const newRows = old.rows.map((row) => {
+                        if (row.orderId !== data.orderId) return row;
+                        if (!wouldChange(row, data.changes!)) return row;
+                        hasChanges = true;
+                        return { ...row, ...data.changes };
+                    });
+                    if (!hasChanges) return old;
                     return { ...old, rows: newRows };
                 });
                 staleOtherOrderViews(queryClient, currentViewRef.current);
@@ -431,9 +455,14 @@ export function useOrderSSE({
             if (data.type === 'order_rto' && data.orderId && data.changes) {
                 queryClient.setQueryData<OrderListCacheData>(queryKey, (old) => {
                     if (!old) return old;
-                    const newRows = old.rows.map((row) =>
-                        row.orderId === data.orderId ? { ...row, ...data.changes } : row
-                    );
+                    let hasChanges = false;
+                    const newRows = old.rows.map((row) => {
+                        if (row.orderId !== data.orderId) return row;
+                        if (!wouldChange(row, data.changes!)) return row;
+                        hasChanges = true;
+                        return { ...row, ...data.changes };
+                    });
+                    if (!hasChanges) return old;
                     return { ...old, rows: newRows };
                 });
                 staleOtherOrderViews(queryClient, currentViewRef.current);

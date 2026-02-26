@@ -71,6 +71,11 @@ export function usePulse(enabled = true) {
 
         if (!enabled) return;
 
+        // Close existing connection before creating a new one
+        if (eventSourceRef.current) {
+            eventSourceRef.current.close();
+        }
+
         const url = new URL('/api/pulse', window.location.origin);
 
         // EventSource sends cookies automatically for same-origin
