@@ -29,12 +29,16 @@ import {
     PackageCheck,
     CircleDot,
     Save,
+    Send,
+    User,
+    AlertCircle,
+    RefreshCw,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 
-import { getReturnDetail } from '../../server/functions/returns';
-import type { ReturnDetailResponse } from '../../server/functions/returns';
+import { getReturnDetail, getReturnTimeline, postReturnComment } from '../../server/functions/returns';
+import type { ReturnDetailResponse, TimelineEventRow } from '../../server/functions/returns';
 import {
     scheduleReturnPickup,
     receiveLineReturn,
@@ -129,6 +133,70 @@ function formatAddress(raw: unknown): string {
 }
 
 // ============================================
+// TIMELINE EVENT HELPERS
+// ============================================
+
+const EVENT_ICON_MAP: Record<string, { icon: typeof CircleDot; color: string }> = {
+    'return.requested':        { icon: CircleDot,    color: 'text-yellow-600 bg-yellow-50' },
+    'return.approved':         { icon: Truck,         color: 'text-blue-600 bg-blue-50' },
+    'return.in_transit':       { icon: Truck,         color: 'text-blue-500 bg-blue-50' },
+    'return.inspected':        { icon: PackageCheck,  color: 'text-teal-600 bg-teal-50' },
+    'return.refund_processed': { icon: CreditCard,    color: 'text-purple-600 bg-purple-50' },
+    'return.refund_completed': { icon: CheckCircle2,  color: 'text-green-600 bg-green-50' },
+    'return.completed':        { icon: CheckCircle2,  color: 'text-green-600 bg-green-50' },
+    'return.cancelled':        { icon: XCircle,       color: 'text-red-600 bg-red-50' },
+    'return.closed_manually':  { icon: AlertCircle,   color: 'text-orange-600 bg-orange-50' },
+    'return.exchange_created': { icon: RefreshCw,     color: 'text-indigo-600 bg-indigo-50' },
+    'return.comment':          { icon: MessageSquare, color: 'text-gray-600 bg-gray-50' },
+    'return.notes_updated':    { icon: FileText,      color: 'text-gray-500 bg-gray-50' },
+};
+
+function TimelineItem({ event }: { event: TimelineEventRow }) {
+    const config = EVENT_ICON_MAP[event.event] || { icon: CircleDot, color: 'text-gray-400 bg-gray-50' };
+    const Icon = config.icon;
+    const isComment = event.event === 'return.comment';
+    const time = new Date(event.createdAt);
+    const relativeTime = getRelativeTime(time);
+
+    return (
+        <div className="flex items-start gap-3 relative">
+            <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 z-10 ${config.color}`}>
+                <Icon size={14} />
+            </div>
+            <div className="flex-1 min-w-0 pt-0.5">
+                <p className={`text-sm ${isComment ? 'text-gray-800 bg-gray-50 rounded-lg px-3 py-2 border border-gray-100' : 'text-gray-700'}`}>
+                    {event.summary}
+                </p>
+                <div className="flex items-center gap-2 mt-0.5">
+                    {event.actorName && (
+                        <span className="text-[11px] text-gray-500 font-medium flex items-center gap-1">
+                            <User size={10} />
+                            {event.actorName}
+                        </span>
+                    )}
+                    <span className="text-[11px] text-gray-400" title={formatDateTime(event.createdAt)}>
+                        {relativeTime}
+                    </span>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function getRelativeTime(date: Date): string {
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    if (diffMins < 1) return 'just now';
+    if (diffMins < 60) return `${diffMins}m ago`;
+    const diffHours = Math.floor(diffMins / 60);
+    if (diffHours < 24) return `${diffHours}h ago`;
+    const diffDays = Math.floor(diffHours / 24);
+    if (diffDays < 7) return `${diffDays}d ago`;
+    return formatDate(date);
+}
+
+// ============================================
 // MAIN COMPONENT
 // ============================================
 
@@ -158,6 +226,36 @@ export default function ReturnDetail() {
     const invalidateAll = useCallback(() => {
         queryClient.invalidateQueries({ queryKey: ['returns'] });
     }, [queryClient]);
+
+    // ============================================
+    // TIMELINE QUERY + COMMENT
+    // ============================================
+
+    const getTimelineFn = useServerFn(getReturnTimeline);
+    const { data: timelineEvents = [] } = useQuery({
+        queryKey: ['returns', 'timeline', returnId],
+        queryFn: async () => {
+            const result = await getTimelineFn({ data: { orderLineId: returnId } });
+            return result as TimelineEventRow[];
+        },
+        staleTime: 15_000,
+        enabled: !!detail,
+    });
+
+    const [commentText, setCommentText] = useState('');
+    const postCommentFn = useServerFn(postReturnComment);
+    const postCommentMutation = useMutation({
+        mutationFn: async () => {
+            if (!commentText.trim()) return;
+            await postCommentFn({ data: { orderLineId: returnId, comment: commentText.trim() } });
+        },
+        onSuccess: () => {
+            setCommentText('');
+            queryClient.invalidateQueries({ queryKey: ['returns', 'timeline', returnId] });
+            toast.success('Comment posted');
+        },
+        onError: () => toast.error('Failed to post comment'),
+    });
 
     // ============================================
     // MUTATIONS
@@ -336,46 +434,14 @@ export default function ReturnDetail() {
     const displayNotes = notesValue !== null ? notesValue : (detail.returnNotes || '');
 
     // ============================================
-    // TIMELINE EVENTS
+    // MILESTONE STEPS (compact progress bar)
     // ============================================
 
-    interface TimelineEvent {
-        label: string;
-        date: Date | string | null;
-        icon: React.ReactNode;
-        color: string;
-        active: boolean;
-    }
-
-    const timelineEvents: TimelineEvent[] = [
-        {
-            label: 'Return Requested',
-            date: detail.returnRequestedAt,
-            icon: <CircleDot size={16} />,
-            color: 'text-yellow-600',
-            active: true,
-        },
-        {
-            label: 'Pickup Scheduled',
-            date: detail.returnPickupScheduledAt,
-            icon: <Truck size={16} />,
-            color: 'text-blue-600',
-            active: !!detail.returnPickupScheduledAt,
-        },
-        {
-            label: 'Received & Inspected',
-            date: detail.returnReceivedAt,
-            icon: <PackageCheck size={16} />,
-            color: 'text-teal-600',
-            active: !!detail.returnReceivedAt,
-        },
-        {
-            label: 'Refund Completed',
-            date: detail.returnRefundCompletedAt,
-            icon: <CheckCircle2 size={16} />,
-            color: 'text-green-600',
-            active: !!detail.returnRefundCompletedAt,
-        },
+    const milestones = [
+        { label: 'Requested', done: true, date: detail.returnRequestedAt },
+        { label: 'Approved', done: !!detail.returnPickupScheduledAt, date: detail.returnPickupScheduledAt },
+        { label: 'Inspected', done: !!detail.returnReceivedAt, date: detail.returnReceivedAt },
+        { label: 'Refunded', done: !!detail.returnRefundCompletedAt, date: detail.returnRefundCompletedAt },
     ];
 
     // ============================================
@@ -666,42 +732,86 @@ export default function ReturnDetail() {
                             </div>
                         )}
 
-                        {/* Timeline */}
+                        {/* Progress milestones */}
+                        <div className="bg-white rounded-lg border border-gray-200 p-5">
+                            <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-4">
+                                Progress
+                            </h3>
+                            <div className="flex items-center gap-1">
+                                {milestones.map((m, idx) => (
+                                    <div key={m.label} className="flex items-center gap-1 flex-1">
+                                        <div className="flex flex-col items-center flex-1">
+                                            <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${
+                                                m.done
+                                                    ? 'bg-green-100 text-green-700 ring-2 ring-green-300'
+                                                    : 'bg-gray-100 text-gray-400 ring-2 ring-gray-200'
+                                            }`}>
+                                                {m.done ? <CheckCircle2 size={14} /> : idx + 1}
+                                            </div>
+                                            <span className={`text-[10px] mt-1 ${m.done ? 'text-green-700 font-medium' : 'text-gray-400'}`}>
+                                                {m.label}
+                                            </span>
+                                            {m.done && m.date && (
+                                                <span className="text-[9px] text-gray-400">{formatDate(m.date)}</span>
+                                            )}
+                                        </div>
+                                        {idx < milestones.length - 1 && (
+                                            <div className={`h-0.5 flex-1 rounded ${
+                                                milestones[idx + 1].done ? 'bg-green-300' : 'bg-gray-200'
+                                            }`} />
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* Activity Timeline — RP-style */}
                         <div className="bg-white rounded-lg border border-gray-200 p-5">
                             <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-4">
                                 Timeline
                             </h3>
+
+                            {/* Comment input */}
+                            <div className="mb-5">
+                                <div className="flex gap-2">
+                                    <textarea
+                                        value={commentText}
+                                        onChange={(e) => setCommentText(e.target.value)}
+                                        placeholder="Leave a comment..."
+                                        rows={2}
+                                        className="flex-1 text-sm border border-gray-200 rounded-lg px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && commentText.trim()) {
+                                                postCommentMutation.mutate();
+                                            }
+                                        }}
+                                    />
+                                    <Button
+                                        size="sm"
+                                        onClick={() => postCommentMutation.mutate()}
+                                        disabled={!commentText.trim() || postCommentMutation.isPending}
+                                        className="self-end"
+                                    >
+                                        <Send size={14} className="mr-1" />
+                                        Post
+                                    </Button>
+                                </div>
+                                <p className="text-[10px] text-gray-400 mt-1">Comments are internal only. Cmd+Enter to post.</p>
+                            </div>
+
+                            {/* Event log */}
                             <div className="relative">
-                                {/* Vertical line */}
-                                <div className="absolute left-[11px] top-2 bottom-2 w-0.5 bg-gray-200" />
-                                <div className="space-y-4">
-                                    {timelineEvents.map((event, idx) => (
-                                        <div key={idx} className="flex items-start gap-3 relative">
-                                            <div
-                                                className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 z-10 ${
-                                                    event.active
-                                                        ? `${event.color} bg-white ring-2 ring-current`
-                                                        : 'text-gray-300 bg-gray-50 ring-2 ring-gray-200'
-                                                }`}
-                                            >
-                                                {event.icon}
-                                            </div>
-                                            <div className="flex-1 pt-0.5">
-                                                <p
-                                                    className={`text-sm font-medium ${
-                                                        event.active ? 'text-gray-900' : 'text-gray-400'
-                                                    }`}
-                                                >
-                                                    {event.label}
-                                                </p>
-                                                {event.active && event.date && (
-                                                    <p className="text-xs text-gray-500 mt-0.5">
-                                                        {formatDateTime(event.date)}
-                                                    </p>
-                                                )}
-                                            </div>
-                                        </div>
-                                    ))}
+                                {timelineEvents.length > 0 && (
+                                    <div className="absolute left-[15px] top-4 bottom-4 w-0.5 bg-gray-100" />
+                                )}
+                                <div className="space-y-3">
+                                    {timelineEvents.length === 0 ? (
+                                        <p className="text-sm text-gray-400 italic">No events yet</p>
+                                    ) : (
+                                        timelineEvents.map((evt) => (
+                                            <TimelineItem key={evt.id} event={evt} />
+                                        ))
+                                    )}
                                 </div>
                             </div>
                         </div>

@@ -35,8 +35,27 @@ import {
 } from '@coh/shared/errors';
 
 // ============================================
-// SSE BROADCAST HELPER
+// EVENT LOGGING + SSE BROADCAST
 // ============================================
+
+async function logReturnEvent(
+    event: string,
+    entityId: string,
+    summary: string,
+    actorId?: string,
+    meta?: Record<string, unknown>
+): Promise<void> {
+    const { logEventDeferred } = await import('@coh/shared/services/eventLog');
+    logEventDeferred({
+        domain: 'returns',
+        event,
+        entityType: 'OrderLine',
+        entityId,
+        summary,
+        ...(meta ? { meta: meta as import('@prisma/client').Prisma.InputJsonValue } : {}),
+        ...(actorId ? { actorId } : {}),
+    });
+}
 
 async function broadcastReturnUpdate(
     type: string,
@@ -257,6 +276,15 @@ export const initiateLineReturn = createServerFn({ method: 'POST' })
             }
         }
 
+        // Event logging
+        for (const line of orderLines) {
+            logReturnEvent('return.requested', line.id,
+                `Return requested — batch ${batchNumber}`,
+                context.user.id,
+                { batchNumber, reason: returnReasonCategory, resolution: returnResolution }
+            );
+        }
+
         // SSE broadcast
         broadcastReturnUpdate('return_initiated', {
             orderLineIds: orderLines.map((l: typeof orderLines[number]) => l.id),
@@ -405,6 +433,13 @@ export const scheduleReturnPickup = createServerFn({ method: 'POST' })
             });
         }
 
+        // Event logging
+        logReturnEvent('return.approved', orderLineId,
+            `Return approved — pickup scheduled${courier ? ` via ${courier}` : ''}`,
+            undefined,
+            { pickupType, courier, awbNumber, batchNumber: line.returnBatchNumber }
+        );
+
         // SSE broadcast
         broadcastReturnUpdate('return_status_updated', {
             lineId: orderLineId,
@@ -461,6 +496,12 @@ export const markReturnInTransit = createServerFn({ method: 'POST' })
             where: { id: orderLineId },
             data: updateData,
         });
+
+        logReturnEvent('return.in_transit', orderLineId,
+            `Item picked up from customer${courier ? ` — ${courier}` : ''}`,
+            undefined,
+            { awbNumber, courier }
+        );
 
         broadcastReturnUpdate('return_status_updated', {
             lineId: orderLineId,
@@ -527,6 +568,12 @@ export const receiveLineReturn = createServerFn({ method: 'POST' })
                 },
             });
         });
+
+        logReturnEvent('return.inspected', orderLineId,
+            `Received at warehouse — condition: ${condition}`,
+            context.user.id,
+            { condition, conditionNotes }
+        );
 
         broadcastReturnUpdate('return_status_updated', {
             lineId: orderLineId,
@@ -610,6 +657,12 @@ export const cancelLineReturn = createServerFn({ method: 'POST' })
             });
         });
 
+        logReturnEvent('return.cancelled', orderLineId,
+            `Return cancelled${reason ? ` — ${reason}` : ''}`,
+            context.user.id,
+            { reason }
+        );
+
         broadcastReturnUpdate('return_cancelled', {
             lineId: orderLineId,
             batchNumber: line.returnBatchNumber,
@@ -657,6 +710,12 @@ export const closeLineReturnManually = createServerFn({ method: 'POST' })
             },
         });
 
+        logReturnEvent('return.closed_manually', orderLineId,
+            `Return closed manually — ${reason}`,
+            context.user.id,
+            { reason }
+        );
+
         broadcastReturnUpdate('return_completed', { lineId: orderLineId }, context.user.id);
 
         return returnSuccess({ orderLineId }, 'Return closed manually');
@@ -693,6 +752,12 @@ export const updateReturnNotes = createServerFn({ method: 'POST' })
             where: { id: orderLineId },
             data: { returnNotes },
         });
+
+        logReturnEvent('return.notes_updated', orderLineId,
+            `Notes updated`,
+            undefined,
+            { notes: returnNotes }
+        );
 
         return returnSuccess(
             { orderLineId },

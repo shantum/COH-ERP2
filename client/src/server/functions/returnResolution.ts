@@ -25,8 +25,27 @@ import {
 import { getInternalApiBaseUrl } from '../utils';
 
 // ============================================
-// SSE BROADCAST HELPER
+// EVENT LOGGING + SSE BROADCAST
 // ============================================
+
+async function logReturnEvent(
+    event: string,
+    entityId: string,
+    summary: string,
+    actorId?: string,
+    meta?: Record<string, unknown>
+): Promise<void> {
+    const { logEventDeferred } = await import('@coh/shared/services/eventLog');
+    logEventDeferred({
+        domain: 'returns',
+        event,
+        entityType: 'OrderLine',
+        entityId,
+        summary,
+        ...(meta ? { meta: meta as import('@prisma/client').Prisma.InputJsonValue } : {}),
+        ...(actorId ? { actorId } : {}),
+    });
+}
 
 async function broadcastReturnUpdate(
     type: string,
@@ -84,6 +103,12 @@ export const processLineReturnRefund = createServerFn({ method: 'POST' })
                 refundReason: 'customer_return',
             },
         });
+
+        logReturnEvent('return.refund_processed', orderLineId,
+            `Refund calculated — ₹${netAmount.toLocaleString('en-IN')}`,
+            undefined,
+            { grossAmount, discountClawback, deductions, netAmount, refundMethod }
+        );
 
         broadcastReturnUpdate('return_refund_processed', {
             lineId: orderLineId,
@@ -177,6 +202,12 @@ export const completeLineReturnRefund = createServerFn({ method: 'POST' })
             });
         }
 
+        logReturnEvent('return.refund_completed', orderLineId,
+            `Refund completed${line?.returnRefundMethod ? ` via ${line.returnRefundMethod}` : ''}`,
+            undefined,
+            { refundMethod: line?.returnRefundMethod, netAmount: line?.returnNetAmount, reference }
+        );
+
         return { success: true, message: 'Refund completed', orderLineId };
     });
 
@@ -226,6 +257,12 @@ export const completeLineReturn = createServerFn({ method: 'POST' })
             where: { id: orderLineId },
             data: { returnStatus: 'refunded' },
         });
+
+        logReturnEvent('return.completed', orderLineId,
+            'Return marked as complete',
+            undefined,
+            { resolution: line.returnResolution }
+        );
 
         broadcastReturnUpdate('return_completed', { lineId: orderLineId }, '');
 
@@ -345,6 +382,12 @@ export const createExchangeOrder = createServerFn({ method: 'POST' })
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ orderId: exchangeOrder.id }),
         }).catch(() => {});
+
+        logReturnEvent('return.exchange_created', orderLineId,
+            `Exchange order ${exchangeOrder.orderNumber} created`,
+            undefined,
+            { exchangeOrderId: exchangeOrder.id, exchangeOrderNumber: exchangeOrder.orderNumber, priceDiff }
+        );
 
         // SSE broadcast exchange creation
         broadcastReturnUpdate('return_exchange_created', {

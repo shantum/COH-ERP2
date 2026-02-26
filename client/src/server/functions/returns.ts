@@ -1205,6 +1205,90 @@ export const getReturnStatusCounts = createServerFn({ method: 'POST' })
         return result;
     });
 
+// ============================================
+// TIMELINE & COMMENTS
+// ============================================
+
+const getReturnTimelineInputSchema = z.object({
+    orderLineId: z.string().uuid(),
+});
+
+export interface TimelineEventRow {
+    id: string;
+    event: string;
+    summary: string;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    meta: any;
+    actorId: string | null;
+    actorName: string | null;
+    createdAt: string;
+}
+
+/**
+ * Get timeline events for a return (from DomainEvent table)
+ */
+export const getReturnTimeline = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => getReturnTimelineInputSchema.parse(input))
+    .handler(async ({ data }): Promise<TimelineEventRow[]> => {
+        const prisma = await getPrisma();
+        const events = await prisma.domainEvent.findMany({
+            where: {
+                entityType: 'OrderLine',
+                entityId: data.orderLineId,
+                domain: 'returns',
+            },
+            orderBy: { createdAt: 'desc' },
+            take: 100,
+        });
+
+        // Batch-fetch actor names
+        const actorIds = [...new Set(events.filter(e => e.actorId).map(e => e.actorId!))];
+        const actors = actorIds.length > 0
+            ? await prisma.user.findMany({
+                where: { id: { in: actorIds } },
+                select: { id: true, name: true },
+            })
+            : [];
+        const actorMap = new Map(actors.map(a => [a.id, a.name]));
+
+        return events.map(e => ({
+            id: e.id,
+            event: e.event,
+            summary: e.summary,
+            meta: e.meta as Record<string, unknown> | null,
+            actorId: e.actorId,
+            actorName: e.actorId ? (actorMap.get(e.actorId) || null) : null,
+            createdAt: e.createdAt.toISOString(),
+        }));
+    });
+
+const postReturnCommentInputSchema = z.object({
+    orderLineId: z.string().uuid(),
+    comment: z.string().min(1).max(2000),
+});
+
+/**
+ * Post an internal comment on a return (stored as DomainEvent)
+ */
+export const postReturnComment = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => postReturnCommentInputSchema.parse(input))
+    .handler(async ({ data, context }): Promise<{ success: boolean; eventId: string }> => {
+        const prisma = await getPrisma();
+        const event = await prisma.domainEvent.create({
+            data: {
+                domain: 'returns',
+                event: 'return.comment',
+                entityType: 'OrderLine',
+                entityId: data.orderLineId,
+                summary: data.comment,
+                actorId: context.user.id,
+            },
+        });
+        return { success: true, eventId: event.id };
+    });
+
 /**
  * Get return action queue (lines needing action)
  * Prioritized list for staff to process
