@@ -5,17 +5,17 @@
 // All column IDs in display order
 export const ALL_COLUMN_IDS = [
     'orderInfo', 'channel', 'customerInfo', 'paymentInfo',
-    'productName', 'qty', 'unitPrice', 'mrp', 'discount', 'cost', 'margin', 'fabricColour', 'fabricBalance',
-    'trackingInfo', 'trackingStatus', 'notes',
+    'productName',
+    'fulfillment', 'notes',
 ] as const;
 
 export type ColumnId = typeof ALL_COLUMN_IDS[number];
 
-// Columns shown by default (Shopify-style: lean set, extras toggleable via column menu)
+// Columns shown by default
 export const DEFAULT_VISIBLE_COLUMNS: ColumnId[] = [
     'orderInfo', 'customerInfo', 'paymentInfo',
-    'productName', 'qty', 'unitPrice',
-    'trackingInfo', 'trackingStatus', 'notes',
+    'productName',
+    'fulfillment', 'notes',
 ];
 
 // Default column headers
@@ -25,16 +25,7 @@ export const DEFAULT_HEADERS: Record<string, string> = {
     customerInfo: 'Customer',
     paymentInfo: 'Payment',
     productName: 'Product',
-    qty: 'Qty',
-    unitPrice: 'Price',
-    mrp: 'MRP',
-    discount: 'Disc %',
-    cost: 'Cost',
-    margin: 'Margin',
-    fabricColour: 'Fabric',
-    fabricBalance: 'Fab Bal',
-    trackingInfo: 'AWB',
-    trackingStatus: 'Tracking',
+    fulfillment: 'Fulfillment',
     notes: 'Notes',
 };
 
@@ -57,21 +48,12 @@ export const DEFAULT_COLUMN_WIDTHS: Partial<Record<ColumnId | string, number>> =
     customerInfo: 160,
     paymentInfo: 100,
     productName: 240,
-    qty: 50,
-    unitPrice: 75,
-    mrp: 75,
-    discount: 55,
-    cost: 75,
-    margin: 55,
-    fabricColour: 100,
-    fabricBalance: 60,
-    trackingInfo: 130,
-    trackingStatus: 80,
-    notes: 120,
+    fulfillment: 160,
+    notes: 140,
 };
 
 // Row height for virtualization
-export const ROW_HEIGHT = 40;
+export const ROW_HEIGHT = 52;
 export const HEADER_HEIGHT = 24;
 
 // Table ID for localStorage

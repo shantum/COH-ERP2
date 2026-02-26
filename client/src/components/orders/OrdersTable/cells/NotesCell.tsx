@@ -11,9 +11,7 @@ interface NotesCellProps {
 }
 
 export const NotesCell = memo(function NotesCell({ row }: NotesCellProps) {
-    if (!row?.lineId) return null;
-
-    const notes = row.lineNotes;
+    const notes = row.customerNotes || row.internalNotes;
     const [isExpanded, setIsExpanded] = useState(false);
     const [isTruncated, setIsTruncated] = useState(false);
     const textRef = useRef<HTMLSpanElement>(null);

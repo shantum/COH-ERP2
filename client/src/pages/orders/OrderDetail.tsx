@@ -1,7 +1,12 @@
 /**
  * OrderDetail — Full-page order detail view (Shopify-style 2-column layout)
  *
- * Replaces the modal-based approach with a dedicated route at /orders/$orderId.
+ * Matches Shopify's order detail page with:
+ * - Status-aware payment card (pending amber / paid green)
+ * - Fulfillment groups with shipping method
+ * - Tags card
+ * - Additional details card (UTM, gateway, etc.)
+ * - Timeline with comment input
  */
 
 import { useState, useMemo, useCallback } from 'react';
@@ -11,7 +16,8 @@ import { useNavigate } from '@tanstack/react-router';
 import {
     ArrowLeft, Printer, MoreHorizontal, Package, User,
     MapPin, FileText, Tag, CreditCard, Truck, Mail, Phone,
-    Percent, ChevronDown,
+    ChevronDown, Clock, Info,
+    AlertCircle, CheckCircle2, Send,
 } from 'lucide-react';
 
 import { Route } from '../../routes/_authenticated/orders_.$orderId';
@@ -22,7 +28,6 @@ import { getOptimizedImageUrl } from '../../utils/imageOptimization';
 import { cn } from '../../lib/utils';
 import { LINE_STATUS_CONFIG } from '../../components/orders/UnifiedOrderModal/types';
 import type { AddressData } from '../../components/orders/UnifiedOrderModal/types';
-import { TimelineSection } from '../../components/orders/UnifiedOrderModal/components/TimelineSection';
 import useOrdersMutations from '../../hooks/useOrdersMutations';
 
 // ============================================
@@ -76,6 +81,14 @@ function formatDateShort(dateStr: string): string {
     });
 }
 
+function formatTime(dateStr: string): string {
+    return new Date(dateStr).toLocaleTimeString('en-IN', {
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true,
+    });
+}
+
 // ============================================
 // MAIN COMPONENT
 // ============================================
@@ -106,6 +119,8 @@ export default function OrderDetail() {
     const [isEditingNotes, setIsEditingNotes] = useState(false);
     const [notesValue, setNotesValue] = useState('');
     const [showMoreActions, setShowMoreActions] = useState(false);
+    const [commentText, setCommentText] = useState('');
+    const [showAllAttributes, setShowAllAttributes] = useState(false);
 
     // Mutations
     const { updateOrderNotes } = useOrdersMutations({
@@ -136,24 +151,27 @@ export default function OrderDetail() {
     // Parse financial data
     const financials = useMemo(() => {
         if (!order) return null;
-        const shopifyDetails = (order as unknown as Record<string, unknown>).shopifyDetails as {
-            subtotalPrice?: string;
-            totalTax?: string;
-            totalDiscounts?: string;
-            shippingLines?: Array<{ title: string; price: string }>;
-        } | undefined;
-        const subtotalPrice = shopifyDetails?.subtotalPrice ? parseFloat(shopifyDetails.subtotalPrice) : 0;
-        const totalTax = shopifyDetails?.totalTax ? parseFloat(shopifyDetails.totalTax) : 0;
-        const totalDiscounts = shopifyDetails?.totalDiscounts ? parseFloat(shopifyDetails.totalDiscounts) : 0;
-        const shippingCost = shopifyDetails?.shippingLines?.reduce(
-            (sum: number, l: { price: string }) => sum + parseFloat(l.price || '0'), 0
+        const subtotalPrice = order.subtotalPrice ? parseFloat(order.subtotalPrice) : 0;
+        const totalTax = order.totalTax ? parseFloat(order.totalTax) : 0;
+        const totalDiscounts = order.totalDiscounts ? parseFloat(order.totalDiscounts) : 0;
+        const shippingCost = order.shippingLines?.reduce(
+            (sum, l) => sum + parseFloat(l.price || '0'), 0
         ) || 0;
+        const shippingTitle = order.shippingLines?.[0]?.title || null;
         const discountCodes = order.shopifyCache?.discountCodes;
         const paymentMethod = order.paymentMethod || 'Prepaid';
         const isCod = paymentMethod.toUpperCase() === 'COD';
         const total = order.totalAmount || subtotalPrice;
 
-        return { subtotalPrice, totalTax, totalDiscounts, shippingCost, discountCodes, paymentMethod, isCod, total };
+        // Determine payment status
+        const financialStatus = order.shopifyCache?.financialStatus || order.paymentStatus || '';
+        const isPaid = financialStatus === 'paid' || (!isCod && financialStatus !== 'pending');
+        const isPending = isCod || financialStatus === 'pending' || financialStatus === 'authorized';
+
+        return {
+            subtotalPrice, totalTax, totalDiscounts, shippingCost, shippingTitle,
+            discountCodes, paymentMethod, isCod, total, financialStatus, isPaid, isPending,
+        };
     }, [order]);
 
     // Group lines by status
@@ -166,12 +184,10 @@ export default function OrderDetail() {
             if (!grouped.has(status)) grouped.set(status, []);
             grouped.get(status)!.push(line);
         }
-        // Sort by status order
         const sorted = new Map<string, OrderDetailType['orderLines']>();
         for (const status of STATUS_ORDER) {
             if (grouped.has(status)) sorted.set(status, grouped.get(status)!);
         }
-        // Add any remaining statuses not in the predefined order
         for (const [status, lines] of grouped) {
             if (!sorted.has(status)) sorted.set(status, lines);
         }
@@ -180,6 +196,107 @@ export default function OrderDetail() {
 
     // Address
     const address = useMemo(() => order ? parseAddress(order) : null, [order]);
+
+    // Shopify attributes for Additional Details
+    const attributes = useMemo(() => {
+        if (!order?.shopifyAttributes) return [];
+        return Object.entries(order.shopifyAttributes)
+            .filter(([, v]) => v && v.trim() !== '')
+            .map(([k, v]) => ({ key: k, value: v }));
+    }, [order]);
+
+    // Timeline events
+    const timelineEvents = useMemo(() => {
+        if (!order) return [];
+        const events: Array<{
+            id: string;
+            type: string;
+            title: string;
+            description?: string;
+            timestamp: Date;
+        }> = [];
+
+        if (order.orderDate) {
+            events.push({
+                id: 'created',
+                type: 'created',
+                title: `${order.customerName} placed this order on ${order.channel || 'Shopify'}.`,
+                timestamp: new Date(order.orderDate),
+            });
+        }
+
+        // Payment event
+        const paymentMethod = financials?.paymentMethod || 'Prepaid';
+        if (order.orderDate) {
+            const isCod = paymentMethod.toUpperCase() === 'COD';
+            events.push({
+                id: 'payment',
+                type: isCod ? 'payment_pending' : 'payment',
+                title: isCod
+                    ? `A ${formatCurrency(order.totalAmount || 0)} INR payment is pending on Cash on Delivery (COD).`
+                    : `Payment of ${formatCurrency(order.totalAmount || 0)} received via ${paymentMethod}.`,
+                timestamp: new Date(new Date(order.orderDate).getTime() + 1000),
+            });
+        }
+
+        // Shopify confirmation
+        if (order.orderDate) {
+            events.push({
+                id: 'confirmation',
+                type: 'confirmation',
+                title: `Confirmation #${order.orderNumber} was generated for this order.`,
+                timestamp: new Date(new Date(order.orderDate).getTime() + 2000),
+            });
+        }
+
+        // Email sent
+        if (order.customerEmail && order.orderDate) {
+            events.push({
+                id: 'email_sent',
+                type: 'email',
+                title: `${order.channel || 'Shopify'} sent an order confirmation email to ${order.customerName} (${order.customerEmail}).`,
+                timestamp: new Date(new Date(order.orderDate).getTime() + 3000),
+            });
+        }
+
+        // Shipped events from lines
+        const shippedLines = order.orderLines?.filter(l => l.shippedAt) || [];
+        if (shippedLines.length > 0) {
+            const first = shippedLines[0];
+            events.push({
+                id: 'shipped',
+                type: 'shipped',
+                title: `Order shipped${first.courier ? ` via ${first.courier}` : ''}.`,
+                description: first.awbNumber ? `AWB: ${first.awbNumber}` : undefined,
+                timestamp: new Date(first.shippedAt!),
+            });
+        }
+
+        // Delivered
+        const deliveredLines = order.orderLines?.filter(l => l.deliveredAt) || [];
+        if (deliveredLines.length > 0) {
+            events.push({
+                id: 'delivered',
+                type: 'delivered',
+                title: 'Order delivered to customer.',
+                timestamp: new Date(deliveredLines[0].deliveredAt!),
+            });
+        }
+
+        // RTO
+        const rtoLines = order.orderLines?.filter(l => l.rtoInitiatedAt) || [];
+        if (rtoLines.length > 0) {
+            events.push({
+                id: 'rto',
+                type: 'rto',
+                title: 'Return to origin initiated.',
+                timestamp: new Date(rtoLines[0].rtoInitiatedAt!),
+            });
+        }
+
+        events.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+        return events;
+    }, [order, financials]);
 
     // ============================================
     // LOADING STATE
@@ -234,13 +351,18 @@ export default function OrderDetail() {
     // STATUS BADGES
     // ============================================
     const paymentBadge = (() => {
-        const isCod = financials?.isCod;
+        if (financials?.isPending) {
+            return (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800 border border-amber-200">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                    Payment pending
+                </span>
+            );
+        }
         return (
-            <span className={cn(
-                'px-2 py-0.5 rounded-full text-xs font-medium',
-                isCod ? 'bg-amber-100 text-amber-800' : 'bg-green-100 text-green-800'
-            )}>
-                {isCod ? 'COD' : 'Paid'}
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 border border-green-200">
+                <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                Paid
             </span>
         );
     })();
@@ -248,27 +370,35 @@ export default function OrderDetail() {
     const fulfillmentBadge = (() => {
         const fulfillment = order.shopifyCache?.fulfillmentStatus || order.status;
         const normalized = fulfillment?.toLowerCase() || '';
-        let color = 'bg-yellow-100 text-yellow-800';
+        let color = 'bg-yellow-100 text-yellow-800 border-yellow-200';
         let label = 'Unfulfilled';
+        let dot = 'bg-yellow-500';
         if (normalized === 'fulfilled' || normalized === 'delivered') {
-            color = 'bg-green-100 text-green-800';
+            color = 'bg-green-100 text-green-800 border-green-200';
             label = normalized === 'delivered' ? 'Delivered' : 'Fulfilled';
+            dot = 'bg-green-500';
         } else if (normalized === 'partial' || normalized === 'partially_fulfilled') {
-            color = 'bg-blue-100 text-blue-800';
+            color = 'bg-blue-100 text-blue-800 border-blue-200';
             label = 'Partially fulfilled';
+            dot = 'bg-blue-500';
         } else if (normalized === 'shipped') {
-            color = 'bg-emerald-100 text-emerald-800';
+            color = 'bg-emerald-100 text-emerald-800 border-emerald-200';
             label = 'Shipped';
+            dot = 'bg-emerald-500';
         } else if (normalized === 'cancelled') {
-            color = 'bg-red-100 text-red-800';
+            color = 'bg-red-100 text-red-800 border-red-200';
             label = 'Cancelled';
+            dot = 'bg-red-500';
         }
         return (
-            <span className={cn('px-2 py-0.5 rounded-full text-xs font-medium', color)}>
+            <span className={cn('inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border', color)}>
+                <span className={cn('w-1.5 h-1.5 rounded-full', dot)} />
                 {label}
             </span>
         );
     })();
+
+    const itemCount = order.orderLines.reduce((sum, l) => sum + l.qty, 0);
 
     // ============================================
     // RENDER
@@ -296,12 +426,13 @@ export default function OrderDetail() {
                                 {paymentBadge}
                                 {fulfillmentBadge}
                                 {order.isExchange && (
-                                    <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
+                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800 border border-purple-200">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-purple-500" />
                                         Exchange
                                     </span>
                                 )}
                                 {order.isArchived && (
-                                    <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
+                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600 border border-gray-200">
                                         Archived
                                     </span>
                                 )}
@@ -325,20 +456,19 @@ export default function OrderDetail() {
                                     onClick={() => setShowMoreActions(!showMoreActions)}
                                     className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
                                 >
-                                    <MoreHorizontal className="w-4 h-4" />
                                     More actions
                                     <ChevronDown className="w-3 h-3" />
                                 </button>
                                 {showMoreActions && (
                                     <>
                                         <div className="fixed inset-0 z-10" onClick={() => setShowMoreActions(false)} />
-                                        <div className="absolute right-0 mt-1 w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-20">
+                                        <div className="absolute right-0 mt-1 w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-20 py-1">
                                             <button
                                                 onClick={() => {
                                                     setShowMoreActions(false);
                                                     handleEditNotes();
                                                 }}
-                                                className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-t-lg"
+                                                className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
                                             >
                                                 Edit notes
                                             </button>
@@ -370,23 +500,49 @@ export default function OrderDetail() {
                         {/* --- FULFILLMENT GROUPS --- */}
                         {Array.from(groupedLines.entries()).map(([status, lines]) => {
                             const config = LINE_STATUS_CONFIG[status] || LINE_STATUS_CONFIG.pending;
+                            const isUnfulfilled = ['pending', 'allocated', 'picked', 'packed'].includes(status);
                             return (
                                 <div key={status} className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
                                     {/* Status header bar */}
-                                    <div className={cn('px-4 py-2.5 flex items-center justify-between', config.bg)}>
+                                    <div className={cn('px-4 py-3 flex items-center justify-between border-b border-gray-100', config.bg)}>
                                         <div className="flex items-center gap-2">
-                                            <Package className={cn('w-4 h-4', config.text)} />
+                                            {isUnfulfilled ? (
+                                                <Package className={cn('w-4 h-4', config.text)} />
+                                            ) : status === 'shipped' ? (
+                                                <Truck className={cn('w-4 h-4', config.text)} />
+                                            ) : status === 'delivered' ? (
+                                                <CheckCircle2 className={cn('w-4 h-4', config.text)} />
+                                            ) : (
+                                                <Package className={cn('w-4 h-4', config.text)} />
+                                            )}
                                             <span className={cn('text-sm font-semibold', config.text)}>
-                                                {config.label} ({lines.length})
+                                                {config.label}
+                                            </span>
+                                            <span className="text-xs text-gray-500">
+                                                ({lines.length} {lines.length === 1 ? 'item' : 'items'})
                                             </span>
                                         </div>
-                                        {status === 'shipped' && order.shopifyCache?.trackingNumber && (
+                                        {(status === 'shipped' || status === 'delivered') && lines.some(l => l.awbNumber) && (
                                             <span className="text-xs text-gray-500">
-                                                AWB: {order.shopifyCache.trackingNumber}
-                                                {order.shopifyCache.trackingCompany && ` (${order.shopifyCache.trackingCompany})`}
+                                                {(() => {
+                                                    const awb = lines.find(l => l.awbNumber);
+                                                    return awb ? `${awb.courier || 'Courier'} · ${awb.awbNumber}` : null;
+                                                })()}
                                             </span>
                                         )}
                                     </div>
+
+                                    {/* Shipping method (for unfulfilled groups) */}
+                                    {isUnfulfilled && financials?.shippingTitle && (
+                                        <div className="px-4 py-2 bg-gray-50 border-b border-gray-100 flex items-center gap-2">
+                                            <Truck className="w-3.5 h-3.5 text-gray-400" />
+                                            <span className="text-xs text-gray-500">
+                                                {financials.shippingTitle}
+                                                {financials.shippingCost > 0 && ` (${formatCurrency(financials.shippingCost)})`}
+                                                {financials.shippingCost === 0 && ' (Free Shipping)'}
+                                            </span>
+                                        </div>
+                                    )}
 
                                     {/* Line items */}
                                     <div className="divide-y divide-gray-100">
@@ -421,7 +577,7 @@ export default function OrderDetail() {
 
                                                     {/* Product info */}
                                                     <div className="flex-1 min-w-0">
-                                                        <p className="text-sm font-medium text-gray-900 truncate">
+                                                        <p className="text-sm font-medium text-blue-700 truncate hover:underline cursor-pointer">
                                                             {productName}
                                                         </p>
                                                         <p className="text-xs text-gray-500">
@@ -439,11 +595,11 @@ export default function OrderDetail() {
 
                                                     {/* Price x Qty = Total */}
                                                     <div className="text-right flex-shrink-0">
+                                                        <p className="text-sm text-gray-700">
+                                                            {formatCurrency(line.unitPrice)} &times; {line.qty}
+                                                        </p>
                                                         <p className="text-sm font-medium text-gray-900">
                                                             {formatCurrency(lineTotal)}
-                                                        </p>
-                                                        <p className="text-xs text-gray-500">
-                                                            {formatCurrency(line.unitPrice)} &times; {line.qty}
                                                         </p>
                                                     </div>
                                                 </div>
@@ -460,7 +616,7 @@ export default function OrderDetail() {
                                                     const awb = lines.find(l => l.awbNumber);
                                                     return awb ? (
                                                         <span>
-                                                            {awb.courier && `${awb.courier} - `}
+                                                            {awb.courier && `${awb.courier} — `}
                                                             {awb.awbNumber}
                                                             {awb.shippedAt && ` (shipped ${formatDateShort(awb.shippedAt)})`}
                                                         </span>
@@ -470,15 +626,15 @@ export default function OrderDetail() {
                                         </div>
                                     )}
 
-                                    {/* CTA for packed items */}
-                                    {status === 'packed' && (
-                                        <div className="px-4 py-2.5 border-t border-gray-100">
+                                    {/* CTA for unfulfilled items */}
+                                    {isUnfulfilled && (
+                                        <div className="px-4 py-3 border-t border-gray-100 flex justify-end">
                                             <button
                                                 disabled
                                                 title="Fulfillment is managed via Google Sheets"
-                                                className="text-sm font-medium text-gray-400 cursor-not-allowed"
+                                                className="px-4 py-1.5 text-sm font-medium text-white bg-gray-300 rounded-lg cursor-not-allowed"
                                             >
-                                                Mark as fulfilled (managed in Sheets)
+                                                Mark as fulfilled
                                             </button>
                                         </div>
                                     )}
@@ -486,19 +642,50 @@ export default function OrderDetail() {
                             );
                         })}
 
-                        {/* --- PAYMENT CARD --- */}
+                        {/* --- PAYMENT CARD (Shopify-style) --- */}
                         {financials && (
-                            <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
-                                <div className="px-4 py-3 border-b border-gray-100">
+                            <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
+                                {/* Payment status header */}
+                                <div className={cn(
+                                    'px-4 py-3 border-b flex items-center justify-between',
+                                    financials.isPending
+                                        ? 'bg-amber-50 border-amber-100'
+                                        : 'bg-green-50 border-green-100'
+                                )}>
                                     <div className="flex items-center gap-2">
-                                        <CreditCard className="w-4 h-4 text-gray-400" />
-                                        <h2 className="text-sm font-semibold text-gray-900">Payment</h2>
+                                        {financials.isPending ? (
+                                            <AlertCircle className="w-4 h-4 text-amber-600" />
+                                        ) : (
+                                            <CheckCircle2 className="w-4 h-4 text-green-600" />
+                                        )}
+                                        <span className={cn(
+                                            'text-sm font-semibold',
+                                            financials.isPending ? 'text-amber-800' : 'text-green-800'
+                                        )}>
+                                            {financials.isPending ? 'Payment pending' : 'Paid'}
+                                        </span>
                                     </div>
+                                    <MoreHorizontal className="w-4 h-4 text-gray-400" />
                                 </div>
+
+                                {/* COD pending message */}
+                                {financials.isPending && financials.isCod && (
+                                    <div className="px-4 py-3 bg-amber-50/50 border-b border-gray-100">
+                                        <div className="flex items-start gap-2">
+                                            <Info className="w-4 h-4 text-amber-500 mt-0.5 flex-shrink-0" />
+                                            <p className="text-sm text-gray-600">
+                                                Cash on Delivery (COD) is still processing this order&apos;s payment.
+                                                To make sure you get paid, wait for the payment to be successful before fulfilling this order.
+                                            </p>
+                                        </div>
+                                    </div>
+                                )}
+
                                 <div className="px-4 py-3 space-y-2">
-                                    {/* Subtotal */}
+                                    {/* Subtotal with item count */}
                                     <div className="flex justify-between text-sm">
                                         <span className="text-gray-600">Subtotal</span>
+                                        <span className="text-gray-500">{itemCount} {itemCount === 1 ? 'item' : 'items'}</span>
                                         <span className="text-gray-900">
                                             {formatCurrency(financials.subtotalPrice || order.orderLines.reduce((s, l) => s + l.unitPrice * l.qty, 0))}
                                         </span>
@@ -508,7 +695,6 @@ export default function OrderDetail() {
                                     {financials.totalDiscounts > 0 && (
                                         <div className="flex justify-between text-sm">
                                             <span className="text-gray-600 flex items-center gap-1.5">
-                                                <Percent className="w-3 h-3" />
                                                 Discount
                                                 {financials.discountCodes && (
                                                     <span className="px-1.5 py-0.5 bg-gray-100 text-gray-700 rounded text-xs font-mono">
@@ -521,22 +707,29 @@ export default function OrderDetail() {
                                     )}
 
                                     {/* Shipping */}
-                                    {financials.shippingCost > 0 && (
-                                        <div className="flex justify-between text-sm">
-                                            <span className="text-gray-600">Shipping</span>
-                                            <span className="text-gray-900">{formatCurrency(financials.shippingCost)}</span>
-                                        </div>
-                                    )}
+                                    <div className="flex justify-between text-sm">
+                                        <span className="text-gray-600">
+                                            Shipping
+                                            {financials.shippingTitle && (
+                                                <span className="text-gray-400 text-xs ml-1">
+                                                    {financials.shippingTitle}
+                                                </span>
+                                            )}
+                                        </span>
+                                        <span className="text-gray-900">
+                                            {financials.shippingCost > 0 ? formatCurrency(financials.shippingCost) : formatCurrency(0)}
+                                        </span>
+                                    </div>
 
                                     {/* Tax */}
-                                    {financials.totalTax > 0 && (
-                                        <div className="flex justify-between text-sm">
-                                            <span className="text-gray-600">Tax (GST)</span>
-                                            <span className="text-gray-900">{formatCurrency(financials.totalTax)}</span>
-                                        </div>
-                                    )}
+                                    <div className="flex justify-between text-sm">
+                                        <span className="text-gray-600">Taxes</span>
+                                        <span className="text-gray-900">
+                                            {financials.totalTax > 0 ? formatCurrency(financials.totalTax) : 'Included'}
+                                        </span>
+                                    </div>
 
-                                    {/* Divider */}
+                                    {/* Divider + Total */}
                                     <div className="border-t border-gray-100 pt-2 mt-2">
                                         <div className="flex justify-between text-sm font-semibold">
                                             <span className="text-gray-900">Total</span>
@@ -544,48 +737,144 @@ export default function OrderDetail() {
                                         </div>
                                     </div>
 
-                                    {/* Paid amount */}
-                                    <div className="flex justify-between text-sm">
-                                        <span className="text-gray-600">Paid by customer</span>
-                                        <span className="text-gray-900">{formatCurrency(financials.total || 0)}</span>
+                                    {/* Paid / Balance */}
+                                    <div className="space-y-1">
+                                        <div className="flex justify-between text-sm">
+                                            <span className="text-gray-600">Paid</span>
+                                            <span className="text-gray-900">
+                                                {financials.isPaid ? formatCurrency(financials.total || 0) : formatCurrency(0)}
+                                            </span>
+                                        </div>
+                                        <div className="flex justify-between text-sm">
+                                            <span className="text-gray-600">Balance</span>
+                                            <span className="text-gray-900">
+                                                {financials.isPending ? formatCurrency(financials.total || 0) : formatCurrency(0)}
+                                            </span>
+                                        </div>
                                     </div>
 
-                                    {/* Payment method badge */}
-                                    <div className="pt-2 border-t border-gray-100 mt-2">
-                                        <span className={cn(
-                                            'px-2 py-0.5 rounded-full text-xs font-medium',
-                                            financials.isCod ? 'bg-amber-100 text-amber-800' : 'bg-green-100 text-green-800'
-                                        )}>
-                                            {financials.paymentMethod}
-                                        </span>
-                                    </div>
+                                    {/* Action buttons for pending payments */}
+                                    {financials.isPending && (
+                                        <div className="flex gap-2 pt-2 border-t border-gray-100 mt-2">
+                                            <button
+                                                disabled
+                                                className="px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                                            >
+                                                Send invoice
+                                            </button>
+                                            <button
+                                                disabled
+                                                className="px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                                            >
+                                                Mark as paid
+                                            </button>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         )}
 
-                        {/* --- TIMELINE CARD --- */}
-                        {/* Build an order-like object for TimelineSection from order lines */}
-                        {(() => {
-                            const lines = order.orderLines || [];
-                            const shipped = lines.find(l => l.shippedAt);
-                            const delivered = lines.find(l => l.deliveredAt);
-                            const rto = lines.find(l => l.rtoInitiatedAt);
-                            const orderForTimeline = {
-                                ...order,
-                                shippedAt: shipped?.shippedAt || null,
-                                deliveredAt: delivered?.deliveredAt || null,
-                                rtoInitiatedAt: rto?.rtoInitiatedAt || null,
-                                awbNumber: shipped?.awbNumber || order.shopifyCache?.trackingNumber || null,
-                                courier: shipped?.courier || order.shopifyCache?.trackingCompany || null,
-                                shopifyCache: {
-                                    ...(order.shopifyCache || {}),
-                                    paymentMethod: financials?.paymentMethod || 'Prepaid',
-                                },
-                            };
-                            return (
-                                <TimelineSection order={orderForTimeline as unknown as import('../../types').Order} />
-                            );
-                        })()}
+                        {/* --- TIMELINE CARD (Shopify-style) --- */}
+                        <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
+                            <div className="px-4 py-3 border-b border-gray-100">
+                                <h2 className="text-sm font-semibold text-gray-900">Timeline</h2>
+                            </div>
+
+                            {/* Comment input */}
+                            <div className="px-4 py-3 border-b border-gray-100">
+                                <div className="flex items-start gap-3">
+                                    <div className="w-8 h-8 rounded-full bg-green-600 flex items-center justify-center flex-shrink-0">
+                                        <span className="text-xs font-semibold text-white">SG</span>
+                                    </div>
+                                    <div className="flex-1">
+                                        <input
+                                            type="text"
+                                            value={commentText}
+                                            onChange={(e) => setCommentText(e.target.value)}
+                                            placeholder="Leave a comment..."
+                                            className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                        />
+                                        {commentText.trim() && (
+                                            <div className="flex justify-end mt-2">
+                                                <button
+                                                    onClick={() => {
+                                                        // Save as internal note (append to existing)
+                                                        if (!order) return;
+                                                        const newNotes = order.internalNotes
+                                                            ? `${order.internalNotes}\n\n[${new Date().toLocaleDateString('en-IN')}] ${commentText}`
+                                                            : `[${new Date().toLocaleDateString('en-IN')}] ${commentText}`;
+                                                        updateOrderNotes.mutate({ id: order.id, notes: newNotes });
+                                                        setCommentText('');
+                                                    }}
+                                                    disabled={updateOrderNotes.isPending}
+                                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-gray-800 rounded-lg hover:bg-gray-900 disabled:opacity-50"
+                                                >
+                                                    <Send className="w-3.5 h-3.5" />
+                                                    Post
+                                                </button>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                                <p className="text-xs text-gray-400 mt-2 ml-11">
+                                    Only you and other staff can see comments
+                                </p>
+                            </div>
+
+                            {/* Timeline events */}
+                            <div className="px-4 py-3">
+                                {timelineEvents.length > 0 && (
+                                    <div className="space-y-0">
+                                        {/* Group by date */}
+                                        {(() => {
+                                            const groups = new Map<string, typeof timelineEvents>();
+                                            for (const event of timelineEvents) {
+                                                const dateKey = event.timestamp.toLocaleDateString('en-IN', {
+                                                    day: 'numeric',
+                                                    month: 'long',
+                                                    year: 'numeric',
+                                                });
+                                                const today = new Date().toLocaleDateString('en-IN', {
+                                                    day: 'numeric',
+                                                    month: 'long',
+                                                    year: 'numeric',
+                                                });
+                                                const label = dateKey === today ? 'Today' : dateKey;
+                                                if (!groups.has(label)) groups.set(label, []);
+                                                groups.get(label)!.push(event);
+                                            }
+                                            return Array.from(groups.entries()).map(([dateLabel, events]) => (
+                                                <div key={dateLabel}>
+                                                    <div className="flex items-center gap-3 py-2">
+                                                        <div className="h-px flex-1 bg-gray-200" />
+                                                        <span className="text-xs font-medium text-gray-500">{dateLabel}</span>
+                                                        <div className="h-px flex-1 bg-gray-200" />
+                                                    </div>
+                                                    <div className="space-y-3">
+                                                        {events.map((event) => (
+                                                            <div key={event.id} className="flex items-start gap-3">
+                                                                <div className="mt-1 flex-shrink-0">
+                                                                    <TimelineIcon type={event.type} />
+                                                                </div>
+                                                                <div className="flex-1 min-w-0">
+                                                                    <p className="text-sm text-gray-700">{event.title}</p>
+                                                                    {event.description && (
+                                                                        <p className="text-xs text-gray-500 mt-0.5">{event.description}</p>
+                                                                    )}
+                                                                </div>
+                                                                <span className="text-xs text-gray-400 whitespace-nowrap flex-shrink-0">
+                                                                    {formatTime(event.timestamp.toISOString())}
+                                                                </span>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            ));
+                                        })()}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
                     </div>
 
                     {/* ===== RIGHT COLUMN (1/3) ===== */}
@@ -595,10 +884,7 @@ export default function OrderDetail() {
                         <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
                             <div className="px-4 py-3 border-b border-gray-100">
                                 <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-2">
-                                        <FileText className="w-4 h-4 text-gray-400" />
-                                        <h2 className="text-sm font-semibold text-gray-900">Notes</h2>
-                                    </div>
+                                    <h2 className="text-sm font-semibold text-gray-900">Notes</h2>
                                     {!isEditingNotes && (
                                         <button
                                             onClick={handleEditNotes}
@@ -611,18 +897,17 @@ export default function OrderDetail() {
                             </div>
                             <div className="px-4 py-3 space-y-3">
                                 {/* Customer notes */}
-                                {order.shopifyCache?.customerNotes && (
-                                    <div>
-                                        <p className="text-xs font-medium text-gray-500 mb-1">Customer note</p>
-                                        <p className="text-sm text-gray-700 bg-yellow-50 border border-yellow-100 rounded px-2.5 py-2">
-                                            {order.shopifyCache.customerNotes}
-                                        </p>
-                                    </div>
+                                {order.shopifyCache?.customerNotes ? (
+                                    <p className="text-sm text-gray-700">
+                                        {order.shopifyCache.customerNotes}
+                                    </p>
+                                ) : (
+                                    <p className="text-sm text-gray-400">No notes from customer</p>
                                 )}
 
                                 {/* Internal notes */}
                                 {isEditingNotes ? (
-                                    <div>
+                                    <div className="border-t border-gray-100 pt-3">
                                         <p className="text-xs font-medium text-gray-500 mb-1">Internal notes</p>
                                         <textarea
                                             value={notesValue}
@@ -648,18 +933,39 @@ export default function OrderDetail() {
                                             </button>
                                         </div>
                                     </div>
-                                ) : (
-                                    <div>
+                                ) : order.internalNotes ? (
+                                    <div className="border-t border-gray-100 pt-3">
                                         <p className="text-xs font-medium text-gray-500 mb-1">Internal notes</p>
-                                        {order.internalNotes ? (
-                                            <p className="text-sm text-gray-700 whitespace-pre-wrap">{order.internalNotes}</p>
-                                        ) : (
-                                            <p className="text-sm text-gray-400 italic">No internal notes</p>
-                                        )}
+                                        <p className="text-sm text-gray-700 whitespace-pre-wrap">{order.internalNotes}</p>
                                     </div>
-                                )}
+                                ) : null}
                             </div>
                         </div>
+
+                        {/* --- ADDITIONAL DETAILS CARD --- */}
+                        {attributes.length > 0 && (
+                            <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
+                                <div className="px-4 py-3 border-b border-gray-100">
+                                    <h2 className="text-sm font-semibold text-gray-900">Additional details</h2>
+                                </div>
+                                <div className="px-4 py-3 space-y-2.5">
+                                    {(showAllAttributes ? attributes : attributes.slice(0, 6)).map(({ key, value }) => (
+                                        <div key={key}>
+                                            <p className="text-xs font-medium text-gray-500">{key}</p>
+                                            <p className="text-sm text-gray-700 break-all">{value}</p>
+                                        </div>
+                                    ))}
+                                    {attributes.length > 6 && (
+                                        <button
+                                            onClick={() => setShowAllAttributes(!showAllAttributes)}
+                                            className="text-xs text-blue-600 hover:text-blue-700 font-medium"
+                                        >
+                                            {showAllAttributes ? 'Show less' : `View all (${attributes.length})`}
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+                        )}
 
                         {/* --- CUSTOMER CARD --- */}
                         <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
@@ -670,36 +976,41 @@ export default function OrderDetail() {
                                 </div>
                             </div>
                             <div className="px-4 py-3 space-y-2.5">
-                                <p className="text-sm font-medium text-gray-900">
+                                <p className="text-sm font-medium text-blue-700 hover:underline cursor-pointer">
                                     {order.customerName}
                                 </p>
-
-                                {(order.customerEmail || order.customer?.email) && (
-                                    <div className="flex items-center gap-2 text-sm text-gray-600">
-                                        <Mail className="w-3.5 h-3.5 text-gray-400" />
-                                        <a
-                                            href={`mailto:${order.customerEmail || order.customer?.email}`}
-                                            className="hover:text-blue-600 truncate"
-                                        >
-                                            {order.customerEmail || order.customer?.email}
-                                        </a>
-                                    </div>
+                                {order.customer && (
+                                    <p className="text-xs text-blue-600">
+                                        {order.customer.orderCount} {order.customer.orderCount === 1 ? 'order' : 'orders'}
+                                    </p>
                                 )}
 
-                                {(order.customerPhone || order.customer?.phone) && (
-                                    <div className="flex items-center gap-2 text-sm text-gray-600">
-                                        <Phone className="w-3.5 h-3.5 text-gray-400" />
-                                        <span>{order.customerPhone || order.customer?.phone}</span>
-                                    </div>
-                                )}
+                                {/* Contact information */}
+                                <div className="border-t border-gray-100 pt-2.5 mt-2.5">
+                                    <p className="text-xs font-medium text-gray-500 mb-2">Contact information</p>
+                                    {(order.customerEmail || order.customer?.email) && (
+                                        <div className="flex items-center gap-2 text-sm text-blue-600 mb-1">
+                                            <a
+                                                href={`mailto:${order.customerEmail || order.customer?.email}`}
+                                                className="hover:underline truncate"
+                                            >
+                                                {order.customerEmail || order.customer?.email}
+                                            </a>
+                                        </div>
+                                    )}
+                                    {(order.customerPhone || order.customer?.phone) && (
+                                        <div className="flex items-center gap-2 text-sm text-gray-600">
+                                            <Phone className="w-3.5 h-3.5 text-gray-400" />
+                                            <span>{order.customerPhone || order.customer?.phone}</span>
+                                        </div>
+                                    )}
+                                </div>
 
+                                {/* Customer badges */}
                                 {order.customer && (
                                     <div className="flex flex-wrap gap-1.5 pt-1">
                                         <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700">
                                             LTV: {formatCurrency(order.customer.ltv)}
-                                        </span>
-                                        <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700">
-                                            {order.customer.orderCount} orders
                                         </span>
                                         {order.customer.rtoCount > 0 && (
                                             <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-red-50 text-red-700">
@@ -739,11 +1050,36 @@ export default function OrderDetail() {
                             </div>
                         )}
 
+                        {/* --- TAGS CARD --- */}
+                        {order.shopifyCache?.tags && (
+                            <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
+                                <div className="px-4 py-3 border-b border-gray-100">
+                                    <div className="flex items-center gap-2">
+                                        <Tag className="w-4 h-4 text-gray-400" />
+                                        <h2 className="text-sm font-semibold text-gray-900">Tags</h2>
+                                    </div>
+                                </div>
+                                <div className="px-4 py-3">
+                                    <div className="flex flex-wrap gap-1.5">
+                                        {order.shopifyCache.tags.split(',').map((tag) => (
+                                            <span
+                                                key={tag.trim()}
+                                                className="inline-flex items-center px-2 py-0.5 bg-gray-100 text-gray-700 rounded-full text-xs"
+                                            >
+                                                {tag.trim()}
+                                                <button className="ml-1 text-gray-400 hover:text-gray-600">&times;</button>
+                                            </span>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
                         {/* --- ORDER DETAILS CARD --- */}
                         <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
                             <div className="px-4 py-3 border-b border-gray-100">
                                 <div className="flex items-center gap-2">
-                                    <Tag className="w-4 h-4 text-gray-400" />
+                                    <FileText className="w-4 h-4 text-gray-400" />
                                     <h2 className="text-sm font-semibold text-gray-900">Order details</h2>
                                 </div>
                             </div>
@@ -756,31 +1092,6 @@ export default function OrderDetail() {
                                 )}
                                 {order.channel && (
                                     <DetailRow label="Channel" value={order.channel} />
-                                )}
-                                {financials?.discountCodes && (
-                                    <DetailRow
-                                        label="Discount"
-                                        value={
-                                            <span className="px-1.5 py-0.5 bg-gray-100 text-gray-700 rounded text-xs font-mono">
-                                                {financials.discountCodes}
-                                            </span>
-                                        }
-                                    />
-                                )}
-                                {order.shopifyCache?.tags && (
-                                    <div>
-                                        <p className="text-xs text-gray-500 mb-1">Tags</p>
-                                        <div className="flex flex-wrap gap-1">
-                                            {order.shopifyCache.tags.split(',').map((tag) => (
-                                                <span
-                                                    key={tag.trim()}
-                                                    className="px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded text-xs"
-                                                >
-                                                    {tag.trim()}
-                                                </span>
-                                            ))}
-                                        </div>
-                                    </div>
                                 )}
                                 {order.shipByDate && (
                                     <DetailRow label="Ship by" value={formatDateShort(order.shipByDate)} />
@@ -805,4 +1116,28 @@ function DetailRow({ label, value }: { label: string; value: React.ReactNode }) 
             <span className="text-gray-900 text-right">{value}</span>
         </div>
     );
+}
+
+function TimelineIcon({ type }: { type: string }) {
+    const base = "w-5 h-5 rounded-full flex items-center justify-center";
+    switch (type) {
+        case 'created':
+            return <div className={cn(base, 'bg-gray-200')}><Package className="w-3 h-3 text-gray-500" /></div>;
+        case 'payment':
+            return <div className={cn(base, 'bg-green-100')}><CreditCard className="w-3 h-3 text-green-600" /></div>;
+        case 'payment_pending':
+            return <div className={cn(base, 'bg-amber-100')}><CreditCard className="w-3 h-3 text-amber-600" /></div>;
+        case 'confirmation':
+            return <div className={cn(base, 'bg-blue-100')}><FileText className="w-3 h-3 text-blue-600" /></div>;
+        case 'email':
+            return <div className={cn(base, 'bg-sky-100')}><Mail className="w-3 h-3 text-sky-600" /></div>;
+        case 'shipped':
+            return <div className={cn(base, 'bg-emerald-100')}><Truck className="w-3 h-3 text-emerald-600" /></div>;
+        case 'delivered':
+            return <div className={cn(base, 'bg-green-100')}><CheckCircle2 className="w-3 h-3 text-green-600" /></div>;
+        case 'rto':
+            return <div className={cn(base, 'bg-orange-100')}><AlertCircle className="w-3 h-3 text-orange-600" /></div>;
+        default:
+            return <div className={cn(base, 'bg-gray-100')}><Clock className="w-3 h-3 text-gray-500" /></div>;
+    }
 }

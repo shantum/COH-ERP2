@@ -42,3 +42,8 @@ export { FabricColourCell } from './FabricColourCell';
 // Tracking cells
 export { TrackingInfoCell } from './TrackingInfoCell';
 export { TrackingStatusCell } from './TrackingStatusCell';
+export { FulfillmentCell } from './FulfillmentCell';
+
+// Shopify cells
+export { CustomerNotesCell } from './CustomerNotesCell';
+export { CustomerTagsCell } from './CustomerTagsCell';

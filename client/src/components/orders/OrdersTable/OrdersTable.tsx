@@ -141,7 +141,7 @@ export function OrdersTable({
         onColumnSizingChange: setColumnSizing,
         getCoreRowModel: getCoreRowModel(),
         getSortedRowModel: getSortedRowModel(),
-        getRowId: (row) => row.lineId || `order-${row.orderId}-header`,
+        getRowId: (row) => row.orderId,
         columnResizeMode: 'onChange',
     });
 
@@ -176,14 +176,13 @@ export function OrdersTable({
 
     // Simple row styling for monitoring dashboard
     const getRowClassName = (row: FlattenedOrderRow): string => {
-        const baseClass = row.isFirstLine ? 'border-t border-gray-400 ' : '';
         if (row.lineStatus === 'cancelled') {
-            return baseClass + 'text-gray-400 line-through opacity-60';
+            return 'text-gray-400 line-through opacity-60';
         }
         if (row.rtoStatus || row.lineTrackingStatus?.includes('rto')) {
-            return baseClass + 'bg-orange-50/50';
+            return 'bg-orange-50/50';
         }
-        return baseClass;
+        return '';
     };
 
     return {

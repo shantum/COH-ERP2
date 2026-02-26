@@ -155,6 +155,23 @@ export interface FlattenedOrderRow {
     customerTags: string[] | null;
     /** null = no fabric colour linked, false = linked & in stock, true = linked & out of stock */
     isFabricOutOfStock: boolean | null;
+
+    // Order-level line summary (one row per order)
+    lines: Array<{
+        lineId: string;
+        productName: string;
+        colorName: string;
+        size: string;
+        skuCode: string;
+        imageUrl: string | null;
+        qty: number;
+        unitPrice: number;
+        lineStatus: string | null;
+        awbNumber: string | null;
+        courier: string | null;
+        trackingStatus: string | null;
+    }>;
+    totalQty: number;
 }
 
 // ============================================
@@ -250,13 +267,20 @@ export interface OrderDetail {
     } | null;
     shopifyCache: {
         fulfillmentStatus: string | null;
+        financialStatus: string | null;
         discountCodes: string | null;
         customerNotes: string | null;
         tags: string | null;
         trackingNumber: string | null;
         trackingCompany: string | null;
         trackingUrl: string | null;
+        paymentMethod: string | null;
     } | null;
+    shopifyAttributes: Record<string, string>;
+    shippingLines: Array<{ title: string; price: string }>;
+    subtotalPrice: string | null;
+    totalTax: string | null;
+    totalDiscounts: string | null;
     orderLines: Array<{
         id: string;
         skuId: string;
@@ -277,6 +301,24 @@ export interface OrderDetail {
         isCustomized: boolean;
         isNonReturnable: boolean;
         productionBatchId: string | null;
+        returnStatus: string | null;
+        returnQty: number | null;
+        returnRequestedAt: string | null;
+        returnReasonCategory: string | null;
+        returnReasonDetail: string | null;
+        returnResolution: string | null;
+        returnCondition: string | null;
+        returnConditionNotes: string | null;
+        returnPickupType: string | null;
+        returnAwbNumber: string | null;
+        returnCourier: string | null;
+        returnPickupScheduledAt: string | null;
+        returnPickupAt: string | null;
+        returnReceivedAt: string | null;
+        returnNotes: string | null;
+        returnRefundCompletedAt: string | null;
+        returnExchangeOrderId: string | null;
+        returnExchangeSkuId: string | null;
         sku: {
             id: string;
             skuCode: string;

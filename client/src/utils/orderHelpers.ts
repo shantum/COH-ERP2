@@ -175,6 +175,25 @@ export interface FlattenedOrderRow {
 
     // Fabric out of stock status: null = no fabric linked, false = linked & in stock, true = linked & OOS
     isFabricOutOfStock?: boolean | null;
+
+    // Order-level line summary (for one-row-per-order display)
+    lines: OrderLineSummary[];
+    totalQty: number;
+}
+
+export interface OrderLineSummary {
+    lineId: string;
+    productName: string;
+    colorName: string;
+    size: string;
+    skuCode: string;
+    imageUrl: string | null;
+    qty: number;
+    unitPrice: number;
+    lineStatus: string | null;
+    awbNumber: string | null;
+    courier: string | null;
+    trackingStatus: string | null;
 }
 
 

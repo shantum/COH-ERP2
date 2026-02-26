@@ -361,198 +361,132 @@ function flattenOrdersToRows(orders: PrismaOrder[]): FlattenedOrderRow[] {
         const totalLines = order.orderLines.length;
         const fulfillmentStage = calculateFulfillmentStage(order.orderLines);
 
-        // Handle orders with no lines
-        if (order.orderLines.length === 0) {
-            rows.push({
-                orderId: order.id,
-                orderNumber: order.orderNumber,
-                orderDate: order.orderDate.toISOString(),
-                shipByDate: toIsoString(order.shipByDate),
-                customerName: order.customerName,
-                customerEmail: order.customerEmail,
-                customerPhone: order.customerPhone,
-                customerId: order.customerId,
-                city,
-                customerOrderCount: order.customer?.orderCount ?? 0,
-                customerLtv: order.customer?.ltv ?? 0,
-                customerTier: order.customer?.tier ?? null,
-                customerRtoCount: order.customer?.rtoCount ?? 0,
-                totalAmount: order.totalAmount,
-                paymentMethod: order.paymentMethod,
-                channel: order.channel,
-                internalNotes: order.internalNotes,
-                orderStatus: order.status || 'pending',
-                isArchived: order.isArchived,
-                releasedToShipped: order.releasedToShipped,
-                releasedToCancelled: order.releasedToCancelled,
-                isExchange: order.isExchange,
-                productName: '(no items)',
-                colorName: '-',
-                colorHex: null,
-                imageUrl: null,
-                size: '-',
-                skuCode: '-',
-                skuId: null,
-                qty: 0,
-                lineId: null,
-                lineStatus: null,
-                lineNotes: '',
-                unitPrice: 0,
-                mrp: 0,
-                discountPercent: 0,
-                bomCost: 0,
-                margin: 0,
-                fabricColourName: null,
-                fabricColourId: null,
-                skuStock: 0,
-                fabricBalance: 0,
-                shopifyStatus,
-                productionBatch: null,
-                productionBatchId: null,
-                productionDate: null,
-                isFirstLine: true,
-                totalLines: 0,
-                fulfillmentStage: null,
-                order: orderRef,
-                isCustomized: false,
-                isNonReturnable: false,
-                customSkuCode: null,
-                customizationType: null,
-                customizationValue: null,
-                customizationNotes: null,
-                originalSkuCode: null,
-                lineShippedAt: null,
-                lineDeliveredAt: null,
-                lineTrackingStatus: null,
-                lineAwbNumber: null,
-                lineCourier: null,
-                daysInTransit: null,
-                daysSinceDelivery: null,
-                daysInRto: null,
-                rtoStatus: null,
-                // Return status fields
-                returnStatus: null,
-                returnQty: null,
-                discountCodes: order.shopifyCache?.discountCodes ?? null,
-                customerNotes: order.shopifyCache?.customerNotes ?? null,
-                shopifyTags: order.shopifyCache?.tags ?? null,
-                shopifyAwb: order.shopifyCache?.trackingNumber ?? null,
-                shopifyCourier: order.shopifyCache?.trackingCompany ?? null,
-                shopifyTrackingUrl: order.shopifyCache?.trackingUrl ?? null,
-                customerTags,
-                isFabricOutOfStock: null, // No lines = no fabric linked
-            });
-            continue;
-        }
+        // Build line summaries for the order
+        const lines = order.orderLines.map((line) => ({
+            lineId: line.id,
+            productName: line.sku.variation.product.name || '(unknown)',
+            colorName: line.sku.variation.colorName || '-',
+            size: line.sku.size || '-',
+            skuCode: line.sku.skuCode || '-',
+            imageUrl: line.sku.variation.imageUrl || line.sku.variation.product.imageUrl || null,
+            qty: line.qty,
+            unitPrice: line.unitPrice,
+            lineStatus: line.lineStatus,
+            awbNumber: line.awbNumber,
+            courier: line.courier,
+            trackingStatus: line.trackingStatus,
+        }));
 
-        // Create a row for each order line
-        for (let i = 0; i < order.orderLines.length; i++) {
-            const line = order.orderLines[i];
-            const isFirstLine = i === 0;
-            const rtoStatus = calculateRtoStatus(line);
+        const totalQty = order.orderLines.reduce((sum, l) => sum + l.qty, 0);
 
-            rows.push({
-                orderId: order.id,
-                orderNumber: order.orderNumber,
-                orderDate: order.orderDate.toISOString(),
-                shipByDate: toIsoString(order.shipByDate),
-                customerName: order.customerName,
-                customerEmail: order.customerEmail,
-                customerPhone: order.customerPhone,
-                customerId: order.customerId,
-                city,
-                customerOrderCount: order.customer?.orderCount ?? 0,
-                customerLtv: order.customer?.ltv ?? 0,
-                customerTier: order.customer?.tier ?? null,
-                customerRtoCount: order.customer?.rtoCount ?? 0,
-                totalAmount: order.totalAmount,
-                paymentMethod: order.paymentMethod,
-                channel: order.channel,
-                internalNotes: order.internalNotes,
-                orderStatus: order.status || 'pending',
-                isArchived: order.isArchived,
-                releasedToShipped: order.releasedToShipped,
-                releasedToCancelled: order.releasedToCancelled,
-                isExchange: order.isExchange,
-                productName: line.sku.variation.product.name || '(unknown)',
-                colorName: line.sku.variation.colorName || '-',
-                colorHex: line.sku.variation.colorHex || null,
-                imageUrl:
-                    line.sku.variation.imageUrl || line.sku.variation.product.imageUrl || null,
-                size: line.sku.size || '-',
-                skuCode: line.sku.skuCode || '-',
-                skuId: line.skuId,
-                qty: line.qty,
-                lineId: line.id,
-                lineStatus: line.lineStatus,
-                lineNotes: line.notes || '',
-                unitPrice: line.unitPrice,
-                mrp: line.sku.mrp || 0,
-                discountPercent: (() => {
-                    const mrp = line.sku.mrp || 0;
-                    const price = line.unitPrice || 0;
-                    if (mrp <= 0 || price >= mrp) return 0;
-                    return Math.round(((mrp - price) / mrp) * 100);
-                })(),
-                bomCost: line.sku.bomCost ?? 0,
-                margin: line.unitPrice > 0 && line.sku.bomCost
-                    ? Math.round(((line.unitPrice - line.sku.bomCost) / line.unitPrice) * 100)
-                    : 0,
-                fabricColourName: line.sku.variation.bomLines[0]?.fabricColour?.colourName ?? null,
-                fabricColourId: line.sku.variation.bomLines[0]?.fabricColour?.id ?? null,
-                skuStock: line.sku.currentBalance ?? 0,
-                fabricBalance: line.sku.variation.bomLines[0]?.fabricColour?.currentBalance ?? 0,
-                shopifyStatus,
-                productionBatch: line.productionBatch
-                    ? {
-                          id: line.productionBatch.id,
-                          batchCode: line.productionBatch.batchCode,
-                          batchDate: line.productionBatch.batchDate
-                              ? line.productionBatch.batchDate.toISOString().split('T')[0]
-                              : null,
-                          status: line.productionBatch.status,
-                      }
-                    : null,
-                productionBatchId: line.productionBatchId,
-                productionDate: line.productionBatch?.batchDate
-                    ? line.productionBatch.batchDate.toISOString().split('T')[0]
-                    : null,
-                isFirstLine,
-                totalLines,
-                fulfillmentStage,
-                order: orderRef,
-                isCustomized: line.isCustomized || false,
-                isNonReturnable: line.isNonReturnable || line.isCustomized || false,
-                customSkuCode: line.sku.isCustomSku ? line.sku.skuCode : null,
-                customizationType: line.sku.customizationType || null,
-                customizationValue: line.sku.customizationValue || null,
-                customizationNotes: line.sku.customizationNotes || null,
-                originalSkuCode: null, // Not tracked in current query
-                lineShippedAt: toIsoString(line.shippedAt),
-                lineDeliveredAt: toIsoString(line.deliveredAt),
-                lineTrackingStatus: line.trackingStatus,
-                lineAwbNumber: line.awbNumber,
-                lineCourier: line.courier,
-                daysInTransit: daysSince(line.shippedAt),
-                daysSinceDelivery: daysSince(line.deliveredAt),
-                daysInRto: daysSince(line.rtoInitiatedAt),
-                rtoStatus,
-                // Return status fields
-                returnStatus: line.returnStatus ?? null,
-                returnQty: line.returnQty ?? null,
-                discountCodes: order.shopifyCache?.discountCodes ?? null,
-                customerNotes: order.shopifyCache?.customerNotes ?? null,
-                shopifyTags: order.shopifyCache?.tags ?? null,
-                shopifyAwb: order.shopifyCache?.trackingNumber ?? null,
-                shopifyCourier: order.shopifyCache?.trackingCompany ?? null,
-                shopifyTrackingUrl: order.shopifyCache?.trackingUrl ?? null,
-                customerTags,
-                // null = no fabric linked via BOM, false = linked & in stock, true = linked & OOS
-                isFabricOutOfStock: line.sku.variation.bomLines.length > 0
-                    ? (line.sku.variation.bomLines[0].fabricColour?.isOutOfStock ?? false)
-                    : null,
-            });
-        }
+        // Use first line for backward-compatible single-line fields
+        const firstLine = order.orderLines[0] ?? null;
+        const rtoStatus = firstLine ? calculateRtoStatus(firstLine) : null;
+
+        rows.push({
+            orderId: order.id,
+            orderNumber: order.orderNumber,
+            orderDate: order.orderDate.toISOString(),
+            shipByDate: toIsoString(order.shipByDate),
+            customerName: order.customerName,
+            customerEmail: order.customerEmail,
+            customerPhone: order.customerPhone,
+            customerId: order.customerId,
+            city,
+            customerOrderCount: order.customer?.orderCount ?? 0,
+            customerLtv: order.customer?.ltv ?? 0,
+            customerTier: order.customer?.tier ?? null,
+            customerRtoCount: order.customer?.rtoCount ?? 0,
+            totalAmount: order.totalAmount,
+            paymentMethod: order.paymentMethod,
+            channel: order.channel,
+            internalNotes: order.internalNotes,
+            orderStatus: order.status || 'pending',
+            isArchived: order.isArchived,
+            releasedToShipped: order.releasedToShipped,
+            releasedToCancelled: order.releasedToCancelled,
+            isExchange: order.isExchange,
+            // First line's product data (backward compat)
+            productName: firstLine?.sku.variation.product.name || '(no items)',
+            colorName: firstLine?.sku.variation.colorName || '-',
+            colorHex: firstLine?.sku.variation.colorHex || null,
+            imageUrl: firstLine
+                ? (firstLine.sku.variation.imageUrl || firstLine.sku.variation.product.imageUrl || null)
+                : null,
+            size: firstLine?.sku.size || '-',
+            skuCode: firstLine?.sku.skuCode || '-',
+            skuId: firstLine?.skuId ?? null,
+            qty: totalQty,
+            lineId: firstLine?.id ?? null,
+            lineStatus: firstLine?.lineStatus ?? null,
+            lineNotes: firstLine?.notes || '',
+            unitPrice: firstLine?.unitPrice ?? 0,
+            mrp: firstLine?.sku.mrp || 0,
+            discountPercent: (() => {
+                if (!firstLine) return 0;
+                const mrp = firstLine.sku.mrp || 0;
+                const price = firstLine.unitPrice || 0;
+                if (mrp <= 0 || price >= mrp) return 0;
+                return Math.round(((mrp - price) / mrp) * 100);
+            })(),
+            bomCost: firstLine?.sku.bomCost ?? 0,
+            margin: firstLine && firstLine.unitPrice > 0 && firstLine.sku.bomCost
+                ? Math.round(((firstLine.unitPrice - firstLine.sku.bomCost) / firstLine.unitPrice) * 100)
+                : 0,
+            fabricColourName: firstLine?.sku.variation.bomLines[0]?.fabricColour?.colourName ?? null,
+            fabricColourId: firstLine?.sku.variation.bomLines[0]?.fabricColour?.id ?? null,
+            skuStock: firstLine?.sku.currentBalance ?? 0,
+            fabricBalance: firstLine?.sku.variation.bomLines[0]?.fabricColour?.currentBalance ?? 0,
+            shopifyStatus,
+            productionBatch: firstLine?.productionBatch
+                ? {
+                      id: firstLine.productionBatch.id,
+                      batchCode: firstLine.productionBatch.batchCode,
+                      batchDate: firstLine.productionBatch.batchDate
+                          ? firstLine.productionBatch.batchDate.toISOString().split('T')[0]
+                          : null,
+                      status: firstLine.productionBatch.status,
+                  }
+                : null,
+            productionBatchId: firstLine?.productionBatchId ?? null,
+            productionDate: firstLine?.productionBatch?.batchDate
+                ? firstLine.productionBatch.batchDate.toISOString().split('T')[0]
+                : null,
+            isFirstLine: true,
+            totalLines,
+            fulfillmentStage,
+            order: orderRef,
+            isCustomized: firstLine?.isCustomized || false,
+            isNonReturnable: firstLine?.isNonReturnable || firstLine?.isCustomized || false,
+            customSkuCode: firstLine?.sku.isCustomSku ? firstLine.sku.skuCode : null,
+            customizationType: firstLine?.sku.customizationType || null,
+            customizationValue: firstLine?.sku.customizationValue || null,
+            customizationNotes: firstLine?.sku.customizationNotes || null,
+            originalSkuCode: null,
+            lineShippedAt: firstLine ? toIsoString(firstLine.shippedAt) : null,
+            lineDeliveredAt: firstLine ? toIsoString(firstLine.deliveredAt) : null,
+            lineTrackingStatus: firstLine?.trackingStatus ?? null,
+            lineAwbNumber: firstLine?.awbNumber ?? null,
+            lineCourier: firstLine?.courier ?? null,
+            daysInTransit: firstLine ? daysSince(firstLine.shippedAt) : null,
+            daysSinceDelivery: firstLine ? daysSince(firstLine.deliveredAt) : null,
+            daysInRto: firstLine ? daysSince(firstLine.rtoInitiatedAt) : null,
+            rtoStatus,
+            returnStatus: firstLine?.returnStatus ?? null,
+            returnQty: firstLine?.returnQty ?? null,
+            discountCodes: order.shopifyCache?.discountCodes ?? null,
+            customerNotes: order.shopifyCache?.customerNotes ?? null,
+            shopifyTags: order.shopifyCache?.tags ?? null,
+            shopifyAwb: order.shopifyCache?.trackingNumber ?? null,
+            shopifyCourier: order.shopifyCache?.trackingCompany ?? null,
+            shopifyTrackingUrl: order.shopifyCache?.trackingUrl ?? null,
+            customerTags,
+            isFabricOutOfStock: firstLine && firstLine.sku.variation.bomLines.length > 0
+                ? (firstLine.sku.variation.bomLines[0].fabricColour?.isOutOfStock ?? false)
+                : null,
+            lines,
+            totalQty,
+        });
     }
 
     return rows;
@@ -1131,12 +1065,15 @@ export const getOrderById = createServerFn({ method: 'GET' })
                     shopifyCache: {
                         select: {
                             fulfillmentStatus: true,
+                            financialStatus: true,
                             discountCodes: true,
                             customerNotes: true,
                             tags: true,
                             trackingNumber: true,
                             trackingCompany: true,
                             trackingUrl: true,
+                            paymentMethod: true,
+                            rawData: true,
                         },
                     },
                     orderLines: {
@@ -1177,6 +1114,47 @@ export const getOrderById = createServerFn({ method: 'GET' })
                 throw new Error('Order not found');
             }
 
+            // Parse Shopify rawData for additional details (UTM, gateway, shipping lines, etc.)
+            let shopifyAttributes: Record<string, string> = {};
+            let shippingLines: Array<{ title: string; price: string }> = [];
+            let subtotalPrice: string | null = null;
+            let totalTax: string | null = null;
+            let totalDiscounts: string | null = null;
+            if (order.shopifyCache?.rawData) {
+                try {
+                    const raw = JSON.parse(order.shopifyCache.rawData);
+                    // Extract note_attributes (UTM data, etc.)
+                    if (Array.isArray(raw.note_attributes)) {
+                        for (const attr of raw.note_attributes) {
+                            if (attr.name && attr.value) {
+                                shopifyAttributes[attr.name] = String(attr.value);
+                            }
+                        }
+                    }
+                    // Extract gateway (payment gateway)
+                    if (raw.gateway) shopifyAttributes.gateway = raw.gateway;
+                    if (raw.processing_method) shopifyAttributes.processing_method = raw.processing_method;
+                    // Extract shipping lines
+                    if (Array.isArray(raw.shipping_lines)) {
+                        shippingLines = raw.shipping_lines.map((sl: { title?: string; price?: string }) => ({
+                            title: sl.title || '',
+                            price: sl.price || '0',
+                        }));
+                    }
+                    // Extract financial values
+                    if (raw.subtotal_price) subtotalPrice = raw.subtotal_price;
+                    if (raw.total_tax) totalTax = raw.total_tax;
+                    if (raw.total_discounts) totalDiscounts = raw.total_discounts;
+                    // Extract customer_type if present
+                    if (raw.customer?.tags) shopifyAttributes.customer_tags = raw.customer.tags;
+                    // Extract referring_site / landing_site
+                    if (raw.referring_site) shopifyAttributes.referring_site = raw.referring_site;
+                    if (raw.landing_site) shopifyAttributes.landing_site = raw.landing_site;
+                    if (raw.source_name) shopifyAttributes.source_name = raw.source_name;
+                    if (raw.browser_ip) shopifyAttributes.browser_ip = raw.browser_ip;
+                } catch { /* ignore parse errors */ }
+            }
+
             // Transform dates to ISO strings
             return {
                 id: order.id,
@@ -1200,7 +1178,15 @@ export const getOrderById = createServerFn({ method: 'GET' })
                 isExchange: order.isExchange,
                 codRemittedAt: order.codRemittedAt ? order.codRemittedAt.toISOString() : null,
                 customer: order.customer,
-                shopifyCache: order.shopifyCache,
+                shopifyCache: {
+                    ...order.shopifyCache,
+                    rawData: undefined, // Don't send raw data to client
+                } as OrderDetail['shopifyCache'],
+                shopifyAttributes,
+                shippingLines,
+                subtotalPrice,
+                totalTax,
+                totalDiscounts,
                 orderLines: order.orderLines.map((line) => ({
                     id: line.id,
                     skuId: line.skuId,
