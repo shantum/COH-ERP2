@@ -70,6 +70,12 @@ import {
 // Register AG Grid modules
 ModuleRegistry.registerModules([AllCommunityModule]);
 
+const DEFAULT_COL_DEF = {
+    sortable: true,
+    resizable: true,
+    suppressMovable: false,
+};
+
 export default function Catalog() {
     // Grid ref for API access
     const gridRef = useRef<AgGridReact>(null);
@@ -774,11 +780,7 @@ export default function Catalog() {
                             rowData={displayData}
                             columnDefs={orderedColumnDefs}
                             loading={isLoading}
-                            defaultColDef={{
-                                sortable: true,
-                                resizable: true,
-                                suppressMovable: false,
-                            }}
+                            defaultColDef={DEFAULT_COL_DEF}
                             animateRows={false}
                             suppressCellFocus={false}
                             singleClickEdit={true}

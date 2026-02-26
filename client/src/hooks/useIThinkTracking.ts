@@ -6,7 +6,7 @@
  */
 
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
 import { getAwbTracking, getBatchAwbTracking } from '../server/functions/tracking';
 import type { AwbTrackingResponse, TrackingLastScan, TrackingScan } from '../server/functions/tracking';
 
@@ -55,11 +55,17 @@ export function useIThinkTracking({
 export function useBatchTracking(awbNumbers: string[]) {
     const queryClient = useQueryClient();
 
-    // Dedupe
-    const unique = [...new Set(awbNumbers.filter(Boolean))];
+    // Dedupe + sort — memoized to produce a stable reference
+    const uniqueKey = useMemo(() => {
+        const deduped = [...new Set(awbNumbers.filter(Boolean))];
+        deduped.sort();
+        return deduped.join(',');
+    }, [awbNumbers]);
+
+    const unique = useMemo(() => (uniqueKey ? uniqueKey.split(',') : []), [uniqueKey]);
 
     const query = useQuery<Record<string, AwbTrackingResponse>>({
-        queryKey: ['ithink-tracking-batch', unique.sort().join(',')],
+        queryKey: ['ithink-tracking-batch', uniqueKey],
         queryFn: async () => {
             if (unique.length === 0) return {};
 
@@ -82,7 +88,6 @@ export function useBatchTracking(awbNumbers: string[]) {
 
     const refresh = useCallback(() => {
         queryClient.invalidateQueries({ queryKey: ['ithink-tracking-batch'] });
-        // Also invalidate individual caches so they re-read
         for (const awb of unique) {
             queryClient.invalidateQueries({ queryKey: ['ithink-tracking', awb] });
         }

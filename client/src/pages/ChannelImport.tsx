@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useRef } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { AgGridReact } from 'ag-grid-react';
 import type { ColDef, GridReadyEvent } from 'ag-grid-community';
@@ -446,6 +446,10 @@ export default function ChannelImport() {
     return rows;
   }, [preview]);
 
+  // Ref for selectedOrderIds so checkbox renderer doesn't cause columnDefs rebuild
+  const selectedOrderIdsRef = useRef(selectedOrderIds);
+  selectedOrderIdsRef.current = selectedOrderIds;
+
   const columnDefs: ColDef<GridRow>[] = useMemo(() => [
     {
       headerName: '',
@@ -453,7 +457,7 @@ export default function ChannelImport() {
       width: 40,
       cellRenderer: (params: { data: GridRow }) => {
         if (!params.data) return null;
-        const checked = selectedOrderIds.has(params.data.orderId);
+        const checked = selectedOrderIdsRef.current.has(params.data.orderId);
         const disabled = params.data.importStatus === 'existing_unchanged';
         return (
           <input
@@ -534,7 +538,7 @@ export default function ChannelImport() {
     },
     { headerName: 'Courier', field: 'courierName', width: 100 },
     { headerName: 'AWB', field: 'awbNumber', width: 140 },
-  ], [selectedOrderIds, toggleOrder]);
+  ], [toggleOrder]);
 
   const defaultColDef: ColDef = useMemo(() => ({
     sortable: true,
@@ -546,13 +550,24 @@ export default function ChannelImport() {
     params.api.sizeColumnsToFit();
   }, []);
 
+  // Refresh checkbox column when selection changes (since we use ref to avoid columnDefs rebuild)
+  useEffect(() => {
+    gridRef.current?.api?.refreshCells({ columns: ['orderId'] });
+  }, [selectedOrderIds]);
+
   // ============================================
   // COMPUTED
   // ============================================
 
   const selectedCount = selectedOrderIds.size;
-  const selectedNewCount = preview?.orders.filter(o => selectedOrderIds.has(o.channelOrderId) && o.importStatus === 'new').length || 0;
-  const selectedUpdatedCount = preview?.orders.filter(o => selectedOrderIds.has(o.channelOrderId) && o.importStatus === 'existing_updated').length || 0;
+  const selectedNewCount = useMemo(() =>
+    preview?.orders.filter(o => selectedOrderIds.has(o.channelOrderId) && o.importStatus === 'new').length || 0,
+    [preview, selectedOrderIds],
+  );
+  const selectedUpdatedCount = useMemo(() =>
+    preview?.orders.filter(o => selectedOrderIds.has(o.channelOrderId) && o.importStatus === 'existing_updated').length || 0,
+    [preview, selectedOrderIds],
+  );
 
   // Filter import history to show order_import batches
   const orderImportHistory = useMemo(() => {

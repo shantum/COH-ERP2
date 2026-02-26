@@ -41,6 +41,11 @@ const CHANNEL_OPTIONS: { value: Channel; label: string }[] = [
     { value: 'marketplace', label: 'Marketplaces' },
 ];
 
+const DEFAULT_COL_DEF = {
+    sortable: true,
+    resizable: true,
+};
+
 export default function Costing() {
     const navigate = useNavigate();
     const { period, channel } = Route.useSearch();
@@ -513,10 +518,7 @@ export default function Costing() {
                                     rowData={productData?.data ?? []}
                                     columnDefs={columnDefs}
                                     theme={compactThemeSmall}
-                                    defaultColDef={{
-                                        sortable: true,
-                                        resizable: true,
-                                    }}
+                                    defaultColDef={DEFAULT_COL_DEF}
                                     animateRows={true}
                                     pagination={true}
                                     paginationPageSize={20}

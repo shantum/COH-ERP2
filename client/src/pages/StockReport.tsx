@@ -74,6 +74,12 @@ function reasonLabel(reason: string): string {
     return REASON_LABELS[reason] ?? reason.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 }
 
+const DEFAULT_COL_DEF = {
+    sortable: true,
+    resizable: true,
+    suppressMovable: false,
+};
+
 // ============================================
 // MAIN COMPONENT
 // ============================================
@@ -433,11 +439,7 @@ export default function StockReport() {
                         columnDefs={columnDefs}
                         loading={snapshotQuery.isLoading}
                         domLayout="autoHeight"
-                        defaultColDef={{
-                            sortable: true,
-                            resizable: true,
-                            suppressMovable: false,
-                        }}
+                        defaultColDef={DEFAULT_COL_DEF}
                         getRowId={(params) => params.data.skuId}
                         animateRows={false}
                         suppressCellFocus

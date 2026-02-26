@@ -351,15 +351,14 @@ export const updateReconciliationItems = createServerFn({ method: 'POST' })
             };
         }
 
-        // Update each item
-        let updatedCount = 0;
-        for (const item of items) {
+        // Batch update all items in a single transaction
+        const updates = items.map((item) => {
             const variance =
                 item.physicalQty !== null && item.physicalQty !== undefined
                     ? item.physicalQty - item.systemQty
                     : null;
 
-            await prisma.inventoryReconciliationItem.update({
+            return prisma.inventoryReconciliationItem.update({
                 where: { id: item.id },
                 data: {
                     physicalQty: item.physicalQty,
@@ -368,8 +367,9 @@ export const updateReconciliationItems = createServerFn({ method: 'POST' })
                     notes: item.notes || null,
                 },
             });
-            updatedCount++;
-        }
+        });
+        await prisma.$transaction(updates);
+        const updatedCount = items.length;
 
         return {
             success: true,

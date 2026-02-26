@@ -3,7 +3,7 @@
  * Manages all state for the unified order modal
  */
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { getCustomerAddresses } from '../../../../server/functions/customers';
@@ -142,8 +142,16 @@ export function useUnifiedOrderModal({ order, initialMode, onNavigateToOrder }: 
   const [isSearchingCustomer, setIsSearchingCustomer] = useState(false);
   const [isAddingProduct, setIsAddingProduct] = useState(false);
 
-  // Initialize form values from order
+  // Initialize form values from order — keyed on order.id + key fields to avoid
+  // resetting user edits on every background TanStack Query refetch.
+  const orderSyncKey = `${order.id}-${order.status}-${order.customerId ?? ''}-${order.orderLines?.length ?? 0}`;
+  const prevOrderSyncKeyRef = useRef(orderSyncKey);
+
   useEffect(() => {
+    // Only re-initialize when the order truly changes (different ID or meaningful server-side update)
+    if (prevOrderSyncKeyRef.current === orderSyncKey && prevOrderSyncKeyRef.current !== '') return;
+    prevOrderSyncKeyRef.current = orderSyncKey;
+
     if (order) {
       // Get shopify details for fallback data
       const orderWithDetails = order as Order & {
@@ -228,7 +236,7 @@ export function useUnifiedOrderModal({ order, initialMode, onNavigateToOrder }: 
         selectedLineIds: new Set(packedLineIds),
       }));
     }
-  }, [order]);
+  }, [orderSyncKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Use selected customer ID (from search) or fall back to order's customer ID
   const activeCustomerId = editForm.customerId || order?.customerId;
@@ -268,7 +276,7 @@ export function useUnifiedOrderModal({ order, initialMode, onNavigateToOrder }: 
   // Handles exchange orders correctly (always calculates from lines)
   const orderTotal = useMemo(() => {
     return calculateOrderTotal(order).total;
-  }, [order]);
+  }, [order.orderLines, order.totalAmount, order.isExchange]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Mode change handler
   const handleModeChange = useCallback((newMode: ModalMode) => {

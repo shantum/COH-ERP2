@@ -503,20 +503,34 @@ export const importStyleCodes = createServerFn({ method: 'POST' })
                     }
                 }
 
-                // Perform updates (style codes can be shared across products)
+                // Batch update all products in a single transaction
                 let updated = 0;
                 let errors = 0;
 
-                for (const [productId, styleCode] of productUpdates) {
-                    try {
-                        await prisma.product.update({
-                            where: { id: productId },
-                            data: { styleCode },
-                        });
-                        updated++;
-                    } catch (err) {
-                        console.error(`Failed to update product ${productId}:`, err);
-                        errors++;
+                const updateOps = [...productUpdates].map(([productId, styleCode]) =>
+                    prisma.product.update({
+                        where: { id: productId },
+                        data: { styleCode },
+                    }),
+                );
+
+                try {
+                    await prisma.$transaction(updateOps);
+                    updated = updateOps.length;
+                } catch (err) {
+                    console.error('Batch style code update failed, falling back to individual:', err);
+                    // Fallback: try individually to identify which ones fail
+                    for (const [productId, styleCode] of productUpdates) {
+                        try {
+                            await prisma.product.update({
+                                where: { id: productId },
+                                data: { styleCode },
+                            });
+                            updated++;
+                        } catch (individualErr) {
+                            console.error(`Failed to update product ${productId}:`, individualErr);
+                            errors++;
+                        }
                     }
                 }
 

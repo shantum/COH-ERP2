@@ -137,6 +137,12 @@ function getChannelColor(channel: string): string {
 }
 
 // ============================================
+const DEFAULT_COL_DEF = {
+  sortable: true,
+  resizable: true,
+  filter: true,
+};
+
 // MAIN COMPONENT
 // ============================================
 
@@ -845,11 +851,7 @@ export default function Channels() {
                 <AgGridReact<ChannelOrderRow>
                   rowData={ordersData?.data || []}
                   columnDefs={columnDefs}
-                  defaultColDef={{
-                    sortable: true,
-                    resizable: true,
-                    filter: true,
-                  }}
+                  defaultColDef={DEFAULT_COL_DEF}
                   theme={compactThemeSmall}
                   loading={isOrdersLoading}
                   animateRows={false}

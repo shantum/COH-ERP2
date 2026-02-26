@@ -37,6 +37,12 @@ ModuleRegistry.registerModules([AllCommunityModule]);
 type StockFilter = 'all' | 'in_stock' | 'low_stock' | 'out_of_stock';
 type DemandPeriod = 14 | 30 | 60 | 90;
 
+const DEFAULT_COL_DEF = {
+    sortable: true,
+    resizable: true,
+    suppressMovable: false,
+};
+
 export default function Inventory() {
     const gridRef = useRef<AgGridReact>(null);
     const searchInputRef = useRef<HTMLInputElement>(null);
@@ -575,11 +581,7 @@ export default function Inventory() {
                             rowData={items}
                             columnDefs={columnDefs}
                             loading={isLoading}
-                            defaultColDef={{
-                                sortable: true,
-                                resizable: true,
-                                suppressMovable: false,
-                            }}
+                            defaultColDef={DEFAULT_COL_DEF}
                             animateRows={false}
                             suppressCellFocus={false}
                             getRowId={(params) => params.data.skuId}

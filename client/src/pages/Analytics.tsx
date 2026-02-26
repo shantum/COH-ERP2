@@ -35,6 +35,11 @@ const CHART_COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#E
 
 type DatePreset = '7d' | '30d' | '90d' | 'custom';
 
+const DEFAULT_COL_DEF = {
+    sortable: true,
+    resizable: true,
+};
+
 export default function Analytics() {
     // State
     const [datePreset, setDatePreset] = useState<DatePreset>('30d');
@@ -360,10 +365,7 @@ export default function Analytics() {
                                         rowData={data.breakdown ?? []}
                                         columnDefs={columnDefs}
                                         theme={compactThemeSmall}
-                                        defaultColDef={{
-                                            sortable: true,
-                                            resizable: true,
-                                        }}
+                                        defaultColDef={DEFAULT_COL_DEF}
                                         animateRows={true}
                                         pagination={true}
                                         paginationPageSize={20}

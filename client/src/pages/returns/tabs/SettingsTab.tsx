@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useQueryClient, useMutation } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import {
@@ -23,13 +23,24 @@ export function SettingsTab({ config, loading, onRefresh }: SettingsTabProps) {
     const [allowExpiredOverride, setAllowExpiredOverride] = useState(config?.allowExpiredOverride ?? true);
     const [hasChanges, setHasChanges] = useState(false);
 
-    // Sync local state when config loads/changes (only if user hasn't edited)
+    // Sync local state when config actually changes from server (not just on hasChanges toggle)
+    const prevConfigRef = useRef<string>('');
     useEffect(() => {
-        if (config && !hasChanges) {
-            setWindowDays(config.windowDays);
-            setWindowWarningDays(config.windowWarningDays);
-            setAutoRejectAfterDays(config.autoRejectAfterDays);
-            setAllowExpiredOverride(config.allowExpiredOverride ?? true);
+        if (!config) return;
+        const configKey = JSON.stringify({
+            w: config.windowDays,
+            ww: config.windowWarningDays,
+            ar: config.autoRejectAfterDays,
+            ae: config.allowExpiredOverride,
+        });
+        if (configKey !== prevConfigRef.current) {
+            prevConfigRef.current = configKey;
+            if (!hasChanges) {
+                setWindowDays(config.windowDays);
+                setWindowWarningDays(config.windowWarningDays);
+                setAutoRejectAfterDays(config.autoRejectAfterDays);
+                setAllowExpiredOverride(config.allowExpiredOverride ?? true);
+            }
         }
     }, [config, hasChanges]);
 

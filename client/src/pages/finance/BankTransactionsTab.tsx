@@ -144,12 +144,14 @@ function BankTransactionListView({ bank, search, updateSearch }: {
   });
 
   // Clear selection when filters/page change
-  const prevKeyRef = useRef('');
   const filterKey = `${bank}-${status}-${search.direction}-${search.matchStatus}-${search.search}-${search.page}`;
-  if (filterKey !== prevKeyRef.current) {
-    prevKeyRef.current = filterKey;
-    if (selectedIds.size > 0) setSelectedIds(new Set());
-  }
+  const prevFilterKeyRef = useRef(filterKey);
+  useEffect(() => {
+    if (filterKey !== prevFilterKeyRef.current) {
+      prevFilterKeyRef.current = filterKey;
+      setSelectedIds(new Set());
+    }
+  }, [filterKey]);
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ['finance'] });

@@ -5,7 +5,7 @@
  * On submit: resolves any unresolved SKU codes → IDs, creates order in ERP, pushes to Google Sheet.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { useNavigate } from '@tanstack/react-router';
@@ -222,8 +222,10 @@ export default function QuickOrder() {
 
     const goBack = () => navigate({ to: '/orders', search: { view: 'all', page: 1, limit: 250 } });
 
-    const channelsWithoutShopify =
-        channels?.filter((ch: { id: string; name: string }) => ch.name?.toLowerCase() !== 'shopify') || [];
+    const channelsWithoutShopify = useMemo(
+        () => channels?.filter((ch: { id: string; name: string }) => ch.name?.toLowerCase() !== 'shopify') || [],
+        [channels],
+    );
     const offlineChannel = useMemo(
         () => channelsWithoutShopify.find((ch: { id: string; name: string }) => ch.name?.trim().toLowerCase() === 'offline')
             || channelsWithoutShopify[0]
@@ -312,7 +314,7 @@ export default function QuickOrder() {
         }
     };
 
-    const handlePhoneMatchSelect = (customer: CustomerSearchItem) => {
+    const handlePhoneMatchSelect = useCallback((customer: CustomerSearchItem) => {
         setCustomerId(customer.id);
         setCustomerName(getCustomerDisplayName(customer));
         setEmail(customer.email || '');
@@ -320,7 +322,7 @@ export default function QuickOrder() {
         setPhoneAutoMatchedKey(normalizePhone(customer.phone || phone));
         setIsPhoneFieldFocused(false);
         void applyCustomerAddress(customer.id);
-    };
+    }, [phone]); // eslint-disable-line react-hooks/exhaustive-deps
 
     useEffect(() => {
         if (phoneDigits.length < 10) {
@@ -332,7 +334,7 @@ export default function QuickOrder() {
         if (exactPhoneMatch) {
             handlePhoneMatchSelect(exactPhoneMatch);
         }
-    }, [phoneDigits, exactPhoneMatch, phoneAutoMatchedKey]);
+    }, [phoneDigits, exactPhoneMatch, phoneAutoMatchedKey, handlePhoneMatchSelect]);
 
     // Exchange handlers
     const handleExchangeToggle = (on: boolean) => {

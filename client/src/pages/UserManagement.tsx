@@ -75,6 +75,11 @@ function AdminBadge({ isAdmin }: { isAdmin: boolean }) {
     );
 }
 
+const DEFAULT_COL_DEF = {
+    sortable: true,
+    resizable: true,
+};
+
 export default function UserManagement() {
     const queryClient = useQueryClient();
     const gridRef = useRef<AgGridReact>(null);
@@ -159,7 +164,15 @@ export default function UserManagement() {
         return () => clearTimeout(timer);
     }, [searchInput]);
 
-    // Column definitions
+    // Stable refs for mutation functions so columnDefs don't rebuild every render
+    const updateRoleMutateRef = useRef(updateRoleMutation.mutate);
+    updateRoleMutateRef.current = updateRoleMutation.mutate;
+    const updateUserMutateRef = useRef(updateUserMutation.mutate);
+    updateUserMutateRef.current = updateUserMutation.mutate;
+    const setSelectedUserRef = useRef(setSelectedUser);
+    setSelectedUserRef.current = setSelectedUser;
+
+    // Column definitions — deps are only truly structural values (roles list, permissions)
     const columnDefs = useMemo<ColDef<User>[]>(() => [
         {
             field: 'name',
@@ -201,7 +214,7 @@ export default function UserManagement() {
                             value={user.roleId || ''}
                             onChange={(e) => {
                                 if (e.target.value) {
-                                    updateRoleMutation.mutate({
+                                    updateRoleMutateRef.current({
                                         userId: user.id,
                                         roleId: e.target.value,
                                     });
@@ -270,7 +283,7 @@ export default function UserManagement() {
                             <button
                                 onClick={(e) => {
                                     e.stopPropagation();
-                                    setSelectedUser(user);
+                                    setSelectedUserRef.current(user);
                                 }}
                                 className="p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded"
                                 title="Edit permissions"
@@ -282,7 +295,7 @@ export default function UserManagement() {
                             <button
                                 onClick={(e) => {
                                     e.stopPropagation();
-                                    updateUserMutation.mutate({
+                                    updateUserMutateRef.current({
                                         id: user.id,
                                         data: { role: isAdmin ? 'staff' : 'admin' },
                                     });
@@ -300,7 +313,7 @@ export default function UserManagement() {
                             <button
                                 onClick={(e) => {
                                     e.stopPropagation();
-                                    updateUserMutation.mutate({
+                                    updateUserMutateRef.current({
                                         id: user.id,
                                         data: { isActive: !user.isActive },
                                     });
@@ -318,7 +331,7 @@ export default function UserManagement() {
                 );
             },
         },
-    ], [roles, hasPermission, updateRoleMutation, updateUserMutation]);
+    ], [roles, hasPermission]);
 
     // Stats
     const stats = useMemo(() => {
@@ -409,10 +422,7 @@ export default function UserManagement() {
                         rowData={users || []}
                         columnDefs={columnDefs}
                         loading={usersLoading}
-                        defaultColDef={{
-                            sortable: true,
-                            resizable: true,
-                        }}
+                        defaultColDef={DEFAULT_COL_DEF}
                         rowSelection="single"
                         onRowClicked={(e) => {
                             if (hasPermission('users:edit') && e.data) {
