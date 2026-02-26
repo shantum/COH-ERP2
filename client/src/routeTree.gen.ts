@@ -50,6 +50,7 @@ import { Route as AuthenticatedBusinessIndexRouteImport } from './routes/_authen
 import { Route as AuthenticatedReturnsReturnIdRouteImport } from './routes/_authenticated/returns_.$returnId'
 import { Route as AuthenticatedProductsNewRouteImport } from './routes/_authenticated/products_.new'
 import { Route as AuthenticatedOrdersOrderIdRouteImport } from './routes/_authenticated/orders_.$orderId'
+import { Route as AuthenticatedCustomersCustomerIdRouteImport } from './routes/_authenticated/customers_.$customerId'
 import { Route as AuthenticatedProductsProductSlugEditRouteImport } from './routes/_authenticated/products_/$productSlug/edit'
 
 const ShipmentsRoute = ShipmentsRouteImport.update({
@@ -270,6 +271,12 @@ const AuthenticatedOrdersOrderIdRoute =
     path: '/orders/$orderId',
     getParentRoute: () => AuthenticatedRoute,
   } as any)
+const AuthenticatedCustomersCustomerIdRoute =
+  AuthenticatedCustomersCustomerIdRouteImport.update({
+    id: '/customers_/$customerId',
+    path: '/customers/$customerId',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
 const AuthenticatedProductsProductSlugEditRoute =
   AuthenticatedProductsProductSlugEditRouteImport.update({
     id: '/products_/$productSlug/edit',
@@ -314,6 +321,7 @@ export interface FileRoutesByFullPath {
   '/stock-report': typeof AuthenticatedStockReportRoute
   '/tracking': typeof AuthenticatedTrackingRoute
   '/users': typeof AuthenticatedUsersRoute
+  '/customers/$customerId': typeof AuthenticatedCustomersCustomerIdRoute
   '/orders/$orderId': typeof AuthenticatedOrdersOrderIdRoute
   '/products/new': typeof AuthenticatedProductsNewRoute
   '/returns/$returnId': typeof AuthenticatedReturnsReturnIdRoute
@@ -357,6 +365,7 @@ export interface FileRoutesByTo {
   '/tracking': typeof AuthenticatedTrackingRoute
   '/users': typeof AuthenticatedUsersRoute
   '/': typeof AuthenticatedIndexRoute
+  '/customers/$customerId': typeof AuthenticatedCustomersCustomerIdRoute
   '/orders/$orderId': typeof AuthenticatedOrdersOrderIdRoute
   '/products/new': typeof AuthenticatedProductsNewRoute
   '/returns/$returnId': typeof AuthenticatedReturnsReturnIdRoute
@@ -402,6 +411,7 @@ export interface FileRoutesById {
   '/_authenticated/tracking': typeof AuthenticatedTrackingRoute
   '/_authenticated/users': typeof AuthenticatedUsersRoute
   '/_authenticated/': typeof AuthenticatedIndexRoute
+  '/_authenticated/customers_/$customerId': typeof AuthenticatedCustomersCustomerIdRoute
   '/_authenticated/orders_/$orderId': typeof AuthenticatedOrdersOrderIdRoute
   '/_authenticated/products_/new': typeof AuthenticatedProductsNewRoute
   '/_authenticated/returns_/$returnId': typeof AuthenticatedReturnsReturnIdRoute
@@ -447,6 +457,7 @@ export interface FileRouteTypes {
     | '/stock-report'
     | '/tracking'
     | '/users'
+    | '/customers/$customerId'
     | '/orders/$orderId'
     | '/products/new'
     | '/returns/$returnId'
@@ -490,6 +501,7 @@ export interface FileRouteTypes {
     | '/tracking'
     | '/users'
     | '/'
+    | '/customers/$customerId'
     | '/orders/$orderId'
     | '/products/new'
     | '/returns/$returnId'
@@ -534,6 +546,7 @@ export interface FileRouteTypes {
     | '/_authenticated/tracking'
     | '/_authenticated/users'
     | '/_authenticated/'
+    | '/_authenticated/customers_/$customerId'
     | '/_authenticated/orders_/$orderId'
     | '/_authenticated/products_/new'
     | '/_authenticated/returns_/$returnId'
@@ -841,6 +854,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedOrdersOrderIdRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/customers_/$customerId': {
+      id: '/_authenticated/customers_/$customerId'
+      path: '/customers/$customerId'
+      fullPath: '/customers/$customerId'
+      preLoaderRoute: typeof AuthenticatedCustomersCustomerIdRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/products_/$productSlug/edit': {
       id: '/_authenticated/products_/$productSlug/edit'
       path: '/products/$productSlug/edit'
@@ -881,6 +901,7 @@ interface AuthenticatedRouteChildren {
   AuthenticatedTrackingRoute: typeof AuthenticatedTrackingRoute
   AuthenticatedUsersRoute: typeof AuthenticatedUsersRoute
   AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
+  AuthenticatedCustomersCustomerIdRoute: typeof AuthenticatedCustomersCustomerIdRoute
   AuthenticatedOrdersOrderIdRoute: typeof AuthenticatedOrdersOrderIdRoute
   AuthenticatedProductsNewRoute: typeof AuthenticatedProductsNewRoute
   AuthenticatedReturnsReturnIdRoute: typeof AuthenticatedReturnsReturnIdRoute
@@ -919,6 +940,7 @@ const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedTrackingRoute: AuthenticatedTrackingRoute,
   AuthenticatedUsersRoute: AuthenticatedUsersRoute,
   AuthenticatedIndexRoute: AuthenticatedIndexRoute,
+  AuthenticatedCustomersCustomerIdRoute: AuthenticatedCustomersCustomerIdRoute,
   AuthenticatedOrdersOrderIdRoute: AuthenticatedOrdersOrderIdRoute,
   AuthenticatedProductsNewRoute: AuthenticatedProductsNewRoute,
   AuthenticatedReturnsReturnIdRoute: AuthenticatedReturnsReturnIdRoute,

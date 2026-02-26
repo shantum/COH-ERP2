@@ -269,7 +269,6 @@ export default function Customers() {
     const {
         modalType,
         selectedId: selectedCustomerId,
-        openModal,
         closeModal,
     } = useCustomersUrlModal();
 
@@ -335,11 +334,10 @@ export default function Customers() {
         }
     }, [customerOrderData, modalOrder, getOrdersFn]);
 
-    // Handle customer row click - now URL-driven for bookmarking/sharing
+    // Handle customer row click - navigate to full-page detail
     const handleCustomerClick = useCallback((customerId: string) => {
-        openModal('view', customerId);
-        setModalOrder(null); // Reset modal order to trigger fetch
-    }, [openModal]);
+        navigate({ to: '/customers/$customerId', params: { customerId } });
+    }, [navigate]);
 
     // Close modal - removes modal params from URL
     const handleCloseModal = useCallback(() => {
