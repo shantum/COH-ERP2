@@ -137,11 +137,13 @@ export function ReturnPrimeCsvEnrichmentDialog({ open, onOpenChange, onImported 
     setEnrichOrderLines(true);
     previewMutation.reset();
     executeMutation.reset();
-  }, [previewMutation, executeMutation]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- mutation .reset() refs are stable
+  }, []);
 
   useEffect(() => {
     if (!open) resetState();
-  }, [open, resetState]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   const previewRows = useMemo(() => preview?.rows.slice(0, 200) || [], [preview]);
   const actionableCount = (preview?.creates || 0) + (preview?.updates || 0);
