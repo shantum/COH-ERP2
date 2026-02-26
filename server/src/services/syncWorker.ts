@@ -67,25 +67,19 @@ type SyncOrderResult = 'created' | 'updated' | 'skipped';
  * - DEEP: Full import, aggressive memory management (initial setup, recovery)
  * - INCREMENTAL: Fast catch-up using date filters (hourly/daily refresh)
  */
+/** Per-job config resolved from sync mode. Passed as local variable, not stored on the singleton. */
+interface JobConfig {
+    batchSize: number;
+    batchDelay: number;
+    gcInterval: number;
+}
+
 class SyncWorker {
     // Active jobs tracker (in-memory, single instance only)
     private activeJobs: Map<string, boolean>;
 
-    // Default settings (overridden per sync mode)
-    private batchSize: number;
-    private batchDelay: number;
-    private maxErrors: number;
-    private gcInterval: number;
-    private disconnectInterval: number;
-
     constructor() {
         this.activeJobs = new Map();
-        // Initialize with incremental defaults from config
-        this.batchSize = SYNC_WORKER_CONFIG.incremental.batchSize;
-        this.batchDelay = SYNC_WORKER_CONFIG.incremental.batchDelay;
-        this.maxErrors = SYNC_WORKER_CONFIG.maxErrors;
-        this.gcInterval = SYNC_WORKER_CONFIG.incremental.gcInterval;
-        this.disconnectInterval = SYNC_WORKER_CONFIG.incremental.disconnectInterval;
     }
 
     /**
@@ -98,16 +92,16 @@ class SyncWorker {
     }
 
     /**
-     * Configure settings based on sync mode
+     * Get config for a sync mode (returns a new object — safe for concurrent jobs)
      */
-    private configureModeSettings(syncMode: SyncMode): void {
+    private getJobConfig(syncMode: SyncMode): JobConfig {
         const mode = this.normalizeMode(syncMode);
         const config = mode === 'deep' ? SYNC_WORKER_CONFIG.deep : SYNC_WORKER_CONFIG.incremental;
-
-        this.batchSize = config.batchSize;
-        this.batchDelay = config.batchDelay;
-        this.gcInterval = config.gcInterval;
-        this.disconnectInterval = config.disconnectInterval;
+        return {
+            batchSize: config.batchSize,
+            batchDelay: config.batchDelay,
+            gcInterval: config.gcInterval,
+        };
     }
 
     /**
@@ -321,8 +315,8 @@ class SyncWorker {
         const rawSyncMode = job.syncMode as SyncMode;
         const effectiveMode = this.normalizeMode(rawSyncMode);
 
-        // Configure batch settings based on sync mode
-        this.configureModeSettings(rawSyncMode);
+        // Get config as local variable (safe for concurrent jobs)
+        const cfg = this.getJobConfig(rawSyncMode);
 
         // Calculate date filters based on sync mode
         let createdAtMin: string | null = null;
@@ -391,7 +385,7 @@ class SyncWorker {
                 const fetchOptions: Record<string, any> = {
                     since_id: sinceId,
                     status: 'any',
-                    limit: this.batchSize,
+                    limit: cfg.batchSize,
                 };
 
                 // Apply date filters (don't combine with since_id for pagination)
@@ -432,7 +426,7 @@ class SyncWorker {
                     }
                 } catch (err) {
                     batchErrors++;
-                    if (errorLog.length < this.maxErrors) {
+                    if (errorLog.length < SYNC_WORKER_CONFIG.maxErrors) {
                         errorLog.push(`Order ${shopifyOrder.order_number}: ${(err as Error).message}`);
                     }
                 }
@@ -451,30 +445,23 @@ class SyncWorker {
                     errors: { increment: batchErrors },
                     lastProcessedId: sinceId,
                     currentBatch: batchNumber,
-                    errorLog: JSON.stringify(errorLog.slice(-this.maxErrors)),
+                    errorLog: JSON.stringify(errorLog.slice(-SYNC_WORKER_CONFIG.maxErrors)),
                 }
             });
 
             // Rate limit delay
-            await new Promise(resolve => setTimeout(resolve, this.batchDelay));
+            await new Promise(resolve => setTimeout(resolve, cfg.batchDelay));
 
             // Memory cleanup: Request GC periodically
-            if (batchNumber % this.gcInterval === 0) {
+            if (batchNumber % cfg.gcInterval === 0) {
                 if (global.gc) {
                     global.gc();
                     syncLogger.debug({ jobId, batchNumber }, 'GC triggered');
                 }
             }
 
-            // Prisma connection cleanup: Disconnect periodically to release memory
-            if (batchNumber % this.disconnectInterval === 0) {
-                await prisma.$disconnect();
-                syncLogger.debug({ jobId, batchNumber }, 'Prisma disconnected');
-                await new Promise(r => setTimeout(r, 500));
-            }
-
             // Stop if batch was smaller than limit (no more records)
-            if (shopifyOrders.length < this.batchSize) {
+            if (shopifyOrders.length < cfg.batchSize) {
                 break;
             }
         }
@@ -525,6 +512,9 @@ class SyncWorker {
         let job = await prisma.syncJob.findUnique({ where: { id: jobId } });
         if (!job) return;
 
+        // Local config — safe for concurrent jobs
+        const cfg = this.getJobConfig(job.syncMode as SyncMode);
+
         if (!job.totalRecords) {
             const totalCount = await shopifyClient.getCustomerCount();
             await prisma.syncJob.update({
@@ -549,7 +539,7 @@ class SyncWorker {
 
             const shopifyCustomers = await shopifyClient.getCustomers({
                 since_id: sinceId || undefined,
-                limit: this.batchSize,
+                limit: cfg.batchSize,
             });
 
             if (shopifyCustomers.length === 0) break;
@@ -569,7 +559,7 @@ class SyncWorker {
                     else batchSkipped++;
                 } catch (err) {
                     batchErrors++;
-                    if (errorLog.length < this.maxErrors) {
+                    if (errorLog.length < SYNC_WORKER_CONFIG.maxErrors) {
                         errorLog.push(`Customer ${shopifyCustomer.id}: ${(err as Error).message}`);
                     }
                 }
@@ -587,24 +577,18 @@ class SyncWorker {
                     errors: { increment: batchErrors },
                     lastProcessedId: sinceId,
                     currentBatch: batchNumber,
-                    errorLog: JSON.stringify(errorLog.slice(-this.maxErrors)),
+                    errorLog: JSON.stringify(errorLog.slice(-SYNC_WORKER_CONFIG.maxErrors)),
                 }
             });
 
-            await new Promise(resolve => setTimeout(resolve, this.batchDelay));
+            await new Promise(resolve => setTimeout(resolve, cfg.batchDelay));
 
             // Memory cleanup: Request GC periodically
-            if (batchNumber % this.gcInterval === 0 && global.gc) {
+            if (batchNumber % cfg.gcInterval === 0 && global.gc) {
                 global.gc();
             }
 
-            // Prisma connection cleanup
-            if (batchNumber % this.disconnectInterval === 0) {
-                await prisma.$disconnect();
-                await new Promise(r => setTimeout(r, 500));
-            }
-
-            if (shopifyCustomers.length < this.batchSize) break;
+            if (shopifyCustomers.length < cfg.batchSize) break;
         }
 
         await prisma.syncJob.update({
@@ -643,7 +627,7 @@ class SyncWorker {
                     if (result.updated) updated += result.updated;
                 } catch (err) {
                     errors++;
-                    if (errorLog.length < this.maxErrors) {
+                    if (errorLog.length < SYNC_WORKER_CONFIG.maxErrors) {
                         errorLog.push(`Product ${shopifyProduct.title}: ${(err as Error).message}`);
                     }
                 }

@@ -576,6 +576,11 @@ export function useOrderSSE({
             }));
             es.close();
 
+            // Clear any pending reconnect to prevent fan-out
+            if (reconnectTimeoutRef.current) {
+                clearTimeout(reconnectTimeoutRef.current);
+            }
+
             // Exponential backoff for reconnection (max 30 seconds)
             const delay = Math.min(1000 * Math.pow(2, reconnectAttempts.current), 30000);
             reconnectAttempts.current++;

@@ -183,19 +183,18 @@ class LogBuffer {
         }
 
         this.isWriting = true;
+        const entries = [...this.writeQueue];
+        this.writeQueue = [];
 
         try {
-            const entries = [...this.writeQueue];
-            this.writeQueue = [];
-
             const lines = entries.map(entry => JSON.stringify(entry)).join('\n') + '\n';
 
             await fs.promises.appendFile(this.logFilePath, lines, 'utf-8');
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
             console.error('[LogBuffer] Failed to write logs to file:', errorMessage);
-            // Put failed entries back in the queue
-            this.writeQueue.unshift(...this.writeQueue);
+            // Put failed entries back in the queue for retry
+            this.writeQueue.unshift(...entries);
         } finally {
             this.isWriting = false;
 

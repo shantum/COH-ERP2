@@ -33,6 +33,7 @@ export interface EnrichmentPreview {
 
 const TTL_MS = 15 * 60 * 1000; // 15 minutes
 const CLEANUP_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+const MAX_ENTRIES = 20; // Cap to prevent unbounded memory growth (~200MB worst case at 10MB each)
 
 const cache = new Map<string, CachedPreview>();
 
@@ -51,6 +52,11 @@ const cleanupTimer = setInterval(cleanup, CLEANUP_INTERVAL_MS);
 cleanupTimer.unref(); // Don't keep process alive
 
 export function set(id: string, data: CachedPreview): void {
+  // Evict oldest entry if at capacity
+  if (cache.size >= MAX_ENTRIES && !cache.has(id)) {
+    const oldestKey = cache.keys().next().value;
+    if (oldestKey) cache.delete(oldestKey);
+  }
   cache.set(id, data);
 }
 

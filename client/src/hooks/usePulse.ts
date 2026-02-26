@@ -109,6 +109,11 @@ export function usePulse(enabled = true) {
             setIsConnected(false);
             es.close();
 
+            // Clear any pending reconnect to prevent fan-out
+            if (reconnectTimeoutRef.current) {
+                clearTimeout(reconnectTimeoutRef.current);
+            }
+
             // Exponential backoff: 1s, 2s, 4s, 8s, ... max 30s
             const delay = Math.min(1000 * Math.pow(2, reconnectAttempts.current), 30000);
             reconnectAttempts.current++;

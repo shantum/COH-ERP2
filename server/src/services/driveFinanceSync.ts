@@ -43,6 +43,7 @@ let isRunning = false;
 let lastSyncAt: Date | null = null;
 let lastSyncResult: { uploaded: number; errors: number } | null = null;
 let syncInterval: ReturnType<typeof setInterval> | null = null;
+let startupTimeout: ReturnType<typeof setTimeout> | null = null;
 
 /** In-memory cache: "parentId/folderName" → folderId */
 const folderCache = new Map<string, string>();
@@ -393,7 +394,8 @@ function start(): void {
     driveLogger.info({ intervalMinutes: SYNC_INTERVAL_MS / 60_000 }, 'Drive sync scheduler starting');
 
     // First run after startup delay
-    setTimeout(() => {
+    startupTimeout = setTimeout(() => {
+        startupTimeout = null;
         trackWorkerRun('drive_sync', syncAllPendingFiles, 'startup').catch(() => {});
     }, STARTUP_DELAY_MS);
 
@@ -404,6 +406,10 @@ function start(): void {
 }
 
 function stop(): void {
+    if (startupTimeout) {
+        clearTimeout(startupTimeout);
+        startupTimeout = null;
+    }
     if (syncInterval) {
         clearInterval(syncInterval);
         syncInterval = null;

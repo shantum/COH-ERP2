@@ -50,11 +50,15 @@ let reconcileInterval: ReturnType<typeof setInterval> | null = null;
 let statusSyncInterval: ReturnType<typeof setInterval> | null = null;
 let awbSyncInterval: ReturnType<typeof setInterval> | null = null;
 let cacheCleanupInterval: ReturnType<typeof setInterval> | null = null;
+// Startup timeout handles (must be cancellable on shutdown)
+let reconcileStartupTimeout: ReturnType<typeof setTimeout> | null = null;
+let cleanupStartupTimeout: ReturnType<typeof setTimeout> | null = null;
 
 function startIntervalWorkers(): void {
   // Sheet order reconciler — catches orders missed due to crashes/downtime
   // Runs immediately on startup (with delay), then every 2 min
-  setTimeout(() => {
+  reconcileStartupTimeout = setTimeout(() => {
+    reconcileStartupTimeout = null;
     console.log('[SheetReconciler] Running startup reconciliation...');
     reconcileSheetOrders().catch(() => {});
   }, 15_000);
@@ -82,18 +86,25 @@ function startIntervalWorkers(): void {
     }
   }, 60 * 60 * 1000);
 
-  setTimeout(() => {
+  cleanupStartupTimeout = setTimeout(() => {
+    cleanupStartupTimeout = null;
     console.log('[CacheCleanup] Running startup cleanup...');
     trackWorkerRun('cache_cleanup', () => runAllCleanup() as Promise<unknown>, 'startup').catch(err =>
       console.error('[CacheCleanup] Startup cleanup error:', err)
     );
   }, 30_000);
 
-  // Register interval shutdown handlers
-  shutdownCoordinator.register('sheetReconciler', () => { if (reconcileInterval) clearInterval(reconcileInterval); }, 1000);
+  // Register interval and startup timeout shutdown handlers
+  shutdownCoordinator.register('sheetReconciler', () => {
+    if (reconcileStartupTimeout) clearTimeout(reconcileStartupTimeout);
+    if (reconcileInterval) clearInterval(reconcileInterval);
+  }, 1000);
   shutdownCoordinator.register('sheetStatusSync', () => { if (statusSyncInterval) clearInterval(statusSyncInterval); }, 1000);
   shutdownCoordinator.register('sheetAwbSync', () => { if (awbSyncInterval) clearInterval(awbSyncInterval); }, 1000);
-  shutdownCoordinator.register('cacheCleanup', () => { if (cacheCleanupInterval) clearInterval(cacheCleanupInterval); }, 1000);
+  shutdownCoordinator.register('cacheCleanup', () => {
+    if (cleanupStartupTimeout) clearTimeout(cleanupStartupTimeout);
+    if (cacheCleanupInterval) clearInterval(cacheCleanupInterval);
+  }, 1000);
 }
 
 export async function startAllWorkers(): Promise<void> {

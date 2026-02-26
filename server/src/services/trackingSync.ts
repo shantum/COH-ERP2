@@ -109,6 +109,7 @@ const BATCH_SIZE = 10;
 // ============================================
 
 let syncInterval: NodeJS.Timeout | null = null;
+let startupTimeout: NodeJS.Timeout | null = null;
 let isRunning = false;
 let lastSyncAt: Date | null = null;
 let lastSyncResult: SyncResult | null = null;
@@ -472,7 +473,8 @@ function start(): void {
     trackingLogger.info({ intervalMinutes: SYNC_INTERVAL_MS / 1000 / 60 }, 'Starting scheduler');
 
     // Run 2 minutes after startup (let server stabilize)
-    setTimeout(() => {
+    startupTimeout = setTimeout(() => {
+        startupTimeout = null;
         trackWorkerRun('tracking_sync', runTrackingSync, 'startup').catch(() => {});
     }, 2 * 60 * 1000);
 
@@ -486,6 +488,10 @@ function start(): void {
  * Stop the scheduled sync
  */
 function stop(): void {
+    if (startupTimeout) {
+        clearTimeout(startupTimeout);
+        startupTimeout = null;
+    }
     if (syncInterval) {
         clearInterval(syncInterval);
         syncInterval = null;
