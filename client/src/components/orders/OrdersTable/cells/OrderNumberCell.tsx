@@ -14,7 +14,7 @@ export const OrderNumberCell = memo(function OrderNumberCell({ row, handlersRef 
         <button
             onClick={(e) => {
                 e.stopPropagation();
-                onViewOrder(row.orderId);
+                onViewOrder(row.orderNumber);
             }}
             className="text-blue-600 hover:text-blue-800 hover:underline font-medium"
             title={`View order ${row.orderNumber}`}

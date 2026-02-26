@@ -11,10 +11,10 @@ export const ALL_COLUMN_IDS = [
 
 export type ColumnId = typeof ALL_COLUMN_IDS[number];
 
-// Columns shown by default
+// Columns shown by default (Shopify-style: lean set, extras toggleable via column menu)
 export const DEFAULT_VISIBLE_COLUMNS: ColumnId[] = [
-    'orderInfo', 'channel', 'customerInfo', 'paymentInfo',
-    'productName', 'qty', 'unitPrice', 'mrp', 'discount', 'cost', 'margin', 'fabricColour', 'fabricBalance',
+    'orderInfo', 'customerInfo', 'paymentInfo',
+    'productName', 'qty', 'unitPrice',
     'trackingInfo', 'trackingStatus', 'notes',
 ];
 

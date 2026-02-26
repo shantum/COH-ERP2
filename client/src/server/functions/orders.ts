@@ -1107,8 +1107,12 @@ export const getOrderById = createServerFn({ method: 'GET' })
         try {
             const prisma = await getPrisma();
 
+            const where = 'id' in data
+                ? { id: data.id }
+                : { orderNumber: data.orderNumber };
+
             const order = await prisma.order.findUnique({
-                where: { id: data.id },
+                where,
                 include: {
                     customer: {
                         select: {

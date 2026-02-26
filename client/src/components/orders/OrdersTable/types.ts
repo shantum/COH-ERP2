@@ -15,7 +15,7 @@ export type OrderViewType = 'all' | 'in_transit' | 'delivered' | 'rto' | 'cancel
  * Dynamic values accessed via ref for stable column context.
  */
 export interface DynamicColumnHandlers {
-    onViewOrder: (orderId: string) => void;
+    onViewOrder: (orderNumber: string) => void;
     onViewCustomer: (order: Order) => void;
 }
 
@@ -43,6 +43,6 @@ export interface CellProps {
 export interface OrdersTableProps {
     rows: FlattenedOrderRow[];
     currentView?: OrderViewType;
-    onViewOrder: (orderId: string) => void;
+    onViewOrder: (orderNumber: string) => void;
     onViewCustomer: (order: Order) => void;
 }

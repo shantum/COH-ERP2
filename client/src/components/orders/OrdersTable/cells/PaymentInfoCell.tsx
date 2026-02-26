@@ -1,12 +1,11 @@
 /**
- * PaymentInfoCell - Order value, payment method, discount indicator
- * Line 1: Order value + discount icon (if applicable)
- * Line 2: COD/Prepaid
+ * PaymentInfoCell - Order value + payment status pill badge (Shopify-style)
+ * Line 1: Order value + discount icon
+ * Line 2: Payment pill badge (Paid = green, COD = amber)
  */
 
 import { memo } from 'react';
 import type { FlattenedOrderRow } from '../../../../utils/orderHelpers';
-import { cn } from '../../../../lib/utils';
 import { Tag } from 'lucide-react';
 
 interface PaymentInfoCellProps {
@@ -24,7 +23,7 @@ export const PaymentInfoCell = memo(function PaymentInfoCell({ row }: PaymentInf
     const discountCode = row.discountCodes;
 
     return (
-        <div className="flex flex-col justify-center leading-tight py-0.5 min-w-0">
+        <div className="flex flex-col justify-center leading-tight py-0.5 min-w-0 gap-1">
             {/* Line 1: Order value + discount icon */}
             <div className="flex items-center gap-1.5">
                 <span
@@ -39,14 +38,15 @@ export const PaymentInfoCell = memo(function PaymentInfoCell({ row }: PaymentInf
                     </span>
                 )}
             </div>
-            {/* Line 2: Payment method */}
+            {/* Line 2: Payment status pill badge */}
             <span
-                className={cn(
-                    'text-[11px]',
-                    isCod ? 'text-amber-600' : 'text-emerald-600'
-                )}
+                className={
+                    isCod
+                        ? 'inline-flex items-center w-fit px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-amber-100 text-amber-700'
+                        : 'inline-flex items-center w-fit px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-emerald-100 text-emerald-700'
+                }
             >
-                {isCod ? 'COD' : 'Prepaid'}
+                {isCod ? 'COD' : 'Paid'}
             </span>
         </div>
     );

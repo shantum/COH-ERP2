@@ -38,27 +38,26 @@ export const TrackingStatusCell = memo(function TrackingStatusCell({ row }: Trac
     const lastUpdate = formatLastUpdate(lastTrackingTime ?? null);
 
     return (
-        <div className="flex items-center gap-1.5">
-            <img
-                src={ithinkLogo}
-                alt="iThink"
-                className="w-4 h-4 object-contain shrink-0"
-            />
-            <div className="flex flex-col leading-tight min-w-0">
-                <span
-                    className={cn(
-                        'font-medium whitespace-nowrap text-[11px]',
-                        style.text
-                    )}
-                >
-                    {style.label}
-                </span>
-                {lastUpdate && (
-                    <span className="text-[10px] text-gray-400">
-                        {lastUpdate}
-                    </span>
+        <div className="flex flex-col gap-1">
+            {/* Fulfillment status pill badge */}
+            <span
+                className={cn(
+                    'inline-flex items-center w-fit px-1.5 py-0.5 rounded-full text-[10px] font-medium',
+                    style.bg, style.text
                 )}
-            </div>
+            >
+                {style.label}
+            </span>
+            {lastUpdate && (
+                <span className="text-[10px] text-gray-400 flex items-center gap-1">
+                    <img
+                        src={ithinkLogo}
+                        alt="iThink"
+                        className="w-3 h-3 object-contain shrink-0"
+                    />
+                    {lastUpdate}
+                </span>
+            )}
         </div>
     );
 });

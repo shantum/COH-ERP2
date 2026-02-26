@@ -1,11 +1,11 @@
 /**
- * Orders page - Monitoring dashboard
+ * Orders page - Monitoring dashboard (Shopify-style)
  * Views: All Orders, In Transit, Delivered, RTO, Cancelled
+ * Analytics summary cards + clean table with pill badges
  */
 
-import { useState, useMemo, useCallback, lazy, Suspense } from 'react';
+import { useState, useCallback, lazy, Suspense } from 'react';
 import { useNavigate } from '@tanstack/react-router';
-import { useQueryClient, useQuery } from '@tanstack/react-query';
 import { Route } from '../routes/_authenticated/orders';
 import { Plus, RefreshCw, ChevronLeft, ChevronRight, X, Search } from 'lucide-react';
 
@@ -15,11 +15,7 @@ import { useSearchOrders } from '../hooks/useSearchOrders';
 import { useOrdersMutations } from '../hooks/useOrdersMutations';
 import { useOrderSSE } from '../hooks/useOrderSSE';
 import { useDebounce } from '../hooks/useDebounce';
-import { useOrdersUrlModal, type OrderModalType } from '../hooks/useUrlModal';
-import { invalidateAllOrderViewsStale } from '../hooks/orders/orderMutationUtils';
-
-// Server functions
-import { getOrderById } from '../server/functions/orders';
+import { useOrdersUrlModal } from '../hooks/useUrlModal';
 
 // Components
 import {
@@ -28,25 +24,14 @@ import {
     GlobalOrderSearch,
     OrderViewTabs,
 } from '../components/orders';
+import { OrdersAnalyticsBar } from '../components/orders/OrdersAnalyticsBar';
 
 // Lazy load modals - only loaded when user opens them
 const CreateOrderModal = lazy(() => import('../components/orders/CreateOrderModal'));
-const UnifiedOrderModal = lazy(() => import('../components/orders/UnifiedOrderModal'));
 import type { Order } from '../types';
 import type { OrdersSearchParams } from '@coh/shared';
 
-// Type for the derived order objects from useUnifiedOrdersData
-interface DerivedOrder {
-    id: string;
-    orderNumber: string;
-    status: string;
-    isArchived: boolean;
-    releasedToShipped: boolean;
-    releasedToCancelled: boolean;
-}
-
 export default function Orders() {
-    const queryClient = useQueryClient();
     // Get loader data from route (SSR pre-fetched data)
     const loaderData = Route.useLoaderData();
 
@@ -83,16 +68,14 @@ export default function Orders() {
     const isSearchMode = debouncedSearch.length >= 2;
     const [searchPage, setSearchPage] = useState(1);
 
-    // URL-driven modal state
+    // URL-driven modal state (only used for create now)
     const {
         modalType,
-        selectedId: modalOrderId,
         openModal,
         closeModal,
     } = useOrdersUrlModal();
 
     const showCreateOrder = modalType === 'create';
-    const unifiedModalMode = (modalType === 'view' || modalType === 'edit' || modalType === 'ship' || modalType === 'customer') ? modalType : 'view';
 
     // Real-time updates via SSE
     const { isConnected: isSSEConnected } = useOrderSSE({ currentView: view, page, limit });
@@ -100,7 +83,6 @@ export default function Orders() {
     // Data hook - simplified
     const {
         rows: serverRows,
-        orders,
         pagination: viewPagination,
         viewCounts,
         viewCountsLoading,
@@ -139,37 +121,19 @@ export default function Orders() {
     const activePage = isSearchMode ? searchPage : page;
     const setActivePage = isSearchMode ? setSearchPage : setPage;
 
-    // Find the order for the modal
-    const orderFromList = useMemo(() => {
-        if (!modalOrderId || !orders) return null;
-        const found = (orders as DerivedOrder[]).find((o) => o.id === modalOrderId);
-        return found ? (found as unknown as Order) : null;
-    }, [modalOrderId, orders]);
+    // Navigate to order detail page by order number (human-readable URL)
+    const handleViewOrderById = useCallback((orderNumber: string) => {
+        navigate({ to: '/orders/$orderId', params: { orderId: orderNumber } });
+    }, [navigate]);
 
-    // Fetch order directly when orderId is in URL but not in loaded list
-    const { data: fetchedOrder, isLoading: isLoadingModalOrder } = useQuery({
-        queryKey: ['order', modalOrderId],
-        queryFn: () => getOrderById({ data: { id: modalOrderId! } }),
-        enabled: !!modalOrderId && !orderFromList && modalType !== null,
-        staleTime: 30 * 1000,
-    });
-
-    const unifiedModalOrder = orderFromList || (fetchedOrder as unknown as Order) || null;
-
-    // Modal handlers
+    // View customer navigates to order detail page
     const handleViewCustomer = useCallback((order: Order) => {
-        openModal('customer' as OrderModalType, order.id);
-    }, [openModal]);
-
-    const handleViewOrderById = useCallback((orderId: string) => {
-        openModal('view' as OrderModalType, orderId);
-    }, [openModal]);
+        navigate({ to: '/orders/$orderId', params: { orderId: order.orderNumber } });
+    }, [navigate]);
 
     // Mutations hook
     const mutations = useOrdersMutations({
         onCreateSuccess: () => closeModal(),
-        onDeleteSuccess: () => closeModal(),
-        onEditSuccess: () => closeModal(),
         currentView: view,
         page,
     });
@@ -201,6 +165,9 @@ export default function Orders() {
 
     return (
         <div className="space-y-1.5">
+            {/* Analytics Summary Cards */}
+            <OrdersAnalyticsBar />
+
             {/* Header Bar */}
             <div className="flex items-center justify-between gap-2 px-3 py-1.5 bg-white border border-gray-200 rounded-lg">
                 <h1 className="text-sm font-semibold text-gray-900 whitespace-nowrap">Orders</h1>
@@ -218,14 +185,14 @@ export default function Orders() {
                         className="btn-primary flex items-center gap-1 text-[11px] px-2 py-1 whitespace-nowrap"
                     >
                         <Plus size={12} />
-                        New
+                        Create order
                     </button>
                 </div>
             </div>
 
             {/* Main Content Card */}
             <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-                {/* Top Toolbar */}
+                {/* Top Toolbar - Tabs + Controls */}
                 <div className="flex items-center justify-between gap-2 px-2 py-1 border-b border-gray-100 bg-gray-50/50">
                     <div className="flex items-center gap-1.5">
                         {isSearchMode ? (
@@ -330,7 +297,7 @@ export default function Orders() {
                 </div>
             </div>
 
-            {/* Modals - lazy loaded */}
+            {/* Create Order Modal - lazy loaded */}
             <Suspense fallback={null}>
                 {showCreateOrder && (
                     <CreateOrderModal
@@ -338,27 +305,6 @@ export default function Orders() {
                         onCreate={(data) => mutations.createOrder.mutate(data)}
                         onClose={closeModal}
                         isCreating={mutations.createOrder.isPending}
-                    />
-                )}
-
-                {isLoadingModalOrder && modalOrderId && !unifiedModalOrder && (
-                    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-                        <div className="bg-white rounded-lg p-6 flex items-center gap-3">
-                            <RefreshCw className="h-5 w-5 animate-spin text-primary-600" />
-                            <span>Loading order...</span>
-                        </div>
-                    </div>
-                )}
-
-                {unifiedModalOrder && (
-                    <UnifiedOrderModal
-                        order={unifiedModalOrder}
-                        initialMode={unifiedModalMode}
-                        onClose={closeModal}
-                        onSuccess={() => {
-                            closeModal();
-                            invalidateAllOrderViewsStale(queryClient);
-                        }}
                     />
                 )}
             </Suspense>

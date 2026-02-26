@@ -60,7 +60,7 @@ export const OrderCustomerCell = memo(function OrderCustomerCell({ row, handlers
                 <button
                     onClick={(e) => {
                         e.stopPropagation();
-                        onViewOrder(row.orderId);
+                        onViewOrder(row.orderNumber);
                     }}
                     className="text-blue-600 hover:text-blue-800 hover:underline font-semibold shrink-0"
                     title={`View order ${row.orderNumber}`}

@@ -1,17 +1,16 @@
 /**
  * OrderInfoCell - Order number + date/time display
- * Layout: Date & relative time (left) | Order number (right, bold)
+ * Layout: Date & relative time (left) | Order number (right, bold link)
  */
 
 import { memo } from 'react';
+import { Link } from '@tanstack/react-router';
 import type { CellProps } from '../types';
 import { cn } from '../../../../lib/utils';
 import { formatDateTime } from '../utils/dateFormatters';
 
-export const OrderInfoCell = memo(function OrderInfoCell({ row, handlersRef }: CellProps) {
+export const OrderInfoCell = memo(function OrderInfoCell({ row }: CellProps) {
     if (!row.isFirstLine) return null;
-
-    const { onViewOrder } = handlersRef.current;
 
     const date = new Date(row.orderDate);
     const { dateStr, relativeStr, isOld } = formatDateTime(date);
@@ -30,12 +29,11 @@ export const OrderInfoCell = memo(function OrderInfoCell({ row, handlersRef }: C
                 <span className="text-[10px] leading-tight">{relativeStr}</span>
             </div>
 
-            {/* Order number */}
-            <button
-                onClick={(e) => {
-                    e.stopPropagation();
-                    onViewOrder(row.orderId);
-                }}
+            {/* Order number - Link to detail page (ctrl+click opens new tab) */}
+            <Link
+                to="/orders/$orderId"
+                params={{ orderId: row.orderNumber }}
+                onClick={(e) => e.stopPropagation()}
                 className={cn(
                     'hover:text-blue-600 hover:underline font-bold truncate max-w-[80px]',
                     row.orderNumber.length > 8 ? 'text-xs text-gray-700' : 'text-base text-gray-800'
@@ -43,7 +41,7 @@ export const OrderInfoCell = memo(function OrderInfoCell({ row, handlersRef }: C
                 title={row.orderNumber}
             >
                 {row.orderNumber}
-            </button>
+            </Link>
         </div>
     );
 });

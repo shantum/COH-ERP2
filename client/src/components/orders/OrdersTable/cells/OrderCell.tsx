@@ -132,7 +132,7 @@ export const OrderCell = memo(function OrderCell({ row, handlersRef }: CellProps
                     <button
                         onClick={(e) => {
                             e.stopPropagation();
-                            onViewOrder(row.orderId);
+                            onViewOrder(row.orderNumber);
                         }}
                         className="text-gray-800 hover:text-blue-600 hover:underline font-semibold shrink-0 w-12"
                         title={`View order ${row.orderNumber}`}

@@ -204,9 +204,10 @@ export interface SearchAllResponse {
 // GET ORDER BY ID
 // ============================================
 
-export const getOrderByIdInputSchema = z.object({
-    id: z.string().uuid('Invalid order ID'),
-});
+export const getOrderByIdInputSchema = z.union([
+    z.object({ id: z.string().uuid('Invalid order ID') }),
+    z.object({ orderNumber: z.string().min(1, 'Order number is required') }),
+]);
 
 export type GetOrderByIdInput = z.infer<typeof getOrderByIdInputSchema>;
 
