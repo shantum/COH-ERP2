@@ -688,7 +688,7 @@ function ReturnRow({ row }: { row: ActiveReturnLine }) {
             {/* Order */}
             <td className="px-4 py-3">
                 <a
-                    href={`/orders?modal=view&orderId=${row.orderId}`}
+                    href={`/orders/${row.orderId}`}
                     className="text-sm text-blue-600 hover:underline font-medium"
                 >
                     #{row.orderNumber}

@@ -331,7 +331,7 @@ export function ActionQueueTab({
                                                     )}
                                                     {item.returnExchangeOrderId && (
                                                         <a
-                                                            href={`/orders?modal=view&orderId=${item.returnExchangeOrderId}`}
+                                                            href={`/orders/${item.returnExchangeOrderId}`}
                                                             className="px-2 py-0.5 text-[11px] font-semibold rounded-md bg-blue-50 text-blue-600 hover:bg-blue-100 flex items-center gap-1 transition-colors"
                                                         >
                                                             <ExternalLink size={10} />

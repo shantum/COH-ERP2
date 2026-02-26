@@ -495,7 +495,7 @@ export default function ReturnDetail() {
                                 </button>
                             </div>
                             <a
-                                href={`/orders?modal=view&orderId=${detail.orderId}`}
+                                href={`/orders/${detail.orderId}`}
                                 className="text-sm text-blue-600 hover:underline font-medium"
                             >
                                 #{detail.orderNumber}
@@ -945,7 +945,7 @@ export default function ReturnDetail() {
                                 <div className="mt-3 text-sm">
                                     <span className="text-gray-500">Exchange Order: </span>
                                     <a
-                                        href={`/orders?modal=view&orderId=${detail.returnExchangeOrderId}`}
+                                        href={`/orders/${detail.returnExchangeOrderId}`}
                                         className="text-blue-600 hover:underline font-medium"
                                     >
                                         View Exchange

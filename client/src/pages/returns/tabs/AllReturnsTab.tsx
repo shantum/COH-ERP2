@@ -201,7 +201,7 @@ function ReturnRow({ row, trackingMap }: { row: ActiveReturnLine; trackingMap?: 
         <tr className="hover:bg-gray-50">
             <td className="px-3 py-2">
                 <a
-                    href={`/orders?modal=view&orderId=${row.orderId}`}
+                    href={`/orders/${row.orderId}`}
                     className="text-blue-600 hover:underline font-medium"
                 >
                     {row.orderNumber}
@@ -252,7 +252,7 @@ function ReturnRow({ row, trackingMap }: { row: ActiveReturnLine; trackingMap?: 
             <td className="px-3 py-2">
                 {row.returnExchangeOrderId ? (
                     <a
-                        href={`/orders?modal=view&orderId=${row.returnExchangeOrderId}`}
+                        href={`/orders/${row.returnExchangeOrderId}`}
                         className="text-blue-600 hover:underline text-xs flex items-center gap-1"
                     >
                         <ExternalLink size={10} />
