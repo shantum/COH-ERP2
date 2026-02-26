@@ -1064,6 +1064,10 @@ export const getReturnDetail = createServerFn({ method: 'POST' })
 /**
  * Get ALL returns (active + completed + cancelled) with pagination and filters
  * For the All Returns AG-Grid tab
+ *
+ * Source: ReturnPrimeRequest table (synced from Return Prime).
+ * Each row = one line item from the RP request's lineItems JSON.
+ * LEFT JOINs to OrderLine via returnPrimeRequestId for ERP-specific fields.
  */
 export interface AllReturnsResponse {
     items: ActiveReturnLine[];
@@ -1082,123 +1086,307 @@ const getAllReturnsInputSchema = z.object({
     dateTo: z.string().optional(),
 });
 
+/**
+ * Derive a single status from ReturnPrimeRequest boolean flags.
+ * Priority order: rejected > archived > refunded > inspected > approved > requested
+ */
+function deriveRpStatus(req: {
+    isRejected: boolean;
+    isArchived: boolean;
+    isRefunded: boolean;
+    isInspected: boolean;
+    isApproved: boolean;
+}): string {
+    if (req.isRejected) return 'rejected';
+    if (req.isArchived) return 'archived';
+    if (req.isRefunded) return 'refunded';
+    if (req.isInspected) return 'inspected';
+    if (req.isApproved) return 'approved';
+    return 'requested';
+}
+
+/**
+ * Shape of a line item stored in ReturnPrimeRequest.lineItems JSON.
+ * Matches the ReturnPrimeApiLineItem shape from the sync.
+ */
+interface StoredRpLineItem {
+    id: number | string;
+    quantity: number;
+    reason?: string | null;
+    reason_detail?: string | null;
+    customer_comment?: string | null;
+    original_product?: {
+        title?: string | null;
+        variant_title?: string | null;
+        sku?: string | null;
+        price?: number | null;
+        image?: { src: string } | null;
+    } | null;
+    shop_price?: {
+        actual_amount?: number | null;
+    } | null;
+    refund?: {
+        requested_mode?: string | null;
+        status?: string | null;
+    } | null;
+    shipping?: Array<{
+        awb?: string | null;
+        shipping_company?: string | null;
+    }> | null;
+}
+
+/**
+ * Parse "The Linen Boat Neck Top - Mustard / M" into product name, color, size.
+ * Falls back gracefully if format doesn't match.
+ */
+function parseProductTitle(title: string | null | undefined): {
+    productName: string | null;
+    colorName: string | null;
+    size: string | null;
+} {
+    if (!title) return { productName: null, colorName: null, size: null };
+    // Pattern: "Product Name - Color / Size" or "Product Name - Variant"
+    const dashIdx = title.lastIndexOf(' - ');
+    if (dashIdx === -1) return { productName: title, colorName: null, size: null };
+
+    const productName = title.substring(0, dashIdx).trim();
+    const variantPart = title.substring(dashIdx + 3).trim();
+
+    const slashIdx = variantPart.lastIndexOf(' / ');
+    if (slashIdx === -1) {
+        return { productName, colorName: variantPart || null, size: null };
+    }
+    return {
+        productName,
+        colorName: variantPart.substring(0, slashIdx).trim() || null,
+        size: variantPart.substring(slashIdx + 3).trim() || null,
+    };
+}
+
 export const getAllReturns = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => getAllReturnsInputSchema.parse(input))
     .handler(async ({ data }): Promise<AllReturnsResponse> => {
         const prisma = await getPrisma();
-        const { page, limit, status, resolution, search, dateFrom, dateTo } = data;
-        const skip = (page - 1) * limit;
+        const { page, limit, status, search, dateFrom, dateTo } = data;
 
-        // Build where clause — must have a return status (i.e. was ever a return)
-        const where: Record<string, unknown> = {
-            returnStatus: status ? status : { not: null },
-        };
+        // Build Prisma where for ReturnPrimeRequest
+        const where: Record<string, unknown> = {};
 
-        if (resolution) {
-            where.returnResolution = resolution;
-        }
-
+        // Date filter on rpCreatedAt
         if (dateFrom || dateTo) {
             const dateFilter: Record<string, Date> = {};
             if (dateFrom) dateFilter.gte = new Date(dateFrom);
             if (dateTo) dateFilter.lte = new Date(dateTo + 'T23:59:59Z');
-            where.returnRequestedAt = dateFilter;
+            where.rpCreatedAt = dateFilter;
         }
 
+        // Search across request number, order number, customer name/email
         if (search) {
             where.OR = [
+                { rpRequestNumber: { contains: search, mode: 'insensitive' } },
                 { order: { orderNumber: { contains: search, mode: 'insensitive' } } },
-                { order: { customerName: { contains: search, mode: 'insensitive' } } },
-                { sku: { skuCode: { contains: search, mode: 'insensitive' } } },
-                { returnAwbNumber: { contains: search, mode: 'insensitive' } },
-                { returnBatchNumber: { contains: search, mode: 'insensitive' } },
-                { returnPrimeRequestNumber: { contains: search, mode: 'insensitive' } },
+                { customerName: { contains: search, mode: 'insensitive' } },
+                { customerEmail: { contains: search, mode: 'insensitive' } },
             ];
         }
 
-        const [lines, total] = await Promise.all([
-            prisma.orderLine.findMany({
-                where,
-                include: {
-                    order: {
-                        select: {
-                            id: true,
-                            orderNumber: true,
-                            customerId: true,
-                            customerName: true,
-                            customerEmail: true,
-                            customerPhone: true,
-                        },
+        // Status filtering: derive from boolean flags. We can push some statuses to Prisma.
+        // For exact status match, add boolean conditions to narrow the query.
+        if (status) {
+            const statusFilters: Record<string, Record<string, unknown>> = {
+                rejected: { isRejected: true },
+                archived: { isArchived: true, isRejected: false },
+                refunded: { isRefunded: true, isRejected: false, isArchived: false },
+                inspected: { isInspected: true, isRefunded: false, isRejected: false, isArchived: false },
+                approved: { isApproved: true, isInspected: false, isRefunded: false, isRejected: false, isArchived: false },
+                requested: { isApproved: false, isInspected: false, isRefunded: false, isRejected: false, isArchived: false },
+            };
+            const flags = statusFilters[status];
+            if (flags) {
+                Object.assign(where, flags);
+            }
+        }
+
+        // Fetch all matching requests (with order relation)
+        const requests = await prisma.returnPrimeRequest.findMany({
+            where,
+            include: {
+                order: {
+                    select: {
+                        id: true,
+                        orderNumber: true,
+                        customerId: true,
+                        customerName: true,
+                        customerEmail: true,
+                        customerPhone: true,
                     },
+                },
+            },
+            orderBy: { rpCreatedAt: 'desc' },
+        });
+
+        // Expand line items: one row per line item per request
+        interface ExpandedRow {
+            request: (typeof requests)[number];
+            lineItem: StoredRpLineItem;
+            lineIndex: number;
+            derivedStatus: string;
+        }
+
+        let expandedRows: ExpandedRow[] = [];
+        for (const req of requests) {
+            const derivedStatus = deriveRpStatus(req);
+            const lineItems = Array.isArray(req.lineItems) ? (req.lineItems as unknown as StoredRpLineItem[]) : [];
+            if (lineItems.length === 0) {
+                // Request with no line items — create a single row
+                expandedRows.push({ request: req, lineItem: { id: 0, quantity: 0 }, lineIndex: 0, derivedStatus });
+            } else {
+                for (let i = 0; i < lineItems.length; i++) {
+                    expandedRows.push({ request: req, lineItem: lineItems[i], lineIndex: i, derivedStatus });
+                }
+            }
+        }
+
+        // Total count (line-item level)
+        const total = expandedRows.length;
+
+        // Paginate the expanded rows
+        const skip = (page - 1) * limit;
+        expandedRows = expandedRows.slice(skip, skip + limit);
+
+        // Batch-fetch linked OrderLines for the page of requests
+        const rpRequestIds = [...new Set(expandedRows.map(r => r.request.rpRequestId))];
+        const linkedOrderLines = rpRequestIds.length > 0
+            ? await prisma.orderLine.findMany({
+                where: { returnPrimeRequestId: { in: rpRequestIds } },
+                select: {
+                    id: true,
+                    returnPrimeRequestId: true,
+                    skuId: true,
+                    orderId: true,
+                    returnBatchNumber: true,
+                    returnStatus: true,
+                    returnQty: true,
+                    returnPickupType: true,
+                    returnAwbNumber: true,
+                    returnCourier: true,
+                    returnPickupScheduledAt: true,
+                    returnReceivedAt: true,
+                    returnCondition: true,
+                    returnExchangeOrderId: true,
+                    returnExchangeSkuId: true,
+                    returnExchangePriceDiff: true,
+                    returnQcResult: true,
+                    returnNotes: true,
+                    returnRefundCompletedAt: true,
+                    returnNetAmount: true,
+                    returnRefundMethod: true,
+                    returnReasonCategory: true,
+                    returnReasonDetail: true,
+                    returnResolution: true,
+                    returnRequestedAt: true,
+                    returnPrimeSyncedAt: true,
+                    returnPrimeSyncError: true,
                     sku: {
-                        include: {
+                        select: {
+                            skuCode: true,
+                            size: true,
                             variation: {
-                                include: {
-                                    product: true,
+                                select: {
+                                    colorName: true,
+                                    imageUrl: true,
+                                    product: { select: { id: true, name: true, imageUrl: true } },
                                 },
                             },
                         },
                     },
                 },
-                orderBy: { returnRequestedAt: 'desc' },
-                skip,
-                take: limit,
-            }),
-            prisma.orderLine.count({ where }),
-        ]);
+            })
+            : [];
 
-        const items: ActiveReturnLine[] = lines.map((line: (typeof lines)[number]) => ({
-            id: line.id,
-            orderId: line.orderId,
-            orderNumber: line.order.orderNumber,
-            skuId: line.skuId,
-            skuCode: line.sku.skuCode,
-            size: line.sku.size,
-            qty: line.qty,
-            unitPrice: line.unitPrice,
-            returnBatchNumber: line.returnBatchNumber,
-            returnStatus: line.returnStatus!,
-            returnQty: line.returnQty!,
-            returnRequestedAt: line.returnRequestedAt,
-            returnReasonCategory: line.returnReasonCategory,
-            returnReasonDetail: line.returnReasonDetail,
-            returnResolution: line.returnResolution,
-            returnPickupType: line.returnPickupType,
-            returnAwbNumber: line.returnAwbNumber,
-            returnCourier: line.returnCourier,
-            returnPickupScheduledAt: line.returnPickupScheduledAt,
-            returnReceivedAt: line.returnReceivedAt,
-            returnCondition: line.returnCondition,
-            returnExchangeOrderId: line.returnExchangeOrderId,
-            returnExchangeSkuId: line.returnExchangeSkuId,
-            returnExchangePriceDiff: line.returnExchangePriceDiff?.toNumber() ?? null,
-            returnQcResult: line.returnQcResult,
-            returnNotes: line.returnNotes,
-            returnRefundCompletedAt: line.returnRefundCompletedAt,
-            returnNetAmount: line.returnNetAmount?.toNumber() ?? null,
-            returnRefundMethod: line.returnRefundMethod,
-            customerId: line.order.customerId,
-            customerName: line.order.customerName,
-            customerEmail: line.order.customerEmail,
-            customerPhone: line.order.customerPhone,
-            productId: line.sku.variation.product.id,
-            productName: line.sku.variation.product.name,
-            colorName: line.sku.variation.colorName,
-            imageUrl: line.sku.variation.imageUrl || line.sku.variation.product.imageUrl,
-            // Return Prime
-            returnPrimeRequestId: line.returnPrimeRequestId,
-            returnPrimeRequestNumber: line.returnPrimeRequestNumber,
-            returnPrimeSyncedAt: line.returnPrimeSyncedAt,
-            returnPrimeSyncError: line.returnPrimeSyncError,
-        }));
+        // Index OrderLines by rpRequestId (there can be multiple per request — one per line)
+        const orderLinesByRpId = new Map<string, (typeof linkedOrderLines)>();
+        for (const ol of linkedOrderLines) {
+            if (!ol.returnPrimeRequestId) continue;
+            const existing = orderLinesByRpId.get(ol.returnPrimeRequestId);
+            if (existing) {
+                existing.push(ol);
+            } else {
+                orderLinesByRpId.set(ol.returnPrimeRequestId, [ol]);
+            }
+        }
+
+        // Map expanded rows to ActiveReturnLine
+        const items: ActiveReturnLine[] = expandedRows.map(({ request: req, lineItem: li, lineIndex, derivedStatus }) => {
+            // Try to find a matching OrderLine for this line item
+            const candidates = orderLinesByRpId.get(req.rpRequestId) || [];
+            // Match by SKU if possible, otherwise by index
+            const liSku = li.original_product?.sku;
+            const matchedOl = candidates.find(ol => liSku && ol.sku.skuCode === liSku) || candidates[lineIndex] || null;
+
+            const parsed = parseProductTitle(li.original_product?.title);
+            const price = li.original_product?.price ?? li.shop_price?.actual_amount ?? 0;
+            const awb = li.shipping?.[0]?.awb ?? null;
+            const courier = li.shipping?.[0]?.shipping_company ?? null;
+
+            return {
+                // ID: use OrderLine ID if linked, otherwise deterministic from rpRequestId + index
+                id: matchedOl?.id ?? `rp-${req.rpRequestId}-${lineIndex}`,
+                orderId: req.orderId ?? matchedOl?.orderId ?? '',
+                orderNumber: req.order?.orderNumber ?? '',
+                skuId: matchedOl?.skuId ?? '',
+                skuCode: liSku ?? matchedOl?.sku.skuCode ?? '',
+                size: parsed.size ?? matchedOl?.sku.size ?? '',
+                qty: li.quantity,
+                unitPrice: price,
+                // Return info — prefer RP-derived status, fall back to OrderLine for ERP fields
+                returnBatchNumber: matchedOl?.returnBatchNumber ?? null,
+                returnStatus: derivedStatus,
+                returnQty: li.quantity,
+                returnRequestedAt: req.rpCreatedAt,
+                returnReasonCategory: li.reason ?? matchedOl?.returnReasonCategory ?? null,
+                returnReasonDetail: li.reason_detail ?? li.customer_comment ?? matchedOl?.returnReasonDetail ?? null,
+                returnResolution: matchedOl?.returnResolution ?? (req.requestType === 'exchange' ? 'exchange' : null),
+                returnPickupType: matchedOl?.returnPickupType ?? null,
+                returnAwbNumber: awb ?? matchedOl?.returnAwbNumber ?? null,
+                returnCourier: courier ?? matchedOl?.returnCourier ?? null,
+                returnPickupScheduledAt: matchedOl?.returnPickupScheduledAt ?? null,
+                returnReceivedAt: req.receivedAt ?? matchedOl?.returnReceivedAt ?? null,
+                returnCondition: matchedOl?.returnCondition ?? null,
+                returnExchangeOrderId: matchedOl?.returnExchangeOrderId ?? null,
+                returnExchangeSkuId: matchedOl?.returnExchangeSkuId ?? null,
+                returnExchangePriceDiff: matchedOl?.returnExchangePriceDiff?.toNumber() ?? null,
+                returnQcResult: matchedOl?.returnQcResult ?? null,
+                returnNotes: matchedOl?.returnNotes ?? null,
+                returnRefundCompletedAt: req.refundedAt ?? matchedOl?.returnRefundCompletedAt ?? null,
+                returnNetAmount: matchedOl?.returnNetAmount?.toNumber() ?? null,
+                returnRefundMethod: matchedOl?.returnRefundMethod ?? null,
+                // Customer info — from RP request, fallback to linked order
+                customerId: req.order?.customerId ?? null,
+                customerName: req.customerName ?? req.order?.customerName ?? '',
+                customerEmail: req.customerEmail ?? req.order?.customerEmail ?? null,
+                customerPhone: req.customerPhone ?? req.order?.customerPhone ?? null,
+                // Product info — from RP line item JSON, fallback to OrderLine's SKU
+                productId: matchedOl?.sku.variation.product.id ?? null,
+                productName: parsed.productName ?? matchedOl?.sku.variation.product.name ?? null,
+                colorName: parsed.colorName ?? matchedOl?.sku.variation.colorName ?? null,
+                imageUrl: li.original_product?.image?.src ?? matchedOl?.sku.variation.imageUrl ?? matchedOl?.sku.variation.product.imageUrl ?? null,
+                // Return Prime
+                returnPrimeRequestId: req.rpRequestId,
+                returnPrimeRequestNumber: req.rpRequestNumber,
+                returnPrimeSyncedAt: req.syncedAt,
+                returnPrimeSyncError: matchedOl?.returnPrimeSyncError ?? null,
+            };
+        });
 
         return { items, total, page, limit };
     });
 
 /**
  * Get return status counts for pill tab badges
- * Groups by returnStatus, returns counts per status + total
+ * Counts ReturnPrimeRequest rows by derived status (from boolean flags).
+ * Each request counts as lineItemCount rows to match the expanded view.
  */
 const getReturnStatusCountsInputSchema = z.object({
     dateFrom: z.string().optional(),
@@ -1211,36 +1399,43 @@ export const getReturnStatusCounts = createServerFn({ method: 'POST' })
     .inputValidator((input: unknown) => getReturnStatusCountsInputSchema.parse(input))
     .handler(async ({ data }): Promise<Record<string, number>> => {
         const prisma = await getPrisma();
-        const where: Record<string, unknown> = { returnStatus: { not: null } };
+        const where: Record<string, unknown> = {};
 
         if (data.dateFrom || data.dateTo) {
             const dateFilter: Record<string, Date> = {};
             if (data.dateFrom) dateFilter.gte = new Date(data.dateFrom);
             if (data.dateTo) dateFilter.lte = new Date(data.dateTo + 'T23:59:59Z');
-            where.returnRequestedAt = dateFilter;
+            where.rpCreatedAt = dateFilter;
         }
 
         if (data.search) {
             where.OR = [
+                { rpRequestNumber: { contains: data.search, mode: 'insensitive' } },
                 { order: { orderNumber: { contains: data.search, mode: 'insensitive' } } },
-                { order: { customerName: { contains: data.search, mode: 'insensitive' } } },
-                { sku: { skuCode: { contains: data.search, mode: 'insensitive' } } },
-                { returnBatchNumber: { contains: data.search, mode: 'insensitive' } },
+                { customerName: { contains: data.search, mode: 'insensitive' } },
+                { customerEmail: { contains: data.search, mode: 'insensitive' } },
             ];
         }
 
-        const counts = await prisma.orderLine.groupBy({
-            by: ['returnStatus'],
+        const requests = await prisma.returnPrimeRequest.findMany({
             where,
-            _count: true,
+            select: {
+                isApproved: true,
+                isReceived: true,
+                isInspected: true,
+                isRefunded: true,
+                isRejected: true,
+                isArchived: true,
+                lineItemCount: true,
+            },
         });
 
         const result: Record<string, number> = { all: 0 };
-        for (const c of counts) {
-            if (c.returnStatus) {
-                result[c.returnStatus] = c._count;
-                result.all += c._count;
-            }
+        for (const req of requests) {
+            const status = deriveRpStatus(req);
+            const count = Math.max(req.lineItemCount, 1); // At least 1 row per request
+            result[status] = (result[status] ?? 0) + count;
+            result.all += count;
         }
         return result;
     });

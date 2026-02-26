@@ -239,8 +239,13 @@ export async function syncReturnPrimeRequests(options: SyncOptions = {}): Promis
         const prisma = await getPrisma();
 
         // Set date range
+        // NOTE: RP API's created_at_max is exclusive (records created ON that date are excluded).
+        // Add 1 day to dateTo so today's records are included.
         let dateFrom = options.dateFrom;
-        const dateTo = options.dateTo || new Date().toISOString().split('T')[0];
+        const rawDateTo = options.dateTo || new Date().toISOString().split('T')[0];
+        const dateToPlus1 = new Date(rawDateTo + 'T00:00:00Z');
+        dateToPlus1.setUTCDate(dateToPlus1.getUTCDate() + 1);
+        const dateTo = dateToPlus1.toISOString().split('T')[0];
 
         if (options.fullSync) {
             const yearAgo = new Date();
@@ -368,8 +373,8 @@ export async function syncReturnPrimeRequests(options: SyncOptions = {}): Promis
 // WORKER LIFECYCLE (for workerRegistry)
 // ============================================
 
-const SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
-const INITIAL_DELAY_MS = 3 * 60 * 1000; // 3 min after startup
+const SYNC_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+const INITIAL_DELAY_MS = 30 * 1000; // 30s after startup
 
 let syncInterval: NodeJS.Timeout | null = null;
 let initialTimeout: NodeJS.Timeout | null = null;
@@ -380,7 +385,7 @@ function startInboundSync(): void {
         return;
     }
 
-    log.info({ intervalHours: SYNC_INTERVAL_MS / 3600000 }, 'Starting inbound sync worker');
+    log.info({ intervalMinutes: SYNC_INTERVAL_MS / 60000 }, 'Starting inbound sync worker');
 
     // Run after initial delay, then every 6 hours
     initialTimeout = setTimeout(() => {
