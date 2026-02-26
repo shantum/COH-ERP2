@@ -156,9 +156,10 @@ export const getCustomersList = createServerFn({ method: 'GET' })
         }
     });
 
-const getCustomerInputSchema = z.object({
-    id: z.string().uuid(),
-});
+const getCustomerInputSchema = z.union([
+    z.object({ id: z.string().uuid() }),
+    z.object({ email: z.string().email() }),
+]);
 
 /**
  * Server Function: Get single customer by ID
@@ -175,7 +176,22 @@ export const getCustomer = createServerFn({ method: 'POST' }) // POST to avoid h
     .handler(async ({ data }) => {
         const { getCustomerKysely } = await import('@coh/shared/services/db/queries');
 
-        const customer = await getCustomerKysely(data.id);
+        let customerId: string;
+        if ('email' in data) {
+            // Look up customer ID by email
+            const { getPrisma } = await import('@coh/shared/services/db');
+            const prisma = await getPrisma();
+            const found = await prisma.customer.findUnique({
+                where: { email: data.email },
+                select: { id: true },
+            });
+            if (!found) throw new Error('Customer not found');
+            customerId = found.id;
+        } else {
+            customerId = data.id;
+        }
+
+        const customer = await getCustomerKysely(customerId);
 
         if (!customer) {
             throw new Error('Customer not found');

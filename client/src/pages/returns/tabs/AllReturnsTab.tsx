@@ -201,7 +201,7 @@ function ReturnRow({ row, trackingMap }: { row: ActiveReturnLine; trackingMap?: 
         <tr className="hover:bg-gray-50">
             <td className="px-3 py-2">
                 <a
-                    href={`/orders/${row.orderId}`}
+                    href={`/orders/${row.orderNumber}`}
                     className="text-blue-600 hover:underline font-medium"
                 >
                     {row.orderNumber}

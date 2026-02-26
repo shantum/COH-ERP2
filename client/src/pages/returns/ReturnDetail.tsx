@@ -495,7 +495,7 @@ export default function ReturnDetail() {
                                 </button>
                             </div>
                             <a
-                                href={`/orders/${detail.orderId}`}
+                                href={`/orders/${detail.orderNumber}`}
                                 className="text-sm text-blue-600 hover:underline font-medium"
                             >
                                 #{detail.orderNumber}

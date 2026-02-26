@@ -334,9 +334,9 @@ export default function Customers() {
         }
     }, [customerOrderData, modalOrder, getOrdersFn]);
 
-    // Handle customer row click - navigate to full-page detail
-    const handleCustomerClick = useCallback((customerId: string) => {
-        navigate({ to: '/customers/$customerId', params: { customerId } });
+    // Handle customer row click - navigate to full-page detail (using email for clean URLs)
+    const handleCustomerClick = useCallback((email: string) => {
+        navigate({ to: '/customers/$customerId', params: { customerId: email } });
     }, [navigate]);
 
     // Close modal - removes modal params from URL
@@ -715,7 +715,7 @@ export default function Customers() {
                     </tr></thead>
                     <tbody>
                         {displayData?.map((c) => (
-                            <tr key={c.id} className="border-b last:border-0 hover:bg-gray-50 cursor-pointer" onClick={() => handleCustomerClick(c.id)}>
+                            <tr key={c.id} className="border-b last:border-0 hover:bg-gray-50 cursor-pointer" onClick={() => handleCustomerClick(c.email)}>
                                 <td className="table-cell"><div className="flex items-center gap-2">{getTierIcon(c.customerTier)}<span className="font-medium">{c.firstName} {c.lastName}</span></div></td>
                                 <td className="table-cell text-gray-500">{c.email}</td>
                                 <td className="table-cell text-right">{c.totalOrders}</td>

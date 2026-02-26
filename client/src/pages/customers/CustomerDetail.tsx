@@ -82,10 +82,14 @@ export default function CustomerDetail() {
 
     const getCustomerFn = useServerFn(getCustomer);
 
+    // Determine if URL param is a UUID or an email
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(customerId);
+
     const { data: customer, isLoading, error } = useQuery({
         queryKey: ['customer', 'detail', customerId],
         queryFn: async () => {
-            const result = await getCustomerFn({ data: { id: customerId } });
+            const input = isUuid ? { id: customerId } : { email: customerId };
+            const result = await getCustomerFn({ data: input });
             return result as CustomerDetailResult;
         },
         staleTime: 60 * 1000,

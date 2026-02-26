@@ -978,10 +978,13 @@ export default function OrderDetail() {
                             <div className="px-4 py-3 space-y-2.5">
                                 <p
                                     className="text-sm font-medium text-blue-700 hover:underline cursor-pointer"
-                                    onClick={() => order.customerId && navigate({
-                                        to: '/customers/$customerId',
-                                        params: { customerId: order.customerId },
-                                    })}
+                                    onClick={() => {
+                                        const customerIdentifier = order.customerEmail || order.customer?.email || order.customerId;
+                                        if (customerIdentifier) navigate({
+                                            to: '/customers/$customerId',
+                                            params: { customerId: customerIdentifier },
+                                        });
+                                    }}
                                 >
                                     {order.customerName}
                                 </p>
