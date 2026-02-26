@@ -36,10 +36,14 @@ import { formatRawToTrackingData } from './ithinkLogistics/tracking.js';
 // ============================================
 
 /** How fresh each entry must be (ms) */
-const STALE_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
+const STALE_THRESHOLD_MS = 60 * 60 * 1000; // 60 minutes
 
 /** How often the refresh loop ticks (ms) */
 const REFRESH_LOOP_INTERVAL_MS = 60 * 1000; // 60 seconds
+
+/** Max entries to refresh per tick — prevents thundering herd.
+ *  With 10 per API batch and 1s delay, 100 entries = ~10 API calls = ~10s per tick. */
+const MAX_PER_TICK = 100;
 
 /** iThink API batch size */
 const BATCH_SIZE = 10;
@@ -374,21 +378,31 @@ class TrackingCacheService {
                 return result;
             }
 
-            // Collect stale AWBs
-            const staleAwbs: string[] = [];
+            // Collect oldest entries past the stale threshold.
+            // Sort by age descending (oldest first), cap at MAX_PER_TICK
+            // to spread load evenly across ticks instead of thundering herd.
+            const candidates: Array<{ awb: string; age: number }> = [];
             for (const [awb, entry] of this.cache) {
-                if (entry.adhoc) continue; // don't refresh ad-hoc entries
-                if (now - entry.lastFetched.getTime() > STALE_THRESHOLD_MS) {
-                    staleAwbs.push(awb);
+                if (entry.adhoc) continue;
+                const age = now - entry.lastFetched.getTime();
+                if (age > STALE_THRESHOLD_MS) {
+                    candidates.push({ awb, age });
                 }
             }
+            candidates.sort((a, b) => b.age - a.age);
+            const staleAwbs = candidates.slice(0, MAX_PER_TICK).map(c => c.awb);
 
             result.awbsChecked = staleAwbs.length;
+
+            // Always record that we ran
+            this.lastRefreshAt = new Date();
+
             if (staleAwbs.length === 0) {
+                this.lastRefreshResult = result;
                 return result;
             }
 
-            trackingLogger.info({ count: staleAwbs.length }, 'Refreshing stale AWBs');
+            trackingLogger.info({ count: staleAwbs.length, total: candidates.length }, 'Refreshing stale AWBs');
 
             // Fetch in batches of 10
             for (let i = 0; i < staleAwbs.length; i += BATCH_SIZE) {
