@@ -2554,3 +2554,26 @@ model EmailLog {
   @@index([createdAt])
   @@index([messageId])
 }
+
+/// Persisted demand forecast runs
+model DemandForecast {
+  id            String   @id @default(uuid())
+  createdAt     DateTime @default(now())
+  createdById   String?
+
+  /// Number of weeks forecasted
+  forecastWeeks Int      @default(8)
+
+  /// Full forecast JSON (products, fabric requirements, purchase orders, etc.)
+  data          Json
+
+  /// Claude AI analysis text (populated after user requests it)
+  aiAnalysis    String?
+
+  /// Summary fields for quick listing
+  totalUnits    Float?
+  productCount  Int?
+  shortfallCount Int?
+
+  @@index([createdAt])
+}

@@ -57,6 +57,7 @@ import attendanceImportRoutes from './routes/attendanceImport.js';
 import marketplacePayoutRoutes from './routes/marketplacePayout.js';
 import razorpaySettlementRoutes from './routes/razorpaySettlement.js';
 import chatRoutes from './routes/chat.js';
+import forecastRoutes from './routes/forecast.js';
 import imageUploadRoutes from './routes/imageUpload.js';
 import resendWebhookRoutes from './routes/resendWebhook.js';
 import returnPrimeWebhooks from './routes/returnPrimeWebhooks.js';
@@ -167,6 +168,7 @@ app.use('/api/marketplace-payout', marketplacePayoutRoutes);
 app.use('/api/razorpay-settlement', razorpaySettlementRoutes);
 app.use('/api/razorpayx', razorpayxPayoutRoutes);
 app.use('/api/chat', chatRoutes);
+app.use('/api/forecast', forecastRoutes);
 
 // Image uploads
 app.use('/api/uploads', imageUploadRoutes);

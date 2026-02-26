@@ -228,6 +228,29 @@ export type Customer = {
     bankAccountNumber: string | null;
     bankIfsc: string | null;
 };
+export type DemandForecast = {
+    id: Generated<string>;
+    createdAt: Generated<Timestamp>;
+    createdById: string | null;
+    /**
+     * Number of weeks forecasted
+     */
+    forecastWeeks: Generated<number>;
+    /**
+     * Full forecast JSON (products, fabric requirements, purchase orders, etc.)
+     */
+    data: unknown;
+    /**
+     * Claude AI analysis text (populated after user requests it)
+     */
+    aiAnalysis: string | null;
+    /**
+     * Summary fields for quick listing
+     */
+    totalUnits: number | null;
+    productCount: number | null;
+    shortfallCount: number | null;
+};
 export type DomainEvent = {
     id: Generated<string>;
     domain: string;
@@ -1524,6 +1547,7 @@ export type DB = {
     ComponentType: ComponentType;
     CostConfig: CostConfig;
     Customer: Customer;
+    DemandForecast: DemandForecast;
     DomainEvent: DomainEvent;
     EmailLog: EmailLog;
     Employee: Employee;
