@@ -15,7 +15,6 @@ import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth';
 import { getPrisma, type PrismaTransaction } from '@coh/shared/services/db';
-import { getInternalApiBaseUrl } from '../utils';
 
 // ============================================
 // INPUT SCHEMAS
@@ -258,16 +257,8 @@ interface ProductionUpdateEvent {
 }
 
 async function broadcastUpdate(event: ProductionUpdateEvent, excludeUserId: string | null): Promise<void> {
-    try {
-        const baseUrl = getInternalApiBaseUrl();
-        await fetch(`${baseUrl}/api/internal/sse-broadcast`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ event, excludeUserId }),
-        });
-    } catch {
-        console.warn('[productionMutations] SSE broadcast failed (non-critical)');
-    }
+    const { notifySSE } = await import('@coh/shared/services/sseBroadcast');
+    await notifySSE(event, excludeUserId);
 }
 
 // ============================================

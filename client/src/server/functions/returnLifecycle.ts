@@ -43,19 +43,8 @@ async function broadcastReturnUpdate(
     data: Record<string, unknown>,
     excludeUserId: string
 ): Promise<void> {
-    try {
-        const baseUrl = getInternalApiBaseUrl();
-        await fetch(`${baseUrl}/api/internal/sse-broadcast`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                event: { type, ...data },
-                excludeUserId,
-            }),
-        });
-    } catch {
-        // Non-critical — fire and forget
-    }
+    const { notifySSE } = await import('@coh/shared/services/sseBroadcast');
+    await notifySSE({ type, ...data }, excludeUserId);
 }
 
 /**

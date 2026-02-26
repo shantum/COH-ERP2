@@ -33,19 +33,8 @@ async function broadcastReturnUpdate(
     data: Record<string, unknown>,
     excludeUserId: string
 ): Promise<void> {
-    try {
-        const baseUrl = getInternalApiBaseUrl();
-        await fetch(`${baseUrl}/api/internal/sse-broadcast`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                event: { type, ...data },
-                excludeUserId,
-            }),
-        });
-    } catch {
-        // Non-critical
-    }
+    const { notifySSE } = await import('@coh/shared/services/sseBroadcast');
+    await notifySSE({ type, ...data }, excludeUserId);
 }
 
 /**
@@ -365,13 +354,8 @@ export const createExchangeOrder = createServerFn({ method: 'POST' })
         }, '');
 
         // Also broadcast the new order creation for the Orders page
-        fetch(`${baseUrl}/api/internal/sse-broadcast`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                event: { type: 'order_created', orderId: exchangeOrder.id },
-            }),
-        }).catch(() => {});
+        const { notifySSE } = await import('@coh/shared/services/sseBroadcast');
+        notifySSE({ type: 'order_created', orderId: exchangeOrder.id }).catch(() => {});
 
         return returnSuccess(
             {

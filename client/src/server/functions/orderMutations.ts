@@ -20,6 +20,7 @@ import {
     hasAllocatedInventory as sharedHasAllocatedInventory,
 } from '@coh/shared/domain';
 import { getInternalApiBaseUrl } from '../utils';
+import { notifySSE } from '@coh/shared/services/sseBroadcast';
 
 // Re-export line and status mutations for backward compatibility
 export { updateLine, addLine, updateLineNotes } from './orderLineMutations';
@@ -183,16 +184,7 @@ export interface OrderUpdateEvent {
 }
 
 export async function broadcastUpdate(event: OrderUpdateEvent, excludeUserId: string): Promise<void> {
-    try {
-        const baseUrl = getInternalApiBaseUrl();
-        await fetch(`${baseUrl}/api/internal/sse-broadcast`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ event, excludeUserId }),
-        });
-    } catch {
-        console.warn('[orderMutations] SSE broadcast failed (non-critical)');
-    }
+    await notifySSE(event, excludeUserId);
 }
 
 // ============================================

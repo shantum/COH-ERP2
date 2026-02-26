@@ -229,20 +229,12 @@ export const processRepackingItem = createServerFn({ method: 'POST' })
 
                 // SSE broadcast for return status change
                 try {
-                    const { getInternalApiBaseUrl } = await import('../utils');
-                    const baseUrl = getInternalApiBaseUrl();
-                    fetch(`${baseUrl}/api/internal/sse-broadcast`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            event: {
-                                type: 'return_status_updated',
-                                lineId: item.orderLineId,
-                                changes: { returnStatus: 'qc_inspected', returnQcResult: qcResult },
-                            },
-                            excludeUserId: context.user.id,
-                        }),
-                    }).catch(() => {});
+                    const { notifySSE } = await import('@coh/shared/services/sseBroadcast');
+                    notifySSE({
+                        type: 'return_status_updated',
+                        lineId: item.orderLineId,
+                        changes: { returnStatus: 'qc_inspected', returnQcResult: qcResult },
+                    }, context.user.id);
                 } catch {
                     // Non-critical
                 }

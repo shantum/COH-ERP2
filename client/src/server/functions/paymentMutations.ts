@@ -10,7 +10,6 @@ import { createServerFn } from '@tanstack/react-start';
 import { authMiddleware, type AuthUser } from '../middleware/auth';
 import { CreatePaymentSchema, type CreatePaymentInput } from '@coh/shared';
 import { getPrisma, type PrismaTransaction } from '@coh/shared/services/db';
-import { getInternalApiBaseUrl } from '../utils';
 
 // ============================================
 // RESPONSE TYPES
@@ -108,19 +107,8 @@ export const createPayment = createServerFn({ method: 'POST' })
             });
 
             // SSE broadcast after transaction (non-critical)
-            try {
-                const baseUrl = getInternalApiBaseUrl();
-                await fetch(`${baseUrl}/api/internal/sse-broadcast`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        event: { type: 'payment_created', orderId },
-                        excludeUserId: user.id,
-                    }),
-                });
-            } catch {
-                // Non-critical — UI will pick up on next query refresh
-            }
+            const { notifySSE } = await import('@coh/shared/services/sseBroadcast');
+            await notifySSE({ type: 'payment_created', orderId }, user.id);
 
             return {
                 payment,

@@ -346,25 +346,10 @@ async function runSteps(
     // Clean up internals after execution
     jobInternals.delete(job.id);
 
-    // Broadcast SSE event for cache invalidation
+    // Broadcast SSE event for cache invalidation (via Postgres NOTIFY — no HTTP hop)
     try {
-        const port = process.env.PORT || '3001';
-        const baseUrl = process.env.NODE_ENV === 'production'
-            ? `http://127.0.0.1:${port}`
-            : `http://localhost:${port}`;
-        const secret = process.env.INTERNAL_API_SECRET;
-        if (secret) {
-            await fetch(`${baseUrl}/api/internal/sse-broadcast`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'x-internal-secret': secret,
-                },
-                body: JSON.stringify({
-                    event: { type: 'sheet_sync_complete', data: { jobId: job.id } },
-                }),
-            });
-        }
+        const { broadcastOrderUpdate } = await import('../routes/sse.js');
+        broadcastOrderUpdate({ type: 'inventory_updated' as const }, null);
     } catch {
         // Non-critical — SSE broadcast failure shouldn't affect job result
     }

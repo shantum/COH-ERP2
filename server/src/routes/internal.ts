@@ -12,8 +12,6 @@
 import { Router } from 'express';
 import type { Request, Response, NextFunction } from 'express';
 import { asyncHandler } from '../middleware/asyncHandler.js';
-import { broadcastOrderUpdate } from './sse.js';
-import type { OrderUpdateEvent } from './sse.js';
 import { deferredExecutor } from '../services/deferredExecutor.js';
 import { pushERPOrderToSheet } from '../services/sheetOrderPush.js';
 import { updateSheetBalances } from '../services/sheetOffload/balances.js';
@@ -67,37 +65,6 @@ function verifyInternalRequest(req: Request, res: Response, next: NextFunction):
     console.warn(`[Internal API] Rejected request from ${remoteAddress} - missing or invalid secret`);
     res.status(403).json({ error: 'Forbidden - internal endpoint' });
 }
-
-/**
- * POST /api/internal/sse-broadcast
- *
- * Broadcasts an SSE event to all connected clients.
- * Called by Server Functions after mutations to notify other users.
- *
- * Body: { event: OrderUpdateEvent, excludeUserId?: string }
- */
-router.post('/sse-broadcast', verifyInternalRequest, (req: Request, res: Response): void => {
-    try {
-        const { event, excludeUserId } = req.body as {
-            event: OrderUpdateEvent;
-            excludeUserId?: string;
-        };
-
-        if (!event || !event.type) {
-            res.status(400).json({ error: 'Missing event or event.type' });
-            return;
-        }
-
-        // Broadcast to all connected SSE clients
-        broadcastOrderUpdate(event, excludeUserId || null);
-
-        res.json({ success: true, eventType: event.type });
-    } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : 'Unknown error';
-        console.error('[Internal API] SSE broadcast error:', message);
-        res.status(500).json({ error: 'Failed to broadcast event' });
-    }
-});
 
 /**
  * POST /api/internal/push-order-to-sheet

@@ -17,6 +17,7 @@ import payuSettlementSync from './payuSettlementSync.js';
 import returnPrimeSyncWorker from './returnPrimeSyncWorker.js';
 import { returnPrimeInboundSyncWorker } from './returnPrimeInboundSync.js';
 import { pulseBroadcaster } from './pulseBroadcaster.js';
+import { sseEventBridge } from './sseEventBridge.js';
 import { reconcileSheetOrders, syncSheetOrderStatus, syncSheetAwb } from './sheetOrderPush.js';
 import { runAllCleanup } from '../utils/cacheCleanup.js';
 import { cleanupStaleRuns, trackWorkerRun } from '../utils/workerRunTracker.js';
@@ -131,6 +132,10 @@ export async function startAllWorkers(): Promise<void> {
   // Pulse broadcaster is always enabled — SSE needs it
   pulseBroadcaster.start();
   shutdownCoordinator.register('pulseBroadcaster', () => pulseBroadcaster.shutdown(), 5000);
+
+  // SSE event bridge — listens on coh_erp_events for cross-process SSE dispatch
+  sseEventBridge.start();
+  shutdownCoordinator.register('sseEventBridge', () => sseEventBridge.shutdown(), 5000);
 
   // Prisma disconnect on shutdown (always)
   shutdownCoordinator.register('prisma', () => prisma.$disconnect(), 10000);

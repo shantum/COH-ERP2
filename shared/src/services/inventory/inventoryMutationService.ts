@@ -238,21 +238,11 @@ export async function invalidateInventoryCaches(
         console.warn('[inventoryMutationService] Sheet balance push failed (non-critical)');
     });
 
-    // 3. SSE broadcast for each SKU
+    // 3. SSE broadcast for each SKU (via Postgres NOTIFY — no HTTP hop)
+    const { notifySSE } = await import('../sseBroadcast.js');
     for (const skuId of skuIds) {
         const changes = balancesBySkuId?.get(skuId) ?? {};
-        try {
-            await fetch(`${internalApiBaseUrl}/api/internal/sse-broadcast`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    event: { type: 'inventory_updated', skuId, changes },
-                    excludeUserId: null,
-                }),
-            });
-        } catch {
-            console.warn('[inventoryMutationService] SSE broadcast failed (non-critical)');
-        }
+        await notifySSE({ type: 'inventory_updated', skuId, changes });
     }
 }
 
