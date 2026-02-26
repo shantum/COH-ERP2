@@ -45,11 +45,11 @@ export async function getKysely(): Promise<Kysely<Database>> {
 
     // Use globalThis for singleton storage
     const globalForKysely = globalThis as unknown as {
-        kyselyInstance: Kysely<Database> | undefined;
+        kysely: Kysely<Database> | undefined;
     };
 
-    if (!globalForKysely.kyselyInstance) {
-        globalForKysely.kyselyInstance = new KyselyClass<Database>({
+    if (!globalForKysely.kysely) {
+        globalForKysely.kysely = new KyselyClass<Database>({
             dialect: new PostgresDialect({
                 pool: new Pool({
                     connectionString: process.env.DATABASE_URL,
@@ -59,7 +59,7 @@ export async function getKysely(): Promise<Kysely<Database>> {
         });
     }
 
-    return globalForKysely.kyselyInstance;
+    return globalForKysely.kysely;
 }
 
 /**
