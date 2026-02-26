@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQueryClient, useMutation } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import {
@@ -17,29 +17,21 @@ export function SettingsTab({ config, loading, onRefresh }: SettingsTabProps) {
     const updateSettingsFn = useServerFn(updateReturnSettings);
 
     // Editable state
-    const [windowDays, setWindowDays] = useState(14);
-    const [windowWarningDays, setWindowWarningDays] = useState(12);
-    const [autoRejectAfterDays, setAutoRejectAfterDays] = useState<number | null>(null);
-    const [allowExpiredOverride, setAllowExpiredOverride] = useState(true);
+    const [windowDays, setWindowDays] = useState(config?.windowDays ?? 14);
+    const [windowWarningDays, setWindowWarningDays] = useState(config?.windowWarningDays ?? 12);
+    const [autoRejectAfterDays, setAutoRejectAfterDays] = useState<number | null>(config?.autoRejectAfterDays ?? null);
+    const [allowExpiredOverride, setAllowExpiredOverride] = useState(config?.allowExpiredOverride ?? true);
     const [hasChanges, setHasChanges] = useState(false);
 
-    // Sync state with config
-    useState(() => {
-        if (config) {
+    // Sync local state when config loads/changes (only if user hasn't edited)
+    useEffect(() => {
+        if (config && !hasChanges) {
             setWindowDays(config.windowDays);
             setWindowWarningDays(config.windowWarningDays);
             setAutoRejectAfterDays(config.autoRejectAfterDays);
             setAllowExpiredOverride(config.allowExpiredOverride ?? true);
         }
-    });
-
-    // Update local state when config changes
-    if (config && !hasChanges) {
-        if (windowDays !== config.windowDays) setWindowDays(config.windowDays);
-        if (windowWarningDays !== config.windowWarningDays) setWindowWarningDays(config.windowWarningDays);
-        if (autoRejectAfterDays !== config.autoRejectAfterDays) setAutoRejectAfterDays(config.autoRejectAfterDays);
-        if (allowExpiredOverride !== (config.allowExpiredOverride ?? true)) setAllowExpiredOverride(config.allowExpiredOverride ?? true);
-    }
+    }, [config, hasChanges]);
 
     const saveMutation = useMutation({
         mutationFn: () => updateSettingsFn({
