@@ -1,19 +1,12 @@
-import React, { useState, useMemo, useCallback } from 'react';
-import { useQueryClient, useQuery, useMutation } from '@tanstack/react-query';
-import { useServerFn } from '@tanstack/react-start';
+import React, { useState, useMemo } from 'react';
 import {
-    AlertTriangle, X, ChevronDown, ChevronRight,
+    AlertTriangle, ChevronDown, ChevronRight,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { MaterialsTreeView } from '../../components/materials/MaterialsTreeView';
-import { createFabricColourTransaction } from '@/server/functions/fabricColourMutations';
-import { getParties } from '@/server/functions/materialsMutations';
-import type { MaterialNode } from '../../components/materials/types';
-import type { Party } from '@/server/functions/materialsMutations';
 import type { FabricsLoaderData } from '../../routes/_authenticated/fabrics';
 import {
     fmt, fmtInt,
-    type ReorderItem, type ConsumptionItem, type InwardTarget,
+    type ReorderItem, type ConsumptionItem,
 } from './shared';
 
 // ── Sub-components ──────────────────────────────────────────
@@ -207,73 +200,6 @@ export default function OverviewTab({
     analysis: FabricsLoaderData['analysis'];
     health: FabricsLoaderData['health'];
 }) {
-    const queryClient = useQueryClient();
-
-    // Inward modal state
-    const [showInward, setShowInward] = useState<InwardTarget | null>(null);
-    const [inwardForm, setInwardForm] = useState({
-        qty: '', notes: '', costPerUnit: '', partyId: '',
-    });
-
-    // Server functions
-    const createColourTxnFn = useServerFn(createFabricColourTransaction);
-    const getPartiesFn = useServerFn(getParties);
-
-    // Fetch parties for inward modal
-    const { data: partiesData } = useQuery({
-        queryKey: ['parties'],
-        queryFn: () => getPartiesFn(),
-    });
-    const parties: Party[] | undefined = partiesData?.parties;
-
-    // Inward mutation
-    const createInwardMutation = useMutation({
-        mutationFn: (data: {
-            fabricColourId: string;
-            txnType: 'inward';
-            qty: number;
-            unit: 'meter' | 'kg' | 'yard';
-            reason: string;
-            notes?: string | null;
-            costPerUnit?: number | null;
-            partyId?: string | null;
-        }) => createColourTxnFn({ data }),
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['materialsTree'] });
-            queryClient.invalidateQueries({ queryKey: ['fabricColour'] });
-            setShowInward(null);
-            setInwardForm({ qty: '', notes: '', costPerUnit: '', partyId: '' });
-        },
-        onError: (err: Error) => alert(err.message || 'Failed to create inward'),
-    });
-
-    const handleSubmitInward = useCallback((e: React.FormEvent) => {
-        e.preventDefault();
-        if (!showInward) return;
-        const unit = (showInward.unit === 'kg' || showInward.unit === 'yard') ? showInward.unit : 'meter' as const;
-        createInwardMutation.mutate({
-            fabricColourId: showInward.id,
-            txnType: 'inward',
-            qty: parseFloat(inwardForm.qty),
-            unit,
-            reason: 'supplier_receipt',
-            ...(inwardForm.notes ? { notes: inwardForm.notes } : {}),
-            ...(inwardForm.costPerUnit ? { costPerUnit: parseFloat(inwardForm.costPerUnit) } : {}),
-            ...(inwardForm.partyId ? { partyId: inwardForm.partyId } : {}),
-        });
-    }, [showInward, inwardForm, createInwardMutation]);
-
-    // Handle add inward from tree view
-    const handleAddInward = useCallback((node: MaterialNode) => {
-        setShowInward({
-            id: node.id,
-            colourName: node.colourName,
-            name: node.name,
-            fabricName: node.fabricName,
-            unit: node.unit,
-        });
-    }, []);
-
     // Derive summary counts
     const analysisItems = analysis.analysis;
     const { orderNowCount, orderSoonCount, okCount } = useMemo(() => {
@@ -313,107 +239,65 @@ export default function OverviewTab({
     }, [health.data]);
 
     return (
-        <>
-            <div className="flex flex-col gap-6 overflow-auto p-6" style={{ height: 'calc(100vh - 120px)' }}>
-                {/* Summary Cards */}
-                <SummaryCards
-                    orderNowCount={orderNowCount}
-                    orderSoonCount={orderSoonCount}
-                    okCount={okCount}
-                    totalBalance={health.totalBalance}
-                />
+        <div className="flex flex-col gap-6 overflow-auto p-6" style={{ height: 'calc(100vh - 120px)' }}>
+            {/* Summary Cards */}
+            <SummaryCards
+                orderNowCount={orderNowCount}
+                orderSoonCount={orderSoonCount}
+                okCount={okCount}
+                totalBalance={health.totalBalance}
+            />
 
-                {/* Fabric Colours Table */}
-                <div className="rounded-xl bg-white shadow-sm ring-1 ring-slate-200 overflow-hidden" style={{ height: '500px' }}>
-                    <MaterialsTreeView
-                        onAddInward={handleAddInward}
-                    />
+            {/* Fabric Balances */}
+            <div className="rounded-xl bg-white shadow-sm ring-1 ring-slate-200">
+                <div className="px-4 py-3 border-b bg-slate-50">
+                    <h3 className="text-sm font-semibold text-slate-800">
+                        Fabric Balances
+                    </h3>
                 </div>
-
-                {/* Reorder Alerts */}
-                <ReorderAlerts items={reorderItems} />
-
-                {/* Top Consumption */}
-                <TopConsumptionChart items={topConsumption} />
+                <div style={{ maxHeight: 500, overflow: 'auto' }}>
+                    {health.data.map((fabric) => (
+                        <div key={fabric.fabricId} className="border-b border-slate-100">
+                            <div className="flex items-center justify-between px-4 py-2 bg-slate-50/50">
+                                <div>
+                                    <span className="font-medium text-slate-800 text-sm">{fabric.fabricName}</span>
+                                    <span className="ml-2 text-xs text-slate-400">{fabric.materialName}</span>
+                                    <span className="ml-2 text-xs text-slate-400">({fabric.colours.length} colours)</span>
+                                </div>
+                                <span className="font-semibold text-sm tabular-nums text-slate-800">
+                                    {fmt(fabric.totalBalance)} {fabric.unit === 'kg' ? 'kg' : 'mtr'}
+                                </span>
+                            </div>
+                            {fabric.colours.map((colour) => (
+                                <div
+                                    key={colour.colourName}
+                                    className="flex items-center justify-between px-4 py-1.5 pl-8 hover:bg-blue-50/30"
+                                >
+                                    <div className="flex items-center gap-2">
+                                        <div
+                                            className="w-3 h-3 rounded-full border border-slate-300"
+                                            style={{ backgroundColor: colour.colourHex || '#ccc' }}
+                                        />
+                                        <span className="text-sm text-slate-600">{colour.colourName}</span>
+                                    </div>
+                                    <span className={cn(
+                                        'text-sm tabular-nums font-medium',
+                                        colour.balance === 0 ? 'text-red-500' : 'text-slate-700'
+                                    )}>
+                                        {fmt(colour.balance)} {fabric.unit === 'kg' ? 'kg' : 'mtr'}
+                                    </span>
+                                </div>
+                            ))}
+                        </div>
+                    ))}
+                </div>
             </div>
 
-            {/* Add Inward Modal */}
-            {showInward && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-                    <div className="bg-white rounded-xl p-6 w-full max-w-md">
-                        <div className="flex items-center justify-between mb-4">
-                            <h2 className="text-lg font-semibold">Add Stock Inward</h2>
-                            <button onClick={() => setShowInward(null)} className="text-gray-400 hover:text-gray-600">
-                                <X size={20} />
-                            </button>
-                        </div>
-                        <div className="mb-4 p-3 bg-gray-50 rounded-lg">
-                            <p className="text-sm text-gray-500">
-                                Colour: <span className="font-medium text-gray-900">{showInward.colourName || showInward.name}</span>
-                            </p>
-                            {showInward.fabricName && (
-                                <p className="text-sm text-gray-500">
-                                    Fabric: <span className="font-medium text-gray-900">{showInward.fabricName}</span>
-                                </p>
-                            )}
-                        </div>
-                        <form onSubmit={handleSubmitInward} className="space-y-4">
-                            <div>
-                                <label className="label">Quantity ({showInward.unit || 'm'})</label>
-                                <input
-                                    className="input"
-                                    type="number"
-                                    step="0.01"
-                                    value={inwardForm.qty}
-                                    onChange={(e) => setInwardForm(f => ({ ...f, qty: e.target.value }))}
-                                    placeholder="0.00"
-                                    required
-                                />
-                            </div>
-                            <div>
-                                <label className="label">Cost/Unit (INR, optional)</label>
-                                <input
-                                    className="input"
-                                    type="number"
-                                    step="0.01"
-                                    value={inwardForm.costPerUnit}
-                                    onChange={(e) => setInwardForm(f => ({ ...f, costPerUnit: e.target.value }))}
-                                    placeholder="0.00"
-                                />
-                            </div>
-                            <div>
-                                <label className="label">Supplier</label>
-                                <select
-                                    className="input"
-                                    value={inwardForm.partyId}
-                                    onChange={(e) => setInwardForm(f => ({ ...f, partyId: e.target.value }))}
-                                >
-                                    <option value="">Select supplier...</option>
-                                    {parties?.map((s) => (
-                                        <option key={s.id} value={s.id}>{s.name}</option>
-                                    ))}
-                                </select>
-                            </div>
-                            <div>
-                                <label className="label">Notes (optional)</label>
-                                <textarea
-                                    className="input"
-                                    rows={2}
-                                    value={inwardForm.notes}
-                                    onChange={(e) => setInwardForm(f => ({ ...f, notes: e.target.value }))}
-                                    placeholder="Invoice ref, quality notes..."
-                                />
-                            </div>
-                            <div className="flex gap-3 pt-2">
-                                <button type="button" onClick={() => setShowInward(null)} className="btn-secondary flex-1">Cancel</button>
-                                <button type="submit" className="btn-primary flex-1" disabled={createInwardMutation.isPending}>
-                                    {createInwardMutation.isPending ? 'Adding...' : 'Add Inward'}
-                                </button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-            )}
-        </>
+            {/* Reorder Alerts */}
+            <ReorderAlerts items={reorderItems} />
+
+            {/* Top Consumption */}
+            <TopConsumptionChart items={topConsumption} />
+        </div>
     );
 }
