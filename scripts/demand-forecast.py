@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """
-COH Demand Forecasting + Fabric Requirements
-=============================================
-Forecasts weekly demand by product, maps to fabric requirements via BOM.
+COH Demand Forecasting — Fabric-First
+======================================
+Forecasts fabric colour demand directly from historical order consumption.
+Each fabric colour gets its own time series forecast (SARIMA + XGBoost).
+Product drivers are derived from actual recent consumption, not estimated.
 Outputs JSON (--json) or human-readable text.
 """
 
@@ -17,8 +19,9 @@ warnings.filterwarnings('ignore')
 
 DB_URL = "postgresql://cohapp:cohsecure2026@128.140.98.253:5432/coherp"
 FORECAST_WEEKS = 8
-WASTAGE_DEFAULT = 5
 JSON_MODE = '--json' in sys.argv
+MIN_WEEKS_ML = 30       # Minimum weeks of data for ML forecast
+MIN_WEEKS_AVG = 4       # Minimum weeks with sales for simple avg
 SIZE_ORDER = ['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL']
 
 
@@ -30,6 +33,7 @@ def log(msg):
 def fetch_all_data():
     conn = psycopg2.connect(DB_URL)
 
+    # Overall weekly orders
     weekly_total = pd.read_sql("""
         SELECT date_trunc('week', "orderDate")::date as week,
                COUNT(*) as orders,
@@ -40,6 +44,7 @@ def fetch_all_data():
         GROUP BY 1 ORDER BY 1
     """, conn)
 
+    # Weekly product units (for product forecasts section)
     weekly_product = pd.read_sql("""
         SELECT date_trunc('week', o."orderDate")::date as week,
                p.name as product_name,
@@ -53,51 +58,54 @@ def fetch_all_data():
         GROUP BY 1, 2
     """, conn)
 
-    size_mix = pd.read_sql("""
-        SELECT p.name as product_name, s.size, SUM(ol.qty) as units
+    # ── FABRIC-FIRST: Weekly fabric consumption from orders × BOM ──
+    weekly_fabric = pd.read_sql("""
+        SELECT date_trunc('week', o."orderDate")::date as week,
+               fc.code as fc_code,
+               fc."colourName" as colour,
+               f.name as fabric_name,
+               f.unit as fabric_unit,
+               fc."costPerUnit",
+               SUM(ol.qty * sbl.quantity
+                   * (1 + COALESCE(sbl."wastagePercent", 5) / 100.0)) as fabric_qty
         FROM "OrderLine" ol
         JOIN "Order" o ON o.id = ol."orderId"
         JOIN "Sku" s ON s.id = ol."skuId"
         JOIN "Variation" v ON v.id = s."variationId"
-        JOIN "Product" p ON p.id = v."productId"
-        WHERE o."orderDate" >= NOW() - INTERVAL '6 months'
-        GROUP BY 1, 2
+        JOIN "SkuBomLine" sbl ON sbl."skuId" = s.id
+        JOIN "VariationBomLine" vbl ON vbl."variationId" = v.id
+                                   AND vbl."roleId" = sbl."roleId"
+        JOIN "FabricColour" fc ON fc.id = vbl."fabricColourId"
+        JOIN "Fabric" f ON f.id = fc."fabricId"
+        WHERE o."orderDate" IS NOT NULL AND sbl.quantity > 0
+        GROUP BY 1, 2, 3, 4, 5, 6
     """, conn)
 
-    variation_mix = pd.read_sql("""
-        SELECT p.name as product_name,
-               v.id as variation_id, v."colorName" as colour,
-               SUM(ol.qty) as units
+    # Product-level fabric consumption (for drivers breakdown)
+    fabric_by_product = pd.read_sql("""
+        SELECT date_trunc('week', o."orderDate")::date as week,
+               fc.code as fc_code,
+               p.name as product_name,
+               SUM(ol.qty * sbl.quantity
+                   * (1 + COALESCE(sbl."wastagePercent", 5) / 100.0)) as fabric_qty
         FROM "OrderLine" ol
         JOIN "Order" o ON o.id = ol."orderId"
         JOIN "Sku" s ON s.id = ol."skuId"
         JOIN "Variation" v ON v.id = s."variationId"
         JOIN "Product" p ON p.id = v."productId"
-        WHERE o."orderDate" >= NOW() - INTERVAL '6 months'
+        JOIN "SkuBomLine" sbl ON sbl."skuId" = s.id
+        JOIN "VariationBomLine" vbl ON vbl."variationId" = v.id
+                                   AND vbl."roleId" = sbl."roleId"
+        JOIN "FabricColour" fc ON fc.id = vbl."fabricColourId"
+        WHERE o."orderDate" >= NOW() - INTERVAL '8 weeks'
+        AND sbl.quantity > 0
         GROUP BY 1, 2, 3
     """, conn)
 
-    bom = pd.read_sql("""
-        SELECT s.id as sku_id, s.size,
-               v.id as variation_id, v."colorName" as variation_colour,
-               p.name as product_name,
-               f.name as fabric_name, f.unit as fabric_unit,
-               fc.id as fabric_colour_id, fc."colourName" as fabric_colour,
-               fc.code as fc_code, fc."costPerUnit",
-               sbl.quantity as qty_per_unit, sbl."wastagePercent"
-        FROM "SkuBomLine" sbl
-        JOIN "Sku" s ON s.id = sbl."skuId"
-        JOIN "Variation" v ON v.id = s."variationId"
-        JOIN "VariationBomLine" vbl ON vbl."variationId" = v.id AND vbl."roleId" = sbl."roleId"
-        JOIN "FabricColour" fc ON fc.id = vbl."fabricColourId"
-        JOIN "Fabric" f ON f.id = fc."fabricId"
-        JOIN "Product" p ON p.id = v."productId"
-        WHERE sbl.quantity IS NOT NULL AND sbl.quantity > 0
-    """, conn)
-
+    # Current fabric stock
     fabric_stock = pd.read_sql("""
-        SELECT fc.id as fabric_colour_id, fc."colourName" as fabric_colour,
-               fc.code as fc_code, fc."currentBalance",
+        SELECT fc.code as fc_code, fc."currentBalance",
+               fc."colourName" as colour,
                f.name as fabric_name, f.unit as fabric_unit
         FROM "FabricColour" fc
         JOIN "Fabric" f ON f.id = fc."fabricId"
@@ -105,10 +113,11 @@ def fetch_all_data():
     """, conn)
 
     conn.close()
-    return weekly_total, weekly_product, size_mix, variation_mix, bom, fabric_stock
+    return weekly_total, weekly_product, weekly_fabric, fabric_by_product, fabric_stock
 
 
 # ── ML Models ────────────────────────────────────────────────────────
+
 def create_time_features(df, target_col='units'):
     df = df.copy()
     df['week_dt'] = pd.to_datetime(df['week'])
@@ -165,6 +174,7 @@ def xgboost_forecast(df, target_col='units', steps=8):
 
 
 def forecast_series(df, target_col='units', steps=8):
+    """Run SARIMA + XGBoost ensemble on a weekly time series."""
     df = df.copy()
     df['week_dt'] = pd.to_datetime(df['week'])
     df = df.sort_values('week_dt')
@@ -197,46 +207,10 @@ def forecast_series(df, target_col='units', steps=8):
     return forecasts
 
 
-def compute_fabric_needs(product_name, total_units, size_mix_df, variation_mix_df, bom_df):
-    var_data = variation_mix_df[variation_mix_df['product_name'] == product_name]
-    if var_data.empty:
-        return {}
-    var_total = var_data['units'].sum()
-    var_props = dict(zip(var_data['variation_id'], var_data['units'] / var_total))
-
-    sz_data = size_mix_df[size_mix_df['product_name'] == product_name]
-    if sz_data.empty:
-        return {}
-    sz_total = sz_data['units'].sum()
-    sz_props = dict(zip(sz_data['size'], sz_data['units'] / sz_total))
-
-    needs = {}
-    for var_id, var_pct in var_props.items():
-        var_units = total_units * var_pct
-        for size, sz_pct in sz_props.items():
-            size_units = var_units * sz_pct
-            bom_rows = bom_df[(bom_df['variation_id'] == var_id) & (bom_df['size'] == size)]
-            for _, row in bom_rows.iterrows():
-                wastage = row['wastagePercent'] if pd.notna(row['wastagePercent']) and row['wastagePercent'] > 0 else WASTAGE_DEFAULT
-                fabric_qty = size_units * row['qty_per_unit'] * (1 + wastage / 100)
-                code = row['fc_code']
-                if code not in needs:
-                    needs[code] = {
-                        'fabric': row['fabric_name'],
-                        'colour': row['fabric_colour'],
-                        'unit': row['fabric_unit'],
-                        'qty': 0,
-                        'fc_id': row['fabric_colour_id'],
-                        'cost': float(row['costPerUnit']) if pd.notna(row['costPerUnit']) else 0
-                    }
-                needs[code]['qty'] += fabric_qty
-    return needs
-
-
 # ══════════════════════════════════════════════════════════════════════
 if __name__ == '__main__':
     log("Fetching data...")
-    weekly_total, weekly_product, size_mix, variation_mix, bom, fabric_stock = fetch_all_data()
+    weekly_total, weekly_product, weekly_fabric, fabric_by_product, fabric_stock = fetch_all_data()
     weekly_product['week'] = pd.to_datetime(weekly_product['week']).dt.date
 
     # ── Overall stats ────────────────────────────────────────────────
@@ -259,12 +233,10 @@ if __name__ == '__main__':
         'prevAov': round(float(prev_12['aov'].mean()), 0),
     }
 
-    # YoY
     if len(wt) > 56:
         yoy_same = float(wt.iloc[-56:-48]['orders'].mean())
         overall['yoySameperiodAvg'] = round(yoy_same, 1)
 
-    # Seasonality
     wt['month'] = wt['week_dt'].dt.month
     monthly_avg = wt.groupby('month')['orders'].mean()
     overall_avg = monthly_avg.mean()
@@ -274,7 +246,6 @@ if __name__ == '__main__':
         for m in range(1, 13)
     ]
 
-    # Weekly history for chart (last 52 weeks)
     history = []
     for _, row in wt.tail(52).iterrows():
         history.append({
@@ -284,51 +255,200 @@ if __name__ == '__main__':
             'aov': round(float(row['aov']), 0) if pd.notna(row['aov']) else 0,
         })
 
-    # ── Overall forecast (orders) ──────────────────────────────────────
+    # ── Overall order forecast ────────────────────────────────────────
     log("Running overall order forecast...")
     overall_fc = forecast_series(wt.rename(columns={'orders': 'units'}), 'units', FORECAST_WEEKS)
 
-    # ── Revenue forecast (orders × recent AOV) ──────────────────────
+    # Revenue forecast (orders × recent AOV)
     recent_aov = float(recent_12['aov'].mean())
     log(f"Revenue forecast using recent 12w AOV: ₹{recent_aov:,.0f}")
-    revenue_fc = []
-    for fc in overall_fc:
-        revenue_fc.append({
+    revenue_fc = [
+        {
             'week': fc['week'],
             'forecast': round(fc['forecast'] * recent_aov, 0),
             'low': round(fc['low'] * recent_aov, 0),
             'high': round(fc['high'] * recent_aov, 0),
+        }
+        for fc in overall_fc
+    ]
+
+    # ═══════════════════════════════════════════════════════════════════
+    # FABRIC-FIRST FORECASTING
+    # Forecast each fabric colour's consumption directly from its own
+    # time series, rather than forecasting products and distributing.
+    # ═══════════════════════════════════════════════════════════════════
+    log("Running fabric-first forecasting...")
+
+    # Aggregate weekly consumption per fabric colour
+    wf = weekly_fabric.copy()
+    wf['week'] = pd.to_datetime(wf['week']).dt.date
+    # Don't groupby costPerUnit — NaN values cause pandas to drop rows
+    wf_agg = wf.groupby(['week', 'fc_code', 'colour', 'fabric_name', 'fabric_unit']).agg(
+        fabric_qty=('fabric_qty', 'sum')
+    ).reset_index()
+
+    # Build a cost lookup separately (take first non-null cost per fc_code)
+    cost_lookup = wf.dropna(subset=['costPerUnit']).drop_duplicates('fc_code').set_index('fc_code')['costPerUnit'].to_dict()
+
+    # Get unique fabric colours
+    fc_codes = wf_agg['fc_code'].unique()
+    log(f"  {len(fc_codes)} fabric colours found in order history")
+
+    # Build product drivers from actual last 8 weeks consumption
+    fbp = fabric_by_product.copy()
+    drivers_by_fc = {}
+    if not fbp.empty:
+        driver_agg = fbp.groupby(['fc_code', 'product_name'])['fabric_qty'].sum().reset_index()
+        for fc_code in driver_agg['fc_code'].unique():
+            fc_drivers = driver_agg[driver_agg['fc_code'] == fc_code].sort_values('fabric_qty', ascending=False)
+            drivers_by_fc[fc_code] = [
+                {'product': row['product_name'], 'qty': round(float(row['fabric_qty']), 1)}
+                for _, row in fc_drivers.iterrows()
+                if row['fabric_qty'] > 0.1
+            ]
+
+    # Forecast each fabric colour
+    fabric_forecasts = {}  # fc_code -> {info + forecast_total + method + history + forecasts}
+    ml_count = 0
+    avg_count = 0
+    skip_count = 0
+
+    for fc_code in fc_codes:
+        fc_data = wf_agg[wf_agg['fc_code'] == fc_code].copy()
+        fc_info = fc_data.iloc[0]
+        ts = fc_data.groupby('week').agg({'fabric_qty': 'sum'}).reset_index()
+        ts = ts.rename(columns={'fabric_qty': 'units'})
+        ts = ts.sort_values('week')
+
+        # Count weeks with actual sales
+        recent_8w = ts.tail(8)
+        weeks_with_sales = (recent_8w['units'] > 0).sum()
+
+        if weeks_with_sales < MIN_WEEKS_AVG:
+            skip_count += 1
+            continue
+
+        recent_avg = float(recent_8w['units'].mean())
+
+        if len(ts) >= MIN_WEEKS_ML:
+            # ML forecast
+            forecasts = forecast_series(ts, 'units', FORECAST_WEEKS)
+            if forecasts:
+                total_fc = sum(f['forecast'] for f in forecasts)
+                method = 'ml'
+                ml_count += 1
+            else:
+                total_fc = recent_avg * FORECAST_WEEKS
+                forecasts = []
+                method = 'avg'
+                avg_count += 1
+        else:
+            total_fc = recent_avg * FORECAST_WEEKS
+            forecasts = []
+            method = 'avg'
+            avg_count += 1
+
+        if total_fc < 0.1:
+            skip_count += 1
+            continue
+
+        # Weekly history (last 26 weeks)
+        fc_history = []
+        for _, row in ts.tail(26).iterrows():
+            fc_history.append({'week': str(row['week']), 'qty': round(float(row['units']), 1)})
+
+        cost = float(cost_lookup.get(fc_code, 0))
+
+        fabric_forecasts[fc_code] = {
+            'fc_code': fc_code,
+            'colour': fc_info['colour'],
+            'fabric_name': fc_info['fabric_name'],
+            'fabric_unit': fc_info['fabric_unit'],
+            'cost': cost,
+            'forecast_total': round(total_fc, 1),
+            'recent8wTotal': round(float(recent_8w['units'].sum()), 1),
+            'recent8wAvg': round(recent_avg, 1),
+            'method': method,
+            'history': fc_history,
+            'forecasts': forecasts,
+            'drivers': drivers_by_fc.get(fc_code, []),
+        }
+
+    log(f"  ML forecasts: {ml_count} | Simple avg: {avg_count} | Skipped: {skip_count}")
+
+    # ── Assemble fabric requirements (grouped by fabric type) ─────────
+    fabrics_by_type = {}
+    for fc_code, fc in fabric_forecasts.items():
+        fname = fc['fabric_name']
+        if fname not in fabrics_by_type:
+            fabrics_by_type[fname] = {
+                'name': fname,
+                'unit': fc['fabric_unit'],
+                'totalQty': 0,
+                'colours': [],
+            }
+        fabrics_by_type[fname]['totalQty'] += fc['forecast_total']
+
+        stock_row = fabric_stock[fabric_stock['fc_code'] == fc_code]
+        current = float(stock_row['currentBalance'].sum()) if not stock_row.empty else 0
+        gap = fc['forecast_total'] - current
+
+        fabrics_by_type[fname]['colours'].append({
+            'code': fc_code,
+            'colour': fc['colour'],
+            'required': fc['forecast_total'],
+            'inStock': round(current, 1),
+            'gap': round(gap, 1),
+            'costPerUnit': fc['cost'],
+            'orderCost': round(max(0, gap) * fc['cost'], 0) if fc['cost'] > 0 else 0,
+            'method': fc['method'],
+            'recent8wTotal': fc['recent8wTotal'],
+            'recent8wAvg': fc['recent8wAvg'],
+            'history': fc['history'],
+            'forecasts': fc['forecasts'],
+            'drivers': fc['drivers'],
         })
 
-    # ── Product forecasts (top 10 with ML) ───────────────────────────
+    fabric_list = sorted(fabrics_by_type.values(), key=lambda x: -x['totalQty'])
+    for f in fabric_list:
+        f['totalQty'] = round(f['totalQty'], 1)
+        f['colours'].sort(key=lambda x: -x['required'])
+
+    # ── Purchase orders (shortfalls only) ─────────────────────────────
+    shortfalls = []
+    for fc_code, fc in fabric_forecasts.items():
+        stock_row = fabric_stock[fabric_stock['fc_code'] == fc_code]
+        current = float(stock_row['currentBalance'].sum()) if not stock_row.empty else 0
+        gap = fc['forecast_total'] - current
+        if gap > 0:
+            shortfalls.append({
+                'code': fc_code,
+                'fabric': fc['fabric_name'],
+                'colour': fc['colour'],
+                'unit': fc['fabric_unit'],
+                'required': fc['forecast_total'],
+                'inStock': round(current, 1),
+                'toOrder': round(gap, 1),
+                'costPerUnit': fc['cost'],
+                'estCost': round(gap * fc['cost'], 0) if fc['cost'] > 0 else 0,
+            })
+    shortfalls.sort(key=lambda x: -x['required'])
+
+    total_fabric_qty = sum(fc['forecast_total'] for fc in fabric_forecasts.values())
+    total_order_cost = sum(s['estCost'] for s in shortfalls)
+    covered = sum(1 for fc_code, fc in fabric_forecasts.items()
+                  if float(fabric_stock[fabric_stock['fc_code'] == fc_code]['currentBalance'].sum()) >= fc['forecast_total'])
+
+    # ── Product forecasts (top 10, kept for context) ──────────────────
+    log("Running top 10 product forecasts...")
     cutoff_12mo = (datetime.now() - timedelta(days=365)).date()
     recent = weekly_product[weekly_product['week'] >= cutoff_12mo]
     product_rank = recent.groupby('product_name')['units'].sum().sort_values(ascending=False).head(10)
 
     products = []
-    all_fabric_needs = {}
-    fabric_drivers = {}  # fc_code -> {product_name: qty}
-    ml_forecasted_products = set()
-    product_forecasts = {}  # product_name -> total_fc (for all products)
-
-    def accumulate_fabric(product_name, total_fc):
-        """Compute fabric needs for a product and track per-product drivers."""
-        needs = compute_fabric_needs(product_name, total_fc, size_mix, variation_mix, bom)
-        for code, info in needs.items():
-            if code in all_fabric_needs:
-                all_fabric_needs[code]['qty'] += info['qty']
-            else:
-                all_fabric_needs[code] = info.copy()
-            # Track which products drive each fabric colour
-            if code not in fabric_drivers:
-                fabric_drivers[code] = {}
-            fabric_drivers[code][product_name] = fabric_drivers[code].get(product_name, 0) + info['qty']
-
     for product_name, last_12mo in product_rank.items():
-        log(f"  Forecasting {product_name}...")
         prod_data = weekly_product[weekly_product['product_name'] == product_name]
         prod_data = prod_data.groupby('week').agg({'units': 'sum'}).reset_index()
-
         if len(prod_data) < 30:
             continue
 
@@ -336,38 +456,6 @@ if __name__ == '__main__':
         forecasts = forecast_series(prod_data, 'units', FORECAST_WEEKS)
         total_fc = sum(f['forecast'] for f in forecasts)
 
-        ml_forecasted_products.add(product_name)
-        product_forecasts[product_name] = total_fc
-
-        # Size mix
-        sz = size_mix[size_mix['product_name'] == product_name]
-        sz_total = sz['units'].sum() if not sz.empty else 0
-        size_breakdown = []
-        if sz_total > 0:
-            for size in SIZE_ORDER:
-                sz_row = sz[sz['size'] == size]
-                if not sz_row.empty:
-                    pct = float(sz_row['units'].sum() / sz_total)
-                    size_breakdown.append({
-                        'size': size,
-                        'pct': round(pct * 100, 1),
-                        'units': round(total_fc * pct, 0)
-                    })
-
-        # Colour mix
-        var = variation_mix[variation_mix['product_name'] == product_name]
-        var_total = var['units'].sum() if not var.empty else 0
-        colour_breakdown = []
-        if var_total > 0:
-            for _, row in var.sort_values('units', ascending=False).iterrows():
-                pct = float(row['units'] / var_total)
-                colour_breakdown.append({
-                    'colour': row['colour'],
-                    'pct': round(pct * 100, 1),
-                    'units': round(total_fc * pct, 0)
-                })
-
-        # Weekly history for this product (last 26 weeks)
         prod_history = []
         for _, row in prod_data.tail(26).iterrows():
             prod_history.append({'week': str(row['week']), 'units': int(row['units'])})
@@ -378,107 +466,15 @@ if __name__ == '__main__':
             'recent8wAvg': round(recent_8w, 1),
             'forecastTotal': round(total_fc, 0),
             'forecasts': forecasts,
-            'sizeBreakdown': size_breakdown,
-            'colourBreakdown': colour_breakdown,
+            'sizeBreakdown': [],
+            'colourBreakdown': [],
             'history': prod_history,
         })
 
-        accumulate_fabric(product_name, total_fc)
-
-    # ── Fabric needs for ALL other products (simple avg projection) ──
-    log("Computing fabric for remaining products (simple avg)...")
-    all_product_names = set(size_mix['product_name'].unique()) & set(variation_mix['product_name'].unique())
-    bom_products = set(bom['product_name'].unique())
-    remaining_products = (all_product_names & bom_products) - ml_forecasted_products
-
-    remaining_count = 0
-    for product_name in remaining_products:
-        prod_data = weekly_product[weekly_product['product_name'] == product_name]
-        prod_data = prod_data.groupby('week').agg({'units': 'sum'}).reset_index()
-
-        if prod_data.empty:
-            continue
-
-        recent_avg = float(prod_data.tail(8)['units'].mean())
-        total_fc = recent_avg * FORECAST_WEEKS
-
-        if total_fc < 1:
-            continue
-
-        remaining_count += 1
-        product_forecasts[product_name] = total_fc
-        accumulate_fabric(product_name, total_fc)
-
-    log(f"  Added fabric needs from {remaining_count} additional products")
-
-    # ── Fabric requirements ──────────────────────────────────────────
-    log("Computing fabric requirements...")
-    fabrics_by_type = {}
-    for code, info in all_fabric_needs.items():
-        fname = info['fabric']
-        if fname not in fabrics_by_type:
-            fabrics_by_type[fname] = {'name': fname, 'unit': info['unit'], 'totalQty': 0, 'colours': []}
-        fabrics_by_type[fname]['totalQty'] += info['qty']
-
-        stock_row = fabric_stock[fabric_stock['fc_code'] == code]
-        current = float(stock_row['currentBalance'].sum()) if not stock_row.empty else 0
-        gap = info['qty'] - current
-
-        # Build sorted product drivers for this fabric colour
-        drivers = []
-        if code in fabric_drivers:
-            for pname, pqty in sorted(fabric_drivers[code].items(), key=lambda x: -x[1]):
-                drivers.append({
-                    'product': pname,
-                    'qty': round(pqty, 1),
-                    'units': round(product_forecasts.get(pname, 0), 0),
-                })
-
-        fabrics_by_type[fname]['colours'].append({
-            'code': code,
-            'colour': info['colour'],
-            'required': round(info['qty'], 1),
-            'inStock': round(current, 1),
-            'gap': round(gap, 1),
-            'costPerUnit': info['cost'],
-            'orderCost': round(max(0, gap) * info['cost'], 0) if info['cost'] > 0 else 0,
-            'drivers': drivers,
-        })
-
-    fabric_list = sorted(fabrics_by_type.values(), key=lambda x: -x['totalQty'])
-    for f in fabric_list:
-        f['totalQty'] = round(f['totalQty'], 1)
-        f['colours'].sort(key=lambda x: -x['required'])
-
-    # Purchase orders
-    shortfalls = []
-    for code, info in all_fabric_needs.items():
-        stock_row = fabric_stock[fabric_stock['fc_code'] == code]
-        current = float(stock_row['currentBalance'].sum()) if not stock_row.empty else 0
-        gap = info['qty'] - current
-        if gap > 0:
-            shortfalls.append({
-                'code': code,
-                'fabric': info['fabric'],
-                'colour': info['colour'],
-                'unit': info['unit'],
-                'required': round(info['qty'], 1),
-                'inStock': round(current, 1),
-                'toOrder': round(gap, 1),
-                'costPerUnit': info['cost'],
-                'estCost': round(gap * info['cost'], 0) if info['cost'] > 0 else 0,
-            })
-    shortfalls.sort(key=lambda x: -x['required'])
-
-    total_units = sum(p['forecastTotal'] for p in products)
-    total_order_cost = sum(s['estCost'] for s in shortfalls)
-    covered = sum(1 for code, info in all_fabric_needs.items()
-                  if float(fabric_stock[fabric_stock['fc_code'] == code]['currentBalance'].sum()) >= info['qty'])
-
+    # ── Result ────────────────────────────────────────────────────────
     result = {
         'generatedAt': datetime.now().isoformat(),
         'forecastWeeks': FORECAST_WEEKS,
-        'wastagePercent': WASTAGE_DEFAULT,
         'overall': overall,
         'weeklyHistory': history,
         'overallForecast': overall_fc,
@@ -487,39 +483,40 @@ if __name__ == '__main__':
         'fabricRequirements': fabric_list,
         'purchaseOrders': shortfalls,
         'summary': {
-            'totalForecastUnits': round(total_units, 0),
+            'totalForecastUnits': round(sum(p['forecastTotal'] for p in products), 0),
             'productsForecasted': len(products),
             'fabricTypesNeeded': len(fabric_list),
-            'fabricColoursNeeded': len(all_fabric_needs),
+            'fabricColoursNeeded': len(fabric_forecasts),
+            'fabricColoursML': ml_count,
+            'fabricColoursAvg': avg_count,
             'shortfallCount': len(shortfalls),
             'coveredByStock': covered,
             'estimatedPurchaseCost': total_order_cost,
+            'totalFabricQty': round(total_fabric_qty, 1),
         }
     }
 
     if JSON_MODE:
         print(json.dumps(result, default=str))
     else:
-        # Human-readable output
         print(f"\n{'#'*65}")
-        print(f"  DEMAND FORECAST — {datetime.now().strftime('%Y-%m-%d')}")
+        print(f"  FABRIC DEMAND FORECAST — {datetime.now().strftime('%Y-%m-%d')}")
         print(f"{'#'*65}")
         print(f"\n  Data: {overall['totalOrders']:,} orders over {overall['weeksOfData']} weeks")
         print(f"  Recent 12w avg: {overall['recent12wAvg']}/wk | AOV: ₹{overall['recentAov']:,.0f}")
+        print(f"  Fabric colours: {len(fabric_forecasts)} ({ml_count} ML + {avg_count} simple avg)")
 
-        for p in products:
-            print(f"\n  {'─'*60}")
-            print(f"  {p['name']} — {p['forecastTotal']:.0f} units ({FORECAST_WEEKS}wk)")
-            for f in p['forecasts']:
-                print(f"    {f['week']}  {f['forecast']:>6.0f}  ({f['low']:.0f}-{f['high']:.0f})")
-
-        print(f"\n\n  FABRIC REQUIREMENTS:")
+        print(f"\n  FABRIC REQUIREMENTS ({FORECAST_WEEKS}-week projection):")
         for fab in fabric_list:
             print(f"\n  {fab['name']} — {fab['totalQty']:.1f} {fab['unit']}")
             for c in fab['colours']:
                 status = f"ORDER {c['gap']:.1f}" if c['gap'] > 0 else f"OK (+{-c['gap']:.1f})"
-                print(f"    {c['code']:<16} {c['colour']:<20} need:{c['required']:>7.1f}  stock:{c['inStock']:>7.1f}  {status}")
+                tag = '🤖' if c['method'] == 'ml' else '📊'
+                print(f"    {tag} {c['code']:<16} {c['colour']:<20} need:{c['required']:>7.1f}  stock:{c['inStock']:>7.1f}  {status}")
+                if c['drivers']:
+                    for d in c['drivers'][:3]:
+                        print(f"       └─ {d['product']}: {d['qty']:.1f} {fab['unit']}")
 
-        print(f"\n  SUMMARY: {total_units:.0f} units | {len(shortfalls)} fabrics to order")
+        print(f"\n  SUMMARY: {len(fabric_forecasts)} fabric colours | {len(shortfalls)} to order")
         if total_order_cost > 0:
             print(f"  Est. purchase: ₹{total_order_cost:,.0f}")

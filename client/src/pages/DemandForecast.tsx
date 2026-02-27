@@ -39,7 +39,6 @@ interface ProductForecast {
 interface FabricDriver {
     product: string;
     qty: number;
-    units: number;
 }
 
 interface FabricColour {
@@ -50,6 +49,11 @@ interface FabricColour {
     gap: number;
     costPerUnit: number;
     orderCost: number;
+    method?: 'ml' | 'avg';
+    recent8wTotal?: number;
+    recent8wAvg?: number;
+    history?: { week: string; qty: number }[];
+    forecasts?: ForecastPoint[];
     drivers?: FabricDriver[];
 }
 
@@ -810,23 +814,30 @@ function FabricRequirements({ fabrics, unit }: { fabrics: FabricRequirement[]; u
                             <tbody>
                                 {fabric.colours.map(c => {
                                     const isExpanded = expandedColours.has(c.code);
-                                    const hasDrivers = c.drivers && c.drivers.length > 0;
                                     return (
                                         <React.Fragment key={c.code}>
                                             <tr
-                                                className={`border-t border-zinc-800/30 ${hasDrivers ? 'cursor-pointer hover:bg-zinc-800/30' : ''} ${isExpanded ? 'bg-zinc-800/20' : ''}`}
-                                                onClick={() => hasDrivers && toggleColour(c.code)}
+                                                className={`border-t border-zinc-800/30 cursor-pointer hover:bg-zinc-800/30 ${isExpanded ? 'bg-zinc-800/20' : ''}`}
+                                                onClick={() => toggleColour(c.code)}
                                             >
                                                 <td className="pl-4 py-2 text-zinc-600">
-                                                    {hasDrivers && (
-                                                        isExpanded
-                                                            ? <ChevronUp className="w-3 h-3" />
-                                                            : <ChevronDown className="w-3 h-3" />
-                                                    )}
+                                                    {isExpanded
+                                                        ? <ChevronUp className="w-3 h-3" />
+                                                        : <ChevronDown className="w-3 h-3" />
+                                                    }
                                                 </td>
                                                 <td className="py-2">
                                                     <span className="text-zinc-300">{c.colour}</span>
                                                     <span className="ml-2 font-mono text-zinc-600 text-[10px]">{c.code}</span>
+                                                    {c.method && (
+                                                        <span className={`ml-2 text-[9px] px-1.5 py-0.5 rounded ${
+                                                            c.method === 'ml'
+                                                                ? 'bg-blue-500/10 text-blue-400'
+                                                                : 'bg-zinc-700 text-zinc-500'
+                                                        }`}>
+                                                            {c.method === 'ml' ? 'ML' : 'AVG'}
+                                                        </span>
+                                                    )}
                                                 </td>
                                                 <td className="py-2 text-right pr-3 font-medium">{c.required.toFixed(1)}</td>
                                                 <td className="py-2 text-right pr-3 text-zinc-400">{c.inStock.toFixed(1)}</td>
@@ -844,39 +855,83 @@ function FabricRequirements({ fabrics, unit }: { fabrics: FabricRequirement[]; u
                                                     )}
                                                 </td>
                                             </tr>
-                                            {/* Product drivers (expanded) */}
-                                            {isExpanded && c.drivers && (
+                                            {/* Expanded detail */}
+                                            {isExpanded && (
                                                 <tr>
                                                     <td colSpan={6} className="px-4 pb-3 pt-1">
-                                                        <div className="bg-zinc-800/40 rounded-lg p-3 ml-4">
-                                                            <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-2">
-                                                                Demand driven by
+                                                        <div className="bg-zinc-800/40 rounded-lg p-3 ml-4 space-y-3">
+                                                            {/* Consumption stats */}
+                                                            <div className="flex items-center gap-6 text-xs">
+                                                                <div>
+                                                                    <span className="text-zinc-500">Last 8w actual:</span>{' '}
+                                                                    <span className="text-zinc-300 font-medium">{c.recent8wTotal?.toFixed(1)} {fabric.unit}</span>
+                                                                </div>
+                                                                <div>
+                                                                    <span className="text-zinc-500">Avg/wk:</span>{' '}
+                                                                    <span className="text-zinc-300">{c.recent8wAvg?.toFixed(1)}</span>
+                                                                </div>
+                                                                <div>
+                                                                    <span className="text-zinc-500">Forecast:</span>{' '}
+                                                                    <span className="text-zinc-300 font-medium">{c.required.toFixed(1)} {fabric.unit}</span>
+                                                                </div>
+                                                                {c.recent8wTotal != null && c.recent8wTotal > 0 && (
+                                                                    <div>
+                                                                        <span className="text-zinc-500">vs actual:</span>{' '}
+                                                                        <span className={c.required / c.recent8wTotal > 1.2 ? 'text-amber-400' : 'text-green-400'}>
+                                                                            {((c.required / c.recent8wTotal - 1) * 100).toFixed(0)}%
+                                                                        </span>
+                                                                    </div>
+                                                                )}
                                                             </div>
-                                                            <div className="space-y-1.5">
-                                                                {c.drivers.map(d => {
-                                                                    const pct = c.required > 0 ? (d.qty / c.required * 100) : 0;
-                                                                    return (
-                                                                        <div key={d.product} className="flex items-center gap-2">
-                                                                            <span className="text-xs text-zinc-300 w-48 truncate">{d.product}</span>
-                                                                            <div className="flex-1 bg-zinc-700 rounded-full h-1.5 overflow-hidden">
-                                                                                <div
-                                                                                    className="h-full bg-blue-500/70 rounded-full"
-                                                                                    style={{ width: `${Math.min(100, pct)}%` }}
-                                                                                />
-                                                                            </div>
-                                                                            <span className="text-xs text-zinc-400 w-16 text-right">
-                                                                                {d.qty.toFixed(1)} {fabric.unit}
-                                                                            </span>
-                                                                            <span className="text-[10px] text-zinc-500 w-10 text-right">
-                                                                                {pct.toFixed(0)}%
-                                                                            </span>
-                                                                        </div>
-                                                                    );
-                                                                })}
-                                                            </div>
-                                                            <div className="text-[10px] text-zinc-600 mt-2">
-                                                                Based on {unit}-week demand forecast ({c.drivers.length} product{c.drivers.length !== 1 ? 's' : ''})
-                                                            </div>
+
+                                                            {/* Mini consumption chart */}
+                                                            {c.history && c.history.length > 0 && (
+                                                                <div>
+                                                                    <div className="text-[10px] text-zinc-500 mb-1">Weekly consumption (26w history{c.forecasts && c.forecasts.length > 0 ? ' + forecast' : ''})</div>
+                                                                    <ResponsiveContainer width="100%" height={80}>
+                                                                        <AreaChart data={[
+                                                                            ...c.history.map(h => ({ week: h.week.slice(5), qty: h.qty })),
+                                                                            ...(c.forecasts ?? []).map(f => ({ week: f.week.slice(5), fc: f.forecast })),
+                                                                        ]}>
+                                                                            <XAxis dataKey="week" tick={{ fontSize: 8, fill: '#52525b' }} interval={4} />
+                                                                            <YAxis tick={{ fontSize: 8, fill: '#52525b' }} width={30} />
+                                                                            <Area type="monotone" dataKey="qty" stroke={CHART_BLUE} fill={CHART_BLUE} fillOpacity={0.1} strokeWidth={1.5} />
+                                                                            <Area type="monotone" dataKey="fc" stroke={CHART_GREEN} fill={CHART_GREEN} fillOpacity={0.1} strokeWidth={2} strokeDasharray="4 4" />
+                                                                        </AreaChart>
+                                                                    </ResponsiveContainer>
+                                                                </div>
+                                                            )}
+
+                                                            {/* Product drivers */}
+                                                            {c.drivers && c.drivers.length > 0 && (
+                                                                <div>
+                                                                    <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-2">
+                                                                        Demand driven by (last 8 weeks actual)
+                                                                    </div>
+                                                                    <div className="space-y-1.5">
+                                                                        {c.drivers.map(d => {
+                                                                            const pct = c.recent8wTotal && c.recent8wTotal > 0 ? (d.qty / c.recent8wTotal * 100) : 0;
+                                                                            return (
+                                                                                <div key={d.product} className="flex items-center gap-2">
+                                                                                    <span className="text-xs text-zinc-300 w-48 truncate">{d.product}</span>
+                                                                                    <div className="flex-1 bg-zinc-700 rounded-full h-1.5 overflow-hidden">
+                                                                                        <div
+                                                                                            className="h-full bg-blue-500/70 rounded-full"
+                                                                                            style={{ width: `${Math.min(100, pct)}%` }}
+                                                                                        />
+                                                                                    </div>
+                                                                                    <span className="text-xs text-zinc-400 w-16 text-right">
+                                                                                        {d.qty.toFixed(1)} {fabric.unit}
+                                                                                    </span>
+                                                                                    <span className="text-[10px] text-zinc-500 w-10 text-right">
+                                                                                        {pct.toFixed(0)}%
+                                                                                    </span>
+                                                                                </div>
+                                                                            );
+                                                                        })}
+                                                                    </div>
+                                                                </div>
+                                                            )}
                                                         </div>
                                                     </td>
                                                 </tr>
