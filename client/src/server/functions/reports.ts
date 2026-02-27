@@ -1048,6 +1048,7 @@ export interface BreakdownItem {
     orders: number;
     avgOrderValue: number;
     percentOfTotal: number;
+    children?: BreakdownItem[];
 }
 
 /** Sales analytics response */
@@ -1195,7 +1196,123 @@ export const getSalesAnalytics = createServerFn({ method: 'GET' })
             },
         });
 
-        // Aggregate based on dimension
+        // For product dimension, use two-level aggregation (product name → variation color)
+        if (dimension === 'product') {
+            // Track per-variation stats, grouped by product name
+            const productMap = new Map<string, {
+                label: string;
+                units: number;
+                revenue: number;
+                orderIds: Set<string>;
+                variations: Map<string, {
+                    label: string;
+                    units: number;
+                    revenue: number;
+                    orderIds: Set<string>;
+                }>;
+            }>();
+
+            for (const line of orderLines) {
+                const productName = line.sku.variation.product.name;
+                const colorName = line.sku.variation.colorName || 'No Color';
+                const lineRevenue = line.unitPrice * line.qty;
+
+                if (!productMap.has(productName)) {
+                    productMap.set(productName, {
+                        label: productName,
+                        units: 0,
+                        revenue: 0,
+                        orderIds: new Set(),
+                        variations: new Map(),
+                    });
+                }
+
+                const product = productMap.get(productName)!;
+                product.units += line.qty;
+                product.revenue += lineRevenue;
+                product.orderIds.add(line.orderId);
+
+                if (!product.variations.has(colorName)) {
+                    product.variations.set(colorName, {
+                        label: colorName,
+                        units: 0,
+                        revenue: 0,
+                        orderIds: new Set(),
+                    });
+                }
+
+                const variation = product.variations.get(colorName)!;
+                variation.units += line.qty;
+                variation.revenue += lineRevenue;
+                variation.orderIds.add(line.orderId);
+            }
+
+            const totalUnits = Array.from(productMap.values()).reduce((sum, p) => sum + p.units, 0);
+            const totalRevenue = Array.from(productMap.values()).reduce((sum, p) => sum + p.revenue, 0);
+            const uniqueOrderIds = new Set(orderLines.map((l: { orderId: string }) => l.orderId));
+            const totalOrders = uniqueOrderIds.size;
+            const avgOrderValue = totalOrders > 0 ? Math.round((totalRevenue / totalOrders) * 100) / 100 : 0;
+
+            // Build breakdown with children sorted by revenue
+            const breakdown: BreakdownItem[] = Array.from(productMap.entries())
+                .map(([name, stats]) => {
+                    const children: BreakdownItem[] = Array.from(stats.variations.entries())
+                        .map(([color, vStats]) => ({
+                            key: `${name}::${color}`,
+                            label: color,
+                            revenue: Math.round(vStats.revenue * 100) / 100,
+                            units: vStats.units,
+                            orders: vStats.orderIds.size,
+                            avgOrderValue: vStats.orderIds.size > 0
+                                ? Math.round((vStats.revenue / vStats.orderIds.size) * 100) / 100 : 0,
+                            percentOfTotal: totalRevenue > 0
+                                ? Math.round((vStats.revenue / totalRevenue) * 10000) / 100 : 0,
+                        }))
+                        .sort((a, b) => b.revenue - a.revenue);
+
+                    return {
+                        key: name,
+                        label: name,
+                        revenue: Math.round(stats.revenue * 100) / 100,
+                        units: stats.units,
+                        orders: stats.orderIds.size,
+                        avgOrderValue: stats.orderIds.size > 0
+                            ? Math.round((stats.revenue / stats.orderIds.size) * 100) / 100 : 0,
+                        percentOfTotal: totalRevenue > 0
+                            ? Math.round((stats.revenue / totalRevenue) * 10000) / 100 : 0,
+                        // Only include children if more than 1 variation
+                        ...(children.length > 1 ? { children } : {}),
+                    };
+                })
+                .sort((a, b) => b.revenue - a.revenue);
+
+            // Data points for chart (consolidated by product name)
+            const dataPoints: SalesDataPoint[] = breakdown.map(b => ({
+                key: b.key,
+                label: b.label,
+                units: b.units,
+                revenue: b.revenue,
+                orders: b.orders,
+                avgOrderValue: b.avgOrderValue,
+            }));
+
+            return {
+                dimension,
+                startDate: start.toISOString(),
+                endDate: end.toISOString(),
+                data: dataPoints,
+                timeSeries: undefined,
+                breakdown,
+                summary: {
+                    totalUnits,
+                    totalRevenue: Math.round(totalRevenue * 100) / 100,
+                    totalOrders,
+                    avgOrderValue,
+                },
+            };
+        }
+
+        // Aggregate based on dimension (non-product)
         const aggregateMap = new Map<
             string,
             {
@@ -1220,11 +1337,6 @@ export const getSalesAnalytics = createServerFn({ method: 'GET' })
                     const istDate = new Date(date.getTime() + istOffset);
                     key = istDate.toISOString().split('T')[0];
                     label = key;
-                    break;
-                }
-                case 'product': {
-                    key = line.sku.variation.product.id;
-                    label = line.sku.variation.product.name;
                     break;
                 }
                 case 'category': {

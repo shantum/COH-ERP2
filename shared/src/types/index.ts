@@ -888,6 +888,7 @@ export interface SalesBreakdownItem {
   units: number;
   orders: number;
   percentOfTotal: number;
+  children?: SalesBreakdownItem[];
 }
 
 export interface SalesTimeSeriesPoint {

@@ -3,12 +3,12 @@
  * Shows sales metrics with charts and breakdowns by various dimensions
  */
 
-import { useState, useMemo, useCallback, useEffect } from 'react';
+import { useState, useMemo, useCallback, useEffect, memo } from 'react';
 import { BarChart, Bar, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { AgGridReact } from 'ag-grid-react';
-import type { ColDef, ValueFormatterParams, ColumnResizedEvent, Column } from 'ag-grid-community';
+import type { ColDef, ValueFormatterParams, ColumnResizedEvent, Column, ICellRendererParams } from 'ag-grid-community';
 import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community';
-import { TrendingUp, Package, ShoppingCart, DollarSign, Calendar } from 'lucide-react';
+import { TrendingUp, Package, ShoppingCart, DollarSign, Calendar, ChevronRight } from 'lucide-react';
 import { useSalesAnalytics, getDateRange } from '../hooks/useSalesAnalytics';
 import { compactThemeSmall } from '../utils/agGridHelpers';
 import { formatCurrency } from '../utils/formatting';
@@ -40,6 +40,13 @@ const DEFAULT_COL_DEF = {
     resizable: true,
 };
 
+// Extended row type for expandable product rows
+interface DisplayRow extends SalesBreakdownItem {
+    isGroup?: boolean;
+    isChild?: boolean;
+    childCount?: number;
+}
+
 export default function Analytics() {
     // State
     const [datePreset, setDatePreset] = useState<DatePreset>('30d');
@@ -47,6 +54,7 @@ export default function Analytics() {
     const [customEnd, setCustomEnd] = useState('');
     const [dimension, setDimension] = useState<SalesDimension>('summary');
     const [activeMetric, setActiveMetric] = useState<'revenue' | 'units' | 'orders'>('revenue');
+    const [expandedProducts, setExpandedProducts] = useState<Set<string>>(new Set());
 
     // Column widths state for grid - hydrate after mount to avoid SSR mismatch
     const [columnWidths, setColumnWidths] = useState<Record<string, number>>({});
@@ -84,21 +92,99 @@ export default function Analytics() {
         orderStatus: 'all',
     });
 
-    // formatCurrency imported from utils/formatting (compact by default)
+    // Reset expanded state when dimension changes
+    useEffect(() => {
+        setExpandedProducts(new Set());
+    }, [dimension]);
+
+    const toggleProduct = useCallback((key: string) => {
+        setExpandedProducts(prev => {
+            const next = new Set(prev);
+            if (next.has(key)) {
+                next.delete(key);
+            } else {
+                next.add(key);
+            }
+            return next;
+        });
+    }, []);
 
     // Format number
     const formatNumber = (value: number) => {
         return value.toLocaleString('en-IN');
     };
 
+    // Flatten breakdown data for product dimension (parent + expanded children)
+    const flatRowData = useMemo((): DisplayRow[] => {
+        if (!data?.breakdown) return [];
+        if (dimension !== 'product') return data.breakdown;
+
+        const rows: DisplayRow[] = [];
+        for (const item of data.breakdown) {
+            const hasChildren = item.children && item.children.length > 0;
+            rows.push({
+                ...item,
+                isGroup: !!hasChildren,
+                childCount: item.children?.length ?? 0,
+            });
+            if (hasChildren && expandedProducts.has(item.key)) {
+                for (const child of item.children!) {
+                    rows.push({
+                        ...child,
+                        isChild: true,
+                    });
+                }
+            }
+        }
+        return rows;
+    }, [data?.breakdown, dimension, expandedProducts]);
+
+    // Product label cell renderer with expand/collapse
+    const ProductLabelRenderer = useMemo(() => {
+        return memo(function ProductLabel(params: ICellRendererParams<DisplayRow>) {
+            const row = params.data;
+            if (!row) return null;
+
+            if (row.isGroup) {
+                const expanded = expandedProducts.has(row.key);
+                return (
+                    <div
+                        className="flex items-center gap-1 cursor-pointer select-none"
+                        onClick={() => toggleProduct(row.key)}
+                    >
+                        <ChevronRight
+                            size={14}
+                            className={`text-gray-400 transition-transform flex-shrink-0 ${expanded ? 'rotate-90' : ''}`}
+                        />
+                        <span className="font-medium truncate">{row.label}</span>
+                        <span className="text-xs text-gray-400 flex-shrink-0">
+                            ({row.childCount})
+                        </span>
+                    </div>
+                );
+            }
+
+            if (row.isChild) {
+                return (
+                    <div className="pl-5 text-gray-600 truncate">
+                        {row.label}
+                    </div>
+                );
+            }
+
+            return <span className="truncate">{row.label}</span>;
+        });
+    }, [expandedProducts, toggleProduct]);
+
     // Column definitions for breakdown table
-    const columnDefs: ColDef<SalesBreakdownItem>[] = useMemo(() => {
-        const baseDefs: ColDef<SalesBreakdownItem>[] = [
+    const columnDefs: ColDef<DisplayRow>[] = useMemo(() => {
+        const baseDefs: ColDef<DisplayRow>[] = [
             {
                 field: 'label' as const,
                 headerName: getDimensionColumnHeader(dimension),
                 flex: 2,
                 minWidth: 150,
+                ...(dimension === 'product' ? { cellRenderer: ProductLabelRenderer, sortable: false } : {}),
             },
             {
                 field: 'revenue',
@@ -138,7 +224,7 @@ export default function Analytics() {
             const savedWidth = col.field ? columnWidths[col.field] : undefined;
             return savedWidth ? { ...col, width: savedWidth } : col;
         });
-    }, [dimension, columnWidths]);
+    }, [dimension, columnWidths, ProductLabelRenderer]);
 
     // Get chart data based on dimension
     const chartData = useMemo(() => {
@@ -151,7 +237,7 @@ export default function Analytics() {
                 orders: point.orders,
             }));
         } else if (data?.breakdown) {
-            // Bar chart for breakdown (top 10)
+            // Bar chart for breakdown (top 10) - uses consolidated parent data
             return data.breakdown.slice(0, 10).map(item => ({
                 name: item.label.length > 15 ? item.label.substring(0, 15) + '...' : item.label,
                 fullName: item.label,
@@ -162,6 +248,11 @@ export default function Analytics() {
         }
         return [];
     }, [data, dimension]);
+
+    // Count unique products for product dimension
+    const breakdownCount = dimension === 'product'
+        ? data?.breakdown?.length ?? 0
+        : data?.breakdown?.length ?? 0;
 
     return (
         <div className="h-full flex flex-col">
@@ -354,14 +445,31 @@ export default function Analytics() {
                         {/* Breakdown Table */}
                         {dimension !== 'summary' && data?.breakdown && (
                             <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-                                <div className="px-4 py-3 border-b">
+                                <div className="px-4 py-3 border-b flex items-center justify-between">
                                     <h3 className="text-sm font-medium text-gray-700">
-                                        Detailed Breakdown ({data.breakdown.length} items)
+                                        Detailed Breakdown ({breakdownCount} {dimension === 'product' ? 'products' : 'items'})
                                     </h3>
+                                    {dimension === 'product' && data.breakdown.some(b => b.children?.length) && (
+                                        <button
+                                            onClick={() => {
+                                                if (expandedProducts.size > 0) {
+                                                    setExpandedProducts(new Set());
+                                                } else {
+                                                    const allKeys = data.breakdown!
+                                                        .filter(b => b.children?.length)
+                                                        .map(b => b.key);
+                                                    setExpandedProducts(new Set(allKeys));
+                                                }
+                                            }}
+                                            className="text-xs text-gray-500 hover:text-gray-700 transition-colors"
+                                        >
+                                            {expandedProducts.size > 0 ? 'Collapse All' : 'Expand All'}
+                                        </button>
+                                    )}
                                 </div>
                                 <div className="h-96">
-                                    <AgGridReact
-                                        rowData={data.breakdown ?? []}
+                                    <AgGridReact<DisplayRow>
+                                        rowData={flatRowData}
                                         columnDefs={columnDefs}
                                         theme={compactThemeSmall}
                                         defaultColDef={DEFAULT_COL_DEF}
@@ -371,6 +479,12 @@ export default function Analytics() {
                                         onColumnResized={handleColumnResized}
                                         enableCellTextSelection={true}
                                         ensureDomOrder={true}
+                                        getRowStyle={(params) => {
+                                            if (params.data?.isChild) {
+                                                return { backgroundColor: '#F9FAFB' };
+                                            }
+                                            return undefined;
+                                        }}
                                     />
                                 </div>
                             </div>

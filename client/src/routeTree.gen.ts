@@ -46,6 +46,7 @@ import { Route as AuthenticatedCustomersRouteImport } from './routes/_authentica
 import { Route as AuthenticatedCostingRouteImport } from './routes/_authenticated/costing'
 import { Route as AuthenticatedChannelsRouteImport } from './routes/_authenticated/channels'
 import { Route as AuthenticatedChannelImportRouteImport } from './routes/_authenticated/channel-import'
+import { Route as AuthenticatedBomRouteImport } from './routes/_authenticated/bom'
 import { Route as AuthenticatedAnalyticsRouteImport } from './routes/_authenticated/analytics'
 import { Route as AuthenticatedBusinessIndexRouteImport } from './routes/_authenticated/business/index'
 import { Route as AuthenticatedReturnsReturnIdRouteImport } from './routes/_authenticated/returns_.$returnId'
@@ -249,6 +250,11 @@ const AuthenticatedChannelImportRoute =
     path: '/channel-import',
     getParentRoute: () => AuthenticatedRoute,
   } as any)
+const AuthenticatedBomRoute = AuthenticatedBomRouteImport.update({
+  id: '/bom',
+  path: '/bom',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
 const AuthenticatedAnalyticsRoute = AuthenticatedAnalyticsRouteImport.update({
   id: '/analytics',
   path: '/analytics',
@@ -301,6 +307,7 @@ export interface FileRoutesByFullPath {
   '/return-inward': typeof ReturnInwardRoute
   '/shipments': typeof ShipmentsRoute
   '/analytics': typeof AuthenticatedAnalyticsRoute
+  '/bom': typeof AuthenticatedBomRoute
   '/channel-import': typeof AuthenticatedChannelImportRoute
   '/channels': typeof AuthenticatedChannelsRoute
   '/costing': typeof AuthenticatedCostingRoute
@@ -345,6 +352,7 @@ export interface FileRoutesByTo {
   '/return-inward': typeof ReturnInwardRoute
   '/shipments': typeof ShipmentsRoute
   '/analytics': typeof AuthenticatedAnalyticsRoute
+  '/bom': typeof AuthenticatedBomRoute
   '/channel-import': typeof AuthenticatedChannelImportRoute
   '/channels': typeof AuthenticatedChannelsRoute
   '/costing': typeof AuthenticatedCostingRoute
@@ -392,6 +400,7 @@ export interface FileRoutesById {
   '/return-inward': typeof ReturnInwardRoute
   '/shipments': typeof ShipmentsRoute
   '/_authenticated/analytics': typeof AuthenticatedAnalyticsRoute
+  '/_authenticated/bom': typeof AuthenticatedBomRoute
   '/_authenticated/channel-import': typeof AuthenticatedChannelImportRoute
   '/_authenticated/channels': typeof AuthenticatedChannelsRoute
   '/_authenticated/costing': typeof AuthenticatedCostingRoute
@@ -440,6 +449,7 @@ export interface FileRouteTypes {
     | '/return-inward'
     | '/shipments'
     | '/analytics'
+    | '/bom'
     | '/channel-import'
     | '/channels'
     | '/costing'
@@ -484,6 +494,7 @@ export interface FileRouteTypes {
     | '/return-inward'
     | '/shipments'
     | '/analytics'
+    | '/bom'
     | '/channel-import'
     | '/channels'
     | '/costing'
@@ -530,6 +541,7 @@ export interface FileRouteTypes {
     | '/return-inward'
     | '/shipments'
     | '/_authenticated/analytics'
+    | '/_authenticated/bom'
     | '/_authenticated/channel-import'
     | '/_authenticated/channels'
     | '/_authenticated/costing'
@@ -839,6 +851,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedChannelImportRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/bom': {
+      id: '/_authenticated/bom'
+      path: '/bom'
+      fullPath: '/bom'
+      preLoaderRoute: typeof AuthenticatedBomRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/analytics': {
       id: '/_authenticated/analytics'
       path: '/analytics'
@@ -893,6 +912,7 @@ declare module '@tanstack/react-router' {
 
 interface AuthenticatedRouteChildren {
   AuthenticatedAnalyticsRoute: typeof AuthenticatedAnalyticsRoute
+  AuthenticatedBomRoute: typeof AuthenticatedBomRoute
   AuthenticatedChannelImportRoute: typeof AuthenticatedChannelImportRoute
   AuthenticatedChannelsRoute: typeof AuthenticatedChannelsRoute
   AuthenticatedCostingRoute: typeof AuthenticatedCostingRoute
@@ -932,6 +952,7 @@ interface AuthenticatedRouteChildren {
 
 const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedAnalyticsRoute: AuthenticatedAnalyticsRoute,
+  AuthenticatedBomRoute: AuthenticatedBomRoute,
   AuthenticatedChannelImportRoute: AuthenticatedChannelImportRoute,
   AuthenticatedChannelsRoute: AuthenticatedChannelsRoute,
   AuthenticatedCostingRoute: AuthenticatedCostingRoute,

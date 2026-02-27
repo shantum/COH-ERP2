@@ -2,7 +2,7 @@ import { Outlet, Link, useNavigate, useRouterState } from '@tanstack/react-route
 import { useAuth } from '../hooks/useAuth';
 import {
     LayoutDashboard, ShoppingCart,
-    Users, RotateCcw, Factory, LogOut, Menu, X, BookOpen, Settings, PackagePlus, Clipboard, BarChart3, UserCog, ChevronLeft, ChevronRight, Search, Package, PackageX, ChevronDown, Minimize2, Maximize2, Calculator, Truck, Store, FileSpreadsheet, FilePlus, ShoppingBag, HeartPulse, Upload, IndianRupee, Layers, Sliders, TrendingUp
+    Users, RotateCcw, Factory, LogOut, Menu, X, BookOpen, Settings, PackagePlus, Clipboard, BarChart3, UserCog, ChevronLeft, ChevronRight, Search, Package, PackageX, ChevronDown, Minimize2, Maximize2, Calculator, Truck, Store, FileSpreadsheet, FilePlus, ShoppingBag, HeartPulse, Upload, IndianRupee, Layers, Sliders, TrendingUp, ClipboardList
 } from 'lucide-react';
 import { usePermissions } from '../hooks/usePermissions';
 import { useAccess, type AccessFeature } from '../hooks/useAccess';
@@ -54,6 +54,7 @@ const navGroups: NavGroup[] = [
         items: [
             { to: '/products', icon: Package, label: 'Products' },
             { to: '/fabrics', icon: Layers, label: 'Fabrics' },
+            { to: '/bom', icon: ClipboardList, label: 'Bill of Materials' },
             { to: '/shopify-catalog', icon: ShoppingBag, label: 'Shopify Catalog' },
             { to: '/facebook-feed-health', icon: HeartPulse, label: 'Feed Health' },
             { to: '/inventory', icon: Package, label: 'Inventory' },
