@@ -7,6 +7,8 @@ import { sheetsLogger } from '../../utils/logger.js';
 import { TXN_TYPE, FABRIC_TXN_TYPE } from '../../utils/patterns/types.js';
 import {
     readRangeWithSerials,
+    protectRowsWithWarning,
+    getSheetId,
 } from '../googleSheetsClient.js';
 import {
     ORDERS_MASTERSHEET_ID,
@@ -26,6 +28,7 @@ import type {
     SkuLookupInfo,
     BalanceSnapshot,
     StepTracker,
+    FabricConsumptionLine,
 } from './state.js';
 import {
     ingestInwardState,
@@ -66,12 +69,12 @@ export async function deductFabricForSamplingRows(
     skuMap: Map<string, SkuLookupInfo>,
     adminUserId: string,
     lastReconDate: Date | null
-): Promise<void> {
+): Promise<FabricConsumptionLine[]> {
     // Filter to only sampling source rows
     const samplingRows = successfulRows.filter(
         r => FABRIC_DEDUCT_SOURCES.some(s => s === r.source.toLowerCase().trim())
     );
-    if (samplingRows.length === 0) return;
+    if (samplingRows.length === 0) return [];
 
     // Collect unique variationIds from sampling rows
     const variationIds = [...new Set(
@@ -80,7 +83,7 @@ export async function deductFabricForSamplingRows(
             .filter((v): v is string => !!v)
     )];
 
-    if (variationIds.length === 0) return;
+    if (variationIds.length === 0) return [];
 
     // Batch lookup fabric assignments via BOM
     const { getVariationsMainFabrics } = await import('@coh/shared/services/bom');
@@ -243,6 +246,61 @@ export async function deductFabricForSamplingRows(
         skippedBeforeRecon,
         affectedFabricColours: affectedFabricColourIds.size,
     }, 'Fabric deduction for sampling inwards complete');
+
+    // --- Build consumption summary grouped by fabricColourId ---
+    if (fabricTxnCreated === 0) return [];
+
+    // Aggregate pieces produced and fabric consumed per fabricColourId
+    const aggMap = new Map<string, { pieces: number; consumed: number }>();
+    for (const txn of fabricTxnData) {
+        const existing = aggMap.get(txn.fabricColourId);
+        if (existing) {
+            // Each txn corresponds to one parsed row — qty in row is pieces, txn.qty is fabric consumed
+            existing.consumed += txn.qty;
+        } else {
+            aggMap.set(txn.fabricColourId, { pieces: 0, consumed: txn.qty });
+        }
+    }
+    // Count pieces per fabricColourId from the sampling rows
+    for (const row of samplingRows) {
+        const skuInfo = skuMap.get(row.skuCode);
+        if (!skuInfo) continue;
+        const fabric = fabricMap.get(skuInfo.variationId);
+        if (!fabric) continue;
+        const existing = aggMap.get(fabric.fabricColourId);
+        if (existing) existing.pieces += row.qty;
+    }
+
+    // Query remaining balances for affected fabric colours
+    const fabricColours = await prisma.fabricColour.findMany({
+        where: { id: { in: [...affectedFabricColourIds] } },
+        select: {
+            id: true,
+            colourName: true,
+            currentBalance: true,
+            fabric: { select: { name: true, unit: true } },
+        },
+    });
+    const fcMap = new Map(fabricColours.map(fc => [fc.id, fc]));
+
+    const consumptionLines: FabricConsumptionLine[] = [];
+    for (const [fcId, agg] of aggMap) {
+        const fc = fcMap.get(fcId);
+        if (!fc) continue;
+        consumptionLines.push({
+            fabricName: fc.fabric.name,
+            colourName: fc.colourName,
+            unit: fc.fabric.unit ?? 'meters',
+            piecesProduced: agg.pieces,
+            fabricConsumed: Math.round(agg.consumed * 100) / 100,
+            remainingBalance: Math.round(fc.currentBalance * 100) / 100,
+        });
+    }
+
+    // Sort by fabric name then colour
+    consumptionLines.sort((a, b) => a.fabricName.localeCompare(b.fabricName) || a.colourName.localeCompare(b.colourName));
+
+    return consumptionLines;
 }
 
 // ============================================
@@ -477,7 +535,10 @@ export async function ingestInwardLive(result: IngestInwardResult, tracker?: Ste
     // --- Step 6: Auto-deduct fabric for sampling inwards ---
     if (successfulRows.length > 0) {
         try {
-            await deductFabricForSamplingRows(successfulRows, skuMap, adminUserId, lastReconDate);
+            const consumption = await deductFabricForSamplingRows(successfulRows, skuMap, adminUserId, lastReconDate);
+            if (consumption.length > 0) {
+                result.fabricConsumption = consumption;
+            }
         } catch (err: unknown) {
             const message = err instanceof Error ? err.message : 'Unknown error';
             sheetsLogger.error({ error: message }, 'Fabric deduction failed (non-fatal)');
@@ -497,6 +558,26 @@ export async function ingestInwardLive(result: IngestInwardResult, tracker?: Ste
     await markRowsIngested(ORDERS_MASTERSHEET_ID, tab, rowsToMark, 'J', result);
 
     tracker?.done('Mark DONE', markStart, `${rowsToMark.length} rows`);
+
+    // --- Step: Protect DONE rows with warning ---
+    const protectStart = tracker?.start('Protect DONE rows') ?? 0;
+    try {
+        if (rowsToMark.length > 0) {
+            const sheetId = await getSheetId(ORDERS_MASTERSHEET_ID, tab);
+            await protectRowsWithWarning(
+                ORDERS_MASTERSHEET_ID,
+                sheetId,
+                rowsToMark.map(r => r.rowIndex)
+            );
+            tracker?.done('Protect DONE rows', protectStart, `${rowsToMark.length} rows`);
+        } else {
+            tracker?.done('Protect DONE rows', protectStart, 'No rows to protect');
+        }
+    } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : 'Unknown error';
+        sheetsLogger.warn({ error: message }, 'Row protection failed (non-fatal)');
+        tracker?.fail('Protect DONE rows', protectStart, message);
+    }
 
     return affectedSkuIds;
 }

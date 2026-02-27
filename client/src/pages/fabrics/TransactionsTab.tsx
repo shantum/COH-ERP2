@@ -4,7 +4,10 @@ import { useServerFn } from '@tanstack/react-start';
 import { X, Trash2, Plus, Search } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { AgGridReact } from 'ag-grid-react';
+import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community';
 import type { ColDef, ICellRendererParams } from 'ag-grid-community';
+
+ModuleRegistry.registerModules([AllCommunityModule]);
 import { getParties } from '@/server/functions/materialsMutations';
 import type { Party } from '@/server/functions/materialsMutations';
 import {
