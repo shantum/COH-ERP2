@@ -324,7 +324,7 @@ export default function OverviewTab({
                 />
 
                 {/* Fabric Colours Table */}
-                <div className="rounded-xl bg-white shadow-sm ring-1 ring-slate-200" style={{ height: '500px' }}>
+                <div className="rounded-xl bg-white shadow-sm ring-1 ring-slate-200 overflow-hidden" style={{ height: '500px' }}>
                     <MaterialsTreeView
                         onAddInward={handleAddInward}
                     />

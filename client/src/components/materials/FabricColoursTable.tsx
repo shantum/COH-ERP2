@@ -398,8 +398,8 @@ export function FabricColoursTable({
             {/* Table with virtual scrolling */}
             <div
                 ref={parentRef}
-                className="overflow-auto flex-1"
-                style={{ height }}
+                className="overflow-auto flex-1 min-h-0"
+                style={height !== '100%' ? { height } : undefined}
             >
                 <table className="w-full text-sm border-collapse">
                     <thead className="sticky top-0 bg-white border-b z-10">
