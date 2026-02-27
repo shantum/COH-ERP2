@@ -30,12 +30,9 @@ import {
     SelectValue,
 } from '@/components/ui/select';
 import { SkuWiseDataTable } from './SkuWiseDataTable';
-import { BomDataTable } from './BomDataTable';
 import { useProductsTree } from './hooks/useProductsTree';
 import { buildProductSlug } from '../../pages/EditProduct';
 import type { ProductTreeNode } from './types';
-
-type ProductsView = 'catalog' | 'bom';
 
 interface ProductsViewSwitcherProps {
     searchQuery?: string;
@@ -101,7 +98,6 @@ function parseFabricFilter(value: string): FabricFilterValue {
 }
 
 export function ProductsViewSwitcher({ searchQuery, onSearchChange, onViewProduct, onEditBom, onAddProduct, initialData }: ProductsViewSwitcherProps) {
-    const [activeView, setActiveView] = useState<ProductsView>('catalog');
     const [filters, setFilters] = useState<FilterState>({
         gender: null,
         fabricFilter: { type: 'all' },
@@ -383,26 +379,6 @@ export function ProductsViewSwitcher({ searchQuery, onSearchChange, onViewProduc
                         </div>
                     )}
 
-                    {/* View Toggle */}
-                    <div className="flex items-center rounded-md border bg-muted p-0.5">
-                        {([
-                            { key: 'catalog' as const, label: 'Catalog' },
-                            { key: 'bom' as const, label: 'BOM' },
-                        ]).map(view => (
-                            <button
-                                key={view.key}
-                                onClick={() => setActiveView(view.key)}
-                                className={`px-2.5 py-1 text-xs font-medium rounded transition-colors ${
-                                    activeView === view.key
-                                        ? 'bg-background text-foreground shadow-sm'
-                                        : 'text-muted-foreground hover:text-foreground'
-                                }`}
-                            >
-                                {view.label}
-                            </button>
-                        ))}
-                    </div>
-
                     {/* Filter Toggle */}
                     <Button
                         variant={showFilters ? "default" : "outline"}
@@ -652,21 +628,13 @@ export function ProductsViewSwitcher({ searchQuery, onSearchChange, onViewProduc
 
             {/* View Content */}
             <div className="flex-1 min-h-0">
-                {activeView === 'catalog' ? (
-                    <SkuWiseDataTable
-                        filteredData={filteredProducts}
-                        searchQuery={debouncedSearchQuery}
-                        onViewProduct={onViewProduct}
-                        onEditBom={onEditBom}
-                        onEditProduct={handleEditProduct}
-                    />
-                ) : (
-                    <BomDataTable
-                        filteredData={filteredProducts}
-                        searchQuery={debouncedSearchQuery}
-                        onEditProduct={handleEditProduct}
-                    />
-                )}
+                <SkuWiseDataTable
+                    filteredData={filteredProducts}
+                    searchQuery={debouncedSearchQuery}
+                    onViewProduct={onViewProduct}
+                    onEditBom={onEditBom}
+                    onEditProduct={handleEditProduct}
+                />
             </div>
 
         </div>

@@ -1,21 +1,17 @@
 /**
- * SkuWiseDataTable - Flat SKU spreadsheet view
+ * SkuWiseDataTable - Variation-grouped product catalog
  *
- * Every row is a single SKU with all data filled in.
- * Product boundaries marked with a heavier border.
- * Repeated product/colour values are dimmed for visual grouping.
+ * Each row is a variation (product + colour).
+ * Sizes shown as inline badges with per-size stock.
+ * Product boundaries marked with heavier borders.
  */
 
 import { useState, useMemo, useEffect, memo, useCallback } from 'react';
-import {
-    Layers,
-    Box,
-    Package,
-} from 'lucide-react';
+import { Package, Layers } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { ProductTreeNode, ShopifyStatus } from './types';
-import { flattenToSkuRows, filterSkuRows } from './utils/flattenToSkuRows';
-import type { SkuViewRow } from './utils/flattenToSkuRows';
+import { flattenToVariationRows, filterVariationRows } from './utils/flattenToVariationRows';
+import type { VariationRow } from './utils/flattenToVariationRows';
 
 interface SkuWiseDataTableProps {
     filteredData: ProductTreeNode[];
@@ -25,12 +21,12 @@ interface SkuWiseDataTableProps {
     onEditProduct?: (node: ProductTreeNode) => void;
 }
 
-const BATCH_SIZE = 250;
+const BATCH_SIZE = 200;
 
 import { formatCurrencyOrDash as formatCurrency } from '../../utils/formatting';
 
 /**
- * Shopify status dot — compact inline indicator
+ * Shopify status dot
  */
 const ShopifyDot = memo(function ShopifyDot({ status }: { status?: ShopifyStatus }) {
     if (!status || status === 'not_linked' || status === 'not_cached' || status === 'unknown') {
@@ -57,36 +53,35 @@ export function SkuWiseDataTable({
 }: SkuWiseDataTableProps) {
     const [visibleCount, setVisibleCount] = useState(BATCH_SIZE);
 
-    // Transform to flat SKU rows
-    const allRows = useMemo(() => flattenToSkuRows(filteredData), [filteredData]);
+    // Transform to variation rows
+    const allRows = useMemo(() => flattenToVariationRows(filteredData), [filteredData]);
 
     // Apply search filter
     const filteredRows = useMemo(
-        () => (searchQuery ? filterSkuRows(allRows, searchQuery) : allRows),
+        () => (searchQuery ? filterVariationRows(allRows, searchQuery) : allRows),
         [allRows, searchQuery]
     );
 
-    // Calculate summary stats
+    // Summary stats
     const summary = useMemo(() => {
         const productIds = new Set<string>();
-        const variationIds = new Set<string>();
         let totalStock = 0;
+        let totalSkus = 0;
 
         for (const row of filteredRows) {
             productIds.add(row.productId);
-            variationIds.add(row.variationId);
-            totalStock += row.currentBalance || 0;
+            totalStock += row.totalStock;
+            totalSkus += row.sizes.length;
         }
 
         return {
             products: productIds.size,
-            variations: variationIds.size,
-            skus: filteredRows.length,
+            variations: filteredRows.length,
+            skus: totalSkus,
             totalStock,
         };
     }, [filteredRows]);
 
-    // Show rows up to visibleCount
     const visibleRows = useMemo(
         () => filteredRows.slice(0, visibleCount),
         [filteredRows, visibleCount]
@@ -94,15 +89,13 @@ export function SkuWiseDataTable({
 
     const hasMore = visibleCount < filteredRows.length;
 
-    // Reset visible count when data changes
     useEffect(() => {
         setVisibleCount(BATCH_SIZE);
     }, [searchQuery, filteredData]);
 
-    // Click handler
     const handleRowClick = useCallback(
-        (row: SkuViewRow) => {
-            onEditProduct?.(row.skuNode);
+        (row: VariationRow) => {
+            onEditProduct?.(row.variationNode);
         },
         [onEditProduct]
     );
@@ -122,11 +115,6 @@ export function SkuWiseDataTable({
                 </div>
                 <div className="w-px h-3 bg-gray-200" />
                 <div className="flex items-center gap-1.5 text-xs">
-                    <Box size={13} className="text-blue-400" />
-                    <span className="text-gray-600">{summary.skus} SKUs</span>
-                </div>
-                <div className="w-px h-3 bg-gray-200" />
-                <div className="flex items-center gap-1.5 text-xs">
                     <span className="font-semibold text-green-600">
                         {summary.totalStock.toLocaleString()}
                     </span>
@@ -139,47 +127,37 @@ export function SkuWiseDataTable({
                 <div className="overflow-auto flex-1">
                     <table className="w-full text-[11px] border-collapse table-fixed">
                         <colgroup>
-                            <col style={{ width: 72 }} />   {/* Image */}
-                            <col style={{ width: 120 }} />  {/* SKU */}
-                            <col />                         {/* Product / Colour / Size */}
-                            <col style={{ width: 90 }} />   {/* Style Code */}
-                            <col style={{ width: 180 }} />  {/* Fabric */}
-                            <col style={{ width: 55 }} />   {/* Shopify */}
+                            <col style={{ width: 64 }} />   {/* Image */}
+                            <col />                         {/* Product - Color */}
+                            <col style={{ width: 90 }} />   {/* Style */}
+                            <col style={{ width: 160 }} />  {/* Sizes */}
+                            <col style={{ width: 50 }} />   {/* Stock */}
                             <col style={{ width: 68 }} />   {/* MRP */}
-                            <col style={{ width: 68 }} />   {/* Shopify ₹ */}
-                            <col style={{ width: 68 }} />   {/* Sale ₹ */}
-                            <col style={{ width: 42 }} />   {/* Sale % */}
-                            <col style={{ width: 60 }} />   {/* BOM */}
-                            <col style={{ width: 42 }} />   {/* MRP× */}
-                            <col style={{ width: 42 }} />   {/* Sale× */}
+                            <col style={{ width: 55 }} />   {/* Status */}
+                            <col style={{ width: 160 }} />  {/* Fabric */}
                         </colgroup>
                         <thead className="sticky top-0 z-10">
                             <tr className="bg-gray-50 border-b border-gray-200">
                                 <th className="px-1 py-1.5" />
-                                <th className="px-2 py-1.5 text-[10px] font-medium text-gray-500 uppercase tracking-wide text-left">SKU</th>
-                                <th className="px-2 py-1.5 text-[10px] font-medium text-gray-500 uppercase tracking-wide text-left">Product</th>
+                                <th className="px-2 py-1.5 text-[10px] font-medium text-gray-500 uppercase tracking-wide text-left">Product - Colour</th>
                                 <th className="px-2 py-1.5 text-[10px] font-medium text-gray-500 uppercase tracking-wide text-left">Style</th>
-                                <th className="px-2 py-1.5 text-[10px] font-medium text-gray-500 uppercase tracking-wide text-left">Fabric</th>
-                                <th className="px-2 py-1.5 text-[10px] font-medium text-gray-500 uppercase tracking-wide text-center">Shpfy</th>
+                                <th className="px-2 py-1.5 text-[10px] font-medium text-gray-500 uppercase tracking-wide text-left">Sizes</th>
+                                <th className="px-2 py-1.5 text-[10px] font-medium text-gray-500 uppercase tracking-wide text-right">Stock</th>
                                 <th className="px-2 py-1.5 text-[10px] font-medium text-gray-500 uppercase tracking-wide text-right">MRP</th>
-                                <th className="px-2 py-1.5 text-[10px] font-medium text-gray-500 uppercase tracking-wide text-right">Shopify</th>
-                                <th className="px-2 py-1.5 text-[10px] font-medium text-gray-500 uppercase tracking-wide text-right">Sale</th>
-                                <th className="px-2 py-1.5 text-[10px] font-medium text-gray-500 uppercase tracking-wide text-right">Off%</th>
-                                <th className="px-2 py-1.5 text-[10px] font-medium text-gray-500 uppercase tracking-wide text-right">BOM</th>
-                                <th className="px-2 py-1.5 text-[10px] font-medium text-gray-500 uppercase tracking-wide text-right">MRP×</th>
-                                <th className="px-2 py-1.5 text-[10px] font-medium text-gray-500 uppercase tracking-wide text-right">Sale×</th>
+                                <th className="px-2 py-1.5 text-[10px] font-medium text-gray-500 uppercase tracking-wide text-center">Shpfy</th>
+                                <th className="px-2 py-1.5 text-[10px] font-medium text-gray-500 uppercase tracking-wide text-left">Fabric</th>
                             </tr>
                         </thead>
                         <tbody>
                             {visibleRows.length === 0 ? (
                                 <tr>
-                                    <td colSpan={13} className="h-24 text-center text-muted-foreground">
-                                        No SKUs found.
+                                    <td colSpan={8} className="h-24 text-center text-muted-foreground">
+                                        No variations found.
                                     </td>
                                 </tr>
                             ) : (
                                 visibleRows.map((row) => (
-                                    <SkuRow
+                                    <VariationRowComponent
                                         key={row.id}
                                         row={row}
                                         onClick={handleRowClick}
@@ -195,7 +173,7 @@ export function SkuWiseDataTable({
             {filteredRows.length > 0 && (
                 <div className="flex items-center justify-between px-3 py-2 border rounded bg-gray-50/50 mt-2 flex-shrink-0">
                     <div className="text-xs text-muted-foreground">
-                        Showing {Math.min(visibleCount, filteredRows.length)} of {filteredRows.length} SKUs
+                        Showing {Math.min(visibleCount, filteredRows.length)} of {filteredRows.length} variations
                     </div>
                     {hasMore && (
                         <Button
@@ -214,112 +192,90 @@ export function SkuWiseDataTable({
 }
 
 /**
- * Single SKU row with conditional product/variation display and border styling
+ * Single variation row with inline size badges
  */
-interface SkuRowProps {
-    row: SkuViewRow;
-    onClick: (row: SkuViewRow) => void;
+interface VariationRowProps {
+    row: VariationRow;
+    onClick: (row: VariationRow) => void;
 }
 
-const SkuRow = memo(function SkuRow({ row, onClick }: SkuRowProps) {
-    const mrpMultiple =
-        row.mrp != null && row.bomCost != null && row.bomCost > 0
-            ? row.mrp / row.bomCost
-            : null;
-
-    const actualSellingPrice = row.sellingPrice ?? row.shopifySalePrice;
-    const saleMultiple =
-        actualSellingPrice != null && row.bomCost != null && row.bomCost > 0
-            ? actualSellingPrice / row.bomCost
-            : null;
-
-    const hasPriceMismatch =
-        row.shopifyPrice != null && row.mrp != null && Math.round(row.shopifyPrice) !== Math.round(row.mrp);
-
-    // Grouping borders: thick for products, medium for variations, thin for SKUs
+const VariationRowComponent = memo(function VariationRowComponent({ row, onClick }: VariationRowProps) {
     const borderClass = row.isFirstOfProduct
         ? 'border-t-2 border-t-gray-400'
-        : row.isFirstOfVariation
-        ? 'border-t border-t-gray-300'
-        : 'border-t border-t-gray-100';
+        : 'border-t border-t-gray-200';
 
     return (
         <tr
-            className={`cursor-pointer h-7 hover:bg-blue-50/40 ${borderClass}`}
+            className={`cursor-pointer h-9 hover:bg-blue-50/40 ${borderClass}`}
             onClick={() => onClick(row)}
         >
-            {/* Image — spans all SKUs of this variation */}
-            {row.isFirstOfVariation && (
-                <td
-                    className="px-1 py-0.5 align-middle"
-                    rowSpan={row.variationSkuCount}
-                >
-                    {(row.variationImageUrl || row.productImageUrl) ? (
-                        <img
-                            src={row.variationImageUrl || row.productImageUrl}
-                            alt=""
-                            className="w-full rounded object-cover"
-                            loading="lazy"
-                        />
-                    ) : (
-                        <span className="block w-full aspect-square rounded bg-gray-100" />
-                    )}
-                </td>
-            )}
-
-            {/* SKU */}
-            <td className="px-2 py-0 font-mono text-gray-600 truncate">
-                {row.skuCode}
-            </td>
-
-            {/* Product / Colour / Size */}
-            <td className="px-2 py-0">
-                <span className="inline-flex items-center gap-1.5 min-w-0">
-                    {row.colorHex && (
-                        <span
-                            className="w-2.5 h-2.5 rounded-full border border-gray-200 flex-shrink-0"
-                            style={{ backgroundColor: row.colorHex }}
-                        />
-                    )}
-                    <span className={`truncate ${row.isFirstOfProduct ? 'font-medium text-gray-900' : 'text-gray-400'}`}>
-                        {row.productName}
-                    </span>
-                    {row.isFirstOfProduct && row.productStatus === 'draft' && (
-                        <span className="flex-shrink-0 px-1.5 py-0.5 text-[10px] font-medium rounded bg-yellow-100 text-yellow-700">
-                            Draft
-                        </span>
-                    )}
-                    <span className="text-gray-400 flex-shrink-0">/</span>
-                    <span className={`flex-shrink-0 ${row.isFirstOfVariation ? 'text-gray-700' : 'text-gray-400'}`}>
-                        {row.colorName}
-                    </span>
-                    <span className="text-gray-400 flex-shrink-0">/</span>
-                    <span className="font-medium text-gray-900 flex-shrink-0">{row.size}</span>
-                </span>
-            </td>
-
-            {/* Style Code */}
-            <td className="px-2 py-0 truncate font-mono text-gray-500">
-                {row.styleCode || '-'}
-            </td>
-
-            {/* Fabric */}
-            <td className="px-2 py-0 truncate text-gray-500">
-{row.fabricName ? (
-                    <>
-                        {row.fabricName}
-                        {row.fabricColourName && (
-                            <span className="text-gray-400"> | {row.fabricColourName}</span>
-                        )}
-                    </>
+            {/* Image */}
+            <td className="px-1 py-0.5 align-middle">
+                {row.imageUrl ? (
+                    <img
+                        src={row.imageUrl}
+                        alt=""
+                        className="w-14 h-14 rounded object-cover"
+                        loading="lazy"
+                    />
                 ) : (
-                    <span className="text-gray-300">-</span>
+                    <span className="block w-14 h-14 rounded bg-gray-100" />
                 )}
             </td>
 
-            {/* Shopify dot */}
-            <td className="px-1 py-0 text-center">
-                <ShopifyDot status={row.shopifyStatus} />
+            {/* Product - Colour */}
+            <td className="px-2 py-0">
+                <div className="flex items-center gap-1.5 min-w-0">
+                    {row.colorHex && (
+                        <span
+                            className="w-3 h-3 rounded-full border border-gray-200 flex-shrink-0"
+                            style={{ backgroundColor: row.colorHex }}
+                        />
+                    )}
+                    <div className="min-w-0">
+                        <div className="truncate font-medium text-gray-900 text-xs">
+                            {row.displayName}
+                        </div>
+                        {row.isFirstOfProduct && row.productVariationCount > 1 && (
+                            <div className="text-[10px] text-gray-400">
+                                {row.productVariationCount} colours
+                            </div>
+                        )}
+                    </div>
+                </div>
+            </td>
+
+            {/* Style Code */}
+            <td className="px-2 py-0 truncate font-mono text-gray-500 text-[10px]">
+                {row.styleCode || '-'}
+            </td>
+
+            {/* Sizes - plain badges */}
+            <td className="px-2 py-0">
+                <div className="flex flex-wrap gap-0.5">
+                    {row.sizes.map(s => (
+                        <span
+                            key={s.skuId}
+                            className={`inline-flex items-center px-1.5 py-0 rounded text-[10px] leading-4 font-medium ${
+                                s.stock > 0
+                                    ? 'bg-green-50 text-green-700 border border-green-200'
+                                    : 'bg-gray-50 text-gray-400 border border-gray-200'
+                            }`}
+                            title={`${s.skuCode}: ${s.stock} in stock`}
+                        >
+                            {s.size}
+                        </span>
+                    ))}
+                </div>
+            </td>
+
+            {/* Total Stock */}
+            <td className="px-2 py-0 text-right tabular-nums">
+                {row.totalStock > 0 ? (
+                    <span className="font-semibold text-gray-800">{row.totalStock}</span>
+                ) : (
+                    <span className="text-gray-300">0</span>
+                )}
             </td>
 
             {/* MRP */}
@@ -327,77 +283,20 @@ const SkuRow = memo(function SkuRow({ row, onClick }: SkuRowProps) {
                 {formatCurrency(row.mrp)}
             </td>
 
-            {/* Shopify Price */}
-            <td className={`px-2 py-0 text-right tabular-nums ${hasPriceMismatch ? 'text-amber-600 font-medium' : ''}`}>
-                {formatCurrency(row.shopifyPrice)}
+            {/* Shopify Status dot */}
+            <td className="px-1 py-0 text-center">
+                <ShopifyDot status={row.shopifyStatus} />
             </td>
 
-            {/* Sale Price */}
-            <td className="px-2 py-0 text-right tabular-nums">
-                {row.shopifySalePrice != null ? (
-                    <span className="text-green-600">{formatCurrency(row.shopifySalePrice)}</span>
-                ) : (
-                    <span className="text-gray-300">-</span>
-                )}
-            </td>
-
-            {/* Sale % */}
-            <td className="px-1 py-0 text-right tabular-nums">
-                {row.shopifySalePercent != null ? (
-                    <span
-                        className={
-                            row.shopifySalePercent > 30
-                                ? 'text-red-500'
-                                : row.shopifySalePercent > 15
-                                ? 'text-amber-600'
-                                : 'text-green-600'
-                        }
-                    >
-                        {row.shopifySalePercent}%
-                    </span>
-                ) : (
-                    <span className="text-gray-300">-</span>
-                )}
-            </td>
-
-            {/* BOM */}
-            <td className="px-2 py-0 text-right tabular-nums text-gray-600">
-                {formatCurrency(row.bomCost)}
-            </td>
-
-            {/* MRP× */}
-            <td className="px-1 py-0 text-right tabular-nums">
-                {mrpMultiple != null ? (
-                    <span
-                        className={
-                            mrpMultiple >= 3
-                                ? 'text-green-600'
-                                : mrpMultiple >= 2
-                                ? 'text-gray-600'
-                                : 'text-red-500'
-                        }
-                    >
-                        {mrpMultiple.toFixed(1)}×
-                    </span>
-                ) : (
-                    <span className="text-gray-300">-</span>
-                )}
-            </td>
-
-            {/* Sale× */}
-            <td className="px-1 py-0 text-right tabular-nums">
-                {saleMultiple != null ? (
-                    <span
-                        className={
-                            saleMultiple >= 3
-                                ? 'text-green-600'
-                                : saleMultiple >= 2
-                                ? 'text-gray-600'
-                                : 'text-red-500'
-                        }
-                    >
-                        {saleMultiple.toFixed(1)}×
-                    </span>
+            {/* Fabric */}
+            <td className="px-2 py-0 truncate text-gray-500">
+                {row.fabricName ? (
+                    <>
+                        {row.fabricName}
+                        {row.fabricColourName && (
+                            <span className="text-gray-400"> | {row.fabricColourName}</span>
+                        )}
+                    </>
                 ) : (
                     <span className="text-gray-300">-</span>
                 )}
