@@ -5,14 +5,14 @@
  * fabric requirements, and streams AI analysis from Claude.
  */
 
-import { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
     AreaChart, Area, BarChart, Bar, Line, XAxis, YAxis, CartesianGrid,
     Tooltip, ResponsiveContainer, Cell, ComposedChart
 } from 'recharts';
 import {
     TrendingUp, Play, Loader2, Brain, Package, Scissors,
-    ShoppingCart, AlertTriangle, ChevronDown, ChevronUp,
+    AlertTriangle, ChevronDown, ChevronUp,
     History, Clock, RefreshCw
 } from 'lucide-react';
 
@@ -36,6 +36,12 @@ interface ProductForecast {
     history: { week: string; units: number }[];
 }
 
+interface FabricDriver {
+    product: string;
+    qty: number;
+    units: number;
+}
+
 interface FabricColour {
     code: string;
     colour: string;
@@ -44,6 +50,7 @@ interface FabricColour {
     gap: number;
     costPerUnit: number;
     orderCost: number;
+    drivers?: FabricDriver[];
 }
 
 interface FabricRequirement {
@@ -121,7 +128,6 @@ export default function DemandForecast() {
     const [analysis, setAnalysis] = useState('');
     const [analysisLoading, setAnalysisLoading] = useState(false);
     const [expandedProducts, setExpandedProducts] = useState<Set<string>>(new Set());
-    const [activeTab, setActiveTab] = useState<'products' | 'fabric' | 'orders'>('products');
     const [historyItems, setHistoryItems] = useState<HistoryItem[]>([]);
     const [showHistory, setShowHistory] = useState(false);
     const abortRef = useRef<AbortController | null>(null);
@@ -370,40 +376,48 @@ export default function DemandForecast() {
                     {/* Summary Cards */}
                     <SummaryCards data={data} />
 
-                    {/* Overall Chart */}
-                    <OverallChart data={data} />
-
-                    {/* Seasonality */}
-                    <SeasonalityChart data={data} />
-
-                    {/* Tabs */}
-                    <div className="flex gap-1 mt-8 mb-4 bg-zinc-900 rounded-lg p-1 w-fit">
-                        {(['products', 'fabric', 'orders'] as const).map(tab => (
-                            <button
-                                key={tab}
-                                onClick={() => setActiveTab(tab)}
-                                className={`px-4 py-2 rounded-md text-sm font-medium transition ${
-                                    activeTab === tab
-                                        ? 'bg-zinc-700 text-white'
-                                        : 'text-zinc-400 hover:text-zinc-200'
-                                }`}
-                            >
-                                {tab === 'products' && <><Package className="w-3.5 h-3.5 inline mr-1.5" />Products</>}
-                                {tab === 'fabric' && <><Scissors className="w-3.5 h-3.5 inline mr-1.5" />Fabric</>}
-                                {tab === 'orders' && <><ShoppingCart className="w-3.5 h-3.5 inline mr-1.5" />Purchase Orders</>}
-                            </button>
-                        ))}
+                    {/* ═══ FABRIC DEMAND — Primary Section ═══ */}
+                    <div className="mt-2 mb-8">
+                        <div className="flex items-center justify-between mb-4">
+                            <div className="flex items-center gap-2">
+                                <Scissors className="w-5 h-5 text-blue-400" />
+                                <h2 className="text-lg font-semibold">Fabric Demand Projection</h2>
+                                <span className="text-xs text-zinc-500 bg-zinc-800 px-2 py-0.5 rounded-full">
+                                    Next {data.forecastWeeks} weeks
+                                </span>
+                            </div>
+                            {data.summary.estimatedPurchaseCost > 0 && (
+                                <span className="text-sm text-amber-400">
+                                    Est. procurement: ₹{data.summary.estimatedPurchaseCost.toLocaleString()}
+                                </span>
+                            )}
+                        </div>
+                        <FabricRequirements fabrics={data.fabricRequirements} unit={data.forecastWeeks} />
                     </div>
 
-                    {activeTab === 'products' && (
+                    {/* ═══ Purchase Orders ═══ */}
+                    {data.purchaseOrders.length > 0 && (
+                        <PurchaseOrders orders={data.purchaseOrders} summary={data.summary} />
+                    )}
+
+                    {/* ═══ Overall Chart + Seasonality ═══ */}
+                    <div className="mt-8">
+                        <OverallChart data={data} />
+                        <SeasonalityChart data={data} />
+                    </div>
+
+                    {/* ═══ Product Forecasts (collapsed by default) ═══ */}
+                    <details className="mt-6">
+                        <summary className="flex items-center gap-2 cursor-pointer text-sm font-medium text-zinc-400 hover:text-zinc-200 mb-4">
+                            <Package className="w-4 h-4" />
+                            Product-Level Forecasts ({data.products.length} products)
+                        </summary>
                         <ProductForecasts
                             products={data.products}
                             expanded={expandedProducts}
                             onToggle={toggleProduct}
                         />
-                    )}
-                    {activeTab === 'fabric' && <FabricRequirements fabrics={data.fabricRequirements} />}
-                    {activeTab === 'orders' && <PurchaseOrders orders={data.purchaseOrders} summary={data.summary} />}
+                    </details>
 
                     {/* AI Analysis */}
                     <div className="mt-8 bg-zinc-900 rounded-xl border border-zinc-800 p-5">
@@ -725,56 +739,156 @@ function ProductForecasts({ products, expanded, onToggle }: {
     );
 }
 
-// ── Fabric Requirements ─────────────────────────────────────────────
+// ── Fabric Requirements (Primary Section) ───────────────────────────
 
-function FabricRequirements({ fabrics }: { fabrics: FabricRequirement[] }) {
+function FabricRequirements({ fabrics, unit }: { fabrics: FabricRequirement[]; unit: number }) {
+    const [expandedColours, setExpandedColours] = useState<Set<string>>(new Set());
+
+    const toggleColour = (code: string) => {
+        setExpandedColours(prev => {
+            const next = new Set(prev);
+            next.has(code) ? next.delete(code) : next.add(code);
+            return next;
+        });
+    };
+
+    const totalCovered = fabrics.reduce((sum, f) =>
+        sum + f.colours.filter(c => c.gap <= 0).length, 0);
+    const totalColours = fabrics.reduce((sum, f) => sum + f.colours.length, 0);
+
     return (
         <div className="space-y-4">
-            {fabrics.map(fabric => (
-                <div key={fabric.name} className="bg-zinc-900 rounded-xl border border-zinc-800 p-4">
-                    <div className="flex items-center justify-between mb-3">
-                        <h3 className="font-medium text-sm">{fabric.name}</h3>
-                        <span className="text-sm text-blue-400 font-semibold">
-                            {fabric.totalQty.toFixed(1)} {fabric.unit}
-                        </span>
-                    </div>
-                    <table className="w-full text-xs">
-                        <thead>
-                            <tr className="text-zinc-500 border-b border-zinc-800">
-                                <th className="text-left pb-2">Code</th>
-                                <th className="text-left pb-2">Colour</th>
-                                <th className="text-right pb-2">Need</th>
-                                <th className="text-right pb-2">Stock</th>
-                                <th className="text-right pb-2">Gap</th>
-                                <th className="text-right pb-2">Status</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {fabric.colours.map(c => (
-                                <tr key={c.code} className="border-t border-zinc-800/50">
-                                    <td className="py-1.5 font-mono text-zinc-400">{c.code}</td>
-                                    <td className="py-1.5">{c.colour}</td>
-                                    <td className="py-1.5 text-right">{c.required.toFixed(1)}</td>
-                                    <td className="py-1.5 text-right text-zinc-400">{c.inStock.toFixed(1)}</td>
-                                    <td className={`py-1.5 text-right font-medium ${c.gap > 0 ? 'text-red-400' : 'text-green-400'}`}>
-                                        {c.gap > 0 ? `+${c.gap.toFixed(1)}` : c.gap.toFixed(1)}
-                                    </td>
-                                    <td className="py-1.5 text-right">
-                                        {c.gap > 0 ? (
-                                            <span className="inline-flex items-center gap-1 text-amber-400">
-                                                <AlertTriangle className="w-3 h-3" />
-                                                Order
-                                            </span>
-                                        ) : (
-                                            <span className="text-green-400">OK</span>
-                                        )}
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
+            {/* Fabric summary strip */}
+            <div className="grid grid-cols-3 gap-3">
+                <div className="bg-zinc-900 rounded-lg border border-zinc-800 px-4 py-3">
+                    <div className="text-xs text-zinc-500">Fabric Types</div>
+                    <div className="text-lg font-semibold">{fabrics.length}</div>
+                    <div className="text-xs text-zinc-500">{totalColours} colour variants</div>
                 </div>
-            ))}
+                <div className="bg-zinc-900 rounded-lg border border-zinc-800 px-4 py-3">
+                    <div className="text-xs text-zinc-500">Covered by Stock</div>
+                    <div className="text-lg font-semibold text-green-400">{totalCovered}/{totalColours}</div>
+                    <div className="text-xs text-zinc-500">{totalColours - totalCovered} need ordering</div>
+                </div>
+                <div className="bg-zinc-900 rounded-lg border border-zinc-800 px-4 py-3">
+                    <div className="text-xs text-zinc-500">Projection Period</div>
+                    <div className="text-lg font-semibold">{unit} weeks</div>
+                    <div className="text-xs text-zinc-500">incl. {fabrics.length > 0 ? '5%' : '0%'} wastage</div>
+                </div>
+            </div>
+
+            {fabrics.map(fabric => {
+                const shortfallColours = fabric.colours.filter(c => c.gap > 0).length;
+                return (
+                    <div key={fabric.name} className="bg-zinc-900 rounded-xl border border-zinc-800 overflow-hidden">
+                        {/* Fabric type header */}
+                        <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800/50">
+                            <div className="flex items-center gap-3">
+                                <h3 className="font-medium">{fabric.name}</h3>
+                                {shortfallColours > 0 && (
+                                    <span className="text-xs text-amber-400 bg-amber-400/10 px-2 py-0.5 rounded-full">
+                                        {shortfallColours} to order
+                                    </span>
+                                )}
+                            </div>
+                            <span className="text-sm font-semibold text-blue-400">
+                                {fabric.totalQty.toFixed(1)} {fabric.unit}
+                            </span>
+                        </div>
+                        {/* Colour rows */}
+                        <table className="w-full text-xs">
+                            <thead>
+                                <tr className="text-zinc-500">
+                                    <th className="text-left px-4 py-2 w-8"></th>
+                                    <th className="text-left py-2">Colour</th>
+                                    <th className="text-right py-2 pr-3">Need ({fabric.unit})</th>
+                                    <th className="text-right py-2 pr-3">Stock</th>
+                                    <th className="text-right py-2 pr-3">Gap</th>
+                                    <th className="text-right py-2 pr-4">Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {fabric.colours.map(c => {
+                                    const isExpanded = expandedColours.has(c.code);
+                                    const hasDrivers = c.drivers && c.drivers.length > 0;
+                                    return (
+                                        <React.Fragment key={c.code}>
+                                            <tr
+                                                className={`border-t border-zinc-800/30 ${hasDrivers ? 'cursor-pointer hover:bg-zinc-800/30' : ''} ${isExpanded ? 'bg-zinc-800/20' : ''}`}
+                                                onClick={() => hasDrivers && toggleColour(c.code)}
+                                            >
+                                                <td className="pl-4 py-2 text-zinc-600">
+                                                    {hasDrivers && (
+                                                        isExpanded
+                                                            ? <ChevronUp className="w-3 h-3" />
+                                                            : <ChevronDown className="w-3 h-3" />
+                                                    )}
+                                                </td>
+                                                <td className="py-2">
+                                                    <span className="text-zinc-300">{c.colour}</span>
+                                                    <span className="ml-2 font-mono text-zinc-600 text-[10px]">{c.code}</span>
+                                                </td>
+                                                <td className="py-2 text-right pr-3 font-medium">{c.required.toFixed(1)}</td>
+                                                <td className="py-2 text-right pr-3 text-zinc-400">{c.inStock.toFixed(1)}</td>
+                                                <td className={`py-2 text-right pr-3 font-medium ${c.gap > 0 ? 'text-red-400' : 'text-green-400'}`}>
+                                                    {c.gap > 0 ? `+${c.gap.toFixed(1)}` : c.gap.toFixed(1)}
+                                                </td>
+                                                <td className="py-2 text-right pr-4">
+                                                    {c.gap > 0 ? (
+                                                        <span className="inline-flex items-center gap-1 text-amber-400">
+                                                            <AlertTriangle className="w-3 h-3" />
+                                                            Order
+                                                        </span>
+                                                    ) : (
+                                                        <span className="text-green-400">OK</span>
+                                                    )}
+                                                </td>
+                                            </tr>
+                                            {/* Product drivers (expanded) */}
+                                            {isExpanded && c.drivers && (
+                                                <tr>
+                                                    <td colSpan={6} className="px-4 pb-3 pt-1">
+                                                        <div className="bg-zinc-800/40 rounded-lg p-3 ml-4">
+                                                            <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-2">
+                                                                Demand driven by
+                                                            </div>
+                                                            <div className="space-y-1.5">
+                                                                {c.drivers.map(d => {
+                                                                    const pct = c.required > 0 ? (d.qty / c.required * 100) : 0;
+                                                                    return (
+                                                                        <div key={d.product} className="flex items-center gap-2">
+                                                                            <span className="text-xs text-zinc-300 w-48 truncate">{d.product}</span>
+                                                                            <div className="flex-1 bg-zinc-700 rounded-full h-1.5 overflow-hidden">
+                                                                                <div
+                                                                                    className="h-full bg-blue-500/70 rounded-full"
+                                                                                    style={{ width: `${Math.min(100, pct)}%` }}
+                                                                                />
+                                                                            </div>
+                                                                            <span className="text-xs text-zinc-400 w-16 text-right">
+                                                                                {d.qty.toFixed(1)} {fabric.unit}
+                                                                            </span>
+                                                                            <span className="text-[10px] text-zinc-500 w-10 text-right">
+                                                                                {pct.toFixed(0)}%
+                                                                            </span>
+                                                                        </div>
+                                                                    );
+                                                                })}
+                                                            </div>
+                                                            <div className="text-[10px] text-zinc-600 mt-2">
+                                                                Based on {unit}-week demand forecast ({c.drivers.length} product{c.drivers.length !== 1 ? 's' : ''})
+                                                            </div>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            )}
+                                        </React.Fragment>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                );
+            })}
         </div>
     );
 }

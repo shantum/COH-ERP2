@@ -307,7 +307,22 @@ if __name__ == '__main__':
 
     products = []
     all_fabric_needs = {}
+    fabric_drivers = {}  # fc_code -> {product_name: qty}
     ml_forecasted_products = set()
+    product_forecasts = {}  # product_name -> total_fc (for all products)
+
+    def accumulate_fabric(product_name, total_fc):
+        """Compute fabric needs for a product and track per-product drivers."""
+        needs = compute_fabric_needs(product_name, total_fc, size_mix, variation_mix, bom)
+        for code, info in needs.items():
+            if code in all_fabric_needs:
+                all_fabric_needs[code]['qty'] += info['qty']
+            else:
+                all_fabric_needs[code] = info.copy()
+            # Track which products drive each fabric colour
+            if code not in fabric_drivers:
+                fabric_drivers[code] = {}
+            fabric_drivers[code][product_name] = fabric_drivers[code].get(product_name, 0) + info['qty']
 
     for product_name, last_12mo in product_rank.items():
         log(f"  Forecasting {product_name}...")
@@ -322,6 +337,7 @@ if __name__ == '__main__':
         total_fc = sum(f['forecast'] for f in forecasts)
 
         ml_forecasted_products.add(product_name)
+        product_forecasts[product_name] = total_fc
 
         # Size mix
         sz = size_mix[size_mix['product_name'] == product_name]
@@ -367,24 +383,16 @@ if __name__ == '__main__':
             'history': prod_history,
         })
 
-        # Fabric needs for ML-forecasted products
-        needs = compute_fabric_needs(product_name, total_fc, size_mix, variation_mix, bom)
-        for code, info in needs.items():
-            if code in all_fabric_needs:
-                all_fabric_needs[code]['qty'] += info['qty']
-            else:
-                all_fabric_needs[code] = info.copy()
+        accumulate_fabric(product_name, total_fc)
 
     # ── Fabric needs for ALL other products (simple avg projection) ──
     log("Computing fabric for remaining products (simple avg)...")
-    # Get all product names that have BOM data and recent sales
     all_product_names = set(size_mix['product_name'].unique()) & set(variation_mix['product_name'].unique())
     bom_products = set(bom['product_name'].unique())
     remaining_products = (all_product_names & bom_products) - ml_forecasted_products
 
     remaining_count = 0
     for product_name in remaining_products:
-        # Use last 8 weeks average * forecast weeks as simple estimate
         prod_data = weekly_product[weekly_product['product_name'] == product_name]
         prod_data = prod_data.groupby('week').agg({'units': 'sum'}).reset_index()
 
@@ -398,12 +406,8 @@ if __name__ == '__main__':
             continue
 
         remaining_count += 1
-        needs = compute_fabric_needs(product_name, total_fc, size_mix, variation_mix, bom)
-        for code, info in needs.items():
-            if code in all_fabric_needs:
-                all_fabric_needs[code]['qty'] += info['qty']
-            else:
-                all_fabric_needs[code] = info.copy()
+        product_forecasts[product_name] = total_fc
+        accumulate_fabric(product_name, total_fc)
 
     log(f"  Added fabric needs from {remaining_count} additional products")
 
@@ -420,6 +424,16 @@ if __name__ == '__main__':
         current = float(stock_row['currentBalance'].sum()) if not stock_row.empty else 0
         gap = info['qty'] - current
 
+        # Build sorted product drivers for this fabric colour
+        drivers = []
+        if code in fabric_drivers:
+            for pname, pqty in sorted(fabric_drivers[code].items(), key=lambda x: -x[1]):
+                drivers.append({
+                    'product': pname,
+                    'qty': round(pqty, 1),
+                    'units': round(product_forecasts.get(pname, 0), 0),
+                })
+
         fabrics_by_type[fname]['colours'].append({
             'code': code,
             'colour': info['colour'],
@@ -428,6 +442,7 @@ if __name__ == '__main__':
             'gap': round(gap, 1),
             'costPerUnit': info['cost'],
             'orderCost': round(max(0, gap) * info['cost'], 0) if info['cost'] > 0 else 0,
+            'drivers': drivers,
         })
 
     fabric_list = sorted(fabrics_by_type.values(), key=lambda x: -x['totalQty'])
