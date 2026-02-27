@@ -66,6 +66,10 @@
       "types": "./dist/config/productTaxonomy.d.ts",
       "import": "./dist/config/productTaxonomy.js"
     },
+    "./config/shopifyMetafieldSync": {
+      "types": "./dist/config/shopifyMetafieldSync.d.ts",
+      "import": "./dist/config/shopifyMetafieldSync.js"
+    },
     "./services/auth": {
       "types": "./dist/services/auth/index.d.ts",
       "import": "./dist/services/auth/index.js"

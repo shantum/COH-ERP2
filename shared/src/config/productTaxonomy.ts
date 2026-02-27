@@ -213,6 +213,7 @@ export type Closure = (typeof CLOSURES)[number];
  * All fields optional — not every attribute applies to every garment type.
  */
 export const productAttributesSchema = z.object({
+  // ── ERP-managed attributes ──
   constructionType: z.enum(CONSTRUCTION_TYPES).optional(),
   sleeveType: z.enum(SLEEVE_TYPES).optional(),
   neckline: z.enum(NECKLINES).optional(),
@@ -222,6 +223,17 @@ export const productAttributesSchema = z.object({
   fabricComposition: z.string().optional(),
   fabricWeight: z.number().positive().optional(),
   season: z.string().optional(),
+  // ── Synced from Shopify metafields (see shopifyMetafieldSync.ts) ──
+  washcare: z.string().optional(),
+  shopifySleeveLength: z.string().optional(), // free-text from Shopify (key has typo: "sleeve_lenght")
+  modelDetails: z.string().optional(),
+  productTypeForFeed: z.string().optional(),
+  offerText: z.string().optional(),
+  moreColorText: z.string().optional(),
+  linkedProductGids: z.array(z.string()).optional(), // Shopify product GIDs for color siblings
+  colorUrls: z.array(z.string()).optional(),
+  colorSwatches: z.array(z.string()).optional(), // hex codes
+  recommendedProductGids: z.array(z.string()).optional(),
 });
 
 export type ProductAttributes = z.infer<typeof productAttributesSchema>;

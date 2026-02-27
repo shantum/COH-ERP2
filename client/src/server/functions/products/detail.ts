@@ -74,6 +74,9 @@ export interface ProductDetailResponse {
     attributes: Record<string, string | number> | null;
     description: string | null;
     erpDescription: string | null;
+    erpDescriptionHistory: Array<{version: number; text: string; createdAt: string; source: string}> | null;
+    erpSeoTitle: string | null;
+    erpSeoDescription: string | null;
     hsnCode: string | null;
     status: string;
     isReturnable: boolean;
@@ -249,6 +252,9 @@ export const getProductById = createServerFn({ method: 'GET' })
                 attributes: (product.attributes ?? null) as Record<string, string | number> | null,
                 description: product.description,
                 erpDescription: product.erpDescription ?? null,
+                erpDescriptionHistory: (product.erpDescriptionHistory ?? null) as ProductDetailResponse['erpDescriptionHistory'],
+                erpSeoTitle: product.erpSeoTitle ?? null,
+                erpSeoDescription: product.erpSeoDescription ?? null,
                 hsnCode: product.hsnCode,
                 status: product.status,
                 isReturnable: product.isReturnable,

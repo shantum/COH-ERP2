@@ -12,15 +12,16 @@
  *   - Variation Cards (with images, fabric, BOM, SKUs)
  */
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { useNavigate } from '@tanstack/react-router';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { Route } from '../routes/_authenticated/products_/$productSlug/edit';
 import { useProductEditForm } from '../components/products/unified-edit/hooks/useProductEditForm';
 import { useVariationEditForm } from '../components/products/unified-edit/hooks/useVariationEditForm';
 import { useSkuEditForm } from '../components/products/unified-edit/hooks/useSkuEditForm';
 import { getCatalogFilters } from '../server/functions/products';
+import { updateProduct } from '../server/functions/productsMutations';
 import { getResolvedBomForVariation, type ResolvedBomLine } from '../server/functions/bomQueries';
 import type { ProductDetailData, VariationDetailData, SkuDetailData, MeasurementData, ShopifyProductData } from '../components/products/unified-edit/types';
 import { GARMENT_GROUP_LABELS, getGoogleCategoryPath, type GarmentGroup } from '@coh/shared/config/productTaxonomy';
@@ -52,6 +53,9 @@ import {
     Ruler,
     ImageIcon,
     ExternalLink,
+    History,
+    Search,
+    Globe,
 } from 'lucide-react';
 
 // ─── Attribute Labels ───────────────────────────────────────
@@ -85,6 +89,202 @@ export function buildProductSlug(name: string, id: string): string {
 
 function capitalize(s: string): string {
     return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+// ─── ERP Description Card with Version History ─────────────
+
+function ErpDescriptionCard({ description, history }: {
+    description: string;
+    history: Array<{version: number; text: string; createdAt: string; source: string}> | null;
+}) {
+    const [showHistory, setShowHistory] = useState(false);
+    const currentVersion = history?.length ?? 1;
+
+    return (
+        <Card>
+            <CardHeader className="pb-2">
+                <div className="flex items-center justify-between">
+                    <CardTitle className="text-base">ERP Description</CardTitle>
+                    <div className="flex items-center gap-2">
+                        <Badge variant="secondary" className="text-xs font-normal">
+                            v{currentVersion}
+                        </Badge>
+                        {history && history.length > 1 && (
+                            <button
+                                onClick={() => setShowHistory(!showHistory)}
+                                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                            >
+                                <History className="h-3 w-3" />
+                                {showHistory ? 'Hide' : 'History'}
+                            </button>
+                        )}
+                    </div>
+                </div>
+            </CardHeader>
+            <CardContent className="space-y-3">
+                <p className="text-sm leading-relaxed">{description}</p>
+
+                {showHistory && history && history.length > 1 && (
+                    <div className="border-t pt-3 space-y-3">
+                        <p className="text-xs font-medium text-muted-foreground">Previous Versions</p>
+                        {history
+                            .slice()
+                            .sort((a, b) => b.version - a.version)
+                            .slice(1)
+                            .map((entry) => (
+                                <div key={entry.version} className="rounded-md bg-muted/50 p-3 space-y-1">
+                                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                        <span className="font-medium">v{entry.version}</span>
+                                        <span>&middot;</span>
+                                        <span>{new Date(entry.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+                                        <span>&middot;</span>
+                                        <span>{entry.source}</span>
+                                    </div>
+                                    <p className="text-sm leading-relaxed text-muted-foreground">
+                                        {entry.text}
+                                    </p>
+                                </div>
+                            ))
+                        }
+                    </div>
+                )}
+            </CardContent>
+        </Card>
+    );
+}
+
+// ─── SEO Card with Google Preview ───────────────────────────
+
+function SeoCard({ productId, seoTitle, seoDescription, shopifyHandle }: {
+    productId: string;
+    seoTitle: string | null;
+    seoDescription: string | null;
+    shopifyHandle: string | null;
+}) {
+    const queryClient = useQueryClient();
+    const updateProductFn = useServerFn(updateProduct);
+    const [isEditing, setIsEditing] = useState(false);
+    const [title, setTitle] = useState(seoTitle ?? '');
+    const [description, setDescription] = useState(seoDescription ?? '');
+
+    const saveMutation = useMutation({
+        mutationFn: async () => {
+            const result = await updateProductFn({
+                data: {
+                    id: productId,
+                    erpSeoTitle: title || null,
+                    erpSeoDescription: description || null,
+                },
+            });
+            if (!result.success) throw new Error(result.error?.message ?? 'Failed to save');
+            return result.data;
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['product', productId] });
+            setIsEditing(false);
+        },
+    });
+
+    const handleCancel = useCallback(() => {
+        setTitle(seoTitle ?? '');
+        setDescription(seoDescription ?? '');
+        setIsEditing(false);
+    }, [seoTitle, seoDescription]);
+
+    const titleLen = title.length;
+    const descLen = description.length;
+    const previewUrl = shopifyHandle
+        ? `www.creaturesofhabit.in › products › ${shopifyHandle}`
+        : 'www.creaturesofhabit.in › products › ...';
+
+    return (
+        <Card>
+            <CardHeader className="pb-2">
+                <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                        <Globe className="h-4 w-4 text-muted-foreground" />
+                        <CardTitle className="text-base">SEO</CardTitle>
+                    </div>
+                    {!isEditing ? (
+                        <Button variant="ghost" size="sm" onClick={() => setIsEditing(true)}>
+                            <Pencil className="h-3.5 w-3.5 mr-1" /> Edit
+                        </Button>
+                    ) : (
+                        <div className="flex items-center gap-2">
+                            <Button variant="ghost" size="sm" onClick={handleCancel} disabled={saveMutation.isPending}>
+                                Cancel
+                            </Button>
+                            <Button size="sm" onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending}>
+                                {saveMutation.isPending ? (
+                                    <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                                ) : (
+                                    <Save className="h-3.5 w-3.5 mr-1" />
+                                )}
+                                Save
+                            </Button>
+                        </div>
+                    )}
+                </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+                {isEditing ? (
+                    <>
+                        <div>
+                            <div className="flex items-center justify-between mb-1">
+                                <Label htmlFor="seoTitle" className="text-xs">Meta Title</Label>
+                                <span className={`text-xs ${titleLen > 60 ? 'text-red-500 font-medium' : titleLen > 50 ? 'text-amber-500' : 'text-muted-foreground'}`}>
+                                    {titleLen}/60
+                                </span>
+                            </div>
+                            <Input
+                                id="seoTitle"
+                                value={title}
+                                onChange={(e) => setTitle(e.target.value)}
+                                placeholder="e.g. Organic Cotton T-Shirt - Relaxed Fit | Creatures of Habit"
+                                className="text-sm"
+                            />
+                        </div>
+                        <div>
+                            <div className="flex items-center justify-between mb-1">
+                                <Label htmlFor="seoDesc" className="text-xs">Meta Description</Label>
+                                <span className={`text-xs ${descLen > 160 ? 'text-red-500 font-medium' : descLen > 140 ? 'text-amber-500' : 'text-muted-foreground'}`}>
+                                    {descLen}/160
+                                </span>
+                            </div>
+                            <textarea
+                                id="seoDesc"
+                                value={description}
+                                onChange={(e) => setDescription(e.target.value)}
+                                placeholder="e.g. Handcrafted organic cotton tee in a relaxed fit. Made sustainably in Goa. Shop conscious everyday wear."
+                                rows={3}
+                                className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                            />
+                        </div>
+                    </>
+                ) : (
+                    !title && !description ? (
+                        <p className="text-sm text-muted-foreground italic">No SEO metadata set yet. Click Edit to add.</p>
+                    ) : null
+                )}
+
+                {/* Google Preview */}
+                {(title || description) && (
+                    <div className="rounded-lg border bg-white p-4 space-y-1">
+                        <p className="text-xs text-muted-foreground mb-2 flex items-center gap-1">
+                            <Search className="h-3 w-3" /> Google Preview
+                        </p>
+                        <p className="text-xs text-green-700 truncate">{previewUrl}</p>
+                        <p className="text-[#1a0dab] text-base leading-snug hover:underline cursor-default truncate">
+                            {title || 'No title set'}
+                        </p>
+                        <p className="text-xs text-[#545454] leading-relaxed line-clamp-2">
+                            {description || 'No description set'}
+                        </p>
+                    </div>
+                )}
+            </CardContent>
+        </Card>
+    );
 }
 
 // ─── Main Page ──────────────────────────────────────────────
@@ -390,18 +590,12 @@ export default function EditProduct() {
                         </Card>
                     )}
 
-                    {/* ERP Description (rewritten for conversion) */}
+                    {/* ERP Description with version history */}
                     {product.erpDescription && (
-                        <Card>
-                            <CardHeader className="pb-2">
-                                <CardTitle className="text-base">ERP Description</CardTitle>
-                            </CardHeader>
-                            <CardContent>
-                                <p className="text-sm leading-relaxed">
-                                    {product.erpDescription}
-                                </p>
-                            </CardContent>
-                        </Card>
+                        <ErpDescriptionCard
+                            description={product.erpDescription}
+                            history={product.erpDescriptionHistory}
+                        />
                     )}
 
                     {/* Shopify Description (marketing copy) */}
@@ -418,6 +612,14 @@ export default function EditProduct() {
                             </CardContent>
                         </Card>
                     )}
+
+                    {/* SEO Metadata */}
+                    <SeoCard
+                        productId={product.id}
+                        seoTitle={product.erpSeoTitle}
+                        seoDescription={product.erpSeoDescription}
+                        shopifyHandle={product.shopify?.handle ?? null}
+                    />
 
                     {/* Pricing Summary */}
                     <PricingSummaryCard product={product} />

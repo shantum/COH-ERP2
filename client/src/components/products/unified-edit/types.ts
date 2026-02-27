@@ -104,6 +104,9 @@ export interface ProductDetailData {
   attributes: Record<string, string | number> | null;
   description: string | null;
   erpDescription: string | null;
+  erpDescriptionHistory: Array<{version: number; text: string; createdAt: string; source: string}> | null;
+  erpSeoTitle: string | null;
+  erpSeoDescription: string | null;
   hsnCode: string | null;
   status: string;
   isReturnable: boolean;

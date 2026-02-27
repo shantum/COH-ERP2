@@ -102,6 +102,9 @@ model UserGridPreference {
   @@index([gridId])
 }
 
+/// 1:1 with Shopify product. Each color of a design is a separate Product.
+/// Sibling colors share the same name but are NOT linked in the DB.
+/// Shopify groups siblings via `custom.product_variants` metafield (list of product GIDs).
 model Product {
   id                       String      @id @default(uuid())
   name                     String
@@ -111,12 +114,15 @@ model Product {
   productType              String
   gender                   String      @default("unisex")
   googleProductCategoryId  Int?        // Google/Meta product taxonomy ID (e.g. 212 = Shirts & Tops)
-  attributes               Json?       // Structured product attributes (validated by Zod: constructionType, sleeveType, neckline, fit, etc.)
+  attributes               Json?       // Structured product attributes — see productAttributesSchema in shared/src/config/productTaxonomy.ts
   // NOTE: fabricTypeId removed - fabric info comes from variation BOM lines
   baseProductionTimeMins   Int         @default(60)
   defaultFabricConsumption Float?
   description              String?
   erpDescription           String?
+  erpDescriptionHistory    Json?       // Array of {version, text, createdAt, source}
+  erpSeoTitle              String?     // SEO meta title (50-60 chars ideal)
+  erpSeoDescription        String?     // SEO meta description (150-160 chars ideal)
   imageUrl                 String?
   notes                    Json?       // Array of {id, text, createdAt, updatedAt}
   status                   String      @default("draft") // draft | active | archived
@@ -125,13 +131,13 @@ model Product {
   nonReturnableReason      String?     // 'sale_item', 'hygiene', 'custom_made', etc.
   createdAt                DateTime    @default(now())
   updatedAt                DateTime    @updatedAt
-  shopifyProductId         String?     @unique
+  shopifyProductId         String?     @unique // 1:1 with Shopify product
   shopifyHandle            String?
   exchangeCount            Int         @default(0)
   returnCount              Int         @default(0)
   writeOffCount            Int         @default(0)
   hsnCode                  String?     // HSN/SAC code for GST (default '6109' for knitted apparel)
-  shopifyProductIds        String[]    @default([])
+  shopifyProductIds        String[]    @default([]) // LEGACY — stale, not used. Was old multi-color grouping attempt. Safe to clear.
   variations               Variation[]
   bomTemplates             ProductBomTemplate[] // BOM structure for this product
 
@@ -142,6 +148,9 @@ model Product {
   @@index([styleCode])
 }
 
+/// In the current 1:1 sync, each Product has exactly ONE Variation (holds color name).
+/// shopifySourceProductId duplicates Product.shopifyProductId in 1:1 mode.
+/// Shopify "Product" (one color) = ERP Product + Variation. Shopify "Variant" (size) = ERP Sku.
 model Variation {
   id                     String  @id @default(uuid())
   productId              String
@@ -153,7 +162,7 @@ model Variation {
   isActive               Boolean @default(true)
   hasLining              Boolean @default(false)
   bomCost                Float?   // Computed total BOM cost (sum of SKU bomCosts)
-  shopifySourceProductId String?
+  shopifySourceProductId String?  // Same as parent Product.shopifyProductId in 1:1 mode
   shopifySourceHandle    String?
   skus                   Sku[]
   product                Product @relation(fields: [productId], references: [id])

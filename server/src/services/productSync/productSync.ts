@@ -1,5 +1,13 @@
 /**
  * Product Sync Service — Single Product Sync
+ *
+ * 1:1 mapping: one Shopify product = one ERP Product.
+ * Each Shopify product represents ONE COLOR of a design.
+ * Shopify "Variant" (size) = ERP "Sku".
+ * The Variation layer has exactly one entry per Product (holds color name + Shopify source).
+ *
+ * Sibling colors (e.g. same shirt in Red, Black, Blue) are separate ERP Products
+ * with the same name. Shopify links them via `custom.product_variants` metafield.
  */
 
 import type { Prisma, PrismaClient } from '@prisma/client';

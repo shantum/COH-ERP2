@@ -79,6 +79,8 @@ const updateProductSchema = z.object({
     imageUrl: z.string().url().optional().nullable(),
     isActive: z.boolean().optional(),
     attributes: productAttributesSchema.optional().nullable(),
+    erpSeoTitle: z.string().max(100).optional().nullable(),
+    erpSeoDescription: z.string().max(300).optional().nullable(),
 });
 
 const deleteProductSchema = z.object({
@@ -194,6 +196,8 @@ export const updateProduct = createServerFn({ method: 'POST' })
                 if (data.imageUrl !== undefined) updateData.imageUrl = data.imageUrl;
                 if (data.isActive !== undefined) updateData.isActive = data.isActive;
                 if (data.attributes !== undefined) updateData.attributes = data.attributes;
+                if (data.erpSeoTitle !== undefined) updateData.erpSeoTitle = data.erpSeoTitle;
+                if (data.erpSeoDescription !== undefined) updateData.erpSeoDescription = data.erpSeoDescription;
 
                 const product = await prisma.product.update({
                     where: { id: data.id },

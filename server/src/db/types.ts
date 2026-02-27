@@ -1030,6 +1030,9 @@ export type Product = {
     defaultFabricConsumption: number | null;
     description: string | null;
     erpDescription: string | null;
+    erpDescriptionHistory: unknown | null;
+    erpSeoTitle: string | null;
+    erpSeoDescription: string | null;
     imageUrl: string | null;
     notes: unknown | null;
     status: Generated<string>;
