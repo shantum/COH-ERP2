@@ -383,6 +383,56 @@ export async function getSheetId(
 }
 
 /**
+ * Ensure a sheet has at least `requiredRows` rows by expanding the grid if needed.
+ * Prevents "Range exceeds grid limits" errors when writing beyond current grid size.
+ */
+export async function ensureSheetRows(
+    spreadsheetId: string,
+    sheetName: string,
+    requiredRows: number
+): Promise<void> {
+    const client = getClient();
+
+    const response = await withRetry(
+        () => client.spreadsheets.get({
+            spreadsheetId,
+            includeGridData: false,
+        }),
+        `ensureSheetRows(${sheetName})`
+    );
+
+    const sheet = response.data.sheets?.find(
+        s => s.properties?.title === sheetName
+    );
+
+    if (!sheet?.properties) {
+        throw new Error(`Sheet "${sheetName}" not found in spreadsheet`);
+    }
+
+    const currentRows = sheet.properties.gridProperties?.rowCount ?? 0;
+    if (currentRows >= requiredRows) return;
+
+    const rowsToAdd = requiredRows - currentRows;
+    sheetsLogger.info({ sheetName, currentRows, requiredRows, rowsToAdd }, 'Expanding sheet grid');
+
+    await withRetry(
+        () => client.spreadsheets.batchUpdate({
+            spreadsheetId,
+            requestBody: {
+                requests: [{
+                    appendDimension: {
+                        sheetId: sheet.properties!.sheetId!,
+                        dimension: 'ROWS',
+                        length: rowsToAdd,
+                    },
+                }],
+            },
+        }),
+        `ensureSheetRows(${sheetName}, +${rowsToAdd})`
+    );
+}
+
+/**
  * Delete rows from a sheet using batchUpdate.
  * IMPORTANT: Rows must be deleted bottom-up to avoid index shifting.
  *
@@ -476,4 +526,132 @@ export async function deleteRowsBatch(
         }),
         `deleteRowsBatch(${rowIndices.length} rows)`
     );
+}
+
+// ============================================
+// ROW PROTECTION (WARNING-ONLY)
+// ============================================
+
+/** Description prefix so we can identify our protections for cleanup */
+const PROTECTION_DESC_PREFIX = '[auto-import]';
+
+/**
+ * Add warning-only protection to specific rows.
+ * Shows a confirmation dialog when users try to edit, but doesn't block them.
+ * Groups contiguous rows into ranges for efficiency.
+ */
+export async function protectRowsWithWarning(
+    spreadsheetId: string,
+    sheetId: number,
+    rowIndices: number[]
+): Promise<void> {
+    if (rowIndices.length === 0) return;
+
+    // Sort ascending and group contiguous rows into ranges
+    const sorted = [...rowIndices].sort((a, b) => a - b);
+    const ranges: Array<{ start: number; end: number }> = [];
+    let rangeStart = sorted[0];
+    let rangeEnd = sorted[0] + 1;
+
+    for (let i = 1; i < sorted.length; i++) {
+        if (sorted[i] === rangeEnd) {
+            rangeEnd = sorted[i] + 1;
+        } else {
+            ranges.push({ start: rangeStart, end: rangeEnd });
+            rangeStart = sorted[i];
+            rangeEnd = sorted[i] + 1;
+        }
+    }
+    ranges.push({ start: rangeStart, end: rangeEnd });
+
+    const requests = ranges.map(r => ({
+        addProtectedRange: {
+            protectedRange: {
+                range: {
+                    sheetId,
+                    startRowIndex: r.start,
+                    endRowIndex: r.end,
+                },
+                description: `${PROTECTION_DESC_PREFIX} Imported row — edit with caution`,
+                warningOnly: true,
+            },
+        },
+    }));
+
+    const client = getClient();
+
+    await withRetry(
+        () => client.spreadsheets.batchUpdate({
+            spreadsheetId,
+            requestBody: { requests },
+        }),
+        `protectRowsWithWarning(${rowIndices.length} rows, ${ranges.length} ranges)`
+    );
+
+    sheetsLogger.info({ rows: rowIndices.length, ranges: ranges.length }, 'Protected imported rows with warning');
+}
+
+/**
+ * Remove all warning-only protections we created (identified by description prefix)
+ * for rows that are about to be deleted. Call before deleteRowsBatch.
+ */
+export async function removeOurProtections(
+    spreadsheetId: string,
+    sheetName: string,
+    rowIndicesToDelete: number[]
+): Promise<number> {
+    if (rowIndicesToDelete.length === 0) return 0;
+
+    const client = getClient();
+
+    // Get all protected ranges for this spreadsheet
+    const response = await withRetry(
+        () => client.spreadsheets.get({
+            spreadsheetId,
+            fields: 'sheets(properties(sheetId,title),protectedRanges)',
+        }),
+        `getProtectedRanges(${sheetName})`
+    );
+
+    const sheet = response.data.sheets?.find(s => s.properties?.title === sheetName);
+    if (!sheet?.protectedRanges) return 0;
+
+    const deleteSet = new Set(rowIndicesToDelete);
+
+    // Find our warning-only protections that overlap with rows being deleted
+    const toRemove = sheet.protectedRanges.filter(pr => {
+        if (!pr.description?.startsWith(PROTECTION_DESC_PREFIX)) return false;
+        if (!pr.warningOnly) return false;
+        const range = pr.range;
+        if (!range || range.startRowIndex == null || range.endRowIndex == null) return false;
+
+        // Check if any row in this protection overlaps with rows being deleted
+        for (let r = range.startRowIndex; r < range.endRowIndex; r++) {
+            if (deleteSet.has(r)) return true;
+        }
+        return false;
+    });
+
+    if (toRemove.length === 0) return 0;
+
+    const requests = toRemove
+        .filter(pr => pr.protectedRangeId != null)
+        .map(pr => ({
+            deleteProtectedRange: {
+                protectedRangeId: pr.protectedRangeId!,
+            },
+        }));
+
+    if (requests.length > 0) {
+        await withRetry(
+            () => client.spreadsheets.batchUpdate({
+                spreadsheetId,
+                requestBody: { requests },
+            }),
+            `removeProtections(${requests.length} ranges)`
+        );
+    }
+
+    sheetsLogger.info({ removed: requests.length, tab: sheetName }, 'Removed protections before row cleanup');
+    return requests.length;
 }

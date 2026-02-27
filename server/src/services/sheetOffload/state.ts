@@ -7,6 +7,16 @@
 // TYPES
 // ============================================
 
+/** Fabric consumption line for a single fabric colour */
+export interface FabricConsumptionLine {
+    fabricName: string;
+    colourName: string;
+    unit: string;
+    piecesProduced: number;
+    fabricConsumed: number;
+    remainingBalance: number;
+}
+
 export interface IngestInwardResult {
     startedAt: string;
     inwardIngested: number;
@@ -18,6 +28,7 @@ export interface IngestInwardResult {
     error: string | null;
     inwardValidationErrors: Record<string, number>;
     balanceVerification?: BalanceVerificationResult;
+    fabricConsumption?: FabricConsumptionLine[];
 }
 
 export interface IngestOutwardResult {
@@ -430,6 +441,7 @@ export const INWARD_STEPS = [
     'Validate rows',
     'DB write',
     'Mark DONE',
+    'Protect DONE rows',
     'Push updated balances',
     'Verify balances',
     'Cleanup DONE rows',

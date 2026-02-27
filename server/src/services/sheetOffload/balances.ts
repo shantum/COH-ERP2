@@ -12,6 +12,7 @@ import {
     batchWriteRanges,
     deleteRowsBatch,
     getSheetId,
+    removeOurProtections,
 } from '../googleSheetsClient.js';
 import {
     ORDERS_MASTERSHEET_ID,
@@ -458,6 +459,16 @@ export async function cleanupSingleTab(
         }
 
         if (toDelete.length > 0) {
+            // Remove warning-only protections on rows being deleted
+            try {
+                await removeOurProtections(ORDERS_MASTERSHEET_ID, tabName, toDelete);
+            } catch (protErr: unknown) {
+                sheetsLogger.warn(
+                    { tab: tabName, error: protErr instanceof Error ? protErr.message : String(protErr) },
+                    'Failed to remove protections before cleanup (non-fatal)'
+                );
+            }
+
             const sheetId = await getSheetId(ORDERS_MASTERSHEET_ID, tabName);
             await deleteRowsBatch(ORDERS_MASTERSHEET_ID, sheetId, toDelete);
             sheetsLogger.info({ tab: tabName, deleted: toDelete.length }, 'Cleaned up DONE rows');

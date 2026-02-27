@@ -6,9 +6,16 @@ import prisma from '../../lib/prisma.js';
 import { sheetsLogger } from '../../utils/logger.js';
 import {
     readRange,
+    protectRowsWithWarning,
+    removeOurProtections,
+    getSheetId,
 } from '../googleSheetsClient.js';
 import {
     ENABLE_SHEET_OFFLOAD,
+    ENABLE_AUTO_INGEST,
+    AUTO_INGEST_HOUR_IST,
+    AUTO_INGEST_MINUTE_IST,
+    AUTO_INGEST_REPORT_EMAIL,
     ORDERS_MASTERSHEET_ID,
     LIVE_TABS,
     INWARD_LIVE_COLS,
@@ -90,6 +97,79 @@ export async function getBufferCounts(): Promise<{ inward: number; outward: numb
 }
 
 // ============================================
+// AUTO-INGEST DAILY SCHEDULER
+// ============================================
+
+let autoIngestCheckInterval: ReturnType<typeof setInterval> | null = null;
+
+/** Date string (YYYY-MM-DD in IST) of the last successful auto-ingest run */
+let lastAutoIngestDate: string | null = null;
+
+/** Get current date string in IST */
+function getIstDateStr(): string {
+    return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }); // YYYY-MM-DD
+}
+
+/** Get current hour and minute in IST */
+function getIstTime(): { hour: number; minute: number } {
+    const parts = new Date().toLocaleTimeString('en-GB', { timeZone: 'Asia/Kolkata', hour12: false }).split(':');
+    return { hour: Number(parts[0]), minute: Number(parts[1]) };
+}
+
+/** Run the inward cycle and send the report email */
+async function runAutoIngestAndReport(): Promise<void> {
+    const todayStr = getIstDateStr();
+    sheetsLogger.info({ date: todayStr }, 'Auto-ingest: starting daily inward cycle');
+
+    const result = await runInwardCycle();
+
+    // Mark as run for today regardless of outcome (avoid infinite retry loops)
+    lastAutoIngestDate = todayStr;
+
+    // Send email report
+    try {
+        const { sendCustomerEmail, renderInwardReport } = await import('../email/index.js');
+
+        const dateDisplay = new Date().toLocaleDateString('en-IN', {
+            timeZone: 'Asia/Kolkata',
+            day: 'numeric',
+            month: 'short',
+            year: 'numeric',
+        });
+
+        const { html, text, subject } = renderInwardReport({
+            date: dateDisplay,
+            inwardIngested: result.inwardIngested,
+            skipped: result.skipped,
+            rowsMarkedDone: result.rowsMarkedDone,
+            skusUpdated: result.skusUpdated,
+            errors: result.errors,
+            durationMs: result.durationMs,
+            validationErrors: result.inwardValidationErrors ?? {},
+            balancePassed: result.balanceVerification?.passed ?? null,
+            balanceDrifted: result.balanceVerification?.drifted ?? 0,
+            errorMessage: result.error,
+            fabricConsumption: result.fabricConsumption,
+        });
+
+        await sendCustomerEmail({
+            to: AUTO_INGEST_REPORT_EMAIL,
+            subject,
+            html,
+            text,
+            templateKey: 'inward_daily_report',
+        });
+
+        sheetsLogger.info({ to: AUTO_INGEST_REPORT_EMAIL, ingested: result.inwardIngested }, 'Inward report email sent');
+    } catch (emailErr: unknown) {
+        sheetsLogger.error(
+            { error: emailErr instanceof Error ? emailErr.message : String(emailErr) },
+            'Failed to send inward report email (non-fatal)'
+        );
+    }
+}
+
+// ============================================
 // PUBLIC API
 // ============================================
 
@@ -106,10 +186,39 @@ export function start(): void {
 
     setSchedulerActive(true);
 
-    sheetsLogger.info('Sheet offload worker ready (manual trigger only)');
+    if (ENABLE_AUTO_INGEST) {
+        sheetsLogger.info(
+            { scheduleIST: `${AUTO_INGEST_HOUR_IST}:${String(AUTO_INGEST_MINUTE_IST).padStart(2, '0')}`, reportTo: AUTO_INGEST_REPORT_EMAIL },
+            'Auto-ingest enabled — checking every minute for scheduled time'
+        );
+
+        // Check every 60s if it's time to run. If the server was down at the scheduled time,
+        // it will catch up as soon as it's back online (runs if past schedule + not run today).
+        autoIngestCheckInterval = setInterval(() => {
+            const today = getIstDateStr();
+            if (lastAutoIngestDate === today) return; // already ran today
+
+            const { hour, minute } = getIstTime();
+            const isPastSchedule = hour > AUTO_INGEST_HOUR_IST ||
+                (hour === AUTO_INGEST_HOUR_IST && minute >= AUTO_INGEST_MINUTE_IST);
+
+            if (!isPastSchedule) return; // not yet time
+
+            // Time to run — fire and forget (concurrency guard in runInwardCycle handles overlap)
+            runAutoIngestAndReport().catch(err => {
+                sheetsLogger.error({ error: err instanceof Error ? err.message : String(err) }, 'Auto-ingest daily run failed');
+            });
+        }, 60_000);
+    } else {
+        sheetsLogger.info('Sheet offload worker ready (manual trigger only, auto-ingest disabled)');
+    }
 }
 
 export function stop(): void {
+    if (autoIngestCheckInterval) {
+        clearInterval(autoIngestCheckInterval);
+        autoIngestCheckInterval = null;
+    }
     setSchedulerActive(false);
     sheetsLogger.info('Sheet offload worker stopped');
 }
@@ -263,7 +372,7 @@ export async function runInwardCycle(): Promise<IngestInwardResult> {
         const affectedSkuIds = await ingestInwardLive(result, tracker);
 
         // Mark any import steps still pending as skipped (e.g. early return with no data)
-        for (const name of ['Read sheet rows', 'Validate rows', 'DB write', 'Mark DONE']) {
+        for (const name of ['Read sheet rows', 'Validate rows', 'DB write', 'Mark DONE', 'Protect DONE rows']) {
             const step = getStep(name);
             if (step && step.status === 'pending') step.status = 'skipped';
         }

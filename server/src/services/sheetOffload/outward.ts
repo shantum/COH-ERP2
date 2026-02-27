@@ -13,6 +13,7 @@ import {
     batchWriteRanges,
     deleteRowsBatch,
     getSheetId,
+    ensureSheetRows,
 } from '../googleSheetsClient.js';
 import {
     ORDERS_MASTERSHEET_ID,
@@ -871,6 +872,10 @@ export async function triggerMoveShipped(): Promise<MoveShippedResult | null> {
         const existingRows = await readRange(ORDERS_MASTERSHEET_ID, `'${outwardTab}'!A:AG`);
         const startRow = existingRows.length + 1; // 1-based, after all existing rows (including header)
         const endRow = startRow + outwardRows.length - 1;
+
+        // Expand grid if needed (prevents "Range exceeds grid limits" error)
+        await ensureSheetRows(ORDERS_MASTERSHEET_ID, outwardTab, endRow);
+
         await writeRange(
             ORDERS_MASTERSHEET_ID,
             `'${outwardTab}'!A${startRow}:AF${endRow}`,

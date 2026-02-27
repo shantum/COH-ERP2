@@ -20,8 +20,27 @@ export const INGESTED_PREFIX = 'DONE:' as const;
 
 /**
  * How many days to keep DONE rows before cleanup deletes them.
+ * Rows stay visible on the sheet for this period so ops can audit, then get auto-deleted.
  */
-export const CLEANUP_RETENTION_DAYS = 0;
+export const CLEANUP_RETENTION_DAYS = 14;
+
+/**
+ * Enable automatic inward ingestion on a daily schedule.
+ * Set via ENABLE_AUTO_INGEST environment variable. Defaults to true when ENABLE_SHEET_OFFLOAD is on.
+ */
+export const ENABLE_AUTO_INGEST = process.env.ENABLE_AUTO_INGEST !== 'false';
+
+/**
+ * Hour (0–23) and minute for daily auto-ingest in IST (Asia/Kolkata, UTC+5:30).
+ * Default: 19:30 (7:30 PM IST).
+ */
+export const AUTO_INGEST_HOUR_IST = parseInt(process.env.AUTO_INGEST_HOUR_IST || '19', 10);
+export const AUTO_INGEST_MINUTE_IST = parseInt(process.env.AUTO_INGEST_MINUTE_IST || '30', 10);
+
+/**
+ * Email recipient for the daily inward report.
+ */
+export const AUTO_INGEST_REPORT_EMAIL = process.env.AUTO_INGEST_REPORT_EMAIL || 'shantum@creaturesofhabit.in';
 
 // ============================================
 // SPREADSHEET IDS
