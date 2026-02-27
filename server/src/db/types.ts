@@ -1021,11 +1021,15 @@ export type Product = {
     name: string;
     styleCode: string | null;
     category: string;
+    garmentGroup: Generated<string>;
     productType: string;
     gender: Generated<string>;
+    googleProductCategoryId: number | null;
+    attributes: unknown | null;
     baseProductionTimeMins: Generated<number>;
     defaultFabricConsumption: number | null;
     description: string | null;
+    erpDescription: string | null;
     imageUrl: string | null;
     notes: unknown | null;
     status: Generated<string>;
@@ -1354,6 +1358,22 @@ export type SkuBomLine = {
     createdAt: Generated<Timestamp>;
     updatedAt: Timestamp;
 };
+export type StyleMeasurement = {
+    id: Generated<string>;
+    styleCode: string;
+    unit: Generated<string>;
+    measurements: Generated<unknown>;
+    fitComments: Generated<unknown>;
+    sampleSize: string | null;
+    isFullyGraded: Generated<boolean>;
+    /**
+     * UK/US/EU equivalents per size, e.g. { "M": { "uk": 10, "us": 6, "eu": 38 } }
+     */
+    sizeEquivalents: unknown | null;
+    source: string | null;
+    createdAt: Generated<Timestamp>;
+    updatedAt: Timestamp;
+};
 export type SyncJob = {
     id: Generated<string>;
     jobType: string;
@@ -1604,6 +1624,7 @@ export type DB = {
     ShopifyProductCache: ShopifyProductCache;
     Sku: Sku;
     SkuBomLine: SkuBomLine;
+    StyleMeasurement: StyleMeasurement;
     SyncJob: SyncJob;
     SystemSetting: SystemSetting;
     Tailor: Tailor;

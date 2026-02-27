@@ -116,6 +116,7 @@ model Product {
   baseProductionTimeMins   Int         @default(60)
   defaultFabricConsumption Float?
   description              String?
+  erpDescription           String?
   imageUrl                 String?
   notes                    Json?       // Array of {id, text, createdAt, updatedAt}
   status                   String      @default("draft") // draft | active | archived
@@ -2580,4 +2581,18 @@ model DemandForecast {
   shortfallCount Int?
 
   @@index([createdAt])
+}
+
+model StyleMeasurement {
+  id               String   @id @default(uuid())
+  styleCode        String   @unique
+  unit             String   @default("in")
+  measurements     Json     @default("{}")
+  fitComments      Json     @default("[]")
+  sampleSize       String?
+  isFullyGraded    Boolean  @default(false)
+  sizeEquivalents  Json?    /// UK/US/EU equivalents per size, e.g. { "M": { "uk": 10, "us": 6, "eu": 38 } }
+  source           String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 }

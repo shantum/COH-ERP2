@@ -58,17 +58,60 @@ export interface SkuFormData {
 
 // === API Data Types ===
 
+export interface ShopifyProductData {
+  shopifyId: string;
+  status: string;
+  handle: string | null;
+  tags: string[];
+  productType: string | null;
+  vendor: string | null;
+  publishedAt: string | null;
+  bodyHtml: string | null;
+  images: Array<{ src: string; alt: string | null }>;
+  storefrontUrl: string | null;
+  adminUrl: string;
+}
+
+export interface SizeEquivalent {
+  uk: number | string;
+  us: number | string;
+  eu: number | string;
+}
+
+export interface MeasurementData {
+  unit: string;
+  measurements: Record<string, Record<string, number>>;
+  fitComments: string[];
+  sampleSize: string | null;
+  isFullyGraded: boolean;
+  sizeEquivalents: Record<string, SizeEquivalent> | null;
+}
+
 export interface ProductDetailData {
   id: string;
   name: string;
   styleCode: string | null;
   category: string;
+  garmentGroup: string;
   productType: string;
   gender: string;
+  googleProductCategoryId: number | null;
   baseProductionTimeMins: number;
   defaultFabricConsumption: number | null;
   isActive: boolean;
   imageUrl: string | null;
+  // Display fields
+  attributes: Record<string, string | number> | null;
+  description: string | null;
+  erpDescription: string | null;
+  hsnCode: string | null;
+  status: string;
+  isReturnable: boolean;
+  exchangeCount: number;
+  returnCount: number;
+  writeOffCount: number;
+  measurements: MeasurementData | null;
+  shopify: ShopifyProductData | null;
   variations: VariationDetailData[];
 }
 
@@ -86,6 +129,7 @@ export interface VariationDetailData {
   bomCost: number | null;
   isActive: boolean;
   imageUrl: string | null;
+  shopifySourceProductId: string | null;
   skus: SkuDetailData[];
 }
 
@@ -96,10 +140,12 @@ export interface SkuDetailData {
   size: string;
 
   mrp: number | null;
+  sellingPrice: number | null;
   targetStockQty: number | null;
   bomCost: number | null;
   isActive: boolean;
   currentBalance: number;
+  shopifyVariantId: string | null;
 }
 
 // === Filter/Dropdown Data ===

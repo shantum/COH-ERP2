@@ -16,7 +16,44 @@ const getProductByIdInputSchema = z.object({
 });
 
 /**
- * Product detail response type for unified edit modal
+ * Shopify product data parsed from ShopifyProductCache
+ */
+export interface ShopifyProductData {
+    shopifyId: string;
+    status: string;
+    handle: string | null;
+    tags: string[];
+    productType: string | null;
+    vendor: string | null;
+    publishedAt: string | null;
+    bodyHtml: string | null;
+    images: Array<{ src: string; alt: string | null }>;
+    /** Storefront URL */
+    storefrontUrl: string | null;
+    /** Admin URL */
+    adminUrl: string;
+}
+
+/**
+ * Measurements data from StyleMeasurement table
+ */
+export interface SizeEquivalent {
+    uk: number | string;
+    us: number | string;
+    eu: number | string;
+}
+
+export interface MeasurementData {
+    unit: string;
+    measurements: Record<string, Record<string, number>>;
+    fitComments: string[];
+    sampleSize: string | null;
+    isFullyGraded: boolean;
+    sizeEquivalents: Record<string, SizeEquivalent> | null;
+}
+
+/**
+ * Product detail response type for product detail page
  */
 export interface ProductDetailResponse {
     id: string;
@@ -33,6 +70,18 @@ export interface ProductDetailResponse {
     defaultFabricConsumption: number | null;
     isActive: boolean;
     imageUrl: string | null;
+    // New display fields
+    attributes: Record<string, string | number> | null;
+    description: string | null;
+    erpDescription: string | null;
+    hsnCode: string | null;
+    status: string;
+    isReturnable: boolean;
+    exchangeCount: number;
+    returnCount: number;
+    writeOffCount: number;
+    measurements: MeasurementData | null;
+    shopify: ShopifyProductData | null;
     variations: VariationDetailResponse[];
 }
 
@@ -50,6 +99,7 @@ export interface VariationDetailResponse {
     bomCost: number | null;
     isActive: boolean;
     imageUrl: string | null;
+    shopifySourceProductId: string | null;
     skus: SkuDetailResponse[];
 }
 
@@ -59,10 +109,12 @@ export interface SkuDetailResponse {
     variationId: string;
     size: string;
     mrp: number | null;
+    sellingPrice: number | null;
     targetStockQty: number | null;
     bomCost: number | null;
     isActive: boolean;
     currentBalance: number;
+    shopifyVariantId: string | null;
 }
 
 /**
@@ -94,10 +146,12 @@ export const getProductById = createServerFn({ method: 'GET' })
                                     variationId: true,
                                     size: true,
                                     mrp: true,
+                                    sellingPrice: true,
                                     targetStockQty: true,
                                     bomCost: true,
                                     isActive: true,
                                     currentBalance: true,
+                                    shopifyVariantId: true,
                                 },
                             },
                         },
@@ -115,6 +169,67 @@ export const getProductById = createServerFn({ method: 'GET' })
             // Derive product-level fabric type from first variation with fabric
             const firstFabric = [...fabricMap.values()].find((f) => f !== null);
 
+            // Fetch measurements from StyleMeasurement if styleCode exists
+            let measurements: MeasurementData | null = null;
+            if (product.styleCode) {
+                const sm = await prisma.styleMeasurement.findUnique({
+                    where: { styleCode: product.styleCode },
+                });
+                if (sm) {
+                    measurements = {
+                        unit: sm.unit,
+                        measurements: sm.measurements as Record<string, Record<string, number>>,
+                        fitComments: sm.fitComments as string[],
+                        sampleSize: sm.sampleSize,
+                        isFullyGraded: sm.isFullyGraded,
+                        sizeEquivalents: (sm.sizeEquivalents ?? null) as Record<string, SizeEquivalent> | null,
+                    };
+                }
+            }
+
+            // Fetch Shopify data from cache if linked
+            let shopify: ShopifyProductData | null = null;
+            // Collect all unique Shopify product IDs (product-level + variation-level)
+            const shopifyIds = new Set<string>();
+            if (product.shopifyProductId) shopifyIds.add(product.shopifyProductId);
+            for (const v of product.variations) {
+                if (v.shopifySourceProductId) shopifyIds.add(v.shopifySourceProductId);
+            }
+            if (shopifyIds.size > 0) {
+                // Use primary product ID, fall back to first variation's
+                const primaryId = product.shopifyProductId ?? [...shopifyIds][0];
+                const cache = await prisma.shopifyProductCache.findUnique({
+                    where: { id: primaryId },
+                    select: { rawData: true },
+                });
+                if (cache) {
+                    try {
+                        const raw = JSON.parse(cache.rawData) as {
+                            id: number; title?: string; handle?: string; body_html?: string;
+                            vendor?: string; product_type?: string; status?: string;
+                            tags?: string; published_at?: string;
+                            images?: Array<{ src: string; alt?: string | null }>;
+                        };
+                        const handle = raw.handle ?? null;
+                        shopify = {
+                            shopifyId: primaryId,
+                            status: raw.status ?? 'unknown',
+                            handle,
+                            tags: raw.tags ? raw.tags.split(', ').map(t => t.trim()).filter(Boolean) : [],
+                            productType: raw.product_type ?? null,
+                            vendor: raw.vendor ?? null,
+                            publishedAt: raw.published_at ?? null,
+                            bodyHtml: raw.body_html ?? null,
+                            images: (raw.images ?? []).map(img => ({ src: img.src, alt: img.alt ?? null })),
+                            storefrontUrl: handle ? `https://www.creaturesofhabit.in/products/${handle}` : null,
+                            adminUrl: `https://admin.shopify.com/store/creatures-of-habit-india/products/${primaryId}`,
+                        };
+                    } catch {
+                        // Skip corrupt cache
+                    }
+                }
+            }
+
             // Transform to response type
             return {
                 id: product.id,
@@ -131,6 +246,17 @@ export const getProductById = createServerFn({ method: 'GET' })
                 defaultFabricConsumption: product.defaultFabricConsumption,
                 isActive: product.isActive,
                 imageUrl: product.imageUrl,
+                attributes: (product.attributes ?? null) as Record<string, string | number> | null,
+                description: product.description,
+                erpDescription: product.erpDescription ?? null,
+                hsnCode: product.hsnCode,
+                status: product.status,
+                isReturnable: product.isReturnable,
+                exchangeCount: product.exchangeCount,
+                returnCount: product.returnCount,
+                writeOffCount: product.writeOffCount,
+                measurements,
+                shopify,
                 variations: product.variations.map((v) => {
                     const fabric = fabricMap.get(v.id) ?? null;
                     return {
@@ -147,16 +273,19 @@ export const getProductById = createServerFn({ method: 'GET' })
                         bomCost: v.bomCost,
                         isActive: v.isActive,
                         imageUrl: v.imageUrl,
+                        shopifySourceProductId: v.shopifySourceProductId,
                         skus: v.skus.map((s) => ({
                             id: s.id,
                             skuCode: s.skuCode,
                             variationId: s.variationId,
                             size: s.size,
                             mrp: s.mrp,
+                            sellingPrice: s.sellingPrice,
                             targetStockQty: s.targetStockQty,
                             bomCost: s.bomCost,
                             isActive: s.isActive,
                             currentBalance: s.currentBalance ?? 0,
+                            shopifyVariantId: s.shopifyVariantId,
                         })),
                     };
                 }),
