@@ -68,6 +68,11 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
+      '/api/forecast': {
+        target: 'http://127.0.0.1:3001',
+        changeOrigin: true,
+        timeout: 300_000, // 5 min for ML forecast
+      },
       '/api': {
         target: 'http://127.0.0.1:3001',
         changeOrigin: true,

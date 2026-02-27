@@ -43,6 +43,9 @@ echo "🗄️  Running Prisma generate + migrate..."
 npx prisma generate
 npx prisma migrate deploy --schema=prisma/schema.prisma
 
+echo "🐍 Installing Python dependencies for forecast script..."
+pip3 install -q -r scripts/requirements.txt 2>/dev/null || echo "⚠️  Python deps install failed (non-fatal)"
+
 echo "🔨 Building shared + client..."
 cd shared && pnpm build && cd ..
 cd client && pnpm build && cd ..

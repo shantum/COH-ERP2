@@ -243,7 +243,7 @@ function runPythonScript(scriptPath: string): Promise<unknown> {
     return new Promise((resolve, reject) => {
         const proc = spawn('python3', [scriptPath, '--json'], {
             cwd: path.resolve(__dirname, '../../..'),
-            timeout: 120_000,
+            timeout: 300_000, // 5 min — 70 ML models take 2-3 min
         });
 
         let stdout = '';

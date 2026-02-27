@@ -135,12 +135,13 @@ def create_time_features(df, target_col='units'):
     return df
 
 
-def sarima_forecast(series, steps=8):
+def arima_forecast(series, steps=8):
     from statsmodels.tsa.statespace.sarimax import SARIMAX
     try:
-        model = SARIMAX(series, order=(1,1,1), seasonal_order=(1,1,0,52),
+        # Simple ARIMA — seasonal(52) is too slow for 70+ models and too few data points
+        model = SARIMAX(series, order=(1,1,1),
                         enforce_stationarity=False, enforce_invertibility=False)
-        fitted = model.fit(disp=False, maxiter=200)
+        fitted = model.fit(disp=False, maxiter=50)
         fc = fitted.get_forecast(steps=steps)
         return fc.predicted_mean.values, fc.conf_int(alpha=0.2).values
     except:
@@ -154,7 +155,7 @@ def xgboost_forecast(df, target_col='units', steps=8):
     if len(train) < 20:
         return None
     X, y = train[feature_cols].values, train[target_col].values
-    model = XGBRegressor(n_estimators=200, max_depth=4, learning_rate=0.05,
+    model = XGBRegressor(n_estimators=50, max_depth=3, learning_rate=0.1,
                          subsample=0.8, colsample_bytree=0.8, random_state=42)
     model.fit(X, y, verbose=False)
     last_row = df.iloc[-1].copy()
@@ -179,23 +180,23 @@ def forecast_series(df, target_col='units', steps=8):
     df['week_dt'] = pd.to_datetime(df['week'])
     df = df.sort_values('week_dt')
     series = df.set_index('week_dt')[target_col].asfreq('W-MON').ffill()
-    sarima_pred, sarima_ci = sarima_forecast(series, steps)
+    arima_pred, arima_ci = arima_forecast(series, steps)
     df_feat = create_time_features(df, target_col)
     xgb_pred = xgboost_forecast(df_feat, target_col, steps)
     last_date = df['week_dt'].max()
     forecasts = []
     for i in range(steps):
         date = last_date + timedelta(weeks=i+1)
-        s = sarima_pred[i] if sarima_pred is not None else None
+        a = arima_pred[i] if arima_pred is not None else None
         x = xgb_pred[i] if xgb_pred is not None else None
-        if s is not None and x is not None:
-            ens = 0.4 * s + 0.6 * x
-            lo = sarima_ci[i][0] if sarima_ci is not None else ens * 0.8
-            hi = sarima_ci[i][1] if sarima_ci is not None else ens * 1.2
+        if a is not None and x is not None:
+            ens = 0.4 * a + 0.6 * x
+            lo = arima_ci[i][0] if arima_ci is not None else ens * 0.8
+            hi = arima_ci[i][1] if arima_ci is not None else ens * 1.2
         elif x is not None:
             ens, lo, hi = x, x * 0.8, x * 1.2
-        elif s is not None:
-            ens, lo, hi = s, sarima_ci[i][0], sarima_ci[i][1]
+        elif a is not None:
+            ens, lo, hi = a, arima_ci[i][0], arima_ci[i][1]
         else:
             continue
         forecasts.append({
