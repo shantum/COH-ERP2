@@ -38,6 +38,12 @@ export const AUTO_INGEST_HOUR_IST = parseInt(process.env.AUTO_INGEST_HOUR_IST ||
 export const AUTO_INGEST_MINUTE_IST = parseInt(process.env.AUTO_INGEST_MINUTE_IST || '30', 10);
 
 /**
+ * Enable automatic outward ingestion (move-shipped + outward ingest) as part of the daily pipeline.
+ * Set via ENABLE_AUTO_OUTWARD environment variable. Defaults to true when ENABLE_AUTO_INGEST is on.
+ */
+export const ENABLE_AUTO_OUTWARD = process.env.ENABLE_AUTO_OUTWARD !== 'false';
+
+/**
  * Email recipient for the daily inward report.
  */
 export const AUTO_INGEST_REPORT_EMAIL = process.env.AUTO_INGEST_REPORT_EMAIL || 'shantum@creaturesofhabit.in';

@@ -7,7 +7,7 @@ import { sheetsLogger } from '../../utils/logger.js';
 import { TXN_TYPE, FABRIC_TXN_TYPE } from '../../utils/patterns/types.js';
 import {
     readRangeWithSerials,
-    protectRowsWithWarning,
+    protectRowsStrict,
     getSheetId,
 } from '../googleSheetsClient.js';
 import {
@@ -564,7 +564,7 @@ export async function ingestInwardLive(result: IngestInwardResult, tracker?: Ste
     try {
         if (rowsToMark.length > 0) {
             const sheetId = await getSheetId(ORDERS_MASTERSHEET_ID, tab);
-            await protectRowsWithWarning(
+            await protectRowsStrict(
                 ORDERS_MASTERSHEET_ID,
                 sheetId,
                 rowsToMark.map(r => r.rowIndex)

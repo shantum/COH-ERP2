@@ -14,6 +14,7 @@ import {
     deleteRowsBatch,
     getSheetId,
     ensureSheetRows,
+    protectRowsStrict,
 } from '../googleSheetsClient.js';
 import {
     ORDERS_MASTERSHEET_ID,
@@ -322,6 +323,25 @@ export async function ingestOutwardLive(
     await markRowsIngested(ORDERS_MASTERSHEET_ID, tab, rowsToMark, 'AG', result);
 
     tracker?.done('Mark DONE', markStart, `${rowsToMark.length} rows`);
+
+    // --- Step: Protect DONE rows ---
+    const protectStart = tracker?.start('Protect DONE rows') ?? 0;
+    try {
+        if (rowsToMark.length > 0) {
+            const sheetId = await getSheetId(ORDERS_MASTERSHEET_ID, tab);
+            await protectRowsStrict(
+                ORDERS_MASTERSHEET_ID,
+                sheetId,
+                rowsToMark.map(r => r.rowIndex)
+            );
+            tracker?.done('Protect DONE rows', protectStart, `${rowsToMark.length} rows`);
+        } else {
+            tracker?.done('Protect DONE rows', protectStart, 'No rows to protect');
+        }
+    } catch (err: unknown) {
+        tracker?.fail('Protect DONE rows', protectStart, err instanceof Error ? err.message : 'Unknown error');
+        sheetsLogger.error({ error: err instanceof Error ? err.message : String(err) }, 'Failed to protect outward DONE rows (non-fatal)');
+    }
 
     return { affectedSkuIds, linkableItems, orderMap };
 }

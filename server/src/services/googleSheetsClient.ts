@@ -529,25 +529,19 @@ export async function deleteRowsBatch(
 }
 
 // ============================================
-// ROW PROTECTION (WARNING-ONLY)
+// ROW PROTECTION
 // ============================================
 
 /** Description prefix so we can identify our protections for cleanup */
 const PROTECTION_DESC_PREFIX = '[auto-import]';
 
-/**
- * Add warning-only protection to specific rows.
- * Shows a confirmation dialog when users try to edit, but doesn't block them.
- * Groups contiguous rows into ranges for efficiency.
- */
-export async function protectRowsWithWarning(
-    spreadsheetId: string,
-    sheetId: number,
-    rowIndices: number[]
-): Promise<void> {
-    if (rowIndices.length === 0) return;
+/** Service account email — only editor allowed on strict-protected rows */
+const SERVICE_ACCOUNT_EMAIL = 'coh-sheets@coh-erp.iam.gserviceaccount.com';
 
-    // Sort ascending and group contiguous rows into ranges
+/**
+ * Group contiguous row indices into ranges for efficient batch operations.
+ */
+function groupContiguousRows(rowIndices: number[]): Array<{ start: number; end: number }> {
     const sorted = [...rowIndices].sort((a, b) => a - b);
     const ranges: Array<{ start: number; end: number }> = [];
     let rangeStart = sorted[0];
@@ -563,6 +557,21 @@ export async function protectRowsWithWarning(
         }
     }
     ranges.push({ start: rangeStart, end: rangeEnd });
+    return ranges;
+}
+
+/**
+ * Add warning-only protection to specific rows.
+ * Shows a confirmation dialog when users try to edit, but doesn't block them.
+ */
+export async function protectRowsWithWarning(
+    spreadsheetId: string,
+    sheetId: number,
+    rowIndices: number[]
+): Promise<void> {
+    if (rowIndices.length === 0) return;
+
+    const ranges = groupContiguousRows(rowIndices);
 
     const requests = ranges.map(r => ({
         addProtectedRange: {
@@ -592,8 +601,50 @@ export async function protectRowsWithWarning(
 }
 
 /**
- * Remove all warning-only protections we created (identified by description prefix)
+ * Add strict protection to specific rows.
+ * Only the service account can edit — all other users are blocked.
+ */
+export async function protectRowsStrict(
+    spreadsheetId: string,
+    sheetId: number,
+    rowIndices: number[]
+): Promise<void> {
+    if (rowIndices.length === 0) return;
+
+    const ranges = groupContiguousRows(rowIndices);
+
+    const requests = ranges.map(r => ({
+        addProtectedRange: {
+            protectedRange: {
+                range: {
+                    sheetId,
+                    startRowIndex: r.start,
+                    endRowIndex: r.end,
+                },
+                description: `${PROTECTION_DESC_PREFIX} Imported row — locked`,
+                warningOnly: false,
+                editors: { users: [SERVICE_ACCOUNT_EMAIL] },
+            },
+        },
+    }));
+
+    const client = getClient();
+
+    await withRetry(
+        () => client.spreadsheets.batchUpdate({
+            spreadsheetId,
+            requestBody: { requests },
+        }),
+        `protectRowsStrict(${rowIndices.length} rows, ${ranges.length} ranges)`
+    );
+
+    sheetsLogger.info({ rows: rowIndices.length, ranges: ranges.length }, 'Protected imported rows with strict lock');
+}
+
+/**
+ * Remove all protections we created (identified by description prefix)
  * for rows that are about to be deleted. Call before deleteRowsBatch.
+ * Handles both warning-only and strict protections.
  */
 export async function removeOurProtections(
     spreadsheetId: string,
@@ -618,10 +669,9 @@ export async function removeOurProtections(
 
     const deleteSet = new Set(rowIndicesToDelete);
 
-    // Find our warning-only protections that overlap with rows being deleted
+    // Find our protections (warning or strict) that overlap with rows being deleted
     const toRemove = sheet.protectedRanges.filter(pr => {
         if (!pr.description?.startsWith(PROTECTION_DESC_PREFIX)) return false;
-        if (!pr.warningOnly) return false;
         const range = pr.range;
         if (!range || range.startRowIndex == null || range.endRowIndex == null) return false;
 

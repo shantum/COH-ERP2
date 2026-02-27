@@ -13,6 +13,7 @@ import {
 import {
     ENABLE_SHEET_OFFLOAD,
     ENABLE_AUTO_INGEST,
+    ENABLE_AUTO_OUTWARD,
     AUTO_INGEST_HOUR_IST,
     AUTO_INGEST_MINUTE_IST,
     AUTO_INGEST_REPORT_EMAIL,
@@ -25,6 +26,7 @@ import {
 import type {
     IngestInwardResult,
     IngestOutwardResult,
+    MoveShippedResult,
     OffloadStatus,
     BalanceSnapshot,
     StepTracker,
@@ -58,7 +60,7 @@ import {
     pushRecentRun,
 } from './helpers.js';
 import { ingestInwardLive } from './inward.js';
-import { ingestOutwardLive, linkOutwardToOrders } from './outward.js';
+import { ingestOutwardLive, linkOutwardToOrders, triggerMoveShipped } from './outward.js';
 import {
     readInventorySnapshot,
     compareSnapshots,
@@ -116,19 +118,50 @@ function getIstTime(): { hour: number; minute: number } {
     return { hour: Number(parts[0]), minute: Number(parts[1]) };
 }
 
-/** Run the inward cycle and send the report email */
-async function runAutoIngestAndReport(): Promise<void> {
+/** Run the full daily pipeline: inward → move-shipped → outward → combined email report */
+async function runDailyPipeline(): Promise<void> {
     const todayStr = getIstDateStr();
-    sheetsLogger.info({ date: todayStr }, 'Auto-ingest: starting daily inward cycle');
+    sheetsLogger.info({ date: todayStr }, 'Daily pipeline: starting');
 
-    const result = await runInwardCycle();
+    // 1. Inward cycle
+    const inwardResult = await runInwardCycle();
+
+    // 2. Move-shipped + Outward (if enabled)
+    let moveResult: MoveShippedResult | null = null;
+    let outwardResult: IngestOutwardResult | null = null;
+
+    if (ENABLE_AUTO_OUTWARD) {
+        // Move shipped rows from "Orders from COH" → "Outward (Live)"
+        try {
+            sheetsLogger.info('Daily pipeline: starting move-shipped');
+            moveResult = await triggerMoveShipped();
+        } catch (err: unknown) {
+            sheetsLogger.error(
+                { error: err instanceof Error ? err.message : String(err) },
+                'Daily pipeline: move-shipped failed (non-fatal, continuing to outward)'
+            );
+        }
+
+        // Outward ingestion from "Outward (Live)" → DB
+        try {
+            sheetsLogger.info('Daily pipeline: starting outward cycle');
+            outwardResult = await runOutwardCycle();
+        } catch (err: unknown) {
+            sheetsLogger.error(
+                { error: err instanceof Error ? err.message : String(err) },
+                'Daily pipeline: outward cycle failed (non-fatal)'
+            );
+        }
+    } else {
+        sheetsLogger.info('Daily pipeline: outward auto-ingest disabled (ENABLE_AUTO_OUTWARD=false)');
+    }
 
     // Mark as run for today regardless of outcome (avoid infinite retry loops)
     lastAutoIngestDate = todayStr;
 
-    // Send email report
+    // 3. Send combined email report
     try {
-        const { sendCustomerEmail, renderInwardReport } = await import('../email/index.js');
+        const { sendCustomerEmail, renderDailyReport } = await import('../email/index.js');
 
         const dateDisplay = new Date().toLocaleDateString('en-IN', {
             timeZone: 'Asia/Kolkata',
@@ -137,19 +170,42 @@ async function runAutoIngestAndReport(): Promise<void> {
             year: 'numeric',
         });
 
-        const { html, text, subject } = renderInwardReport({
+        const { html, text, subject } = renderDailyReport({
             date: dateDisplay,
-            inwardIngested: result.inwardIngested,
-            skipped: result.skipped,
-            rowsMarkedDone: result.rowsMarkedDone,
-            skusUpdated: result.skusUpdated,
-            errors: result.errors,
-            durationMs: result.durationMs,
-            validationErrors: result.inwardValidationErrors ?? {},
-            balancePassed: result.balanceVerification?.passed ?? null,
-            balanceDrifted: result.balanceVerification?.drifted ?? 0,
-            errorMessage: result.error,
-            fabricConsumption: result.fabricConsumption,
+
+            // Inward
+            inwardIngested: inwardResult.inwardIngested,
+            inwardSkipped: inwardResult.skipped,
+            inwardRowsMarkedDone: inwardResult.rowsMarkedDone,
+            inwardSkusUpdated: inwardResult.skusUpdated,
+            inwardErrors: inwardResult.errors,
+            inwardDurationMs: inwardResult.durationMs,
+            inwardValidationErrors: inwardResult.inwardValidationErrors ?? {},
+            inwardBalancePassed: inwardResult.balanceVerification?.passed ?? null,
+            inwardBalanceDrifted: inwardResult.balanceVerification?.drifted ?? 0,
+            inwardErrorMessage: inwardResult.error,
+            fabricConsumption: inwardResult.fabricConsumption,
+
+            // Move Shipped
+            moveShippedRowsFound: moveResult?.shippedRowsFound ?? 0,
+            moveShippedSkipped: moveResult?.skippedRows ?? 0,
+            moveShippedSkipReasons: moveResult?.skipReasons ?? {},
+            moveShippedWritten: moveResult?.rowsWrittenToOutward ?? 0,
+            moveShippedVerified: moveResult?.rowsVerified ?? 0,
+            moveShippedDeleted: moveResult?.rowsDeletedFromOrders ?? 0,
+            moveShippedErrors: moveResult?.errors ?? [],
+            moveShippedDurationMs: moveResult?.durationMs ?? 0,
+
+            // Outward
+            outwardIngested: outwardResult?.outwardIngested ?? 0,
+            outwardLinked: outwardResult?.ordersLinked ?? 0,
+            outwardSkipped: outwardResult?.skipped ?? 0,
+            outwardErrors: outwardResult?.errors ?? 0,
+            outwardDurationMs: outwardResult?.durationMs ?? 0,
+            outwardSkipReasons: outwardResult?.outwardSkipReasons,
+            outwardBalancePassed: outwardResult?.balanceVerification?.passed ?? null,
+            outwardBalanceDrifted: outwardResult?.balanceVerification?.drifted ?? 0,
+            outwardErrorMessage: outwardResult?.error ?? null,
         });
 
         await sendCustomerEmail({
@@ -157,16 +213,23 @@ async function runAutoIngestAndReport(): Promise<void> {
             subject,
             html,
             text,
-            templateKey: 'inward_daily_report',
+            templateKey: 'daily_pipeline_report',
         });
 
-        sheetsLogger.info({ to: AUTO_INGEST_REPORT_EMAIL, ingested: result.inwardIngested }, 'Inward report email sent');
+        sheetsLogger.info({
+            to: AUTO_INGEST_REPORT_EMAIL,
+            inward: inwardResult.inwardIngested,
+            outward: outwardResult?.outwardIngested ?? 0,
+            moved: moveResult?.rowsWrittenToOutward ?? 0,
+        }, 'Daily pipeline report email sent');
     } catch (emailErr: unknown) {
         sheetsLogger.error(
             { error: emailErr instanceof Error ? emailErr.message : String(emailErr) },
-            'Failed to send inward report email (non-fatal)'
+            'Failed to send daily pipeline report email (non-fatal)'
         );
     }
+
+    sheetsLogger.info({ date: todayStr }, 'Daily pipeline: complete');
 }
 
 // ============================================
@@ -204,9 +267,9 @@ export function start(): void {
 
             if (!isPastSchedule) return; // not yet time
 
-            // Time to run — fire and forget (concurrency guard in runInwardCycle handles overlap)
-            runAutoIngestAndReport().catch(err => {
-                sheetsLogger.error({ error: err instanceof Error ? err.message : String(err) }, 'Auto-ingest daily run failed');
+            // Time to run — fire and forget (concurrency guards in cycle runners handle overlap)
+            runDailyPipeline().catch(err => {
+                sheetsLogger.error({ error: err instanceof Error ? err.message : String(err) }, 'Daily pipeline run failed');
             });
         }, 60_000);
     } else {
@@ -548,7 +611,7 @@ export async function runOutwardCycle(): Promise<IngestOutwardResult> {
         const { affectedSkuIds, linkableItems, orderMap } = await ingestOutwardLive(result, tracker);
 
         // Mark any import steps still pending as skipped (e.g. early return with no data)
-        for (const name of ['Read sheet rows', 'Validate rows', 'DB write', 'Mark DONE']) {
+        for (const name of ['Read sheet rows', 'Validate rows', 'DB write', 'Mark DONE', 'Protect DONE rows']) {
             const step = getStep(name);
             if (step && step.status === 'pending') step.status = 'skipped';
         }
