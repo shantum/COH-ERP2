@@ -45,6 +45,7 @@ export interface ProductNode {
     status?: string;
     styleCode?: string;
     category: string;
+    garmentGroup?: string;
     gender?: string;
     productType?: string;
     fabricTypeId?: string;
@@ -474,6 +475,7 @@ export const getProductsTree = createServerFn({ method: 'GET' })
                     status: product.status ?? 'active',
                     styleCode: product.styleCode ?? undefined,
                     category: product.category || '',
+                    garmentGroup: product.garmentGroup ?? undefined,
                     gender: product.gender ?? undefined,
                     productType: product.productType ?? undefined,
                     // NOTE: fabricTypeId/fabricTypeName removed - now derived from BOM materials

@@ -18,6 +18,7 @@ export function ProductInfoTab({ product, isEditing = false }: ProductInfoTabPro
                 <InfoField label="Name" value={product.name} editable={isEditing} />
                 <InfoField label="Style Code" value={product.styleCode} editable={isEditing} />
                 <InfoField label="Category" value={product.category} editable={isEditing} />
+                <InfoField label="Group" value={product.garmentGroup} badge="blue" />
                 <InfoField label="Gender" value={product.gender} editable={isEditing} />
                 <InfoField label="Fabric Type" value={product.fabricTypeName} />
                 <InfoField

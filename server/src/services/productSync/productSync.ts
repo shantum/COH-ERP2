@@ -6,6 +6,7 @@ import type { Prisma, PrismaClient } from '@prisma/client';
 import type { ShopifyProductWithImages, ShopifyVariantWithInventory, SyncResult } from './types.js';
 import shopifyClient from '../shopify/index.js';
 import { resolveProductCategory } from '../../config/mappings/index.js';
+import { deriveTaxonomy } from '@coh/shared/config/productTaxonomy';
 import logger from '../../utils/logger.js';
 import { buildVariantImageMap, groupVariantsByColor, resolveOptionPositions } from './variantUtils.js';
 import { syncSingleSku } from './skuSync.js';
@@ -79,15 +80,19 @@ export async function syncSingleProduct(
     });
 
     if (!product) {
+        const category = resolveProductCategory({
+            product_type: shopifyProduct.product_type,
+            tags: shopifyProduct.tags,
+        });
+        const taxonomy = deriveTaxonomy(category);
         product = await prisma.product.create({
             data: {
                 name: shopifyProduct.title,
                 shopifyProductId,
                 shopifyHandle: shopifyProduct.handle,
-                category: resolveProductCategory({
-                    product_type: shopifyProduct.product_type,
-                    tags: shopifyProduct.tags,
-                }),
+                category,
+                garmentGroup: taxonomy.garmentGroup,
+                googleProductCategoryId: taxonomy.googleCategoryId,
                 productType: 'basic',
                 gender: gender || 'unisex',
                 baseProductionTimeMins: 60,
@@ -110,7 +115,10 @@ export async function syncSingleProduct(
             tags: shopifyProduct.tags,
         });
         if (resolvedCategory !== product.category) {
+            const taxonomy = deriveTaxonomy(resolvedCategory);
             updates.category = resolvedCategory;
+            updates.garmentGroup = taxonomy.garmentGroup;
+            updates.googleProductCategoryId = taxonomy.googleCategoryId;
         }
 
         if (Object.keys(updates).length > 0) {

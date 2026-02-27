@@ -27,6 +27,7 @@ export const inventorySkuRowSchema = z.object({
     productType: z.string(),
     gender: z.string(),
     category: z.string(),
+    garmentGroup: z.string(),
     productImageUrl: z.string().nullable(),
     fabricId: z.string(),
     fabricName: z.string().nullable(),

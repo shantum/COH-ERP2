@@ -35,8 +35,10 @@ export interface ProductData {
     name: string;
     styleCode: string | null;
     category: string;
+    garmentGroup: string;
     gender: string;
     productType: string;
+    googleProductCategoryId: number | null;
     shopifyProductId: string | null;
     imageUrl: string | null;
     status: string;

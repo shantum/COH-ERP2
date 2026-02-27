@@ -12,6 +12,7 @@ import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth';
 import { getPrisma } from '@coh/shared/services/db';
+import { deriveTaxonomy, productAttributesSchema } from '@coh/shared/config/productTaxonomy';
 
 // ============================================
 // EXPORTED RESPONSE TYPES
@@ -63,6 +64,7 @@ const createProductSchema = z.object({
     baseProductionTimeMins: z.number().int().positive().default(60),
     defaultFabricConsumption: z.number().positive().optional().nullable(),
     imageUrl: z.string().url().optional().nullable(),
+    attributes: productAttributesSchema.optional().nullable(),
 });
 
 const updateProductSchema = z.object({
@@ -76,6 +78,7 @@ const updateProductSchema = z.object({
     defaultFabricConsumption: z.number().positive().optional().nullable(),
     imageUrl: z.string().url().optional().nullable(),
     isActive: z.boolean().optional(),
+    attributes: productAttributesSchema.optional().nullable(),
 });
 
 const deleteProductSchema = z.object({
@@ -136,16 +139,20 @@ export const createProduct = createServerFn({ method: 'POST' })
     .handler(async ({ data }) => {
         try {
             const prisma = await getPrisma();
+                const taxonomy = deriveTaxonomy(data.category);
                 const product = await prisma.product.create({
                     data: {
                         name: data.name,
                         styleCode: data.styleCode || null,
                         category: data.category,
+                        garmentGroup: taxonomy.garmentGroup,
+                        googleProductCategoryId: taxonomy.googleCategoryId,
                         productType: data.productType || '',
                         gender: data.gender || 'unisex',
                         baseProductionTimeMins: data.baseProductionTimeMins || 60,
                         defaultFabricConsumption: data.defaultFabricConsumption || null,
                         imageUrl: data.imageUrl || null,
+                        ...(data.attributes ? { attributes: data.attributes } : {}),
                     },
                 });
 
@@ -173,13 +180,20 @@ export const updateProduct = createServerFn({ method: 'POST' })
                 const updateData: Record<string, unknown> = {};
                 if (data.name !== undefined) updateData.name = data.name;
                 if (data.styleCode !== undefined) updateData.styleCode = data.styleCode || null;
-                if (data.category !== undefined) updateData.category = data.category;
+                if (data.category !== undefined) {
+                    updateData.category = data.category;
+                    // Re-derive taxonomy when category changes
+                    const taxonomy = deriveTaxonomy(data.category);
+                    updateData.garmentGroup = taxonomy.garmentGroup;
+                    updateData.googleProductCategoryId = taxonomy.googleCategoryId;
+                }
                 if (data.productType !== undefined) updateData.productType = data.productType;
                 if (data.gender !== undefined) updateData.gender = data.gender;
                 if (data.baseProductionTimeMins !== undefined) updateData.baseProductionTimeMins = data.baseProductionTimeMins;
                 if (data.defaultFabricConsumption !== undefined) updateData.defaultFabricConsumption = data.defaultFabricConsumption;
                 if (data.imageUrl !== undefined) updateData.imageUrl = data.imageUrl;
                 if (data.isActive !== undefined) updateData.isActive = data.isActive;
+                if (data.attributes !== undefined) updateData.attributes = data.attributes;
 
                 const product = await prisma.product.update({
                     where: { id: data.id },

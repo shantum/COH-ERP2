@@ -25,6 +25,7 @@ export interface SkuViewRow {
     productStatus?: string;
     styleCode?: string;
     category?: string;
+    garmentGroup?: string;
     gender?: string;
     productImageUrl?: string;
     variationImageUrl?: string;
@@ -102,6 +103,7 @@ export function flattenToSkuRows(products: ProductTreeNode[]): SkuViewRow[] {
                     productStatus: product.status,
                     styleCode: product.styleCode,
                     category: product.category,
+                    garmentGroup: product.garmentGroup,
                     gender: product.gender,
                     productImageUrl: product.imageUrl,
                     variationImageUrl: variation.imageUrl,

@@ -23,6 +23,7 @@ import { asyncHandler } from '../middleware/asyncHandler.js';
 import { parse, format } from 'fast-csv';
 import multer from 'multer';
 import { Readable } from 'stream';
+import { deriveTaxonomy } from '@coh/shared/config/productTaxonomy';
 
 const router: Router = Router();
 
@@ -47,6 +48,7 @@ interface ImportResults {
 interface ProductCsvRow {
     productName: string;
     category?: string;
+    garmentGroup?: string;
     productType?: string;
     gender?: string;
     productionTimeMins?: string;
@@ -128,6 +130,7 @@ router.get('/export/products', authenticateToken, asyncHandler(async (req: Reque
                     rows.push({
                         productName: product.name,
                         category: product.category,
+                        garmentGroup: product.garmentGroup,
                         productType: product.productType,
                         gender: product.gender,
                         productionTimeMins: product.baseProductionTimeMins,
@@ -210,10 +213,14 @@ router.post('/import/products', authenticateToken, upload.single('file'), asyncH
                 });
 
                 if (!product) {
+                    const importCategory = row.category || 'dress';
+                    const taxonomy = deriveTaxonomy(importCategory);
                     product = await req.prisma.product.create({
                         data: {
                             name: row.productName,
-                            category: row.category || 'dress',
+                            category: importCategory,
+                            garmentGroup: taxonomy.garmentGroup,
+                            googleProductCategoryId: taxonomy.googleCategoryId,
                             productType: row.productType || 'basic',
                             gender: row.gender || 'unisex',
                             baseProductionTimeMins: parseInt(row.productionTimeMins || '60') || 60,

@@ -100,6 +100,7 @@ export interface InventoryAllItem {
     variationId: string;
     size: string;
     category: string | null;
+    garmentGroup: string | null;
     imageUrl: string | null;
     currentBalance: number;
     availableBalance: number;
@@ -394,6 +395,7 @@ export const getInventoryAll = createServerFn({ method: 'GET' })
                 variationId: sku.variationId,
                 size: sku.size,
                 category: sku.category,
+                garmentGroup: sku.garmentGroup,
                 imageUrl,
                 currentBalance: balance.currentBalance,
                 availableBalance: balance.availableBalance,

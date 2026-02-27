@@ -29,7 +29,7 @@ import { getOptimizedImageUrl } from './imageOptimization';
 
 // All column IDs in display order
 export const ALL_COLUMN_IDS = [
-    'image', 'productName', 'styleCode', 'category', 'gender', 'productType', 'fabricTypeName',
+    'image', 'productName', 'styleCode', 'category', 'garmentGroup', 'gender', 'productType', 'fabricTypeName',
     'colorName', 'hasLining', 'fabricName',
     'skuCode', 'size', 'mrp', 'bomCost', 'totalCost',
     'exGstPrice', 'gstAmount', 'costMultiple',
@@ -42,6 +42,7 @@ export const DEFAULT_HEADERS: Record<string, string> = {
     productName: 'Product',
     styleCode: 'Style',
     category: 'Category',
+    garmentGroup: 'Group',
     gender: 'Gender',
     productType: 'Type',
     fabricTypeName: 'Fabric Type',
@@ -203,6 +204,14 @@ export function createColumnDefs({
             field: 'category',
             width: 90,
             cellClass: 'capitalize',
+        },
+        {
+            colId: 'garmentGroup',
+            headerName: DEFAULT_HEADERS.garmentGroup,
+            field: 'garmentGroup',
+            width: 80,
+            cellClass: 'capitalize',
+            hide: true,  // Hidden by default, available in column chooser
         },
         {
             colId: 'gender',

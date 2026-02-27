@@ -65,8 +65,11 @@ export interface Product {
   name: string;
   styleCode: string | null;
   category: string;
+  garmentGroup: string;
   productType: string;
   gender: string;
+  googleProductCategoryId: number | null;
+  attributes: Record<string, unknown> | null;
   baseProductionTimeMins: number;
   defaultFabricConsumption: number | null;
   imageUrl: string | null;
@@ -863,6 +866,7 @@ export type SalesDimension =
   | 'summary'
   | 'product'
   | 'category'
+  | 'garmentGroup'
   | 'gender'
   | 'color'
   | 'standardColor'

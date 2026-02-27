@@ -62,6 +62,10 @@
       "types": "./dist/config/product.d.ts",
       "import": "./dist/config/product.js"
     },
+    "./config/productTaxonomy": {
+      "types": "./dist/config/productTaxonomy.d.ts",
+      "import": "./dist/config/productTaxonomy.js"
+    },
     "./services/auth": {
       "types": "./dist/services/auth/index.d.ts",
       "import": "./dist/services/auth/index.js"

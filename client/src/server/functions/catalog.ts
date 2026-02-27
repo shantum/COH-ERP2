@@ -74,6 +74,7 @@ export interface CatalogSkuItem {
     productName: string;
     styleCode: string | null;
     category: string | null;
+    garmentGroup: string | null;
     gender: string | null;
     productType: string | null;
     fabricTypeId: string | null;
@@ -450,6 +451,7 @@ export const getCatalogProducts = createServerFn({ method: 'GET' })
                         productName: product.name,
                         styleCode: product.styleCode ?? null,
                         category: product.category ?? null,
+                        garmentGroup: product.garmentGroup ?? null,
                         gender: product.gender ?? null,
                         productType: product.productType ?? null,
                         // NOTE: fabricTypeId removed - fabric info now from BOM

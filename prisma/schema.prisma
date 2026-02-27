@@ -107,8 +107,11 @@ model Product {
   name                     String
   styleCode                String?
   category                 String
+  garmentGroup             String      @default("tops") // tops | bottoms | dresses | sets | accessories
   productType              String
   gender                   String      @default("unisex")
+  googleProductCategoryId  Int?        // Google/Meta product taxonomy ID (e.g. 212 = Shirts & Tops)
+  attributes               Json?       // Structured product attributes (validated by Zod: constructionType, sleeveType, neckline, fit, etc.)
   // NOTE: fabricTypeId removed - fabric info comes from variation BOM lines
   baseProductionTimeMins   Int         @default(60)
   defaultFabricConsumption Float?
@@ -132,6 +135,7 @@ model Product {
   bomTemplates             ProductBomTemplate[] // BOM structure for this product
 
   @@index([category])
+  @@index([garmentGroup])
   @@index([shopifyHandle])
   @@index([name])
   @@index([styleCode])

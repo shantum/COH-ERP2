@@ -1011,7 +1011,7 @@ export const getFrequentReturners = createServerFn({ method: 'GET' })
 
 const getSalesAnalyticsInputSchema = z.object({
     dimension: z.enum([
-        'summary', 'product', 'category', 'gender', 'color',
+        'summary', 'product', 'category', 'garmentGroup', 'gender', 'color',
         'standardColor', 'material', 'fabric', 'fabricColour', 'channel'
     ]).optional().default('summary'),
     startDate: z.string().optional(),
@@ -1341,6 +1341,13 @@ export const getSalesAnalytics = createServerFn({ method: 'GET' })
                 }
                 case 'category': {
                     key = line.sku.variation.product.category || 'uncategorized';
+                    label = key.charAt(0).toUpperCase() + key.slice(1);
+                    break;
+                }
+                case 'garmentGroup': {
+                    // garmentGroup is on the Prisma model (product: true fetches all columns)
+                    const product = line.sku.variation.product as { garmentGroup?: string };
+                    key = product.garmentGroup || 'tops';
                     label = key.charAt(0).toUpperCase() + key.slice(1);
                     break;
                 }

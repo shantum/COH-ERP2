@@ -20,6 +20,7 @@ ModuleRegistry.registerModules([AllCommunityModule]);
 const DIMENSIONS: { key: SalesDimension; label: string }[] = [
     { key: 'summary', label: 'Overview' },
     { key: 'product', label: 'By Product' },
+    { key: 'garmentGroup', label: 'By Group' },
     { key: 'category', label: 'By Category' },
     { key: 'gender', label: 'By Gender' },
     { key: 'color', label: 'By Color' },
@@ -539,6 +540,7 @@ function getDimensionLabel(dimension: SalesDimension): string {
     const labels: Record<SalesDimension, string> = {
         summary: 'Overview',
         product: 'Product',
+        garmentGroup: 'Group',
         category: 'Category',
         gender: 'Gender',
         color: 'Color',
@@ -555,6 +557,7 @@ function getDimensionColumnHeader(dimension: SalesDimension): string {
     const headers: Record<SalesDimension, string> = {
         summary: 'Item',
         product: 'Product',
+        garmentGroup: 'Group',
         category: 'Category',
         gender: 'Gender',
         color: 'Color',

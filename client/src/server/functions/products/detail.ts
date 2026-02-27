@@ -23,8 +23,10 @@ export interface ProductDetailResponse {
     name: string;
     styleCode: string | null;
     category: string;
+    garmentGroup: string;
     productType: string;
     gender: string;
+    googleProductCategoryId: number | null;
     fabricTypeId: string | null;
     fabricTypeName: string | null;
     baseProductionTimeMins: number;
@@ -119,8 +121,10 @@ export const getProductById = createServerFn({ method: 'GET' })
                 name: product.name,
                 styleCode: product.styleCode,
                 category: product.category,
+                garmentGroup: product.garmentGroup,
                 productType: product.productType,
                 gender: product.gender,
+                googleProductCategoryId: product.googleProductCategoryId,
                 fabricTypeId: firstFabric?.materialId ?? null,
                 fabricTypeName: firstFabric?.materialName ?? null,
                 baseProductionTimeMins: product.baseProductionTimeMins,

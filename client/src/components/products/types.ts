@@ -32,6 +32,7 @@ export interface ProductTreeNode {
     // === Product level ===
     styleCode?: string;
     category?: string;
+    garmentGroup?: string;
     gender?: string;
     productType?: string;
     fabricTypeId?: string;
