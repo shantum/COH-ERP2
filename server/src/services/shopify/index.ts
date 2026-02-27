@@ -28,6 +28,9 @@ export type {
     ProductFeedData,
 } from './types.js';
 
+export type { MetafieldSetResult, CategorySetResult } from './metafields.js';
+export { extractMetafieldAttributes } from './metafields.js';
+
 // Export singleton instance
 const shopifyClient = new ShopifyClient();
 

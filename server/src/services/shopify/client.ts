@@ -32,6 +32,7 @@ import * as paymentsFn from './payments.js';
 import * as graphqlFn from './graphql.js';
 import * as inventoryFn from './inventory.js';
 import * as utilsFn from './utils.js';
+import * as metafieldsFn from './metafields.js';
 
 /**
  * Shopify Admin API client for importing orders and customers
@@ -453,6 +454,25 @@ export class ShopifyClient {
         locationId: string
     ): Promise<{ sku: string; result: SetInventoryResult }[]> {
         return inventoryFn.zeroOutInventoryForSkus(this.getContext(), skus, locationId);
+    }
+
+    // ============================================
+    // METAFIELDS (delegates to metafields module)
+    // ============================================
+
+    async setProductMetafields(
+        shopifyProductId: string,
+        fieldKeys: string[],
+        values: Record<string, string>,
+    ): Promise<metafieldsFn.MetafieldSetResult> {
+        return metafieldsFn.setProductMetafields(this.getContext(), shopifyProductId, fieldKeys, values);
+    }
+
+    async setProductCategory(
+        shopifyProductId: string,
+        googleCategoryId: number,
+    ): Promise<metafieldsFn.CategorySetResult> {
+        return metafieldsFn.setProductCategory(this.getContext(), shopifyProductId, googleCategoryId);
     }
 
     // ============================================

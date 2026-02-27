@@ -956,3 +956,74 @@ export const getProductShopifyStatuses = createServerFn({ method: 'POST' })
             };
         }
     });
+
+// ============================================
+// METAFIELD PUSH (ERP → SHOPIFY)
+// ============================================
+
+const pushMetafieldsSchema = z.object({
+    shopifyProductId: z.string().min(1),
+    fields: z.record(z.string(), z.string()),
+});
+
+export interface PushMetafieldsResult {
+    success: boolean;
+    error?: string;
+    updatedFields: string[];
+}
+
+/**
+ * Push selected metafield values from ERP to Shopify.
+ * Caller explicitly selects which fields to push via the fields map.
+ */
+export const pushMetafieldsToShopify = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => pushMetafieldsSchema.parse(input))
+    .handler(async ({ data }): Promise<MutationResult<PushMetafieldsResult>> => {
+        try {
+            const result = await callExpressApi<PushMetafieldsResult>(
+                '/api/shopify/metafields/push',
+                {
+                    method: 'POST',
+                    body: JSON.stringify(data),
+                },
+            );
+            return { success: true, data: result };
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : 'Unknown error';
+            return { success: false, error: { code: 'EXTERNAL_ERROR', message } };
+        }
+    });
+
+const pushCategorySchema = z.object({
+    shopifyProductId: z.string().min(1),
+    googleCategoryId: z.number().int().positive(),
+});
+
+export interface PushCategoryResult {
+    success: boolean;
+    error?: string;
+    appliedCategoryId?: string;
+}
+
+/**
+ * Push Google product category to Shopify via taxonomy node.
+ */
+export const pushCategoryToShopify = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => pushCategorySchema.parse(input))
+    .handler(async ({ data }): Promise<MutationResult<PushCategoryResult>> => {
+        try {
+            const result = await callExpressApi<PushCategoryResult>(
+                '/api/shopify/metafields/push-category',
+                {
+                    method: 'POST',
+                    body: JSON.stringify(data),
+                },
+            );
+            return { success: true, data: result };
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : 'Unknown error';
+            return { success: false, error: { code: 'EXTERNAL_ERROR', message } };
+        }
+    });

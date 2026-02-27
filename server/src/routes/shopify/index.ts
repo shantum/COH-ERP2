@@ -9,6 +9,7 @@ import cacheRouter from './cache.js';
 import debugRouter from './debug.js';
 import inventoryRouter from './inventory.js';
 import facebookFeedRouter from './facebook-feed.js';
+import metafieldsRouter from './metafields.js';
 
 const router = Router();
 
@@ -37,5 +38,8 @@ router.use('/debug', debugRouter);
 
 // Facebook feed health: /facebook-feed-health
 router.use('/', facebookFeedRouter);
+
+// Metafield push/pull: /metafields/push, /metafields/push-category, /metafields/config
+router.use('/metafields', metafieldsRouter);
 
 export default router;
