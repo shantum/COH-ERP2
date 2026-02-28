@@ -81,7 +81,8 @@ export function GeneralTab() {
             if (!result.success) throw new Error(result.error?.message);
             return result.data;
         },
-        enabled: user?.role === 'admin',
+        enabled: user?.role === 'admin' || user?.role === 'owner'
+            || (user?.permissions?.includes('users:create') ?? false),
     });
 
     // Tier thresholds query
@@ -95,7 +96,8 @@ export function GeneralTab() {
             }
             return result.data;
         },
-        enabled: user?.role === 'admin',
+        enabled: user?.role === 'admin' || user?.role === 'owner'
+            || (user?.permissions?.includes('users:create') ?? false),
     });
 
     const updateTierMutation = useMutation({

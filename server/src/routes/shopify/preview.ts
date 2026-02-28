@@ -1,7 +1,7 @@
 // Shopify preview endpoints - fetch data without importing
 import { Router } from 'express';
 import type { Request, Response } from 'express';
-import { authenticateToken } from '../../middleware/auth.js';
+import { requireAdmin } from '../../middleware/auth.js';
 import asyncHandler from '../../middleware/asyncHandler.js';
 import { ValidationError, ExternalServiceError } from '../../utils/errors.js';
 import shopifyClient from '../../services/shopify/index.js';
@@ -32,7 +32,7 @@ async function previewResource<T>(
 }
 
 // POST /preview/orders - Preview orders without importing
-router.post('/preview/orders', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.post('/preview/orders', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
   await shopifyClient.loadFromDatabase();
   if (!shopifyClient.isConfigured()) {
     throw new ValidationError('Shopify is not configured');
@@ -61,7 +61,7 @@ router.post('/preview/orders', authenticateToken, asyncHandler(async (req: Reque
 }));
 
 // POST /preview/customers - Preview customers without importing
-router.post('/preview/customers', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.post('/preview/customers', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
   await shopifyClient.loadFromDatabase();
   if (!shopifyClient.isConfigured()) {
     throw new ValidationError('Shopify is not configured');
@@ -90,7 +90,7 @@ router.post('/preview/customers', authenticateToken, asyncHandler(async (req: Re
 }));
 
 // POST /preview/products - Preview products (more complex, supports metafields)
-router.post('/preview/products', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.post('/preview/products', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
   await shopifyClient.loadFromDatabase();
   if (!shopifyClient.isConfigured()) {
     throw new ValidationError('Shopify is not configured');
@@ -164,7 +164,7 @@ router.post('/preview/products', authenticateToken, asyncHandler(async (req: Req
 }));
 
 // GET /products/:id/metafields - Fetch metafields for a single product
-router.get('/products/:id/metafields', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.get('/products/:id/metafields', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
   await shopifyClient.loadFromDatabase();
   if (!shopifyClient.isConfigured()) {
     throw new ValidationError('Shopify is not configured');
@@ -186,7 +186,7 @@ router.get('/products/:id/metafields', authenticateToken, asyncHandler(async (re
 }));
 
 // GET /products/:id/feed-data - Fetch full feed enrichment data (collections, channels, inventory by location, variant metafields)
-router.get('/products/:id/feed-data', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.get('/products/:id/feed-data', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
   await shopifyClient.loadFromDatabase();
   if (!shopifyClient.isConfigured()) {
     throw new ValidationError('Shopify is not configured');

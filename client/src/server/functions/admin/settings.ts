@@ -83,9 +83,12 @@ export const getChannels = createServerFn({ method: 'GET' })
             { id: 'myntra', name: 'Myntra' },
         ];
 
-        const channels = setting?.value
-            ? (JSON.parse(setting.value) as Channel[])
-            : defaultChannels;
+        let channels: Channel[];
+        try {
+            channels = setting?.value ? (JSON.parse(setting.value) as Channel[]) : defaultChannels;
+        } catch {
+            channels = defaultChannels;
+        }
 
         return { success: true, data: channels };
     });
@@ -135,9 +138,12 @@ export const getTierThresholds = createServerFn({ method: 'GET' })
             where: { key: 'tier_thresholds' },
         });
 
-        const thresholds = setting?.value
-            ? (JSON.parse(setting.value) as TierThresholds)
-            : DEFAULT_TIER_THRESHOLDS;
+        let thresholds: TierThresholds;
+        try {
+            thresholds = setting?.value ? (JSON.parse(setting.value) as TierThresholds) : DEFAULT_TIER_THRESHOLDS;
+        } catch {
+            thresholds = DEFAULT_TIER_THRESHOLDS;
+        }
 
         return { success: true, data: thresholds };
     });
@@ -306,7 +312,11 @@ export const getSidebarOrder = createServerFn({ method: 'GET' })
             return { success: true, data: null };
         }
 
-        return { success: true, data: JSON.parse(setting.value) as string[] };
+        try {
+            return { success: true, data: JSON.parse(setting.value) as string[] };
+        } catch {
+            return { success: true, data: null };
+        }
     });
 
 /**

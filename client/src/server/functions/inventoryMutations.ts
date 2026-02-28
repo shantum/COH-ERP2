@@ -829,7 +829,9 @@ export const deleteTransaction = createServerFn({ method: 'POST' })
         const { transactionId, force } = data;
 
         // Admin check (stateless — no TOCTOU risk)
-        if (context.user.role !== 'admin') {
+        const isAdmin = context.user.role === 'admin' || context.user.role === 'owner'
+            || context.permissions?.includes('users:create');
+        if (!isAdmin) {
             return {
                 success: false,
                 error: { code: 'FORBIDDEN', message: 'Admin role required' },

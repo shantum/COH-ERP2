@@ -10,7 +10,7 @@
 
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
-import { authMiddleware } from '../middleware/auth';
+import { authMiddleware, adminMiddleware } from '../middleware/auth';
 import { getPrisma, type PrismaTransaction } from '@coh/shared/services/db';
 
 // ============================================
@@ -195,7 +195,9 @@ export const deleteStockCount = createServerFn({ method: 'POST' })
         if (count.status !== 'pending') {
             return { success: false as const, error: 'Can only delete pending counts' };
         }
-        if (count.countedById !== context.user.id && context.user.role !== 'admin') {
+        const isAdmin = context.user.role === 'admin' || context.user.role === 'owner'
+            || context.permissions?.includes('users:create');
+        if (count.countedById !== context.user.id && !isAdmin) {
             return { success: false as const, error: 'Can only delete your own counts' };
         }
 
@@ -209,7 +211,7 @@ export const deleteStockCount = createServerFn({ method: 'POST' })
 // ============================================
 
 export const getPendingStockCounts = createServerFn({ method: 'GET' })
-    .middleware([authMiddleware])
+    .middleware([adminMiddleware])
     .handler(async () => {
         const prisma = await getPrisma();
 
@@ -254,7 +256,7 @@ export const getPendingStockCounts = createServerFn({ method: 'GET' })
 // ============================================
 
 export const applyStockCounts = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
+    .middleware([adminMiddleware])
     .inputValidator((input: unknown) => applyStockCountsSchema.parse(input))
     .handler(async ({ data, context }) => {
         const prisma = await getPrisma();
@@ -329,7 +331,7 @@ export const applyStockCounts = createServerFn({ method: 'POST' })
 // ============================================
 
 export const discardStockCounts = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
+    .middleware([adminMiddleware])
     .inputValidator((input: unknown) => discardStockCountsSchema.parse(input))
     .handler(async ({ data }) => {
         const prisma = await getPrisma();

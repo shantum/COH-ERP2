@@ -66,7 +66,8 @@ const TypeBadgeCellRenderer = React.memo(function TypeBadgeCellRenderer(
 export default function TransactionsTab() {
     const queryClient = useQueryClient();
     const { user } = useAuth();
-    const isAdmin = user?.role === 'admin';
+    const isAdmin = user?.role === 'admin' || user?.role === 'owner'
+        || (user?.permissions?.includes('users:create') ?? false);
 
     // Filter state
     const [typeFilter, setTypeFilter] = useState<'all' | 'inward' | 'outward'>('all');

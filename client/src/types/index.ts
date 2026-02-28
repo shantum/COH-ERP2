@@ -124,6 +124,16 @@ export interface AuthUser {
 }
 
 /**
+ * Check if user has admin-equivalent access (role or permission).
+ * Use this for all client-side admin visibility checks.
+ */
+export function isAdminUser(user: AuthUser | null | undefined): boolean {
+    if (!user) return false;
+    return user.role === 'admin' || user.role === 'owner'
+        || (user.permissions?.includes('users:create') ?? false);
+}
+
+/**
  * Authentication state for router context
  */
 export interface AuthState {

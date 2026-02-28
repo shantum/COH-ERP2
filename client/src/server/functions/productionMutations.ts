@@ -215,7 +215,11 @@ async function getLockedDates(prisma: PrismaClientInstance): Promise<string[]> {
     const setting = await prisma.systemSetting.findUnique({
         where: { key: 'locked_production_dates' },
     });
-    return setting?.value ? JSON.parse(setting.value) : [];
+    try {
+        return setting?.value ? JSON.parse(setting.value) as string[] : [];
+    } catch {
+        return [];
+    }
 }
 
 /**

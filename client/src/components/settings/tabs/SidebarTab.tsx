@@ -114,7 +114,8 @@ export function SidebarTab() {
             }
             return result.data;
         },
-        enabled: user?.role === 'admin',
+        enabled: user?.role === 'admin' || user?.role === 'owner'
+            || (user?.permissions?.includes('users:create') ?? false),
     });
 
     useEffect(() => {

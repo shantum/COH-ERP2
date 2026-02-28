@@ -69,7 +69,8 @@ const tabComponents: Record<SettingsTab, React.ComponentType> = {
 export default function Settings() {
     const { user } = useAuth();
     const [activeTab, setActiveTab] = useState<SettingsTab>('general');
-    const isAdmin = user?.role === 'admin';
+    const isAdmin = user?.role === 'admin' || user?.role === 'owner'
+        || (user?.permissions?.includes('users:create') ?? false);
 
     const visibleTabs = tabs.filter(t => !t.adminOnly || isAdmin);
     const ActiveComponent = tabComponents[activeTab];
