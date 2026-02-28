@@ -25,17 +25,8 @@ export * from '@coh/shared';
 // ============================================
 
 /**
- * Validation middleware factory
- * Creates Express middleware that validates request body against a Zod schema
- *
- * @param schema - Zod schema to validate against
- * @returns Express middleware function
- *
- * @example
- * router.post('/', validate(CreateOrderSchema), (req, res) => {
- *     const { customerName, lines } = req.validatedBody;
- *     // ...
- * });
+ * @deprecated Use `typedRoute()` from middleware/asyncHandler.ts instead.
+ * typedRoute combines validation + asyncHandler and provides full type inference.
  */
 export function validate<T extends z.ZodTypeAny>(schema: T) {
     return (req: Request, res: Response, next: NextFunction): void => {

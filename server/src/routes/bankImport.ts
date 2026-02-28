@@ -12,7 +12,7 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import { requireAdmin } from '../middleware/auth.js';
-import { asyncHandler } from '../middleware/asyncHandler.js';
+import { asyncHandler, typedRoute, typedRouteWithParams } from '../middleware/asyncHandler.js';
 import logger from '../utils/logger.js';
 import {
   importHdfcStatement,
@@ -256,14 +256,8 @@ router.post('/preview', requireAdmin, upload.single('file'), asyncHandler(async 
 // POST /post — Post all pending transactions (legacy batch)
 // ============================================
 
-router.post('/post', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
-  const parsed = BankImportPostSchema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.issues[0]?.message || 'Invalid request body' });
-    return;
-  }
-
-  const { bank } = parsed.data;
+router.post('/post', requireAdmin, ...typedRoute(BankImportPostSchema, async (req, res) => {
+  const { bank } = req.validatedBody;
   log.info({ bank }, 'Post triggered');
 
   const result = await postTransactions(bank ? { bank } : undefined);
@@ -276,14 +270,8 @@ router.post('/post', requireAdmin, asyncHandler(async (req: Request, res: Respon
 // POST /confirm — Confirm a single transaction
 // ============================================
 
-router.post('/confirm', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
-  const parsed = BankImportConfirmSchema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.issues[0]?.message || 'Invalid request body' });
-    return;
-  }
-
-  const { txnId } = parsed.data;
+router.post('/confirm', requireAdmin, ...typedRoute(BankImportConfirmSchema, async (req, res) => {
+  const { txnId } = req.validatedBody;
   log.info({ txnId }, 'Confirm single transaction');
   const result = await confirmSingleTransaction(txnId);
 
@@ -299,14 +287,8 @@ router.post('/confirm', requireAdmin, asyncHandler(async (req: Request, res: Res
 // POST /confirm-batch — Confirm multiple transactions
 // ============================================
 
-router.post('/confirm-batch', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
-  const parsed = BankImportConfirmBatchSchema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.issues[0]?.message || 'Invalid request body' });
-    return;
-  }
-
-  const { txnIds } = parsed.data;
+router.post('/confirm-batch', requireAdmin, ...typedRoute(BankImportConfirmBatchSchema, async (req, res) => {
+  const { txnIds } = req.validatedBody;
   log.info({ count: txnIds.length }, 'Confirm batch');
   const result = await confirmBatch(txnIds);
   log.info({ confirmed: result.confirmed, errors: result.errors }, 'Batch confirm complete');
@@ -318,14 +300,8 @@ router.post('/confirm-batch', requireAdmin, asyncHandler(async (req: Request, re
 // POST /skip-batch — Skip multiple transactions
 // ============================================
 
-router.post('/skip-batch', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
-  const parsed = BankImportSkipBatchSchema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.issues[0]?.message || 'Invalid request body' });
-    return;
-  }
-
-  const { txnIds, reason } = parsed.data;
+router.post('/skip-batch', requireAdmin, ...typedRoute(BankImportSkipBatchSchema, async (req, res) => {
+  const { txnIds, reason } = req.validatedBody;
   log.info({ count: txnIds.length }, 'Skip batch');
   await req.prisma.bankTransaction.updateMany({
     where: { id: { in: txnIds }, status: { in: ['imported', 'categorized'] } },
@@ -339,14 +315,8 @@ router.post('/skip-batch', requireAdmin, asyncHandler(async (req: Request, res: 
 // POST /assign-party — Manually assign a party to a bank transaction
 // ============================================
 
-router.post('/assign-party', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
-  const parsed = AssignBankTxnPartySchema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.issues[0]?.message || 'Invalid request body' });
-    return;
-  }
-
-  const { txnId, partyId } = parsed.data;
+router.post('/assign-party', requireAdmin, ...typedRoute(AssignBankTxnPartySchema, async (req, res) => {
+  const { txnId, partyId } = req.validatedBody;
 
   // Fetch the party with TransactionType
   const party = await req.prisma.party.findUnique({
@@ -427,14 +397,8 @@ router.post('/assign-party', requireAdmin, asyncHandler(async (req: Request, res
 // PATCH /update — Edit bank transaction fields (party, accounts, category)
 // ============================================
 
-router.patch('/update', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
-  const parsed = BankImportUpdateSchema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.issues[0]?.message || 'Invalid request body' });
-    return;
-  }
-
-  const { txnId, partyId, debitAccountCode, creditAccountCode, category } = parsed.data;
+router.patch('/update', requireAdmin, ...typedRoute(BankImportUpdateSchema, async (req, res) => {
+  const { txnId, partyId, debitAccountCode, creditAccountCode, category } = req.validatedBody;
 
   const txn = await req.prisma.bankTransaction.findUnique({
     where: { id: txnId },
@@ -516,14 +480,8 @@ router.patch('/update', requireAdmin, asyncHandler(async (req: Request, res: Res
 // POST /skip — Mark transaction as skipped
 // ============================================
 
-router.post('/skip', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
-  const parsed = BankImportSkipSchema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.issues[0]?.message || 'Invalid request body' });
-    return;
-  }
-
-  const { txnId, reason } = parsed.data;
+router.post('/skip', requireAdmin, ...typedRoute(BankImportSkipSchema, async (req, res) => {
+  const { txnId, reason } = req.validatedBody;
 
   const updated = await req.prisma.bankTransaction.update({
     where: { id: txnId },
@@ -539,14 +497,8 @@ router.post('/skip', requireAdmin, asyncHandler(async (req: Request, res: Respon
 // POST /unskip — Restore skipped transaction
 // ============================================
 
-router.post('/unskip', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
-  const parsed = BankImportUnskipSchema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.issues[0]?.message || 'Invalid request body' });
-    return;
-  }
-
-  const { txnId } = parsed.data;
+router.post('/unskip', requireAdmin, ...typedRoute(BankImportUnskipSchema, async (req, res) => {
+  const { txnId } = req.validatedBody;
 
   const updated = await req.prisma.bankTransaction.update({
     where: { id: txnId },
@@ -562,14 +514,8 @@ router.post('/unskip', requireAdmin, asyncHandler(async (req: Request, res: Resp
 // DELETE /:id — Delete a bank transaction
 // ============================================
 
-router.delete('/:id', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
-  const parsed = BankImportDeleteParamSchema.safeParse(req.params);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.issues[0]?.message || 'Invalid request' });
-    return;
-  }
-
-  const { id } = parsed.data;
+router.delete('/:id', requireAdmin, ...typedRouteWithParams(BankImportDeleteParamSchema, null, async (req, res) => {
+  const { id } = req.params;
 
   const txn = await req.prisma.bankTransaction.findUnique({
     where: { id },

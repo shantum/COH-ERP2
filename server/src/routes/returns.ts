@@ -13,7 +13,7 @@ import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { authenticateToken } from '../middleware/auth.js';
-import { asyncHandler } from '../middleware/asyncHandler.js';
+import { asyncHandler, typedRoute } from '../middleware/asyncHandler.js';
 import ithinkLogistics from '../services/ithinkLogistics/index.js';
 import type { ProductInfo, ShipmentDimensions } from '../services/ithinkLogistics/index.js';
 import { shippingLogger } from '../utils/logger.js';
@@ -65,33 +65,14 @@ const CheckServiceabilitySchema = z.object({
  *
  * Check if a pincode supports reverse pickup
  */
-router.post('/check-serviceability', authenticateToken, asyncHandler(async (req: Request, res: Response): Promise<void> => {
-    try {
-        const parseResult = CheckServiceabilitySchema.safeParse(req.body);
-        if (!parseResult.success) {
-            res.status(400).json({
-                success: false,
-                error: 'Invalid pincode',
-                details: parseResult.error.issues,
-            });
-            return;
-        }
+router.post('/check-serviceability', authenticateToken, ...typedRoute(CheckServiceabilitySchema, async (req, res) => {
+    const { pincode } = req.validatedBody;
+    const result = await ithinkLogistics.checkReversePickupServiceability(pincode);
 
-        const { pincode } = parseResult.data;
-        const result = await ithinkLogistics.checkReversePickupServiceability(pincode);
-
-        res.json({
-            success: true,
-            data: result,
-        });
-    } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : 'Unknown error';
-        shippingLogger.error({ error: message }, 'Serviceability check failed');
-        res.status(500).json({
-            success: false,
-            error: message,
-        });
-    }
+    res.json({
+        success: true,
+        data: result,
+    });
 }));
 
 /**
@@ -103,19 +84,9 @@ router.post('/check-serviceability', authenticateToken, asyncHandler(async (req:
  * When a line has a returnBatchNumber, ALL lines in that batch with status='requested'
  * are included in the same pickup and share the AWB number.
  */
-router.post('/schedule-pickup', authenticateToken, asyncHandler(async (req: Request, res: Response): Promise<void> => {
+router.post('/schedule-pickup', authenticateToken, ...typedRoute(SchedulePickupSchema, async (req, res) => {
     try {
-        const parseResult = SchedulePickupSchema.safeParse(req.body);
-        if (!parseResult.success) {
-            res.status(400).json({
-                success: false,
-                error: 'Invalid request',
-                details: parseResult.error.issues,
-            });
-            return;
-        }
-
-        const { orderLineId } = parseResult.data;
+        const { orderLineId } = req.validatedBody;
         const prisma = req.prisma;
 
         // Fetch the trigger line with order and customer data
