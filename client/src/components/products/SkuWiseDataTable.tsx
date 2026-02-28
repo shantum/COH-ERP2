@@ -1,12 +1,12 @@
 /**
- * SkuWiseDataTable - Variation-grouped product catalog
+ * SkuWiseDataTable - Variation-grouped product catalog (Grid Card layout)
  *
- * Each row is a variation (product + colour).
- * Sizes shown as inline badges with per-size stock.
- * Product boundaries marked with heavier borders.
+ * Each card is a variation (product + colour).
+ * Responsive grid: 1-col mobile, 2-col tablet, 3-col desktop.
+ * Product boundaries marked with full-width separator headers.
  */
 
-import { useState, useMemo, useEffect, memo, useCallback } from 'react';
+import { useState, useMemo, useEffect, memo, useCallback, Fragment } from 'react';
 import { Package, Layers } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { ProductTreeNode, ShopifyStatus } from './types';
@@ -26,22 +26,22 @@ const BATCH_SIZE = 200;
 import { formatCurrencyOrDash as formatCurrency } from '../../utils/formatting';
 
 /**
- * Shopify status dot
+ * Shopify status pill badge
  */
-const ShopifyDot = memo(function ShopifyDot({ status }: { status?: ShopifyStatus }) {
+const ShopifyStatusPill = memo(function ShopifyStatusPill({ status }: { status?: ShopifyStatus }) {
     if (!status || status === 'not_linked' || status === 'not_cached' || status === 'unknown') {
-        return <span className="text-gray-300">-</span>;
+        return <span className="text-gray-300 text-xs">&mdash;</span>;
     }
     const config =
         status === 'active'
-            ? { dot: 'bg-green-500', text: 'text-green-700', label: 'Live' }
+            ? { dot: 'bg-emerald-500', bg: 'bg-emerald-50 text-emerald-700 border-emerald-200', label: 'Live' }
             : status === 'draft'
-            ? { dot: 'bg-amber-400', text: 'text-amber-600', label: 'Draft' }
-            : { dot: 'bg-gray-400', text: 'text-gray-500', label: 'Arch' };
+            ? { dot: 'bg-amber-500', bg: 'bg-amber-50 text-amber-700 border-amber-200', label: 'Draft' }
+            : { dot: 'bg-gray-400', bg: 'bg-gray-100 text-gray-500 border-gray-200', label: 'Arch' };
     return (
-        <span className={`inline-flex items-center gap-1 ${config.text}`}>
-            <span className={`w-2 h-2 rounded-full ${config.dot}`} />
-            <span>{config.label}</span>
+        <span className={`inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full border ${config.bg}`}>
+            <span className={`w-1.5 h-1.5 rounded-full ${config.dot}`} />
+            {config.label}
         </span>
     );
 });
@@ -93,7 +93,7 @@ export function SkuWiseDataTable({
         setVisibleCount(BATCH_SIZE);
     }, [searchQuery, filteredData]);
 
-    const handleRowClick = useCallback(
+    const handleCardClick = useCallback(
         (row: VariationRow) => {
             onEditProduct?.(row.variationNode);
         },
@@ -103,7 +103,7 @@ export function SkuWiseDataTable({
     return (
         <div className="flex flex-col h-full">
             {/* Summary Stats */}
-            <div className="flex items-center gap-3 px-1 mb-2 flex-shrink-0 flex-wrap">
+            <div className="flex items-center gap-3 px-1 mb-3 flex-shrink-0 flex-wrap">
                 <div className="flex items-center gap-1.5 text-xs">
                     <Package size={13} className="text-indigo-400" />
                     <span className="text-gray-600">{summary.products} Products</span>
@@ -122,57 +122,41 @@ export function SkuWiseDataTable({
                 </div>
             </div>
 
-            {/* Table */}
-            <div className="border rounded-md overflow-hidden flex-1 min-h-0 flex flex-col">
-                <div className="overflow-auto flex-1">
-                    <table className="w-full text-[11px] border-collapse table-fixed">
-                        <colgroup>
-                            <col style={{ width: 64 }} />   {/* Image */}
-                            <col />                         {/* Product - Color */}
-                            <col style={{ width: 90 }} />   {/* Style */}
-                            <col style={{ width: 160 }} />  {/* Sizes */}
-                            <col style={{ width: 50 }} />   {/* Stock */}
-                            <col style={{ width: 68 }} />   {/* MRP */}
-                            <col style={{ width: 55 }} />   {/* Status */}
-                            <col style={{ width: 160 }} />  {/* Fabric */}
-                        </colgroup>
-                        <thead className="sticky top-0 z-10">
-                            <tr className="bg-gray-50 border-b border-gray-200">
-                                <th className="px-1 py-1.5" />
-                                <th className="px-2 py-1.5 text-[10px] font-medium text-gray-500 uppercase tracking-wide text-left">Product - Colour</th>
-                                <th className="px-2 py-1.5 text-[10px] font-medium text-gray-500 uppercase tracking-wide text-left">Style</th>
-                                <th className="px-2 py-1.5 text-[10px] font-medium text-gray-500 uppercase tracking-wide text-left">Sizes</th>
-                                <th className="px-2 py-1.5 text-[10px] font-medium text-gray-500 uppercase tracking-wide text-right">Stock</th>
-                                <th className="px-2 py-1.5 text-[10px] font-medium text-gray-500 uppercase tracking-wide text-right">MRP</th>
-                                <th className="px-2 py-1.5 text-[10px] font-medium text-gray-500 uppercase tracking-wide text-center">Shpfy</th>
-                                <th className="px-2 py-1.5 text-[10px] font-medium text-gray-500 uppercase tracking-wide text-left">Fabric</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {visibleRows.length === 0 ? (
-                                <tr>
-                                    <td colSpan={8} className="h-24 text-center text-muted-foreground">
-                                        No variations found.
-                                    </td>
-                                </tr>
-                            ) : (
-                                visibleRows.map((row) => (
-                                    <VariationRowComponent
-                                        key={row.id}
-                                        row={row}
-                                        onClick={handleRowClick}
-                                    />
-                                ))
-                            )}
-                        </tbody>
-                    </table>
-                </div>
+            {/* Card Grid */}
+            <div className="flex-1 min-h-0 overflow-auto">
+                {visibleRows.length === 0 ? (
+                    <div className="flex items-center justify-center h-24 text-sm text-gray-400">
+                        No variations found.
+                    </div>
+                ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 pb-2">
+                        {visibleRows.map((row) => (
+                            <Fragment key={row.id}>
+                                {row.isFirstOfProduct && row.productVariationCount > 1 && (
+                                    <div className="col-span-full flex items-center gap-2 pt-2 pb-1 first:pt-0">
+                                        <span className="text-xs font-semibold text-gray-700 tracking-wide">
+                                            {row.productName}
+                                        </span>
+                                        <span className="text-xs text-gray-400">
+                                            {row.productVariationCount} colours
+                                        </span>
+                                        <div className="flex-1 h-px bg-gray-200" />
+                                    </div>
+                                )}
+                                <VariationCard
+                                    row={row}
+                                    onClick={handleCardClick}
+                                />
+                            </Fragment>
+                        ))}
+                    </div>
+                )}
             </div>
 
             {/* Load More */}
             {filteredRows.length > 0 && (
-                <div className="flex items-center justify-between px-3 py-2 border rounded bg-gray-50/50 mt-2 flex-shrink-0">
-                    <div className="text-xs text-muted-foreground">
+                <div className="flex items-center justify-between px-3 py-2 border rounded-lg bg-gray-50/50 mt-2 flex-shrink-0">
+                    <div className="text-xs text-gray-500">
                         Showing {Math.min(visibleCount, filteredRows.length)} of {filteredRows.length} variations
                     </div>
                     {hasMore && (
@@ -192,115 +176,105 @@ export function SkuWiseDataTable({
 }
 
 /**
- * Single variation row with inline size badges
+ * Single variation card
  */
-interface VariationRowProps {
+interface VariationCardProps {
     row: VariationRow;
     onClick: (row: VariationRow) => void;
 }
 
-const VariationRowComponent = memo(function VariationRowComponent({ row, onClick }: VariationRowProps) {
-    const borderClass = row.isFirstOfProduct
-        ? 'border-t-2 border-t-gray-400'
-        : 'border-t border-t-gray-200';
-
+const VariationCard = memo(function VariationCard({ row, onClick }: VariationCardProps) {
     return (
-        <tr
-            className={`cursor-pointer h-9 hover:bg-blue-50/40 ${borderClass}`}
+        <div
+            className="bg-white border border-gray-200 rounded-lg p-4 flex flex-col gap-3 cursor-pointer hover:shadow-md hover:border-gray-300 transition-all"
             onClick={() => onClick(row)}
         >
-            {/* Image */}
-            <td className="px-1 py-0.5 align-middle">
+            {/* Top: Image + Name */}
+            <div className="flex items-start gap-3">
                 {row.imageUrl ? (
                     <img
                         src={row.imageUrl}
                         alt=""
-                        className="w-14 h-14 rounded object-cover"
+                        className="w-14 h-14 rounded-lg object-cover flex-shrink-0 bg-gray-100"
                         loading="lazy"
                     />
-                ) : (
-                    <span className="block w-14 h-14 rounded bg-gray-100" />
-                )}
-            </td>
-
-            {/* Product - Colour */}
-            <td className="px-2 py-0">
-                <div className="flex items-center gap-1.5 min-w-0">
-                    {row.colorHex && (
-                        <span
-                            className="w-3 h-3 rounded-full border border-gray-200 flex-shrink-0"
+                ) : row.colorHex ? (
+                    <div
+                        className="w-14 h-14 rounded-lg flex items-center justify-center flex-shrink-0 border border-gray-200/50"
+                        style={{ background: `${row.colorHex}20` }}
+                    >
+                        <div
+                            className="w-8 h-8 rounded-full border border-gray-200/30"
                             style={{ backgroundColor: row.colorHex }}
                         />
-                    )}
-                    <div className="min-w-0">
-                        <div className="truncate font-medium text-gray-900 text-xs">
-                            {row.displayName}
-                        </div>
-                        {row.isFirstOfProduct && row.productVariationCount > 1 && (
-                            <div className="text-[10px] text-gray-400">
-                                {row.productVariationCount} colours
-                            </div>
+                    </div>
+                ) : (
+                    <div className="w-14 h-14 rounded-lg bg-gray-100 flex-shrink-0" />
+                )}
+                <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium text-gray-900 truncate">
+                        {row.productName}
+                    </div>
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                        {row.colorHex && (
+                            <span
+                                className="w-3.5 h-3.5 rounded-full border border-gray-200/50 flex-shrink-0"
+                                style={{ backgroundColor: row.colorHex }}
+                            />
                         )}
+                        <span className="text-xs text-gray-500">{row.colorName}</span>
+                    </div>
+                    {row.styleCode && (
+                        <code className="font-mono text-[10px] text-gray-400 mt-1 block">
+                            {row.styleCode}
+                        </code>
+                    )}
+                </div>
+            </div>
+
+            {/* Sizes */}
+            <div className="flex flex-wrap gap-1">
+                {row.sizes.map(s => (
+                    <span
+                        key={s.skuId}
+                        className={`inline-flex items-center justify-center rounded px-1.5 py-0.5 text-[11px] font-medium leading-none ${
+                            s.stock > 0
+                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                : 'bg-gray-50 text-gray-400 border border-gray-200'
+                        }`}
+                        title={`${s.skuCode}: ${s.stock} in stock`}
+                    >
+                        {s.size}
+                    </span>
+                ))}
+            </div>
+
+            {/* Bottom meta */}
+            <div className="flex items-center justify-between pt-2 border-t border-gray-100">
+                <div className="flex items-center gap-4 text-xs">
+                    <div className="flex flex-col">
+                        <span className="text-gray-400">Stock</span>
+                        <span className={row.totalStock > 0 ? 'font-semibold text-gray-900' : 'text-gray-300'}>
+                            {row.totalStock}
+                        </span>
+                    </div>
+                    <div className="flex flex-col">
+                        <span className="text-gray-400">MRP</span>
+                        <span className="font-semibold text-gray-900">{formatCurrency(row.mrp)}</span>
                     </div>
                 </div>
-            </td>
+                <ShopifyStatusPill status={row.shopifyStatus} />
+            </div>
 
-            {/* Style Code */}
-            <td className="px-2 py-0 truncate font-mono text-gray-500 text-[10px]">
-                {row.styleCode || '-'}
-            </td>
-
-            {/* Sizes - plain badges */}
-            <td className="px-2 py-0">
-                <div className="flex flex-wrap gap-0.5">
-                    {row.sizes.map(s => (
-                        <span
-                            key={s.skuId}
-                            className={`inline-flex items-center px-1.5 py-0 rounded text-[10px] leading-4 font-medium ${
-                                s.stock > 0
-                                    ? 'bg-green-50 text-green-700 border border-green-200'
-                                    : 'bg-gray-50 text-gray-400 border border-gray-200'
-                            }`}
-                            title={`${s.skuCode}: ${s.stock} in stock`}
-                        >
-                            {s.size}
-                        </span>
-                    ))}
+            {/* Fabric info */}
+            {row.fabricName && (
+                <div className="text-[11px] text-gray-400">
+                    {row.fabricName}
+                    {row.fabricColourName && (
+                        <span> | {row.fabricColourName}</span>
+                    )}
                 </div>
-            </td>
-
-            {/* Total Stock */}
-            <td className="px-2 py-0 text-right tabular-nums">
-                {row.totalStock > 0 ? (
-                    <span className="font-semibold text-gray-800">{row.totalStock}</span>
-                ) : (
-                    <span className="text-gray-300">0</span>
-                )}
-            </td>
-
-            {/* MRP */}
-            <td className="px-2 py-0 text-right tabular-nums">
-                {formatCurrency(row.mrp)}
-            </td>
-
-            {/* Shopify Status dot */}
-            <td className="px-1 py-0 text-center">
-                <ShopifyDot status={row.shopifyStatus} />
-            </td>
-
-            {/* Fabric */}
-            <td className="px-2 py-0 truncate text-gray-500">
-                {row.fabricName ? (
-                    <>
-                        {row.fabricName}
-                        {row.fabricColourName && (
-                            <span className="text-gray-400"> | {row.fabricColourName}</span>
-                        )}
-                    </>
-                ) : (
-                    <span className="text-gray-300">-</span>
-                )}
-            </td>
-        </tr>
+            )}
+        </div>
     );
 });
