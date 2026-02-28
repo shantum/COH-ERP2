@@ -9,6 +9,7 @@ import { createServerFn } from '@tanstack/react-start';
 import { authMiddleware } from '../../middleware/auth';
 import { getPrisma } from '@coh/shared/services/db';
 import { GENDERS, GENDER_LABELS } from '@coh/shared/config/product';
+import { serverLog } from '../serverLog';
 
 /**
  * Catalog filters response for dropdowns
@@ -113,7 +114,7 @@ export const getCatalogFilters = createServerFn({ method: 'GET' })
                 genders,
             };
         } catch (error: unknown) {
-            console.error('[Server Function] Error in getCatalogFilters:', error);
+            serverLog.error({ domain: 'products', fn: 'getCatalogFilters' }, 'Failed to get catalog filters', error);
             throw error;
         }
     });

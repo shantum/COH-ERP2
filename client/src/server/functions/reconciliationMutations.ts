@@ -17,6 +17,7 @@
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth';
+import { serverLog } from './serverLog';
 import { getPrisma, type PrismaTransaction } from '@coh/shared/services/db';
 
 // ============================================
@@ -185,7 +186,7 @@ async function invalidateAllCache(): Promise<void> {
         const { inventoryBalanceCache } = await import('@coh/shared/services/inventory');
         inventoryBalanceCache.invalidateAll();
     } catch {
-        console.warn('[reconciliationMutations] Cache invalidation skipped (server module not available)');
+        serverLog.warn({ domain: 'inventory', fn: 'reconciliationCacheInvalidation' }, 'Cache invalidation skipped (server module not available)');
     }
 }
 

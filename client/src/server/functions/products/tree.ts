@@ -13,6 +13,7 @@ import { z } from 'zod';
 import { authMiddleware } from '../../middleware/auth';
 import { getPrisma } from '@coh/shared/services/db';
 import type { SkuData, VariationData, ProductData } from './types';
+import { serverLog } from '../serverLog';
 
 // Input validation schema
 const productsTreeInputSchema = z.object({
@@ -503,7 +504,7 @@ export const getProductsTree = createServerFn({ method: 'GET' })
                 },
             };
         } catch (error: unknown) {
-            console.error('[Server Function] Error in getProductsTree:', error);
+            serverLog.error({ domain: 'products', fn: 'getProductsTree' }, 'Failed to get products tree', error);
             throw error;
         }
     });

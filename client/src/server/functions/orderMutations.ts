@@ -21,6 +21,7 @@ import {
 } from '@coh/shared/domain';
 import { getInternalApiBaseUrl } from '../utils';
 import { notifySSE } from '@coh/shared/services/sseBroadcast';
+import { serverLog } from './serverLog';
 
 // Re-export line and status mutations for backward compatibility
 export { updateLine, addLine, updateLineNotes } from './orderLineMutations';
@@ -561,7 +562,7 @@ export const createOrder = createServerFn({ method: 'POST' })
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ orderId: order.id }),
         }).catch((err: unknown) => {
-            console.error('[Server Function] Sheet push failed:', err instanceof Error ? err.message : String(err));
+            serverLog.warn({ domain: 'orders', fn: 'createOrder' }, 'Sheet push failed (non-critical)', { error: err instanceof Error ? err.message : String(err) });
         });
 
         return {

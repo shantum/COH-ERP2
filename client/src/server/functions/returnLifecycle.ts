@@ -9,6 +9,7 @@ import { createServerFn } from '@tanstack/react-start';
 import { getCookie } from '@tanstack/react-start/server';
 import { z } from 'zod';
 import { authMiddleware, type AuthUser } from '../middleware/auth';
+import { serverLog } from './serverLog';
 import { getPrisma, type PrismaTransaction } from '@coh/shared/services/db';
 import { getInternalApiBaseUrl } from '../utils';
 import type { PrismaClient } from '@prisma/client';
@@ -76,7 +77,9 @@ function pushToReturnPrime(orderLineId: string, erpStatus: string): void {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ orderLineId, erpStatus }),
-    }).catch(() => {});
+    }).catch((err: unknown) => {
+        serverLog.warn({ domain: 'returns', fn: 'pushToReturnPrime', orderLineId, erpStatus }, 'Fire-and-forget push failed', { error: err instanceof Error ? err.message : String(err) });
+    });
 }
 
 /**
@@ -281,10 +284,10 @@ export const initiateLineReturn = createServerFn({ method: 'POST' })
                 if (exchangeResult.success && exchangeResult.data) {
                     exchangeOrderNumber = exchangeResult.data.exchangeOrderNumber;
                 } else {
-                    console.warn('[initiateLineReturn] Exchange order creation failed:', exchangeResult);
+                    serverLog.warn({ domain: 'returns', fn: 'initiateLineReturn' }, 'Exchange order creation returned failure', { result: exchangeResult });
                 }
             } catch (exchangeError: unknown) {
-                console.error('[initiateLineReturn] Exchange order error:', exchangeError);
+                serverLog.error({ domain: 'returns', fn: 'initiateLineReturn' }, 'Exchange order creation error (non-fatal)', exchangeError);
                 // Non-fatal: return batch is created, exchange can be retried manually
             }
         }
@@ -320,7 +323,7 @@ export const initiateLineReturn = createServerFn({ method: 'POST' })
             message
         );
         } catch (error: unknown) {
-            console.error('[initiateLineReturn] Error:', error);
+            serverLog.error({ domain: 'returns', fn: 'initiateLineReturn' }, 'Failed to initiate line return', error);
             const message = error instanceof Error ? error.message : 'Unknown error';
             return returnError(RETURN_ERROR_CODES.UNKNOWN, message);
         }

@@ -13,6 +13,7 @@ import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth';
 import { getPrisma } from '@coh/shared/services/db';
 import { deriveTaxonomy, productAttributesSchema } from '@coh/shared/config/productTaxonomy';
+import { serverLog } from './serverLog';
 
 // ============================================
 // EXPORTED RESPONSE TYPES
@@ -160,7 +161,7 @@ export const createProduct = createServerFn({ method: 'POST' })
 
                 return { success: true, data: product };
         } catch (error: unknown) {
-            console.error('Create product error:', error);
+            serverLog.error({ domain: 'products', fn: 'createProduct' }, 'Failed to create product', error);
             const message = error instanceof Error ? error.message : 'Failed to create product';
             return { success: false, error: { message } };
         }
@@ -206,7 +207,7 @@ export const updateProduct = createServerFn({ method: 'POST' })
 
                 return { success: true, data: product };
         } catch (error: unknown) {
-            console.error('Update product error:', error);
+            serverLog.error({ domain: 'products', fn: 'updateProduct' }, 'Failed to update product', error);
             const message = error instanceof Error ? error.message : 'Failed to update product';
             return { success: false, error: { message } };
         }
@@ -230,7 +231,7 @@ export const deleteProduct = createServerFn({ method: 'POST' })
 
                 return { success: true, data: { message: 'Product deactivated' } };
         } catch (error: unknown) {
-            console.error('Delete product error:', error);
+            serverLog.error({ domain: 'products', fn: 'deleteProduct' }, 'Failed to delete product', error);
             const message = error instanceof Error ? error.message : 'Failed to delete product';
             return { success: false, error: { message } };
         }
@@ -269,7 +270,7 @@ export const createVariation = createServerFn({ method: 'POST' })
 
                 return { success: true, data: variation };
         } catch (error: unknown) {
-            console.error('Create variation error:', error);
+            serverLog.error({ domain: 'products', fn: 'createVariation' }, 'Failed to create variation', error);
             const message = error instanceof Error ? error.message : 'Failed to create variation';
             return { success: false, error: { message } };
         }
@@ -312,7 +313,7 @@ export const updateVariation = createServerFn({ method: 'POST' })
 
                 return { success: true, data: variation };
         } catch (error: unknown) {
-            console.error('Update variation error:', error);
+            serverLog.error({ domain: 'products', fn: 'updateVariation' }, 'Failed to update variation', error);
             const message = error instanceof Error ? error.message : 'Failed to update variation';
             return { success: false, error: { message } };
         }
@@ -355,7 +356,7 @@ export const createSku = createServerFn({ method: 'POST' })
 
                 return { success: true, data: sku };
         } catch (error: unknown) {
-            console.error('Create SKU error:', error);
+            serverLog.error({ domain: 'products', fn: 'createSku' }, 'Failed to create SKU', error);
             const message = error instanceof Error ? error.message : 'Failed to create SKU';
             return { success: false, error: { message } };
         }
@@ -394,7 +395,7 @@ export const updateSku = createServerFn({ method: 'POST' })
 
                 return { success: true, data: sku };
         } catch (error: unknown) {
-            console.error('Update SKU error:', error);
+            serverLog.error({ domain: 'products', fn: 'updateSku' }, 'Failed to update SKU', error);
             const message = error instanceof Error ? error.message : 'Failed to update SKU';
             return { success: false, error: { message } };
         }
@@ -428,7 +429,7 @@ export const updateStyleCode = createServerFn({ method: 'POST' })
 
                 return { success: true as const, data: { id: product.id, styleCode: product.styleCode } };
         } catch (error: unknown) {
-            console.error('Update style code error:', error);
+            serverLog.error({ domain: 'products', fn: 'updateStyleCode' }, 'Failed to update style code', error);
             const message = error instanceof Error ? error.message : 'Failed to update style code';
             return { success: false as const, error: { message } };
         }
@@ -536,7 +537,7 @@ export const importStyleCodes = createServerFn({ method: 'POST' })
                     await prisma.$transaction(updateOps);
                     updated = updateOps.length;
                 } catch (err) {
-                    console.error('Batch style code update failed, falling back to individual:', err);
+                    serverLog.warn({ domain: 'products', fn: 'importStyleCodes' }, 'Batch update failed, falling back to individual', { error: err instanceof Error ? err.message : String(err) });
                     // Fallback: try individually to identify which ones fail
                     for (const [productId, styleCode] of productUpdates) {
                         try {
@@ -546,7 +547,7 @@ export const importStyleCodes = createServerFn({ method: 'POST' })
                             });
                             updated++;
                         } catch (individualErr) {
-                            console.error(`Failed to update product ${productId}:`, individualErr);
+                            serverLog.error({ domain: 'products', fn: 'importStyleCodes', productId }, 'Individual style code update failed', individualErr);
                             errors++;
                         }
                     }
@@ -560,7 +561,7 @@ export const importStyleCodes = createServerFn({ method: 'POST' })
                     errors,
                 };
         } catch (error: unknown) {
-            console.error('Import style codes error:', error);
+            serverLog.error({ domain: 'products', fn: 'importStyleCodes' }, 'Failed to import style codes', error);
             const message = error instanceof Error ? error.message : 'Failed to import style codes';
             return { success: false as const, error: { message }, updated: 0, notFound: 0, duplicates: 0, errors: 0 };
         }
@@ -701,7 +702,7 @@ export const createProductDraft = createServerFn({ method: 'POST' })
                         });
                     } catch (err) {
                         // Non-fatal: product was created, fabric linking is optional
-                        console.warn(`Failed to link fabric colour ${link.fabricColourId} to variation ${link.variationId}:`, err);
+                        serverLog.warn({ domain: 'products', fn: 'createProductDraft', fabricColourId: link.fabricColourId, variationId: link.variationId }, 'Failed to link fabric colour to variation', { error: err instanceof Error ? err.message : String(err) });
                     }
                 }
             }
@@ -717,7 +718,7 @@ export const createProductDraft = createServerFn({ method: 'POST' })
                 },
             };
         } catch (error: unknown) {
-            console.error('Create product draft error:', error);
+            serverLog.error({ domain: 'products', fn: 'createProductDraft' }, 'Failed to create product draft', error);
             const message = error instanceof Error ? error.message : 'Failed to create product draft';
             return { success: false, error: { message } };
         }

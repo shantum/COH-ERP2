@@ -14,6 +14,7 @@ import { createServerFn } from '@tanstack/react-start';
 import { getCookie } from '@tanstack/react-start/server';
 import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth';
+import { serverLog } from './serverLog';
 import type { Prisma } from '@prisma/client';
 import { getPrisma } from '@coh/shared/services/db';
 import type {
@@ -285,8 +286,7 @@ export const getReturnPrimeDashboard = createServerFn({ method: 'POST' })
         try {
             return await fetchDashboardData(filters);
         } catch (error: unknown) {
-            const message = error instanceof Error ? error.message : 'Unknown error';
-            console.error('[Server Function] Error in getReturnPrimeDashboard:', message);
+            serverLog.error({ domain: 'returns', fn: 'getReturnPrimeDashboard' }, 'Failed to get Return Prime dashboard', error);
             throw error;
         }
     });
@@ -315,8 +315,7 @@ export const getReturnPrimeRequest = createServerFn({ method: 'POST' })
 
             return transformLocalToApiFormat(local, enrichment ?? undefined);
         } catch (error: unknown) {
-            const message = error instanceof Error ? error.message : 'Unknown error';
-            console.error('[Server Function] Error in getReturnPrimeRequest:', message);
+            serverLog.error({ domain: 'returns', fn: 'getReturnPrimeRequest' }, 'Failed to get Return Prime request', error);
             throw error;
         }
     });
@@ -391,8 +390,7 @@ export const getReturnPrimeAnalytics = createServerFn({ method: 'POST' })
                 dailyTrend: dailyTrendArray,
             };
         } catch (error: unknown) {
-            const message = error instanceof Error ? error.message : 'Unknown error';
-            console.error('[Server Function] Error in getReturnPrimeAnalytics:', message);
+            serverLog.error({ domain: 'returns', fn: 'getReturnPrimeAnalytics' }, 'Failed to get Return Prime analytics', error);
             throw error;
         }
     });
@@ -429,8 +427,7 @@ export const getReturnPrimeSyncStatus = createServerFn({ method: 'POST' })
             newestRecord: newest?.rpCreatedAt?.toISOString() || null,
         };
     } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : 'Unknown error';
-        console.error('[Server Function] Error in getReturnPrimeSyncStatus:', message);
+        serverLog.error({ domain: 'returns', fn: 'getReturnPrimeSyncStatus' }, 'Failed to get sync status', error);
         throw error;
     }
 });
@@ -626,8 +623,7 @@ export const autoCompleteReceivedReturns = createServerFn({ method: 'POST' })
                 dryRun,
             };
         } catch (error: unknown) {
-            const message = error instanceof Error ? error.message : 'Unknown error';
-            console.error('[autoCompleteReceivedReturns] Error:', message);
+            serverLog.error({ domain: 'returns', fn: 'autoCompleteReceivedReturns' }, 'Failed to auto-complete returns', error);
             throw error;
         }
     });

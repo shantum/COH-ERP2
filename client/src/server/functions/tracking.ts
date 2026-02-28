@@ -12,6 +12,7 @@ import { getCookie } from '@tanstack/react-start/server';
 import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth';
 import { getInternalApiBaseUrl } from '../utils';
+import { serverLog } from './serverLog';
 
 // ============================================
 // INPUT SCHEMAS
@@ -136,7 +137,7 @@ export const getShippingRates = createServerFn({ method: 'POST' })
                 toPincode: data.toPincode,
             };
         } catch (error: unknown) {
-            console.error('[Server Function] Error in getShippingRates:', error);
+            serverLog.error({ domain: 'shipping', fn: 'getShippingRates' }, 'Failed to get shipping rates', error);
             throw error;
         }
     });
@@ -178,7 +179,7 @@ export const createShipment = createServerFn({ method: 'POST' })
                 labelUrl: result.labelUrl,
             };
         } catch (error: unknown) {
-            console.error('[Server Function] Error in createShipment:', error);
+            serverLog.error({ domain: 'shipping', fn: 'createShipment' }, 'Failed to create shipment', error);
             throw error;
         }
     });
@@ -213,7 +214,7 @@ export const cancelShipment = createServerFn({ method: 'POST' })
                 message: result.message || 'Shipment cancelled successfully',
             };
         } catch (error: unknown) {
-            console.error('[Server Function] Error in cancelShipment:', error);
+            serverLog.error({ domain: 'shipping', fn: 'cancelShipment' }, 'Failed to cancel shipment', error);
             throw error;
         }
     });
@@ -246,7 +247,7 @@ export const getShippingLabel = createServerFn({ method: 'POST' })
                 awbNumber: result.awbNumber || data.awbNumber || '',
             };
         } catch (error: unknown) {
-            console.error('[Server Function] Error in getShippingLabel:', error);
+            serverLog.error({ domain: 'shipping', fn: 'getShippingLabel' }, 'Failed to get shipping label', error);
             throw error;
         }
     });
@@ -353,7 +354,7 @@ export const getAwbTracking = createServerFn({ method: 'GET' })
             // Return the response as-is, the API already returns the correct shape
             return await response.json();
         } catch (error: unknown) {
-            console.error('[Server Function] Error in getAwbTracking:', error);
+            serverLog.error({ domain: 'shipping', fn: 'getAwbTracking' }, 'Failed to get AWB tracking', error);
             throw error;
         }
     });
@@ -396,7 +397,7 @@ export const getBatchAwbTracking = createServerFn({ method: 'POST' })
 
             return await response.json();
         } catch (error: unknown) {
-            console.error('[Server Function] Error in getBatchAwbTracking:', error);
+            serverLog.error({ domain: 'shipping', fn: 'getBatchAwbTracking' }, 'Failed to get batch AWB tracking', error);
             throw error;
         }
     });
@@ -511,7 +512,7 @@ export const trackShipment = createServerFn({ method: 'POST' })
                 rawApiResponse: result.rawApiResponse,
             };
         } catch (error: unknown) {
-            console.error('[Server Function] Error in trackShipment:', error);
+            serverLog.error({ domain: 'shipping', fn: 'trackShipment' }, 'Failed to track shipment', error);
             const message = error instanceof Error ? error.message : 'Unknown error';
             return {
                 success: false,

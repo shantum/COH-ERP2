@@ -11,6 +11,7 @@
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth';
+import { serverLog } from './serverLog';
 
 // ============================================
 // INPUT SCHEMAS
@@ -53,7 +54,7 @@ export const getOrderContextFn = createServerFn({ method: 'GET' })
       const { getOrderContext } = await import('@coh/shared/services/business');
       return await getOrderContext(data.orderId);
     } catch (error: unknown) {
-      console.error('[Business] Error in getOrderContextFn:', error);
+      serverLog.error({ domain: 'business', fn: 'getOrderContext' }, 'Failed to get order context', error);
       throw error;
     }
   });
@@ -69,7 +70,7 @@ export const getProductContextFn = createServerFn({ method: 'GET' })
       const { getProductContext } = await import('@coh/shared/services/business');
       return await getProductContext(data.productId);
     } catch (error: unknown) {
-      console.error('[Business] Error in getProductContextFn:', error);
+      serverLog.error({ domain: 'business', fn: 'getProductContext' }, 'Failed to get product context', error);
       throw error;
     }
   });
@@ -85,7 +86,7 @@ export const getCustomerContextFn = createServerFn({ method: 'GET' })
       const { getCustomerContext } = await import('@coh/shared/services/business');
       return await getCustomerContext(data.customerId);
     } catch (error: unknown) {
-      console.error('[Business] Error in getCustomerContextFn:', error);
+      serverLog.error({ domain: 'business', fn: 'getCustomerContext' }, 'Failed to get customer context', error);
       throw error;
     }
   });
@@ -103,7 +104,7 @@ export const getBusinessPulseFn = createServerFn({ method: 'GET' })
       const { getBusinessPulse } = await import('@coh/shared/services/business');
       return await getBusinessPulse();
     } catch (error: unknown) {
-      console.error('[Business] Error in getBusinessPulseFn:', error);
+      serverLog.error({ domain: 'business', fn: 'getBusinessPulse' }, 'Failed to get business pulse', error);
       throw error;
     }
   });
@@ -119,7 +120,7 @@ export const getRecentEventsFn = createServerFn({ method: 'GET' })
       const { getRecentEvents } = await import('@coh/shared/services/eventLog');
       return await getRecentEvents(data.limit ?? 50, data.domain);
     } catch (error: unknown) {
-      console.error('[Business] Error in getRecentEventsFn:', error);
+      serverLog.error({ domain: 'business', fn: 'getRecentEvents' }, 'Failed to get recent events', error);
       throw error;
     }
   });
@@ -135,7 +136,7 @@ export const getEntityTimelineFn = createServerFn({ method: 'GET' })
       const { getEntityTimeline } = await import('@coh/shared/services/eventLog');
       return await getEntityTimeline(data.entityType, data.entityId);
     } catch (error: unknown) {
-      console.error('[Business] Error in getEntityTimelineFn:', error);
+      serverLog.error({ domain: 'business', fn: 'getEntityTimeline' }, 'Failed to get entity timeline', error);
       throw error;
     }
   });

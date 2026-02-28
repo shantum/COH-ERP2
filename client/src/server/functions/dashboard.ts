@@ -13,6 +13,7 @@ import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
 import { getISTMidnightAsUTC, getISTMonthStartAsUTC, getISTDayOfMonth, getISTDaysInMonth } from '@coh/shared';
 import { authMiddleware } from '../middleware/auth';
+import { serverLog } from './serverLog';
 
 // ============================================
 // RESPONSE TYPES
@@ -273,7 +274,7 @@ export const getOrdersAnalytics = createServerFn({ method: 'GET' })
 
             return result;
         } catch (error: unknown) {
-            console.error('[Server Function] Error in getOrdersAnalytics:', error);
+            serverLog.error({ domain: 'dashboard', fn: 'getDashboardAnalytics' }, 'Failed to get dashboard analytics', error);
             throw error;
         }
     });
@@ -346,7 +347,7 @@ export const getTopProductsForDashboard = createServerFn({ method: 'GET' })
             cache.set(cacheKey, result);
             return result;
         } catch (error: unknown) {
-            console.error('[Server Function] Error in getTopProductsForDashboard:', error);
+            serverLog.error({ domain: 'dashboard', fn: 'getTopProducts' }, 'Failed to get top products', error);
             throw error;
         }
     });
@@ -427,7 +428,7 @@ export const getTopCustomersForDashboard = createServerFn({ method: 'GET' })
             cache.set(cacheKey, result);
             return result;
         } catch (error: unknown) {
-            console.error('[Server Function] Error in getTopCustomersForDashboard:', error);
+            serverLog.error({ domain: 'dashboard', fn: 'getTopCustomers' }, 'Failed to get top customers', error);
             throw error;
         }
     });
@@ -525,7 +526,7 @@ export const getTopMaterials = createServerFn({ method: 'GET' })
             cache.set(cacheKey, result);
             return result;
         } catch (error: unknown) {
-            console.error('[Server Function] Error in getTopMaterials:', error);
+            serverLog.error({ domain: 'dashboard', fn: 'getTopMaterials' }, 'Failed to get top materials', error);
             throw error;
         }
     });
@@ -543,7 +544,7 @@ export const invalidateDashboardCache = createServerFn({ method: 'POST' })
             cache.invalidateAll();
             return { success: true };
         } catch (error: unknown) {
-            console.error('[Server Function] Error invalidating dashboard cache:', error);
+            serverLog.error({ domain: 'dashboard', fn: 'invalidateDashboardCache' }, 'Failed to invalidate cache', error);
             return { success: false };
         }
     });
@@ -583,7 +584,7 @@ export const getWorkerStatuses = createServerFn({ method: 'GET' })
 
             return await response.json() as WorkerStatusResponse;
         } catch (error: unknown) {
-            console.error('[Server Function] Error in getWorkerStatuses:', error);
+            serverLog.error({ domain: 'dashboard', fn: 'getWorkerStatuses' }, 'Failed to get worker statuses', error);
             throw error;
         }
     });

@@ -10,6 +10,7 @@ import { getPrisma } from '@coh/shared/services/db';
 import { authMiddleware } from '../middleware/auth';
 import { getOrderForExchangeSchema, searchOrdersForExchangeSchema } from './orderTypes';
 import type { GetOrderForExchangeResult, SearchOrdersForExchangeResult } from './orderTypes';
+import { serverLog } from './serverLog';
 
 // ============================================
 // GET ORDER FOR EXCHANGE - Source order lookup
@@ -97,7 +98,7 @@ export const getOrderForExchange = createServerFn({ method: 'GET' })
                 },
             };
         } catch (error: unknown) {
-            console.error('[Server Function] Error in getOrderForExchange:', error);
+            serverLog.error({ domain: 'orders', fn: 'getOrderForExchange' }, 'Failed to get order for exchange', error);
             return {
                 success: false,
                 error: error instanceof Error ? error.message : 'Unknown error',
@@ -151,7 +152,7 @@ export const searchOrdersForExchange = createServerFn({ method: 'POST' })
                 })),
             };
         } catch (error: unknown) {
-            console.error('[Server Function] Error in searchOrdersForExchange:', error);
+            serverLog.error({ domain: 'orders', fn: 'searchOrdersForExchange' }, 'Failed to search orders for exchange', error);
             return {
                 success: false,
                 error: error instanceof Error ? error.message : 'Unknown error',

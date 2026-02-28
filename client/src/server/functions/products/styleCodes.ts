@@ -7,6 +7,7 @@
 import { createServerFn } from '@tanstack/react-start';
 import { authMiddleware } from '../../middleware/auth';
 import { getKysely } from '@coh/shared/services/db';
+import { serverLog } from '../serverLog';
 
 /**
  * Response type for getStyleCodes
@@ -77,7 +78,7 @@ export const getStyleCodes = createServerFn({ method: 'GET' })
                 })),
             };
         } catch (error: unknown) {
-            console.error('[Server Function] Error in getStyleCodes:', error);
+            serverLog.error({ domain: 'products', fn: 'getStyleCodes' }, 'Failed to get style codes', error);
             throw error;
         }
     });

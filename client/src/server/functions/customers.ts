@@ -13,6 +13,7 @@ import { z } from 'zod';
 import type { Prisma } from '@prisma/client';
 import { getPrisma } from '@coh/shared/services/db';
 import { authMiddleware } from '../middleware/auth';
+import { serverLog } from './serverLog';
 
 // Input validation schema
 const customersListInputSchema = z.object({
@@ -151,7 +152,7 @@ export const getCustomersList = createServerFn({ method: 'GET' })
                 },
             };
         } catch (error: unknown) {
-            console.error('[Server Function] Error in getCustomersList:', error);
+            serverLog.error({ domain: 'customers', fn: 'getCustomersList' }, 'Failed to get customers list', error);
             throw error;
         }
     });

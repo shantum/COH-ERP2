@@ -9,6 +9,7 @@ import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth';
 import { getPrisma, type PrismaTransaction } from '@coh/shared/services/db';
+import { serverLog } from './serverLog';
 
 import {
     ProcessReturnRefundInputSchema,
@@ -65,7 +66,9 @@ function pushToReturnPrime(orderLineId: string, erpStatus: string): void {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ orderLineId, erpStatus }),
-    }).catch(() => {});
+    }).catch((err: unknown) => {
+        serverLog.warn({ domain: 'returns', fn: 'pushToReturnPrime', orderLineId, erpStatus }, 'Fire-and-forget push failed', { error: err instanceof Error ? err.message : String(err) });
+    });
 }
 
 /**
@@ -489,7 +492,9 @@ export const createExchangeOrder = createServerFn({ method: 'POST' })
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ orderId: exchangeOrder.id }),
-        }).catch(() => {});
+        }).catch((err: unknown) => {
+            serverLog.warn({ domain: 'returns', fn: 'processExchange', orderId: exchangeOrder.id }, 'Sheet push failed (non-critical)', { error: err instanceof Error ? err.message : String(err) });
+        });
 
         logReturnEvent('return.exchange_created', orderLineId,
             `Exchange order ${exchangeOrder.orderNumber} created`,
@@ -506,7 +511,9 @@ export const createExchangeOrder = createServerFn({ method: 'POST' })
 
         // Also broadcast the new order creation for the Orders page
         const { notifySSE } = await import('@coh/shared/services/sseBroadcast');
-        notifySSE({ type: 'order_created', orderId: exchangeOrder.id }).catch(() => {});
+        notifySSE({ type: 'order_created', orderId: exchangeOrder.id }).catch((err: unknown) => {
+            serverLog.warn({ domain: 'returns', fn: 'processExchange', orderId: exchangeOrder.id }, 'SSE broadcast failed (non-critical)', { error: err instanceof Error ? err.message : String(err) });
+        });
 
         return returnSuccess(
             {

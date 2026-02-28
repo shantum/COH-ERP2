@@ -12,6 +12,7 @@ import { createServerFn } from '@tanstack/react-start';
 import type { Prisma } from '@prisma/client';
 import { getPrisma } from '@coh/shared/services/db';
 import { authMiddleware } from '../middleware/auth';
+import { serverLog } from './serverLog';
 
 // Re-export types and schemas from orderTypes.ts for backward compatibility
 export type {
@@ -619,7 +620,7 @@ export const getOrders = createServerFn({ method: 'GET' })
                 },
             };
         } catch (error: unknown) {
-            console.error('[Server Function] Error in getOrders:', error);
+            serverLog.error({ domain: 'orders', fn: 'getOrders' }, 'Failed to get orders', error);
             throw error;
         }
     });
@@ -693,7 +694,7 @@ export const getOrderViewCounts = createServerFn({ method: 'GET' })
                 cancelled: cancelledCount,
             };
         } catch (error: unknown) {
-            console.error('[Server Function] Error in getOrderViewCounts:', error);
+            serverLog.error({ domain: 'orders', fn: 'getOrderViewCounts' }, 'Failed to get order view counts', error);
             throw error;
         }
     });
@@ -902,7 +903,7 @@ export const searchAllOrders = createServerFn({ method: 'GET' })
                 results,
             };
         } catch (error: unknown) {
-            console.error('[Server Function] Error in searchAllOrders:', error);
+            serverLog.error({ domain: 'orders', fn: 'searchAllOrders' }, 'Failed to search orders', error);
             throw error;
         }
     });
@@ -1025,7 +1026,7 @@ export const searchUnifiedOrders = createServerFn({ method: 'GET' })
                 searchQuery: searchTerm,
             };
         } catch (error: unknown) {
-            console.error('[Server Function] Error in searchUnifiedOrders:', error);
+            serverLog.error({ domain: 'orders', fn: 'searchUnifiedOrders' }, 'Failed to search unified orders', error);
             throw error;
         }
     });
@@ -1257,7 +1258,7 @@ export const getOrderById = createServerFn({ method: 'GET' })
                 })),
             };
         } catch (error: unknown) {
-            console.error('[Server Function] Error in getOrderById:', error);
+            serverLog.error({ domain: 'orders', fn: 'getOrderById' }, 'Failed to get order', error);
             throw error;
         }
     });

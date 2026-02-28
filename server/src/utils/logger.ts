@@ -143,6 +143,12 @@ interface FormattedConsoleArgs {
     context: Record<string, unknown>;
 }
 
+/** Check if an object is a structured log from serverLog utility */
+function isStructuredMeta(arg: unknown): arg is Record<string, unknown> & { _structured: true } {
+    return typeof arg === 'object' && arg !== null && '_structured' in arg
+        && (arg as Record<string, unknown>)._structured === true;
+}
+
 // Helper to format arguments and extract context
 const formatConsoleArgs = (args: unknown[]): FormattedConsoleArgs => {
     const context: Record<string, unknown> = {};
@@ -150,7 +156,17 @@ const formatConsoleArgs = (args: unknown[]): FormattedConsoleArgs => {
 
     // Extract message and context from arguments
     for (const arg of args) {
-        if (arg instanceof Error) {
+        if (isStructuredMeta(arg)) {
+            // Structured log from serverLog — hoist domain/fn/error to top-level context
+            const { _structured, domain, fn, errorMessage, errorName, stack, ...rest } = arg;
+            if (domain) context.domain = domain;
+            if (fn) context.fn = fn;
+            if (errorMessage) context.errorMessage = errorMessage;
+            if (errorName) context.errorName = errorName;
+            if (stack) context.stackTrace = stack;
+            // Merge remaining fields
+            Object.assign(context, rest);
+        } else if (arg instanceof Error) {
             messageParts.push(arg.message);
             context.errorName = arg.name;
             context.stackTrace = arg.stack;

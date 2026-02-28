@@ -11,6 +11,7 @@
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth';
+import { serverLog } from './serverLog';
 import { getPrisma } from '@coh/shared/services/db';
 
 // ============================================
@@ -1770,7 +1771,7 @@ async function getReturnSettingsFromDb(): Promise<ReturnSettingsFromDb> {
         }
     } catch (error) {
         // Table might not exist yet - fall back to defaults
-        console.warn('Failed to load return settings from DB, using defaults:', error);
+        serverLog.warn({ domain: 'returns', fn: 'getReturnSettings' }, 'Failed to load settings from DB, using defaults', { error: error instanceof Error ? error.message : String(error) });
     }
 
     // Return code defaults

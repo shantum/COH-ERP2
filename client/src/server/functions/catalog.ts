@@ -14,6 +14,7 @@ import { z } from 'zod';
 import type { Prisma } from '@prisma/client';
 import { authMiddleware } from '../middleware/auth';
 import { getPrisma } from '@coh/shared/services/db';
+import { serverLog } from './serverLog';
 
 // ============================================
 // INPUT SCHEMAS
@@ -501,7 +502,7 @@ export const getCatalogProducts = createServerFn({ method: 'GET' })
                     },
                 };
         } catch (error: unknown) {
-            console.error('getCatalogProducts error:', error);
+            serverLog.error({ domain: 'catalog', fn: 'getCatalogProducts' }, 'Failed to get catalog products', error);
             throw error;
         }
     });
@@ -551,7 +552,7 @@ export const getCatalogCategories = createServerFn({ method: 'GET' })
                     fabrics: [],
                 };
         } catch (error: unknown) {
-            console.error('getCatalogCategories error:', error);
+            serverLog.error({ domain: 'catalog', fn: 'getCatalogCategories' }, 'Failed to get catalog categories', error);
             throw error;
         }
     });
@@ -588,7 +589,7 @@ export const updateCatalogProduct = createServerFn({ method: 'POST' })
                 // Prisma result is serialized to JSON by TanStack Start
                 return { success: true, data: sku as unknown as Record<string, JsonValue> };
         } catch (error: unknown) {
-            console.error('updateCatalogProduct error:', error);
+            serverLog.error({ domain: 'catalog', fn: 'updateCatalogProduct' }, 'Failed to update catalog product', error);
             const message = error instanceof Error ? error.message : 'Failed to update catalog product';
             return { success: false, error: { message } };
         }
@@ -623,7 +624,7 @@ export const syncCatalogWithShopify = createServerFn({ method: 'POST' })
                 data: response,
             };
         } catch (error: unknown) {
-            console.error('syncCatalogWithShopify error:', error);
+            serverLog.error({ domain: 'catalog', fn: 'syncCatalogWithShopify' }, 'Failed to sync with Shopify', error);
             const message = error instanceof Error ? error.message : 'Failed to sync catalog with Shopify';
             return { success: false, error: { message } };
         }

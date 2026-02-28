@@ -10,6 +10,7 @@ import { getPrisma } from '@coh/shared/services/db';
 import { authMiddleware } from '../middleware/auth';
 import { getISTMidnightAsUTC, getISTMonthStartAsUTC, getISTMonthEndAsUTC } from '@coh/shared';
 import type { OrdersAnalyticsResponse, TopProduct } from './orderTypes';
+import { serverLog } from './serverLog';
 
 // ============================================
 // ORDERS ANALYTICS - Server Function
@@ -244,7 +245,7 @@ export const getOrdersAnalytics = createServerFn({ method: 'GET' })
                 },
             };
         } catch (error: unknown) {
-            console.error('[Server Function] Error in getOrdersAnalytics:', error);
+            serverLog.error({ domain: 'orders', fn: 'getOrdersAnalytics' }, 'Failed to get orders analytics', error);
             throw error;
         }
     });

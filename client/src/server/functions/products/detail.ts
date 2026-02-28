@@ -10,6 +10,7 @@ import { z } from 'zod';
 import { authMiddleware } from '../../middleware/auth';
 import { getPrisma } from '@coh/shared/services/db';
 import { getProductVariationsFabrics } from '@coh/shared/services/bom';
+import { serverLog } from '../serverLog';
 
 const getProductByIdInputSchema = z.object({
     id: z.string().uuid('Invalid product ID'),
@@ -297,7 +298,7 @@ export const getProductById = createServerFn({ method: 'GET' })
                 }),
             };
         } catch (error: unknown) {
-            console.error('[Server Function] Error in getProductById:', error);
+            serverLog.error({ domain: 'products', fn: 'getProductById' }, 'Failed to get product', error);
             throw error;
         }
     });

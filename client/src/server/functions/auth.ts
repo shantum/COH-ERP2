@@ -7,6 +7,7 @@
 
 import { createServerFn } from '@tanstack/react-start';
 import { getCookie, getRequestHeader } from '@tanstack/react-start/server';
+import { serverLog } from './serverLog';
 
 /**
  * User data returned from auth check
@@ -86,7 +87,7 @@ export const getAuthUser = createServerFn({ method: 'GET' }).handler(
             const user = await response.json();
             return user as AuthUser;
         } catch (error: unknown) {
-            console.error('[getAuthUser] Error:', error);
+            serverLog.error({ domain: 'auth', fn: 'getAuthUser' }, 'Failed to get auth user', error);
             return null;
         }
     }
