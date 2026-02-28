@@ -11,6 +11,9 @@
 // offset (e.g. CET +1h, IST +5.5h) when compared against timestamp columns.
 process.env.TZ = 'UTC';
 
+// Sentry must be initialized before other imports to auto-instrument
+import './instrument.js';
+
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';

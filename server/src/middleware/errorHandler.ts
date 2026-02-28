@@ -7,6 +7,7 @@
  */
 
 import type { Request, Response, NextFunction, ErrorRequestHandler } from 'express';
+import * as Sentry from '@sentry/node';
 import { ZodError } from 'zod';
 import {
     ValidationError,
@@ -219,8 +220,12 @@ export const errorHandler: ErrorRequestHandler = (
         return;
     }
 
-    // Default 500 error
+    // Capture unexpected (5xx) errors in Sentry
     const statusCode = err.statusCode || 500;
+    if (statusCode >= 500) {
+        Sentry.captureException(err);
+    }
+
     const response: {
         error: string;
         type: string;
