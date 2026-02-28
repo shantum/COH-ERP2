@@ -294,6 +294,62 @@ router.get(
     })
 );
 
+// Magic login - one-click login link that sets auth cookie and redirects
+router.get(
+    '/magic/:token',
+    asyncHandler(async (req: Request, res: Response) => {
+        const { token } = req.params;
+
+        let decoded: { userId: string; purpose: string };
+        try {
+            decoded = jwt.verify(token, JWT_SECRET) as { userId: string; purpose: string };
+        } catch {
+            res.status(401).send('Link expired or invalid. Ask admin for a new link.');
+            return;
+        }
+
+        if (decoded.purpose !== 'magic-login') {
+            res.status(400).send('Invalid link.');
+            return;
+        }
+
+        const user = await req.prisma.user.findUnique({
+            where: { id: decoded.userId },
+            include: { userRole: true },
+        });
+
+        if (!user || !user.isActive) {
+            res.status(404).send('User not found or disabled.');
+            return;
+        }
+
+        // Generate a normal session token
+        const sessionSignOptions: SignOptions = { expiresIn: '30d' as SignOptions['expiresIn'] };
+        const sessionToken = jwt.sign(
+            {
+                id: user.id,
+                email: user.email,
+                role: user.role,
+                roleId: user.roleId,
+                tokenVersion: user.tokenVersion,
+            },
+            JWT_SECRET,
+            sessionSignOptions
+        );
+
+        res.cookie('auth_token', sessionToken, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'lax',
+            maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+            path: '/',
+        });
+
+        // Redirect to fabric count page
+        res.redirect('/fabric-count');
+    })
+);
+
 // Change password
 router.post(
     '/change-password',
