@@ -8,7 +8,7 @@ import { Router } from 'express';
 import type { Request, Response } from 'express';
 import multer from 'multer';
 import { parse } from 'csv-parse/sync';
-import { authenticateToken } from '../middleware/auth.js';
+import { requireAdmin } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { reconciliationLogger } from '../utils/logger.js';
 
@@ -63,7 +63,7 @@ const upload = multer({
  * This endpoint requires multer middleware for multipart/form-data handling,
  * which is why it remains in Express rather than tRPC.
  */
-router.post('/reconciliation/:id/upload-csv', authenticateToken, upload.single('file'), asyncHandler(async (req: Request, res: Response) => {
+router.post('/reconciliation/:id/upload-csv', requireAdmin, upload.single('file'), asyncHandler(async (req: Request, res: Response) => {
     const id = req.params.id as string;
     const file = req.file as Express.Multer.File | undefined;
 

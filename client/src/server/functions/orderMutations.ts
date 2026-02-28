@@ -13,7 +13,7 @@
 
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
-import { authMiddleware } from '../middleware/auth';
+import { authMiddleware, adminMiddleware } from '../middleware/auth';
 import { getPrisma, type PrismaTransaction } from '@coh/shared/services/db';
 import type { Prisma } from '@prisma/client';
 import {
@@ -307,7 +307,7 @@ export const markPaid = createServerFn({ method: 'POST' })
  * Delete an order (hard delete, only for manual orders)
  */
 export const deleteOrder = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
+    .middleware([adminMiddleware])
     .inputValidator((input: unknown) => deleteOrderSchema.parse(input))
     .handler(async ({ data }): Promise<MutationResult<DeleteOrderResult>> => {
         const prisma = await getPrisma();

@@ -2,7 +2,7 @@
 
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
-import { authMiddleware } from '../../middleware/auth';
+import { authMiddleware, adminMiddleware } from '../../middleware/auth';
 import { getPrisma } from '@coh/shared/services/db';
 import {
   CreateEmployeeSchema,
@@ -126,7 +126,7 @@ export const getEmployee = createServerFn({ method: 'GET' })
 // ============================================
 
 export const createEmployee = createServerFn({ method: 'POST' })
-  .middleware([authMiddleware])
+  .middleware([adminMiddleware])
   .inputValidator((input: unknown) => CreateEmployeeSchema.parse(input))
   .handler(async ({ data }) => {
     const prisma = await getPrisma();
@@ -184,7 +184,7 @@ export const createEmployee = createServerFn({ method: 'POST' })
 // ============================================
 
 export const updateEmployee = createServerFn({ method: 'POST' })
-  .middleware([authMiddleware])
+  .middleware([adminMiddleware])
   .inputValidator((input: unknown) => UpdateEmployeeSchema.parse(input))
   .handler(async ({ data, context }) => {
     const prisma = await getPrisma();

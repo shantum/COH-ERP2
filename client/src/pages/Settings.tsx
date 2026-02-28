@@ -9,6 +9,7 @@ import {
     Store, Settings as SettingsIcon, FileSpreadsheet, Database, Eye, DollarSign, Terminal, Calculator, RefreshCw, PanelLeft, MapPin, Sheet
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
+import { isAdminUser } from '../types';
 
 // Tab components
 import {
@@ -69,8 +70,7 @@ const tabComponents: Record<SettingsTab, React.ComponentType> = {
 export default function Settings() {
     const { user } = useAuth();
     const [activeTab, setActiveTab] = useState<SettingsTab>('general');
-    const isAdmin = user?.role === 'admin' || user?.role === 'owner'
-        || (user?.permissions?.includes('users:create') ?? false);
+    const isAdmin = isAdminUser(user);
 
     const visibleTabs = tabs.filter(t => !t.adminOnly || isAdmin);
     const ActiveComponent = tabComponents[activeTab];

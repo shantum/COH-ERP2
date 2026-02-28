@@ -145,7 +145,7 @@ router.post('/import', requireAdmin, upload.single('file'), asyncHandler(async (
 // PREVIEW ORDER IMPORT
 // ============================================
 
-router.post('/preview-import', authenticateToken, upload.single('file'), asyncHandler(async (req: Request, res: Response) => {
+router.post('/preview-import', requireAdmin, upload.single('file'), asyncHandler(async (req: Request, res: Response) => {
   try {
     const file = req.file as Express.Multer.File | undefined;
     if (!file) {
@@ -189,7 +189,7 @@ router.post('/execute-import', requireAdmin, asyncHandler(async (req: Request, r
 // GET IMPORT HISTORY
 // ============================================
 
-router.get('/import-history', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.get('/import-history', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
   try {
     const batches = await req.prisma.channelImportBatch.findMany({
       orderBy: { importedAt: 'desc' },

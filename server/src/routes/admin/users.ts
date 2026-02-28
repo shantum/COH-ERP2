@@ -7,44 +7,8 @@ import bcrypt from 'bcryptjs';
 import { validatePassword } from '@coh/shared';
 import { ValidationError, NotFoundError, ConflictError, BusinessLogicError } from '../../utils/errors.js';
 import { sendInternalEmail, renderWelcomeUser, renderNewUserAdminNotice } from '../../services/email/index.js';
-import type { PrismaClient } from '@prisma/client';
+import { hasAdminAccessFromDb, countAdminUsers } from '@coh/shared/services/auth';
 import type { CreateUserBody, UpdateUserBody, PasswordValidationResult } from './types.js';
-
-/**
- * Count active users with admin-equivalent access.
- * Checks both legacy role='admin' AND users whose Role has 'users:create' or '*' permission.
- */
-async function countAdminEquivalentUsers(prisma: PrismaClient, activeOnly = true): Promise<number> {
-    const where: Record<string, unknown> = {};
-    if (activeOnly) where.isActive = true;
-
-    // Get roles that grant admin access
-    const adminRoles = await prisma.role.findMany({
-        where: { permissions: { not: undefined } },
-        select: { id: true, permissions: true },
-    });
-    const adminRoleIds = adminRoles
-        .filter(r => {
-            const perms = r.permissions as string[];
-            return perms.includes('*') || perms.includes('users:create');
-        })
-        .map(r => r.id);
-
-    return prisma.user.count({
-        where: {
-            ...where,
-            OR: [
-                { role: 'admin' },
-                ...(adminRoleIds.length > 0 ? [{ roleId: { in: adminRoleIds } }] : []),
-            ],
-        },
-    });
-}
-
-/** Check if a user has admin-equivalent access */
-function userHasAdminAccess(user: { role: string; roleId?: string | null }, adminRoleIds: string[]): boolean {
-    return user.role === 'admin' || (user.roleId != null && adminRoleIds.includes(user.roleId));
-}
 
 /** Generate a strong random password: 12 chars, mixed case + digits + special */
 function generatePassword(): string {
@@ -279,15 +243,10 @@ router.put('/users/:id', asyncHandler(async (req: Request, res: Response) => {
     }
 
     // Prevent disabling or demoting the last admin-equivalent user
-    // Get admin role IDs for the check
-    const allRoles = await req.prisma.role.findMany({ select: { id: true, permissions: true } });
-    const adminRoleIds = allRoles
-        .filter(r => { const p = r.permissions as string[]; return p.includes('*') || p.includes('users:create'); })
-        .map(r => r.id);
-    const isExistingAdmin = userHasAdminAccess(existing, adminRoleIds);
+    const isExistingAdmin = await hasAdminAccessFromDb(req.prisma, existing.id, existing.role);
 
-    if (isExistingAdmin && (isActive === false || (role && role !== 'admin'))) {
-        const adminCount = await countAdminEquivalentUsers(req.prisma);
+    if (isExistingAdmin && (isActive === false || (role && role !== 'admin' && role !== 'owner'))) {
+        const adminCount = await countAdminUsers(req.prisma);
         if (adminCount <= 1) {
             throw new BusinessLogicError(
                 isActive === false ? 'Cannot disable the last admin user' : 'Cannot change role of the last admin user',
@@ -368,12 +327,9 @@ router.delete('/users/:id', asyncHandler(async (req: Request, res: Response) => 
     }
 
     // Prevent deleting the last admin-equivalent user
-    const deleteRoles = await req.prisma.role.findMany({ select: { id: true, permissions: true } });
-    const deleteAdminRoleIds = deleteRoles
-        .filter(r => { const p = r.permissions as string[]; return p.includes('*') || p.includes('users:create'); })
-        .map(r => r.id);
-    if (userHasAdminAccess(user, deleteAdminRoleIds)) {
-        const adminCount = await countAdminEquivalentUsers(req.prisma, false);
+    const userIsAdmin = await hasAdminAccessFromDb(req.prisma, user.id, user.role);
+    if (userIsAdmin) {
+        const adminCount = await countAdminUsers(req.prisma, false);
         if (adminCount <= 1) {
             throw new BusinessLogicError('Cannot delete the last admin user', 'last_admin_protection');
         }

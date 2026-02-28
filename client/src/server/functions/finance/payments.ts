@@ -6,7 +6,7 @@
 
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
-import { authMiddleware } from '../../middleware/auth';
+import { authMiddleware, adminMiddleware } from '../../middleware/auth';
 import { getPrisma } from '@coh/shared/services/db';
 import {
   MatchAllocationSchema,
@@ -151,7 +151,7 @@ export const updatePaymentNotes = createServerFn({ method: 'POST' })
 // ============================================
 
 export const matchPaymentToInvoice = createServerFn({ method: 'POST' })
-  .middleware([authMiddleware])
+  .middleware([adminMiddleware])
   .inputValidator((input: unknown) => MatchAllocationSchema.parse(input))
   .handler(async ({ data, context }) => {
     const prisma = await getPrisma();
@@ -218,7 +218,7 @@ const unmatchInput = z.object({
 });
 
 export const unmatchPayment = createServerFn({ method: 'POST' })
-  .middleware([authMiddleware])
+  .middleware([adminMiddleware])
   .inputValidator((input: unknown) => unmatchInput.parse(input))
   .handler(async ({ data }) => {
     const prisma = await getPrisma();

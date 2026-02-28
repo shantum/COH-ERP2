@@ -17,6 +17,7 @@ import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { requireAdmin } from '../middleware/auth.js';
+import { verifyInternalRequest } from './internal.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import {
   isConfigured,
@@ -433,7 +434,7 @@ const RefundPayoutLinkSchema = z.object({
  * Customer receives the link and enters their own bank/UPI details.
  * Called internally by sendReturnRefundLink server function.
  */
-router.post('/payout/refund', asyncHandler(async (req: Request, res: Response) => {
+router.post('/payout/refund', verifyInternalRequest, asyncHandler(async (req: Request, res: Response) => {
   const parsed = RefundPayoutLinkSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.issues[0]?.message || 'Invalid request' });

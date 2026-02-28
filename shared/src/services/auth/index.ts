@@ -223,8 +223,88 @@ export function hasPermission(permissions: string[], required: string): boolean 
 }
 
 /**
- * Check if user has admin-level access
+ * Check if user has admin-level access.
+ * This is THE single definition — all admin checks should flow through here.
+ *
+ * Admin-equivalent means ANY of:
+ * - Legacy role === 'admin'
+ * - Legacy role === 'owner'
+ * - Effective permissions include '*' (wildcard)
+ * - Effective permissions include 'users:create'
+ *
+ * "permissions" should be the effective permission set (role + overrides),
+ * as returned by validateAuth() or getUserPermissionsAndAccess().
  */
 export function hasAdminAccess(user: AuthenticatedUser, permissions: string[]): boolean {
-    return user.role === 'admin' || permissions.includes('users:create');
+    return user.role === 'admin'
+        || user.role === 'owner'
+        || permissions.includes('*')
+        || permissions.includes('users:create');
+}
+
+/**
+ * Check if a user has admin-level access using effective permissions from DB.
+ * Use this when you only have a userId and need to query the DB.
+ */
+export async function hasAdminAccessFromDb(
+    prisma: PrismaInstance,
+    userId: string,
+    userRole: string,
+): Promise<boolean> {
+    const { permissions } = await getUserPermissionsAndAccess(prisma, userId);
+    return hasAdminAccess({ id: userId, email: '', role: userRole, roleId: null }, permissions);
+}
+
+/**
+ * Count users with admin-equivalent access, using effective permissions (including overrides).
+ * This is the canonical way to check "how many admins exist" for last-admin protection.
+ */
+export async function countAdminUsers(
+    prisma: PrismaInstance,
+    activeOnly = true,
+): Promise<number> {
+    const where: Record<string, unknown> = {};
+    if (activeOnly) where.isActive = true;
+
+    const users = await prisma.user.findMany({
+        where,
+        select: {
+            id: true,
+            role: true,
+            userRole: { select: { permissions: true } },
+            permissionOverrides: { select: { permission: true, granted: true } },
+        },
+    });
+
+    let count = 0;
+    for (const u of users) {
+        // Quick check: legacy admin/owner role
+        if (u.role === 'admin' || u.role === 'owner') {
+            count++;
+            continue;
+        }
+
+        // Compute effective permissions (role perms + overrides)
+        const rolePerms: string[] = Array.isArray(u.userRole?.permissions)
+            ? (u.userRole.permissions as string[])
+            : [];
+        const granted = (u.permissionOverrides as Array<{ permission: string; granted: boolean }>)
+            .filter(o => o.granted)
+            .map(o => o.permission);
+        const revoked = new Set(
+            (u.permissionOverrides as Array<{ permission: string; granted: boolean }>)
+                .filter(o => !o.granted)
+                .map(o => o.permission)
+        );
+        const effective = [
+            ...rolePerms.filter(p => !revoked.has(p)),
+            ...granted,
+        ];
+
+        if (effective.includes('*') || effective.includes('users:create')) {
+            count++;
+        }
+    }
+
+    return count;
 }

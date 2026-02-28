@@ -6,7 +6,7 @@
 
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
-import { authMiddleware } from '../../middleware/auth';
+import { authMiddleware, adminMiddleware } from '../../middleware/auth';
 import { getPrisma } from '@coh/shared/services/db';
 import {
   CreateInvoiceSchema,
@@ -376,7 +376,7 @@ const confirmInvoiceInput = z.object({
 });
 
 export const confirmInvoice = createServerFn({ method: 'POST' })
-  .middleware([authMiddleware])
+  .middleware([adminMiddleware])
   .inputValidator((input: unknown) => confirmInvoiceInput.parse(input))
   .handler(async ({ data, context }) => {
     const prisma = await getPrisma();
@@ -734,7 +734,7 @@ export const updateInvoiceLines = createServerFn({ method: 'POST' })
 const cancelInvoiceInput = z.object({ id: z.string().uuid() });
 
 export const cancelInvoice = createServerFn({ method: 'POST' })
-  .middleware([authMiddleware])
+  .middleware([adminMiddleware])
   .inputValidator((input: unknown) => cancelInvoiceInput.parse(input))
   .handler(async ({ data }) => {
     const prisma = await getPrisma();

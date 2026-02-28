@@ -62,7 +62,7 @@ const ConfirmSchema = z.object({
 // POST /message — Stream chat response (SSE)
 // ============================================
 
-router.post('/message', authenticateToken, upload.array('files', 5), asyncHandler(async (req: Request, res: Response) => {
+router.post('/message', requireAdmin, upload.array('files', 5), asyncHandler(async (req: Request, res: Response) => {
     const userId = req.user!.id;
 
     // Parse the JSON payload from the multipart form

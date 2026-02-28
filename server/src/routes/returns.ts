@@ -12,7 +12,7 @@
 import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { z } from 'zod';
-import { authenticateToken } from '../middleware/auth.js';
+import { authenticateToken, requireAdmin } from '../middleware/auth.js';
 import { asyncHandler, typedRoute } from '../middleware/asyncHandler.js';
 import ithinkLogistics from '../services/ithinkLogistics/index.js';
 import type { ProductInfo, ShipmentDimensions } from '../services/ithinkLogistics/index.js';
@@ -84,7 +84,7 @@ router.post('/check-serviceability', authenticateToken, ...typedRoute(CheckServi
  * When a line has a returnBatchNumber, ALL lines in that batch with status='requested'
  * are included in the same pickup and share the AWB number.
  */
-router.post('/schedule-pickup', authenticateToken, ...typedRoute(SchedulePickupSchema, async (req, res) => {
+router.post('/schedule-pickup', requireAdmin, ...typedRoute(SchedulePickupSchema, async (req, res) => {
     try {
         const { orderLineId } = req.validatedBody;
         const prisma = req.prisma;

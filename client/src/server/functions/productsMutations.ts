@@ -10,7 +10,7 @@
 
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
-import { authMiddleware } from '../middleware/auth';
+import { authMiddleware, adminMiddleware } from '../middleware/auth';
 import { getPrisma } from '@coh/shared/services/db';
 import { deriveTaxonomy, productAttributesSchema } from '@coh/shared/config/productTaxonomy';
 import { serverLog } from './serverLog';
@@ -219,7 +219,7 @@ export const updateProduct = createServerFn({ method: 'POST' })
  * Sets isActive to false instead of deleting from database.
  */
 export const deleteProduct = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
+    .middleware([adminMiddleware])
     .inputValidator((input: unknown) => deleteProductSchema.parse(input))
     .handler(async ({ data }) => {
         try {
@@ -454,7 +454,7 @@ const importStyleCodesSchema = z.object({
  * Skips products that already have a style code set.
  */
 export const importStyleCodes = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
+    .middleware([adminMiddleware])
     .inputValidator((input: unknown) => importStyleCodesSchema.parse(input))
     .handler(async ({ data }) => {
         try {

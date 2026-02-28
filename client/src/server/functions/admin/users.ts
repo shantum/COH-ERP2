@@ -7,50 +7,28 @@ import { authMiddleware } from '../../middleware/auth';
 import { getPrisma } from '@coh/shared/services/db';
 import { type MutationResult, type User, requireAdminRole, parsePermissionsArray } from './types';
 import { getInternalApiBaseUrl } from '../../utils';
-import type { PrismaClient } from '@prisma/client';
 
 // ============================================
 // ADMIN-EQUIVALENT HELPERS
+// Uses shared auth module (dynamic import per @coh/shared/services rules)
 // ============================================
 
-/** Check if a user has admin-equivalent access (legacy role OR roleId with admin permissions) */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AnyPrisma = any;
+
+/** Check if a user has admin-equivalent access using effective permissions from DB */
 async function isAdminEquivalent(
-    prisma: PrismaClient,
-    user: { role: string; roleId?: string | null },
+    prisma: AnyPrisma,
+    user: { id: string; role: string },
 ): Promise<boolean> {
-    if (user.role === 'admin') return true;
-    if (!user.roleId) return false;
-    const role = await prisma.role.findUnique({
-        where: { id: user.roleId },
-        select: { permissions: true },
-    });
-    if (!role) return false;
-    const perms = parsePermissionsArray(role.permissions);
-    return perms.includes('*') || perms.includes('users:create');
+    const { hasAdminAccessFromDb } = await import('@coh/shared/services/auth');
+    return hasAdminAccessFromDb(prisma, user.id, user.role);
 }
 
-/** Count active (or all) users with admin-equivalent access */
-async function countAdminEquivalentUsers(prisma: PrismaClient, activeOnly = true): Promise<number> {
-    const adminRoles = await prisma.role.findMany({
-        where: { permissions: { not: undefined } },
-        select: { id: true, permissions: true },
-    });
-    const adminRoleIds = adminRoles
-        .filter(r => {
-            const perms = parsePermissionsArray(r.permissions);
-            return perms.includes('*') || perms.includes('users:create');
-        })
-        .map(r => r.id);
-
-    return prisma.user.count({
-        where: {
-            ...(activeOnly ? { isActive: true } : {}),
-            OR: [
-                { role: 'admin' },
-                ...(adminRoleIds.length > 0 ? [{ roleId: { in: adminRoleIds } }] : []),
-            ],
-        },
-    });
+/** Count active (or all) users with admin-equivalent access (includes permission overrides) */
+async function countAdminEquivalentUsers(prisma: AnyPrisma, activeOnly = true): Promise<number> {
+    const { countAdminUsers } = await import('@coh/shared/services/auth');
+    return countAdminUsers(prisma, activeOnly);
 }
 
 // ============================================
@@ -405,7 +383,7 @@ export const updateUser = createServerFn({ method: 'POST' })
         if (isActive !== undefined) updateData.isActive = isActive;
         if (role !== undefined) {
             // Prevent demoting the last admin-equivalent user
-            if (existingIsAdmin && role !== 'admin') {
+            if (existingIsAdmin && role !== 'admin' && role !== 'owner') {
                 const adminCount = await countAdminEquivalentUsers(prisma);
                 if (adminCount <= 1) {
                     return {

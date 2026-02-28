@@ -7,7 +7,7 @@
 
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
-import { authMiddleware } from '../middleware/auth';
+import { authMiddleware, adminMiddleware } from '../middleware/auth';
 import { getPrisma, type PrismaTransaction } from '@coh/shared/services/db';
 import { serverLog } from './serverLog';
 
@@ -23,7 +23,7 @@ import {
     returnError,
     type ReturnResult,
 } from '@coh/shared/errors';
-import { getInternalApiBaseUrl, callInternalApi } from '../utils';
+import { getInternalApiBaseUrl, callInternalApi, getInternalHeaders } from '../utils';
 
 // ============================================
 // EVENT LOGGING + SSE BROADCAST
@@ -68,7 +68,7 @@ function pushToReturnPrime(orderLineId: string, erpStatus: string): void {
  * Process refund for a return
  */
 export const processLineReturnRefund = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
+    .middleware([adminMiddleware])
     .inputValidator((input: unknown): ProcessReturnRefundInput => ProcessReturnRefundInputSchema.parse(input))
     .handler(async ({ data }: { data: ProcessReturnRefundInput }): Promise<ReturnResult<{ orderLineId: string; netAmount: number }>> => {
         const prisma = await getPrisma();
@@ -215,7 +215,7 @@ export const sendReturnRefundLink = createServerFn({ method: 'POST' })
         const baseUrl = getInternalApiBaseUrl();
         const payoutRes = await fetch(`${baseUrl}/api/razorpayx/payout/refund`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: getInternalHeaders(),
             body: JSON.stringify({
                 orderLineId,
                 amount: Math.round(amountInr * 100), // paise

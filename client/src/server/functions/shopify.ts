@@ -11,7 +11,7 @@
 
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
-import { authMiddleware } from '../middleware/auth';
+import { authMiddleware, adminMiddleware } from '../middleware/auth';
 import { callExpressApi } from '../utils';
 import { getPrisma } from '@coh/shared/services/db';
 
@@ -165,7 +165,7 @@ export const getShopifyConfig = createServerFn({ method: 'GET' })
  * Calls: PUT /api/shopify/config
  */
 export const updateShopifyConfig = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
+    .middleware([adminMiddleware])
     .inputValidator((input: unknown) => updateShopifyConfigSchema.parse(input))
     .handler(async ({ data }): Promise<MutationResult<UpdateConfigResult>> => {
         const { shopDomain, accessToken } = data;
@@ -329,7 +329,7 @@ export const getSyncJobStatus = createServerFn({ method: 'GET' })
  * Calls: POST /api/shopify/sync/jobs/start
  */
 export const startSyncJob = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
+    .middleware([adminMiddleware])
     .inputValidator((input: unknown) => startSyncJobSchema.parse(input))
     .handler(async ({ data }): Promise<MutationResult<SyncJobResult>> => {
         const { jobType, syncMode, days, staleAfterMins } = data;
@@ -367,7 +367,7 @@ export const startSyncJob = createServerFn({ method: 'POST' })
  * Calls: POST /api/shopify/sync/jobs/:id/cancel
  */
 export const cancelSyncJob = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
+    .middleware([adminMiddleware])
     .inputValidator((input: unknown) => cancelSyncJobSchema.parse(input))
     .handler(async ({ data }): Promise<MutationResult<SyncJobResult>> => {
         try {
@@ -436,7 +436,7 @@ export const getCacheStatus = createServerFn({ method: 'GET' })
  * Calls: POST /api/shopify/sync/jobs/scheduler/trigger
  */
 export const triggerSync = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
+    .middleware([adminMiddleware])
     .inputValidator((input: unknown) => {
         if (input === undefined || input === null) return {};
         return triggerSyncSchema.parse(input);

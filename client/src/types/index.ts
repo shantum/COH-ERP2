@@ -126,10 +126,14 @@ export interface AuthUser {
 /**
  * Check if user has admin-equivalent access (role or permission).
  * Use this for all client-side admin visibility checks.
+ *
+ * Mirrors shared hasAdminAccess(): role admin/owner OR wildcard/users:create permission.
  */
 export function isAdminUser(user: AuthUser | null | undefined): boolean {
     if (!user) return false;
-    return user.role === 'admin' || user.role === 'owner'
+    return user.role === 'admin'
+        || user.role === 'owner'
+        || (user.permissions?.includes('*') ?? false)
         || (user.permissions?.includes('users:create') ?? false);
 }
 

@@ -82,8 +82,7 @@ export function GeneralTab() {
             if (!result.success) throw new Error(result.error?.message);
             return result.data;
         },
-        enabled: user?.role === 'admin' || user?.role === 'owner'
-            || (user?.permissions?.includes('users:create') ?? false),
+        enabled: isAdminUser(user),
     });
 
     // Tier thresholds query
@@ -97,8 +96,7 @@ export function GeneralTab() {
             }
             return result.data;
         },
-        enabled: user?.role === 'admin' || user?.role === 'owner'
-            || (user?.permissions?.includes('users:create') ?? false),
+        enabled: isAdminUser(user),
     });
 
     const updateTierMutation = useMutation({
@@ -366,10 +364,10 @@ export function GeneralTab() {
                                             <td className="px-4 py-3">{u.email}</td>
                                             <td className="px-4 py-3">
                                                 <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                                                    u.role === 'admin' ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-700'
+                                                    (u.role === 'admin' || u.role === 'owner') ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-700'
                                                 }`}>
-                                                    {u.role === 'admin' && <Shield size={12} className="inline mr-1" />}
-                                                    {u.role}
+                                                    {(u.role === 'admin' || u.role === 'owner') && <Shield size={12} className="inline mr-1" />}
+                                                    {u.roleName || u.role}
                                                 </span>
                                             </td>
                                             <td className="px-4 py-3">

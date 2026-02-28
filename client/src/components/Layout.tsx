@@ -1,5 +1,6 @@
 import { Outlet, Link, useNavigate, useRouterState } from '@tanstack/react-router';
 import { useAuth } from '../hooks/useAuth';
+import { isAdminUser } from '../types';
 import {
     LayoutDashboard, ShoppingCart,
     Users, RotateCcw, Factory, LogOut, Menu, X, BookOpen, Settings, PackagePlus, Clipboard, BarChart3, UserCog, ChevronLeft, ChevronRight, Search, Package, PackageX, ChevronDown, Minimize2, Maximize2, Calculator, Truck, Store, FileSpreadsheet, FilePlus, ShoppingBag, HeartPulse, Upload, IndianRupee, Layers, Sliders, TrendingUp, ClipboardList
@@ -120,7 +121,7 @@ const navGroups: NavGroup[] = [
 
 export default function Layout() {
     const { user, logout } = useAuth();
-    const { hasPermission, isOwner } = usePermissions();
+    const { hasPermission } = usePermissions();
     const { hasAccess } = useAccess();
     const navigate = useNavigate();
     const routerState = useRouterState();
@@ -248,8 +249,8 @@ export default function Layout() {
             }
             // Legacy permission check
             if (!item.permission) return true;
-            // Special case: 'admin' means owner/admin only
-            if (item.permission === 'admin') return isOwner;
+            // Special case: 'admin' means admin-equivalent access
+            if (item.permission === 'admin') return isAdminUser(user);
             return hasPermission(item.permission);
         });
     };
@@ -441,8 +442,8 @@ export default function Layout() {
                 </div>
             </main>
 
-            {/* AI Chat Assistant */}
-            <ChatButton />
+            {/* AI Chat Assistant (admin only) */}
+            {isAdminUser(user) && <ChatButton />}
 
             {/* Overlay for mobile */}
             {sidebarOpen && (

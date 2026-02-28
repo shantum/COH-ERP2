@@ -10,7 +10,7 @@
 
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
-import { authMiddleware } from '../middleware/auth';
+import { authMiddleware, adminMiddleware } from '../middleware/auth';
 import { getPrisma } from '@coh/shared/services/db';
 import { getISTMidnightAsUTC, getISTMonthStartAsUTC, getISTDayOfMonth } from '@coh/shared';
 
@@ -211,7 +211,7 @@ export const getCostingConfig = createServerFn({ method: 'GET' })
  * Update costing config (overhead settings)
  */
 export const updateCostingConfig = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
+    .middleware([adminMiddleware])
     .inputValidator((input: unknown) => updateCostingConfigInputSchema.parse(input))
     .handler(async ({ data }) => {
         const prisma = await getPrisma();

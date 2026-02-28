@@ -16,7 +16,7 @@
 
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
-import { authMiddleware } from '../middleware/auth';
+import { authMiddleware, adminMiddleware } from '../middleware/auth';
 import { serverLog } from './serverLog';
 import { getPrisma, type PrismaTransaction } from '@coh/shared/services/db';
 
@@ -386,7 +386,7 @@ export const updateReconciliationItems = createServerFn({ method: 'POST' })
  * Submit reconciliation and create adjustment transactions
  */
 export const submitReconciliation = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
+    .middleware([adminMiddleware])
     .inputValidator((input: unknown) => submitReconciliationSchema.parse(input))
     .handler(async ({ data, context }): Promise<MutationResult<SubmitReconciliationResult>> => {
         const prisma = await getPrisma();
@@ -529,7 +529,7 @@ export const submitReconciliation = createServerFn({ method: 'POST' })
  * Delete a draft reconciliation
  */
 export const deleteReconciliation = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
+    .middleware([adminMiddleware])
     .inputValidator((input: unknown) => deleteReconciliationSchema.parse(input))
     .handler(async ({ data }): Promise<MutationResult<DeleteReconciliationResult>> => {
         const prisma = await getPrisma();

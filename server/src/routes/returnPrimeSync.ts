@@ -13,7 +13,7 @@ import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { syncReturnPrimeStatus } from '../utils/returnPrimeSync.js';
-import { authenticateToken } from '../middleware/auth.js';
+import { requireAdmin } from '../middleware/auth.js';
 import { verifyInternalRequest } from './internal.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { syncLogger } from '../utils/logger.js';
@@ -68,7 +68,7 @@ router.post('/push-status', verifyInternalRequest, asyncHandler(async (req: Requ
  * POST /api/returnprime/sync
  * Sync a single order line's return data to Return Prime
  */
-router.post('/sync', authenticateToken, asyncHandler(async (req: Request, res: Response): Promise<void> => {
+router.post('/sync', requireAdmin, asyncHandler(async (req: Request, res: Response): Promise<void> => {
     const validation = SyncOrderLineInputSchema.safeParse(req.body);
     if (!validation.success) {
         res.status(400).json({
@@ -120,7 +120,7 @@ router.post('/sync', authenticateToken, asyncHandler(async (req: Request, res: R
  * POST /api/returnprime/sync-batch
  * Sync all lines in a return batch to Return Prime
  */
-router.post('/sync-batch', authenticateToken, asyncHandler(async (req: Request, res: Response): Promise<void> => {
+router.post('/sync-batch', requireAdmin, asyncHandler(async (req: Request, res: Response): Promise<void> => {
     const validation = SyncBatchInputSchema.safeParse(req.body);
     if (!validation.success) {
         res.status(400).json({
@@ -175,7 +175,7 @@ router.post('/sync-batch', authenticateToken, asyncHandler(async (req: Request, 
  * GET /api/returnprime/sync-status
  * Get sync status for lines with Return Prime integration
  */
-router.get('/sync-status', authenticateToken, asyncHandler(async (req: Request, res: Response): Promise<void> => {
+router.get('/sync-status', requireAdmin, asyncHandler(async (req: Request, res: Response): Promise<void> => {
     try {
         const [pendingSync, failedSync, totalWithRp] = await Promise.all([
             // Lines that need syncing (status changed locally but not synced to RP)

@@ -10,7 +10,7 @@
 
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
-import { authMiddleware } from '../middleware/auth';
+import { authMiddleware, adminMiddleware } from '../middleware/auth';
 import { getPrisma } from '@coh/shared/services/db';
 import type {
     Material,
@@ -285,7 +285,7 @@ export const updateMaterial = createServerFn({ method: 'POST' })
  * Will fail if material has fabrics (foreign key constraint)
  */
 export const deleteMaterial = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
+    .middleware([adminMiddleware])
     .inputValidator((input: unknown) => deleteMaterialSchema.parse(input))
     .handler(async ({ data }): Promise<DeleteMaterialResult> => {
         try {
@@ -419,7 +419,7 @@ export const updateFabric = createServerFn({ method: 'POST' })
  * Will fail if fabric has colours (foreign key constraint)
  */
 export const deleteFabric = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
+    .middleware([adminMiddleware])
     .inputValidator((input: unknown) => deleteFabricSchema.parse(input))
     .handler(async ({ data }): Promise<DeleteFabricResult> => {
         try {
@@ -580,7 +580,7 @@ export const updateColour = createServerFn({ method: 'POST' })
  * Will fail if colour is used in BOMs (foreign key constraint)
  */
 export const deleteColour = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
+    .middleware([adminMiddleware])
     .inputValidator((input: unknown) => deleteColourSchema.parse(input))
     .handler(async ({ data }): Promise<DeleteColourResult> => {
         try {

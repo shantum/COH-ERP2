@@ -2,7 +2,7 @@
 
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
-import { authMiddleware } from '../../middleware/auth';
+import { authMiddleware, adminMiddleware } from '../../middleware/auth';
 import { getPrisma, type PrismaTransaction } from '@coh/shared/services/db';
 import {
   CreatePayrollRunSchema,
@@ -49,7 +49,7 @@ export const listPayrollRuns = createServerFn({ method: 'POST' })
 // ============================================
 
 export const createPayrollRun = createServerFn({ method: 'POST' })
-  .middleware([authMiddleware])
+  .middleware([adminMiddleware])
   .inputValidator((input: unknown) => CreatePayrollRunSchema.parse(input))
   .handler(async ({ data, context }) => {
     const prisma = await getPrisma();
@@ -254,7 +254,7 @@ export const updatePayrollSlip = createServerFn({ method: 'POST' })
 // ============================================
 
 export const confirmPayrollRun = createServerFn({ method: 'POST' })
-  .middleware([authMiddleware])
+  .middleware([adminMiddleware])
   .inputValidator((input: unknown) => ConfirmPayrollRunSchema.parse(input))
   .handler(async ({ data, context }) => {
     const prisma = await getPrisma();
@@ -323,7 +323,7 @@ export const confirmPayrollRun = createServerFn({ method: 'POST' })
 // ============================================
 
 export const cancelPayrollRun = createServerFn({ method: 'POST' })
-  .middleware([authMiddleware])
+  .middleware([adminMiddleware])
   .inputValidator((input: unknown) => z.object({ id: z.string().uuid() }).parse(input))
   .handler(async ({ data }) => {
     const prisma = await getPrisma();

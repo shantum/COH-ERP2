@@ -13,7 +13,7 @@
 
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
-import { authMiddleware } from '../middleware/auth';
+import { authMiddleware, adminMiddleware } from '../middleware/auth';
 import { serverLog } from './serverLog';
 import { getPrisma, type PrismaTransaction } from '@coh/shared/services/db';
 
@@ -528,7 +528,7 @@ export const updateBatch = createServerFn({ method: 'POST' })
  * Delete batch
  */
 export const deleteBatch = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
+    .middleware([adminMiddleware])
     .inputValidator((input: unknown) => deleteBatchSchema.parse(input))
     .handler(async ({ data, context }): Promise<MutationResult<DeleteBatchResult>> => {
         const prisma = await getPrisma();
@@ -834,7 +834,7 @@ export const uncompleteBatch = createServerFn({ method: 'POST' })
  * Create tailor
  */
 export const createTailor = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
+    .middleware([adminMiddleware])
     .inputValidator((input: unknown) => createTailorSchema.parse(input))
     .handler(async ({ data }): Promise<MutationResult<CreateTailorResult>> => {
         const prisma = await getPrisma();
@@ -861,7 +861,7 @@ export const createTailor = createServerFn({ method: 'POST' })
  * Update tailor
  */
 export const updateTailor = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
+    .middleware([adminMiddleware])
     .inputValidator((input: unknown) => updateTailorSchema.parse(input))
     .handler(async ({ data }): Promise<MutationResult<UpdateTailorResult>> => {
         const prisma = await getPrisma();
@@ -902,7 +902,7 @@ export const updateTailor = createServerFn({ method: 'POST' })
  * Lock a production date
  */
 export const lockDate = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
+    .middleware([adminMiddleware])
     .inputValidator((input: unknown) => lockDateSchema.parse(input))
     .handler(async ({ data }): Promise<MutationResult<LockDateResult>> => {
         const prisma = await getPrisma();
@@ -928,7 +928,7 @@ export const lockDate = createServerFn({ method: 'POST' })
  * Unlock a production date
  */
 export const unlockDate = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
+    .middleware([adminMiddleware])
     .inputValidator((input: unknown) => lockDateSchema.parse(input))
     .handler(async ({ data }): Promise<MutationResult<LockDateResult>> => {
         const prisma = await getPrisma();

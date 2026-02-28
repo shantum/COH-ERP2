@@ -91,7 +91,8 @@ export interface BackgroundJob {
  */
 export function requireAdminRole(userRole: string, permissions?: string[]): void {
     const isAdmin = userRole === 'admin' || userRole === 'owner';
-    const hasPermission = permissions?.includes('users:create') ?? false;
+    const hasPermission = (permissions?.includes('*') ?? false)
+        || (permissions?.includes('users:create') ?? false);
     if (!isAdmin && !hasPermission) {
         throw new Error('Admin access required');
     }

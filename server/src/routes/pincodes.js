@@ -16,7 +16,7 @@
  */
 
 import { Router } from 'express';
-import { authenticateToken } from '../middleware/auth.js';
+import { authenticateToken, requireAdmin } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { parse } from 'fast-csv';
 import multer from 'multer';
@@ -69,7 +69,7 @@ const upload = multer({
 // UPLOAD PINCODE CSV
 // ============================================
 
-router.post('/upload', authenticateToken, upload.single('file'), asyncHandler(async (req, res) => {
+router.post('/upload', requireAdmin, upload.single('file'), asyncHandler(async (req, res) => {
     const file = req.file;
     if (!file) {
         res.status(400).json({ error: 'No file uploaded' });
