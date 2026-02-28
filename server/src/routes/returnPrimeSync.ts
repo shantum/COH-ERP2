@@ -14,6 +14,7 @@ import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { syncReturnPrimeStatus } from '../utils/returnPrimeSync.js';
 import { authenticateToken } from '../middleware/auth.js';
+import { verifyInternalRequest } from './internal.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { syncLogger } from '../utils/logger.js';
 
@@ -48,7 +49,7 @@ const PushStatusInputSchema = z.object({
  * Fire-and-forget endpoint called by server functions after status transitions.
  * Dispatches async sync to Return Prime — returns immediately.
  */
-router.post('/push-status', asyncHandler(async (req: Request, res: Response): Promise<void> => {
+router.post('/push-status', verifyInternalRequest, asyncHandler(async (req: Request, res: Response): Promise<void> => {
     const validation = PushStatusInputSchema.safeParse(req.body);
     if (!validation.success) {
         res.status(400).json({ success: false, error: 'Invalid input' });

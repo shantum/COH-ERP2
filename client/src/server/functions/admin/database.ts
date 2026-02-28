@@ -64,7 +64,7 @@ export const getDatabaseStats = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .handler(async ({ context }): Promise<MutationResult<DatabaseStats>> => {
         try {
-            requireAdminRole(context.user.role);
+            requireAdminRole(context.user.role, context.permissions);
         } catch {
             return {
                 success: false,
@@ -122,7 +122,7 @@ export const clearTables = createServerFn({ method: 'POST' })
     .inputValidator((input: unknown) => clearTablesSchema.parse(input))
     .handler(async ({ data, context }): Promise<MutationResult<ClearTablesResult>> => {
         try {
-            requireAdminRole(context.user.role);
+            requireAdminRole(context.user.role, context.permissions);
         } catch {
             return {
                 success: false,
@@ -206,7 +206,7 @@ export const getTables = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .handler(async ({ context }): Promise<MutationResult<{ tables: TableInfo[] }>> => {
         try {
-            requireAdminRole(context.user.role);
+            requireAdminRole(context.user.role, context.permissions);
         } catch {
             return {
                 success: false,
@@ -276,7 +276,7 @@ export const inspectTable = createServerFn({ method: 'GET' })
     .inputValidator((input: unknown) => inspectTableSchema.parse(input))
     .handler(async ({ data, context }): Promise<MutationResult<InspectResult>> => {
         try {
-            requireAdminRole(context.user.role);
+            requireAdminRole(context.user.role, context.permissions);
         } catch {
             return {
                 success: false,

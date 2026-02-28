@@ -51,7 +51,7 @@ router.post('/import', authenticateToken, upload.single('file'), asyncHandler(as
       return;
     }
 
-    const userId = (req as unknown as { user?: { userId?: string } }).user?.userId;
+    const userId = req.user?.id;
     let minDate: Date | null = null;
     let maxDate: Date | null = null;
     const channelsFound = new Set<string>();

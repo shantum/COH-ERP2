@@ -10,7 +10,7 @@ import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import { randomUUID } from 'crypto';
 import { z } from 'zod';
-import { authenticateToken } from '../middleware/auth.js';
+import { requireAdmin } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import {
     syncReturnPrimeRequests,
@@ -44,8 +44,8 @@ const upload = multer({
     },
 });
 
-// All routes require authentication
-router.use(authenticateToken);
+// All routes require admin access
+router.use(requireAdmin);
 
 // ============================================
 // INPUT SCHEMAS

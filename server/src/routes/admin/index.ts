@@ -19,17 +19,20 @@
  */
 
 import { Router } from 'express';
+import { requireAdmin } from '../../middleware/auth.js';
 import settingsRouter from './settings.js';
 import rolesRouter from './roles.js';
 import usersRouter from './users.js';
 import inspectRouter from './inspect.js';
 import logsRouter from './logs.js';
 import backgroundJobsRouter from './backgroundJobs.js';
-import gridPreferencesRouter from './gridPreferences.js';
 import sheetOpsRouter from './sheetOps.js';
 import workerRunsRouter from './workerRuns.js';
 
 const router = Router();
+
+// All admin routes require admin access (auth + admin check in one middleware)
+router.use(requireAdmin);
 
 router.use('/', settingsRouter);
 router.use('/', rolesRouter);
@@ -37,7 +40,6 @@ router.use('/', usersRouter);
 router.use('/', inspectRouter);
 router.use('/', logsRouter);
 router.use('/', backgroundJobsRouter);
-router.use('/', gridPreferencesRouter);
 router.use('/', sheetOpsRouter);
 router.use('/', workerRunsRouter);
 

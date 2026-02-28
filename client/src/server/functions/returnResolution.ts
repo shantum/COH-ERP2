@@ -23,7 +23,7 @@ import {
     returnError,
     type ReturnResult,
 } from '@coh/shared/errors';
-import { getInternalApiBaseUrl } from '../utils';
+import { getInternalApiBaseUrl, callInternalApi } from '../utils';
 
 // ============================================
 // EVENT LOGGING + SSE BROADCAST
@@ -61,14 +61,7 @@ async function broadcastReturnUpdate(
  * Fire-and-forget: push ERP status change to Return Prime.
  */
 function pushToReturnPrime(orderLineId: string, erpStatus: string): void {
-    const baseUrl = getInternalApiBaseUrl();
-    fetch(`${baseUrl}/api/returnprime/push-status`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orderLineId, erpStatus }),
-    }).catch((err: unknown) => {
-        serverLog.warn({ domain: 'returns', fn: 'pushToReturnPrime', orderLineId, erpStatus }, 'Fire-and-forget push failed', { error: err instanceof Error ? err.message : String(err) });
-    });
+    callInternalApi('/api/returnprime/push-status', { orderLineId, erpStatus });
 }
 
 /**
@@ -485,16 +478,8 @@ export const createExchangeOrder = createServerFn({ method: 'POST' })
             return newOrder;
         });
 
-        const baseUrl = getInternalApiBaseUrl();
-
         // Push exchange order to "Orders from COH" sheet (fire-and-forget)
-        fetch(`${baseUrl}/api/internal/push-order-to-sheet`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ orderId: exchangeOrder.id }),
-        }).catch((err: unknown) => {
-            serverLog.warn({ domain: 'returns', fn: 'processExchange', orderId: exchangeOrder.id, orderLineId }, 'Sheet push failed (non-critical)', { error: err instanceof Error ? err.message : String(err) });
-        });
+        callInternalApi('/api/internal/push-order-to-sheet', { orderId: exchangeOrder.id });
 
         logReturnEvent('return.exchange_created', orderLineId,
             `Exchange order ${exchangeOrder.orderNumber} created`,

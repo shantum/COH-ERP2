@@ -180,7 +180,7 @@ export const updateAdminGridPreferences = createServerFn({ method: 'POST' })
     .inputValidator((input: unknown) => updateAdminGridPreferencesSchema.parse(input))
     .handler(async ({ data, context }): Promise<MutationResult<AdminGridPreferences>> => {
         try {
-            requireAdminRole(context.user.role);
+            requireAdminRole(context.user.role, context.permissions);
         } catch {
             return {
                 success: false,

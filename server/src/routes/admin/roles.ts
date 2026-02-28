@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import type { Request, Response } from 'express';
-import { authenticateToken, requireAdmin } from '../../middleware/auth.js';
+// Auth handled by admin router-level guard in admin/index.ts
 import { asyncHandler } from '../../middleware/asyncHandler.js';
 import { ValidationError, NotFoundError, BusinessLogicError } from '../../utils/errors.js';
 import logger from '../../utils/logger.js';
@@ -15,7 +15,7 @@ const router = Router();
  * @route GET /api/admin/roles
  * @returns {Object[]} roles - [{ id, name, displayName, permissions, createdAt }]
  */
-router.get('/roles', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.get('/roles', asyncHandler(async (req: Request, res: Response) => {
     const roles = await req.prisma.role.findMany({
         orderBy: { createdAt: 'asc' },
     });
@@ -23,7 +23,7 @@ router.get('/roles', authenticateToken, asyncHandler(async (req: Request, res: R
 }));
 
 // Get single role with user count
-router.get('/roles/:id', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.get('/roles/:id', asyncHandler(async (req: Request, res: Response) => {
     const id = req.params.id as string;
     const role = await req.prisma.role.findUnique({
         where: { id },
@@ -46,7 +46,7 @@ router.get('/roles/:id', authenticateToken, asyncHandler(async (req: Request, re
  * @returns {Object} user - Updated user with roleName
  * @description Prevents changing last Owner role. Forces re-login to apply new permissions.
  */
-router.put('/users/:id/role', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
+router.put('/users/:id/role', asyncHandler(async (req: Request, res: Response) => {
     const { roleId } = req.body as RoleAssignmentBody;
     const id = req.params.id as string;
 
@@ -117,7 +117,7 @@ router.put('/users/:id/role', requireAdmin, asyncHandler(async (req: Request, re
  * @route GET /api/admin/users/:id/permissions
  * @returns {Object} { userId, roleId, roleName, rolePermissions[], overrides: [{ permission, granted }] }
  */
-router.get('/users/:id/permissions', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
+router.get('/users/:id/permissions', asyncHandler(async (req: Request, res: Response) => {
     const id = req.params.id as string;
     const user = await req.prisma.user.findUnique({
         where: { id },
@@ -160,7 +160,7 @@ router.get('/users/:id/permissions', requireAdmin, asyncHandler(async (req: Requ
  * @param {Object[]} body.overrides - [{ permission: 'orders:read', granted: true }]
  * @description Only stores overrides that differ from role defaults. Auto-deletes overrides matching role. Forces re-login.
  */
-router.put('/users/:id/permissions', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
+router.put('/users/:id/permissions', asyncHandler(async (req: Request, res: Response) => {
     const { overrides } = req.body as PermissionsUpdateBody;
     const id = req.params.id as string;
 

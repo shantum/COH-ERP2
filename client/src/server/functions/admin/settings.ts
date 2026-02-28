@@ -99,7 +99,7 @@ export const updateChannels = createServerFn({ method: 'POST' })
     .inputValidator((input: unknown) => updateChannelsSchema.parse(input))
     .handler(async ({ data, context }): Promise<MutationResult<Channel[]>> => {
         try {
-            requireAdminRole(context.user.role);
+            requireAdminRole(context.user.role, context.permissions);
         } catch {
             return {
                 success: false,
@@ -151,7 +151,7 @@ export const updateTierThresholds = createServerFn({ method: 'POST' })
     .inputValidator((input: unknown) => updateTierThresholdsSchema.parse(input))
     .handler(async ({ data, context }): Promise<MutationResult<TierThresholds>> => {
         try {
-            requireAdminRole(context.user.role);
+            requireAdminRole(context.user.role, context.permissions);
         } catch {
             return {
                 success: false,
@@ -233,7 +233,7 @@ export const updateCostConfig = createServerFn({ method: 'POST' })
     .inputValidator((input: unknown) => updateCostConfigSchema.parse(input))
     .handler(async ({ data, context }): Promise<MutationResult<CostConfig>> => {
         try {
-            requireAdminRole(context.user.role);
+            requireAdminRole(context.user.role, context.permissions);
         } catch {
             return {
                 success: false,
@@ -318,7 +318,7 @@ export const updateSidebarOrder = createServerFn({ method: 'POST' })
     .inputValidator((input: unknown) => updateSidebarOrderSchema.parse(input))
     .handler(async ({ data, context }): Promise<MutationResult<{ updated: boolean }>> => {
         try {
-            requireAdminRole(context.user.role);
+            requireAdminRole(context.user.role, context.permissions);
         } catch {
             return {
                 success: false,

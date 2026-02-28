@@ -13,7 +13,7 @@ import { asyncHandler } from '../middleware/asyncHandler.js';
 import logger from '../utils/logger.js';
 import { parseNykaaReport } from '../services/marketplacePayout/parseNykaaReport.js';
 import { previewReport, confirmReport } from '../services/marketplacePayout/reconcile.js';
-import prisma from '../lib/prisma.js';
+// prisma accessed via req.prisma (request-scoped)
 
 const log = logger.child({ module: 'marketplacePayout' });
 const router = Router();
@@ -78,8 +78,8 @@ router.post('/confirm/:reportId', requireAdmin, asyncHandler(async (req: Request
 // GET /reports — List all marketplace payout reports
 // ============================================
 
-router.get('/reports', requireAdmin, asyncHandler(async (_req: Request, res: Response) => {
-  const reports = await prisma.marketplacePayoutReport.findMany({
+router.get('/reports', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
+  const reports = await req.prisma.marketplacePayoutReport.findMany({
     orderBy: { createdAt: 'desc' },
     select: {
       id: true,

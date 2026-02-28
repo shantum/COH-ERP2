@@ -8,16 +8,9 @@
 'use server';
 
 import { createServerFn } from '@tanstack/react-start';
-import { getCookie } from '@tanstack/react-start/server';
 import { z } from 'zod';
-import { authMiddleware } from '../middleware/auth';
-
-function getApiBaseUrl(): string {
-    const port = process.env.PORT || '3001';
-    return process.env.NODE_ENV === 'production'
-        ? `http://127.0.0.1:${port}`
-        : 'http://localhost:3001';
-}
+import { adminMiddleware } from '../middleware/auth';
+import { internalFetch } from '../utils';
 
 // ============================================
 // SCHEMAS
@@ -45,23 +38,12 @@ const statusSchema = z.object({
  * Plan sync from Google Sheets URL
  */
 export const planSyncFromSheet = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
+    .middleware([adminMiddleware])
     .inputValidator((input: unknown) => planFromSheetSchema.parse(input))
-    .handler(async ({ data, context }) => {
-        if (context.user.role !== 'admin') {
-            return { success: false as const, error: 'Admin access required' };
-        }
-
-        const baseUrl = getApiBaseUrl();
-        const authToken = getCookie('auth_token');
-
+    .handler(async ({ data }) => {
         try {
-            const response = await fetch(`${baseUrl}/api/admin/sheet-sync/plan`, {
+            const response = await internalFetch('/api/admin/sheet-sync/plan', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
-                },
                 body: JSON.stringify(data),
             });
 
@@ -85,23 +67,12 @@ export const planSyncFromSheet = createServerFn({ method: 'POST' })
  * Execute a planned sync job
  */
 export const executeSyncJob = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
+    .middleware([adminMiddleware])
     .inputValidator((input: unknown) => executeSchema.parse(input))
-    .handler(async ({ data, context }) => {
-        if (context.user.role !== 'admin') {
-            return { success: false as const, error: 'Admin access required' };
-        }
-
-        const baseUrl = getApiBaseUrl();
-        const authToken = getCookie('auth_token');
-
+    .handler(async ({ data }) => {
         try {
-            const response = await fetch(`${baseUrl}/api/admin/sheet-sync/execute`, {
+            const response = await internalFetch('/api/admin/sheet-sync/execute', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
-                },
                 body: JSON.stringify(data),
             });
 
@@ -125,26 +96,15 @@ export const executeSyncJob = createServerFn({ method: 'POST' })
  * Get sync job status (for polling)
  */
 export const getSyncJobStatus = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
+    .middleware([adminMiddleware])
     .inputValidator((input: unknown) => statusSchema.parse(input))
-    .handler(async ({ data, context }) => {
-        if (context.user.role !== 'admin') {
-            return { success: false as const, error: 'Admin access required' };
-        }
-
-        const baseUrl = getApiBaseUrl();
-        const authToken = getCookie('auth_token');
-
+    .handler(async ({ data }) => {
         try {
-            const url = data.jobId
-                ? `${baseUrl}/api/admin/sheet-sync/status?jobId=${data.jobId}`
-                : `${baseUrl}/api/admin/sheet-sync/status`;
+            const path = data.jobId
+                ? `/api/admin/sheet-sync/status?jobId=${data.jobId}`
+                : '/api/admin/sheet-sync/status';
 
-            const response = await fetch(url, {
-                headers: {
-                    ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
-                },
-            });
+            const response = await internalFetch(path);
 
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({}));

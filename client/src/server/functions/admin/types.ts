@@ -85,21 +85,14 @@ export interface BackgroundJob {
 // ============================================
 
 /**
- * Get API base URL for internal server-to-server calls
+ * Check if user has admin-level access.
+ * Accepts admin role, owner role, or users:create permission.
+ * Matches Express-side hasAdminAccess() logic from shared/services/auth.
  */
-export function getApiBaseUrl(): string {
-    const port = process.env.PORT || '3001';
-    return process.env.NODE_ENV === 'production'
-        ? `http://127.0.0.1:${port}` // Same server in production
-        : 'http://localhost:3001'; // Separate dev server
-}
-
-/**
- * Legacy admin check - use for backward compatibility
- * Checks if user has admin/owner role
- */
-export function requireAdminRole(userRole: string): void {
-    if (userRole !== 'admin' && userRole !== 'owner') {
+export function requireAdminRole(userRole: string, permissions?: string[]): void {
+    const isAdmin = userRole === 'admin' || userRole === 'owner';
+    const hasPermission = permissions?.includes('users:create') ?? false;
+    if (!isAdmin && !hasPermission) {
         throw new Error('Admin access required');
     }
 }

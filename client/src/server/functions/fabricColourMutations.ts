@@ -278,7 +278,9 @@ export const deleteFabricColourTransaction = createServerFn({ method: 'POST' })
 
         try {
             // Check if user is admin
-            if (context.user.role !== 'admin') {
+            const isAdmin = context.user.role === 'admin' || context.user.role === 'owner'
+                || context.permissions?.includes('users:create');
+            if (!isAdmin) {
                 return {
                     success: false,
                     error: {

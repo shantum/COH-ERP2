@@ -2,7 +2,7 @@
 import { Router } from 'express';
 import type { Request, Response } from 'express';
 import type { PrismaClient } from '@prisma/client';
-import { authenticateToken } from '../../middleware/auth.js';
+import { authenticateToken, requireAdmin } from '../../middleware/auth.js';
 import asyncHandler from '../../middleware/asyncHandler.js';
 import { ValidationError, ExternalServiceError, NotFoundError } from '../../utils/errors.js';
 import shopifyClient from '../../services/shopify/index.js';
@@ -318,7 +318,7 @@ async function backfillLineItemsJson(prisma: PrismaClient, batchSize = 500): Pro
 // PRODUCT SYNC
 // ============================================
 
-router.post('/products', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.post('/products', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
   await shopifyClient.loadFromDatabase();
   if (!shopifyClient.isConfigured()) {
     throw new ValidationError('Shopify is not configured');
@@ -359,7 +359,7 @@ router.post('/products', authenticateToken, asyncHandler(async (req: Request, re
 // CUSTOMER SYNC
 // ============================================
 
-router.post('/customers', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.post('/customers', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
   await shopifyClient.loadFromDatabase();
   if (!shopifyClient.isConfigured()) {
     throw new ValidationError('Shopify is not configured');
@@ -394,7 +394,7 @@ router.post('/customers', authenticateToken, asyncHandler(async (req: Request, r
   }
 }));
 
-router.post('/customers/all', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.post('/customers/all', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
   await shopifyClient.loadFromDatabase();
   if (!shopifyClient.isConfigured()) {
     throw new ValidationError('Shopify is not configured');
@@ -414,7 +414,7 @@ router.post('/customers/all', authenticateToken, asyncHandler(async (req: Reques
 // UNIFIED BACKFILL
 // ============================================
 
-router.post('/backfill', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.post('/backfill', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
   const { fields = ['all'], batchSize = 5000 } = req.body as { fields?: string[]; batchSize?: number };
 
   shopifyLogger.info({ fields, batchSize }, 'Unified backfill starting');
@@ -451,7 +451,7 @@ router.post('/backfill', authenticateToken, asyncHandler(async (req: Request, re
 // BACKFILL FULFILLMENTS (re-sync tracking to order lines)
 // ============================================
 
-router.post('/backfill-fulfillments', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.post('/backfill-fulfillments', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
   const { batchSize = 500, daysBack, skip = 0 } = req.body as { batchSize?: number; daysBack?: number; skip?: number };
 
   // Find orders with fulfillment data in cache
@@ -523,7 +523,7 @@ router.post('/backfill-fulfillments', authenticateToken, asyncHandler(async (req
 // REPROCESS CACHE
 // ============================================
 
-router.post('/reprocess-cache', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.post('/reprocess-cache', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
   const failedEntries = await req.prisma.shopifyOrderCache.findMany({
     where: {
       OR: [{ processedAt: null }, { processingError: { not: null } }]
@@ -569,7 +569,7 @@ router.post('/reprocess-cache', authenticateToken, asyncHandler(async (req: Requ
 // FULL DUMP
 // ============================================
 
-router.post('/full-dump', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.post('/full-dump', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
   const { daysBack } = req.body as { daysBack?: number };
 
   await shopifyClient.loadFromDatabase();
@@ -647,7 +647,7 @@ router.post('/full-dump', authenticateToken, asyncHandler(async (req: Request, r
 // PROCESS CACHE
 // ============================================
 
-router.post('/process-cache', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.post('/process-cache', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
   const { limit = 500, retryFailed = false, concurrency = 10 } = req.body as {
     limit?: number;
     retryFailed?: boolean;

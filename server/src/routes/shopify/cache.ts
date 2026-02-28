@@ -1,7 +1,7 @@
 // Shopify cache status and maintenance endpoints
 import { Router } from 'express';
 import type { Request, Response } from 'express';
-import { authenticateToken } from '../../middleware/auth.js';
+import { authenticateToken, requireAdmin } from '../../middleware/auth.js';
 import asyncHandler from '../../middleware/asyncHandler.js';
 import { runAllCleanup, getCacheStats } from '../../utils/cacheCleanup.js';
 import type { CleanupOptions } from './types.js';
@@ -82,7 +82,7 @@ router.get('/full-stats', authenticateToken, asyncHandler(async (req: Request, r
   res.json(await getCacheStats());
 }));
 
-router.post('/cleanup', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.post('/cleanup', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
   const options = req.body as CleanupOptions;
   const results = await runAllCleanup(options);
   res.json({ message: 'Cache cleanup completed', ...results });

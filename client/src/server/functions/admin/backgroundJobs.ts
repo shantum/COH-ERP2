@@ -5,7 +5,7 @@ import { getCookie } from '@tanstack/react-start/server';
 import { z } from 'zod';
 import { authMiddleware } from '../../middleware/auth';
 import { getInternalApiBaseUrl } from '../../utils';
-import { type MutationResult, type BackgroundJob, type JsonValue, requireAdminRole, getApiBaseUrl } from './types';
+import { type MutationResult, type BackgroundJob, type JsonValue, requireAdminRole } from './types';
 
 // ============================================
 // INPUT SCHEMAS
@@ -36,7 +36,7 @@ export const getBackgroundJobs = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .handler(async ({ context }): Promise<MutationResult<BackgroundJob[]>> => {
         try {
-            requireAdminRole(context.user.role);
+            requireAdminRole(context.user.role, context.permissions);
         } catch {
             return {
                 success: false,
@@ -45,7 +45,7 @@ export const getBackgroundJobs = createServerFn({ method: 'GET' })
         }
 
         // Call the Express backend API for background jobs
-        const baseUrl = getApiBaseUrl();
+        const baseUrl = getInternalApiBaseUrl();
         const authToken = getCookie('auth_token');
 
         try {
@@ -81,7 +81,7 @@ export const getSheetOffloadStatus = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .handler(async ({ context }): Promise<MutationResult<Record<string, JsonValue>>> => {
         try {
-            requireAdminRole(context.user.role);
+            requireAdminRole(context.user.role, context.permissions);
         } catch {
             return {
                 success: false,
@@ -89,7 +89,7 @@ export const getSheetOffloadStatus = createServerFn({ method: 'GET' })
             };
         }
 
-        const baseUrl = getApiBaseUrl();
+        const baseUrl = getInternalApiBaseUrl();
         const authToken = getCookie('auth_token');
 
         try {
@@ -125,7 +125,7 @@ export const getCycleProgress = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .handler(async ({ context }): Promise<MutationResult<Record<string, JsonValue>>> => {
         try {
-            requireAdminRole(context.user.role);
+            requireAdminRole(context.user.role, context.permissions);
         } catch {
             return {
                 success: false,
@@ -133,7 +133,7 @@ export const getCycleProgress = createServerFn({ method: 'GET' })
             };
         }
 
-        const baseUrl = getApiBaseUrl();
+        const baseUrl = getInternalApiBaseUrl();
         const authToken = getCookie('auth_token');
 
         try {
@@ -170,7 +170,7 @@ export const startBackgroundJob = createServerFn({ method: 'POST' })
     .inputValidator((input: unknown) => startBackgroundJobSchema.parse(input))
     .handler(async ({ data, context }): Promise<MutationResult<{ triggered: boolean; result?: JsonValue }>> => {
         try {
-            requireAdminRole(context.user.role);
+            requireAdminRole(context.user.role, context.permissions);
         } catch {
             return {
                 success: false,
@@ -181,7 +181,7 @@ export const startBackgroundJob = createServerFn({ method: 'POST' })
         const { jobId } = data;
 
         // Call the Express backend API to trigger the job
-        const baseUrl = getApiBaseUrl();
+        const baseUrl = getInternalApiBaseUrl();
         const authToken = getCookie('auth_token');
 
         try {
@@ -221,7 +221,7 @@ export const cancelBackgroundJob = createServerFn({ method: 'POST' })
     .inputValidator((input: unknown) => cancelBackgroundJobSchema.parse(input))
     .handler(async ({ data, context }): Promise<MutationResult<{ cancelled: boolean }>> => {
         try {
-            requireAdminRole(context.user.role);
+            requireAdminRole(context.user.role, context.permissions);
         } catch {
             return {
                 success: false,
@@ -232,14 +232,10 @@ export const cancelBackgroundJob = createServerFn({ method: 'POST' })
         const { jobId } = data;
 
         // Call the Express backend API to update job settings (disable)
-        const baseUrl = getInternalApiBaseUrl();
-
         try {
-            const response = await fetch(`${baseUrl}/api/admin/background-jobs/${jobId}`, {
+            const { internalFetch } = await import('../../utils');
+            const response = await internalFetch(`/api/admin/background-jobs/${jobId}`, {
                 method: 'PUT',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
                 body: JSON.stringify({ enabled: false }),
             });
 
@@ -269,7 +265,7 @@ export const updateBackgroundJob = createServerFn({ method: 'POST' })
     .inputValidator((input: unknown) => updateBackgroundJobSchema.parse(input))
     .handler(async ({ data, context }): Promise<MutationResult<{ updated: boolean }>> => {
         try {
-            requireAdminRole(context.user.role);
+            requireAdminRole(context.user.role, context.permissions);
         } catch {
             return {
                 success: false,
@@ -280,7 +276,7 @@ export const updateBackgroundJob = createServerFn({ method: 'POST' })
         const { jobId, enabled } = data;
 
         // Call the Express backend API to update job settings
-        const baseUrl = getApiBaseUrl();
+        const baseUrl = getInternalApiBaseUrl();
         const authToken = getCookie('auth_token');
 
         try {

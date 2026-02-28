@@ -13,7 +13,7 @@ import { asyncHandler } from '../middleware/asyncHandler.js';
 import logger from '../utils/logger.js';
 import { parseRazorpayReport } from '../services/razorpaySettlement/parseRazorpayReport.js';
 import { previewReport, confirmReport } from '../services/razorpaySettlement/reconcile.js';
-import prisma from '../lib/prisma.js';
+// prisma accessed via req.prisma (request-scoped)
 
 const log = logger.child({ module: 'razorpaySettlement' });
 const router = Router();
@@ -80,8 +80,8 @@ router.post('/confirm/:reportId', requireAdmin, asyncHandler(async (req: Request
 // GET /reports — List all Razorpay settlement reports
 // ============================================
 
-router.get('/reports', requireAdmin, asyncHandler(async (_req: Request, res: Response) => {
-  const reports = await prisma.marketplacePayoutReport.findMany({
+router.get('/reports', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
+  const reports = await req.prisma.marketplacePayoutReport.findMany({
     where: { marketplace: 'razorpay' },
     orderBy: { createdAt: 'desc' },
     select: {

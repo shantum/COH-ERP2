@@ -1,8 +1,7 @@
 import { Router } from 'express';
 import type { Request, Response } from 'express';
-import { authenticateToken } from '../../middleware/auth.js';
+// Auth handled by admin router-level guard in admin/index.ts
 import { asyncHandler } from '../../middleware/asyncHandler.js';
-import prismaClient from '../../lib/prisma.js';
 
 const router = Router();
 
@@ -14,7 +13,7 @@ const router = Router();
  * @query {number} [limit=50] - Max rows
  * @query {number} [offset=0] - Pagination offset
  */
-router.get('/worker-runs', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.get('/worker-runs', asyncHandler(async (req: Request, res: Response) => {
     const workerName = req.query.workerName as string | undefined;
     const status = req.query.status as string | undefined;
     const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
@@ -25,13 +24,13 @@ router.get('/worker-runs', authenticateToken, asyncHandler(async (req: Request, 
     if (status) where.status = status;
 
     const [runs, total] = await Promise.all([
-        prismaClient.workerRun.findMany({
+        req.prisma.workerRun.findMany({
             where,
             orderBy: { startedAt: 'desc' },
             take: limit,
             skip: offset,
         }),
-        prismaClient.workerRun.count({ where }),
+        req.prisma.workerRun.count({ where }),
     ]);
 
     res.json({ runs, total });
@@ -41,11 +40,11 @@ router.get('/worker-runs', authenticateToken, asyncHandler(async (req: Request, 
  * Get per-worker summary stats (last 24h counts, avg duration, last run)
  * @route GET /api/admin/worker-runs/summary
  */
-router.get('/worker-runs/summary', authenticateToken, asyncHandler(async (_req: Request, res: Response) => {
+router.get('/worker-runs/summary', asyncHandler(async (req: Request, res: Response) => {
     const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
     // Get all runs from last 24h
-    const recentRuns = await prismaClient.workerRun.findMany({
+    const recentRuns = await req.prisma.workerRun.findMany({
         where: { startedAt: { gte: since24h } },
         select: {
             workerName: true,
@@ -57,7 +56,7 @@ router.get('/worker-runs/summary', authenticateToken, asyncHandler(async (_req: 
     });
 
     // Get last run per worker (regardless of time window)
-    const lastRuns = await prismaClient.workerRun.findMany({
+    const lastRuns = await req.prisma.workerRun.findMany({
         orderBy: { startedAt: 'desc' },
         distinct: ['workerName'],
         select: {

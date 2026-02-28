@@ -37,7 +37,7 @@ const INTERNAL_API_SECRET = process.env.INTERNAL_API_SECRET;
  * 1. X-Internal-Secret header matching the secret
  * 2. Request from localhost (for dev/same-server calls)
  */
-function verifyInternalRequest(req: Request, res: Response, next: NextFunction): void {
+export function verifyInternalRequest(req: Request, res: Response, next: NextFunction): void {
     const secret = req.headers['x-internal-secret'];
     const forwardedFor = req.headers['x-forwarded-for'];
     const remoteAddress = req.socket?.remoteAddress || req.ip;

@@ -6,7 +6,7 @@
  */
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
-import { authenticateToken } from '../../middleware/auth.js';
+import { authenticateToken, requireAdmin } from '../../middleware/auth.js';
 import { asyncHandler } from '../../middleware/asyncHandler.js';
 import shopifyClient from '../../services/shopify/index.js';
 import { shopifyLogger } from '../../utils/logger.js';
@@ -40,7 +40,7 @@ const PushCategorySchema = z.object({
  * Push specific metafield values from ERP to Shopify.
  * Body: { shopifyProductId: string, fields: { [fieldKey]: value } }
  */
-router.post('/push', authenticateToken, asyncHandler(async (req: Request, res: Response): Promise<void> => {
+router.post('/push', requireAdmin, asyncHandler(async (req: Request, res: Response): Promise<void> => {
     if (!shopifyClient.isConfigured()) {
         res.status(400).json({ error: 'Shopify is not configured' });
         return;
@@ -73,7 +73,7 @@ router.post('/push', authenticateToken, asyncHandler(async (req: Request, res: R
  * Push Google product category to Shopify via taxonomy node.
  * Body: { shopifyProductId: string, googleCategoryId: number }
  */
-router.post('/push-category', authenticateToken, asyncHandler(async (req: Request, res: Response): Promise<void> => {
+router.post('/push-category', requireAdmin, asyncHandler(async (req: Request, res: Response): Promise<void> => {
     if (!shopifyClient.isConfigured()) {
         res.status(400).json({ error: 'Shopify is not configured' });
         return;

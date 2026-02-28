@@ -1,7 +1,7 @@
 // Shopify background jobs - sync jobs, scheduler, cache processor, dump worker
 import { Router } from 'express';
 import type { Request, Response } from 'express';
-import { authenticateToken } from '../../middleware/auth.js';
+import { authenticateToken, requireAdmin } from '../../middleware/auth.js';
 import asyncHandler from '../../middleware/asyncHandler.js';
 import { ValidationError, NotFoundError } from '../../utils/errors.js';
 import syncWorker from '../../services/syncWorker.js';
@@ -15,7 +15,7 @@ const router = Router();
 // SYNC JOBS
 // ============================================
 
-router.post('/start', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.post('/start', authenticateToken, requireAdmin, asyncHandler(async (req: Request, res: Response) => {
   const { jobType, days, syncMode, staleAfterMins } = req.body as {
     jobType: string;
     days?: number;
@@ -56,12 +56,12 @@ router.get('/:id', authenticateToken, asyncHandler(async (req: Request, res: Res
   res.json(job);
 }));
 
-router.post('/:id/resume', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.post('/:id/resume', authenticateToken, requireAdmin, asyncHandler(async (req: Request, res: Response) => {
   const job = await syncWorker.resumeJob(req.params.id as string);
   res.json({ message: 'Job resumed', job });
 }));
 
-router.post('/:id/cancel', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.post('/:id/cancel', authenticateToken, requireAdmin, asyncHandler(async (req: Request, res: Response) => {
   const job = await syncWorker.cancelJob(req.params.id as string);
   res.json({ message: 'Job cancelled', job });
 }));
@@ -74,17 +74,17 @@ router.get('/scheduler/status', authenticateToken, asyncHandler(async (req: Requ
   res.json(scheduledSync.getStatus());
 }));
 
-router.post('/scheduler/trigger', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.post('/scheduler/trigger', authenticateToken, requireAdmin, asyncHandler(async (req: Request, res: Response) => {
   const result = await scheduledSync.triggerSync();
   res.json({ message: 'Sync triggered', result });
 }));
 
-router.post('/scheduler/start', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.post('/scheduler/start', authenticateToken, requireAdmin, asyncHandler(async (req: Request, res: Response) => {
   scheduledSync.start();
   res.json({ message: 'Scheduler started', status: scheduledSync.getStatus() });
 }));
 
-router.post('/scheduler/stop', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.post('/scheduler/stop', authenticateToken, requireAdmin, asyncHandler(async (req: Request, res: Response) => {
   scheduledSync.stop();
   res.json({ message: 'Scheduler stopped', status: scheduledSync.getStatus() });
 }));
@@ -97,27 +97,27 @@ router.get('/processor/status', authenticateToken, asyncHandler(async (req: Requ
   res.json(await cacheProcessor.getStatusWithPending());
 }));
 
-router.post('/processor/start', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.post('/processor/start', authenticateToken, requireAdmin, asyncHandler(async (req: Request, res: Response) => {
   cacheProcessor.start();
   res.json({ message: 'Cache processor started', ...(await cacheProcessor.getStatusWithPending()) });
 }));
 
-router.post('/processor/stop', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.post('/processor/stop', authenticateToken, requireAdmin, asyncHandler(async (req: Request, res: Response) => {
   cacheProcessor.stop();
   res.json({ message: 'Cache processor stopped', ...cacheProcessor.getStatus() });
 }));
 
-router.post('/processor/pause', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.post('/processor/pause', authenticateToken, requireAdmin, asyncHandler(async (req: Request, res: Response) => {
   cacheProcessor.pause();
   res.json({ message: 'Cache processor paused', ...cacheProcessor.getStatus() });
 }));
 
-router.post('/processor/resume', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.post('/processor/resume', authenticateToken, requireAdmin, asyncHandler(async (req: Request, res: Response) => {
   cacheProcessor.resume();
   res.json({ message: 'Cache processor resumed', ...cacheProcessor.getStatus() });
 }));
 
-router.post('/processor/trigger', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.post('/processor/trigger', authenticateToken, requireAdmin, asyncHandler(async (req: Request, res: Response) => {
   try {
     const result = await cacheProcessor.triggerBatch();
     res.json({ message: 'Batch triggered', batch: result, ...(await cacheProcessor.getStatusWithPending()) });
@@ -136,12 +136,12 @@ router.get('/dump/status', authenticateToken, asyncHandler(async (req: Request, 
   res.json(await cacheDumpWorker.getStatus());
 }));
 
-router.post('/dump/stop', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.post('/dump/stop', authenticateToken, requireAdmin, asyncHandler(async (req: Request, res: Response) => {
   cacheDumpWorker.stop();
   res.json({ message: 'Cache dump worker stopped', ...(await cacheDumpWorker.getStatus()) });
 }));
 
-router.post('/dump/start', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.post('/dump/start', authenticateToken, requireAdmin, asyncHandler(async (req: Request, res: Response) => {
   const { daysBack } = req.body as { daysBack?: number };
 
   try {
@@ -158,7 +158,7 @@ router.post('/dump/start', authenticateToken, asyncHandler(async (req: Request, 
   }
 }));
 
-router.post('/dump/:id/cancel', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.post('/dump/:id/cancel', authenticateToken, requireAdmin, asyncHandler(async (req: Request, res: Response) => {
   try {
     const job = await cacheDumpWorker.cancelJob(req.params.id as string);
     res.json({ message: 'Cache dump cancelled', job });
@@ -169,7 +169,7 @@ router.post('/dump/:id/cancel', authenticateToken, asyncHandler(async (req: Requ
   }
 }));
 
-router.post('/dump/:id/resume', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.post('/dump/:id/resume', authenticateToken, requireAdmin, asyncHandler(async (req: Request, res: Response) => {
   try {
     const job = await cacheDumpWorker.resumeJob(req.params.id as string);
     res.json({ message: 'Cache dump resumed', job });

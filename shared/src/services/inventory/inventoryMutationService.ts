@@ -220,6 +220,7 @@ export async function invalidateInventoryCaches(
     skuIds: string[],
     internalApiBaseUrl: string,
     balancesBySkuId?: Map<string, { currentBalance: number; availableBalance: number }>,
+    internalHeaders?: Record<string, string>,
 ): Promise<void> {
     // 1. Invalidate cache
     try {
@@ -232,7 +233,7 @@ export async function invalidateInventoryCaches(
     // 2. Push to Google Sheets (fire-and-forget)
     fetch(`${internalApiBaseUrl}/api/internal/push-sku-balances`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: internalHeaders ?? { 'Content-Type': 'application/json' },
         body: JSON.stringify({ skuIds }),
     }).catch(() => {
         console.warn('[inventoryMutationService] Sheet balance push failed (non-critical)');

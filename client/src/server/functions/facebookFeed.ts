@@ -6,8 +6,8 @@
  */
 
 import { createServerFn } from '@tanstack/react-start';
-import { getCookie } from '@tanstack/react-start/server';
 import { authMiddleware } from '../middleware/auth';
+import { callExpressApi } from '../utils';
 
 // ============================================
 // RESULT TYPES
@@ -52,45 +52,7 @@ interface MutationResult<T> {
     };
 }
 
-// ============================================
-// EXPRESS API HELPER (same pattern as shopify.ts)
-// ============================================
-
-async function callExpressApi<T>(
-    path: string,
-    options: RequestInit = {}
-): Promise<T> {
-    const port = process.env.PORT || '3001';
-    const apiUrl =
-        process.env.NODE_ENV === 'production'
-            ? `http://127.0.0.1:${port}`
-            : 'http://localhost:3001';
-
-    const authToken = getCookie('auth_token');
-
-    const response = await fetch(`${apiUrl}${path}`, {
-        ...options,
-        headers: {
-            'Content-Type': 'application/json',
-            ...(authToken ? { Cookie: `auth_token=${authToken}` } : {}),
-            ...options.headers,
-        },
-    });
-
-    if (!response.ok) {
-        const errorBody = await response.text();
-        let errorMessage: string;
-        try {
-            const errorJson = JSON.parse(errorBody) as { error?: string; message?: string };
-            errorMessage = errorJson.error || errorJson.message || `API call failed: ${response.status}`;
-        } catch {
-            errorMessage = `API call failed: ${response.status} - ${errorBody}`;
-        }
-        throw new Error(errorMessage);
-    }
-
-    return response.json() as Promise<T>;
-}
+// callExpressApi imported from ../utils
 
 // ============================================
 // SERVER FUNCTIONS

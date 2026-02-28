@@ -7,11 +7,11 @@
  */
 import { Router } from 'express';
 import type { Request, Response } from 'express';
+import type { PrismaClient } from '@prisma/client';
 import { XMLParser } from 'fast-xml-parser';
-import { authenticateToken } from '../../middleware/auth.js';
+import { authenticateToken, requireAdmin } from '../../middleware/auth.js';
 import asyncHandler from '../../middleware/asyncHandler.js';
 import { shopifyLogger } from '../../utils/logger.js';
-import prisma from '../../lib/prisma.js';
 import {
     FACEBOOK_FEED_URL,
     FEED_HEALTH_CACHE_DURATION_MS,
@@ -180,7 +180,7 @@ function chunk<T>(arr: T[], size: number): T[][] {
 // MAIN COMPARISON LOGIC
 // ============================================
 
-async function buildFeedHealth(): Promise<FeedHealthResult> {
+async function buildFeedHealth(prisma: PrismaClient): Promise<FeedHealthResult> {
     const startTime = Date.now();
 
     // 1. Fetch XML (uses custom https to handle broken TLS on feed server)
@@ -197,7 +197,6 @@ async function buildFeedHealth(): Promise<FeedHealthResult> {
     const productIds = [...new Set(feedItems.map(item => item.itemGroupId).filter(Boolean))];
 
     // 4. Query ERP SKUs by shopifyVariantId — chunked
-    // prisma is the module-level default import
     const erpSkuMap = new Map<string, {
         skuCode: string;
         mrp: number;
@@ -432,7 +431,7 @@ async function buildFeedHealth(): Promise<FeedHealthResult> {
 // ENDPOINT
 // ============================================
 
-router.get('/facebook-feed-health', authenticateToken, asyncHandler(async (_req: Request, res: Response) => {
+router.get('/facebook-feed-health', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
     // Return cached result if fresh enough
     if (cache && Date.now() - cache.fetchedAt < FEED_HEALTH_CACHE_DURATION_MS) {
         log.debug('Returning cached feed health result');
@@ -440,16 +439,16 @@ router.get('/facebook-feed-health', authenticateToken, asyncHandler(async (_req:
         return;
     }
 
-    const result = await buildFeedHealth();
+    const result = await buildFeedHealth(req.prisma);
     cache = { data: result, fetchedAt: Date.now() };
     res.json(result);
 }));
 
 // Force refresh (bypasses cache)
-router.post('/facebook-feed-health/refresh', authenticateToken, asyncHandler(async (_req: Request, res: Response) => {
+router.post('/facebook-feed-health/refresh', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
     log.info('Force-refreshing feed health');
     cache = null;
-    const result = await buildFeedHealth();
+    const result = await buildFeedHealth(req.prisma);
     cache = { data: result, fetchedAt: Date.now() };
     res.json(result);
 }));

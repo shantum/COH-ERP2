@@ -11,9 +11,9 @@
  */
 
 import { createServerFn } from '@tanstack/react-start';
-import { getCookie } from '@tanstack/react-start/server';
 import { z } from 'zod';
-import { authMiddleware } from '../middleware/auth';
+import { authMiddleware, adminMiddleware } from '../middleware/auth';
+import { internalFetch } from '../utils';
 import { serverLog } from './serverLog';
 import type { Prisma } from '@prisma/client';
 import { getPrisma } from '@coh/shared/services/db';
@@ -438,23 +438,11 @@ export const getReturnPrimeSyncStatus = createServerFn({ method: 'POST' })
  * Trigger a manual Return Prime inbound sync via the Express admin route.
  */
 export const triggerReturnPrimeSync = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
+    .middleware([adminMiddleware])
     .handler(async (): Promise<{ success: boolean; message: string }> => {
-        const port = process.env.PORT || '3001';
-        const apiUrl =
-            process.env.NODE_ENV === 'production'
-                ? `http://127.0.0.1:${port}`
-                : 'http://localhost:3001';
-
-        const authToken = getCookie('auth_token');
-
         try {
-            const response = await fetch(`${apiUrl}/api/returnprime/admin/sync`, {
+            const response = await internalFetch('/api/returnprime/admin/sync', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    ...(authToken ? { Cookie: `auth_token=${authToken}` } : {}),
-                },
                 body: JSON.stringify({}),
             });
 
@@ -463,7 +451,7 @@ export const triggerReturnPrimeSync = createServerFn({ method: 'POST' })
                 return { success: false, message: `Sync failed: ${text}` };
             }
 
-            const data = await response.json();
+            const data = await response.json() as { success?: boolean; data?: { created?: number; updated?: number } };
             return {
                 success: data.success ?? true,
                 message: `Synced ${data.data?.created ?? 0} new, ${data.data?.updated ?? 0} updated`,

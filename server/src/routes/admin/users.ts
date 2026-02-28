@@ -1,9 +1,8 @@
 import { Router } from 'express';
 import type { Request, Response } from 'express';
 import crypto from 'crypto';
-import { requireAdmin } from '../../middleware/auth.js';
+// Auth handled by admin router-level guard in admin/index.ts
 import { asyncHandler } from '../../middleware/asyncHandler.js';
-// @ts-ignore - types are available in server context but might fail in client composite build
 import bcrypt from 'bcryptjs';
 import { validatePassword } from '@coh/shared';
 import { ValidationError, NotFoundError, ConflictError, BusinessLogicError } from '../../utils/errors.js';
@@ -41,7 +40,7 @@ const router = Router();
  * @route GET /api/admin/users
  * @returns {Object[]} users - [{ id, email, name, role, roleId, isActive, createdAt, roleName }]
  */
-router.get('/users', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
+router.get('/users', asyncHandler(async (req: Request, res: Response) => {
     const users = await req.prisma.user.findMany({
         select: {
             id: true,
@@ -72,7 +71,7 @@ router.get('/users', requireAdmin, asyncHandler(async (req: Request, res: Respon
 }));
 
 // Get single user
-router.get('/users/:id', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
+router.get('/users/:id', asyncHandler(async (req: Request, res: Response) => {
     const id = req.params.id as string;
     const user = await req.prisma.user.findUnique({
         where: { id },
@@ -103,7 +102,7 @@ router.get('/users/:id', requireAdmin, asyncHandler(async (req: Request, res: Re
  * @param {string} [body.roleId] - New permissions system role UUID
  * @returns {Object} user - Created user
  */
-router.post('/users', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
+router.post('/users', asyncHandler(async (req: Request, res: Response) => {
     const { email, name, phone, role = 'staff', roleId } = req.body as CreateUserBody;
 
     // Validate input
@@ -229,7 +228,7 @@ router.post('/users', requireAdmin, asyncHandler(async (req: Request, res: Respo
  * @param {string} [body.password] - New password (re-hashed)
  * @description Cannot disable/demote last admin user.
  */
-router.put('/users/:id', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
+router.put('/users/:id', asyncHandler(async (req: Request, res: Response) => {
     const { email, name, role, isActive, password } = req.body as UpdateUserBody;
     const id = req.params.id as string;
 
@@ -323,7 +322,7 @@ router.put('/users/:id', requireAdmin, asyncHandler(async (req: Request, res: Re
  * @route DELETE /api/admin/users/:id
  * @description Cannot delete last admin or self.
  */
-router.delete('/users/:id', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
+router.delete('/users/:id', asyncHandler(async (req: Request, res: Response) => {
     const id = req.params.id as string;
     const user = await req.prisma.user.findUnique({
         where: { id },

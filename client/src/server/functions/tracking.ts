@@ -100,12 +100,18 @@ export interface GetLabelResponse {
 // ============================================
 
 function getApiBaseUrl(): string {
-    return process.env.VITE_API_URL || `${getInternalApiBaseUrl()}/api`;
+    return `${getInternalApiBaseUrl()}/api`;
 }
 
 // ============================================
 // SERVER FUNCTIONS
 // ============================================
+
+// TODO: The 4 shipping functions below (getShippingRates, createShipment,
+// cancelShipment, getShippingLabel) call Express endpoints that don't exist yet.
+// The iThink service methods exist in server/src/services/ithinkLogistics/ but
+// are not exposed via Express routes. These will 404 at runtime.
+// Fix: create matching routes in server/src/routes/tracking.ts
 
 /**
  * Get shipping rates from iThink Logistics

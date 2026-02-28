@@ -3,7 +3,8 @@
 import { createServerFn } from '@tanstack/react-start';
 import { getCookie } from '@tanstack/react-start/server';
 import { authMiddleware } from '../../middleware/auth';
-import { type MutationResult, requireAdminRole, getApiBaseUrl } from './types';
+import { type MutationResult, requireAdminRole } from './types';
+import { getInternalApiBaseUrl } from '../../utils';
 
 // ============================================
 // INTERFACES
@@ -45,7 +46,7 @@ export const getSheetsMonitorStats = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .handler(async ({ context }): Promise<MutationResult<SheetsMonitorStats>> => {
         try {
-            requireAdminRole(context.user.role);
+            requireAdminRole(context.user.role, context.permissions);
         } catch {
             return {
                 success: false,
@@ -53,7 +54,7 @@ export const getSheetsMonitorStats = createServerFn({ method: 'GET' })
             };
         }
 
-        const baseUrl = getApiBaseUrl();
+        const baseUrl = getInternalApiBaseUrl();
         const authToken = getCookie('auth_token');
 
         try {

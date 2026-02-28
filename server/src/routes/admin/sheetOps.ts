@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import type { Request, Response } from 'express';
-import { requireAdmin } from '../../middleware/auth.js';
+// Auth handled by admin router-level guard in admin/index.ts
 import { asyncHandler } from '../../middleware/asyncHandler.js';
 import sheetOffloadWorker from '../../services/sheetOffload/index.js';
 
@@ -10,7 +10,7 @@ const router = Router();
  * Get sheet offload worker status including pending buffer counts
  * @route GET /api/admin/sheet-offload/status
  */
-router.get('/sheet-offload/status', requireAdmin, asyncHandler(async (_req: Request, res: Response) => {
+router.get('/sheet-offload/status', asyncHandler(async (_req: Request, res: Response) => {
     const status = sheetOffloadWorker.getStatus();
     const bufferCounts = await sheetOffloadWorker.getBufferCounts();
 
@@ -30,7 +30,7 @@ router.get('/sheet-offload/status', requireAdmin, asyncHandler(async (_req: Requ
  * Get cycle progress for the real-time CLI modal
  * @route GET /api/admin/sheet-offload/cycle-progress
  */
-router.get('/sheet-offload/cycle-progress', requireAdmin, asyncHandler(async (_req: Request, res: Response) => {
+router.get('/sheet-offload/cycle-progress', asyncHandler(async (_req: Request, res: Response) => {
     res.json(sheetOffloadWorker.getCycleProgress());
 }));
 
@@ -39,7 +39,7 @@ router.get('/sheet-offload/cycle-progress', requireAdmin, asyncHandler(async (_r
  * @route POST /api/admin/sheet-offload/trigger
  * @deprecated Use /api/admin/background-jobs/ingest_inward/trigger instead
  */
-router.post('/sheet-offload/trigger', requireAdmin, asyncHandler(async (_req: Request, res: Response) => {
+router.post('/sheet-offload/trigger', asyncHandler(async (_req: Request, res: Response) => {
     const inwardResult = await sheetOffloadWorker.triggerIngestInward();
     const outwardResult = await sheetOffloadWorker.triggerIngestOutward();
 
@@ -58,7 +58,7 @@ router.post('/sheet-offload/trigger', requireAdmin, asyncHandler(async (_req: Re
  * Get sheet monitor stats: inventory totals, ingestion counts, recent sheet transactions
  * @route GET /api/admin/sheet-monitor/stats
  */
-router.get('/sheet-monitor/stats', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
+router.get('/sheet-monitor/stats', asyncHandler(async (req: Request, res: Response) => {
     const prisma = req.prisma;
 
     const [

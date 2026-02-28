@@ -81,7 +81,7 @@ export function reportError(
     };
 
     // Fire-and-forget
-    fetch(`${getApiBaseUrl()}/api/admin/logs/client`, {
+    fetch(`${getApiBaseUrl()}/api/logs/client`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -108,7 +108,7 @@ export function reportWarning(
         },
     };
 
-    fetch(`${getApiBaseUrl()}/api/admin/logs/client`, {
+    fetch(`${getApiBaseUrl()}/api/logs/client`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),

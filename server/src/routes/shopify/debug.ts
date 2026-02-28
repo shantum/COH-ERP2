@@ -1,7 +1,7 @@
 // Shopify debug endpoints - locks, sync progress, circuit breaker
 import { Router } from 'express';
 import type { Request, Response } from 'express';
-import { authenticateToken } from '../../middleware/auth.js';
+import { authenticateToken, requireAdmin } from '../../middleware/auth.js';
 import asyncHandler from '../../middleware/asyncHandler.js';
 import { getOrderLockStatus } from '../../utils/orderLock.js';
 import { getAllCircuitBreakerStatus, resetAllCircuitBreakers, shopifyApiCircuit } from '../../utils/circuitBreaker.js';
@@ -98,7 +98,7 @@ router.get('/circuit-breaker', authenticateToken, asyncHandler(async (_req: Requ
 }));
 
 // POST /circuit-breaker/reset - Reset circuit breaker
-router.post('/circuit-breaker/reset', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.post('/circuit-breaker/reset', authenticateToken, requireAdmin, asyncHandler(async (req: Request, res: Response) => {
   const { name } = req.body as { name?: string };
 
   if (name) {
@@ -142,11 +142,12 @@ router.get('/product-cache/:skuCode', authenticateToken, asyncHandler(async (req
       where: { id: product.shopifyProductId }
     });
     if (cache) {
-      const rawData = JSON.parse(cache.rawData);
+      let rawData: Record<string, unknown> | null = null;
+      try { rawData = JSON.parse(cache.rawData); } catch { /* malformed cache */ }
       primaryCache = {
         cacheId: cache.id,
-        statusInCache: rawData.status,
-        titleInCache: rawData.title,
+        statusInCache: rawData?.status ?? null,
+        titleInCache: rawData?.title ?? null,
         lastWebhookAt: cache.lastWebhookAt,
         processedAt: cache.processedAt
       };
@@ -169,11 +170,12 @@ router.get('/product-cache/:skuCode', authenticateToken, asyncHandler(async (req
       where: { id: variation.shopifySourceProductId }
     });
     if (cache) {
-      const rawData = JSON.parse(cache.rawData);
+      let rawData: Record<string, unknown> | null = null;
+      try { rawData = JSON.parse(cache.rawData); } catch { /* malformed cache */ }
       variationSourceCache = {
         cacheId: cache.id,
-        statusInCache: rawData.status,
-        titleInCache: rawData.title
+        statusInCache: rawData?.status ?? null,
+        titleInCache: rawData?.title ?? null
       };
     }
   }

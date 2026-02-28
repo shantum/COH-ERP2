@@ -19,7 +19,7 @@ import type { Prisma } from '@prisma/client';
 import {
     hasAllocatedInventory as sharedHasAllocatedInventory,
 } from '@coh/shared/domain';
-import { getInternalApiBaseUrl } from '../utils';
+import { callInternalApi } from '../utils';
 import { notifySSE } from '@coh/shared/services/sseBroadcast';
 import { serverLog } from './serverLog';
 
@@ -555,15 +555,8 @@ export const createOrder = createServerFn({ method: 'POST' })
             logEvent({ domain: 'orders', event: 'order.created', entityType: 'Order', entityId: order.id, summary: `Order #${order.orderNumber} — ₹${order.totalAmount.toLocaleString('en-IN')} via ${channel}`, meta: { channel, lineCount: order.orderLines.length, totalAmount: order.totalAmount, paymentMethod, isExchange }, actorId: context.user.id })
         );
 
-        // Push to "Orders from COH" sheet (fire-and-forget, same pattern as SSE broadcast)
-        const sheetBaseUrl = getInternalApiBaseUrl();
-        fetch(`${sheetBaseUrl}/api/internal/push-order-to-sheet`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ orderId: order.id }),
-        }).catch((err: unknown) => {
-            serverLog.warn({ domain: 'orders', fn: 'createOrder', orderId: order.id, orderNumber: order.orderNumber }, 'Sheet push failed (non-critical)', { error: err instanceof Error ? err.message : String(err) });
-        });
+        // Push to "Orders from COH" sheet (fire-and-forget)
+        callInternalApi('/api/internal/push-order-to-sheet', { orderId: order.id });
 
         return {
             success: true,

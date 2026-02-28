@@ -42,6 +42,7 @@ import authRoutes from './routes/auth.js';
 import importExportRoutes from './routes/import-export.js';
 import shopifyRoutes from './routes/shopify/index.js';
 import adminRoutes from './routes/admin/index.js';
+import clientErrorRoutes from './routes/clientErrors.js';
 import webhookRoutes from './routes/webhooks.js';
 // Repacking routes migrated to TanStack Start Server Functions
 import trackingRoutes from './routes/tracking.js';
@@ -152,6 +153,7 @@ app.use('/api/inventory', inventoryReconciliationRoutes);
 app.use('/api', importExportRoutes);
 app.use('/api/shopify', shopifyRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/logs', clientErrorRoutes);
 app.use('/api/webhooks', webhookRoutes);
 // Repacking routes migrated to TanStack Start Server Functions
 // Tracking routes migrated to TanStack Start Server Functions

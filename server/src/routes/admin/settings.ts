@@ -1,6 +1,5 @@
 import { Router } from 'express';
 import type { Request, Response } from 'express';
-import { authenticateToken, requireAdmin } from '../../middleware/auth.js';
 import { asyncHandler } from '../../middleware/asyncHandler.js';
 import { ValidationError } from '../../utils/errors.js';
 import { DEFAULT_TIER_THRESHOLDS, recalculateAllCustomerLtvs } from '../../utils/tierUtils.js';
@@ -17,7 +16,7 @@ const router = Router();
 // at client/src/server/functions/admin/database.ts
 
 // Get order channels
-router.get('/channels', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.get('/channels', asyncHandler(async (req: Request, res: Response) => {
     const setting = await req.prisma.systemSetting.findUnique({
         where: { key: 'order_channels' }
     });
@@ -31,12 +30,17 @@ router.get('/channels', authenticateToken, asyncHandler(async (req: Request, res
         { id: 'myntra', name: 'Myntra' },
     ];
 
-    const channels = setting?.value ? JSON.parse(setting.value) as Channel[] : defaultChannels;
+    let channels: Channel[];
+    try {
+        channels = setting?.value ? JSON.parse(setting.value) as Channel[] : defaultChannels;
+    } catch {
+        channels = defaultChannels;
+    }
     res.json(channels);
 }));
 
 // Update order channels
-router.put('/channels', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.put('/channels', asyncHandler(async (req: Request, res: Response) => {
     const { channels } = req.body as ChannelsUpdateBody;
 
     if (!Array.isArray(channels)) {
@@ -60,18 +64,23 @@ router.put('/channels', authenticateToken, asyncHandler(async (req: Request, res
 }));
 
 // Get sidebar section order
-router.get('/sidebar-order', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.get('/sidebar-order', asyncHandler(async (req: Request, res: Response) => {
     const setting = await req.prisma.systemSetting.findUnique({
         where: { key: 'sidebar_section_order' }
     });
 
     // Return null if not configured (frontend will use default)
-    const order = setting?.value ? JSON.parse(setting.value) as string[] : null;
+    let order: string[] | null;
+    try {
+        order = setting?.value ? JSON.parse(setting.value) as string[] : null;
+    } catch {
+        order = null;
+    }
     res.json(order);
 }));
 
 // Update sidebar section order (admin only)
-router.put('/sidebar-order', authenticateToken, requireAdmin, asyncHandler(async (req: Request, res: Response) => {
+router.put('/sidebar-order', asyncHandler(async (req: Request, res: Response) => {
     const { order } = req.body as { order: string[] };
 
     if (!Array.isArray(order)) {
@@ -95,17 +104,22 @@ router.put('/sidebar-order', authenticateToken, requireAdmin, asyncHandler(async
 }));
 
 // Get tier thresholds
-router.get('/tier-thresholds', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.get('/tier-thresholds', asyncHandler(async (req: Request, res: Response) => {
     const setting = await req.prisma.systemSetting.findUnique({
         where: { key: 'tier_thresholds' }
     });
 
-    const thresholds = setting?.value ? JSON.parse(setting.value) as TierThresholds : DEFAULT_TIER_THRESHOLDS;
+    let thresholds: TierThresholds;
+    try {
+        thresholds = setting?.value ? JSON.parse(setting.value) as TierThresholds : DEFAULT_TIER_THRESHOLDS;
+    } catch {
+        thresholds = DEFAULT_TIER_THRESHOLDS;
+    }
     res.json(thresholds);
 }));
 
 // Update tier thresholds
-router.put('/tier-thresholds', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
+router.put('/tier-thresholds', asyncHandler(async (req: Request, res: Response) => {
     const { platinum, gold, silver } = req.body as TierThresholdsUpdateBody;
 
     // Validate thresholds
@@ -134,7 +148,7 @@ router.put('/tier-thresholds', requireAdmin, asyncHandler(async (req: Request, r
  * @returns {Object} { total, updated, upgrades: [{ customerId, oldTier, newTier, ltv }] }
  * @description Recalculates tier for all customers. Use after threshold changes or data migration.
  */
-router.post('/update-customer-tiers', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
+router.post('/update-customer-tiers', asyncHandler(async (req: Request, res: Response) => {
     const result = await recalculateAllCustomerLtvs(req.prisma);
 
     res.json({
@@ -144,7 +158,7 @@ router.post('/update-customer-tiers', requireAdmin, asyncHandler(async (req: Req
 }));
 
 // Reset and reseed database (Admin only)
-router.post('/reseed', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
+router.post('/reseed', asyncHandler(async (req: Request, res: Response) => {
     const { confirmPhrase } = req.body as { confirmPhrase: string };
 
     if (confirmPhrase !== 'RESEED DATABASE') {

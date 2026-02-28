@@ -1,7 +1,7 @@
 // Shopify configuration and status endpoints
 import { Router } from 'express';
 import type { Request, Response } from 'express';
-import { authenticateToken } from '../../middleware/auth.js';
+import { authenticateToken, requireAdmin } from '../../middleware/auth.js';
 import asyncHandler from '../../middleware/asyncHandler.js';
 import { ValidationError } from '../../utils/errors.js';
 import shopifyClient from '../../services/shopify/index.js';
@@ -29,7 +29,7 @@ router.get('/config', authenticateToken, asyncHandler(async (req: Request, res: 
 }));
 
 // PUT /config - Update Shopify configuration
-router.put('/config', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.put('/config', authenticateToken, requireAdmin, asyncHandler(async (req: Request, res: Response) => {
   const { shopDomain, accessToken } = req.body as { shopDomain?: string; accessToken?: string };
 
   if (!shopDomain || !accessToken) {
@@ -46,7 +46,7 @@ router.put('/config', authenticateToken, asyncHandler(async (req: Request, res: 
 }));
 
 // POST /test-connection - Test Shopify API connection
-router.post('/test-connection', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.post('/test-connection', authenticateToken, requireAdmin, asyncHandler(async (req: Request, res: Response) => {
   await shopifyClient.loadFromDatabase();
 
   const client = shopifyClient as unknown as { shopDomain: string | undefined; accessToken: string | undefined };

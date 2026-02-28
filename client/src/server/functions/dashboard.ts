@@ -574,9 +574,11 @@ export const getWorkerStatuses = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .handler(async (): Promise<WorkerStatusResponse> => {
         try {
-            const { getInternalApiBaseUrl } = await import('../utils');
+            const { getInternalApiBaseUrl, getInternalHeaders } = await import('../utils');
             const baseUrl = getInternalApiBaseUrl();
-            const response = await fetch(`${baseUrl}/api/internal/worker-status`);
+            const response = await fetch(`${baseUrl}/api/internal/worker-status`, {
+                headers: getInternalHeaders(),
+            });
 
             if (!response.ok) {
                 throw new Error(`Worker status request failed: ${response.status}`);

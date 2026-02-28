@@ -12,7 +12,7 @@ import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth';
 import { getPrisma, type PrismaTransaction } from '@coh/shared/services/db';
-import { getInternalApiBaseUrl } from '../utils';
+import { getInternalApiBaseUrl, getInternalHeaders } from '../utils';
 
 // Dynamic import helper for the shared mutation service (prevents bundling server code into client)
 async function getMutationService() {
@@ -283,7 +283,7 @@ async function postMutationInvalidate(
     balancesBySkuId?: Map<string, { currentBalance: number; availableBalance: number }>,
 ): Promise<void> {
     const { invalidateInventoryCaches } = await getMutationService();
-    await invalidateInventoryCaches(skuIds, getInternalApiBaseUrl(), balancesBySkuId);
+    await invalidateInventoryCaches(skuIds, getInternalApiBaseUrl(), balancesBySkuId, getInternalHeaders());
 }
 
 /**
@@ -612,7 +612,9 @@ export const deleteInward = createServerFn({ method: 'POST' })
         const { transactionId, force } = data;
 
         // Check admin for force delete before transaction (reads auth context, not DB)
-        if (force && context.user.role !== 'admin') {
+        const isAdmin = context.user.role === 'admin' || context.user.role === 'owner'
+            || context.permissions?.includes('users:create');
+        if (force && !isAdmin) {
             return {
                 success: false,
                 error: { code: 'FORBIDDEN', message: 'Force delete requires admin role' },

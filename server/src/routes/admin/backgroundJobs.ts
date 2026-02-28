@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import type { Request, Response } from 'express';
-import { authenticateToken, requireAdmin } from '../../middleware/auth.js';
+// Auth handled by admin router-level guard in admin/index.ts
 import { asyncHandler } from '../../middleware/asyncHandler.js';
 import { ValidationError } from '../../utils/errors.js';
 import scheduledSync from '../../services/scheduledSync.js';
@@ -23,7 +23,7 @@ const router = Router();
  * @returns {Object} { jobs: [{ id, name, description, enabled, intervalMinutes?, schedule?, isRunning, lastRunAt, lastResult }] }
  * @description Jobs: shopify_sync (24hr lookback), tracking_sync (30min updates), cache_cleanup (daily 2AM), auto_archive (on startup).
  */
-router.get('/background-jobs', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.get('/background-jobs', asyncHandler(async (req: Request, res: Response) => {
     // Get sync service statuses
     const shopifyStatus = scheduledSync.getStatus();
     const trackingStatus = trackingSync.getStatus();
@@ -36,7 +36,8 @@ router.get('/background-jobs', authenticateToken, asyncHandler(async (req: Reque
     const settings = await req.prisma.systemSetting.findUnique({
         where: { key: 'background_jobs' }
     });
-    const savedSettings = settings?.value ? JSON.parse(settings.value) as Record<string, unknown> : {};
+    let savedSettings: Record<string, unknown> = {};
+    try { savedSettings = settings?.value ? JSON.parse(settings.value) as Record<string, unknown> : {}; } catch { /* malformed */ }
 
     const jobs: BackgroundJob[] = [
         {
@@ -269,7 +270,7 @@ router.get('/background-jobs', authenticateToken, asyncHandler(async (req: Reque
  * @returns {Object} { message, result }
  * @description Saves cache_cleanup result to SystemSetting for persistence.
  */
-router.post('/background-jobs/:jobId/trigger', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
+router.post('/background-jobs/:jobId/trigger', asyncHandler(async (req: Request, res: Response) => {
     const { jobId } = req.params as { jobId: JobId };
 
     switch (jobId) {
@@ -296,7 +297,8 @@ router.post('/background-jobs/:jobId/trigger', requireAdmin, asyncHandler(async 
             const existingSettings = await req.prisma.systemSetting.findUnique({
                 where: { key: 'background_jobs' }
             });
-            const savedSettings = existingSettings?.value ? JSON.parse(existingSettings.value) as Record<string, unknown> : {};
+            let savedSettings: Record<string, unknown> = {};
+            try { savedSettings = existingSettings?.value ? JSON.parse(existingSettings.value) as Record<string, unknown> : {}; } catch { /* malformed */ }
             savedSettings.lastCacheCleanupAt = new Date().toISOString();
             savedSettings.lastCacheCleanupResult = result.summary;
 
@@ -439,7 +441,7 @@ router.post('/background-jobs/:jobId/trigger', requireAdmin, asyncHandler(async 
  * Currently just tracks enabled/disabled state for cache cleanup
  * (Shopify and tracking sync are controlled by their services)
  */
-router.put('/background-jobs/:jobId', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
+router.put('/background-jobs/:jobId', asyncHandler(async (req: Request, res: Response) => {
     const { jobId } = req.params;
     const { enabled } = req.body as JobUpdateBody;
 
@@ -447,7 +449,8 @@ router.put('/background-jobs/:jobId', requireAdmin, asyncHandler(async (req: Req
     const existingSettings = await req.prisma.systemSetting.findUnique({
         where: { key: 'background_jobs' }
     });
-    const savedSettings = existingSettings?.value ? JSON.parse(existingSettings.value) as Record<string, unknown> : {};
+    let savedSettings: Record<string, unknown> = {};
+            try { savedSettings = existingSettings?.value ? JSON.parse(existingSettings.value) as Record<string, unknown> : {}; } catch { /* malformed */ }
 
     switch (jobId) {
         case 'cache_cleanup':

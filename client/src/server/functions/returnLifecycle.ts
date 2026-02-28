@@ -11,7 +11,7 @@ import { z } from 'zod';
 import { authMiddleware, type AuthUser } from '../middleware/auth';
 import { serverLog } from './serverLog';
 import { getPrisma, type PrismaTransaction } from '@coh/shared/services/db';
-import { getInternalApiBaseUrl } from '../utils';
+import { getInternalApiBaseUrl, callInternalApi } from '../utils';
 import type { PrismaClient } from '@prisma/client';
 
 import {
@@ -72,14 +72,7 @@ async function broadcastReturnUpdate(
  * Calls the Express endpoint which handles RP API + error capture for retry.
  */
 function pushToReturnPrime(orderLineId: string, erpStatus: string): void {
-    const baseUrl = getInternalApiBaseUrl();
-    fetch(`${baseUrl}/api/returnprime/push-status`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orderLineId, erpStatus }),
-    }).catch((err: unknown) => {
-        serverLog.warn({ domain: 'returns', fn: 'pushToReturnPrime', orderLineId, erpStatus }, 'Fire-and-forget push failed', { error: err instanceof Error ? err.message : String(err) });
-    });
+    callInternalApi('/api/returnprime/push-status', { orderLineId, erpStatus });
 }
 
 /**

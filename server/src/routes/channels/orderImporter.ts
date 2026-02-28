@@ -32,7 +32,7 @@ export async function executeImport(req: Request, res: Response): Promise<void> 
   const rawRows: BtReportRow[] = (cacheKey ? getCsvCache(cacheKey) : null) ?? [];
   if (cacheKey) deleteCsvCache(cacheKey); // One-time use
 
-  const userId = (req as unknown as { user?: { userId?: string } }).user?.userId;
+  const userId = req.user?.id;
 
   // Create import batch
   const importBatch = await req.prisma.channelImportBatch.create({

@@ -4,7 +4,8 @@ import { createServerFn } from '@tanstack/react-start';
 import { getCookie } from '@tanstack/react-start/server';
 import { z } from 'zod';
 import { authMiddleware } from '../../middleware/auth';
-import { type MutationResult, type JsonValue, requireAdminRole, getApiBaseUrl } from './types';
+import { type MutationResult, type JsonValue, requireAdminRole } from './types';
+import { getInternalApiBaseUrl } from '../../utils';
 
 // ============================================
 // INTERFACES
@@ -53,7 +54,7 @@ export const getWorkerRunHistory = createServerFn({ method: 'GET' })
     .inputValidator((input: unknown) => getWorkerRunHistorySchema.parse(input))
     .handler(async ({ data, context }): Promise<MutationResult<{ runs: WorkerRunEntry[]; total: number }>> => {
         try {
-            requireAdminRole(context.user.role);
+            requireAdminRole(context.user.role, context.permissions);
         } catch {
             return {
                 success: false,
@@ -61,7 +62,7 @@ export const getWorkerRunHistory = createServerFn({ method: 'GET' })
             };
         }
 
-        const baseUrl = getApiBaseUrl();
+        const baseUrl = getInternalApiBaseUrl();
         const authToken = getCookie('auth_token');
 
         const params = new URLSearchParams();
@@ -102,7 +103,7 @@ export const getWorkerRunSummary = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .handler(async ({ context }): Promise<MutationResult<Record<string, WorkerRunSummaryEntry>>> => {
         try {
-            requireAdminRole(context.user.role);
+            requireAdminRole(context.user.role, context.permissions);
         } catch {
             return {
                 success: false,
@@ -110,7 +111,7 @@ export const getWorkerRunSummary = createServerFn({ method: 'GET' })
             };
         }
 
-        const baseUrl = getApiBaseUrl();
+        const baseUrl = getInternalApiBaseUrl();
         const authToken = getCookie('auth_token');
 
         try {

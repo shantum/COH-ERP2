@@ -17,7 +17,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { authenticateToken, requireAdmin } from '../middleware/auth.js';
 import { env } from '../config/env.js';
 import logger from '../utils/logger.js';
-import prisma from '../lib/prisma.js';
+// prisma accessed via req.prisma (request-scoped)
 
 const log = logger.child({ module: 'forecastRoutes' });
 const router: Router = Router();
@@ -31,7 +31,7 @@ let cachedId: string | null = null;
 // ─── Run Forecast ───────────────────────────────────────────────────
 
 router.post('/run', authenticateToken, requireAdmin, async (req: Request, res: Response): Promise<void> => {
-    const userId = (req as unknown as Record<string, unknown>).userId as string | undefined;
+    const userId = req.user?.id;
 
     // Return memory cache if fresh (< 1 hour) and not force-refreshed
     const forceRefresh = req.body?.forceRefresh === true;
@@ -52,7 +52,7 @@ router.post('/run', authenticateToken, requireAdmin, async (req: Request, res: R
         const summary = result.summary as Record<string, number> | undefined;
 
         // Save to DB
-        const saved = await prisma.demandForecast.create({
+        const saved = await req.prisma.demandForecast.create({
             data: {
                 createdById: userId ?? null,
                 forecastWeeks: (result.forecastWeeks as number) ?? 8,
@@ -157,7 +157,7 @@ Structure your response as:
 
         // Save analysis to the forecast record
         if (forecastId && fullAnalysis) {
-            await prisma.demandForecast.update({
+            await req.prisma.demandForecast.update({
                 where: { id: forecastId },
                 data: { aiAnalysis: fullAnalysis },
             }).catch((err: unknown) => {
@@ -178,9 +178,9 @@ Structure your response as:
 
 // ─── History ────────────────────────────────────────────────────────
 
-router.get('/history', authenticateToken, async (_req: Request, res: Response): Promise<void> => {
+router.get('/history', authenticateToken, async (req: Request, res: Response): Promise<void> => {
     try {
-        const forecasts = await prisma.demandForecast.findMany({
+        const forecasts = await req.prisma.demandForecast.findMany({
             orderBy: { createdAt: 'desc' },
             take: 20,
             select: {
@@ -212,7 +212,7 @@ router.get('/history', authenticateToken, async (_req: Request, res: Response): 
 
 router.get('/:id', authenticateToken, async (req: Request, res: Response): Promise<void> => {
     try {
-        const forecast = await prisma.demandForecast.findUnique({
+        const forecast = await req.prisma.demandForecast.findUnique({
             where: { id: req.params.id as string },
         });
 

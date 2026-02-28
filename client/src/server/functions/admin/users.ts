@@ -5,7 +5,8 @@ import { getCookie } from '@tanstack/react-start/server';
 import { z } from 'zod';
 import { authMiddleware } from '../../middleware/auth';
 import { getPrisma } from '@coh/shared/services/db';
-import { type MutationResult, type User, requireAdminRole, parsePermissionsArray, getApiBaseUrl } from './types';
+import { type MutationResult, type User, requireAdminRole, parsePermissionsArray } from './types';
+import { getInternalApiBaseUrl } from '../../utils';
 
 // ============================================
 // INPUT SCHEMAS
@@ -85,7 +86,7 @@ export const getUsers = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .handler(async ({ context }): Promise<MutationResult<User[]>> => {
         try {
-            requireAdminRole(context.user.role);
+            requireAdminRole(context.user.role, context.permissions);
         } catch {
             return {
                 success: false,
@@ -151,7 +152,7 @@ export const createUser = createServerFn({ method: 'POST' })
     .inputValidator((input: unknown) => createUserSchema.parse(input))
     .handler(async ({ data, context }): Promise<MutationResult<User & { generatedPassword: string }>> => {
         try {
-            requireAdminRole(context.user.role);
+            requireAdminRole(context.user.role, context.permissions);
         } catch {
             return {
                 success: false,
@@ -162,7 +163,7 @@ export const createUser = createServerFn({ method: 'POST' })
         const { email, name, phone, roleId } = data;
 
         // Delegate to Express endpoint which has bcryptjs working correctly
-        const baseUrl = getApiBaseUrl();
+        const baseUrl = getInternalApiBaseUrl();
         const authToken = getCookie('auth_token');
 
         try {
@@ -227,7 +228,7 @@ export const updateUser = createServerFn({ method: 'POST' })
     .inputValidator((input: unknown) => updateUserSchema.parse(input))
     .handler(async ({ data, context }): Promise<MutationResult<User>> => {
         try {
-            requireAdminRole(context.user.role);
+            requireAdminRole(context.user.role, context.permissions);
         } catch {
             return {
                 success: false,
@@ -240,7 +241,7 @@ export const updateUser = createServerFn({ method: 'POST' })
         // If password is being updated, delegate to Express endpoint
         // which has bcryptjs working correctly
         if (password) {
-            const baseUrl = getApiBaseUrl();
+            const baseUrl = getInternalApiBaseUrl();
             const authToken = getCookie('auth_token');
 
             try {
@@ -430,7 +431,7 @@ export const deleteUser = createServerFn({ method: 'POST' })
     .inputValidator((input: unknown) => deleteUserSchema.parse(input))
     .handler(async ({ data, context }): Promise<MutationResult<{ deleted: boolean }>> => {
         try {
-            requireAdminRole(context.user.role);
+            requireAdminRole(context.user.role, context.permissions);
         } catch {
             return {
                 success: false,
@@ -487,7 +488,7 @@ export const getUserPermissions = createServerFn({ method: 'GET' })
     .inputValidator((input: unknown) => getUserPermissionsSchema.parse(input))
     .handler(async ({ data, context }): Promise<MutationResult<UserPermissionsData>> => {
         try {
-            requireAdminRole(context.user.role);
+            requireAdminRole(context.user.role, context.permissions);
         } catch {
             return {
                 success: false,
@@ -550,7 +551,7 @@ export const updateUserPermissions = createServerFn({ method: 'POST' })
     .inputValidator((input: unknown) => updateUserPermissionsSchema.parse(input))
     .handler(async ({ data, context }): Promise<MutationResult<{ updated: boolean }>> => {
         try {
-            requireAdminRole(context.user.role);
+            requireAdminRole(context.user.role, context.permissions);
         } catch {
             return {
                 success: false,
@@ -622,7 +623,7 @@ export const assignUserRole = createServerFn({ method: 'POST' })
     .inputValidator((input: unknown) => assignUserRoleSchema.parse(input))
     .handler(async ({ data, context }): Promise<MutationResult<{ updated: boolean }>> => {
         try {
-            requireAdminRole(context.user.role);
+            requireAdminRole(context.user.role, context.permissions);
         } catch {
             return {
                 success: false,

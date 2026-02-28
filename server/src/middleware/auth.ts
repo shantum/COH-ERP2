@@ -49,14 +49,26 @@ export const authenticateToken = async (
 };
 
 /**
- * @deprecated Use requirePermission('users:*') from permissions.js instead
- * Kept for backward compatibility during migration
+ * Middleware to require admin access.
+ * If authenticateToken already ran (req.user set), skips re-validation.
+ * Otherwise validates token from scratch.
  */
 export const requireAdmin = async (
     req: Request,
     res: Response,
     next: NextFunction
 ): Promise<void> => {
+    // Fast path: already authenticated by prior middleware
+    if (req.user && req.userPermissions) {
+        if (!hasAdminAccess(req.user, req.userPermissions)) {
+            res.status(403).json({ error: 'Admin access required' });
+            return;
+        }
+        next();
+        return;
+    }
+
+    // Slow path: validate token from scratch
     const token = extractToken(req);
     const result = await validateAuth(token, req.prisma);
 
@@ -66,7 +78,6 @@ export const requireAdmin = async (
         return;
     }
 
-    // Check admin access using unified logic
     if (!hasAdminAccess(result.user, result.permissions)) {
         res.status(403).json({ error: 'Admin access required' });
         return;

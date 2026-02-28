@@ -3,7 +3,7 @@
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
 import { authMiddleware } from '../../middleware/auth';
-import { getInternalApiBaseUrl } from '../../utils';
+import { internalFetch } from '../../utils';
 import { type MutationResult, type LogsResult, requireAdminRole } from './types';
 
 // ============================================
@@ -49,7 +49,7 @@ export const getServerLogs = createServerFn({ method: 'GET' })
     .inputValidator((input: unknown) => getServerLogsSchema.parse(input))
     .handler(async ({ data, context }): Promise<MutationResult<LogsResult>> => {
         try {
-            requireAdminRole(context.user.role);
+            requireAdminRole(context.user.role, context.permissions);
         } catch {
             return {
                 success: false,
@@ -60,7 +60,6 @@ export const getServerLogs = createServerFn({ method: 'GET' })
         const { level, limit, offset, search } = data;
 
         // Call the Express backend API for logs
-        const baseUrl = getInternalApiBaseUrl();
         const params = new URLSearchParams();
         params.set('level', level);
         params.set('limit', String(limit));
@@ -68,11 +67,7 @@ export const getServerLogs = createServerFn({ method: 'GET' })
         if (search) params.set('search', search);
 
         try {
-            const response = await fetch(`${baseUrl}/api/admin/logs?${params.toString()}`, {
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-            });
+            const response = await internalFetch(`/api/admin/logs?${params.toString()}`);
 
             if (!response.ok) {
                 return {
@@ -99,7 +94,7 @@ export const getLogStats = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .handler(async ({ context }): Promise<MutationResult<LogStats>> => {
         try {
-            requireAdminRole(context.user.role);
+            requireAdminRole(context.user.role, context.permissions);
         } catch {
             return {
                 success: false,
@@ -108,14 +103,8 @@ export const getLogStats = createServerFn({ method: 'GET' })
         }
 
         // Call the Express backend API for log stats
-        const baseUrl = getInternalApiBaseUrl();
-
         try {
-            const response = await fetch(`${baseUrl}/api/admin/logs/stats`, {
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-            });
+            const response = await internalFetch('/api/admin/logs/stats');
 
             if (!response.ok) {
                 return {
@@ -142,7 +131,7 @@ export const clearLogs = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .handler(async ({ context }): Promise<MutationResult<{ cleared: boolean }>> => {
         try {
-            requireAdminRole(context.user.role);
+            requireAdminRole(context.user.role, context.permissions);
         } catch {
             return {
                 success: false,
@@ -151,15 +140,8 @@ export const clearLogs = createServerFn({ method: 'POST' })
         }
 
         // Call the Express backend API to clear logs
-        const baseUrl = getInternalApiBaseUrl();
-
         try {
-            const response = await fetch(`${baseUrl}/api/admin/logs`, {
-                method: 'DELETE',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-            });
+            const response = await internalFetch('/api/admin/logs', { method: 'DELETE' });
 
             if (!response.ok) {
                 return {

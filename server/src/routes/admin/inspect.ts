@@ -1,6 +1,5 @@
 import { Router } from 'express';
 import type { Request, Response } from 'express';
-import { authenticateToken } from '../../middleware/auth.js';
 import { asyncHandler } from '../../middleware/asyncHandler.js';
 import { NotFoundError } from '../../utils/errors.js';
 import { chunkProcess } from '../../utils/asyncUtils.js';
@@ -9,7 +8,7 @@ import type { PrismaModelDelegate } from './types.js';
 const router = Router();
 
 // Inspect orders table
-router.get('/inspect/orders', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.get('/inspect/orders', asyncHandler(async (req: Request, res: Response) => {
     const limit = Math.min(parseInt(req.query.limit as string) || 50, 5000);
     const offset = parseInt(req.query.offset as string) || 0;
 
@@ -32,7 +31,7 @@ router.get('/inspect/orders', authenticateToken, asyncHandler(async (req: Reques
 }));
 
 // Inspect customers table
-router.get('/inspect/customers', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.get('/inspect/customers', asyncHandler(async (req: Request, res: Response) => {
     const limit = Math.min(parseInt(req.query.limit as string) || 50, 5000);
     const offset = parseInt(req.query.offset as string) || 0;
 
@@ -49,7 +48,7 @@ router.get('/inspect/customers', authenticateToken, asyncHandler(async (req: Req
 }));
 
 // Inspect products table
-router.get('/inspect/products', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.get('/inspect/products', asyncHandler(async (req: Request, res: Response) => {
     const limit = Math.min(parseInt(req.query.limit as string) || 50, 5000);
     const offset = parseInt(req.query.offset as string) || 0;
 
@@ -71,7 +70,7 @@ router.get('/inspect/products', authenticateToken, asyncHandler(async (req: Requ
 }));
 
 // Inspect SKUs table
-router.get('/inspect/skus', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.get('/inspect/skus', asyncHandler(async (req: Request, res: Response) => {
     const limit = Math.min(parseInt(req.query.limit as string) || 50, 5000);
     const offset = parseInt(req.query.offset as string) || 0;
 
@@ -93,7 +92,7 @@ router.get('/inspect/skus', authenticateToken, asyncHandler(async (req: Request,
 }));
 
 // Inspect Shopify Order Cache table
-router.get('/inspect/shopify-order-cache', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.get('/inspect/shopify-order-cache', asyncHandler(async (req: Request, res: Response) => {
     const limit = Math.min(parseInt(req.query.limit as string) || 50, 5000);
     const offset = parseInt(req.query.offset as string) || 0;
 
@@ -110,7 +109,7 @@ router.get('/inspect/shopify-order-cache', authenticateToken, asyncHandler(async
 }));
 
 // Inspect Shopify Product Cache table
-router.get('/inspect/shopify-product-cache', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.get('/inspect/shopify-product-cache', asyncHandler(async (req: Request, res: Response) => {
     const limit = Math.min(parseInt(req.query.limit as string) || 50, 5000);
     const offset = parseInt(req.query.offset as string) || 0;
 
@@ -127,7 +126,7 @@ router.get('/inspect/shopify-product-cache', authenticateToken, asyncHandler(asy
 }));
 
 // Get all table names from Prisma - for dynamic table selector
-router.get('/inspect/tables', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.get('/inspect/tables', asyncHandler(async (req: Request, res: Response) => {
     // Get all model names from Prisma client
     // The _dmmf property contains the data model meta information
     const prismaAny = req.prisma as unknown as Record<string, unknown>;
@@ -160,7 +159,7 @@ router.get('/inspect/tables', authenticateToken, asyncHandler(async (req: Reques
 }));
 
 // Generic table inspector - inspect any table
-router.get('/inspect/table/:tableName', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.get('/inspect/table/:tableName', asyncHandler(async (req: Request, res: Response) => {
     const tableName = req.params.tableName as string;
     const limit = Math.min(parseInt(req.query.limit as string) || 50, 5000);
     const offset = parseInt(req.query.offset as string) || 0;
