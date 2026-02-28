@@ -36,6 +36,10 @@ export const Route = createFileRoute('/_authenticated')({
                 if (user) {
                     // Populate query cache for client hydration
                     queryClient.setQueryData(authQueryKeys.user, user);
+                    // Restricted users can only access /fabric-count
+                    if (user.email === 'prabhakar@coh.one' && location.pathname !== '/fabric-count') {
+                        throw redirect({ to: '/fabric-count' });
+                    }
                     return { user };
                 }
             } catch (error) {
@@ -58,9 +62,15 @@ export const Route = createFileRoute('/_authenticated')({
             const user = await queryClient.ensureQueryData(authQueryOptions);
 
             if (user) {
+                // Restricted users can only access /fabric-count
+                if (user.email === 'prabhakar@coh.one' && location.pathname !== '/fabric-count') {
+                    throw redirect({ to: '/fabric-count' });
+                }
                 return { user };
             }
         } catch (error) {
+            // Re-throw redirects
+            if (error instanceof Response || (error && typeof error === 'object' && 'to' in error)) throw error;
             console.error('[Auth] Query error:', error);
         }
 
