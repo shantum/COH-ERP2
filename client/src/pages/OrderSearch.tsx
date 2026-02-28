@@ -14,7 +14,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
-import { Search, Loader2, ChevronRight, Package } from 'lucide-react';
+import { Search, Loader2, ChevronRight, Package, User } from 'lucide-react';
 import { useDebounce } from '../hooks/useDebounce';
 import {
     searchAllOrders,
@@ -141,12 +141,14 @@ export default function OrderSearch() {
                             {/* Orders in this tab */}
                             <div className="divide-y divide-gray-100">
                                 {tabResult.orders.map((order: SearchResultOrder) => (
-                                    <button
+                                    <div
                                         key={order.id}
-                                        onClick={() => handleSelectOrder(order.orderNumber)}
                                         className="w-full px-5 py-4 flex items-center justify-between hover:bg-gray-50 text-left transition-colors group"
                                     >
-                                        <div className="min-w-0 flex-1">
+                                        <button
+                                            onClick={() => handleSelectOrder(order.orderNumber)}
+                                            className="min-w-0 flex-1 text-left"
+                                        >
                                             <div className="flex items-center gap-3 mb-1">
                                                 <span className="font-semibold text-gray-900 text-lg">
                                                     #{order.orderNumber}
@@ -176,9 +178,20 @@ export default function OrderSearch() {
                                                     )}
                                                 </div>
                                             )}
+                                        </button>
+                                        <div className="flex items-center gap-2 flex-shrink-0 ml-4">
+                                            {order.customerId && (
+                                                <button
+                                                    onClick={() => navigate({ to: '/customers/$customerId', params: { customerId: order.customerId! } })}
+                                                    className="p-2 rounded-lg text-gray-400 hover:text-primary-600 hover:bg-primary-50 transition-colors"
+                                                    title={`View customer: ${order.customerName || 'Unknown'}`}
+                                                >
+                                                    <User size={18} />
+                                                </button>
+                                            )}
+                                            <ChevronRight size={20} className="text-gray-400 group-hover:text-gray-600 transition-colors" />
                                         </div>
-                                        <ChevronRight size={20} className="text-gray-400 group-hover:text-gray-600 flex-shrink-0 ml-4 transition-colors" />
-                                    </button>
+                                    </div>
                                 ))}
                             </div>
                         </div>
