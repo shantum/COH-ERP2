@@ -37,7 +37,7 @@ const updateWebhookLog = _updateWebhookLog as (
     processingTime?: number | null,
     resultData?: unknown
 ) => Promise<void>;
-import { upsertCustomerFromWebhook } from '../utils/customerUtils.js';
+import { upsertCustomerFromWebhook} from '../utils/customerUtils.js';
 import { webhookLogger as log } from '../utils/logger.js';
 import { deferredExecutor } from '../services/deferredExecutor.js';
 import { pushNewOrderToSheet, syncSingleOrderToSheet } from '../services/sheetOrderPush.js';
@@ -261,6 +261,7 @@ router.post('/shopify/orders', verifyWebhook, asyncHandler(async (req: WebhookRe
     } catch (error) {
         const err = error as Error;
         log.error({ err: error, webhookId }, 'Webhook orders error');
+
         await updateWebhookLog(req.prisma, webhookId, 'failed', err.message, Date.now() - startTime);
         // Add to dead letter queue for retry
         const body = req.body as { id?: unknown };
@@ -329,6 +330,7 @@ router.post('/shopify/products', verifyWebhook, asyncHandler(async (req: Webhook
     } catch (error) {
         const err = error as Error;
         log.error({ err, webhookId, topic: webhookTopic }, 'Product webhook error');
+
         await updateWebhookLog(req.prisma, webhookId, 'failed', err.message, Date.now() - startTime);
         const body = req.body as { id?: unknown };
         await addToFailedQueue(req.prisma, 'product', body?.id, req.body, err.message);
@@ -381,6 +383,7 @@ router.post('/shopify/customers', verifyWebhook, asyncHandler(async (req: Webhoo
     } catch (error) {
         const err = error as Error;
         log.error({ err, webhookId, topic: webhookTopic }, 'Customer webhook error');
+
         await updateWebhookLog(req.prisma, webhookId, 'failed', err.message, Date.now() - startTime);
         const body = req.body as { id?: unknown };
         await addToFailedQueue(req.prisma, 'customer', body?.id, req.body, err.message);
@@ -445,6 +448,7 @@ router.post('/shopify/inventory_levels/update', verifyWebhook, asyncHandler(asyn
     } catch (error) {
         const err = error as Error;
         log.error({ err, webhookId }, 'inventory_levels/update webhook error');
+
         await updateWebhookLog(req.prisma, webhookId, 'failed', err.message, Date.now() - startTime);
         res.status(200).json({ received: true, error: err.message });
     }

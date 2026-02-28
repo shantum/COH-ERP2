@@ -504,6 +504,7 @@ async function processAttachment(
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     log.error({ attachmentId, filename, error: msg }, 'Failed to process email attachment');
+
     result.error = msg;
     return result;
   }
@@ -572,6 +573,7 @@ router.post('/inbound', asyncHandler(async (req: Request, res: Response) => {
     emailData = emailResult.data;
   } catch (err: unknown) {
     log.error({ emailId, error: err instanceof Error ? err.message : err }, 'Error fetching email from Resend');
+
     respond();
     return;
   }
@@ -604,6 +606,7 @@ router.post('/inbound', asyncHandler(async (req: Request, res: Response) => {
     attachments = attachResult.data?.data ?? [];
   } catch (err: unknown) {
     log.error({ emailId, error: err instanceof Error ? err.message : err }, 'Error listing attachments from Resend');
+
     respond();
     return;
   }

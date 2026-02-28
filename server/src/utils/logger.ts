@@ -11,6 +11,16 @@ import type { LogLevel } from './logBuffer.js';
 // Determine if we're in development
 const isDev = process.env.NODE_ENV !== 'production';
 
+/**
+ * Sentry bridge — lazy-loaded to avoid circular imports.
+ * instrument.ts sets this after Sentry.init() completes.
+ */
+let sentryCaptureError: ((error: Error | string, extra?: Record<string, unknown>) => void) | null = null;
+
+export function setSentryCaptureError(fn: (error: Error | string, extra?: Record<string, unknown>) => void): void {
+    sentryCaptureError = fn;
+}
+
 /** Pino numeric level to string level mapping */
 interface PinoLogObject {
     level: number;
@@ -37,7 +47,7 @@ const levelMap: Record<number, LogLevel> = {
     60: 'fatal',
 };
 
-// Pino stream that feeds logs to our buffer
+// Pino stream that feeds logs to our buffer (and Sentry for error/fatal)
 const bufferStream: DestinationStream = {
     write: (line: string): void => {
         try {
@@ -64,6 +74,17 @@ const bufferStream: DestinationStream = {
 
             // Add to buffer
             logBuffer.addLog(levelName, message, context);
+
+            // Forward error/fatal to Sentry
+            if (sentryCaptureError && logObj.level >= 50) {
+                if (logObj.err && logObj.err.message) {
+                    const err = new Error(logObj.err.message);
+                    if (logObj.err.stack) err.stack = logObj.err.stack;
+                    sentryCaptureError(err, context);
+                } else if (message) {
+                    sentryCaptureError(message, context);
+                }
+            }
         } catch {
             // Ignore parse errors
         }
@@ -199,6 +220,16 @@ console.error = (...args: unknown[]): void => {
     const { message, context } = formatConsoleArgs(args);
     logBuffer.addLog('error', message, context);
     originalConsole.error(...args);
+
+    // Send to Sentry — find the first Error instance in args, or create a message event
+    if (sentryCaptureError) {
+        const errorArg = args.find((a): a is Error => a instanceof Error);
+        if (errorArg) {
+            sentryCaptureError(errorArg, context);
+        } else if (message) {
+            sentryCaptureError(message, context);
+        }
+    }
 };
 
 console.info = (...args: unknown[]): void => {

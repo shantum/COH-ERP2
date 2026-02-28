@@ -25,4 +25,16 @@ if (env.SENTRY_DSN) {
     release: `coh-erp-backend@${getRelease()}`,
     tracesSampleRate: env.NODE_ENV === 'production' ? 0.2 : 1.0,
   });
+
+  // Bridge: route all console.error calls through Sentry
+  // Logger intercepts console.error, so this covers every catch block in the app
+  import('./utils/logger.js').then(({ setSentryCaptureError }) => {
+    setSentryCaptureError((error, extra) => {
+      if (error instanceof Error) {
+        Sentry.captureException(error, { extra });
+      } else {
+        Sentry.captureMessage(error, { level: 'error', extra });
+      }
+    });
+  });
 }
