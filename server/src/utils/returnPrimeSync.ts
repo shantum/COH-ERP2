@@ -150,7 +150,7 @@ async function doBatchSync(
     });
 
     for (const line of lines) {
-        await doSync(line.id, rpStatus, extraData).catch(() => {});
+        await doSync(line.id, rpStatus, extraData).catch((err) => console.error(`[returnPrime] Per-line sync failed for line ${line.id}:`, err));
     }
 }
 

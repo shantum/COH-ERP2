@@ -215,6 +215,7 @@ export const createBomLine = createServerFn({ method: 'POST' })
                 data: { id: result.id, level, roleId },
             };
         } catch (error: unknown) {
+            console.error('[bom] createBomLine failed:', error);
             const message = error instanceof Error ? error.message : 'Failed to create BOM line';
             return {
                 success: false,
@@ -296,6 +297,7 @@ export const updateBomLine = createServerFn({ method: 'POST' })
                 data: { id: lineId, level, updated: true },
             };
         } catch (error: unknown) {
+            console.error('[bom] updateBomLine failed:', error);
             const message = error instanceof Error ? error.message : 'Failed to update BOM line';
             if (message.includes('Record to update not found')) {
                 return {
@@ -347,6 +349,7 @@ export const deleteBomLine = createServerFn({ method: 'POST' })
                 data: { id: lineId, level, deleted: true },
             };
         } catch (error: unknown) {
+            console.error('[bom] deleteBomLine failed:', error);
             const message = error instanceof Error ? error.message : 'Failed to delete BOM line';
             if (message.includes('Record to delete does not exist')) {
                 return {

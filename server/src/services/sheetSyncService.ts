@@ -248,6 +248,7 @@ export async function planSync(
         return job;
     } catch (error: unknown) {
         const message = error instanceof Error ? error.message : String(error);
+        console.error('[sheetSync] Plan sync job failed:', error);
         job.status = 'failed';
         job.errors.push(message);
         job.completedAt = new Date();
@@ -333,6 +334,7 @@ async function runSteps(
             job.stepResults[i].summary = summary;
         } catch (error: unknown) {
             const message = error instanceof Error ? error.message : String(error);
+            console.error(`[sheetSync] Step ${i} (${STEP_NAMES[i]}) failed:`, error);
             job.stepResults[i].status = 'failed';
             job.stepResults[i].summary = `Failed: ${message}`;
             job.stepResults[i].errors.push(message);

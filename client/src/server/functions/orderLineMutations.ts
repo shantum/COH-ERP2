@@ -183,6 +183,7 @@ export const addLine = createServerFn({ method: 'POST' })
                 });
             });
         } catch (error: unknown) {
+            console.error('[orders] addLine failed:', error);
             const message = error instanceof Error ? error.message : 'Unknown error';
             const [code, msg] = message.includes(':') ? message.split(':', 2) : ['INTERNAL', message];
             return { success: false, error: { code: code as 'NOT_FOUND' | 'BAD_REQUEST' | 'INTERNAL', message: msg as string } };

@@ -74,7 +74,7 @@ export async function trackShipments(
             response: data,
         }));
         // Store in background - don't await
-        storeTrackingResponsesBatch(responsesToStore).catch(() => {});
+        storeTrackingResponsesBatch(responsesToStore).catch((err) => console.error('[tracking] Failed to store tracking responses:', err));
     }
 
     return trackingData;

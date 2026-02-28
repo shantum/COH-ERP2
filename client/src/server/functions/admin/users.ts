@@ -208,6 +208,7 @@ export const createUser = createServerFn({ method: 'POST' })
                 },
             };
         } catch (error) {
+            console.error('[admin] createUser failed:', error);
             const message = error instanceof Error ? error.message : 'Unknown error creating user';
             return {
                 success: false,
@@ -296,6 +297,7 @@ export const updateUser = createServerFn({ method: 'POST' })
                     },
                 };
             } catch (error) {
+                console.error('[admin] updateUser (password) failed:', error);
                 const message = error instanceof Error ? error.message : 'Unknown error updating user';
                 return {
                     success: false,

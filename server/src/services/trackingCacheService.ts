@@ -419,7 +419,7 @@ class TrackingCacheService {
                         statusCode: data.message === 'success' ? 200 : 404,
                         response: data,
                     }));
-                    storeTrackingResponsesBatch(toStore).catch(() => {});
+                    storeTrackingResponsesBatch(toStore).catch((err) => console.error('[tracking] Failed to store tracking responses:', err));
 
                     // Process each AWB
                     for (const awb of batch) {

@@ -488,6 +488,7 @@ router.get('/status', requireAdmin, asyncHandler(async (req: Request, res: Respo
             recentLogs: logs
         });
     } catch (error) {
+        console.error('[webhooks] Failed to get webhook status:', error);
         res.status(500).json({ error: 'Failed to get webhook status' });
     }
 }));
@@ -505,6 +506,7 @@ router.put('/secret', requireAdmin, asyncHandler(async (req: Request, res: Respo
 
         res.json({ success: true });
     } catch (error) {
+        console.error('[webhooks] Failed to update webhook secret:', error);
         res.status(500).json({ error: 'Failed to update webhook secret' });
     }
 }));

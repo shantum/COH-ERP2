@@ -563,6 +563,7 @@ export const deleteBatch = createServerFn({ method: 'POST' })
 
             linkedLineId = result.linkedLineId;
         } catch (error: unknown) {
+            serverLog.error({ domain: 'production', fn: 'deleteBatch' }, 'Failed', error);
             const message = error instanceof Error ? error.message : 'Unknown error';
             const [code, msg] = message.includes(':') ? message.split(':', 2) : ['INTERNAL', message];
             return { success: false, error: { code: code as 'NOT_FOUND' | 'BAD_REQUEST' | 'CONFLICT' | 'FORBIDDEN', message: msg as string } };

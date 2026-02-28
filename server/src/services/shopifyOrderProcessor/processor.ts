@@ -209,6 +209,7 @@ export async function cacheAndProcessOrder(
             return result;
         } catch (error: unknown) {
             const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            console.error(`[shopifyOrderProcessor] Order processing failed for ${shopifyOrderId}:`, error);
             // Step 3b: Mark error but don't throw
             await markCacheError(prisma, shopifyOrderId, errorMessage);
 

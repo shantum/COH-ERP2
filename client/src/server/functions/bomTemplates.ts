@@ -266,6 +266,7 @@ export const getProductBom = createServerFn({ method: 'GET' })
 
             return { success: true, data: result };
         } catch (error: unknown) {
+            console.error('[bom] getProductBom failed:', error);
             const message = error instanceof Error ? error.message : 'Failed to load product BOM';
             return {
                 success: false,
@@ -352,6 +353,7 @@ export const updateTemplate = createServerFn({ method: 'POST' })
                 data: { updated, created },
             };
         } catch (error: unknown) {
+            console.error('[bom] updateTemplate failed:', error);
             const message = error instanceof Error ? error.message : 'Failed to update template';
             return {
                 success: false,
@@ -406,6 +408,7 @@ export const updateProductBom = createServerFn({ method: 'POST' })
 
             return { success: true, data: { success: true } };
         } catch (error: unknown) {
+            console.error('[bom] updateProductBom failed:', error);
             const message = error instanceof Error ? error.message : 'Failed to update product BOM';
             return {
                 success: false,

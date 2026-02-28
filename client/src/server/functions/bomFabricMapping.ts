@@ -197,6 +197,7 @@ export const linkFabricToVariation = createServerFn({ method: 'POST' })
                 },
             };
         } catch (error: unknown) {
+            console.error('[bom] linkFabricToVariation failed:', error);
             const message = error instanceof Error ? error.message : 'Failed to link fabric';
             return {
                 success: false,
@@ -405,6 +406,7 @@ export const linkVariationsToColour = createServerFn({ method: 'POST' })
                 },
             };
         } catch (error: unknown) {
+            console.error('[bom] linkVariationsToColour failed:', error);
             const message = error instanceof Error ? error.message : 'Failed to link variations';
             return {
                 success: false,
@@ -475,6 +477,7 @@ export const clearVariationsFabricMapping = createServerFn({ method: 'POST' })
                 cleared: { total: variations.length },
             };
         } catch (error: unknown) {
+            console.error('[bom] clearVariationsFabricMapping failed:', error);
             const message = error instanceof Error ? error.message : 'Failed to clear fabric mapping';
             return {
                 success: false,

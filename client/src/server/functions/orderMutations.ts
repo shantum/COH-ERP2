@@ -377,8 +377,8 @@ export const deleteOrder = createServerFn({ method: 'POST' })
             try {
                 const { inventoryBalanceCache } = await import('@coh/shared/services/inventory');
                 inventoryBalanceCache.invalidate(uniqueSkuIds);
-            } catch {
-                // Non-critical
+            } catch (cacheErr) {
+                serverLog.warn({ domain: 'orders', fn: 'deleteOrder' }, 'Inventory cache invalidation failed (non-critical)', { error: cacheErr instanceof Error ? cacheErr.message : String(cacheErr) });
             }
         }
 

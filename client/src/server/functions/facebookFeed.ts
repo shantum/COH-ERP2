@@ -109,6 +109,7 @@ export const getFacebookFeedHealth = createServerFn({ method: 'GET' })
             return { success: true, data: result };
         } catch (error: unknown) {
             const message = error instanceof Error ? error.message : 'Unknown error';
+            console.error('[facebook-feed] getFacebookFeedHealth failed:', error);
             return {
                 success: false,
                 error: { code: 'EXTERNAL_ERROR', message },
@@ -130,6 +131,7 @@ export const refreshFacebookFeedHealth = createServerFn({ method: 'POST' })
             return { success: true, data: result };
         } catch (error: unknown) {
             const message = error instanceof Error ? error.message : 'Unknown error';
+            console.error('[facebook-feed] refreshFacebookFeedHealth failed:', error);
             return {
                 success: false,
                 error: { code: 'EXTERNAL_ERROR', message },

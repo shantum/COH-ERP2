@@ -196,6 +196,7 @@ export const getShopifyConfig = createServerFn({ method: 'GET' })
             };
         } catch (error: unknown) {
             const message = error instanceof Error ? error.message : 'Unknown error';
+            console.error('[shopify] getShopifyConfig failed:', error);
             return {
                 success: false,
                 error: { code: 'EXTERNAL_ERROR', message },
@@ -231,6 +232,7 @@ export const updateShopifyConfig = createServerFn({ method: 'POST' })
             };
         } catch (error: unknown) {
             const message = error instanceof Error ? error.message : 'Unknown error';
+            console.error('[shopify] updateShopifyConfig failed:', error);
             return {
                 success: false,
                 error: { code: 'EXTERNAL_ERROR', message },
@@ -256,6 +258,7 @@ export const testShopifyConnection = createServerFn({ method: 'POST' })
             };
         } catch (error: unknown) {
             const message = error instanceof Error ? error.message : 'Unknown error';
+            console.error('[shopify] testShopifyConnection failed:', error);
             return {
                 success: false,
                 error: { code: 'EXTERNAL_ERROR', message },
@@ -295,6 +298,7 @@ export const getShopifySyncHistory = createServerFn({ method: 'GET' })
             };
         } catch (error: unknown) {
             const message = error instanceof Error ? error.message : 'Unknown error';
+            console.error('[shopify] getShopifySyncHistory failed:', error);
             return {
                 success: false,
                 error: { code: 'EXTERNAL_ERROR', message },
@@ -323,6 +327,7 @@ export const getSyncJobs = createServerFn({ method: 'GET' })
             };
         } catch (error: unknown) {
             const message = error instanceof Error ? error.message : 'Unknown error';
+            console.error('[shopify] getSyncJobs failed:', error);
             return {
                 success: false,
                 error: { code: 'EXTERNAL_ERROR', message },
@@ -348,6 +353,7 @@ export const getSyncJobStatus = createServerFn({ method: 'GET' })
             };
         } catch (error: unknown) {
             const message = error instanceof Error ? error.message : 'Unknown error';
+            console.error('[shopify] getSyncJobStatus failed:', error);
             // Check for NOT_FOUND in the error message
             if (message.includes('not found') || message.includes('404')) {
                 return {
@@ -392,6 +398,7 @@ export const startSyncJob = createServerFn({ method: 'POST' })
             };
         } catch (error: unknown) {
             const message = error instanceof Error ? error.message : 'Unknown error';
+            console.error('[shopify] startSyncJob failed:', error);
             return {
                 success: false,
                 error: { code: 'BAD_REQUEST', message },
@@ -419,6 +426,7 @@ export const cancelSyncJob = createServerFn({ method: 'POST' })
             };
         } catch (error: unknown) {
             const message = error instanceof Error ? error.message : 'Unknown error';
+            console.error('[shopify] cancelSyncJob failed:', error);
             return {
                 success: false,
                 error: { code: 'BAD_REQUEST', message },
@@ -459,6 +467,7 @@ export const getCacheStatus = createServerFn({ method: 'GET' })
             };
         } catch (error: unknown) {
             const message = error instanceof Error ? error.message : 'Unknown error';
+            console.error('[shopify] getCacheStatus failed:', error);
             return {
                 success: false,
                 error: { code: 'EXTERNAL_ERROR', message },
@@ -492,6 +501,7 @@ export const triggerSync = createServerFn({ method: 'POST' })
             };
         } catch (error: unknown) {
             const message = error instanceof Error ? error.message : 'Unknown error';
+            console.error('[shopify] triggerSync failed:', error);
             return {
                 success: false,
                 error: { code: 'EXTERNAL_ERROR', message },
@@ -815,6 +825,7 @@ export const getShopifyMetafields = createServerFn({ method: 'GET' })
             };
         } catch (error: unknown) {
             const message = error instanceof Error ? error.message : 'Unknown error';
+            console.error('[shopify] getShopifyMetafields failed:', error);
             return {
                 success: false,
                 error: { code: 'EXTERNAL_ERROR', message },
@@ -877,6 +888,7 @@ export const getShopifyFeedData = createServerFn({ method: 'GET' })
             return { success: true, data: result };
         } catch (error: unknown) {
             const message = error instanceof Error ? error.message : 'Unknown error';
+            console.error('[shopify] getShopifyFeedData failed:', error);
             return {
                 success: false,
                 error: { code: 'EXTERNAL_ERROR', message },
@@ -950,6 +962,7 @@ export const getProductShopifyStatuses = createServerFn({ method: 'POST' })
             return { success: true, data: result };
         } catch (error: unknown) {
             const message = error instanceof Error ? error.message : 'Unknown error';
+            console.error('[shopify] getProductShopifyStatuses failed:', error);
             return {
                 success: false,
                 error: { code: 'EXTERNAL_ERROR', message },
@@ -991,6 +1004,7 @@ export const pushMetafieldsToShopify = createServerFn({ method: 'POST' })
             return { success: true, data: result };
         } catch (error: unknown) {
             const message = error instanceof Error ? error.message : 'Unknown error';
+            console.error('[shopify] pushMetafieldsToShopify failed:', error);
             return { success: false, error: { code: 'EXTERNAL_ERROR', message } };
         }
     });
@@ -1024,6 +1038,7 @@ export const pushCategoryToShopify = createServerFn({ method: 'POST' })
             return { success: true, data: result };
         } catch (error: unknown) {
             const message = error instanceof Error ? error.message : 'Unknown error';
+            console.error('[shopify] pushCategoryToShopify failed:', error);
             return { success: false, error: { code: 'EXTERNAL_ERROR', message } };
         }
     });

@@ -202,6 +202,7 @@ export const matchPaymentToInvoice = createServerFn({ method: 'POST' })
 
       return { success: true as const };
     }).catch((error: unknown) => {
+      console.error('[finance] matchPaymentToInvoice failed:', error);
       const message = error instanceof Error ? error.message : 'Unknown error';
       return { success: false as const, error: message };
     });
@@ -262,6 +263,7 @@ export const unmatchPayment = createServerFn({ method: 'POST' })
 
       return { success: true as const };
     }).catch((error: unknown) => {
+      console.error('[finance] unmatchPayment failed:', error);
       const message = error instanceof Error ? error.message : 'Unknown error';
       return { success: false as const, error: message };
     });

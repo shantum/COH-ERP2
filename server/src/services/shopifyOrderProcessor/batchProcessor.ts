@@ -235,6 +235,7 @@ export async function processCacheBatch(
                     return { success: true, orderNumber: entry.orderNumber };
                 } catch (err) {
                     const errorMsg = err instanceof Error ? err.message : 'Unknown error';
+                    console.error(`[batchProcessor] Order ${entry.orderNumber} processing failed:`, err);
                     await markCacheError(prisma, entry.id, errorMsg);
                     return { success: false, orderNumber: entry.orderNumber, error: errorMsg };
                 }

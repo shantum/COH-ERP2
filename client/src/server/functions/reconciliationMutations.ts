@@ -515,6 +515,7 @@ export const submitReconciliation = createServerFn({ method: 'POST' })
                 },
             };
         } catch (error: unknown) {
+            serverLog.error({ domain: 'inventory', fn: 'submitReconciliation' }, 'Failed', error);
             const message = error instanceof Error ? error.message : 'Unknown error';
             const [code, msg] = message.includes(':') ? message.split(':', 2) : ['INTERNAL', message];
             return {

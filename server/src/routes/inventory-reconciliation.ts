@@ -121,6 +121,7 @@ router.post('/reconciliation/:id/upload-csv', authenticateToken, upload.single('
         });
     } catch (parseError) {
         const errorMessage = parseError instanceof Error ? parseError.message : 'Unknown parse error';
+        console.error('[inventory-reconciliation] CSV parse error:', parseError);
         return res.status(400).json({ error: `CSV parsing error: ${errorMessage}` });
     }
 

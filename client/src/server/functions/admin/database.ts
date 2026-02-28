@@ -341,7 +341,8 @@ export const inspectTable = createServerFn({ method: 'GET' })
                         table: tableName,
                     },
                 };
-            } catch {
+            } catch (innerError) {
+                console.error(`[admin] inspectTable '${tableName}' failed:`, innerError);
                 return {
                     success: false,
                     error: { code: 'BAD_REQUEST', message: `Failed to query table '${tableName}'` },

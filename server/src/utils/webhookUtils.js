@@ -205,6 +205,7 @@ function preparePayloadForStorage(payload, maxLength = 50000) {
 
         return JSON.stringify(summary);
     } catch (e) {
+        console.error('[webhookUtils] Failed to serialize webhook payload:', e.message);
         return JSON.stringify({ _error: 'Failed to serialize payload', message: e.message });
     }
 }
@@ -290,6 +291,7 @@ export async function updateWebhookLog(prisma, webhookId, status, error = null, 
                     });
                 }
             } catch (e) {
+                console.error('[webhookUtils] Failed to serialize webhook result data:', e.message);
                 resultDataStr = JSON.stringify({ _error: 'Failed to serialize result' });
             }
         }

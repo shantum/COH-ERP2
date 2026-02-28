@@ -312,6 +312,7 @@ export async function syncReturnPrimeRequests(options: SyncOptions = {}): Promis
                     result.totalFetched++;
                 } catch (error: unknown) {
                     const msg = error instanceof Error ? error.message : 'Unknown';
+                    console.error(`[returnPrimeInbound] Failed to sync request ${data.rpRequestNumber}:`, error);
                     result.errors.push(`${data.rpRequestNumber}: ${msg}`);
                 }
             }

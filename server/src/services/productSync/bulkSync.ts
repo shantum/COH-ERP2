@@ -180,6 +180,7 @@ export async function syncAllProducts(
                 });
             }
         } catch (productError: unknown) {
+            console.error(`[productSync] Failed to sync product "${shopifyProduct.title}":`, productError);
             results.errors.push(`Product ${shopifyProduct.title}: ${productError instanceof Error ? productError.message : String(productError)}`);
             results.skipped++;
         }

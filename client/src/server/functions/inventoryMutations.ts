@@ -579,6 +579,7 @@ export const editInward = createServerFn({ method: 'POST' })
             skuId = result.skuId;
             qtyChanged = result.qtyChanged;
         } catch (error: unknown) {
+            console.error('[inventory] editInward failed:', error);
             const message = error instanceof Error ? error.message : 'Unknown error';
             const [code, msg] = message.includes(':') ? message.split(':', 2) : ['INTERNAL', message];
             return { success: false, error: { code: code as 'NOT_FOUND' | 'BAD_REQUEST' | 'INTERNAL', message: msg as string } };
@@ -645,6 +646,7 @@ export const deleteInward = createServerFn({ method: 'POST' })
             });
             skuId = result.skuId;
         } catch (error: unknown) {
+            console.error('[inventory] deleteInward failed:', error);
             const message = error instanceof Error ? error.message : 'Unknown error';
             const [code, msg] = message.includes(':') ? message.split(':', 2) : ['INTERNAL', message];
             return { success: false, error: { code: code as 'NOT_FOUND' | 'BAD_REQUEST' | 'CONFLICT' | 'FORBIDDEN' | 'INTERNAL', message: msg as string } };
@@ -725,6 +727,7 @@ export const undoInward = createServerFn({ method: 'POST' })
             txnQty = result.txnQty;
             revertedQueueItem = result.reverted;
         } catch (error: unknown) {
+            console.error('[inventory] undoInward failed:', error);
             const message = error instanceof Error ? error.message : 'Unknown error';
             const [code, msg] = message.includes(':') ? message.split(':', 2) : ['INTERNAL', message];
             return { success: false, error: { code: code as 'NOT_FOUND' | 'BAD_REQUEST' | 'CONFLICT' | 'FORBIDDEN' | 'INTERNAL', message: msg as string } };
@@ -908,6 +911,7 @@ export const deleteTransaction = createServerFn({ method: 'POST' })
             skuId = result.skuId;
             message = result.message;
         } catch (error: unknown) {
+            console.error('[inventory] deleteTransaction failed:', error);
             const errMsg = error instanceof Error ? error.message : 'Unknown error';
             const [code, msg] = errMsg.includes(':') ? errMsg.split(':', 2) : ['INTERNAL', errMsg];
             return { success: false, error: { code: code as 'NOT_FOUND' | 'BAD_REQUEST' | 'INTERNAL', message: msg as string } };
@@ -1775,6 +1779,7 @@ export const updateTransactionTailor = createServerFn({ method: 'POST' })
                 data: { transactionId, tailorNumber: tailorNumber || null },
             };
         } catch (error: unknown) {
+            console.error('[inventory] updateTransactionTailor failed:', error);
             const message = error instanceof Error ? error.message : 'Unknown error';
             return {
                 success: false,
