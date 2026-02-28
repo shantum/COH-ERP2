@@ -16,6 +16,7 @@ import {
     FileSpreadsheet, Monitor,
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
+import { isAdminUser } from '../types';
 import { invalidateOrderView } from '../hooks/orders/orderMutationUtils';
 import { Route } from '../routes/_authenticated/ledgers';
 import type { LedgersLoaderData } from '../routes/_authenticated/ledgers';
@@ -54,7 +55,7 @@ export default function Ledgers() {
     const queryClient = useQueryClient();
     const navigate = useNavigate();
     const { user } = useAuth();
-    const isAdmin = user?.role === 'admin';
+    const isAdmin = isAdminUser(user);
 
     // Route state
     const loaderData = Route.useLoaderData() as LedgersLoaderData;

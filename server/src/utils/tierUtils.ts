@@ -344,6 +344,7 @@ export async function recalculateAllCustomerLtvs(prisma: PrismaClient): Promise<
         // Update all customers in chunk using interactive transaction
         // This executes updates sequentially inside a single transaction
         // to avoid connection pool exhaustion
+        // Timeout increased: 100 sequential updates can exceed the default 5s
         await prisma.$transaction(async (tx) => {
             for (const id of customerIds) {
                 const ltv = ltvMap.get(id) || 0;
@@ -353,7 +354,7 @@ export async function recalculateAllCustomerLtvs(prisma: PrismaClient): Promise<
                     data: { ltv, orderCount, tier: calculateTierFromLtv(ltv, thresholds) }
                 });
             }
-        });
+        }, { timeout: 30000 });
 
         processed += customers.length;
         updated += customerIds.length;

@@ -10,6 +10,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { toast } from 'sonner';
 import { useAuth } from '../../../hooks/useAuth';
+import { isAdminUser } from '../../../types';
 import ConfirmModal from '../../common/ConfirmModal';
 import {
     Lock, Users, UserPlus, Edit2, Shield, Trash2, RefreshCw, Plus, X,
@@ -328,7 +329,7 @@ export function GeneralTab() {
             </div>
 
             {/* User Management (Admin only) */}
-            {user?.role === 'admin' && (
+            {isAdminUser(user) && (
                 <div className="card">
                     <div className="flex items-center justify-between mb-4">
                         <h2 className="text-lg font-semibold flex items-center gap-2">
@@ -636,7 +637,7 @@ export function GeneralTab() {
             </div>
 
             {/* Customer Tier Thresholds (Admin only) */}
-            {user?.role === 'admin' && (
+            {isAdminUser(user) && (
                 <div className="card">
                     <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
                         <Star size={20} /> Customer Tier Thresholds

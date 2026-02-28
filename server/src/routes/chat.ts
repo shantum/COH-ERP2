@@ -9,7 +9,7 @@ import { Router } from 'express';
 import type { Request, Response } from 'express';
 import multer from 'multer';
 import { z } from 'zod';
-import { authenticateToken } from '../middleware/auth.js';
+import { authenticateToken, requireAdmin } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { streamChat, executeAction, type ChatMessage, type FileAttachment } from '../services/chatAgent/index.js';
 import logger from '../utils/logger.js';
@@ -132,7 +132,7 @@ router.post('/message', authenticateToken, upload.array('files', 5), asyncHandle
 // POST /confirm — Execute confirmed action
 // ============================================
 
-router.post('/confirm', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.post('/confirm', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
     const userId = req.user!.id;
 
     const validation = ConfirmSchema.safeParse(req.body);

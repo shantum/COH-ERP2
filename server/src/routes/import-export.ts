@@ -18,7 +18,7 @@
 
 import { Router } from 'express';
 import type { Request, Response } from 'express';
-import { authenticateToken } from '../middleware/auth.js';
+import { authenticateToken, requireAdmin } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { parse, format } from 'fast-csv';
 import multer from 'multer';
@@ -108,7 +108,7 @@ const upload = multer({
 // PRODUCT EXPORT
 // ============================================
 
-router.get('/export/products', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.get('/export/products', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
     try {
         // NOTE: fabric/fabricType removed from schema - fabric assignment now via BOM
         const products = await req.prisma.product.findMany({
@@ -168,7 +168,7 @@ router.get('/export/products', authenticateToken, asyncHandler(async (req: Reque
 // PRODUCT IMPORT
 // ============================================
 
-router.post('/import/products', authenticateToken, upload.single('file'), asyncHandler(async (req: Request, res: Response) => {
+router.post('/import/products', requireAdmin, upload.single('file'), asyncHandler(async (req: Request, res: Response) => {
     try {
         const file = req.file as Express.Multer.File | undefined;
         if (!file) {
@@ -303,7 +303,7 @@ router.post('/import/products', authenticateToken, upload.single('file'), asyncH
 // FABRIC EXPORT
 // ============================================
 
-router.get('/export/fabrics', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.get('/export/fabrics', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
     try {
         // NOTE: FabricType removed - now using Material > Fabric > FabricColour hierarchy
         // Export FabricColour with parent Fabric and Material info
@@ -350,7 +350,7 @@ router.get('/export/fabrics', authenticateToken, asyncHandler(async (req: Reques
 // FABRIC IMPORT
 // ============================================
 
-router.post('/import/fabrics', authenticateToken, upload.single('file'), asyncHandler(async (req: Request, res: Response) => {
+router.post('/import/fabrics', requireAdmin, upload.single('file'), asyncHandler(async (req: Request, res: Response) => {
     try {
         const file = req.file as Express.Multer.File | undefined;
         if (!file) {
@@ -504,7 +504,7 @@ router.post('/import/fabrics', authenticateToken, upload.single('file'), asyncHa
 // INVENTORY EXPORT
 // ============================================
 
-router.get('/export/inventory', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.get('/export/inventory', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
     try {
         const transactions = await req.prisma.inventoryTransaction.findMany({
             include: {

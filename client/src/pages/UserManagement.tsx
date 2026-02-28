@@ -245,7 +245,7 @@ export default function UserManagement() {
             width: 90,
             cellRenderer: (params: ICellRendererParams<User>) => {
                 if (!params.data) return null;
-                return <AdminBadge isAdmin={params.data.role === 'admin'} />;
+                return <AdminBadge isAdmin={params.data.role === 'admin' || params.data.role === 'owner'} />;
             },
         },
         {
@@ -269,7 +269,7 @@ export default function UserManagement() {
             cellRenderer: (params: ICellRendererParams<User>) => {
                 if (!params.data) return null;
                 const user = params.data;
-                const isAdmin = user.role === 'admin';
+                const isAdmin = user.role === 'admin' || user.role === 'owner';
 
                 return (
                     <div className="flex items-center gap-1">

@@ -40,7 +40,7 @@ cd server && pnpm dev       # Port 3001
 cd client && pnpm dev       # Port 5173
 pnpm db:generate && pnpm db:push  # From root
 ```
-Root uses pnpm workspace. Production deploys via `./deploy.sh` to Hetzner.
+Root uses pnpm workspace. Production deploys via GitHub Actions on push to `main`.
 
 ## Gotchas
 - Server Functions live in `client/src/server/functions/`. No tRPC.

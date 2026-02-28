@@ -46,7 +46,7 @@ const navGroups: NavGroup[] = [
         items: [
             { to: '/orders', icon: ShoppingCart, label: 'Orders' },
             { to: '/quick-order', icon: FilePlus, label: 'Quick Order' },
-            { to: '/channel-import', icon: Upload, label: 'Channel Import' },
+            { to: '/channel-import', icon: Upload, label: 'Channel Import', permission: 'admin' },
         ],
     },
     {

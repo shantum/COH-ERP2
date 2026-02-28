@@ -7,6 +7,51 @@ import { authMiddleware } from '../../middleware/auth';
 import { getPrisma } from '@coh/shared/services/db';
 import { type MutationResult, type User, requireAdminRole, parsePermissionsArray } from './types';
 import { getInternalApiBaseUrl } from '../../utils';
+import type { PrismaClient } from '@prisma/client';
+
+// ============================================
+// ADMIN-EQUIVALENT HELPERS
+// ============================================
+
+/** Check if a user has admin-equivalent access (legacy role OR roleId with admin permissions) */
+async function isAdminEquivalent(
+    prisma: PrismaClient,
+    user: { role: string; roleId?: string | null },
+): Promise<boolean> {
+    if (user.role === 'admin') return true;
+    if (!user.roleId) return false;
+    const role = await prisma.role.findUnique({
+        where: { id: user.roleId },
+        select: { permissions: true },
+    });
+    if (!role) return false;
+    const perms = parsePermissionsArray(role.permissions);
+    return perms.includes('*') || perms.includes('users:create');
+}
+
+/** Count active (or all) users with admin-equivalent access */
+async function countAdminEquivalentUsers(prisma: PrismaClient, activeOnly = true): Promise<number> {
+    const adminRoles = await prisma.role.findMany({
+        where: { permissions: { not: undefined } },
+        select: { id: true, permissions: true },
+    });
+    const adminRoleIds = adminRoles
+        .filter(r => {
+            const perms = parsePermissionsArray(r.permissions);
+            return perms.includes('*') || perms.includes('users:create');
+        })
+        .map(r => r.id);
+
+    return prisma.user.count({
+        where: {
+            ...(activeOnly ? { isActive: true } : {}),
+            OR: [
+                { role: 'admin' },
+                ...(adminRoleIds.length > 0 ? [{ roleId: { in: adminRoleIds } }] : []),
+            ],
+        },
+    });
+}
 
 // ============================================
 // INPUT SCHEMAS
@@ -319,11 +364,10 @@ export const updateUser = createServerFn({ method: 'POST' })
             };
         }
 
-        // Prevent disabling the last admin
-        if (existing.role === 'admin' && isActive === false) {
-            const adminCount = await prisma.user.count({
-                where: { role: 'admin', isActive: true },
-            });
+        // Prevent disabling the last admin-equivalent user
+        const existingIsAdmin = await isAdminEquivalent(prisma, existing);
+        if (existingIsAdmin && isActive === false) {
+            const adminCount = await countAdminEquivalentUsers(prisma);
             if (adminCount <= 1) {
                 return {
                     success: false,
@@ -360,11 +404,9 @@ export const updateUser = createServerFn({ method: 'POST' })
         if (name !== undefined) updateData.name = name;
         if (isActive !== undefined) updateData.isActive = isActive;
         if (role !== undefined) {
-            // Prevent removing the last admin
-            if (existing.role === 'admin' && role === 'staff') {
-                const adminCount = await prisma.user.count({
-                    where: { role: 'admin', isActive: true },
-                });
+            // Prevent demoting the last admin-equivalent user
+            if (existingIsAdmin && role !== 'admin') {
+                const adminCount = await countAdminEquivalentUsers(prisma);
                 if (adminCount <= 1) {
                     return {
                         success: false,
@@ -450,9 +492,10 @@ export const deleteUser = createServerFn({ method: 'POST' })
             };
         }
 
-        // Prevent deleting the last admin
-        if (user.role === 'admin') {
-            const adminCount = await prisma.user.count({ where: { role: 'admin' } });
+        // Prevent deleting the last admin-equivalent user
+        const userIsAdmin = await isAdminEquivalent(prisma, user);
+        if (userIsAdmin) {
+            const adminCount = await countAdminEquivalentUsers(prisma, false);
             if (adminCount <= 1) {
                 return {
                     success: false,

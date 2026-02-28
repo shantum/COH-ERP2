@@ -9,6 +9,7 @@ import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getSidebarOrder, updateSidebarOrder } from '../../../server/functions/admin';
 import { useAuth } from '../../../hooks/useAuth';
+import { isAdminUser } from '../../../types';
 import {
     DndContext,
     closestCenter,
@@ -162,7 +163,7 @@ export function SidebarTab() {
         setHasChanges(true);
     };
 
-    if (user?.role !== 'admin') {
+    if (!isAdminUser(user)) {
         return (
             <div className="p-6 text-center text-gray-500">
                 Only admins can configure sidebar order.

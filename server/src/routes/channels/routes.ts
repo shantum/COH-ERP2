@@ -7,7 +7,7 @@ import { Router } from 'express';
 import type { Request, Response } from 'express';
 import multer from 'multer';
 import { randomUUID } from 'crypto';
-import { authenticateToken } from '../../middleware/auth.js';
+import { authenticateToken, requireAdmin } from '../../middleware/auth.js';
 import { asyncHandler } from '../../middleware/asyncHandler.js';
 import type { ChannelImportResults } from './types.js';
 import { parseCSVBuffer, parseDate, normalizeChannel } from './csvParser.js';
@@ -35,7 +35,7 @@ const upload = multer({
 // IMPORT CHANNEL DATA (analytics-only)
 // ============================================
 
-router.post('/import', authenticateToken, upload.single('file'), asyncHandler(async (req: Request, res: Response) => {
+router.post('/import', requireAdmin, upload.single('file'), asyncHandler(async (req: Request, res: Response) => {
   try {
     const file = req.file as Express.Multer.File | undefined;
     if (!file) {
@@ -176,7 +176,7 @@ router.post('/preview-import', authenticateToken, upload.single('file'), asyncHa
 // EXECUTE ORDER IMPORT
 // ============================================
 
-router.post('/execute-import', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.post('/execute-import', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
   try {
     await executeImport(req, res);
   } catch (error) {
@@ -207,7 +207,7 @@ router.get('/import-history', authenticateToken, asyncHandler(async (req: Reques
 // DELETE IMPORT BATCH
 // ============================================
 
-router.delete('/import-batch/:batchId', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.delete('/import-batch/:batchId', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
   try {
     const batchIdParam = req.params.batchId;
     const batchId = Array.isArray(batchIdParam) ? batchIdParam[0] : batchIdParam;

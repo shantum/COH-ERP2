@@ -180,6 +180,9 @@ const envSchema = z.object({
 
     /** Sentry DSN for frontend (passed to client via VITE_ prefix) */
     VITE_SENTRY_DSN: z.string().optional(),
+
+    /** Sentry auth token for API access and source map uploads */
+    SENTRY_AUTH_TOKEN: z.string().optional(),
 });
 
 // ============================================

@@ -39,7 +39,7 @@ interface TabConfig {
 const tabs: TabConfig[] = [
     { key: 'general', icon: SettingsIcon, label: 'General' },
     { key: 'shopify', icon: Store, label: 'Shopify', shortLabel: 'Shop' },
-    { key: 'importExport', icon: FileSpreadsheet, label: 'CSV Import/Export', shortLabel: 'CSV' },
+    { key: 'importExport', icon: FileSpreadsheet, label: 'CSV Import/Export', shortLabel: 'CSV', adminOnly: true },
     { key: 'remittance', icon: DollarSign, label: 'COD Remittance', shortLabel: 'COD' },
     { key: 'costing', icon: Calculator, label: 'Costing', shortLabel: 'Cost' },
     { key: 'pincodes', icon: MapPin, label: 'Pincode Data', shortLabel: 'PIN' },
