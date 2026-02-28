@@ -229,7 +229,7 @@ export const getOrderByIdInputSchema = z.union([
 export type GetOrderByIdInput = z.infer<typeof getOrderByIdInputSchema>;
 
 /**
- * Order detail for UnifiedOrderModal
+ * Order detail for OrderDetail page
  * Includes all fields needed for view/edit/ship operations.
  */
 export interface OrderDetail {

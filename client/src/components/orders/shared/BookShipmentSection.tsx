@@ -1,7 +1,7 @@
 /**
  * BookShipmentSection - iThink Logistics integration for booking shipments
  *
- * Shared component used by UnifiedOrderModal and EditOrderModal.
+ * Shared component used by order detail and edit pages.
  * Provides:
  * - Weight input with quick select buttons
  * - Rate fetching from iThink API

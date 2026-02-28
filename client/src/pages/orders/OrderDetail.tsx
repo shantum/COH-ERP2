@@ -26,8 +26,8 @@ import type { OrderDetail as OrderDetailType } from '../../server/functions/orde
 import { formatCurrencyExact as formatCurrency } from '../../utils/formatting';
 import { getOptimizedImageUrl } from '../../utils/imageOptimization';
 import { cn } from '../../lib/utils';
-import { LINE_STATUS_CONFIG } from '../../components/orders/UnifiedOrderModal/types';
-import type { AddressData } from '../../components/orders/UnifiedOrderModal/types';
+import { LINE_STATUS_CONFIG } from '../../components/orders/OrdersTable/constants';
+import type { AddressData } from '../../components/orders/OrdersTable/constants';
 import useOrdersMutations from '../../hooks/useOrdersMutations';
 
 // ============================================

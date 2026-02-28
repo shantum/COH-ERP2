@@ -9,7 +9,6 @@ export type { OrdersTableProps, OrderViewType } from './OrdersTable';
 export { OrdersGridSkeleton } from './OrdersGridSkeleton';
 
 // Modals
-export { UnifiedOrderModal } from './UnifiedOrderModal';
 export { CreateOrderModal } from './CreateOrderModal';
 export { CustomerDetailModal } from './CustomerDetailModal';
 export { TrackingModal } from './TrackingModal';

@@ -24,9 +24,11 @@ export {
     DEFAULT_HEADERS,
     DEFAULT_COLUMN_WIDTHS,
     COURIER_OPTIONS,
+    LINE_STATUS_CONFIG,
     ROW_HEIGHT,
     TABLE_ID,
 } from './constants';
+export type { AddressData, StatusConfig } from './constants';
 
 // Styling utilities
 export { getRowClassName, TRACKING_STATUS_STYLES, PAYMENT_STYLES } from './rowStyling';

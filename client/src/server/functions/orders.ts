@@ -1032,7 +1032,7 @@ export const searchUnifiedOrders = createServerFn({ method: 'GET' })
     });
 
 // ============================================
-// GET ORDER BY ID - For UnifiedOrderModal
+// GET ORDER BY ID - For OrderDetail page
 // ============================================
 
 export const getOrderById = createServerFn({ method: 'GET' })
