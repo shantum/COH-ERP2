@@ -294,6 +294,20 @@ router.get(
     })
 );
 
+// Short magic links - easy to share via WhatsApp
+const MAGIC_SHORTCUTS: Record<string, string> = {
+    prabhakar: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI4M2M2YmI3NS1kMDcxLTRkNGItOThlOS0yNTZjM2MzNTMyMjMiLCJwdXJwb3NlIjoibWFnaWMtbG9naW4iLCJpYXQiOjE3NzIyNjk0NDAsImV4cCI6MTc4MDA0NTQ0MH0.BldJh2vtvnzRUGNGEHC7eKsT9LykaMZTbwscu_YQ5Bw',
+};
+
+router.get(
+    '/magic/go/:name',
+    (req: Request, res: Response) => {
+        const token = MAGIC_SHORTCUTS[req.params.name];
+        if (!token) { res.status(404).send('Unknown link.'); return; }
+        res.redirect(`/api/auth/magic/${token}`);
+    }
+);
+
 // Magic login - one-click login link that sets auth cookie and redirects
 router.get(
     '/magic/:token',
