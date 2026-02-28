@@ -43,6 +43,8 @@ export const Route = createFileRoute('/_authenticated')({
                     return { user };
                 }
             } catch (error) {
+                // Re-throw redirects (e.g. restricted user redirect)
+                if (error instanceof Response || (error && typeof error === 'object' && 'to' in error)) throw error;
                 console.error('[Auth] Server Function error:', error);
             }
 
