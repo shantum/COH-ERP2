@@ -8,6 +8,7 @@ import { requireAdmin } from '../middleware/auth.js';
 import { validatePassword } from '@coh/shared';
 import { validateTokenVersion } from '../middleware/permissions.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
+import { sendOtp, verifyOtp } from '../services/watiOtp.js';
 
 const router: Router = Router();
 
@@ -28,6 +29,15 @@ const RegisterBodySchema = z.object({
 const LoginBodySchema = z.object({
     email: z.string().email('Invalid email format'),
     password: z.string().min(1, 'Password is required'),
+});
+
+const OtpSendSchema = z.object({
+    phone: z.string().min(10, 'Phone number is required'),
+});
+
+const OtpVerifySchema = z.object({
+    phone: z.string().min(10, 'Phone number is required'),
+    otp: z.string().length(4, 'OTP must be 4 digits'),
 });
 
 const ChangePasswordBodySchema = z.object({
@@ -294,53 +304,81 @@ router.get(
     })
 );
 
-// Short magic links - easy to share via WhatsApp
-const MAGIC_SHORTCUTS: Record<string, string> = {
-    prabhakar: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI4M2M2YmI3NS1kMDcxLTRkNGItOThlOS0yNTZjM2MzNTMyMjMiLCJwdXJwb3NlIjoibWFnaWMtbG9naW4iLCJpYXQiOjE3NzIyNjk0NDAsImV4cCI6MTc4MDA0NTQ0MH0.BldJh2vtvnzRUGNGEHC7eKsT9LykaMZTbwscu_YQ5Bw',
-    karishma: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiIzMTVkMDY2Yy05ZmY4LTQ3Y2UtOGYyYy00ODZkZDk3MTcwYTMiLCJwdXJwb3NlIjoibWFnaWMtbG9naW4iLCJpYXQiOjE3NzIyNjk2MDEsImV4cCI6MTc4MDA0NTYwMX0.gui5p-pDJyAgsaHYKpOBLMwtoRPqNFqioVYCct6HpYo',
-};
+// ============================================
+// OTP LOGIN (WhatsApp via WATI)
+// ============================================
 
-router.get(
-    '/magic/go/:name',
-    (req: Request, res: Response) => {
-        const token = MAGIC_SHORTCUTS[req.params.name];
-        if (!token) { res.status(404).send('Unknown link.'); return; }
-        res.redirect(`/api/auth/magic/${token}`);
-    }
+// Send OTP to phone number
+router.post(
+    '/otp/send',
+    asyncHandler(async (req: Request, res: Response) => {
+        const parseResult = OtpSendSchema.safeParse(req.body);
+        if (!parseResult.success) {
+            res.status(400).json({ error: parseResult.error.issues[0]?.message || 'Invalid phone number' });
+            return;
+        }
+
+        // Normalize: strip leading +, ensure starts with 91
+        let { phone } = parseResult.data;
+        phone = phone.replace(/[^0-9]/g, '');
+        if (phone.length === 10) phone = `91${phone}`;
+
+        // Check user exists with this phone
+        const user = await req.prisma.user.findUnique({ where: { phone } });
+        if (!user || !user.isActive) {
+            res.status(404).json({ error: 'No account found for this phone number' });
+            return;
+        }
+
+        const result = await sendOtp(phone);
+        if (!result.success) {
+            res.status(429).json({ error: result.error });
+            return;
+        }
+
+        res.json({ success: true, message: 'OTP sent via WhatsApp' });
+    })
 );
 
-// Magic login - one-click login link that sets auth cookie and redirects
-router.get(
-    '/magic/:token',
+// Verify OTP and create session
+router.post(
+    '/otp/verify',
     asyncHandler(async (req: Request, res: Response) => {
-        const { token } = req.params;
-
-        let decoded: { userId: string; purpose: string };
-        try {
-            decoded = jwt.verify(token, JWT_SECRET) as { userId: string; purpose: string };
-        } catch {
-            res.status(401).send('Link expired or invalid. Ask admin for a new link.');
+        const parseResult = OtpVerifySchema.safeParse(req.body);
+        if (!parseResult.success) {
+            res.status(400).json({ error: parseResult.error.issues[0]?.message || 'Invalid request' });
             return;
         }
 
-        if (decoded.purpose !== 'magic-login') {
-            res.status(400).send('Invalid link.');
+        let { phone } = parseResult.data;
+        const { otp } = parseResult.data;
+        phone = phone.replace(/[^0-9]/g, '');
+        if (phone.length === 10) phone = `91${phone}`;
+
+        // Verify OTP
+        const otpResult = verifyOtp(phone, otp);
+        if (!otpResult.valid) {
+            res.status(401).json({ error: otpResult.error });
             return;
         }
 
+        // Look up user
         const user = await req.prisma.user.findUnique({
-            where: { id: decoded.userId },
-            include: { userRole: true },
+            where: { phone },
+            include: {
+                userRole: true,
+                permissionOverrides: true,
+            },
         });
 
         if (!user || !user.isActive) {
-            res.status(404).send('User not found or disabled.');
+            res.status(404).json({ error: 'User not found or disabled' });
             return;
         }
 
-        // Generate a normal session token
-        const sessionSignOptions: SignOptions = { expiresIn: '30d' as SignOptions['expiresIn'] };
-        const sessionToken = jwt.sign(
+        // Generate session token (30 days for OTP login)
+        const otpSignOptions: SignOptions = { expiresIn: '30d' as SignOptions['expiresIn'] };
+        const token = jwt.sign(
             {
                 id: user.id,
                 email: user.email,
@@ -349,10 +387,28 @@ router.get(
                 tokenVersion: user.tokenVersion,
             },
             JWT_SECRET,
-            sessionSignOptions
+            otpSignOptions
         );
 
-        res.cookie('auth_token', sessionToken, {
+        // Calculate permissions
+        const rolePermissions = new Set<string>(
+            Array.isArray(user.userRole?.permissions)
+                ? (user.userRole.permissions as string[])
+                : []
+        );
+        if (user.role === 'admin' && !user.roleId) {
+            rolePermissions.add('*');
+        }
+        for (const override of user.permissionOverrides || []) {
+            if (override.granted) {
+                rolePermissions.add(override.permission);
+            } else {
+                rolePermissions.delete(override.permission);
+            }
+        }
+
+        // Set cookie
+        res.cookie('auth_token', token, {
             httpOnly: true,
             secure: process.env.NODE_ENV === 'production',
             sameSite: 'lax',
@@ -360,8 +416,19 @@ router.get(
             path: '/',
         });
 
-        // Redirect to fabric count page
-        res.redirect('/fabric-count');
+        res.json({
+            user: {
+                id: user.id,
+                email: user.email,
+                name: user.name,
+                role: user.role,
+                roleId: user.roleId,
+                roleName: user.userRole?.displayName || null,
+                extraAccess: Array.isArray(user.extraAccess) ? user.extraAccess : [],
+                mustChangePassword: user.mustChangePassword,
+            },
+            permissions: Array.from(rolePermissions),
+        });
     })
 );
 

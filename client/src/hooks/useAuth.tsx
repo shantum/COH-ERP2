@@ -21,6 +21,7 @@ interface AuthContextType {
     isAuthenticated: boolean;
     isLoading: boolean;
     login: (email: string, password: string) => Promise<void>;
+    loginWithOtp: (phone: string, otp: string) => Promise<void>;
     logout: () => void;
 }
 
@@ -68,6 +69,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         queryClient.setQueryData(authQueryKeys.user, res.data.user);
     }, [queryClient]);
 
+    const loginWithOtp = useCallback(async (phone: string, otp: string) => {
+        const res = await authApi.verifyOtp(phone, otp);
+        queryClient.setQueryData(authQueryKeys.user, res.data.user);
+    }, [queryClient]);
+
     const logout = useCallback(async () => {
         // Clear server-side cookie
         try {
@@ -104,8 +110,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isAuthenticated: !!user,
         isLoading: typeof window === 'undefined' ? false : isLoading,
         login,
+        loginWithOtp,
         logout,
-    }), [user, isLoading, login, logout]);
+    }), [user, isLoading, login, loginWithOtp, logout]);
 
     return (
         <AuthContext.Provider value={value}>

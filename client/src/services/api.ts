@@ -49,6 +49,8 @@ export const authApi = {
     changePassword: (data: { currentPassword: string; newPassword: string }) =>
         api.post('/auth/change-password', data),
     logout: () => api.post('/auth/logout'),
+    sendOtp: (phone: string) => api.post('/auth/otp/send', { phone }),
+    verifyOtp: (phone: string, otp: string) => api.post('/auth/otp/verify', { phone, otp }),
 };
 
 // ==================== INVENTORY (CSV Upload Only) ====================

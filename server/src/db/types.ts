@@ -1473,6 +1473,7 @@ export type TrimItem = {
 export type User = {
     id: Generated<string>;
     email: string;
+    phone: string | null;
     password: string;
     name: string;
     role: Generated<string>;
