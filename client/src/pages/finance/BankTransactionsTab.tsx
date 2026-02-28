@@ -5,7 +5,7 @@
  * Merges old PaymentsTab + BankImportTab into one transparent view.
  */
 
-import { useState, useCallback, useRef, useEffect, Fragment } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo, Fragment } from 'react';
 import ConfirmModal from '../../components/common/ConfirmModal';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
@@ -1175,23 +1175,34 @@ function AutoMatchDialog({ open, onClose }: { open: boolean; onClose: () => void
     enabled: open,
   });
 
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-
-  useEffect(() => {
-    if (!data?.suggestions) return;
-    const highKeys = new Set<string>();
+  const highConfidenceKeys = useMemo(() => {
+    if (!data?.suggestions) return new Set<string>();
+    const keys = new Set<string>();
     for (const group of data.suggestions) {
       for (const m of group.matches) {
         if (m.confidence === 'high') {
-          highKeys.add(`${m.bankTransaction.id}:${m.invoice.id}`);
+          keys.add(`${m.bankTransaction.id}:${m.invoice.id}`);
         }
       }
     }
-    setSelected(highKeys);
+    return keys;
   }, [data]);
 
+  // Track user overrides (toggled keys) separately from the high-confidence defaults
+  const [overrides, setOverrides] = useState<Set<string>>(new Set());
+
+  // Reset overrides when data changes (new suggestions loaded)
+  const selected = useMemo(() => {
+    const base = new Set(highConfidenceKeys);
+    for (const key of overrides) {
+      if (base.has(key)) base.delete(key);
+      else base.add(key);
+    }
+    return base;
+  }, [highConfidenceKeys, overrides]);
+
   const toggle = useCallback((key: string) => {
-    setSelected(prev => {
+    setOverrides(prev => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
       else next.add(key);

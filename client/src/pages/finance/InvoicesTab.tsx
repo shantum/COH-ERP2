@@ -103,7 +103,10 @@ function InlineInvoiceNotes({ invoiceId, notes, onSaved }: { invoiceId: string; 
 
 export default function InvoicesTab({ search: rawSearch }: { search: FinanceSearchParams }) {
   // Default to payable if no type selected
-  const search = { ...rawSearch, type: rawSearch.type ?? 'payable' as const };
+  const search = useMemo(
+    () => ({ ...rawSearch, type: rawSearch.type ?? 'payable' as const }),
+    [rawSearch],
+  );
   const isFabricView = search.category === 'fabric';
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -1735,58 +1738,52 @@ function CreateInvoiceModal({ open, onClose, prefill, editInvoice }: {
   const queryClient = useQueryClient();
   const createFn = useServerFn(createInvoice);
   const updateFn = useServerFn(updateInvoice);
-  const [form, setForm] = useState({
-    type: 'payable' as 'payable' | 'receivable',
-    category: 'other' as string,
-    invoiceNumber: '',
-    totalAmount: '',
-    gstRate: '' as string,
-    gstAmount: '',
-    invoiceDate: new Date().toISOString().split('T')[0],
-    billingPeriod: '',
-    notes: '',
-    partyId: undefined as string | undefined,
-  });
-
-  const [selectedParty, setSelectedParty] = useState<{ id: string; name: string } | null>(null);
-
-  // Prefill for edit mode
-  const prevEditRef = useRef<string | undefined>(undefined);
-  if (editInvoice && editInvoice.id !== prevEditRef.current) {
-    prevEditRef.current = editInvoice.id;
-    setForm({
-      type: editInvoice.type as 'payable' | 'receivable',
-      category: editInvoice.category,
-      invoiceNumber: editInvoice.invoiceNumber ?? '',
-      totalAmount: String(editInvoice.totalAmount),
-      gstRate: '',
-      gstAmount: editInvoice.gstAmount != null ? String(editInvoice.gstAmount) : '',
-      invoiceDate: editInvoice.invoiceDate ? (editInvoice.invoiceDate instanceof Date ? editInvoice.invoiceDate.toISOString() : editInvoice.invoiceDate).split('T')[0] : '',
-      billingPeriod: editInvoice.billingPeriod ?? '',
-      notes: editInvoice.notes ?? '',
-      partyId: editInvoice.party?.id,
-    });
-    if (editInvoice.party) {
-      setSelectedParty({ id: editInvoice.party.id, name: editInvoice.party.name });
+  const [form, setForm] = useState(() => {
+    if (editInvoice) {
+      return {
+        type: editInvoice.type as 'payable' | 'receivable',
+        category: editInvoice.category,
+        invoiceNumber: editInvoice.invoiceNumber ?? '',
+        totalAmount: String(editInvoice.totalAmount),
+        gstRate: '' as string,
+        gstAmount: editInvoice.gstAmount != null ? String(editInvoice.gstAmount) : '',
+        invoiceDate: editInvoice.invoiceDate ? (editInvoice.invoiceDate instanceof Date ? editInvoice.invoiceDate.toISOString() : editInvoice.invoiceDate).split('T')[0] : '',
+        billingPeriod: editInvoice.billingPeriod ?? '',
+        notes: editInvoice.notes ?? '',
+        partyId: editInvoice.party?.id,
+      };
     }
-  }
-
-  const prevPrefillRef = useRef<typeof prefill>(undefined);
-  if (prefill && prefill !== prevPrefillRef.current) {
-    prevPrefillRef.current = prefill;
-    setForm({
-      type: prefill.type,
-      category: 'other',
+    if (prefill) {
+      return {
+        type: prefill.type,
+        category: 'other' as string,
+        invoiceNumber: '',
+        totalAmount: String(prefill.totalAmount),
+        gstRate: '' as string,
+        gstAmount: '',
+        invoiceDate: new Date().toISOString().split('T')[0],
+        billingPeriod: '',
+        notes: '',
+        partyId: prefill.partyId,
+      };
+    }
+    return {
+      type: 'payable' as 'payable' | 'receivable',
+      category: 'other' as string,
       invoiceNumber: '',
-      totalAmount: String(prefill.totalAmount),
-      gstRate: '',
+      totalAmount: '',
+      gstRate: '' as string,
       gstAmount: '',
       invoiceDate: new Date().toISOString().split('T')[0],
       billingPeriod: '',
       notes: '',
-      partyId: prefill.partyId,
-    });
-  }
+      partyId: undefined as string | undefined,
+    };
+  });
+
+  const [selectedParty, setSelectedParty] = useState<{ id: string; name: string } | null>(
+    editInvoice?.party ? { id: editInvoice.party.id, name: editInvoice.party.name } : null
+  );
 
   const mutation = useMutation({
     mutationFn: async () => {
@@ -1836,7 +1833,6 @@ function CreateInvoiceModal({ open, onClose, prefill, editInvoice }: {
   });
 
   const resetForm = () => {
-    prevPrefillRef.current = undefined;
     setForm({
       type: 'payable',
       category: 'other',

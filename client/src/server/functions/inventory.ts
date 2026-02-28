@@ -642,7 +642,7 @@ export const getInventoryGrouped = createServerFn({ method: 'GET' })
         }
 
         // Convert to array and sort products
-        let products = Array.from(productMap.values());
+        const products = Array.from(productMap.values());
 
         // Sort by selected column and order
         products.sort((a, b) => {

@@ -3,7 +3,7 @@
  * Manages all state for the unified order modal
  */
 
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useCallback, useMemo, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { getCustomerAddresses } from '../../../../server/functions/customers';
@@ -143,11 +143,9 @@ export function useUnifiedOrderModal({ order, initialMode, onNavigateToOrder }: 
   // Initialize form values from order — keyed on order.id + key fields to avoid
   // resetting user edits on every background TanStack Query refetch.
   const orderSyncKey = `${order.id}-${order.status}-${order.customerId ?? ''}-${order.orderLines?.length ?? 0}`;
-  const prevOrderSyncKeyRef = useRef(orderSyncKey);
+  const prevOrderSyncKeyRef = useRef('');
 
-  useEffect(() => {
-    // Only re-initialize when the order truly changes (different ID or meaningful server-side update)
-    if (prevOrderSyncKeyRef.current === orderSyncKey && prevOrderSyncKeyRef.current !== '') return;
+  if (prevOrderSyncKeyRef.current !== orderSyncKey) {
     prevOrderSyncKeyRef.current = orderSyncKey;
 
     if (order) {
@@ -234,7 +232,7 @@ export function useUnifiedOrderModal({ order, initialMode, onNavigateToOrder }: 
         selectedLineIds: new Set(packedLineIds),
       }));
     }
-  }, [orderSyncKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }
 
   // Use selected customer ID (from search) or fall back to order's customer ID
   const activeCustomerId = editForm.customerId || order?.customerId;
@@ -274,7 +272,7 @@ export function useUnifiedOrderModal({ order, initialMode, onNavigateToOrder }: 
   // Handles exchange orders correctly (always calculates from lines)
   const orderTotal = useMemo(() => {
     return calculateOrderTotal(order).total;
-  }, [order.orderLines, order.totalAmount, order.isExchange]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [order]);
 
   // Mode change handler
   const handleModeChange = useCallback((newMode: ModalMode) => {
@@ -317,32 +315,30 @@ export function useUnifiedOrderModal({ order, initialMode, onNavigateToOrder }: 
   }, [canEdit, canShip, canCustomer, canReturn, order.id, order.orderNumber, mode]);
 
   // Track the order ID to detect when order changes (for navigation)
-  const [previousOrderId, setPreviousOrderId] = useState(order.id);
+  const previousOrderIdRef = useRef(order.id);
 
   // When order changes (from navigation), update mode and history
-  useEffect(() => {
-    if (order.id !== previousOrderId) {
-      setPreviousOrderId(order.id);
-      // Switch to view mode for the new order
-      setMode('view');
-      // Add new order to navigation history
-      setNavigationState(prev => {
-        const lastEntry = prev.history[prev.history.length - 1];
-        // Don't add duplicate entries
-        if (lastEntry?.orderId === order.id) {
-          return prev;
-        }
-        return {
-          history: [...prev.history, {
-            orderId: order.id,
-            orderNumber: order.orderNumber,
-            mode: 'view',
-          }],
-          currentIndex: prev.history.length,
-        };
-      });
-    }
-  }, [order.id, order.orderNumber, previousOrderId]);
+  if (order.id !== previousOrderIdRef.current) {
+    previousOrderIdRef.current = order.id;
+    // Switch to view mode for the new order
+    setMode('view');
+    // Add new order to navigation history
+    setNavigationState(prev => {
+      const lastEntry = prev.history[prev.history.length - 1];
+      // Don't add duplicate entries
+      if (lastEntry?.orderId === order.id) {
+        return prev;
+      }
+      return {
+        history: [...prev.history, {
+          orderId: order.id,
+          orderNumber: order.orderNumber,
+          mode: 'view',
+        }],
+        currentIndex: prev.history.length,
+      };
+    });
+  }
 
   // Navigate to a different order (from Customer tab order history)
   const navigateToOrder = useCallback((orderId: string) => {
@@ -576,22 +572,19 @@ export function useUnifiedOrderModal({ order, initialMode, onNavigateToOrder }: 
   const isAddressExpanded = expandedSections.addressPicker;
 
   // Line handlers (these trigger mutations in the parent, we just track state changes here)
-  const handleAddLine = useCallback((_skuId: string, _qty: number, _unitPrice: number) => {
-    // State update happens via mutation + cache invalidation
+  // Handlers accept args for callers but only use side effects (mutation + cache invalidation)
+  const handleAddLine = useCallback((_skuId: string, _qty: number, _unitPrice: number) => { // eslint-disable-line @typescript-eslint/no-unused-vars
     setIsAddingProduct(false);
   }, []);
 
-  const handleUpdateLine = useCallback((_lineId: string, _data: { qty?: number; unitPrice?: number }) => {
-    // State update happens via mutation + cache invalidation
+  const handleUpdateLine = useCallback((_lineId: string, _data: { qty?: number; unitPrice?: number }) => { // eslint-disable-line @typescript-eslint/no-unused-vars
     setHasUnsavedChanges(true);
   }, []);
 
-  const handleCancelLine = useCallback((_lineId: string) => {
-    // State update happens via mutation + cache invalidation
+  const handleCancelLine = useCallback((_lineId: string) => { // eslint-disable-line @typescript-eslint/no-unused-vars
   }, []);
 
-  const handleUncancelLine = useCallback((_lineId: string) => {
-    // State update happens via mutation + cache invalidation
+  const handleUncancelLine = useCallback((_lineId: string) => { // eslint-disable-line @typescript-eslint/no-unused-vars
   }, []);
 
   return {
