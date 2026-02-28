@@ -15,7 +15,6 @@ import { useState, useRef, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
 import { Search, Loader2, ChevronRight, Package } from 'lucide-react';
-import type { OrdersSearchParams } from '@coh/shared';
 import { useDebounce } from '../hooks/useDebounce';
 import {
     searchAllOrders,
@@ -23,25 +22,6 @@ import {
     type TabResult,
     type SearchAllResponse,
 } from '../server/functions/orders';
-
-// Tab types for navigation
-type OrderTab = 'open' | 'cancelled';
-type ShipmentTab = 'shipped' | 'rto' | 'cod-pending' | 'archived';
-type AllTabs = OrderTab | ShipmentTab;
-
-// Map API tab names to tab types
-const tabMapping: Record<string, AllTabs> = {
-    open: 'open',
-    cancelled: 'cancelled',
-    shipped: 'shipped',
-    rto: 'rto',
-    cod_pending: 'cod-pending',
-    archived: 'archived',
-};
-
-// Tabs that belong to the Orders page (open, cancelled)
-// All other tabs (shipped, rto, cod-pending, archived) go to Shipments page
-const ordersPageTabs: OrderTab[] = ['open', 'cancelled'];
 
 const getTabColor = (tab: string) => {
     switch (tab) {
@@ -74,17 +54,8 @@ export default function OrderSearch() {
         staleTime: 30000, // Cache for 30s
     });
 
-    const handleSelectOrder = (orderId: string, tab: string) => {
-        const mappedTab = tabMapping[tab] || 'open';
-        // Map tab to view for Orders page - open/cancelled stay, shipped tabs become shipped view
-        const view = (ordersPageTabs as string[]).includes(mappedTab as string) ? mappedTab : 'shipped';
-        // Navigate with modal=view to directly open the order modal
-        // Navigate to orders page with modal open — cast needed because OrderSearch
-        // maps tab names (e.g. 'cancelled') to valid order views at runtime
-        navigate({
-            to: '/orders',
-            search: { view, orderId, modal: 'view' } as unknown as OrdersSearchParams,
-        });
+    const handleSelectOrder = (orderNumber: string) => {
+        navigate({ to: '/orders/$orderId', params: { orderId: orderNumber } });
     };
 
     // Keyboard navigation: Enter to select first result
@@ -93,7 +64,7 @@ export default function OrderSearch() {
             const firstTab = searchResults.results[0];
             const firstOrder = firstTab?.orders[0];
             if (firstOrder) {
-                handleSelectOrder(firstOrder.id, firstTab.tab);
+                handleSelectOrder(firstOrder.orderNumber);
             }
         }
     };
@@ -172,7 +143,7 @@ export default function OrderSearch() {
                                 {tabResult.orders.map((order: SearchResultOrder) => (
                                     <button
                                         key={order.id}
-                                        onClick={() => handleSelectOrder(order.id, tabResult.tab)}
+                                        onClick={() => handleSelectOrder(order.orderNumber)}
                                         className="w-full px-5 py-4 flex items-center justify-between hover:bg-gray-50 text-left transition-colors group"
                                     >
                                         <div className="min-w-0 flex-1">
