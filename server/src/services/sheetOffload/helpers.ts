@@ -455,6 +455,7 @@ export async function validateOutwardRows(
 
     const seenOrderSkus = new Set<string>(); // within-batch tracker
     const validRows: ParsedRow[] = [];
+    const alreadyOutwardedRows: ParsedRow[] = [];
     for (const row of afterBasic) {
         const orderNumber = row.extra;
         if (!orderNumber) {
@@ -479,6 +480,8 @@ export async function validateOutwardRows(
         const orderSkuKey = `${order.orderNumber}|${skuId}`;
         if (existingOrderSkuKeys.has(orderSkuKey)) {
             addSkip('duplicate_order_sku');
+            // Already outward'd in a previous run — treat as DONE, not an error
+            alreadyOutwardedRows.push(row);
             continue;
         }
         if (seenOrderSkus.has(orderSkuKey)) {
@@ -490,7 +493,7 @@ export async function validateOutwardRows(
         validRows.push(row);
     }
 
-    return { validRows, skipReasons, orderMap, existingOrderSkuKeys };
+    return { validRows, alreadyOutwardedRows, skipReasons, orderMap, existingOrderSkuKeys };
 }
 
 const DEDUP_CHUNK_SIZE = 2000;

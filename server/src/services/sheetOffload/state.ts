@@ -308,6 +308,8 @@ export interface OrderMapEntry {
 
 export interface OutwardValidationResult {
     validRows: ParsedRow[];
+    /** Rows skipped because the order+SKU was already outward'd — should be marked DONE */
+    alreadyOutwardedRows: ParsedRow[];
     skipReasons: Record<string, number>;
     orderMap: Map<string, OrderMapEntry>;
     /** ERP orderNumber|skuId keys that already have OUTWARD txns in DB */

@@ -173,7 +173,7 @@ export async function ingestOutwardLive(
 
     const skuMap = await bulkLookupSkus(newRows.map(r => r.skuCode));
 
-    const { validRows, skipReasons, orderMap, existingOrderSkuKeys } = await validateOutwardRows(newRows, skuMap);
+    const { validRows, alreadyOutwardedRows, skipReasons, orderMap, existingOrderSkuKeys } = await validateOutwardRows(newRows, skuMap);
     const skippedCount = newRows.length - validRows.length;
     result.skipped += skippedCount;
     if (Object.keys(skipReasons).length > 0) {
@@ -181,13 +181,15 @@ export async function ingestOutwardLive(
         sheetsLogger.info({ tab, skipped: skippedCount, skipReasons }, 'Outward validation complete');
     }
 
-    // Write Import Errors column only for invalid/skipped rows (not valid or dupe rows)
+    // Write Import Errors column only for invalid/skipped rows (not valid, dupe, or already-outward'd)
     const validRefIds = new Set(validRows.map(r => r.referenceId));
+    const alreadyOutwardedRefIds = new Set(alreadyOutwardedRows.map(r => r.referenceId));
     const outwardImportErrors: Array<{ rowIndex: number; error: string }> = [];
     const seenOrderSkusForErrors = new Set<string>(); // track within-batch dupes for error reporting
     for (const row of parsed) {
-        if (existingRefs.has(row.referenceId)) continue;  // dupe — will be marked DONE
-        if (validRefIds.has(row.referenceId)) continue;    // valid — will be marked DONE
+        if (existingRefs.has(row.referenceId)) continue;        // dupe — will be marked DONE
+        if (validRefIds.has(row.referenceId)) continue;          // valid — will be marked DONE
+        if (alreadyOutwardedRefIds.has(row.referenceId)) continue; // already outward'd — will be marked DONE
         // Skipped — determine reason
         const skuInfo = skuMap.get(row.skuCode);
         const now = new Date();
@@ -314,11 +316,12 @@ export async function ingestOutwardLive(
     // --- Step: Mark DONE ---
     const markStart = tracker?.start('Mark DONE') ?? 0;
 
-    // Mark successfully ingested rows + already-deduped rows as DONE
+    // Mark successfully ingested rows + already-deduped rows + already-outward'd rows as DONE
     const dupeRows = parsed.filter(r => existingRefs.has(r.referenceId));
     const rowsToMark = [
         ...successfulRows.map(r => ({ rowIndex: r.rowIndex, referenceId: r.referenceId })),
         ...dupeRows.map(r => ({ rowIndex: r.rowIndex, referenceId: r.referenceId })),
+        ...alreadyOutwardedRows.map(r => ({ rowIndex: r.rowIndex, referenceId: r.referenceId })),
     ];
     await markRowsIngested(ORDERS_MASTERSHEET_ID, tab, rowsToMark, 'AG', result);
 
@@ -643,7 +646,7 @@ export async function previewIngestOutward(): Promise<IngestPreviewResult | null
 
         // Validate
         const skuMap = await bulkLookupSkus(newRows.map(r => r.skuCode));
-        const { validRows, skipReasons, orderMap, existingOrderSkuKeys } = await validateOutwardRows(newRows, skuMap);
+        const { validRows, alreadyOutwardedRows, skipReasons, orderMap, existingOrderSkuKeys } = await validateOutwardRows(newRows, skuMap);
 
         // Write status column: "ok" for valid, "ok (already in ERP)" for dupes, error text for invalid
         const validRefIds = new Set(validRows.map(r => r.referenceId));
