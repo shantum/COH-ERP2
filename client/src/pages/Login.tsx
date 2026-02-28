@@ -62,7 +62,7 @@ export default function Login({ onLoginSuccess }: LoginProps) {
 function PhoneOtpForm({
     loginWithOtp,
 }: {
-    loginWithOtp: (phone: string, otp: string) => Promise<void>;
+    loginWithOtp: (phone: string, otp: string) => Promise<{ role: string; email: string }>;
 }) {
     const [step, setStep] = useState<OtpStep>('phone');
     const [phone, setPhone] = useState('');
@@ -109,9 +109,10 @@ function PhoneOtpForm({
         setLoading(true);
 
         try {
-            await loginWithOtp(phone, otp);
-            // Hard navigate to ensure fresh request with new cookie
-            window.location.href = '/orders';
+            const user = await loginWithOtp(phone, otp);
+            // Per-user landing page
+            const landing = user.email === 'prabhakar@coh.one' ? '/fabric-count' : '/orders';
+            window.location.href = landing;
         } catch (err: unknown) {
             setLoading(false);
             const axiosErr = err as { response?: { data?: { error?: string } } };

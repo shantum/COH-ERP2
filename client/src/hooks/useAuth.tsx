@@ -21,7 +21,7 @@ interface AuthContextType {
     isAuthenticated: boolean;
     isLoading: boolean;
     login: (email: string, password: string) => Promise<void>;
-    loginWithOtp: (phone: string, otp: string) => Promise<void>;
+    loginWithOtp: (phone: string, otp: string) => Promise<AuthUser>;
     logout: () => void;
 }
 
@@ -72,6 +72,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const loginWithOtp = useCallback(async (phone: string, otp: string) => {
         const res = await authApi.verifyOtp(phone, otp);
         queryClient.setQueryData(authQueryKeys.user, res.data.user);
+        return res.data.user as AuthUser;
     }, [queryClient]);
 
     const logout = useCallback(async () => {
