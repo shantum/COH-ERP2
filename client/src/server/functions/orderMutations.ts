@@ -562,7 +562,7 @@ export const createOrder = createServerFn({ method: 'POST' })
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ orderId: order.id }),
         }).catch((err: unknown) => {
-            serverLog.warn({ domain: 'orders', fn: 'createOrder' }, 'Sheet push failed (non-critical)', { error: err instanceof Error ? err.message : String(err) });
+            serverLog.warn({ domain: 'orders', fn: 'createOrder', orderId: order.id, orderNumber: order.orderNumber }, 'Sheet push failed (non-critical)', { error: err instanceof Error ? err.message : String(err) });
         });
 
         return {

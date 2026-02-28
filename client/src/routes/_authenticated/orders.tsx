@@ -42,7 +42,7 @@ export const Route = createFileRoute('/_authenticated/orders')({
             return { orders, error: null };
         } catch (error) {
             console.error('[Orders Loader] Error:', error);
-            reportError(error, { loader: 'orders' });
+            reportError(error, { loader: 'orders', view: deps.view, page: deps.page });
             return {
                 orders: {
                     rows: [],

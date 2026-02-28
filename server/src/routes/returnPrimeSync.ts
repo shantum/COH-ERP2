@@ -15,6 +15,9 @@ import { z } from 'zod';
 import { syncReturnPrimeStatus } from '../utils/returnPrimeSync.js';
 import { authenticateToken } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
+import { syncLogger } from '../utils/logger.js';
+
+const rpLogger = syncLogger.child({ domain: 'return-prime' });
 
 const router: Router = Router();
 
@@ -107,7 +110,7 @@ router.post('/sync', authenticateToken, asyncHandler(async (req: Request, res: R
 
     } catch (error: unknown) {
         const message = error instanceof Error ? error.message : 'Unknown error';
-        console.error(`[ReturnPrime] Sync failed for ${orderLineId}:`, message);
+        rpLogger.error({ orderLineId, err: message }, 'Sync failed for order line');
         res.json({ success: false, error: message });
     }
 }));
@@ -162,7 +165,7 @@ router.post('/sync-batch', authenticateToken, asyncHandler(async (req: Request, 
 
     } catch (error: unknown) {
         const message = error instanceof Error ? error.message : 'Unknown error';
-        console.error(`[ReturnPrime] Batch sync failed for ${batchNumber}:`, message);
+        rpLogger.error({ batchNumber, err: message }, 'Batch sync failed');
         res.status(500).json({ success: false, error: message });
     }
 }));

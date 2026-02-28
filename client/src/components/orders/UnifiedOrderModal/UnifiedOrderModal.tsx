@@ -273,7 +273,7 @@ export function UnifiedOrderModal({
     } catch (error) {
       setIsSaving(false);
       console.error('Failed to save order:', error);
-      reportError(error, { component: 'UnifiedOrderModal', action: 'saveOrder' });
+      reportError(error, { component: 'UnifiedOrderModal', action: 'saveOrder', orderId: order.id, orderNumber: order.orderNumber });
     }
   }, [hasUnsavedChanges, editForm, addressForm, order, mutations, onClose]);
 
@@ -320,7 +320,7 @@ export function UnifiedOrderModal({
       handleAddLine(data.skuId, data.qty, data.unitPrice);
     } catch (error) {
       console.error('Failed to add line:', error);
-      reportError(error, { component: 'UnifiedOrderModal', action: 'addLine' });
+      reportError(error, { component: 'UnifiedOrderModal', action: 'addLine', orderId: order.id, orderNumber: order.orderNumber });
     }
   }, [order.id, mutations, handleAddLine]);
 
@@ -334,7 +334,7 @@ export function UnifiedOrderModal({
       handleUpdateLine(lineId, data);
     } catch (error) {
       console.error('Failed to update line:', error);
-      reportError(error, { component: 'UnifiedOrderModal', action: 'updateLine' });
+      reportError(error, { component: 'UnifiedOrderModal', action: 'updateLine', orderId: order.id, orderNumber: order.orderNumber, lineId });
     } finally {
       setUpdatingLineIds(prev => {
         const next = new Set(prev);
@@ -402,7 +402,7 @@ export function UnifiedOrderModal({
       onSuccess?.();
     } catch (error) {
       console.error('Failed to initiate return:', error);
-      reportError(error, { component: 'UnifiedOrderModal', action: 'initiateReturn' });
+      reportError(error, { component: 'UnifiedOrderModal', action: 'initiateReturn', orderId: order.id, orderNumber: order.orderNumber });
       showReturnError(error, 'Initiate return');
     }
   }, [returnForm, queryClient, order.id, order.orderLines, resetReturnForm, onSuccess]);
@@ -431,7 +431,7 @@ export function UnifiedOrderModal({
       onSuccess?.();
     } catch (error) {
       console.error('Failed to cancel return:', error);
-      reportError(error, { component: 'UnifiedOrderModal', action: 'cancelReturn' });
+      reportError(error, { component: 'UnifiedOrderModal', action: 'cancelReturn', orderId: order.id, orderNumber: order.orderNumber, lineId });
       showReturnError(error, 'Cancel return');
     }
   }, [queryClient, order.id, onSuccess]);
@@ -478,7 +478,7 @@ export function UnifiedOrderModal({
       };
     } catch (error) {
       console.error('Failed to schedule pickup:', error);
-      reportError(error, { component: 'UnifiedOrderModal', action: 'schedulePickup' });
+      reportError(error, { component: 'UnifiedOrderModal', action: 'schedulePickup', orderId: order.id, orderNumber: order.orderNumber, lineId: pickupDialogLineId });
       const message = error instanceof Error ? error.message : 'Unknown error';
       return { success: false, error: message };
     }
@@ -503,7 +503,7 @@ export function UnifiedOrderModal({
       onSuccess?.();
     } catch (error) {
       console.error('Failed to receive return:', error);
-      reportError(error, { component: 'UnifiedOrderModal', action: 'receiveReturn' });
+      reportError(error, { component: 'UnifiedOrderModal', action: 'receiveReturn', orderId: order.id, orderNumber: order.orderNumber, lineId });
       showReturnError(error, 'Receive return');
     }
   }, [queryClient, order.id, onSuccess]);
@@ -526,7 +526,7 @@ export function UnifiedOrderModal({
       onSuccess?.();
     } catch (error) {
       console.error('Failed to process refund:', error);
-      reportError(error, { component: 'UnifiedOrderModal', action: 'processRefund' });
+      reportError(error, { component: 'UnifiedOrderModal', action: 'processRefund', orderId: order.id, orderNumber: order.orderNumber, lineId });
       showReturnError(error, 'Process refund');
     }
   }, [queryClient, order.id, onSuccess]);
@@ -547,7 +547,7 @@ export function UnifiedOrderModal({
       onSuccess?.();
     } catch (error) {
       console.error('Failed to complete return:', error);
-      reportError(error, { component: 'UnifiedOrderModal', action: 'completeReturn' });
+      reportError(error, { component: 'UnifiedOrderModal', action: 'completeReturn', orderId: order.id, orderNumber: order.orderNumber, lineId });
       showReturnError(error, 'Complete return');
     }
   }, [queryClient, order.id, onSuccess]);
@@ -570,7 +570,7 @@ export function UnifiedOrderModal({
       onSuccess?.();
     } catch (error) {
       console.error('Failed to create exchange:', error);
-      reportError(error, { component: 'UnifiedOrderModal', action: 'createExchange' });
+      reportError(error, { component: 'UnifiedOrderModal', action: 'createExchange', orderId: order.id, orderNumber: order.orderNumber, lineId });
       showReturnError(error, 'Create exchange');
     }
   }, [queryClient, order.id, onSuccess]);
@@ -592,7 +592,7 @@ export function UnifiedOrderModal({
       showReturnSuccess('Notes updated');
     } catch (error) {
       console.error('Failed to update notes:', error);
-      reportError(error, { component: 'UnifiedOrderModal', action: 'updateNotes' });
+      reportError(error, { component: 'UnifiedOrderModal', action: 'updateNotes', orderId: order.id, orderNumber: order.orderNumber, lineId });
       showReturnError(error, 'Update notes');
     }
   }, [queryClient, order.id]);

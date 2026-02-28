@@ -62,7 +62,7 @@ export const Route = createFileRoute('/_authenticated/inventory')({
             };
         } catch (error) {
             console.error('[Inventory Loader] Error:', error);
-            reportError(error, { loader: 'inventory' });
+            reportError(error, { loader: 'inventory', page: deps.page, search: deps.search, stockFilter: deps.stockFilter });
             return {
                 inventory: null,
                 error: error instanceof Error ? error.message : 'Failed to load inventory',

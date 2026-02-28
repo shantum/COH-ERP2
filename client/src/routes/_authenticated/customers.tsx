@@ -50,7 +50,7 @@ export const Route = createFileRoute('/_authenticated/customers')({
             return { customers, error: null };
         } catch (error) {
             console.error('[Customers Loader] Error:', error);
-            reportError(error, { loader: 'customers' });
+            reportError(error, { loader: 'customers', search: deps.search, tier: deps.tier, page: deps.page });
             return {
                 customers: null,
                 error: error instanceof Error ? error.message : 'Failed to load customers',

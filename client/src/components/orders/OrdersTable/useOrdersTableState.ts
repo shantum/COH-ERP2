@@ -304,7 +304,7 @@ export function useOrdersTableState(): UseOrdersTableStateReturn {
                 }
             } catch (error) {
                 console.error('Failed to fetch grid preferences:', error);
-                reportError(error, { hook: 'useOrdersTableState', action: 'fetchPreferences' });
+                reportError(error, { hook: 'useOrdersTableState', action: 'fetchPreferences', gridId: TABLE_ID });
             } finally {
                 setPrefsLoaded(true);
             }
@@ -389,7 +389,7 @@ export function useOrdersTableState(): UseOrdersTableStateReturn {
             return false;
         } catch (error) {
             console.error('Failed to save user preferences:', error);
-            reportError(error, { hook: 'useOrdersTableState', action: 'savePreferences' });
+            reportError(error, { hook: 'useOrdersTableState', action: 'savePreferences', gridId: TABLE_ID });
             return false;
         } finally {
             setIsSavingPrefs(false);
@@ -436,7 +436,7 @@ export function useOrdersTableState(): UseOrdersTableStateReturn {
             return true;
         } catch (error) {
             console.error('Failed to reset preferences:', error);
-            reportError(error, { hook: 'useOrdersTableState', action: 'resetPreferences' });
+            reportError(error, { hook: 'useOrdersTableState', action: 'resetPreferences', gridId: TABLE_ID });
             return false;
         } finally {
             setIsSavingPrefs(false);
@@ -469,7 +469,7 @@ export function useOrdersTableState(): UseOrdersTableStateReturn {
             return false;
         } catch (error) {
             console.error('Failed to save grid preferences:', error);
-            reportError(error, { hook: 'useOrdersTableState', action: 'saveGridPreferences' });
+            reportError(error, { hook: 'useOrdersTableState', action: 'saveGridPreferences', gridId: TABLE_ID });
             return false;
         } finally {
             setIsSavingPrefs(false);

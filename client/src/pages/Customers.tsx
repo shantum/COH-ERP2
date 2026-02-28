@@ -329,7 +329,7 @@ export default function Customers() {
                     }
                 } catch (error) {
                     console.error('Failed to fetch order:', error);
-                    reportError(error, { page: 'Customers', action: 'fetchOrder' });
+                    reportError(error, { page: 'Customers', action: 'fetchOrder', orderId: orders[0].id });
                 }
             };
             fetchOrder();

@@ -192,7 +192,7 @@ export function useGridState({
             } catch (error) {
                 // Preferences not available, continue with localStorage values
                 console.error('Failed to fetch grid preferences:', error);
-                reportError(error, { hook: 'useGridState', action: 'fetchPreferences' });
+                reportError(error, { hook: 'useGridState', action: 'fetchPreferences', gridId });
             } finally {
                 setPrefsLoaded(true);
             }
@@ -292,7 +292,7 @@ export function useGridState({
             return false;
         } catch (error) {
             console.error('Failed to save user preferences:', error);
-            reportError(error, { hook: 'useGridState', action: 'savePreferences' });
+            reportError(error, { hook: 'useGridState', action: 'savePreferences', gridId });
             return false;
         } finally {
             setIsSavingPrefs(false);
@@ -345,7 +345,7 @@ export function useGridState({
             return true;
         } catch (error) {
             console.error('Failed to reset preferences:', error);
-            reportError(error, { hook: 'useGridState', action: 'resetPreferences' });
+            reportError(error, { hook: 'useGridState', action: 'resetPreferences', gridId });
             return false;
         } finally {
             setIsSavingPrefs(false);
@@ -379,7 +379,7 @@ export function useGridState({
             return false;
         } catch (error) {
             console.error('Failed to save grid preferences:', error);
-            reportError(error, { hook: 'useGridState', action: 'saveGridPreferences' });
+            reportError(error, { hook: 'useGridState', action: 'saveGridPreferences', gridId });
             return false;
         } finally {
             setIsSavingPrefs(false);

@@ -323,7 +323,7 @@ export const initiateLineReturn = createServerFn({ method: 'POST' })
             message
         );
         } catch (error: unknown) {
-            serverLog.error({ domain: 'returns', fn: 'initiateLineReturn' }, 'Failed to initiate line return', error);
+            serverLog.error({ domain: 'returns', fn: 'initiateLineReturn', orderLineIds: data.lines.map(l => l.orderLineId), resolution: data.returnResolution }, 'Failed to initiate line return', error);
             const message = error instanceof Error ? error.message : 'Unknown error';
             return returnError(RETURN_ERROR_CODES.UNKNOWN, message);
         }
@@ -419,6 +419,7 @@ export const scheduleReturnPickup = createServerFn({ method: 'POST' })
                     message
                 );
             } catch (error: unknown) {
+                serverLog.error({ domain: 'returns', fn: 'scheduleReturnPickup', orderLineId, batchNumber: line.returnBatchNumber }, 'Failed to schedule pickup via iThink', error);
                 const message = error instanceof Error ? error.message : 'Unknown error';
                 return returnError(RETURN_ERROR_CODES.WRONG_STATUS, `Failed to schedule pickup: ${message}`);
             }

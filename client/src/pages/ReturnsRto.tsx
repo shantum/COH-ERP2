@@ -602,7 +602,7 @@ function AllocationModalContent({
             onSuccess();
         } catch (error) {
             console.error('Failed to allocate:', error);
-            reportError(error, { page: 'ReturnsRto', action: 'allocate' });
+            reportError(error, { page: 'ReturnsRto', action: 'allocate', skuId: item.skuId, skuCode: item.skuCode, queueItemId: item.queueItemId || item.id });
             setIsLoading(false);
         }
     };
