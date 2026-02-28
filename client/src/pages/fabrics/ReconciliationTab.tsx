@@ -4,7 +4,7 @@ import { useServerFn } from '@tanstack/react-start';
 import {
     AlertTriangle, Trash2, Plus, Search, RefreshCw,
     CheckCircle, Send, Eye, ArrowLeft, User, TrendingUp, TrendingDown,
-    History, ClipboardCheck,
+    History, ClipboardCheck, ClipboardList, Check, X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
@@ -18,13 +18,18 @@ import {
     deleteFabricColourReconciliation,
 } from '@/server/functions/fabricColourMutations';
 import {
+    getPendingStockCounts,
+    applyStockCounts,
+    discardStockCounts,
+} from '@/server/functions/fabricStockCount';
+import {
     fmtInt, ADJUSTMENT_REASONS,
     type ReconciliationItem, type Reconciliation, type ReconciliationHistoryItem,
 } from './shared';
 
 export default function ReconciliationTab() {
     const queryClient = useQueryClient();
-    const [subView, setSubView] = useState<'new' | 'history'>('new');
+    const [subView, setSubView] = useState<'new' | 'history' | 'counts'>('new');
     const [currentRecon, setCurrentRecon] = useState<Reconciliation | null>(null);
     const [searchTerm, setSearchTerm] = useState('');
     const [localItems, setLocalItems] = useState<ReconciliationItem[]>([]);
@@ -37,6 +42,57 @@ export default function ReconciliationTab() {
     const submitReconFn = useServerFn(submitFabricColourReconciliation);
     const deleteReconFn = useServerFn(deleteFabricColourReconciliation);
     const getReconDetailFn = useServerFn(getFabricColourReconciliation);
+    const getPendingFn = useServerFn(getPendingStockCounts);
+    const applyCountsFn = useServerFn(applyStockCounts);
+    const discardCountsFn = useServerFn(discardStockCounts);
+
+    // Stock count selections for batch actions
+    const [selectedCountIds, setSelectedCountIds] = useState<Set<string>>(new Set());
+
+    // Fetch pending stock counts
+    const { data: pendingData, isLoading: pendingLoading } = useQuery({
+        queryKey: ['fabricStockCount', 'pending'],
+        queryFn: () => getPendingFn({ data: undefined }),
+        enabled: subView === 'counts',
+    });
+    const pendingCounts = pendingData?.counts ?? [];
+
+    // Apply mutation
+    const applyMutation = useMutation({
+        mutationFn: (ids: string[]) => applyCountsFn({ data: { ids } }),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['fabricStockCount'] });
+            queryClient.invalidateQueries({ queryKey: ['fabricColours'] });
+            queryClient.invalidateQueries({ queryKey: ['materialsTree'] });
+            setSelectedCountIds(new Set());
+        },
+    });
+
+    // Discard mutation
+    const discardMutation = useMutation({
+        mutationFn: (ids: string[]) => discardCountsFn({ data: { ids } }),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['fabricStockCount'] });
+            setSelectedCountIds(new Set());
+        },
+    });
+
+    const toggleCountSelection = (id: string) => {
+        setSelectedCountIds((prev) => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            return next;
+        });
+    };
+
+    const toggleAllCounts = () => {
+        if (selectedCountIds.size === pendingCounts.length) {
+            setSelectedCountIds(new Set());
+        } else {
+            setSelectedCountIds(new Set(pendingCounts.map((c) => c.id)));
+        }
+    };
 
     // Fetch history
     const { data: history, isLoading: historyLoading } = useQuery({
@@ -266,6 +322,23 @@ export default function ReconciliationTab() {
                 >
                     <History className="h-4 w-4" /> History
                 </button>
+                <button
+                    type="button"
+                    className={cn(
+                        'flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium',
+                        subView === 'counts'
+                            ? 'bg-slate-900 text-white'
+                            : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                    )}
+                    onClick={() => setSubView('counts')}
+                >
+                    <ClipboardList className="h-4 w-4" /> Stock Counts
+                    {pendingCounts.length > 0 && (
+                        <span className="ml-1 rounded-full bg-amber-500 px-1.5 py-0.5 text-xs font-bold text-white">
+                            {pendingCounts.length}
+                        </span>
+                    )}
+                </button>
             </div>
 
             {/* New Count sub-view */}
@@ -466,6 +539,140 @@ export default function ReconciliationTab() {
                         </>
                     )}
                 </>
+            )}
+
+            {/* Stock Counts sub-view */}
+            {subView === 'counts' && (
+                <div className="rounded-xl bg-white shadow-sm ring-1 ring-slate-200 p-6">
+                    <div className="mb-4 flex items-center justify-between">
+                        <h2 className="text-base font-semibold text-slate-800">
+                            Pending Stock Counts
+                        </h2>
+                        {selectedCountIds.size > 0 && (
+                            <div className="flex gap-2">
+                                <button
+                                    type="button"
+                                    className="flex items-center gap-1.5 rounded-lg bg-green-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
+                                    onClick={() => applyMutation.mutate([...selectedCountIds])}
+                                    disabled={applyMutation.isPending}
+                                >
+                                    <Check className="h-3.5 w-3.5" />
+                                    Apply {selectedCountIds.size}
+                                </button>
+                                <button
+                                    type="button"
+                                    className="flex items-center gap-1.5 rounded-lg bg-red-100 px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-200 disabled:opacity-50"
+                                    onClick={() => {
+                                        if (confirm(`Discard ${selectedCountIds.size} count(s)?`))
+                                            discardMutation.mutate([...selectedCountIds]);
+                                    }}
+                                    disabled={discardMutation.isPending}
+                                >
+                                    <X className="h-3.5 w-3.5" />
+                                    Discard
+                                </button>
+                            </div>
+                        )}
+                    </div>
+
+                    {pendingLoading ? (
+                        <div className="flex justify-center py-8">
+                            <RefreshCw className="h-5 w-5 animate-spin text-slate-400" />
+                        </div>
+                    ) : pendingCounts.length === 0 ? (
+                        <p className="py-8 text-center text-sm text-slate-500">
+                            No pending stock counts. Warehouse staff can submit counts at <strong>/fabric-count</strong>.
+                        </p>
+                    ) : (
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-sm">
+                                <thead className="bg-slate-50">
+                                    <tr className="text-left text-xs font-medium uppercase tracking-wider text-slate-500">
+                                        <th className="px-4 py-2">
+                                            <input
+                                                type="checkbox"
+                                                checked={selectedCountIds.size === pendingCounts.length}
+                                                onChange={toggleAllCounts}
+                                                className="rounded"
+                                            />
+                                        </th>
+                                        <th className="px-4 py-2">Fabric / Colour</th>
+                                        <th className="px-4 py-2 text-right">System</th>
+                                        <th className="px-4 py-2 text-right">Counted</th>
+                                        <th className="px-4 py-2 text-center">Variance</th>
+                                        <th className="px-4 py-2">Counted By</th>
+                                        <th className="px-4 py-2">When</th>
+                                        <th className="px-4 py-2">Notes</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100">
+                                    {pendingCounts.map((c) => (
+                                        <tr key={c.id} className={cn('hover:bg-slate-50', selectedCountIds.has(c.id) && 'bg-blue-50')}>
+                                            <td className="px-4 py-2">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={selectedCountIds.has(c.id)}
+                                                    onChange={() => toggleCountSelection(c.id)}
+                                                    className="rounded"
+                                                />
+                                            </td>
+                                            <td className="px-4 py-2">
+                                                <div className="flex items-center gap-2">
+                                                    <div
+                                                        className="h-4 w-4 rounded-full border"
+                                                        style={{ backgroundColor: c.colourHex ?? '#e5e7eb' }}
+                                                    />
+                                                    <span className="font-medium text-slate-800">
+                                                        {c.fabricName} — {c.colourName}
+                                                    </span>
+                                                </div>
+                                            </td>
+                                            <td className="px-4 py-2 text-right tabular-nums text-slate-600">
+                                                {c.systemQty.toFixed(2)} {c.unit}
+                                            </td>
+                                            <td className="px-4 py-2 text-right tabular-nums font-medium text-slate-900">
+                                                {c.physicalQty.toFixed(2)} {c.unit}
+                                            </td>
+                                            <td className="px-4 py-2 text-center">
+                                                {Math.abs(c.variance) < 0.01 ? (
+                                                    <span className="text-green-600">
+                                                        <CheckCircle className="inline h-4 w-4" />
+                                                    </span>
+                                                ) : (
+                                                    <span className={cn(
+                                                        'inline-flex items-center gap-1 font-mono font-medium',
+                                                        c.variance > 0 ? 'text-blue-600' : 'text-orange-600'
+                                                    )}>
+                                                        {c.variance > 0 ? (
+                                                            <TrendingUp className="h-3.5 w-3.5" />
+                                                        ) : (
+                                                            <TrendingDown className="h-3.5 w-3.5" />
+                                                        )}
+                                                        {c.variance > 0 ? '+' : ''}{c.variance.toFixed(2)}
+                                                    </span>
+                                                )}
+                                            </td>
+                                            <td className="px-4 py-2 text-slate-600">
+                                                <span className="flex items-center gap-1">
+                                                    <User className="h-3.5 w-3.5" /> {c.countedBy}
+                                                </span>
+                                            </td>
+                                            <td className="px-4 py-2 text-slate-500 text-xs">
+                                                {new Date(c.countedAt).toLocaleString('en-IN', {
+                                                    day: 'numeric', month: 'short',
+                                                    hour: '2-digit', minute: '2-digit',
+                                                })}
+                                            </td>
+                                            <td className="px-4 py-2 text-slate-500 max-w-[200px] truncate">
+                                                {c.notes || '-'}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
+                </div>
             )}
 
             {/* History sub-view */}

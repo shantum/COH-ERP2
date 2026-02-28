@@ -447,6 +447,15 @@ export type FabricReconciliationItem = {
     notes: string | null;
     txnId: string | null;
 };
+export type FabricStockCount = {
+    id: Generated<string>;
+    fabricColourId: string;
+    physicalQty: number;
+    countedById: string;
+    countedAt: Generated<Timestamp>;
+    status: Generated<string>;
+    notes: string | null;
+};
 export type FailedSyncItem = {
     id: Generated<string>;
     itemType: string;
@@ -1582,6 +1591,7 @@ export type DB = {
     FabricOrder: FabricOrder;
     FabricReconciliation: FabricReconciliation;
     FabricReconciliationItem: FabricReconciliationItem;
+    FabricStockCount: FabricStockCount;
     FailedSyncItem: FailedSyncItem;
     Feedback: Feedback;
     FeedbackContent: FeedbackContent;

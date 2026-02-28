@@ -90,6 +90,7 @@ const navGroups: NavGroup[] = [
         collapsible: true,
         items: [
             { to: '/inventory-count', icon: Clipboard, label: 'Inventory Count' },
+            { to: '/fabric-count', icon: ClipboardList, label: 'Fabric Count' },
         ],
     },
     {

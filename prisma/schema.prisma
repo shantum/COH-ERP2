@@ -68,6 +68,7 @@ model User {
   partyChangeLogs           PartyChangeLog[]           @relation("PartyChangeUser")
   leaveRecordsCreated       LeaveRecord[]              @relation("LeaveRecordCreator")
   salaryRevisions           SalaryRevision[]           @relation("SalaryRevisionCreator")
+  fabricStockCounts         FabricStockCount[]         @relation("FabricStockCountCreator")
 
   @@index([roleId])
 }
@@ -281,6 +282,7 @@ model FabricColour {
   // NOTE: Direct variation link removed - use variationBomLines for fabric->variation
   transactions             FabricColourTransaction[]
   reconciliationItems      FabricColourReconciliationItem[]
+  stockCounts              FabricStockCount[]
   invoiceLines             InvoiceLine[]       @relation("FinanceInvoiceLineFabricColour")
 
   @@unique([fabricId, colourName])
@@ -1505,6 +1507,27 @@ model FabricColourReconciliationItem {
   reconciliation   FabricColourReconciliation  @relation(fields: [reconciliationId], references: [id], onDelete: Cascade)
 
   @@index([reconciliationId])
+  @@index([fabricColourId])
+}
+
+// ============================================
+// FABRIC STOCK COUNT (Warehouse physical count pool)
+// ============================================
+
+model FabricStockCount {
+  id             String   @id @default(uuid())
+  fabricColourId String
+  physicalQty    Float
+  countedById    String
+  countedAt      DateTime @default(now())
+  status         String   @default("pending")  // pending | applied | discarded
+  notes          String?
+
+  fabricColour   FabricColour @relation(fields: [fabricColourId], references: [id])
+  countedBy      User         @relation("FabricStockCountCreator", fields: [countedById], references: [id])
+
+  @@index([status])
+  @@index([countedAt])
   @@index([fabricColourId])
 }
 

@@ -41,6 +41,7 @@ import { Route as AuthenticatedInventoryRouteImport } from './routes/_authentica
 import { Route as AuthenticatedFinanceRouteImport } from './routes/_authenticated/finance'
 import { Route as AuthenticatedFacebookFeedHealthRouteImport } from './routes/_authenticated/facebook-feed-health'
 import { Route as AuthenticatedFabricsRouteImport } from './routes/_authenticated/fabrics'
+import { Route as AuthenticatedFabricCountRouteImport } from './routes/_authenticated/fabric-count'
 import { Route as AuthenticatedDemandForecastRouteImport } from './routes/_authenticated/demand-forecast'
 import { Route as AuthenticatedCustomersRouteImport } from './routes/_authenticated/customers'
 import { Route as AuthenticatedCostingRouteImport } from './routes/_authenticated/costing'
@@ -223,6 +224,12 @@ const AuthenticatedFabricsRoute = AuthenticatedFabricsRouteImport.update({
   path: '/fabrics',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
+const AuthenticatedFabricCountRoute =
+  AuthenticatedFabricCountRouteImport.update({
+    id: '/fabric-count',
+    path: '/fabric-count',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
 const AuthenticatedDemandForecastRoute =
   AuthenticatedDemandForecastRouteImport.update({
     id: '/demand-forecast',
@@ -313,6 +320,7 @@ export interface FileRoutesByFullPath {
   '/costing': typeof AuthenticatedCostingRoute
   '/customers': typeof AuthenticatedCustomersRoute
   '/demand-forecast': typeof AuthenticatedDemandForecastRoute
+  '/fabric-count': typeof AuthenticatedFabricCountRoute
   '/fabrics': typeof AuthenticatedFabricsRoute
   '/facebook-feed-health': typeof AuthenticatedFacebookFeedHealthRoute
   '/finance': typeof AuthenticatedFinanceRoute
@@ -358,6 +366,7 @@ export interface FileRoutesByTo {
   '/costing': typeof AuthenticatedCostingRoute
   '/customers': typeof AuthenticatedCustomersRoute
   '/demand-forecast': typeof AuthenticatedDemandForecastRoute
+  '/fabric-count': typeof AuthenticatedFabricCountRoute
   '/fabrics': typeof AuthenticatedFabricsRoute
   '/facebook-feed-health': typeof AuthenticatedFacebookFeedHealthRoute
   '/finance': typeof AuthenticatedFinanceRoute
@@ -406,6 +415,7 @@ export interface FileRoutesById {
   '/_authenticated/costing': typeof AuthenticatedCostingRoute
   '/_authenticated/customers': typeof AuthenticatedCustomersRoute
   '/_authenticated/demand-forecast': typeof AuthenticatedDemandForecastRoute
+  '/_authenticated/fabric-count': typeof AuthenticatedFabricCountRoute
   '/_authenticated/fabrics': typeof AuthenticatedFabricsRoute
   '/_authenticated/facebook-feed-health': typeof AuthenticatedFacebookFeedHealthRoute
   '/_authenticated/finance': typeof AuthenticatedFinanceRoute
@@ -455,6 +465,7 @@ export interface FileRouteTypes {
     | '/costing'
     | '/customers'
     | '/demand-forecast'
+    | '/fabric-count'
     | '/fabrics'
     | '/facebook-feed-health'
     | '/finance'
@@ -500,6 +511,7 @@ export interface FileRouteTypes {
     | '/costing'
     | '/customers'
     | '/demand-forecast'
+    | '/fabric-count'
     | '/fabrics'
     | '/facebook-feed-health'
     | '/finance'
@@ -547,6 +559,7 @@ export interface FileRouteTypes {
     | '/_authenticated/costing'
     | '/_authenticated/customers'
     | '/_authenticated/demand-forecast'
+    | '/_authenticated/fabric-count'
     | '/_authenticated/fabrics'
     | '/_authenticated/facebook-feed-health'
     | '/_authenticated/finance'
@@ -816,6 +829,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedFabricsRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/fabric-count': {
+      id: '/_authenticated/fabric-count'
+      path: '/fabric-count'
+      fullPath: '/fabric-count'
+      preLoaderRoute: typeof AuthenticatedFabricCountRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/demand-forecast': {
       id: '/_authenticated/demand-forecast'
       path: '/demand-forecast'
@@ -918,6 +938,7 @@ interface AuthenticatedRouteChildren {
   AuthenticatedCostingRoute: typeof AuthenticatedCostingRoute
   AuthenticatedCustomersRoute: typeof AuthenticatedCustomersRoute
   AuthenticatedDemandForecastRoute: typeof AuthenticatedDemandForecastRoute
+  AuthenticatedFabricCountRoute: typeof AuthenticatedFabricCountRoute
   AuthenticatedFabricsRoute: typeof AuthenticatedFabricsRoute
   AuthenticatedFacebookFeedHealthRoute: typeof AuthenticatedFacebookFeedHealthRoute
   AuthenticatedFinanceRoute: typeof AuthenticatedFinanceRoute
@@ -958,6 +979,7 @@ const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedCostingRoute: AuthenticatedCostingRoute,
   AuthenticatedCustomersRoute: AuthenticatedCustomersRoute,
   AuthenticatedDemandForecastRoute: AuthenticatedDemandForecastRoute,
+  AuthenticatedFabricCountRoute: AuthenticatedFabricCountRoute,
   AuthenticatedFabricsRoute: AuthenticatedFabricsRoute,
   AuthenticatedFacebookFeedHealthRoute: AuthenticatedFacebookFeedHealthRoute,
   AuthenticatedFinanceRoute: AuthenticatedFinanceRoute,
