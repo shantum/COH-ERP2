@@ -467,6 +467,7 @@ export const triggerReturnPrimeSync = createServerFn({ method: 'POST' })
                 message: `Synced ${data.data?.created ?? 0} new, ${data.data?.updated ?? 0} updated`,
             };
         } catch (error: unknown) {
+            serverLog.error({ domain: 'returns', fn: 'triggerReturnPrimeSync' }, 'Failed to trigger Return Prime sync', error);
             const message = error instanceof Error ? error.message : 'Unknown error';
             return { success: false, message };
         }

@@ -106,6 +106,7 @@ router.post('/sync-orders', asyncHandler(async (req: Request, res: Response) => 
             }
         } catch (syncError) {
             const error = syncError as Error;
+            console.error(`[remittance] Shopify sync failed for order ${order.orderNumber}:`, error.message);
             await req.prisma.order.update({
                 where: { id: order.id },
                 data: {
@@ -232,6 +233,7 @@ router.post('/retry-sync', asyncHandler(async (req: Request, res: Response) => {
             }
         } catch (syncError) {
             const error = syncError as Error;
+            console.error(`[remittance] Shopify sync failed for order ${order.orderNumber}:`, error.message);
             await req.prisma.order.update({
                 where: { id: order.id },
                 data: {

@@ -393,7 +393,7 @@ router.post('/confirm', requireAdmin, asyncHandler(async (req: Request, res: Res
       },
       actorId: req.user?.id,
     })
-  ).catch(() => {});
+  ).catch((err) => console.error('[attendance] Event log failed:', err));
 
   log.info({
     importBatchId,

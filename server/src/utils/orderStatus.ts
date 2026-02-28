@@ -155,6 +155,7 @@ export async function batchRecomputeOrderStatus(orderIds: string[]): Promise<Bat
             }
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Unknown error';
+            console.error(`[orderStatus] Failed to recompute status for order ${orderId}:`, message);
             results.errors.push({ orderId, error: message });
         }
     }

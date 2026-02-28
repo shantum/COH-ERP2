@@ -182,6 +182,7 @@ router.get('/sync-status/simple', asyncHandler(async (req: Request, res: Respons
         });
     } catch (error: unknown) {
         const message = error instanceof Error ? error.message : 'Unknown error';
+        console.error('[ReturnPrimeAdmin] Error getting worker status:', message);
         res.status(500).json({
             success: false,
             error: message,

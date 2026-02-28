@@ -339,6 +339,7 @@ async function matchOrdersForDetails(
                     result.shopifyFailed++;
                 }
             } catch (shopifyErr: unknown) {
+                remittanceLogger.error({ orderId: job.orderId, error: getErrorMessage(shopifyErr) }, 'Shopify COD sync failed for order');
                 await prisma.order.update({
                     where: { id: job.orderId },
                     data: {
@@ -603,12 +604,12 @@ function start(): void {
     // Run after startup delay
     startupTimeout = setTimeout(() => {
         startupTimeout = null;
-        trackWorkerRun('remittance_sync', runRemittanceSync, 'startup').catch(() => {});
+        trackWorkerRun('remittance_sync', runRemittanceSync, 'startup').catch((err) => console.error('[remittanceSync] Startup sync failed:', err));
     }, ITHINK_REMITTANCE_STARTUP_DELAY_MS);
 
     // Then run every 12 hours
     syncInterval = setInterval(() => {
-        trackWorkerRun('remittance_sync', runRemittanceSync, 'scheduled').catch(() => {});
+        trackWorkerRun('remittance_sync', runRemittanceSync, 'scheduled').catch((err) => console.error('[remittanceSync] Scheduled sync failed:', err));
     }, ITHINK_REMITTANCE_SYNC_INTERVAL_MS);
 }
 

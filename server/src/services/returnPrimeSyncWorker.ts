@@ -94,7 +94,8 @@ export async function retryFailedReturnPrimeSyncs(): Promise<{
                 // so we call it and trust it updates DB fields (syncedAt / syncError)
                 syncReturnPrimeStatus(line.id, line.returnStatus || '');
                 results.succeeded++;
-            } catch {
+            } catch (err) {
+                log.error({ orderLineId: line.id, err }, 'Return Prime sync dispatch failed');
                 results.failed++;
             }
         }

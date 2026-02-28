@@ -61,22 +61,22 @@ function startIntervalWorkers(): void {
   reconcileStartupTimeout = setTimeout(() => {
     reconcileStartupTimeout = null;
     console.log('[SheetReconciler] Running startup reconciliation...');
-    reconcileSheetOrders().catch(() => {});
+    reconcileSheetOrders().catch((err) => console.error('[SheetReconciler] Startup reconciliation failed:', err));
   }, 15_000);
   reconcileInterval = setInterval(() => {
-    reconcileSheetOrders().catch(() => {});
+    reconcileSheetOrders().catch((err) => console.error('[SheetReconciler] Scheduled reconciliation failed:', err));
   }, 2 * 60 * 1000);
 
   // Sheet order status sync — updates status/courier/AWB in sheet from ERP
   // Every 5 min
   statusSyncInterval = setInterval(() => {
-    syncSheetOrderStatus().catch(() => {});
+    syncSheetOrderStatus().catch((err) => console.error('[SheetStatusSync] Scheduled status sync failed:', err));
   }, 5 * 60 * 1000);
 
   // Sheet AWB sync — reads AWBs from sheet, validates/links to order lines
   // Every 30 min
   awbSyncInterval = setInterval(() => {
-    trackWorkerRun('sync_sheet_awb', syncSheetAwb, 'scheduled').catch(() => {});
+    trackWorkerRun('sync_sheet_awb', syncSheetAwb, 'scheduled').catch((err) => console.error('[SheetAwbSync] Scheduled AWB sync failed:', err));
   }, 30 * 60 * 1000);
 
   // Cache cleanup — daily at 2 AM, plus startup run

@@ -481,7 +481,7 @@ export function registerRoutes(router: Router): void {
     // Log domain event
     import('@coh/shared/services/eventLog').then(({ logEvent }) =>
       logEvent({ domain: 'finance', event: 'invoice.created', entityType: 'Invoice', entityId: invoice.id, summary: `Invoice ${invoice.invoiceNumber ?? 'draft'} — ₹${invoice.totalAmount?.toLocaleString('en-IN') ?? 0}`, meta: { category: finalCategory, totalAmount: invoice.totalAmount, aiConfidence, partyMatched: !!partyId }, actorId: userId })
-    ).catch(() => {});
+    ).catch((err) => { console.error('[finance] Event log failed:', err); });
 
     // Enrich party data
     let enrichment: EnrichmentResult = { fieldsAdded: [], bankMismatch: false, partyCreated: false };

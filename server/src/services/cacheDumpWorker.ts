@@ -397,7 +397,7 @@ async function startJob(options: { daysBack?: number } = {}): Promise<SyncJob> {
 
     // Start processing if worker is running
     if (isRunning && !activeJobId) {
-        trackWorkerRun('cache_dump', () => runJob(job.id), 'manual').catch(() => {});
+        trackWorkerRun('cache_dump', () => runJob(job.id), 'manual').catch((err) => syncLogger.error({ jobId: job.id, err }, 'Cache dump job failed'));
     }
 
     return job;
@@ -541,7 +541,7 @@ async function resumeJob(jobId: string): Promise<SyncJob> {
 
     // Start processing if worker is running
     if (isRunning && !activeJobId) {
-        trackWorkerRun('cache_dump', () => runJob(jobId), 'manual').catch(() => {});
+        trackWorkerRun('cache_dump', () => runJob(jobId), 'manual').catch((err) => syncLogger.error({ jobId, err }, 'Cache dump resume failed'));
     }
 
     return (await prisma.syncJob.findUnique({ where: { id: jobId } }))!;

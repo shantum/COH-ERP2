@@ -109,8 +109,8 @@ class PulseBroadcaster {
             if (this.client) {
                 try {
                     await this.client.end();
-                } catch {
-                    // Ignore cleanup errors
+                } catch (err) {
+                    console.error('[pulse] PG client cleanup error:', err);
                 }
                 this.client = null;
             }
@@ -125,7 +125,8 @@ class PulseBroadcaster {
         this.clients.forEach((client) => {
             try {
                 client.write(message);
-            } catch {
+            } catch (err) {
+                console.error('[pulse] SSE write error, marking client dead:', err instanceof Error ? err.message : err);
                 deadClients.push(client);
             }
         });
@@ -189,8 +190,8 @@ class PulseBroadcaster {
         this.clients.forEach((client) => {
             try {
                 client.end();
-            } catch {
-                // Ignore
+            } catch (err) {
+                console.error('[pulse] SSE client close error:', err instanceof Error ? err.message : err);
             }
         });
         this.clients.clear();

@@ -94,8 +94,8 @@ class SseEventBridge {
             if (this.client) {
                 try {
                     await this.client.end();
-                } catch {
-                    // Ignore cleanup errors
+                } catch (err) {
+                    console.error('[sseEventBridge] PG client cleanup error:', err);
                 }
                 this.client = null;
             }

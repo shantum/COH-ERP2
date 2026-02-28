@@ -425,6 +425,7 @@ class SyncWorker {
                         batchSkipped++;
                     }
                 } catch (err) {
+                    syncLogger.error({ orderNumber: shopifyOrder.order_number, error: (err as Error).message }, 'Failed to process order in sync batch');
                     batchErrors++;
                     if (errorLog.length < SYNC_WORKER_CONFIG.maxErrors) {
                         errorLog.push(`Order ${shopifyOrder.order_number}: ${(err as Error).message}`);
@@ -558,6 +559,7 @@ class SyncWorker {
                     else if (result.action === 'updated') batchUpdated++;
                     else batchSkipped++;
                 } catch (err) {
+                    syncLogger.error({ customerId: shopifyCustomer.id, error: (err as Error).message }, 'Failed to process customer in sync batch');
                     batchErrors++;
                     if (errorLog.length < SYNC_WORKER_CONFIG.maxErrors) {
                         errorLog.push(`Customer ${shopifyCustomer.id}: ${(err as Error).message}`);
@@ -626,6 +628,7 @@ class SyncWorker {
                     if (result.created) created += result.created;
                     if (result.updated) updated += result.updated;
                 } catch (err) {
+                    syncLogger.error({ productTitle: shopifyProduct.title, error: (err as Error).message }, 'Failed to process product in sync batch');
                     errors++;
                     if (errorLog.length < SYNC_WORKER_CONFIG.maxErrors) {
                         errorLog.push(`Product ${shopifyProduct.title}: ${(err as Error).message}`);

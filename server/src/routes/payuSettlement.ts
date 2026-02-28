@@ -59,7 +59,7 @@ router.get('/sync-status', asyncHandler(async (req: Request, res: Response) => {
  * Manually trigger PayU settlement sync (fire-and-forget)
  */
 router.post('/trigger-sync', asyncHandler(async (_req: Request, res: Response) => {
-    payuSettlementSync.triggerSync().catch(() => {});
+    payuSettlementSync.triggerSync().catch((err) => console.error('[payuSettlement] Trigger sync failed:', err));
     res.json({ success: true, message: 'PayU settlement sync triggered. Check /sync-status for progress.' });
 }));
 
@@ -75,7 +75,7 @@ router.post('/backfill', asyncHandler(async (req: Request, res: Response) => {
         return;
     }
     const { startDate, endDate } = parsed.data;
-    payuSettlementSync.triggerBackfill(startDate, endDate).catch(() => {});
+    payuSettlementSync.triggerBackfill(startDate, endDate).catch((err) => console.error('[payuSettlement] Trigger backfill failed:', err));
     res.json({ success: true, message: `PayU backfill triggered for ${startDate} to ${endDate}. Check /sync-status for progress.` });
 }));
 

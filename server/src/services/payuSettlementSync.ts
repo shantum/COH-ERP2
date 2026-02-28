@@ -364,11 +364,11 @@ function start(): void {
 
     startupTimeout = setTimeout(() => {
         startupTimeout = null;
-        trackWorkerRun('payu_settlement_sync', runPayuSync, 'startup').catch(() => {});
+        trackWorkerRun('payu_settlement_sync', runPayuSync, 'startup').catch((err) => settlementLogger.error({ err }, 'Startup sync failed'));
     }, PAYU_STARTUP_DELAY_MS);
 
     syncInterval = setInterval(() => {
-        trackWorkerRun('payu_settlement_sync', runPayuSync, 'scheduled').catch(() => {});
+        trackWorkerRun('payu_settlement_sync', runPayuSync, 'scheduled').catch((err) => settlementLogger.error({ err }, 'Scheduled sync failed'));
     }, PAYU_SYNC_INTERVAL_MS);
 }
 

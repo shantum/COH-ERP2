@@ -123,7 +123,7 @@ router.post('/fix-payment-method', asyncHandler(async (req: Request, res: Respon
  */
 router.post('/trigger-sync', asyncHandler(async (_req: Request, res: Response) => {
     // Fire-and-forget: sync can take minutes, don't block the HTTP request
-    remittanceSync.triggerSync().catch(() => {});
+    remittanceSync.triggerSync().catch((err) => console.error('[remittance] Trigger sync failed:', err));
     res.json({ success: true, message: 'Remittance sync triggered. Check /sync-status for progress.' });
 }));
 
@@ -146,7 +146,7 @@ router.post('/backfill', asyncHandler(async (req: Request, res: Response) => {
         return;
     }
     const mode = downloadOnly ? 'download-only' : 'full';
-    remittanceSync.triggerBackfill(startDate, endDate, !!downloadOnly).catch(() => {});
+    remittanceSync.triggerBackfill(startDate, endDate, !!downloadOnly).catch((err) => console.error('[remittance] Trigger backfill failed:', err));
     res.json({ success: true, message: `Backfill (${mode}) triggered for ${startDate} to ${endDate}. Check /sync-status for progress.` });
 }));
 
@@ -156,7 +156,7 @@ router.post('/backfill', asyncHandler(async (req: Request, res: Response) => {
  * Finds CodRemittance records with ordersProcessed=0, runs order matching + Shopify sync.
  */
 router.post('/match-unprocessed', asyncHandler(async (_req: Request, res: Response) => {
-    remittanceSync.triggerMatchUnprocessed().catch(() => {});
+    remittanceSync.triggerMatchUnprocessed().catch((err) => console.error('[remittance] Trigger match unprocessed failed:', err));
     res.json({ success: true, message: 'Match unprocessed triggered. Check /sync-status for progress.' });
 }));
 

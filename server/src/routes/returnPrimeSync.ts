@@ -211,6 +211,7 @@ router.get('/sync-status', authenticateToken, asyncHandler(async (req: Request, 
 
     } catch (error: unknown) {
         const message = error instanceof Error ? error.message : 'Unknown error';
+        rpLogger.error({ err: message }, 'Return Prime sync stats failed');
         res.status(500).json({ success: false, error: message });
     }
 }));

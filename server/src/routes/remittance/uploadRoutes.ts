@@ -250,6 +250,7 @@ router.post('/upload', upload.single('file'), asyncHandler(async (req: Request, 
                         }
                     } catch (shopifyError) {
                         const error = shopifyError as Error;
+                        console.error('[remittance] Shopify COD sync failed for order:', error.message);
                         // Don't fail the whole upload if Shopify sync fails
                         await tx.order.update({
                             where: { id: order.id },
@@ -267,6 +268,7 @@ router.post('/upload', upload.single('file'), asyncHandler(async (req: Request, 
 
         } catch (updateError) {
             const error = updateError as Error;
+            console.error(`[remittance] Order update failed for ${orderNumber}:`, error.message);
             results.errors.push({
                 orderNumber,
                 error: error.message,

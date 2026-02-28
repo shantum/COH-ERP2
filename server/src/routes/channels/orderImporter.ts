@@ -445,7 +445,8 @@ export async function executeImport(req: Request, res: Response): Promise<void> 
           }
           await upsertChannelOrderLine(prisma, row, batchId);
           upserted++;
-        } catch {
+        } catch (err) {
+          console.error('[channels] Failed to upsert channel order line:', err);
           skipped++;
         }
       }

@@ -353,7 +353,7 @@ export async function syncReturnPrimeRequests(options: SyncOptions = {}): Promis
         if (result.created > 0) {
             import('@coh/shared/services/eventLog').then(({ logEvent }) =>
                 logEvent({ domain: 'returns', event: 'return.synced', entityType: 'ReturnPrimeRequest', entityId: 'batch', summary: `${result.created} new returns synced from Return Prime`, meta: { created: result.created, updated: result.updated, durationMs: result.durationMs } })
-            ).catch(() => {});
+            ).catch((err) => log.error({ err }, 'Failed to log return sync event'));
         }
 
         return result;

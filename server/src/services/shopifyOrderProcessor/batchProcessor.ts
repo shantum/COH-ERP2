@@ -54,8 +54,8 @@ async function prefetchBatchContext(
                 if (item.variant_id) variantIds.add(String(item.variant_id));
                 if (item.sku) skuCodes.add(item.sku);
             }
-        } catch {
-            // Skip malformed entries
+        } catch (err) {
+            console.error(`[shopify] Malformed cache entry ${entry.id}:`, err instanceof Error ? err.message : err);
         }
     }
 

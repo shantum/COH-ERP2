@@ -396,12 +396,12 @@ function start(): void {
     // First run after startup delay
     startupTimeout = setTimeout(() => {
         startupTimeout = null;
-        trackWorkerRun('drive_sync', syncAllPendingFiles, 'startup').catch(() => {});
+        trackWorkerRun('drive_sync', syncAllPendingFiles, 'startup').catch((err) => console.error('[driveFinanceSync] Startup sync failed:', err));
     }, STARTUP_DELAY_MS);
 
     // Then every 30 minutes
     syncInterval = setInterval(() => {
-        trackWorkerRun('drive_sync', syncAllPendingFiles, 'scheduled').catch(() => {});
+        trackWorkerRun('drive_sync', syncAllPendingFiles, 'scheduled').catch((err) => console.error('[driveFinanceSync] Scheduled sync failed:', err));
     }, SYNC_INTERVAL_MS);
 }
 

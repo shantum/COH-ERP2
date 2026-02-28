@@ -231,11 +231,11 @@ function start(): void {
     syncLogger.info({ intervalMinutes: SYNC_INTERVAL_MS / 1000 / 60 }, 'Starting scheduler');
 
     // Run immediately on start
-    trackWorkerRun('shopify_sync', runHourlySync, 'startup').catch(() => {});
+    trackWorkerRun('shopify_sync', runHourlySync, 'startup').catch((err) => syncLogger.error({ err }, 'Startup sync failed'));
 
     // Then run every hour
     syncInterval = setInterval(() => {
-        trackWorkerRun('shopify_sync', runHourlySync, 'scheduled').catch(() => {});
+        trackWorkerRun('shopify_sync', runHourlySync, 'scheduled').catch((err) => syncLogger.error({ err }, 'Scheduled sync failed'));
     }, SYNC_INTERVAL_MS);
 }
 

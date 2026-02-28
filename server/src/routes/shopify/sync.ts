@@ -111,6 +111,7 @@ async function backfillCacheFields(prisma: PrismaClient, batchSize = 5000): Prom
         results.updated++;
       } catch (entryError) {
         const err = entryError as Error;
+        shopifyLogger.error({ cacheId: entry.id, error: err.message }, 'Backfill discount codes: cache entry error');
         results.errors.push(`Cache ${entry.id}: ${err.message}`);
       }
     }));
@@ -163,6 +164,7 @@ async function backfillOrderFields(prisma: PrismaClient, batchSize = 5000): Prom
       updated++;
     } catch (error) {
       const err = error as Error;
+      shopifyLogger.error({ orderId: order.id, orderNumber: order.orderNumber, error: err.message }, 'Recalc total amount failed');
       errors.push({ orderId: order.id, orderNumber: order.orderNumber, error: err.message });
     }
   }
@@ -300,6 +302,7 @@ async function backfillLineItemsJson(prisma: PrismaClient, batchSize = 500): Pro
         results.updated++;
       } catch (entryError) {
         const err = entryError as Error;
+        shopifyLogger.error({ cacheId: entry.id, error: err.message }, 'Backfill billing: cache entry error');
         results.errors.push(`Cache ${entry.id}: ${err.message}`);
       }
     }));
@@ -499,6 +502,7 @@ router.post('/backfill-fulfillments', authenticateToken, asyncHandler(async (req
       }
     } catch (error) {
       const err = error as Error;
+      shopifyLogger.error({ orderNumber: order.orderNumber || order.id, error: err.message }, 'Process cache entry failed');
       errors.push({ orderNumber: order.orderNumber || order.id, error: err.message });
     }
   }
@@ -613,7 +617,7 @@ router.post('/full-dump', authenticateToken, asyncHandler(async (req: Request, r
           try {
             await cacheShopifyOrders(req.prisma, order, 'full_dump');
             cached++;
-          } catch { skipped++; }
+          } catch (cacheErr) { shopifyLogger.error({ orderNumber: order.order_number, error: cacheErr instanceof Error ? cacheErr.message : String(cacheErr) }, 'Full dump: cache order error'); skipped++; }
         }
       }
 

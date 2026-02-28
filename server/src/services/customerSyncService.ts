@@ -238,6 +238,7 @@ export async function syncCustomers(
             }
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
+            log.error({ shopifyCustomerId: shopifyCustomer.id, error: errorMessage }, 'Failed to sync customer');
             results.errors.push(`Customer ${shopifyCustomer.id}: ${errorMessage}`);
             results.skipped++;
         }
@@ -311,8 +312,9 @@ export async function syncAllCustomers(
                     }
                 }
             } catch (error) {
+                const errorMessage = error instanceof Error ? error.message : String(error);
+                log.error({ shopifyCustomerId: shopifyCustomer.id, error: errorMessage }, 'Failed to sync customer in bulk');
                 if (results.errors.length < maxErrors) {
-                    const errorMessage = error instanceof Error ? error.message : String(error);
                     results.errors.push(`Customer ${shopifyCustomer.id}: ${errorMessage}`);
                 }
                 results.skipped++;

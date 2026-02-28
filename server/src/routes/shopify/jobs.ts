@@ -123,6 +123,7 @@ router.post('/processor/trigger', authenticateToken, asyncHandler(async (req: Re
     res.json({ message: 'Batch triggered', batch: result, ...(await cacheProcessor.getStatusWithPending()) });
   } catch (error) {
     const err = error as Error;
+    console.error('[shopify] Processor trigger failed:', err.message);
     res.status(400).json({ error: err.message });
   }
 }));
@@ -152,6 +153,7 @@ router.post('/dump/start', authenticateToken, asyncHandler(async (req: Request, 
     });
   } catch (error) {
     const err = error as Error;
+    console.error('[shopify] Cache dump start failed:', err.message);
     res.status(400).json({ error: err.message });
   }
 }));
@@ -162,6 +164,7 @@ router.post('/dump/:id/cancel', authenticateToken, asyncHandler(async (req: Requ
     res.json({ message: 'Cache dump cancelled', job });
   } catch (error) {
     const err = error as Error;
+    console.error('[shopify] Cache dump cancel failed:', err.message);
     res.status(400).json({ error: err.message });
   }
 }));
@@ -172,6 +175,7 @@ router.post('/dump/:id/resume', authenticateToken, asyncHandler(async (req: Requ
     res.json({ message: 'Cache dump resumed', job });
   } catch (error) {
     const err = error as Error;
+    console.error('[shopify] Cache dump resume failed:', err.message);
     res.status(400).json({ error: err.message });
   }
 }));

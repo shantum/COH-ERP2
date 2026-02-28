@@ -352,7 +352,8 @@ async function runSteps(
     try {
         const { broadcastOrderUpdate } = await import('../routes/sse.js');
         broadcastOrderUpdate({ type: 'inventory_updated' as const }, null);
-    } catch {
+    } catch (err) {
+        console.error('[sheetSync] SSE broadcast failed:', err);
         // Non-critical — SSE broadcast failure shouldn't affect job result
     }
 }

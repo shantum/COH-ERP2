@@ -72,7 +72,7 @@ export async function cacheAndProcessProduct(
             data: {
                 processingError: error instanceof Error ? error.message : String(error),
             },
-        }).catch(() => { }); // Ignore error if cache entry doesn't exist
+        }).catch((err) => { log.warn({ shopifyProductId, err }, 'Failed to update cache entry processing error'); }); // Ignore error if cache entry doesn't exist
 
         log.error({ product: shopifyProduct.title, err: error }, 'Error processing product');
         return {
@@ -100,7 +100,7 @@ export async function handleProductDeletion(
     // Remove from cache
     await prisma.shopifyProductCache.deleteMany({
         where: { id },
-    }).catch(() => { }); // Ignore if not in cache
+    }).catch((err) => { log.warn({ shopifyProductId: id, err }, 'Failed to delete from product cache'); }); // Ignore if not in cache
 
     return {
         action: result.count > 0 ? 'deleted' : 'not_found',

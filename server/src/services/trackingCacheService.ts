@@ -231,7 +231,7 @@ class TrackingCacheService {
 
         // Refresh loop
         this.refreshTimer = setInterval(() => {
-            trackWorkerRun('tracking_cache_refresh', () => this.refresh(), 'scheduled').catch(() => {});
+            trackWorkerRun('tracking_cache_refresh', () => this.refresh(), 'scheduled').catch((err) => console.error('[trackingCache] Refresh failed:', err));
         }, REFRESH_LOOP_INTERVAL_MS);
     }
 

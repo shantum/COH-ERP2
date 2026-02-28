@@ -153,7 +153,7 @@ async function updateEmailLog(id: string, data: { status?: string; messageId?: s
   try {
     const prisma = await getDb();
     await prisma.emailLog.update({ where: { id }, data });
-  } catch { /* non-critical — don't break email flow for logging failures */ }
+  } catch (err) { console.error('[email] Failed to update email log:', err); /* non-critical — don't break email flow for logging failures */ }
 }
 
 // ============================================

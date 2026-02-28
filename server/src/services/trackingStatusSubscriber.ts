@@ -142,7 +142,7 @@ export async function handleTrackingStatusChange(
                 summary: summaryMap[internalStatus] ?? `Tracking update: ${internalStatus}`,
                 meta: { awbNumber: awb, trackingStatus: internalStatus, courier: rawResponse.logistic },
             }),
-        ).catch(() => {});
+        ).catch((err) => trackingLogger.error({ awb, error: err instanceof Error ? err.message : String(err) }, 'Failed to log tracking event'));
     }
 
     trackingLogger.debug({

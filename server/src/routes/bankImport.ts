@@ -115,7 +115,7 @@ router.post('/upload', requireAdmin, upload.single('file'), asyncHandler(async (
     if (result.newRows > 0) {
       import('@coh/shared/services/eventLog').then(({ logEvent }) =>
         logEvent({ domain: 'finance', event: 'bank_txn.imported', entityType: 'BankTransaction', entityId: 'batch', summary: `${result.newRows} ${bank.toUpperCase()} transactions imported`, meta: { bank, newRows: result.newRows, skippedRows: result.skippedRows }, actorId: req.user?.id })
-      ).catch(() => {});
+      ).catch((err) => console.error('[bankImport] Event log failed:', err));
     }
 
     // Run full categorization (PayU/COD matching + auto-post) on newly imported transactions

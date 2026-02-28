@@ -95,6 +95,7 @@ router.get('/logs/stats', authenticateToken, asyncHandler(async (req: Request, r
             stats.fileSizeMB = (fileStats.size / (1024 * 1024)).toFixed(2);
         }
     } catch (fsError) {
+        console.error('[admin] Failed to get log file stats:', fsError);
         // File size not critical, continue without it
     }
 
