@@ -42,9 +42,14 @@ export const Route = createFileRoute('/_authenticated')({
                 console.error('[Auth] Server Function error:', error);
             }
 
-            // SSR without auth - let client handle redirect after hydration
-            // Return user: null, client will check cache and redirect if needed
-            return { user: null };
+            // Not authenticated on server — redirect immediately (sends 302)
+            // Previously returned { user: null } which rendered empty pages before client redirect
+            throw redirect({
+                to: '/login',
+                search: {
+                    redirect: location.pathname,
+                },
+            });
         }
 
         // CLIENT PATH: Use query cache (shared with AuthProvider)

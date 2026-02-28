@@ -82,13 +82,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }, [queryClient]);
 
     // Listen for unauthorized events from API interceptor
-    // This handles 401 responses without forcing a full page reload
+    // On 401: clear auth cache and redirect to login
     useEffect(() => {
         if (typeof window === 'undefined') return;
 
         const handleUnauthorized = () => {
             // Clear the query cache on 401
             queryClient.setQueryData(authQueryKeys.user, null);
+            // Redirect to login with current path as redirect target
+            // Full page navigation ensures clean state (no stale data in components)
+            const currentPath = window.location.pathname;
+            const redirectParam = currentPath !== '/login' ? `?redirect=${encodeURIComponent(currentPath)}` : '';
+            window.location.href = `/login${redirectParam}`;
         };
 
         window.addEventListener('auth:unauthorized', handleUnauthorized);
