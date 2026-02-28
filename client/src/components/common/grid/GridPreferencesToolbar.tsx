@@ -8,6 +8,7 @@
  */
 
 import { Save, RotateCcw } from 'lucide-react';
+import { toast } from 'sonner';
 
 interface GridPreferencesToolbarProps {
     // User preferences state
@@ -29,21 +30,21 @@ export function GridPreferencesToolbar({
     onSaveAsDefaults,
 }: GridPreferencesToolbarProps) {
     const handleResetToDefaults = async () => {
-        if (!confirm('Reset to default column layout?')) {
+        if (!window.confirm('Reset to default column layout?')) {
             return;
         }
         const success = await onResetToDefaults();
         if (!success) {
-            alert('Failed to reset preferences');
+            toast.error('Failed to reset preferences');
         }
     };
 
     const handleSaveAsDefaults = async () => {
         const success = await onSaveAsDefaults();
         if (success) {
-            alert('Column defaults saved for all users');
+            toast.success('Column defaults saved for all users');
         } else {
-            alert('Failed to save defaults');
+            toast.error('Failed to save defaults');
         }
     };
 

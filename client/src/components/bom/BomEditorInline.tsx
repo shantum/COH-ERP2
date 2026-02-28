@@ -12,6 +12,7 @@
  */
 
 import { useState, useMemo, useEffect } from 'react';
+import { toast } from 'sonner';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Save, AlertCircle, Loader2 } from 'lucide-react';
 import { useServerFn } from '@tanstack/react-start';
@@ -106,7 +107,7 @@ export default function BomEditorInline({ productId }: BomEditorInlineProps) {
             setHasUnsavedChanges(false);
         },
         onError: (err: Error) => {
-            alert(err.message || 'Failed to save BOM');
+            toast.error(err.message || 'Failed to save BOM');
         },
     });
 

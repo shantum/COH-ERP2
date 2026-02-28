@@ -9,6 +9,7 @@ import { useServerFn } from '@tanstack/react-start';
 import { getRecentInwards } from '../../server/functions/inventory';
 import { editInward, undoTransaction } from '../../server/functions/inventoryMutations';
 import { ClipboardList, Undo2 } from 'lucide-react';
+import ConfirmModal from '@/components/common/ConfirmModal';
 import type { RecentInwardItem } from '../../server/functions/inventory';
 
 interface RecentInwardsTableProps {
@@ -164,10 +165,10 @@ export default function RecentInwardsTable({ source, title, onSuccess, onError }
         },
     });
 
+    const [undoConfirmId, setUndoConfirmId] = useState<string | null>(null);
+
     const handleUndo = (id: string) => {
-        if (window.confirm('Are you sure you want to undo this inward?')) {
-            undoMutation.mutate(id);
-        }
+        setUndoConfirmId(id);
     };
 
     const displayTitle = title || `Recent ${getSourceLabel(source)} Inwards`;
@@ -276,6 +277,18 @@ export default function RecentInwardsTable({ source, title, onSuccess, onError }
                     </table>
                 </div>
             )}
+
+            <ConfirmModal
+                isOpen={!!undoConfirmId}
+                onClose={() => setUndoConfirmId(null)}
+                onConfirm={() => {
+                    if (undoConfirmId) undoMutation.mutate(undoConfirmId);
+                }}
+                title="Undo Inward"
+                message="Are you sure you want to undo this inward? The stock change will be reversed."
+                confirmText="Undo"
+                confirmVariant="danger"
+            />
         </div>
     );
 }

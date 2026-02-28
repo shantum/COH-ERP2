@@ -14,6 +14,7 @@
  */
 
 import { useState, useMemo } from 'react';
+import { toast } from 'sonner';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { X, Save, AlertCircle, Loader2 } from 'lucide-react';
 import { useServerFn } from '@tanstack/react-start';
@@ -109,7 +110,7 @@ export default function BomEditorPanel({
             setHasUnsavedChanges(false);
         },
         onError: (err: Error) => {
-            alert(err.message || 'Failed to save BOM');
+            toast.error(err.message || 'Failed to save BOM');
         },
     });
 
@@ -157,7 +158,7 @@ export default function BomEditorPanel({
     // Handle close with confirmation
     const handleClose = () => {
         if (hasUnsavedChanges) {
-            if (!confirm('You have unsaved changes. Are you sure you want to close?')) {
+            if (!window.confirm('You have unsaved changes. Are you sure you want to close?')) {
                 return;
             }
         }

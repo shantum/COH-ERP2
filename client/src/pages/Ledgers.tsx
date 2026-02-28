@@ -20,6 +20,8 @@ import { invalidateOrderView } from '../hooks/orders/orderMutationUtils';
 import { Route } from '../routes/_authenticated/ledgers';
 import type { LedgersLoaderData } from '../routes/_authenticated/ledgers';
 import { useDebounce } from '../hooks/useDebounce';
+import ConfirmModal from '../components/common/ConfirmModal';
+import { toast } from 'sonner';
 
 // Server Functions
 import { getLedgerTransactions, type LedgerTransactionItem, type LedgerTransactionsResult } from '../server/functions/inventory';
@@ -149,8 +151,11 @@ export default function Ledgers() {
                 invalidateOrderView(queryClient, 'open');
             }
         },
-        onError: (err: Error) => alert(err.message || 'Failed to delete transaction')
+        onError: (err: Error) => toast.error(err.message || 'Failed to delete transaction')
     });
+
+    // Delete confirmation modal state
+    const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
 
     // ============================================
     // RENDER
@@ -167,15 +172,17 @@ export default function Ledgers() {
 
             {/* Tabs */}
             <div className="border-b border-gray-200">
-                <nav className="flex gap-6">
+                <nav className="flex gap-6" role="tablist">
                     {tabs.map(t => (
                         <button
                             key={t.key}
+                            role="tab"
+                            aria-selected={activeTab === t.key}
                             onClick={() => navigate({
                                 to: '/ledgers',
                                 search: { tab: t.key, page: 1, limit, origin: 'all' },
                             })}
-                            className={`pb-3 px-1 border-b-2 font-medium text-sm transition-colors ${
+                            className={`pb-3 px-1 border-b-2 font-medium text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-1 rounded-t-md ${
                                 activeTab === t.key
                                     ? 'border-primary-600 text-primary-600'
                                     : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
@@ -199,11 +206,21 @@ export default function Ledgers() {
                 limit={limit}
                 setPage={setPage}
                 isAdmin={isAdmin}
-                onDelete={(id) => {
-                    if (confirm('Delete this transaction? This will affect inventory balances.')) {
-                        deleteInventoryTxnMutation.mutate(id);
-                    }
+                onDelete={(id) => setDeleteTarget(id)}
+            />
+
+            {/* Delete confirmation modal */}
+            <ConfirmModal
+                isOpen={!!deleteTarget}
+                onClose={() => setDeleteTarget(null)}
+                onConfirm={() => {
+                    if (deleteTarget) deleteInventoryTxnMutation.mutate(deleteTarget);
                 }}
+                title="Delete Transaction"
+                message="Delete this transaction? This will affect inventory balances and cannot be undone."
+                confirmText="Delete"
+                confirmVariant="danger"
+                isLoading={deleteInventoryTxnMutation.isPending}
             />
         </div>
     );

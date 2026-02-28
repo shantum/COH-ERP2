@@ -17,6 +17,7 @@ import {
   Truck, Loader2, AlertCircle, CheckCircle2,
   XCircle, Printer
 } from 'lucide-react';
+import ConfirmModal from '@/components/common/ConfirmModal';
 import { getShippingRates, createShipment, cancelShipment, getShippingLabel } from '../../../server/functions/tracking';
 import type { Order } from '../../../types';
 import { getProductMrpForShipping } from '../../../utils/orderPricing';
@@ -69,6 +70,7 @@ export function BookShipmentSection({
   const [selectedCourier, setSelectedCourier] = useState<CourierRate | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [shipmentWeight, setShipmentWeight] = useState<string>('');
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
 
   // Server Functions
   const getShippingRatesFn = useServerFn(getShippingRates);
@@ -274,11 +276,7 @@ export function BookShipmentSection({
 
               {canCancel && (
                 <button
-                  onClick={() => {
-                    if (confirm('Are you sure you want to cancel this shipment?')) {
-                      cancelShipmentMutation.mutate();
-                    }
-                  }}
+                  onClick={() => setShowCancelConfirm(true)}
                   disabled={cancelShipmentMutation.isPending}
                   className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-red-700 bg-red-100 hover:bg-red-200 rounded-lg transition-colors"
                 >
@@ -299,6 +297,16 @@ export function BookShipmentSection({
             </div>
           )}
         </div>
+
+        <ConfirmModal
+          isOpen={showCancelConfirm}
+          onClose={() => setShowCancelConfirm(false)}
+          onConfirm={() => cancelShipmentMutation.mutate()}
+          title="Cancel Shipment"
+          message="Are you sure you want to cancel this shipment? The AWB will be released."
+          confirmText="Cancel Shipment"
+          confirmVariant="danger"
+        />
       </div>
     );
   }

@@ -8,6 +8,7 @@
  */
 
 import { useState, useEffect, useMemo } from 'react';
+import { toast } from 'sonner';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { X } from 'lucide-react';
 import {
@@ -198,7 +199,7 @@ export function MaterialEditModal({ type, item, isOpen, onClose, onSuccess }: Ma
             onSuccess?.();
             onClose();
         },
-        onError: (err: Error) => alert(err.message || 'Failed to update material'),
+        onError: (err: Error) => toast.error(err.message || 'Failed to update material'),
     });
 
     const updateFabric = useMutation({
@@ -214,7 +215,7 @@ export function MaterialEditModal({ type, item, isOpen, onClose, onSuccess }: Ma
             onSuccess?.();
             onClose();
         },
-        onError: (err: Error) => alert(err.message || 'Failed to update fabric'),
+        onError: (err: Error) => toast.error(err.message || 'Failed to update fabric'),
     });
 
     const updateColour = useMutation({
@@ -230,7 +231,7 @@ export function MaterialEditModal({ type, item, isOpen, onClose, onSuccess }: Ma
             onSuccess?.();
             onClose();
         },
-        onError: (err: Error) => alert(err.message || 'Failed to update colour'),
+        onError: (err: Error) => toast.error(err.message || 'Failed to update colour'),
     });
 
     const updateTrim = useMutation({
@@ -246,7 +247,7 @@ export function MaterialEditModal({ type, item, isOpen, onClose, onSuccess }: Ma
             onSuccess?.();
             onClose();
         },
-        onError: (err: Error) => alert(err.message || 'Failed to update trim'),
+        onError: (err: Error) => toast.error(err.message || 'Failed to update trim'),
     });
 
     const updateService = useMutation({
@@ -262,7 +263,7 @@ export function MaterialEditModal({ type, item, isOpen, onClose, onSuccess }: Ma
             onSuccess?.();
             onClose();
         },
-        onError: (err: Error) => alert(err.message || 'Failed to update service'),
+        onError: (err: Error) => toast.error(err.message || 'Failed to update service'),
     });
 
     // Check if any mutation is pending

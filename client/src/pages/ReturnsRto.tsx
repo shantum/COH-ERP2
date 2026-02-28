@@ -30,6 +30,7 @@ import {
     deleteRepackingQueueItem,
 } from '@/server/functions/repacking';
 import { reportError } from '@/utils/errorReporter';
+import ConfirmModal from '@/components/common/ConfirmModal';
 import {
     Search,
     PackageX,
@@ -61,6 +62,16 @@ export default function ReturnsRto() {
     // Selected item for allocation
     const [selectedItem, setSelectedItem] = useState<QueuePanelItemResponse | null>(null);
     const [showAllocateModal, setShowAllocateModal] = useState(false);
+
+    // Confirm modal state
+    const [confirmModal, setConfirmModal] = useState<{
+        isOpen: boolean;
+        title: string;
+        message: string;
+        confirmText: string;
+        confirmVariant: 'danger' | 'primary' | 'warning';
+        onConfirm: () => void | Promise<void>;
+    }>({ isOpen: false, title: '', message: '', confirmText: 'Confirm', confirmVariant: 'primary', onConfirm: () => {} });
 
     // Pagination
     const [pageSize, setPageSize] = useState(50);
@@ -200,9 +211,16 @@ export default function ReturnsRto() {
 
     // Handle delete from queue
     const handleDeleteClick = (item: QueuePanelItemResponse) => {
-        if (confirm(`Remove ${item.skuCode} from queue?`)) {
-            deleteFromQueueMutation.mutate(item.queueItemId || item.id);
-        }
+        setConfirmModal({
+            isOpen: true,
+            title: 'Remove from Queue',
+            message: `Remove ${item.skuCode} from queue?`,
+            confirmText: 'Remove',
+            confirmVariant: 'danger',
+            onConfirm: () => {
+                deleteFromQueueMutation.mutate(item.queueItemId || item.id);
+            },
+        });
     };
 
     // Handle allocate click from repacking queue
@@ -498,7 +516,7 @@ export default function ReturnsRto() {
                                                         <button
                                                             onClick={() => handleDeleteClick(item)}
                                                             disabled={deleteFromQueueMutation.isPending}
-                                                            className="px-2 py-1 text-xs font-medium text-red-600 border border-red-300 rounded hover:bg-red-50 transition-colors disabled:opacity-50"
+                                                            className="px-2 py-1 text-xs font-medium text-red-600 border border-red-300 rounded hover:bg-red-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                                             title="Remove from queue"
                                                         >
                                                             <X size={14} />
@@ -525,7 +543,7 @@ export default function ReturnsRto() {
                                 <button
                                     onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
                                     disabled={currentPage === 1}
-                                    className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50"
+                                    className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
                                     Previous
                                 </button>
@@ -535,7 +553,7 @@ export default function ReturnsRto() {
                                 <button
                                     onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
                                     disabled={currentPage === totalPages}
-                                    className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50"
+                                    className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
                                     Next
                                 </button>
@@ -544,6 +562,17 @@ export default function ReturnsRto() {
                     )}
                 </div>
             </div>
+
+            {/* Confirm Modal */}
+            <ConfirmModal
+                isOpen={confirmModal.isOpen}
+                onClose={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+                onConfirm={confirmModal.onConfirm}
+                title={confirmModal.title}
+                message={confirmModal.message}
+                confirmText={confirmModal.confirmText}
+                confirmVariant={confirmModal.confirmVariant}
+            />
 
             {/* Allocate Modal */}
             {showAllocateModal && selectedItem && (
@@ -648,7 +677,7 @@ function AllocationModalContent({
                                                 key={match.data.lineId}
                                                 onClick={() => handleAllocate('return', match.data.lineId)}
                                                 disabled={isLoading}
-                                                className="w-full p-3 text-left border border-gray-200 rounded-lg hover:border-orange-300 hover:bg-orange-50 transition-colors disabled:opacity-50"
+                                                className="w-full p-3 text-left border border-gray-200 rounded-lg hover:border-orange-300 hover:bg-orange-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                             >
                                                 <div className="flex justify-between">
                                                     <span className="font-medium">{match.data.requestNumber}</span>
@@ -674,7 +703,7 @@ function AllocationModalContent({
                                                 key={match.data.lineId}
                                                 onClick={() => handleAllocate('rto', match.data.lineId)}
                                                 disabled={isLoading}
-                                                className="w-full p-3 text-left border border-gray-200 rounded-lg hover:border-purple-300 hover:bg-purple-50 transition-colors disabled:opacity-50"
+                                                className="w-full p-3 text-left border border-gray-200 rounded-lg hover:border-purple-300 hover:bg-purple-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                             >
                                                 <div className="flex justify-between">
                                                     <span className="font-medium">Order #{match.data.orderNumber}</span>

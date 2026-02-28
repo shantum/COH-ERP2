@@ -31,6 +31,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select';
+import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 
 interface AddressData {
@@ -431,7 +432,7 @@ export function CreateOrderForm({
     const handleSubmit = (e: React.FormEvent, bypassContactWarning = false) => {
         e.preventDefault();
         if (orderLines.length === 0) {
-            alert('Add at least one item');
+            toast.error('Add at least one item');
             return;
         }
 

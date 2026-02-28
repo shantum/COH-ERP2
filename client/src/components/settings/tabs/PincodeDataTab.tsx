@@ -5,6 +5,7 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { pincodeApi } from '../../../services/api';
 import { Upload, MapPin, Database } from 'lucide-react';
 
@@ -39,7 +40,7 @@ export function PincodeDataTab() {
             refetchStats();
         },
         onError: (error: unknown) => {
-            alert(error instanceof Error ? error.message : 'Upload failed');
+            toast.error(error instanceof Error ? error.message : 'Upload failed');
         },
     });
 

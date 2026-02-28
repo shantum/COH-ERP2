@@ -5,6 +5,7 @@ import {
     MessageSquare, Pencil, CheckCircle, ArrowRight,
     ExternalLink, AlertTriangle, ListTodo,
 } from 'lucide-react';
+import { toast } from 'sonner';
 import type { ReturnActionQueueItem as ServerReturnActionQueueItem } from '@coh/shared/schemas/returns';
 import { getStatusBadge, getResolutionBadge, conditionOptions } from '../types';
 import { AwbTrackingCell } from '../../../components/AwbTrackingCell';
@@ -409,7 +410,7 @@ export function ActionQueueTab({
                                                                 if (condition) {
                                                                     onReceive(item.id, condition);
                                                                 } else {
-                                                                    alert('Please select a condition');
+                                                                    toast.error('Please select a condition');
                                                                 }
                                                             }}
                                                             disabled={!receiveConditionMap[item.id]}

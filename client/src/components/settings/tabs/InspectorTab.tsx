@@ -7,6 +7,7 @@
  */
 
 import { useState, useEffect } from 'react';
+import { toast } from 'sonner';
 import { getTables, inspectTable, type TableInfo } from '../../../server/functions/admin';
 import { Database, Eye, RefreshCw, Table2, Layers, Search } from 'lucide-react';
 import { reportError } from '@/utils/errorReporter';
@@ -55,12 +56,12 @@ export function InspectorTab() {
             if (result.success && result.data) {
                 setInspectorData(result.data);
             } else {
-                alert(result.error?.message || 'Failed to fetch data');
+                toast.error(result.error?.message || 'Failed to fetch data');
             }
         } catch (err) {
             console.error(err);
             reportError(err, { component: 'InspectorTab', action: 'runQuery' });
-            alert('Failed to fetch data');
+            toast.error('Failed to fetch data');
         } finally {
             setInspectorLoading(false);
         }

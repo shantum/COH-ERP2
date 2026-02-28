@@ -313,7 +313,7 @@ export default function StockReport() {
                         <button
                             onClick={handleRefresh}
                             disabled={refreshing}
-                            className="ml-2 p-1.5 rounded-lg hover:bg-gray-100 transition-colors disabled:opacity-50"
+                            className="ml-2 p-1.5 rounded-lg hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                             title="Recompute last month snapshot"
                         >
                             <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />

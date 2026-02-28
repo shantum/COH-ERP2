@@ -8,6 +8,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getServerLogs, getLogStats, clearLogs } from '../../../server/functions/admin';
+import ConfirmModal from '../../common/ConfirmModal';
 import {
     Terminal, RefreshCw, Trash2, Search, AlertCircle, Info, AlertTriangle,
     XCircle, Filter, Clock, Activity, TrendingUp
@@ -33,6 +34,7 @@ export function ServerLogsTab() {
     const [searchTerm, setSearchTerm] = useState('');
     const [autoRefresh, setAutoRefresh] = useState(true);
     const [limit] = useState(100);
+    const [showClearConfirm, setShowClearConfirm] = useState(false);
 
     // Fetch logs — keepPreviousData prevents layout flash during refetch
     const { data: logsData, isLoading, refetch } = useQuery({
@@ -85,9 +87,7 @@ export function ServerLogsTab() {
     });
 
     const handleClearLogs = () => {
-        if (confirm('Are you sure you want to clear all server logs?')) {
-            clearLogsMutation.mutate();
-        }
+        setShowClearConfirm(true);
     };
 
     const getLevelIcon = (level: string) => {
@@ -395,6 +395,19 @@ export function ServerLogsTab() {
                     </div>
                 </div>
             </div>
+            {/* Clear Logs Confirm Modal */}
+            <ConfirmModal
+                isOpen={showClearConfirm}
+                onClose={() => setShowClearConfirm(false)}
+                onConfirm={() => {
+                    clearLogsMutation.mutate();
+                }}
+                title="Clear All Logs"
+                message="Are you sure you want to clear all server logs? This action cannot be undone."
+                confirmText="Clear All"
+                confirmVariant="danger"
+                isLoading={clearLogsMutation.isPending}
+            />
         </div>
     );
 }

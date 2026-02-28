@@ -6,6 +6,7 @@
  */
 
 import { useState, useCallback, useRef, useEffect, Fragment } from 'react';
+import ConfirmModal from '../../components/common/ConfirmModal';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { useNavigate } from '@tanstack/react-router';
@@ -191,8 +192,9 @@ function BankTransactionListView({ bank, search, updateSearch }: {
     }
   };
 
+  const [deleteTxnId, setDeleteTxnId] = useState<string | null>(null);
+
   const handleDelete = async (txnId: string) => {
-    if (!confirm('Delete this transaction?')) return;
     try {
       const res = await fetch(`/api/bank-import/${txnId}`, {
         method: 'DELETE', credentials: 'include',
@@ -479,7 +481,7 @@ function BankTransactionListView({ bank, search, updateSearch }: {
                     onConfirm={() => handleConfirm(txn.id)}
                     onSkip={() => handleSkip(txn.id)}
                     onUnskip={() => handleUnskip(txn.id)}
-                    onDelete={() => handleDelete(txn.id)}
+                    onDelete={() => setDeleteTxnId(txn.id)}
                     onCreateParty={(name) => handleCreateParty(txn.id, name)}
                     creatingParty={creatingPartyFor === txn.id}
                     onLink={(info) => setLinkingTxn(info)}
@@ -512,6 +514,19 @@ function BankTransactionListView({ bank, search, updateSearch }: {
       {linkingTxn && (
         <ManualLinkDialog payment={linkingTxn} onClose={() => setLinkingTxn(null)} />
       )}
+
+      <ConfirmModal
+        isOpen={!!deleteTxnId}
+        onClose={() => setDeleteTxnId(null)}
+        onConfirm={async () => {
+          if (deleteTxnId) await handleDelete(deleteTxnId);
+          setDeleteTxnId(null);
+        }}
+        title="Delete Transaction"
+        message="Delete this transaction? This action cannot be undone."
+        confirmText="Delete"
+        confirmVariant="danger"
+      />
     </div>
   );
 }

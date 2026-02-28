@@ -13,6 +13,7 @@ import { useState, useCallback, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { Search, X, Check, Package, Loader2, Link2, AlertCircle } from 'lucide-react';
+import { toast } from 'sonner';
 import { getOptimizedImageUrl } from '../../utils/imageOptimization';
 
 import {
@@ -99,11 +100,11 @@ export function LinkProductsModal({ isOpen, onClose, colour }: LinkProductsModal
             // Invalidate materials tree to refresh product counts
             queryClient.invalidateQueries({ queryKey: materialsTreeKeys.all });
             // Show success and close
-            alert(`Successfully linked ${data.linked.total} variation(s) to ${data.fabricColour.fabricName} - ${data.fabricColour.name}`);
+            toast.success(`Linked ${data.linked.total} variation(s) to ${data.fabricColour.fabricName} - ${data.fabricColour.name}`);
             handleClose();
         },
         onError: (error: Error) => {
-            alert(error.message || 'Failed to link variations');
+            toast.error(error.message || 'Failed to link variations');
         },
     });
 

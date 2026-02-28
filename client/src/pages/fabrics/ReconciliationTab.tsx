@@ -6,7 +6,9 @@ import {
     CheckCircle, Send, Eye, ArrowLeft, User, TrendingUp, TrendingDown,
     History, ClipboardCheck, ClipboardList, Check, X,
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import ConfirmModal from '@/components/common/ConfirmModal';
 import {
     getFabricColourReconciliations,
     startFabricColourReconciliation,
@@ -34,6 +36,16 @@ export default function ReconciliationTab() {
     const [searchTerm, setSearchTerm] = useState('');
     const [localItems, setLocalItems] = useState<ReconciliationItem[]>([]);
     const [viewingReconId, setViewingReconId] = useState<string | null>(null);
+
+    // ConfirmModal state
+    const [confirmModal, setConfirmModal] = useState<{
+        isOpen: boolean;
+        title: string;
+        message: string;
+        confirmText: string;
+        confirmVariant: 'danger' | 'primary' | 'warning';
+        onConfirm: () => void | Promise<void>;
+    }>({ isOpen: false, title: '', message: '', confirmText: 'Confirm', confirmVariant: 'primary', onConfirm: () => {} });
 
     // Server Function wrappers
     const getHistoryFn = useServerFn(getFabricColourReconciliations);
@@ -144,7 +156,7 @@ export default function ReconciliationTab() {
         },
         onError: (error: unknown) => {
             const msg = error instanceof Error ? error.message : 'Unknown error';
-            alert(`Failed to start reconciliation: ${msg}`);
+            toast.error(`Failed to start reconciliation: ${msg}`);
         },
     });
 
@@ -182,7 +194,7 @@ export default function ReconciliationTab() {
         },
         onError: (error: unknown) => {
             const msg = error instanceof Error ? error.message : 'Unknown error';
-            alert(`Failed to save: ${msg}`);
+            toast.error(`Failed to save: ${msg}`);
         },
     });
 
@@ -203,11 +215,11 @@ export default function ReconciliationTab() {
             queryClient.invalidateQueries({ queryKey: ['fabricColourReconciliationHistory'] });
             queryClient.invalidateQueries({ queryKey: ['fabricColours'] });
             queryClient.invalidateQueries({ queryKey: ['materialsTree'] });
-            alert('Reconciliation submitted successfully!');
+            toast.success('Reconciliation submitted successfully!');
         },
         onError: (error: unknown) => {
             const msg = error instanceof Error ? error.message : 'Unknown error';
-            alert(`Failed to submit: ${msg}`);
+            toast.error(`Failed to submit: ${msg}`);
         },
     });
 
@@ -229,7 +241,7 @@ export default function ReconciliationTab() {
         },
         onError: (error: unknown) => {
             const msg = error instanceof Error ? error.message : 'Unknown error';
-            alert(`Failed to delete: ${msg}`);
+            toast.error(`Failed to delete: ${msg}`);
         },
     });
 
@@ -270,9 +282,17 @@ export default function ReconciliationTab() {
 
     // Submit
     const handleSubmit = useCallback(() => {
-        if (!confirm('This will create adjustment transactions for all variances. Continue?')) return;
-        updateMutation.mutate(localItems, {
-            onSuccess: () => submitMutation.mutate(),
+        setConfirmModal({
+            isOpen: true,
+            title: 'Submit Reconciliation',
+            message: 'This will create adjustment transactions for all variances. Continue?',
+            confirmText: 'Submit',
+            confirmVariant: 'warning',
+            onConfirm: () => {
+                updateMutation.mutate(localItems, {
+                    onSuccess: () => submitMutation.mutate(),
+                });
+            },
         });
     }, [updateMutation, submitMutation, localItems]);
 
@@ -563,8 +583,16 @@ export default function ReconciliationTab() {
                                     type="button"
                                     className="flex items-center gap-1.5 rounded-lg bg-red-100 px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-200 disabled:opacity-50"
                                     onClick={() => {
-                                        if (confirm(`Discard ${selectedCountIds.size} count(s)?`))
-                                            discardMutation.mutate([...selectedCountIds]);
+                                        setConfirmModal({
+                                            isOpen: true,
+                                            title: 'Discard Counts',
+                                            message: `Discard ${selectedCountIds.size} count(s)? This cannot be undone.`,
+                                            confirmText: 'Discard',
+                                            confirmVariant: 'danger',
+                                            onConfirm: () => {
+                                                discardMutation.mutate([...selectedCountIds]);
+                                            },
+                                        });
                                     }}
                                     disabled={discardMutation.isPending}
                                 >
@@ -940,6 +968,15 @@ export default function ReconciliationTab() {
                     )}
                 </div>
             )}
+            <ConfirmModal
+                isOpen={confirmModal.isOpen}
+                onClose={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+                onConfirm={confirmModal.onConfirm}
+                title={confirmModal.title}
+                message={confirmModal.message}
+                confirmText={confirmModal.confirmText}
+                confirmVariant={confirmModal.confirmVariant}
+            />
         </div>
     );
 }

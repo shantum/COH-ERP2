@@ -9,6 +9,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
+import { toast } from 'sonner';
 import { shopifyApi } from '../../../services/api';
 import JsonViewer from '../../JsonViewer';
 import {
@@ -194,7 +195,7 @@ export function ShopifyTab() {
         },
         onSuccess: () => refetchJobs(),
         onError: (error: Error) => {
-            alert(error.message || 'Failed to start sync job');
+            toast.error(error.message || 'Failed to start sync job');
         },
     });
 

@@ -385,15 +385,17 @@ export default function Returns() {
                 {search.view === 'returns' && (
                     <>
                         {/* Status Pill Tabs */}
-                        <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                        <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-hide" role="tablist">
                             {STATUS_TABS.map(({ value, label }) => {
                                 const count = statusCounts?.[value] ?? 0;
                                 const isActive = search.status === value;
                                 return (
                                     <button
                                         key={value}
+                                        role="tab"
+                                        aria-selected={isActive}
                                         onClick={() => handleStatusChange(value)}
-                                        className={`relative px-4 py-2 text-sm font-medium rounded-full whitespace-nowrap transition-all ${
+                                        className={`relative px-4 py-2 text-sm font-medium rounded-full whitespace-nowrap transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-1 ${
                                             isActive
                                                 ? 'bg-emerald-600 text-white shadow-sm'
                                                 : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50 hover:border-gray-300'
@@ -423,7 +425,7 @@ export default function Returns() {
                                     <button
                                         key={value}
                                         onClick={() => handleDatePresetChange(value)}
-                                        className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                                        className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 focus-visible:ring-offset-1 ${
                                             search.datePreset === value
                                                 ? 'bg-gray-900 text-white'
                                                 : 'bg-white text-gray-500 border border-gray-200 hover:bg-gray-50'
@@ -556,11 +558,11 @@ export default function Returns() {
                                             )
                                         }
                                         disabled={search.page <= 1}
-                                        className="p-2 rounded-lg hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                                        className="p-1.5 rounded border border-gray-300 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
                                     >
                                         <ChevronLeft size={16} />
                                     </button>
-                                    <span className="text-sm text-gray-600 tabular-nums">
+                                    <span className="text-xs text-gray-500">
                                         Page {search.page} of{' '}
                                         {totalPages || 1}
                                     </span>
@@ -574,7 +576,7 @@ export default function Returns() {
                                             )
                                         }
                                         disabled={search.page >= totalPages}
-                                        className="p-2 rounded-lg hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                                        className="p-1.5 rounded border border-gray-300 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
                                     >
                                         <ChevronRight size={16} />
                                     </button>

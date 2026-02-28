@@ -1,5 +1,7 @@
 import { useState, useCallback, useEffect, useMemo } from 'react';
+import { toast } from 'sonner';
 import { Plus, CheckCircle, X, ChevronDown, ChevronRight, Lock, Unlock, Copy, Check, Undo2, Trash2, Scissors, FlaskConical } from 'lucide-react';
+import ConfirmModal from '../components/common/ConfirmModal';
 import { useSearch, useNavigate, ClientOnly } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { sortBySizeOrder } from '../constants/sizes';
@@ -237,6 +239,7 @@ function ProductionContent() {
     const [expandedDates, setExpandedDates] = useState<Set<string>>(new Set());
     const [copiedDate, setCopiedDate] = useState<string | null>(null);
     const [requirementsLimit, setRequirementsLimit] = useState(10);
+    const [deleteCompletedBatchId, setDeleteCompletedBatchId] = useState<string | null>(null);
 
     // Memoize date range to prevent query key changes on every render
     const dateRange = useMemo(() => getDefaultDateRange(), []);
@@ -330,7 +333,7 @@ function ProductionContent() {
             await mutations.createBatch.mutateAsync(input);
         } catch (error: unknown) {
             const message = error instanceof Error ? error.message : 'Failed to add item';
-            alert(message);
+            toast.error(message);
         }
     }, [mutations.createBatch]);
 
@@ -734,7 +737,7 @@ function ProductionContent() {
                                                                     const dateInput = document.getElementById(`date-${item.orderLineId}`) as HTMLInputElement;
                                                                     const selectedDate = dateInput?.value || getTodayString();
                                                                     if (lockedDates?.includes(selectedDate)) {
-                                                                        alert('This date is locked. Please select another date.');
+                                                                        toast.error('This date is locked. Please select another date.');
                                                                         return;
                                                                     }
                                                                     handleCreateBatch({
@@ -745,7 +748,7 @@ function ProductionContent() {
                                                                     });
                                                                 }}
                                                                 disabled={mutations.createBatch.isPending}
-                                                                className="text-xs px-2 py-1 bg-primary-600 text-white rounded hover:bg-primary-700 disabled:opacity-50"
+                                                                className="text-xs px-2 py-1 bg-primary-600 text-white rounded hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed"
                                                             >
                                                                 + Add
                                                             </button>
@@ -1031,12 +1034,7 @@ function ProductionContent() {
                                                                     <Undo2 size={14} />
                                                                 </button>
                                                                 <button
-                                                                    onClick={async () => {
-                                                                        if (confirm('Delete this completed batch? This will also reverse inventory changes.')) {
-                                                                            await handleUncompleteBatch(batch.id);
-                                                                            await handleDeleteBatch(batch.id);
-                                                                        }
-                                                                    }}
+                                                                    onClick={() => setDeleteCompletedBatchId(batch.id)}
                                                                     className="text-gray-400 hover:text-red-500"
                                                                     title="Delete batch"
                                                                 >
@@ -1204,6 +1202,21 @@ function ProductionContent() {
                 onOpenChange={setShowAddModal}
                 defaultDate={addModalDate || today}
                 lockedDates={lockedDates || []}
+            />
+
+            <ConfirmModal
+                isOpen={!!deleteCompletedBatchId}
+                onClose={() => setDeleteCompletedBatchId(null)}
+                onConfirm={async () => {
+                    if (deleteCompletedBatchId) {
+                        await handleUncompleteBatch(deleteCompletedBatchId);
+                        await handleDeleteBatch(deleteCompletedBatchId);
+                    }
+                }}
+                title="Delete Completed Batch"
+                message="Delete this completed batch? This will also reverse inventory changes."
+                confirmText="Delete"
+                confirmVariant="danger"
             />
         </div>
     );

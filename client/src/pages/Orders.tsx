@@ -279,7 +279,7 @@ export default function Orders() {
                         <button
                             onClick={() => setActivePage(activePage - 1)}
                             disabled={activePage === 1 || isFetching || !pagination}
-                            className="p-0.5 text-gray-500 hover:text-gray-700 disabled:opacity-30"
+                            className="p-0.5 text-gray-500 hover:text-gray-700 disabled:opacity-30 disabled:cursor-not-allowed"
                         >
                             <ChevronLeft size={14} />
                         </button>
@@ -289,7 +289,7 @@ export default function Orders() {
                         <button
                             onClick={() => setActivePage(activePage + 1)}
                             disabled={!pagination || activePage >= pagination.totalPages || isFetching}
-                            className="p-0.5 text-gray-500 hover:text-gray-700 disabled:opacity-30"
+                            className="p-0.5 text-gray-500 hover:text-gray-700 disabled:opacity-30 disabled:cursor-not-allowed"
                         >
                             <ChevronRight size={14} />
                         </button>

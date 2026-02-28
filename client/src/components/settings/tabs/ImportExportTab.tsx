@@ -5,6 +5,7 @@
 
 import { useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { importExportApi } from '../../../services/api';
 import { Download, Upload, FileSpreadsheet } from 'lucide-react';
 
@@ -37,7 +38,7 @@ export function ImportExportTab() {
             setImportFile(null);
         },
         onError: (error: unknown) => {
-            alert(error instanceof Error ? error.message : 'Import failed');
+            toast.error(error instanceof Error ? error.message : 'Import failed');
         },
     });
 
@@ -63,8 +64,8 @@ export function ImportExportTab() {
             a.download = filename;
             a.click();
             window.URL.revokeObjectURL(url);
-        } catch (error) {
-            alert('Export failed');
+        } catch (error: unknown) {
+            toast.error('Export failed');
         }
     };
 

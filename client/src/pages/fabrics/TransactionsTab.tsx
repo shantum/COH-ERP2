@@ -2,6 +2,7 @@ import React, { useState, useMemo, useCallback } from 'react';
 import { useQueryClient, useQuery, useMutation } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { X, Trash2, Plus, Search } from 'lucide-react';
+import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { AgGridReact } from 'ag-grid-react';
 import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community';
@@ -170,7 +171,7 @@ export default function TransactionsTab() {
         },
         onError: (err: unknown) => {
             const msg = err instanceof Error ? err.message : 'Failed to delete';
-            alert(msg);
+            toast.error(msg);
         },
     });
 
@@ -199,7 +200,7 @@ export default function TransactionsTab() {
         },
         onError: (err: unknown) => {
             const msg = err instanceof Error ? err.message : 'Failed to create transaction';
-            alert(msg);
+            toast.error(msg);
         },
     });
 
@@ -457,7 +458,7 @@ export default function TransactionsTab() {
                                 type="button"
                                 disabled={page === 0}
                                 onClick={() => setPage(p => p - 1)}
-                                className="rounded border px-3 py-1 text-sm disabled:opacity-40 hover:bg-slate-50"
+                                className="rounded border px-3 py-1 text-sm disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50"
                             >
                                 Prev
                             </button>
@@ -466,7 +467,7 @@ export default function TransactionsTab() {
                                 type="button"
                                 disabled={page >= totalPages - 1}
                                 onClick={() => setPage(p => p + 1)}
-                                className="rounded border px-3 py-1 text-sm disabled:opacity-40 hover:bg-slate-50"
+                                className="rounded border px-3 py-1 text-sm disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50"
                             >
                                 Next
                             </button>

@@ -46,7 +46,7 @@ export default function Products() {
                         <p className="text-red-600 text-sm mt-1">{loaderData.error}</p>
                         <button
                             onClick={() => window.location.reload()}
-                            className="mt-3 inline-flex items-center gap-1.5 text-sm text-red-700 hover:text-red-800 font-medium"
+                            className="mt-3 inline-flex items-center gap-1.5 text-sm text-red-700 hover:text-red-800 font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 rounded-md"
                         >
                             <RefreshCcw className="w-4 h-4" />
                             Refresh page

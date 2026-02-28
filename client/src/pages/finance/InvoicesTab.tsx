@@ -295,7 +295,7 @@ export default function InvoicesTab({ search: rawSearch }: { search: FinanceSear
     if (missingBank.length > 0) {
       const names = missingBank.map((inv) => inv.party?.name ?? 'Unknown').join(', ');
       if (valid.length === 0) {
-        window.alert(`All selected invoices are missing bank details: ${names}`);
+        showError(`All selected invoices are missing bank details: ${names}`);
         return;
       }
       if (!window.confirm(`${missingBank.length} invoice(s) missing bank details will be skipped: ${names}.\n\nContinue with the remaining ${valid.length}?`)) {

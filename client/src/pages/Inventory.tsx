@@ -495,7 +495,7 @@ export default function Inventory() {
                     <div className="flex gap-2">
                         <button
                             onClick={() => setStockFilter('all')}
-                            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${stockFilter === 'all'
+                            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 ${stockFilter === 'all'
                                 ? 'bg-blue-600 text-white'
                                 : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                                 }`}
@@ -504,7 +504,7 @@ export default function Inventory() {
                         </button>
                         <button
                             onClick={() => setStockFilter('in_stock')}
-                            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${stockFilter === 'in_stock'
+                            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-500 focus-visible:ring-offset-1 ${stockFilter === 'in_stock'
                                 ? 'bg-green-600 text-white'
                                 : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                                 }`}
@@ -513,7 +513,7 @@ export default function Inventory() {
                         </button>
                         <button
                             onClick={() => setStockFilter('low_stock')}
-                            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${stockFilter === 'low_stock'
+                            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:ring-offset-1 ${stockFilter === 'low_stock'
                                 ? 'bg-amber-600 text-white'
                                 : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                                 }`}
@@ -522,7 +522,7 @@ export default function Inventory() {
                         </button>
                         <button
                             onClick={() => setStockFilter('out_of_stock')}
-                            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${stockFilter === 'out_of_stock'
+                            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-1 ${stockFilter === 'out_of_stock'
                                 ? 'bg-red-600 text-white'
                                 : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                                 }`}

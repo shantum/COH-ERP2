@@ -7,6 +7,7 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { getDatabaseStats, clearTables } from '../../../server/functions/admin';
 import { Database, RefreshCw, AlertOctagon, Trash2 } from 'lucide-react';
 
@@ -40,10 +41,10 @@ export function DatabaseTab() {
             queryClient.invalidateQueries();
             setClearConfirm('');
             setSelectedTables([]);
-            alert(`Database cleared! Deleted: ${JSON.stringify(data?.deleted)}`);
+            toast.success(`Database cleared! Deleted: ${JSON.stringify(data?.deleted)}`);
         },
         onError: (error: Error) => {
-            alert(error.message || 'Failed to clear database');
+            toast.error(error.message || 'Failed to clear database');
         },
     });
 

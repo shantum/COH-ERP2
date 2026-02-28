@@ -24,6 +24,8 @@ import {
     submitReconciliation as submitReconciliationFn,
 } from '../server/functions/reconciliationMutations';
 import { reportError } from '@/utils/errorReporter';
+import { toast } from 'sonner';
+import ConfirmModal from '@/components/common/ConfirmModal';
 
 interface Reconciliation {
     id: string;
@@ -73,6 +75,14 @@ export default function InventoryReconciliation() {
     const [viewingReconId, setViewingReconId] = useState<string | null>(null);
     const [historySearchTerm, setHistorySearchTerm] = useState('');
     const [submittingFromHistory, setSubmittingFromHistory] = useState(false);
+    const [confirmModal, setConfirmModal] = useState<{
+        isOpen: boolean;
+        title: string;
+        message: string;
+        confirmText: string;
+        confirmVariant: 'danger' | 'primary' | 'warning';
+        onConfirm: () => void | Promise<void>;
+    }>({ isOpen: false, title: '', message: '', confirmText: 'Confirm', confirmVariant: 'primary', onConfirm: () => {} });
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     // Server Function wrappers for inline use (modal submit)
@@ -111,7 +121,7 @@ export default function InventoryReconciliation() {
             setCurrentRecon(null);
             setLocalItems([]);
             setUploadResult(null);
-            alert(`Reconciliation submitted successfully!\n\n${adjustments} inventory adjustments created.`);
+            toast.success(`Reconciliation submitted! ${adjustments} inventory adjustments created.`);
         },
         onDeleteSuccess: () => {
             setCurrentRecon(null);
@@ -154,9 +164,16 @@ export default function InventoryReconciliation() {
 
     // Delete from history mutation (using the same deleteMutation)
     const handleDeleteFromHistory = (id: string) => {
-        if (confirm('Delete this draft reconciliation?')) {
-            deleteMutation.mutate(id);
-        }
+        setConfirmModal({
+            isOpen: true,
+            title: 'Delete Draft',
+            message: 'Delete this draft reconciliation? This cannot be undone.',
+            confirmText: 'Delete',
+            confirmVariant: 'danger',
+            onConfirm: () => {
+                deleteMutation.mutate(id);
+            },
+        });
     };
 
     // Handle file selection
@@ -235,7 +252,20 @@ export default function InventoryReconciliation() {
     // Submit
     const handleSubmit = () => {
         if (!currentRecon) return;
-        if (!confirm('This will create adjustment transactions for all variances. Continue?')) return;
+        setConfirmModal({
+            isOpen: true,
+            title: 'Submit Reconciliation',
+            message: 'This will create adjustment transactions for all variances. Continue?',
+            confirmText: 'Submit',
+            confirmVariant: 'warning',
+            onConfirm: () => {
+                doSubmit();
+            },
+        });
+    };
+
+    const doSubmit = () => {
+        if (!currentRecon) return;
         // First save, then submit
         updateMutation.mutate(
             {
@@ -859,9 +889,9 @@ export default function InventoryReconciliation() {
                                             queryClient.invalidateQueries({ queryKey: ['inventoryReconciliationHistory'] });
                                             setViewingReconId(null);
                                             setHistorySearchTerm('');
-                                            alert(`Reconciliation submitted successfully!\n\n${result.data?.adjustmentsMade || 0} inventory adjustments created.`);
+                                            toast.success(`Reconciliation submitted! ${result.data?.adjustmentsMade || 0} inventory adjustments created.`);
                                         } catch (err) {
-                                            alert(err instanceof Error ? err.message : 'Failed to submit reconciliation');
+                                            toast.error(err instanceof Error ? err.message : 'Failed to submit reconciliation');
                                         } finally {
                                             setSubmittingFromHistory(false);
                                         }
@@ -883,6 +913,15 @@ export default function InventoryReconciliation() {
                     </div>
                 </div>
             )}
+            <ConfirmModal
+                isOpen={confirmModal.isOpen}
+                onClose={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+                onConfirm={confirmModal.onConfirm}
+                title={confirmModal.title}
+                message={confirmModal.message}
+                confirmText={confirmModal.confirmText}
+                confirmVariant={confirmModal.confirmVariant}
+            />
         </div>
     );
 }

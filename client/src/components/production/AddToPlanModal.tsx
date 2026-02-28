@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { toast } from 'sonner';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { getProductsList } from '@/server/functions/products';
@@ -118,7 +119,7 @@ export function AddToPlanModal({
             onOpenChange(false);
         },
         onError: (error: Error) => {
-            alert(error.message || 'Failed to add item');
+            toast.error(error.message || 'Failed to add item');
         }
     });
 
@@ -159,13 +160,13 @@ export function AddToPlanModal({
         e.preventDefault();
 
         if (lockedDates.includes(batchDate)) {
-            alert('This date is locked. Please select another date.');
+            toast.error('This date is locked. Please select another date.');
             return;
         }
 
         if (activeTab === 'existing') {
             if (!skuId) {
-                alert('Please select a product');
+                toast.error('Please select a product');
                 return;
             }
             createBatchMutation.mutate({
@@ -176,7 +177,7 @@ export function AddToPlanModal({
             });
         } else {
             if (!sampleName.trim()) {
-                alert('Please enter a sample name');
+                toast.error('Please enter a sample name');
                 return;
             }
             createBatchMutation.mutate({

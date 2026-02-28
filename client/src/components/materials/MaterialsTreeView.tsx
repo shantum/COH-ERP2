@@ -16,7 +16,9 @@ import { useState, useCallback, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { Users, Search } from 'lucide-react';
+import { toast } from 'sonner';
 import { useDebounce } from '../../hooks/useDebounce';
+import ConfirmModal from '@/components/common/ConfirmModal';
 
 import type { MaterialNode, MaterialNodeType, MaterialTreeResponse } from './types';
 import { FabricColoursTable } from './FabricColoursTable';
@@ -73,6 +75,16 @@ export function MaterialsTreeView({
 
     // Link products modal state
     const [linkProductsColour, setLinkProductsColour] = useState<MaterialNode | null>(null);
+
+    // Confirm modal state
+    const [confirmModal, setConfirmModal] = useState<{
+        isOpen: boolean;
+        title: string;
+        message: string;
+        confirmText: string;
+        confirmVariant: 'danger' | 'primary' | 'warning';
+        onConfirm: () => void | Promise<void>;
+    }>({ isOpen: false, title: '', message: '', confirmText: 'Confirm', confirmVariant: 'primary', onConfirm: () => {} });
 
     // Server Function for tree data (for quick add buttons)
     const getTreeFn = useServerFn(getMaterialsTree);
@@ -276,16 +288,21 @@ export function MaterialsTreeView({
 
     // Handle deletion
     const handleDeleteRow = useCallback((row: FabricColourFlatRow) => {
-        const confirmMessage = `Are you sure you want to permanently delete "${row.colourName}"?\n\nThis action cannot be undone.`;
-
-        if (window.confirm(confirmMessage)) {
-            deleteColour.mutate(row.id, {
-                onError: (error: unknown) => {
-                    const message = error instanceof Error ? error.message : 'Failed to delete colour';
-                    alert(message);
-                },
-            });
-        }
+        setConfirmModal({
+            isOpen: true,
+            title: 'Delete Colour',
+            message: `Are you sure you want to permanently delete "${row.colourName}"?\n\nThis action cannot be undone.`,
+            confirmText: 'Delete',
+            confirmVariant: 'danger',
+            onConfirm: () => {
+                deleteColour.mutate(row.id, {
+                    onError: (error: unknown) => {
+                        const message = error instanceof Error ? error.message : 'Failed to delete colour';
+                        toast.error(message);
+                    },
+                });
+            },
+        });
     }, [deleteColour]);
 
     // Handle add inward
@@ -382,6 +399,17 @@ export function MaterialsTreeView({
                 isOpen={!!linkProductsColour}
                 onClose={() => setLinkProductsColour(null)}
                 colour={linkProductsColour}
+            />
+
+            {/* Confirm Modal */}
+            <ConfirmModal
+                isOpen={confirmModal.isOpen}
+                onClose={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+                onConfirm={confirmModal.onConfirm}
+                title={confirmModal.title}
+                message={confirmModal.message}
+                confirmText={confirmModal.confirmText}
+                confirmVariant={confirmModal.confirmVariant}
             />
         </div>
     );

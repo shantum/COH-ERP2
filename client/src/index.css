@@ -259,6 +259,11 @@ body {
   .status-badge-cancelled {
     @apply bg-gray-100 text-gray-500;
   }
+
+  /* Consistent focus-visible utility for interactive elements */
+  .focus-ring {
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-1;
+  }
 }
 
 /* Customer Modal Animations */

@@ -7,6 +7,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { ArrowLeft, Check, Search, Trash2, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import ConfirmModal from '@/components/common/ConfirmModal';
 import {
     getFabricColoursForCount,
     getMyRecentCounts,
@@ -49,6 +50,7 @@ export default function FabricCount() {
     const [selected, setSelected] = useState<FabricColourItem | null>(null);
     const [qty, setQty] = useState('');
     const [notes, setNotes] = useState('');
+    const [deleteCountId, setDeleteCountId] = useState<string | null>(null);
     const searchRef = useRef<HTMLInputElement>(null);
     const qtyRef = useRef<HTMLInputElement>(null);
 
@@ -263,10 +265,7 @@ export default function FabricCount() {
                                     </span>
                                     {c.status === 'pending' && (
                                         <button
-                                            onClick={() => {
-                                                if (confirm('Delete this count?'))
-                                                    deleteMutation.mutate(c.id);
-                                            }}
+                                            onClick={() => setDeleteCountId(c.id)}
                                             className="p-2 text-gray-400 hover:text-red-500"
                                         >
                                             <Trash2 className="h-4 w-4" />
@@ -277,6 +276,18 @@ export default function FabricCount() {
                         </div>
                     </div>
                 )}
+
+                <ConfirmModal
+                    isOpen={!!deleteCountId}
+                    onClose={() => setDeleteCountId(null)}
+                    onConfirm={() => {
+                        if (deleteCountId) deleteMutation.mutate(deleteCountId);
+                    }}
+                    title="Delete Count"
+                    message="Delete this count? This action cannot be undone."
+                    confirmText="Delete"
+                    confirmVariant="danger"
+                />
             </div>
         );
     }

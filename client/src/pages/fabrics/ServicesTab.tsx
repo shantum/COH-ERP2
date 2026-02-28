@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useQueryClient, useQuery, useMutation } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { X } from 'lucide-react';
+import { toast } from 'sonner';
 import { ServicesTable } from '../../components/materials/ServicesTable';
 import { createService, updateService, getParties } from '@/server/functions/materialsMutations';
 import type { Party } from '@/server/functions/materialsMutations';
@@ -60,7 +61,7 @@ export default function ServicesTab() {
                 costPerJob: '', costUnit: 'per_piece', partyId: '', leadTimeDays: ''
             });
         },
-        onError: (err: Error) => alert(err.message || 'Failed to create service'),
+        onError: (err: Error) => toast.error(err.message || 'Failed to create service'),
     });
 
     const updateServiceMutation = useMutation({
@@ -69,7 +70,7 @@ export default function ServicesTab() {
             queryClient.invalidateQueries({ queryKey: ['servicesCatalog'] });
             setShowEditService(null);
         },
-        onError: (err: Error) => alert(err.message || 'Failed to update service'),
+        onError: (err: Error) => toast.error(err.message || 'Failed to update service'),
     });
 
     // Form handlers

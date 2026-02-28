@@ -147,7 +147,7 @@ export default function OrderSearch() {
                                     >
                                         <button
                                             onClick={() => handleSelectOrder(order.orderNumber)}
-                                            className="min-w-0 flex-1 text-left"
+                                            className="min-w-0 flex-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 rounded-md"
                                         >
                                             <div className="flex items-center gap-3 mb-1">
                                                 <span className="font-semibold text-gray-900 text-lg">
@@ -183,7 +183,7 @@ export default function OrderSearch() {
                                             {order.customerId && (
                                                 <button
                                                     onClick={() => navigate({ to: '/customers/$customerId', params: { customerId: order.customerId! } })}
-                                                    className="p-2 rounded-lg text-gray-400 hover:text-primary-600 hover:bg-primary-50 transition-colors"
+                                                    className="p-2 rounded-lg text-gray-400 hover:text-primary-600 hover:bg-primary-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
                                                     title={`View customer: ${order.customerName || 'Unknown'}`}
                                                 >
                                                     <User size={18} />

@@ -44,10 +44,10 @@ export default function Finance() {
       </div>
 
       <Tabs value={search.tab || 'dashboard'} onValueChange={handleTabChange}>
-        <TabsList>
+        <TabsList className="overflow-x-auto scrollbar-hide w-auto">
           <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
           <TabsTrigger value="invoices">Invoices</TabsTrigger>
-          <TabsTrigger value="bank-transactions">Bank Transactions</TabsTrigger>
+          <TabsTrigger value="bank-transactions">Bank Txns</TabsTrigger>
           <TabsTrigger value="pnl">P&L</TabsTrigger>
           <TabsTrigger value="cashflow">Cash Flow</TabsTrigger>
           <TabsTrigger value="marketplace">Marketplace</TabsTrigger>

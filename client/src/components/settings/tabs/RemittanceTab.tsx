@@ -6,7 +6,9 @@
 import React, { useState } from 'react';
 import { formatCurrencyFull } from '../../../utils/formatting';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { remittanceApi } from '../../../services/api';
+import ConfirmModal from '../../common/ConfirmModal';
 import { Upload, FileSpreadsheet, DollarSign, CheckCircle, AlertCircle, Clock, RefreshCw, ExternalLink, RotateCcw, Zap, Link2, ChevronDown, ChevronUp } from 'lucide-react';
 
 interface UploadResult {
@@ -60,6 +62,8 @@ export function RemittanceTab() {
     const [showFailedSync, setShowFailedSync] = useState(false);
     const [showApiSync, setShowApiSync] = useState(true);
     const [expandedRemittance, setExpandedRemittance] = useState<string | null>(null);
+    const [confirmRetryAll, setConfirmRetryAll] = useState(false);
+    const [confirmApproveId, setConfirmApproveId] = useState<string | null>(null);
     const queryClient = useQueryClient();
 
     // Fetch summary data
@@ -85,7 +89,7 @@ export function RemittanceTab() {
             queryClient.invalidateQueries({ queryKey: ['remittanceFailed'] });
         },
         onError: (error: unknown) => {
-            alert(error instanceof Error ? error.message : 'Upload failed');
+            toast.error(error instanceof Error ? error.message : 'Upload failed');
         },
     });
 
@@ -94,11 +98,11 @@ export function RemittanceTab() {
         mutationFn: (data: { orderIds?: string[]; all?: boolean }) => remittanceApi.retrySync(data),
         onSuccess: (response) => {
             const result = response.data;
-            alert(`${result.message}`);
+            toast.success(result.message);
             queryClient.invalidateQueries({ queryKey: ['remittanceFailed'] });
         },
         onError: (error: unknown) => {
-            alert(error instanceof Error ? error.message : 'Retry failed');
+            toast.error(error instanceof Error ? error.message : 'Retry failed');
         },
     });
 
@@ -109,7 +113,7 @@ export function RemittanceTab() {
             queryClient.invalidateQueries({ queryKey: ['remittanceFailed'] });
         },
         onError: (error: unknown) => {
-            alert(error instanceof Error ? error.message : 'Approval failed');
+            toast.error(error instanceof Error ? error.message : 'Approval failed');
         },
     });
 
@@ -129,7 +133,7 @@ export function RemittanceTab() {
             queryClient.invalidateQueries({ queryKey: ['remittanceSummary'] });
         },
         onError: (error: unknown) => {
-            alert(error instanceof Error ? error.message : 'Sync trigger failed');
+            toast.error(error instanceof Error ? error.message : 'Sync trigger failed');
         },
     });
 
@@ -140,9 +144,7 @@ export function RemittanceTab() {
     };
 
     const handleRetryAll = () => {
-        if (confirm('Retry syncing all failed orders to Shopify?')) {
-            retrySyncMutation.mutate({ all: true });
-        }
+        setConfirmRetryAll(true);
     };
 
     const handleRetryOne = (orderId: string) => {
@@ -150,9 +152,7 @@ export function RemittanceTab() {
     };
 
     const handleApproveManual = (orderId: string) => {
-        if (confirm('Approve this order and sync to Shopify?')) {
-            approveManualMutation.mutate({ orderId });
-        }
+        setConfirmApproveId(orderId);
     };
 
     const formatCurrency = formatCurrencyFull;
@@ -686,6 +686,35 @@ export function RemittanceTab() {
                     </div>
                 )}
             </div>
+            {/* Retry All Confirm Modal */}
+            <ConfirmModal
+                isOpen={confirmRetryAll}
+                onClose={() => setConfirmRetryAll(false)}
+                onConfirm={() => {
+                    retrySyncMutation.mutate({ all: true });
+                }}
+                title="Retry All Failed"
+                message="Retry syncing all failed orders to Shopify?"
+                confirmText="Retry All"
+                confirmVariant="primary"
+                isLoading={retrySyncMutation.isPending}
+            />
+
+            {/* Approve Manual Confirm Modal */}
+            <ConfirmModal
+                isOpen={!!confirmApproveId}
+                onClose={() => setConfirmApproveId(null)}
+                onConfirm={() => {
+                    if (confirmApproveId) {
+                        approveManualMutation.mutate({ orderId: confirmApproveId });
+                    }
+                }}
+                title="Approve Order"
+                message="Approve this order and sync to Shopify?"
+                confirmText="Approve & Sync"
+                confirmVariant="primary"
+                isLoading={approveManualMutation.isPending}
+            />
         </div>
     );
 }

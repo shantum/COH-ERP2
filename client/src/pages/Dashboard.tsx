@@ -32,7 +32,7 @@ export default function Dashboard() {
                         <p className="text-red-600 text-sm mt-1">{loaderData.error}</p>
                         <button
                             onClick={() => window.location.reload()}
-                            className="mt-3 inline-flex items-center gap-1.5 text-sm text-red-700 hover:text-red-800 font-medium"
+                            className="mt-3 inline-flex items-center gap-1.5 text-sm text-red-700 hover:text-red-800 font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 rounded-md"
                         >
                             <RefreshCcw className="w-4 h-4" />
                             Refresh page
@@ -44,7 +44,7 @@ export default function Dashboard() {
     }
 
     return (
-        <div className="space-y-3 sm:space-y-4 md:space-y-6 px-2 sm:px-0">
+        <div className="space-y-3 sm:space-y-4 md:space-y-6">
             <h1 className="text-lg sm:text-xl md:text-2xl font-bold text-gray-900">Dashboard</h1>
 
             {/* Orders Analytics Bar - pass SSR data for instant render */}

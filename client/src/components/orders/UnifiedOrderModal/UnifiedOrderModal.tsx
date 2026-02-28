@@ -41,8 +41,10 @@ import {
   updateReturnNotes,
 } from '../../../server/functions/returnsMutations';
 import { showReturnError, showReturnSuccess } from '../../../utils/toast';
+import { toast } from 'sonner';
 import { isReturnError } from '@coh/shared/errors';
 import { reportError } from '@/utils/errorReporter';
+import ConfirmModal from '@/components/common/ConfirmModal';
 
 interface UnifiedOrderModalProps {
   order: Order;
@@ -63,6 +65,15 @@ export function UnifiedOrderModal({
   const [updatingLineIds, setUpdatingLineIds] = useState<Set<string>>(new Set());
   // Track which line is open for pickup scheduling dialog
   const [pickupDialogLineId, setPickupDialogLineId] = useState<string | null>(null);
+  // Confirm modal state
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    confirmText: string;
+    confirmVariant: 'danger' | 'primary' | 'warning';
+    onConfirm: () => void | Promise<void>;
+  }>({ isOpen: false, title: '', message: '', confirmText: 'Confirm', confirmVariant: 'primary', onConfirm: () => {} });
   // Track current order for navigation
   const [currentOrderId, setCurrentOrderId] = useState(initialOrder.id);
   // Keep track of last valid order for smooth transitions
@@ -280,13 +291,13 @@ export function UnifiedOrderModal({
   // Ship entire order (resolves to packed line IDs before calling shipLines)
   const handleShipOrder = useCallback(async () => {
     if (!shipForm.awbNumber.trim() || !shipForm.courier.trim()) {
-      alert('Please enter AWB number and select a courier');
+      toast.error('Please enter AWB number and select a courier');
       return;
     }
 
     // Verify AWB if expected
     if (expectedAwb && !awbMatches && !shipForm.bypassVerification) {
-      alert('AWB number does not match Shopify tracking. Check the "Use this AWB anyway" box to proceed.');
+      toast.error('AWB number does not match Shopify tracking. Check the "Use this AWB anyway" box to proceed.');
       return;
     }
 
@@ -296,18 +307,18 @@ export function UnifiedOrderModal({
       .map((line) => line.id) || [];
 
     if (packedLineIds.length === 0) {
-      alert('No packed lines to ship');
+      toast.error('No packed lines to ship');
       return;
     }
 
     // DISABLED: Shipping now managed in Google Sheets
-    alert('Shipping is now managed in Google Sheets. This action is disabled in the ERP.');
+    toast.info('Shipping is now managed in Google Sheets. This action is disabled in the ERP.');
     return;
   }, [shipForm, expectedAwb, awbMatches, order.orderLines]);
 
   // Ship selected lines — DISABLED
   const handleShipLines = useCallback(async () => {
-    alert('Shipping is now managed in Google Sheets. This action is disabled in the ERP.');
+    toast.info('Shipping is now managed in Google Sheets. This action is disabled in the ERP.');
   }, []);
 
   // Handle add line
@@ -346,17 +357,17 @@ export function UnifiedOrderModal({
 
   // Handle cancel line — DISABLED (fulfillment managed in Google Sheets)
   const handleCancelLineWithMutation = useCallback(async (_lineId: string) => {
-    alert('Line-level cancel is now managed in Google Sheets.');
+    toast.info('Line-level cancel is now managed in Google Sheets.');
   }, []);
 
   // Handle uncancel line — DISABLED (fulfillment managed in Google Sheets)
   const handleUncancelLineWithMutation = useCallback(async (_lineId: string) => {
-    alert('Line-level restore is now managed in Google Sheets.');
+    toast.info('Line-level restore is now managed in Google Sheets.');
   }, []);
 
   // Handle mark line as delivered — DISABLED (tracking sync handles this automatically)
   const handleMarkLineDeliveredWithMutation = useCallback(async (_lineId: string) => {
-    alert('Delivery status is now updated automatically via tracking sync.');
+    toast.info('Delivery status is now updated automatically via tracking sync.');
   }, []);
 
   // Handle initiate return (multi-select)
@@ -409,8 +420,17 @@ export function UnifiedOrderModal({
 
   // Handle cancel return
   const handleCancelReturn = useCallback(async (lineId: string) => {
-    if (!confirm('Are you sure you want to cancel this return?')) return;
+    setConfirmModal({
+      isOpen: true,
+      title: 'Cancel Return',
+      message: 'Are you sure you want to cancel this return?',
+      confirmText: 'Cancel Return',
+      confirmVariant: 'danger',
+      onConfirm: () => doCancelReturn(lineId),
+    });
+  }, []);
 
+  const doCancelReturn = useCallback(async (lineId: string) => {
     try {
       const result = await cancelLineReturn({ data: { orderLineId: lineId } });
 
@@ -791,6 +811,17 @@ export function UnifiedOrderModal({
           </div>
         )}
       </div>
+
+      {/* Confirm Modal */}
+      <ConfirmModal
+        isOpen={confirmModal.isOpen}
+        onClose={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+        onConfirm={confirmModal.onConfirm}
+        title={confirmModal.title}
+        message={confirmModal.message}
+        confirmText={confirmModal.confirmText}
+        confirmVariant={confirmModal.confirmVariant}
+      />
 
       {/* Schedule Pickup Dialog */}
       {pickupDialogLineId && (() => {

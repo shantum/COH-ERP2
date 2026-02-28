@@ -119,7 +119,7 @@ export function SettingsTab({ config, loading, onRefresh }: SettingsTabProps) {
                         <button
                             onClick={() => saveMutation.mutate()}
                             disabled={saveMutation.isPending}
-                            className="px-4 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                            className="px-4 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             {saveMutation.isPending ? 'Saving...' : 'Save Changes'}
                         </button>

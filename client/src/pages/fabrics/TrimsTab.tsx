@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useQueryClient, useQuery, useMutation } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { X } from 'lucide-react';
+import { toast } from 'sonner';
 import { TrimsTable } from '../../components/materials/TrimsTable';
 import { createTrim, updateTrim, getParties } from '@/server/functions/materialsMutations';
 import type { Party } from '@/server/functions/materialsMutations';
@@ -61,7 +62,7 @@ export default function TrimsTab() {
                 costPerUnit: '', unit: 'piece', partyId: '', leadTimeDays: '', minOrderQty: ''
             });
         },
-        onError: (err: Error) => alert(err.message || 'Failed to create trim'),
+        onError: (err: Error) => toast.error(err.message || 'Failed to create trim'),
     });
 
     const updateTrimMutation = useMutation({
@@ -70,7 +71,7 @@ export default function TrimsTab() {
             queryClient.invalidateQueries({ queryKey: ['trimsCatalog'] });
             setShowEditTrim(null);
         },
-        onError: (err: Error) => alert(err.message || 'Failed to update trim'),
+        onError: (err: Error) => toast.error(err.message || 'Failed to update trim'),
     });
 
     // Form handlers

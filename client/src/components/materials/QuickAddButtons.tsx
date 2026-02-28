@@ -9,6 +9,7 @@
 
 import { useState } from 'react';
 import { Plus, Box, Layers, Palette, ChevronDown } from 'lucide-react';
+import { toast } from 'sonner';
 
 interface QuickAddButtonsProps {
     onAddMaterial: () => void;
@@ -47,7 +48,7 @@ export function QuickAddButtons({
                     type="button"
                     onClick={() => {
                         if (materials.length === 0) {
-                            alert('No materials found. Please add a material first.');
+                            toast.error('No materials found. Please add a material first.');
                             return;
                         }
                         setShowFabricPicker(!showFabricPicker);
@@ -79,7 +80,7 @@ export function QuickAddButtons({
                     type="button"
                     onClick={() => {
                         if (fabrics.length === 0) {
-                            alert('No fabrics found. Please add a fabric first.');
+                            toast.error('No fabrics found. Please add a fabric first.');
                             return;
                         }
                         setShowColourPicker(!showColourPicker);

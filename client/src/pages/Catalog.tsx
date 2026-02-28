@@ -33,6 +33,7 @@
  */
 
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
+import { toast } from 'sonner';
 import { useNavigate } from '@tanstack/react-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
@@ -215,7 +216,7 @@ export default function Catalog() {
                     context.previousData
                 );
             }
-            alert(err.message || 'Failed to update lining');
+            toast.error(err.message || 'Failed to update lining');
         },
         onSettled: () => {
             // Refetch to ensure we're in sync
@@ -268,7 +269,7 @@ export default function Catalog() {
             setEditModal({ isOpen: false, level: 'sku', data: null });
         },
         onError: (err: Error) => {
-            alert(err.message || 'Failed to update SKU');
+            toast.error(err.message || 'Failed to update SKU');
         },
     });
 
@@ -287,7 +288,7 @@ export default function Catalog() {
             setEditModal({ isOpen: false, level: 'variation', data: null });
         },
         onError: (err: Error) => {
-            alert(err.message || 'Failed to update variation');
+            toast.error(err.message || 'Failed to update variation');
         },
     });
 
@@ -306,7 +307,7 @@ export default function Catalog() {
             setEditModal({ isOpen: false, level: 'product', data: null });
         },
         onError: (err: Error) => {
-            alert(err.message || 'Failed to update product');
+            toast.error(err.message || 'Failed to update product');
         },
     });
 

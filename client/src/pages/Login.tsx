@@ -141,7 +141,7 @@ function PhoneOtpForm({
         return (
             <form onSubmit={handleSendOtp} className="space-y-6">
                 {error && (
-                    <div className="p-3 rounded-lg bg-red-50 text-red-700 text-sm">{error}</div>
+                    <div role="alert" className="p-3 rounded-lg bg-red-50 text-red-700 text-sm">{error}</div>
                 )}
                 <div>
                     <label className="label">Phone Number</label>
@@ -162,7 +162,7 @@ function PhoneOtpForm({
                 <button
                     type="submit"
                     disabled={loading || phone.length < 10}
-                    className="w-full btn-primary py-3 disabled:opacity-50"
+                    className="w-full btn-primary py-3 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                     {loading ? 'Sending...' : 'Send OTP via WhatsApp'}
                 </button>
@@ -173,7 +173,7 @@ function PhoneOtpForm({
     return (
         <form onSubmit={handleVerifyOtp} className="space-y-6">
             {error && (
-                <div className="p-3 rounded-lg bg-red-50 text-red-700 text-sm">{error}</div>
+                <div role="alert" className="p-3 rounded-lg bg-red-50 text-red-700 text-sm">{error}</div>
             )}
             <div className="text-center text-sm text-gray-600">
                 OTP sent to <span className="font-medium">+91 {phone}</span>
@@ -203,7 +203,7 @@ function PhoneOtpForm({
             <button
                 type="submit"
                 disabled={loading || otp.length < 4}
-                className="w-full btn-primary py-3 disabled:opacity-50"
+                className="w-full btn-primary py-3 disabled:opacity-50 disabled:cursor-not-allowed"
             >
                 {loading ? 'Verifying...' : 'Verify & Sign In'}
             </button>
@@ -255,7 +255,7 @@ function EmailPasswordForm({
     return (
         <form onSubmit={handleSubmit} className="space-y-6">
             {error && (
-                <div className="p-3 rounded-lg bg-red-50 text-red-700 text-sm">{error}</div>
+                <div role="alert" className="p-3 rounded-lg bg-red-50 text-red-700 text-sm">{error}</div>
             )}
             <div>
                 <label className="label">Email</label>
@@ -281,7 +281,7 @@ function EmailPasswordForm({
             <button
                 type="submit"
                 disabled={loading}
-                className="w-full btn-primary py-3 disabled:opacity-50"
+                className="w-full btn-primary py-3 disabled:opacity-50 disabled:cursor-not-allowed"
             >
                 {loading ? 'Signing in...' : 'Sign In'}
             </button>

@@ -8,7 +8,9 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
+import { toast } from 'sonner';
 import { useAuth } from '../../../hooks/useAuth';
+import ConfirmModal from '../../common/ConfirmModal';
 import {
     Lock, Users, UserPlus, Edit2, Shield, Trash2, RefreshCw, Plus, X,
     ShoppingCart, CheckCircle, Star
@@ -49,6 +51,8 @@ export function GeneralTab() {
     const [showAddUser, setShowAddUser] = useState(false);
     const [editingUser, setEditingUser] = useState<(User & { newPassword?: string }) | null>(null);
     const [newUser, setNewUser] = useState({ email: '', password: '', name: '', role: 'staff' });
+    const [deleteUserId, setDeleteUserId] = useState<{ id: string; name: string } | null>(null);
+    const [removeChannelId, setRemoveChannelId] = useState<string | null>(null);
 
     // Server Function wrappers
     const getUsersFn = useServerFn(getUsers);
@@ -150,7 +154,7 @@ export function GeneralTab() {
             setNewUser({ email: '', password: '', name: '', role: 'staff' });
         },
         onError: (error: Error) => {
-            alert(error.message || 'Failed to create user');
+            toast.error(error.message || 'Failed to create user');
         },
     });
 
@@ -174,7 +178,7 @@ export function GeneralTab() {
             setEditingUser(null);
         },
         onError: (error: Error) => {
-            alert(error.message || 'Failed to update user');
+            toast.error(error.message || 'Failed to update user');
         },
     });
 
@@ -188,7 +192,7 @@ export function GeneralTab() {
             queryClient.invalidateQueries({ queryKey: ['users'] });
         },
         onError: (error: Error) => {
-            alert(error.message || 'Failed to delete user');
+            toast.error(error.message || 'Failed to delete user');
         },
     });
 
@@ -229,12 +233,12 @@ export function GeneralTab() {
 
     const addChannel = () => {
         if (!newChannel.id || !newChannel.name) {
-            alert('Both ID and Name are required');
+            toast.error('Both ID and Name are required');
             return;
         }
         const channelId = newChannel.id.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
         if (channels?.some((c) => c.id === channelId)) {
-            alert('Channel ID already exists');
+            toast.error('Channel ID already exists');
             return;
         }
         const updatedChannels = [...(channels || []), { id: channelId, name: newChannel.name }];
@@ -243,7 +247,6 @@ export function GeneralTab() {
     };
 
     const removeChannel = (id: string) => {
-        if (!confirm('Remove this channel?')) return;
         const updatedChannels = channels?.filter((c) => c.id !== id) || [];
         updateChannelsMutation.mutate(updatedChannels);
     };
@@ -382,11 +385,7 @@ export function GeneralTab() {
                                                 </button>
                                                 {u.id !== user?.id && (
                                                     <button
-                                                        onClick={() => {
-                                                            if (confirm(`Delete user ${u.name}?`)) {
-                                                                deleteUserMutation.mutate(u.id);
-                                                            }
-                                                        }}
+                                                        onClick={() => setDeleteUserId({ id: u.id, name: u.name })}
                                                         className="text-red-600 hover:text-red-800"
                                                         disabled={deleteUserMutation.isPending}
                                                     >
@@ -583,7 +582,7 @@ export function GeneralTab() {
                                         <span className="ml-2 text-xs text-gray-500 font-mono">({channel.id})</span>
                                     </div>
                                     <button
-                                        onClick={() => removeChannel(channel.id)}
+                                        onClick={() => setRemoveChannelId(channel.id)}
                                         className="text-gray-400 hover:text-red-500"
                                         disabled={updateChannelsMutation.isPending}
                                     >
@@ -728,6 +727,37 @@ export function GeneralTab() {
                     )}
                 </div>
             )}
+            {/* Delete User Confirm Modal */}
+            <ConfirmModal
+                isOpen={!!deleteUserId}
+                onClose={() => setDeleteUserId(null)}
+                onConfirm={() => {
+                    if (deleteUserId) {
+                        deleteUserMutation.mutate(deleteUserId.id);
+                    }
+                }}
+                title="Delete User"
+                message={`Are you sure you want to delete user "${deleteUserId?.name}"? This action cannot be undone.`}
+                confirmText="Delete"
+                confirmVariant="danger"
+                isLoading={deleteUserMutation.isPending}
+            />
+
+            {/* Remove Channel Confirm Modal */}
+            <ConfirmModal
+                isOpen={!!removeChannelId}
+                onClose={() => setRemoveChannelId(null)}
+                onConfirm={() => {
+                    if (removeChannelId) {
+                        removeChannel(removeChannelId);
+                    }
+                }}
+                title="Remove Channel"
+                message="Are you sure you want to remove this channel?"
+                confirmText="Remove"
+                confirmVariant="danger"
+                isLoading={updateChannelsMutation.isPending}
+            />
         </div>
     );
 }

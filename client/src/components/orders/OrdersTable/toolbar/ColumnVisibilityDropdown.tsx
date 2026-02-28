@@ -28,6 +28,7 @@ import {
 import { Button } from '../../../ui/button';
 import { Checkbox } from '../../../ui/checkbox';
 import { Columns3, GripVertical, RotateCcw, Save } from 'lucide-react';
+import { toast } from 'sonner';
 import type { VisibilityState } from '@tanstack/react-table';
 
 interface ColumnVisibilityDropdownProps {
@@ -114,9 +115,9 @@ export function ColumnVisibilityDropdown({
         const success = await onSaveAsDefaults();
         setIsSaving(false);
         if (success) {
-            alert('Column defaults saved for all users');
+            toast.success('Column defaults saved for all users');
         } else {
-            alert('Failed to save defaults');
+            toast.error('Failed to save defaults');
         }
     };
 
