@@ -45,6 +45,17 @@ export type CustomersListResult = z.infer<typeof customersListResultSchema>;
 export const orderLineSchema = z.object({
     id: z.string(),
     qty: z.number(),
+    unitPrice: z.number().nullable().optional(),
+    lineStatus: z.string().nullable().optional(),
+    returnStatus: z.string().nullable().optional(),
+    returnReasonCategory: z.string().nullable().optional(),
+    returnReasonDetail: z.string().nullable().optional(),
+    returnResolution: z.string().nullable().optional(),
+    returnCondition: z.string().nullable().optional(),
+    rtoCondition: z.string().nullable().optional(),
+    rtoInitiatedAt: z.coerce.date().nullable().optional(),
+    notes: z.string().nullable().optional(),
+    refundAmount: z.number().nullable().optional(),
     sku: z.object({
         size: z.string().nullable(),
         variation: z.object({
@@ -72,6 +83,10 @@ export const recentOrderSchema = z.object({
     totalAmount: z.number().nullable(),
     status: z.string(),
     orderDate: z.coerce.date(),
+    internalNotes: z.string().nullable().optional(),
+    paymentMethod: z.string().nullable().optional(),
+    channel: z.string().nullable().optional(),
+    isExchange: z.boolean().optional(),
     orderLines: z.array(orderLineSchema).optional(),
 });
 
@@ -97,6 +112,49 @@ export type ColorAffinity = z.infer<typeof colorAffinitySchema>;
 export type ProductAffinity = z.infer<typeof productAffinitySchema>;
 export type FabricAffinity = z.infer<typeof fabricAffinitySchema>;
 
+// ============================================
+// ANALYSIS SCHEMAS (computed server-side)
+// ============================================
+
+export const returnAnalysisSchema = z.object({
+    reasonBreakdown: z.array(z.object({
+        reason: z.string(),
+        count: z.number(),
+    })),
+    resolutionBreakdown: z.array(z.object({
+        resolution: z.string(),
+        count: z.number(),
+    })),
+    rtoConditionBreakdown: z.array(z.object({
+        condition: z.string(),
+        count: z.number(),
+    })),
+    totalReturnedLines: z.number(),
+    totalRtoLines: z.number(),
+});
+
+export type ReturnAnalysis = z.infer<typeof returnAnalysisSchema>;
+
+export const revenueTimelineSchema = z.array(z.object({
+    month: z.string(),
+    revenue: z.number(),
+    orders: z.number(),
+}));
+
+export type RevenueTimeline = z.infer<typeof revenueTimelineSchema>;
+
+export const paymentBreakdownSchema = z.array(z.object({
+    method: z.string(),
+    count: z.number(),
+    total: z.number(),
+}));
+
+export type PaymentBreakdown = z.infer<typeof paymentBreakdownSchema>;
+
+// ============================================
+// DETAIL RESULT
+// ============================================
+
 export const customerDetailResultSchema = z.object({
     id: z.string(),
     email: z.string(),
@@ -116,6 +174,9 @@ export const customerDetailResultSchema = z.object({
     returnCount: z.number(),
     exchangeCount: z.number(),
     rtoCount: z.number(),
+    rtoOrderCount: z.number(),
+    rtoValue: z.number(),
+    storeCreditBalance: z.number(),
     firstOrderDate: z.coerce.date().nullable(),
     lastOrderDate: z.coerce.date().nullable(),
     acceptsMarketing: z.boolean(),
@@ -124,8 +185,18 @@ export const customerDetailResultSchema = z.object({
     colorAffinity: z.array(colorAffinitySchema).nullable(),
     productAffinity: z.array(productAffinitySchema).nullable(),
     fabricAffinity: z.array(fabricAffinitySchema).nullable(),
-    // Orders with lines for size preferences
+    // Orders with lines
     orders: z.array(recentOrderSchema).nullable(),
+    // Analysis
+    returnAnalysis: returnAnalysisSchema.nullable(),
+    revenueTimeline: revenueTimelineSchema.nullable(),
+    paymentBreakdown: paymentBreakdownSchema.nullable(),
+    // Order notes (timeline of internal notes)
+    orderNotes: z.array(z.object({
+        orderNumber: z.string(),
+        note: z.string(),
+        orderDate: z.coerce.date(),
+    })).nullable(),
 });
 
 export type CustomerDetailResult = z.infer<typeof customerDetailResultSchema>;

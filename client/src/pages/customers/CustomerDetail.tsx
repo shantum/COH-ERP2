@@ -1,20 +1,22 @@
 /**
- * CustomerDetail — Full-page customer profile (Shopify-style 2-column layout)
+ * CustomerDetail — Comprehensive customer profile page
  *
- * Shows customer profile, stats, style DNA, order history, and risk indicators.
- * Data comes from the getCustomer server function (Kysely-based, includes affinities).
+ * Everything about a customer: stats, style DNA, return/RTO analysis,
+ * revenue timeline, payment breakdown, order history with notes, and health scoring.
  */
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { useNavigate } from '@tanstack/react-router';
 import {
     ArrowLeft, Mail, Phone, MessageCircle, User,
-    ShoppingBag, Package, Truck, RotateCcw, Layers,
+    ShoppingBag, Package, RotateCcw, Layers,
     Palette, MapPin, Tag, AlertCircle, AlertTriangle,
-    CheckCircle2, ChevronRight, Clock,
-    TrendingUp, CreditCard,
+    CheckCircle2, ChevronRight, Clock, ChevronDown, ChevronUp,
+    TrendingUp, CreditCard, Wallet, BarChart3,
+    MessageSquare, ArrowLeftRight, IndianRupee, Shield,
+    PackageX, RefreshCcw, Ban, FileText, Activity,
 } from 'lucide-react';
 
 import { Route } from '../../routes/_authenticated/customers_.$customerId';
@@ -55,6 +57,12 @@ function formatINR(amount: number): string {
     });
 }
 
+function formatReasonLabel(reason: string): string {
+    return reason
+        .replace(/_/g, ' ')
+        .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 // ============================================
 // STATUS CONFIG for order cards
 // ============================================
@@ -72,6 +80,7 @@ const ORDER_STATUS_CONFIG: Record<string, { bg: string; text: string; dot: strin
     rto_delivered: { bg: 'bg-orange-50', text: 'text-orange-700', dot: 'bg-orange-500' },
 };
 
+
 // ============================================
 // MAIN COMPONENT
 // ============================================
@@ -79,6 +88,7 @@ const ORDER_STATUS_CONFIG: Record<string, { bg: string; text: string; dot: strin
 export default function CustomerDetail() {
     const { customerId } = Route.useParams();
     const navigate = useNavigate();
+    const [showAllOrders, setShowAllOrders] = useState(false);
 
     const getCustomerFn = useServerFn(getCustomer);
 
@@ -110,7 +120,23 @@ export default function CustomerDetail() {
             ? Math.floor((Date.now() - new Date(customer.lastOrderDate).getTime()) / (1000 * 60 * 60 * 24))
             : null;
 
-        return { healthScore, tierProgress, tenure, daysSinceOrder };
+        // RFM breakdown for health score detail
+        const daysSinceLastOrder = customer.lastOrderDate
+            ? Math.floor((Date.now() - new Date(customer.lastOrderDate).getTime()) / (1000 * 60 * 60 * 24))
+            : 365;
+        const monthsSinceFirst = customer.firstOrderDate
+            ? Math.max(1, Math.floor((Date.now() - new Date(customer.firstOrderDate).getTime()) / (1000 * 60 * 60 * 24 * 30)))
+            : 1;
+        const ordersPerMonth = (customer.totalOrders || 0) / monthsSinceFirst;
+        const recencyScore = Math.round(Math.max(0, (60 - daysSinceLastOrder) / 60) * 25);
+        const frequencyScore = Math.round(Math.min(ordersPerMonth * 15, 25));
+        const monetaryScore = Math.round(Math.min(((customer.lifetimeValue || 0) / 30000) * 25, 25));
+        const returnPenalty = Math.round(Math.min((customer.returnRate || 0) * 0.5, 25));
+
+        return {
+            healthScore, tierProgress, tenure, daysSinceOrder,
+            rfm: { recencyScore, frequencyScore, monetaryScore, returnPenalty },
+        };
     }, [customer]);
 
     // Size preferences from orders
@@ -153,12 +179,37 @@ export default function CustomerDetail() {
         if ((customer.rtoCount || 0) > 2) {
             items.push({
                 type: 'Multiple RTOs',
-                message: `${customer.rtoCount} RTO incidents`,
+                message: `${customer.rtoCount} RTO incidents (${formatINR(customer.rtoValue || 0)} value)`,
                 severity: (customer.rtoCount || 0) > 5 ? 'high' : 'medium',
+            });
+        }
+        if ((customer.storeCreditBalance || 0) > 0) {
+            items.push({
+                type: 'Store Credit Available',
+                message: `${formatINR(customer.storeCreditBalance)} unused credit`,
+                severity: 'low',
             });
         }
         return items;
     }, [customer, metrics]);
+
+    // Count orders with returns/RTOs for badges
+    const returnRtoStats = useMemo(() => {
+        if (!customer?.orders) return { returnOrders: 0, rtoOrders: 0 };
+        let returnOrders = 0;
+        let rtoOrders = 0;
+        for (const order of customer.orders) {
+            let hasReturn = false;
+            let hasRto = false;
+            for (const line of order.orderLines || []) {
+                if (line.returnStatus) hasReturn = true;
+                if (line.rtoCondition || line.rtoInitiatedAt) hasRto = true;
+            }
+            if (hasReturn) returnOrders++;
+            if (hasRto) rtoOrders++;
+        }
+        return { returnOrders, rtoOrders };
+    }, [customer?.orders]);
 
     // ============================================
     // LOADING STATE
@@ -166,9 +217,14 @@ export default function CustomerDetail() {
     if (isLoading) {
         return (
             <div className="min-h-screen bg-gray-50">
-                <div className="max-w-6xl mx-auto px-6 py-6">
+                <div className="max-w-7xl mx-auto px-6 py-6">
                     <div className="animate-pulse space-y-4">
                         <div className="h-8 w-48 bg-gray-200 rounded" />
+                        <div className="grid grid-cols-4 gap-4">
+                            {Array.from({ length: 8 }).map((_, i) => (
+                                <div key={i} className="h-24 bg-gray-200 rounded-lg" />
+                            ))}
+                        </div>
                         <div className="grid grid-cols-3 gap-6">
                             <div className="col-span-2 space-y-4">
                                 <div className="h-48 bg-gray-200 rounded-lg" />
@@ -191,7 +247,7 @@ export default function CustomerDetail() {
     if (error || !customer || !metrics) {
         return (
             <div className="min-h-screen bg-gray-50">
-                <div className="max-w-6xl mx-auto px-6 py-6">
+                <div className="max-w-7xl mx-auto px-6 py-6">
                     <button
                         onClick={() => navigate({ to: '/customers', search: { tier: 'all', page: 1, limit: 100 } })}
                         className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-gray-900 mb-4"
@@ -214,13 +270,14 @@ export default function CustomerDetail() {
     const healthColor = getHealthScoreColor(metrics.healthScore);
     const healthLabel = getHealthScoreLabel(metrics.healthScore);
     const totalColorQty = customer.colorAffinity?.reduce((sum, c) => sum + c.qty, 0) || 1;
+    const displayOrders = showAllOrders ? customer.orders : customer.orders?.slice(0, 10);
 
     // ============================================
     // RENDER
     // ============================================
     return (
         <div className="min-h-screen bg-gray-50">
-            <div className="max-w-6xl mx-auto px-6 py-6">
+            <div className="max-w-7xl mx-auto px-6 py-6">
 
                 {/* ===== HEADER ===== */}
                 <div className="mb-6">
@@ -260,6 +317,13 @@ export default function CustomerDetail() {
                                     <span className="text-sm text-gray-500">
                                         Customer for {metrics.tenure}
                                     </span>
+                                    {/* Store credit badge */}
+                                    {(customer.storeCreditBalance || 0) > 0 && (
+                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                            <Wallet className="w-3 h-3" />
+                                            {formatINR(customer.storeCreditBalance)} credit
+                                        </span>
+                                    )}
                                 </div>
                             </div>
                         </div>
@@ -290,8 +354,8 @@ export default function CustomerDetail() {
                     </div>
                 </div>
 
-                {/* ===== STATS BAR ===== */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3 mb-6">
+                {/* ===== STATS BAR (8 cards) ===== */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3 mb-6">
                     <StatCard
                         label="Lifetime Value"
                         value={formatINR(customer.lifetimeValue || 0)}
@@ -315,17 +379,31 @@ export default function CustomerDetail() {
                         value={`${(customer.returnRate || 0).toFixed(1)}%`}
                         icon={RotateCcw}
                         accent={(customer.returnRate || 0) > 20 ? 'red' : 'gray'}
+                        subtitle={`${customer.returnCount || 0} returns`}
+                    />
+                    <StatCard
+                        label="Exchanges"
+                        value={String(customer.exchangeCount || 0)}
+                        icon={ArrowLeftRight}
+                        accent="violet"
                     />
                     <StatCard
                         label="RTOs"
                         value={String(customer.rtoCount || 0)}
-                        icon={Truck}
+                        icon={PackageX}
                         accent={(customer.rtoCount || 0) > 2 ? 'red' : 'gray'}
+                        subtitle={customer.rtoValue ? formatINR(customer.rtoValue) : undefined}
+                    />
+                    <StatCard
+                        label="Store Credit"
+                        value={formatINR(customer.storeCreditBalance || 0)}
+                        icon={Wallet}
+                        accent={(customer.storeCreditBalance || 0) > 0 ? 'emerald' : 'gray'}
                     />
                     <StatCard
                         label="Health"
                         value={String(metrics.healthScore)}
-                        icon={CheckCircle2}
+                        icon={Activity}
                         accent={metrics.healthScore >= 70 ? 'green' : metrics.healthScore >= 40 ? 'amber' : 'red'}
                         subtitle={healthLabel}
                     />
@@ -347,18 +425,23 @@ export default function CustomerDetail() {
                                             'flex items-start gap-3 px-4 py-3 rounded-lg border',
                                             risk.severity === 'high'
                                                 ? 'bg-red-50 border-red-200'
-                                                : 'bg-amber-50 border-amber-200',
+                                                : risk.severity === 'medium'
+                                                    ? 'bg-amber-50 border-amber-200'
+                                                    : 'bg-blue-50 border-blue-200',
                                         )}
                                     >
                                         {risk.severity === 'high' ? (
                                             <AlertCircle className="w-4 h-4 text-red-500 mt-0.5 flex-shrink-0" />
-                                        ) : (
+                                        ) : risk.severity === 'medium' ? (
                                             <AlertTriangle className="w-4 h-4 text-amber-500 mt-0.5 flex-shrink-0" />
+                                        ) : (
+                                            <CheckCircle2 className="w-4 h-4 text-blue-500 mt-0.5 flex-shrink-0" />
                                         )}
                                         <div>
                                             <p className={cn(
                                                 'text-sm font-medium',
-                                                risk.severity === 'high' ? 'text-red-800' : 'text-amber-800',
+                                                risk.severity === 'high' ? 'text-red-800' :
+                                                    risk.severity === 'medium' ? 'text-amber-800' : 'text-blue-800',
                                             )}>
                                                 {risk.type}
                                             </p>
@@ -403,6 +486,101 @@ export default function CustomerDetail() {
                             </div>
                         )}
 
+                        {/* --- REVENUE TIMELINE --- */}
+                        {customer.revenueTimeline && customer.revenueTimeline.length > 1 && (
+                            <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
+                                <div className="px-4 py-3 border-b border-gray-100">
+                                    <div className="flex items-center gap-2">
+                                        <BarChart3 className="w-4 h-4 text-gray-400" />
+                                        <h2 className="text-sm font-semibold text-gray-900">Revenue Timeline</h2>
+                                    </div>
+                                </div>
+                                <div className="p-4">
+                                    <RevenueChart data={customer.revenueTimeline} />
+                                </div>
+                            </div>
+                        )}
+
+                        {/* --- RETURN & RTO ANALYSIS --- */}
+                        {customer.returnAnalysis && (
+                            <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
+                                <div className="px-4 py-3 border-b border-gray-100">
+                                    <div className="flex items-center gap-2">
+                                        <RotateCcw className="w-4 h-4 text-gray-400" />
+                                        <h2 className="text-sm font-semibold text-gray-900">Return & RTO Analysis</h2>
+                                        <span className="text-xs text-gray-400 ml-auto">
+                                            {customer.returnAnalysis.totalReturnedLines} returned lines, {customer.returnAnalysis.totalRtoLines} RTO lines
+                                        </span>
+                                    </div>
+                                </div>
+                                <div className="p-4">
+                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                                        {/* Return Reasons */}
+                                        {customer.returnAnalysis.reasonBreakdown.length > 0 && (
+                                            <div>
+                                                <p className="text-xs font-medium text-gray-500 mb-2">Return Reasons</p>
+                                                <div className="space-y-1.5">
+                                                    {customer.returnAnalysis.reasonBreakdown.map((r, i) => (
+                                                        <div key={i} className="flex items-center justify-between">
+                                                            <span className="text-xs text-gray-700">{formatReasonLabel(r.reason)}</span>
+                                                            <div className="flex items-center gap-2">
+                                                                <div className="w-16 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                                                                    <div
+                                                                        className="h-full bg-orange-400 rounded-full"
+                                                                        style={{ width: `${(r.count / customer.returnAnalysis!.totalReturnedLines) * 100}%` }}
+                                                                    />
+                                                                </div>
+                                                                <span className="text-xs text-gray-500 w-5 text-right">{r.count}</span>
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* Resolution */}
+                                        {customer.returnAnalysis.resolutionBreakdown.length > 0 && (
+                                            <div>
+                                                <p className="text-xs font-medium text-gray-500 mb-2">Resolution Type</p>
+                                                <div className="space-y-1.5">
+                                                    {customer.returnAnalysis.resolutionBreakdown.map((r, i) => {
+                                                        const icon = r.resolution === 'refund' ? IndianRupee
+                                                            : r.resolution === 'exchange' ? RefreshCcw
+                                                                : r.resolution === 'rejected' ? Ban : Shield;
+                                                        return (
+                                                            <div key={i} className="flex items-center gap-2">
+                                                                {(() => {
+                                                                    const Icon = icon;
+                                                                    return <Icon className="w-3 h-3 text-gray-400" />;
+                                                                })()}
+                                                                <span className="text-xs text-gray-700 flex-1">{formatReasonLabel(r.resolution)}</span>
+                                                                <span className="text-xs font-medium text-gray-900">{r.count}</span>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* RTO Conditions */}
+                                        {customer.returnAnalysis.rtoConditionBreakdown.length > 0 && (
+                                            <div>
+                                                <p className="text-xs font-medium text-gray-500 mb-2">RTO Condition</p>
+                                                <div className="space-y-1.5">
+                                                    {customer.returnAnalysis.rtoConditionBreakdown.map((r, i) => (
+                                                        <div key={i} className="flex items-center justify-between">
+                                                            <span className="text-xs text-gray-700">{formatReasonLabel(r.condition)}</span>
+                                                            <span className="text-xs font-medium text-gray-900">{r.count}</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
                         {/* --- STYLE DNA --- */}
                         {(customer.colorAffinity?.length || customer.productAffinity?.length || customer.fabricAffinity?.length || sizePreferences.length > 0) && (
                             <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
@@ -440,8 +618,8 @@ export default function CustomerDetail() {
                                         </div>
                                     )}
 
-                                    {/* Products + Fabrics */}
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    {/* Products + Fabrics + Sizes */}
+                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                                         {customer.productAffinity && customer.productAffinity.length > 0 && (
                                             <div>
                                                 <p className="text-xs font-medium text-gray-500 mb-2 flex items-center gap-1">
@@ -474,111 +652,163 @@ export default function CustomerDetail() {
                                                 </div>
                                             </div>
                                         )}
-                                    </div>
 
-                                    {/* Size Preferences */}
-                                    {sizePreferences.length > 0 && (
-                                        <div>
-                                            <p className="text-xs font-medium text-gray-500 mb-2">Size Preferences</p>
-                                            <div className="flex flex-wrap gap-1.5">
-                                                {sizePreferences.map(({ size, count }) => (
-                                                    <span key={size} className="px-2.5 py-1 bg-sky-50 text-sky-800 rounded text-xs font-medium">
-                                                        {size} <span className="text-sky-500 font-normal">({count})</span>
-                                                    </span>
-                                                ))}
+                                        {sizePreferences.length > 0 && (
+                                            <div>
+                                                <p className="text-xs font-medium text-gray-500 mb-2">Size Preferences</p>
+                                                <div className="flex flex-wrap gap-1.5">
+                                                    {sizePreferences.map(({ size, count }) => (
+                                                        <span key={size} className="px-2.5 py-1 bg-sky-50 text-sky-800 rounded text-xs font-medium">
+                                                            {size} <span className="text-sky-500 font-normal">({count})</span>
+                                                        </span>
+                                                    ))}
+                                                </div>
                                             </div>
-                                        </div>
-                                    )}
+                                        )}
+                                    </div>
                                 </div>
                             </div>
                         )}
 
-                        {/* --- ORDER HISTORY --- */}
+                        {/* --- ORDER HISTORY (enhanced) --- */}
                         <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
                             <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
                                 <div className="flex items-center gap-2">
                                     <ShoppingBag className="w-4 h-4 text-gray-400" />
                                     <h2 className="text-sm font-semibold text-gray-900">Order History</h2>
+                                    {returnRtoStats.returnOrders > 0 && (
+                                        <span className="text-[10px] px-1.5 py-0.5 bg-orange-50 text-orange-600 rounded-full font-medium">
+                                            {returnRtoStats.returnOrders} with returns
+                                        </span>
+                                    )}
+                                    {returnRtoStats.rtoOrders > 0 && (
+                                        <span className="text-[10px] px-1.5 py-0.5 bg-red-50 text-red-600 rounded-full font-medium">
+                                            {returnRtoStats.rtoOrders} RTOs
+                                        </span>
+                                    )}
                                 </div>
                                 <span className="text-xs text-gray-500">
-                                    {customer.orders?.length || 0} orders
+                                    {customer.totalOrders || 0} total
                                 </span>
                             </div>
 
                             {customer.orders && customer.orders.length > 0 ? (
-                                <div className="divide-y divide-gray-100">
-                                    {customer.orders.map((order) => {
-                                        const statusConfig = ORDER_STATUS_CONFIG[order.status?.toLowerCase()] || ORDER_STATUS_CONFIG.open;
-                                        const firstLine = order.orderLines?.[0];
-                                        const firstImage = firstLine?.sku?.variation?.imageUrl ||
-                                            firstLine?.sku?.variation?.product?.imageUrl;
-                                        const productName = firstLine?.sku?.variation?.product?.name || 'Unknown';
-                                        const itemCount = order.orderLines?.length || 0;
+                                <>
+                                    <div className="divide-y divide-gray-100">
+                                        {displayOrders?.map((order) => {
+                                            const statusConfig = ORDER_STATUS_CONFIG[order.status?.toLowerCase()] || ORDER_STATUS_CONFIG.open;
+                                            const firstLine = order.orderLines?.[0];
+                                            const firstImage = firstLine?.sku?.variation?.imageUrl ||
+                                                firstLine?.sku?.variation?.product?.imageUrl;
+                                            const productName = firstLine?.sku?.variation?.product?.name || 'Unknown';
+                                            const itemCount = order.orderLines?.length || 0;
+                                            const hasReturns = order.orderLines?.some((l) => l.returnStatus);
+                                            const hasRto = order.orderLines?.some((l) => l.rtoCondition || l.rtoInitiatedAt);
 
-                                        return (
-                                            <button
-                                                key={order.id}
-                                                onClick={() => navigate({
-                                                    to: '/orders/$orderId',
-                                                    params: { orderId: order.orderNumber },
-                                                })}
-                                                className="w-full text-left px-4 py-3 hover:bg-gray-50 transition-colors group"
-                                            >
-                                                <div className="flex items-center gap-3">
-                                                    {/* Product thumbnail */}
-                                                    {firstImage ? (
-                                                        <img
-                                                            src={getOptimizedImageUrl(firstImage, 'sm') || firstImage}
-                                                            alt={productName}
-                                                            className="w-11 h-11 rounded-lg object-cover border border-gray-200 flex-shrink-0"
-                                                            loading="lazy"
-                                                        />
-                                                    ) : (
-                                                        <div className="w-11 h-11 rounded-lg bg-gray-100 flex items-center justify-center flex-shrink-0 border border-gray-200">
-                                                            <Package className="w-4 h-4 text-gray-400" />
-                                                        </div>
-                                                    )}
+                                            return (
+                                                <button
+                                                    key={order.id}
+                                                    onClick={() => navigate({
+                                                        to: '/orders/$orderId',
+                                                        params: { orderId: order.orderNumber },
+                                                    })}
+                                                    className="w-full text-left px-4 py-3 hover:bg-gray-50 transition-colors group"
+                                                >
+                                                    <div className="flex items-center gap-3">
+                                                        {/* Product thumbnail */}
+                                                        {firstImage ? (
+                                                            <img
+                                                                src={getOptimizedImageUrl(firstImage, 'sm') || firstImage}
+                                                                alt={productName}
+                                                                className="w-11 h-11 rounded-lg object-cover border border-gray-200 flex-shrink-0"
+                                                                loading="lazy"
+                                                            />
+                                                        ) : (
+                                                            <div className="w-11 h-11 rounded-lg bg-gray-100 flex items-center justify-center flex-shrink-0 border border-gray-200">
+                                                                <Package className="w-4 h-4 text-gray-400" />
+                                                            </div>
+                                                        )}
 
-                                                    {/* Order info */}
-                                                    <div className="flex-1 min-w-0">
-                                                        <div className="flex items-center gap-2">
-                                                            <span className="text-sm font-semibold text-gray-900">
-                                                                #{order.orderNumber}
-                                                            </span>
-                                                            <span className={cn(
-                                                                'inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium',
-                                                                statusConfig.bg, statusConfig.text,
-                                                            )}>
-                                                                <span className={cn('w-1 h-1 rounded-full', statusConfig.dot)} />
-                                                                {order.status}
-                                                            </span>
-                                                        </div>
-                                                        <p className="text-xs text-gray-500 truncate mt-0.5">
-                                                            {productName}
-                                                            {itemCount > 1 && ` + ${itemCount - 1} more`}
-                                                        </p>
-                                                    </div>
-
-                                                    {/* Amount + date */}
-                                                    <div className="text-right flex-shrink-0">
-                                                        <p className="text-sm font-semibold text-gray-900 tabular-nums">
-                                                            {formatINR(order.totalAmount || 0)}
-                                                        </p>
-                                                        <p className="text-[10px] text-gray-400" title={formatDate(order.orderDate)}>
-                                                            {getRelativeTime(
-                                                                typeof order.orderDate === 'string'
-                                                                    ? order.orderDate
-                                                                    : order.orderDate.toISOString()
+                                                        {/* Order info */}
+                                                        <div className="flex-1 min-w-0">
+                                                            <div className="flex items-center gap-1.5 flex-wrap">
+                                                                <span className="text-sm font-semibold text-gray-900">
+                                                                    #{order.orderNumber}
+                                                                </span>
+                                                                <span className={cn(
+                                                                    'inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium',
+                                                                    statusConfig.bg, statusConfig.text,
+                                                                )}>
+                                                                    <span className={cn('w-1 h-1 rounded-full', statusConfig.dot)} />
+                                                                    {order.status}
+                                                                </span>
+                                                                {order.isExchange && (
+                                                                    <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-violet-50 text-violet-700">
+                                                                        Exchange
+                                                                    </span>
+                                                                )}
+                                                                {hasReturns && (
+                                                                    <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-orange-50 text-orange-600">
+                                                                        Return
+                                                                    </span>
+                                                                )}
+                                                                {hasRto && (
+                                                                    <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-red-50 text-red-600">
+                                                                        RTO
+                                                                    </span>
+                                                                )}
+                                                                {order.paymentMethod && (
+                                                                    <span className="text-[10px] text-gray-400">
+                                                                        {order.paymentMethod}
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                            <p className="text-xs text-gray-500 truncate mt-0.5">
+                                                                {productName}
+                                                                {itemCount > 1 && ` + ${itemCount - 1} more`}
+                                                            </p>
+                                                            {order.internalNotes && (
+                                                                <p className="text-[10px] text-amber-600 truncate mt-0.5 flex items-center gap-1">
+                                                                    <MessageSquare className="w-2.5 h-2.5 flex-shrink-0" />
+                                                                    {order.internalNotes}
+                                                                </p>
                                                             )}
-                                                        </p>
-                                                    </div>
+                                                        </div>
 
-                                                    <ChevronRight className="w-4 h-4 text-gray-300 group-hover:text-gray-500 transition-colors flex-shrink-0" />
-                                                </div>
-                                            </button>
-                                        );
-                                    })}
-                                </div>
+                                                        {/* Amount + date */}
+                                                        <div className="text-right flex-shrink-0">
+                                                            <p className="text-sm font-semibold text-gray-900 tabular-nums">
+                                                                {formatINR(order.totalAmount || 0)}
+                                                            </p>
+                                                            <p className="text-[10px] text-gray-400" title={formatDate(order.orderDate)}>
+                                                                {getRelativeTime(
+                                                                    typeof order.orderDate === 'string'
+                                                                        ? order.orderDate
+                                                                        : order.orderDate.toISOString()
+                                                                )}
+                                                            </p>
+                                                        </div>
+
+                                                        <ChevronRight className="w-4 h-4 text-gray-300 group-hover:text-gray-500 transition-colors flex-shrink-0" />
+                                                    </div>
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                    {/* Show more/less toggle */}
+                                    {(customer.orders?.length || 0) > 10 && (
+                                        <button
+                                            onClick={(e) => { e.stopPropagation(); setShowAllOrders(!showAllOrders); }}
+                                            className="w-full px-4 py-2 text-xs text-gray-500 hover:text-gray-700 hover:bg-gray-50 border-t border-gray-100 flex items-center justify-center gap-1"
+                                        >
+                                            {showAllOrders ? (
+                                                <>Show less <ChevronUp className="w-3 h-3" /></>
+                                            ) : (
+                                                <>Show all {customer.orders?.length} orders <ChevronDown className="w-3 h-3" /></>
+                                            )}
+                                        </button>
+                                    )}
+                                </>
                             ) : (
                                 <div className="px-4 py-8 text-center">
                                     <ShoppingBag className="w-8 h-8 text-gray-300 mx-auto mb-2" />
@@ -586,6 +816,38 @@ export default function CustomerDetail() {
                                 </div>
                             )}
                         </div>
+
+                        {/* --- ORDER NOTES TIMELINE --- */}
+                        {customer.orderNotes && customer.orderNotes.length > 0 && (
+                            <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
+                                <div className="px-4 py-3 border-b border-gray-100">
+                                    <div className="flex items-center gap-2">
+                                        <FileText className="w-4 h-4 text-gray-400" />
+                                        <h2 className="text-sm font-semibold text-gray-900">Order Notes</h2>
+                                        <span className="text-xs text-gray-400">{customer.orderNotes.length} notes</span>
+                                    </div>
+                                </div>
+                                <div className="divide-y divide-gray-50 max-h-64 overflow-y-auto">
+                                    {customer.orderNotes.map((note, i) => (
+                                        <div key={i} className="px-4 py-2.5">
+                                            <div className="flex items-center justify-between mb-0.5">
+                                                <button
+                                                    onClick={() => navigate({
+                                                        to: '/orders/$orderId',
+                                                        params: { orderId: note.orderNumber },
+                                                    })}
+                                                    className="text-xs font-medium text-blue-600 hover:underline"
+                                                >
+                                                    #{note.orderNumber}
+                                                </button>
+                                                <span className="text-[10px] text-gray-400">{formatDate(note.orderDate)}</span>
+                                            </div>
+                                            <p className="text-xs text-gray-600">{note.note}</p>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
                     </div>
 
                     {/* ===== RIGHT COLUMN (1/3) ===== */}
@@ -645,38 +907,70 @@ export default function CustomerDetail() {
                             </div>
                         )}
 
-                        {/* --- HEALTH SCORE CARD --- */}
+                        {/* --- HEALTH SCORE CARD (with RFM breakdown) --- */}
                         <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
                             <div className="px-4 py-3 border-b border-gray-100">
                                 <h2 className="text-sm font-semibold text-gray-900">Health Score</h2>
                             </div>
-                            <div className="px-4 py-4 flex items-center gap-4">
-                                {/* Circular gauge */}
-                                <div className="relative w-16 h-16 flex-shrink-0">
-                                    <svg className="w-full h-full transform -rotate-90" viewBox="0 0 50 50">
-                                        <circle cx="25" cy="25" r="20" fill="none" stroke="#e5e7eb" strokeWidth="4" />
-                                        <circle
-                                            cx="25" cy="25" r="20" fill="none" stroke={healthColor} strokeWidth="4"
-                                            strokeLinecap="round"
-                                            strokeDasharray={2 * Math.PI * 20}
-                                            strokeDashoffset={2 * Math.PI * 20 - (metrics.healthScore / 100) * 2 * Math.PI * 20}
-                                            style={{ transition: 'stroke-dashoffset 0.5s ease-out' }}
-                                        />
-                                    </svg>
-                                    <div className="absolute inset-0 flex items-center justify-center">
-                                        <span className="text-lg font-bold" style={{ color: healthColor }}>
-                                            {metrics.healthScore}
-                                        </span>
+                            <div className="px-4 py-4">
+                                <div className="flex items-center gap-4 mb-4">
+                                    {/* Circular gauge */}
+                                    <div className="relative w-16 h-16 flex-shrink-0">
+                                        <svg className="w-full h-full transform -rotate-90" viewBox="0 0 50 50">
+                                            <circle cx="25" cy="25" r="20" fill="none" stroke="#e5e7eb" strokeWidth="4" />
+                                            <circle
+                                                cx="25" cy="25" r="20" fill="none" stroke={healthColor} strokeWidth="4"
+                                                strokeLinecap="round"
+                                                strokeDasharray={2 * Math.PI * 20}
+                                                strokeDashoffset={2 * Math.PI * 20 - (metrics.healthScore / 100) * 2 * Math.PI * 20}
+                                                style={{ transition: 'stroke-dashoffset 0.5s ease-out' }}
+                                            />
+                                        </svg>
+                                        <div className="absolute inset-0 flex items-center justify-center">
+                                            <span className="text-lg font-bold" style={{ color: healthColor }}>
+                                                {metrics.healthScore}
+                                            </span>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <p className="text-sm font-medium text-gray-900">{healthLabel}</p>
+                                        <p className="text-xs text-gray-500 mt-0.5">
+                                            RFM analysis with return penalty
+                                        </p>
                                     </div>
                                 </div>
-                                <div>
-                                    <p className="text-sm font-medium text-gray-900">{healthLabel}</p>
-                                    <p className="text-xs text-gray-500 mt-0.5">
-                                        Based on recency, frequency, monetary value, and return behavior
-                                    </p>
+                                {/* RFM Breakdown */}
+                                <div className="space-y-2">
+                                    <RfmBar label="Recency" score={metrics.rfm.recencyScore} max={25} color="bg-sky-500" />
+                                    <RfmBar label="Frequency" score={metrics.rfm.frequencyScore} max={25} color="bg-blue-500" />
+                                    <RfmBar label="Monetary" score={metrics.rfm.monetaryScore} max={25} color="bg-indigo-500" />
+                                    <RfmBar label="Return Penalty" score={-metrics.rfm.returnPenalty} max={25} color="bg-red-400" isNegative />
                                 </div>
                             </div>
                         </div>
+
+                        {/* --- PAYMENT METHODS CARD --- */}
+                        {customer.paymentBreakdown && customer.paymentBreakdown.length > 0 && (
+                            <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
+                                <div className="px-4 py-3 border-b border-gray-100">
+                                    <div className="flex items-center gap-2">
+                                        <CreditCard className="w-4 h-4 text-gray-400" />
+                                        <h2 className="text-sm font-semibold text-gray-900">Payment Methods</h2>
+                                    </div>
+                                </div>
+                                <div className="px-4 py-3 space-y-2">
+                                    {customer.paymentBreakdown.map((pm, i) => (
+                                        <div key={i} className="flex items-center justify-between text-sm">
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-gray-700">{pm.method}</span>
+                                                <span className="text-[10px] text-gray-400">({pm.count} orders)</span>
+                                            </div>
+                                            <span className="text-gray-900 font-medium tabular-nums">{formatINR(pm.total)}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
 
                         {/* --- TAGS CARD --- */}
                         {customer.tags && (
@@ -734,6 +1028,22 @@ export default function CustomerDetail() {
                                     value={String(customer.exchangeCount || 0)}
                                 />
                                 <DetailRow
+                                    label="RTOs"
+                                    value={`${customer.rtoCount || 0} lines (${customer.rtoOrderCount || 0} orders)`}
+                                />
+                                {(customer.rtoValue || 0) > 0 && (
+                                    <DetailRow
+                                        label="RTO value"
+                                        value={formatINR(customer.rtoValue)}
+                                    />
+                                )}
+                                {(customer.storeCreditBalance || 0) > 0 && (
+                                    <DetailRow
+                                        label="Store credit"
+                                        value={formatINR(customer.storeCreditBalance)}
+                                    />
+                                )}
+                                <DetailRow
                                     label="Account created"
                                     value={customer.createdAt ? formatDate(customer.createdAt) : 'N/A'}
                                 />
@@ -761,7 +1071,9 @@ function StatCard({ label, value, icon: Icon, accent, subtitle }: {
         sky: { iconBg: 'bg-sky-50', iconText: 'text-sky-600' },
         blue: { iconBg: 'bg-blue-50', iconText: 'text-blue-600' },
         indigo: { iconBg: 'bg-indigo-50', iconText: 'text-indigo-600' },
+        violet: { iconBg: 'bg-violet-50', iconText: 'text-violet-600' },
         green: { iconBg: 'bg-green-50', iconText: 'text-green-600' },
+        emerald: { iconBg: 'bg-emerald-50', iconText: 'text-emerald-600' },
         amber: { iconBg: 'bg-amber-50', iconText: 'text-amber-600' },
         red: { iconBg: 'bg-red-50', iconText: 'text-red-600' },
         gray: { iconBg: 'bg-gray-50', iconText: 'text-gray-500' },
@@ -787,6 +1099,65 @@ function DetailRow({ label, value }: { label: string; value: string }) {
         <div className="flex justify-between text-sm">
             <span className="text-gray-500">{label}</span>
             <span className="text-gray-900 text-right">{value}</span>
+        </div>
+    );
+}
+
+function RfmBar({ label, score, max, color, isNegative }: {
+    label: string;
+    score: number;
+    max: number;
+    color: string;
+    isNegative?: boolean;
+}) {
+    const absScore = Math.abs(score);
+    const pct = (absScore / max) * 100;
+
+    return (
+        <div className="flex items-center gap-2">
+            <span className="text-[10px] text-gray-500 w-20">{label}</span>
+            <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                <div
+                    className={cn('h-full rounded-full', color)}
+                    style={{ width: `${pct}%` }}
+                />
+            </div>
+            <span className={cn('text-[10px] w-8 text-right tabular-nums', isNegative ? 'text-red-500' : 'text-gray-600')}>
+                {isNegative ? score : `+${score}`}
+            </span>
+        </div>
+    );
+}
+
+function RevenueChart({ data }: { data: Array<{ month: string; revenue: number; orders: number }> }) {
+    const maxRevenue = Math.max(...data.map((d) => d.revenue), 1);
+
+    return (
+        <div className="space-y-1">
+            <div className="flex items-end gap-1 h-24">
+                {data.map((d, i) => {
+                    const height = (d.revenue / maxRevenue) * 100;
+                    const monthLabel = d.month.split('-')[1];
+                    const monthNames = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                    const shortMonth = monthNames[parseInt(monthLabel, 10)] || monthLabel;
+
+                    return (
+                        <div key={i} className="flex-1 flex flex-col items-center justify-end h-full group relative">
+                            <div
+                                className="w-full bg-sky-400 hover:bg-sky-500 rounded-t transition-colors min-h-[2px]"
+                                style={{ height: `${height}%` }}
+                                title={`${d.month}: ${formatINR(d.revenue)} (${d.orders} orders)`}
+                            />
+                            <span className="text-[8px] text-gray-400 mt-1">{shortMonth}</span>
+                        </div>
+                    );
+                })}
+            </div>
+            <div className="flex justify-between text-[9px] text-gray-400 pt-1 border-t border-gray-100">
+                <span>{data[0]?.month}</span>
+                <span>Total: {formatINR(data.reduce((sum, d) => sum + d.revenue, 0))}</span>
+                <span>{data[data.length - 1]?.month}</span>
+            </div>
         </div>
     );
 }
