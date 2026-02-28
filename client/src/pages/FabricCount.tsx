@@ -198,7 +198,7 @@ export default function FabricCount() {
                                             style={{ backgroundColor: c.colourHex ?? '#e5e7eb' }}
                                         />
                                         <div className="flex-1 min-w-0">
-                                            <div className="font-medium text-gray-900 truncate">
+                                            <div className="font-medium text-gray-900">
                                                 {c.fabricName} — {c.colourName}
                                             </div>
                                             <div className="text-sm text-gray-500">
