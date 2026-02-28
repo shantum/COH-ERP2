@@ -13,6 +13,7 @@ if (dsn) {
   Sentry.init({
     dsn,
     environment: import.meta.env.MODE,
+    release: `coh-erp-frontend@${import.meta.env.MODE}`,
     tracesSampleRate: import.meta.env.MODE === 'production' ? 0.2 : 1.0,
     replaysSessionSampleRate: 0,
     replaysOnErrorSampleRate: 1.0,
