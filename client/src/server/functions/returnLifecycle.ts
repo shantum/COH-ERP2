@@ -8,7 +8,7 @@
 import { createServerFn } from '@tanstack/react-start';
 import { getCookie } from '@tanstack/react-start/server';
 import { z } from 'zod';
-import { authMiddleware, type AuthUser } from '../middleware/auth';
+import { authMiddleware, adminMiddleware, type AuthUser } from '../middleware/auth';
 import { serverLog } from './serverLog';
 import { getPrisma, type PrismaTransaction } from '@coh/shared/services/db';
 import { getInternalApiBaseUrl, callInternalApi } from '../utils';
@@ -329,7 +329,7 @@ export const initiateLineReturn = createServerFn({ method: 'POST' })
  * When false, just updates DB with provided courier/AWB (manual entry).
  */
 export const scheduleReturnPickup = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
+    .middleware([adminMiddleware])
     .inputValidator((input: unknown): ScheduleReturnPickupInput => ScheduleReturnPickupInputSchema.parse(input))
     .handler(async ({ data }: { data: ScheduleReturnPickupInput }): Promise<ReturnResult<{
         orderLineId: string;

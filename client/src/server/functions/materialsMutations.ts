@@ -644,7 +644,7 @@ const deleteTrimSchema = z.object({
  * Create a new trim item
  */
 export const createTrim = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
+    .middleware([adminMiddleware])
     .inputValidator((input: unknown) => createTrimSchema.parse(input))
     .handler(async ({ data }): Promise<CreateTrimResult> => {
         try {
@@ -682,7 +682,7 @@ export const createTrim = createServerFn({ method: 'POST' })
  * Update a trim item
  */
 export const updateTrim = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
+    .middleware([adminMiddleware])
     .inputValidator((input: unknown) => updateTrimSchema.parse(input))
     .handler(async ({ data }): Promise<UpdateTrimResult> => {
         try {
@@ -729,7 +729,7 @@ export const updateTrim = createServerFn({ method: 'POST' })
  * Delete a trim item
  */
 export const deleteTrim = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
+    .middleware([adminMiddleware])
     .inputValidator((input: unknown) => deleteTrimSchema.parse(input))
     .handler(async ({ data }): Promise<DeleteTrimResult> => {
         try {
@@ -791,7 +791,7 @@ const deleteServiceSchema = z.object({
  * Create a new service item
  */
 export const createService = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
+    .middleware([adminMiddleware])
     .inputValidator((input: unknown) => createServiceSchema.parse(input))
     .handler(async ({ data }): Promise<CreateServiceResult> => {
         try {
@@ -828,7 +828,7 @@ export const createService = createServerFn({ method: 'POST' })
  * Update a service item
  */
 export const updateService = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
+    .middleware([adminMiddleware])
     .inputValidator((input: unknown) => updateServiceSchema.parse(input))
     .handler(async ({ data }): Promise<UpdateServiceResult> => {
         try {
@@ -874,7 +874,7 @@ export const updateService = createServerFn({ method: 'POST' })
  * Delete a service item
  */
 export const deleteService = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
+    .middleware([adminMiddleware])
     .inputValidator((input: unknown) => deleteServiceSchema.parse(input))
     .handler(async ({ data }): Promise<DeleteServiceResult> => {
         try {

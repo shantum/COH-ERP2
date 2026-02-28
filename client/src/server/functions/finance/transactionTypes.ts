@@ -6,7 +6,7 @@
 
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
-import { authMiddleware } from '../../middleware/auth';
+import { authMiddleware, adminMiddleware } from '../../middleware/auth';
 import { getPrisma } from '@coh/shared/services/db';
 import type { Prisma } from '@prisma/client';
 import {
@@ -72,7 +72,7 @@ export const getTransactionType = createServerFn({ method: 'GET' })
 // ============================================
 
 export const createTransactionType = createServerFn({ method: 'POST' })
-  .middleware([authMiddleware])
+  .middleware([adminMiddleware])
   .inputValidator((input: unknown) => CreateTransactionTypeSchema.parse(input))
   .handler(async ({ data, context }) => {
     const prisma = await getPrisma();
@@ -114,7 +114,7 @@ export const createTransactionType = createServerFn({ method: 'POST' })
 // ============================================
 
 export const updateTransactionType = createServerFn({ method: 'POST' })
-  .middleware([authMiddleware])
+  .middleware([adminMiddleware])
   .inputValidator((input: unknown) => UpdateTransactionTypeSchema.parse(input))
   .handler(async ({ data, context }) => {
     const prisma = await getPrisma();
@@ -166,7 +166,7 @@ export const updateTransactionType = createServerFn({ method: 'POST' })
 // ============================================
 
 export const deleteTransactionType = createServerFn({ method: 'POST' })
-  .middleware([authMiddleware])
+  .middleware([adminMiddleware])
   .inputValidator((input: unknown) => z.object({ id: z.string().uuid() }).parse(input))
   .handler(async ({ data, context }) => {
     const prisma = await getPrisma();

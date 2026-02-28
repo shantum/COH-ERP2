@@ -9,6 +9,8 @@
 import { useState, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
+import { useAuth } from '../../hooks/useAuth';
+import { isAdminUser } from '../../types';
 // Router is used via Route.useParams() — links use plain <a> for simplicity
 import { Route } from '../../routes/_authenticated/returns_.$returnId';
 import {
@@ -205,6 +207,8 @@ function getRelativeTime(date: Date): string {
 export default function ReturnDetail() {
     const { returnId } = Route.useParams();
     const queryClient = useQueryClient();
+    const { user } = useAuth();
+    const isAdmin = isAdminUser(user);
 
     // Local state
     const [copied, setCopied] = useState(false);
@@ -541,7 +545,7 @@ export default function ReturnDetail() {
 
                         {/* Action buttons */}
                         <div className="flex items-center gap-2">
-                            {detail.returnStatus === 'requested' && (
+                            {detail.returnStatus === 'requested' && isAdmin && (
                                 <>
                                     <Button
                                         onClick={() => schedulePickupMutation.mutate()}
@@ -572,7 +576,7 @@ export default function ReturnDetail() {
                                     {receiveReturnMutation.isPending ? 'Processing...' : 'Mark Received & Inspected'}
                                 </Button>
                             )}
-                            {detail.returnStatus === 'inspected' && detail.returnResolution === 'refund' && !detail.returnRefundCompletedAt && (
+                            {detail.returnStatus === 'inspected' && detail.returnResolution === 'refund' && !detail.returnRefundCompletedAt && isAdmin && (
                                 <Button
                                     onClick={() => processRefundMutation.mutate()}
                                     disabled={processRefundMutation.isPending}
