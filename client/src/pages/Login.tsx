@@ -33,7 +33,7 @@ export default function Login({ onLoginSuccess }: LoginProps) {
                     </div>
 
                     {mode === 'phone' ? (
-                        <PhoneOtpForm loginWithOtp={loginWithOtp} />
+                        <PhoneOtpForm loginWithOtp={loginWithOtp} onSuccess={handleSuccess} />
                     ) : (
                         <EmailPasswordForm onSuccess={handleSuccess} login={login} />
                     )}
@@ -61,8 +61,10 @@ export default function Login({ onLoginSuccess }: LoginProps) {
 
 function PhoneOtpForm({
     loginWithOtp,
+    onSuccess,
 }: {
     loginWithOtp: (phone: string, otp: string) => Promise<{ role: string; email: string }>;
+    onSuccess: () => void;
 }) {
     const [step, setStep] = useState<OtpStep>('phone');
     const [phone, setPhone] = useState('');
@@ -110,9 +112,12 @@ function PhoneOtpForm({
 
         try {
             const user = await loginWithOtp(phone, otp);
-            // Per-user landing page
-            const landing = user.email === 'prabhakar@coh.one' ? '/fabric-count' : '/orders';
-            window.location.href = landing;
+            // Prabhakar always goes to fabric-count; others use redirect param
+            if (user.email === 'prabhakar@coh.one') {
+                window.location.href = '/fabric-count';
+            } else {
+                onSuccess();
+            }
         } catch (err: unknown) {
             setLoading(false);
             const axiosErr = err as { response?: { data?: { error?: string } } };
