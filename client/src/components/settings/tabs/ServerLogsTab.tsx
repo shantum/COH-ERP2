@@ -34,7 +34,7 @@ export function ServerLogsTab() {
     const [autoRefresh, setAutoRefresh] = useState(true);
     const [limit] = useState(100);
 
-    // Fetch logs
+    // Fetch logs — keepPreviousData prevents layout flash during refetch
     const { data: logsData, isLoading, refetch } = useQuery({
         queryKey: ['serverLogs', selectedLevel, searchTerm, limit],
         queryFn: async () => {
@@ -52,9 +52,10 @@ export function ServerLogsTab() {
             return result.data;
         },
         refetchInterval: autoRefresh ? 3000 : false,
+        placeholderData: (prev) => prev,
     });
 
-    // Fetch log stats
+    // Fetch log stats — keepPreviousData prevents stats section from vanishing during refetch
     const { data: stats } = useQuery({
         queryKey: ['logStats'],
         queryFn: async () => {
@@ -65,6 +66,7 @@ export function ServerLogsTab() {
             return result.data;
         },
         refetchInterval: autoRefresh ? 5000 : false,
+        placeholderData: (prev) => prev,
     });
 
     // Clear logs mutation
@@ -319,8 +321,8 @@ export function ServerLogsTab() {
                 </div>
 
                 {/* Log Entries */}
-                <div className="bg-gray-900 rounded-lg p-4 font-mono text-sm overflow-auto max-h-[600px]">
-                    {isLoading && (
+                <div className="bg-gray-900 rounded-lg p-4 font-mono text-sm overflow-auto min-h-[200px] max-h-[600px]">
+                    {isLoading && !logsData && (
                         <div className="flex justify-center items-center h-32">
                             <RefreshCw size={24} className="animate-spin text-gray-500" />
                         </div>
@@ -336,7 +338,7 @@ export function ServerLogsTab() {
                         </div>
                     )}
 
-                    {!isLoading && logsData?.logs && logsData.logs.length > 0 && (
+                    {logsData?.logs && logsData.logs.length > 0 && (
                         <div className="space-y-2">
                             {logsData.logs.map((log: LogEntry, index: number) => (
                                 <div
