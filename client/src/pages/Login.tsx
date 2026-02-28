@@ -33,7 +33,7 @@ export default function Login({ onLoginSuccess }: LoginProps) {
                     </div>
 
                     {mode === 'phone' ? (
-                        <PhoneOtpForm onSuccess={handleSuccess} loginWithOtp={loginWithOtp} />
+                        <PhoneOtpForm loginWithOtp={loginWithOtp} />
                     ) : (
                         <EmailPasswordForm onSuccess={handleSuccess} login={login} />
                     )}
@@ -60,10 +60,8 @@ export default function Login({ onLoginSuccess }: LoginProps) {
 }
 
 function PhoneOtpForm({
-    onSuccess,
     loginWithOtp,
 }: {
-    onSuccess: () => void;
     loginWithOtp: (phone: string, otp: string) => Promise<void>;
 }) {
     const [step, setStep] = useState<OtpStep>('phone');
@@ -112,12 +110,12 @@ function PhoneOtpForm({
 
         try {
             await loginWithOtp(phone, otp);
-            onSuccess();
+            // Hard navigate to ensure fresh request with new cookie
+            window.location.href = '/orders';
         } catch (err: unknown) {
+            setLoading(false);
             const axiosErr = err as { response?: { data?: { error?: string } } };
             setError(axiosErr.response?.data?.error || 'Verification failed');
-        } finally {
-            setLoading(false);
         }
     };
 
