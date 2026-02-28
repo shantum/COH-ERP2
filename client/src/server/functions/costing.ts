@@ -267,7 +267,7 @@ export const getCostingDashboard = createServerFn({ method: 'GET' })
         const channelFilter = getChannelFilter(channel);
 
         // Get config
-        let config = await prisma.costConfig.findFirst();
+        const config = await prisma.costConfig.findFirst();
         const monthlyLaborOverhead = config?.monthlyLaborOverhead ?? DEFAULT_MONTHLY_LABOR_OVERHEAD;
         const monthlyMarketingBudget = config?.monthlyMarketingBudget ?? DEFAULT_MONTHLY_MARKETING_BUDGET;
 
@@ -671,10 +671,9 @@ export const getFabricColourCosts = createServerFn({ method: 'GET' })
                 const rate = fc.costPerUnit ?? fabric.costPerUnit ?? 0;
 
                 // Consumption cascade: SkuBomLine > VariationBomLine > Product.defaultFabricConsumption > 1.5
-                let consumption: number;
                 const skuLine = skuBomLines.find(s => s.roleId === bom.roleId);
                 const varLine = variationBomLines.find(v => v.roleId === bom.roleId);
-                consumption = skuLine?.quantity ?? varLine?.quantity ?? productDefault ?? 1.5;
+                const consumption = skuLine?.quantity ?? varLine?.quantity ?? productDefault ?? 1.5;
 
                 if (!fabricMap.has(fabricKey)) {
                     fabricMap.set(fabricKey, {

@@ -81,11 +81,6 @@ function extractProductId(slug: string): string {
     return sepIdx !== -1 ? slug.slice(sepIdx + 2) : slug;
 }
 
-/** Build slug from product name + UUID */
-export function buildProductSlug(name: string, id: string): string {
-    const nameSlug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-    return `${nameSlug}--${id}`;
-}
 
 function capitalize(s: string): string {
     return s.charAt(0).toUpperCase() + s.slice(1);
@@ -315,21 +310,21 @@ export default function EditProduct() {
         queryFn: () => getCatalogFiltersFn(),
     });
 
+    const watchedCategory = form.watch('category');
     const categoryOptions = useMemo(() => {
-        const currentVal = form.watch('category');
         const dbCategories = catalogFilters?.categories ?? [];
         const set = new Set(dbCategories);
-        if (currentVal && !set.has(currentVal)) set.add(currentVal);
+        if (watchedCategory && !set.has(watchedCategory)) set.add(watchedCategory);
         return Array.from(set).sort((a, b) => a.localeCompare(b));
-    }, [catalogFilters?.categories, form.watch('category')]);
+    }, [catalogFilters?.categories, watchedCategory]);
 
+    const watchedGender = form.watch('gender');
     const genderOptions = useMemo(() => {
-        const currentVal = form.watch('gender');
         const dbGenders = catalogFilters?.genders ?? [];
         const set = new Set(dbGenders);
-        if (currentVal && !set.has(currentVal)) set.add(currentVal);
+        if (watchedGender && !set.has(watchedGender)) set.add(watchedGender);
         return Array.from(set).sort((a, b) => a.localeCompare(b));
-    }, [catalogFilters?.genders, form.watch('gender')]);
+    }, [catalogFilters?.genders, watchedGender]);
 
     if (isLoading) {
         return (
@@ -949,7 +944,6 @@ function findMeasurementKey(sizeMap: Record<string, number>, pattern: RegExp): s
 function SizeGuideCard({ measurements, product }: { measurements: MeasurementData; product: ProductDetailData }) {
     const sizeData = measurements.measurements;
     const sizeKeys = Object.keys(sizeData);
-    if (sizeKeys.length === 0) return null;
 
     const [showFullSpec, setShowFullSpec] = useState(false);
     const equiv = measurements.sizeEquivalents;
@@ -977,15 +971,17 @@ function SizeGuideCard({ measurements, product }: { measurements: MeasurementDat
 
     // Resolve key measurements for the customer-facing table
     const keyPatterns = KEY_MEASUREMENTS[product.garmentGroup] ?? KEY_MEASUREMENTS.tops;
-    const referenceSizeMap = sizeData[orderedSizes[0]] ?? {};
     const resolvedKeyMeasurements = useMemo(() => {
+        const referenceSizeMap = sizeData[orderedSizes[0]] ?? {};
         const result: Array<{ label: string; key: string }> = [];
         for (const [label, pattern] of keyPatterns) {
             const key = findMeasurementKey(referenceSizeMap, pattern);
             if (key) result.push({ label, key });
         }
         return result;
-    }, [keyPatterns, referenceSizeMap]);
+    }, [keyPatterns, sizeData, orderedSizes]);
+
+    if (sizeKeys.length === 0) return null;
 
     return (
         <Card>

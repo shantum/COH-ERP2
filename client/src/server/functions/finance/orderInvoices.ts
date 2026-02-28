@@ -92,7 +92,8 @@ export const getOrderInvoice = createServerFn({ method: 'GET' })
 
     if (!invoice) return { success: false as const, error: 'No invoice found for this order' };
 
-    const { fileData: _, ...rest } = invoice;
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { fileData, ...rest } = invoice;
     return { success: true as const, invoice: rest };
   });
 

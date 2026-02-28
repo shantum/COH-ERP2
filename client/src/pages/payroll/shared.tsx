@@ -3,10 +3,12 @@ import { Badge } from '@/components/ui/badge';
 import { ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
 import { PAYROLL_STATUS_LABELS } from '@coh/shared';
 
+// eslint-disable-next-line react-refresh/only-export-components -- shared utility used by payroll components
 export function formatINR(amount: number): string {
   return '\u20B9' + amount.toLocaleString('en-IN', { maximumFractionDigits: 0 });
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- shared constant used by payroll components
 export const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 export function StatusBadge({ status }: { status: string }) {

@@ -105,7 +105,8 @@ export default function CustomerDetail() {
         staleTime: 60 * 1000,
     });
 
-    // Computed metrics
+    // Computed metrics - use stable timestamp to avoid impure Date.now() in render
+    const [now] = useState(() => Date.now());
     const metrics = useMemo(() => {
         if (!customer) return null;
         const healthScore = calculateHealthScore(customer);
@@ -117,15 +118,15 @@ export default function CustomerDetail() {
             customer.firstOrderDate ? customer.firstOrderDate.toISOString() : null
         );
         const daysSinceOrder = customer.lastOrderDate
-            ? Math.floor((Date.now() - new Date(customer.lastOrderDate).getTime()) / (1000 * 60 * 60 * 24))
+            ? Math.floor((now - new Date(customer.lastOrderDate).getTime()) / (1000 * 60 * 60 * 24))
             : null;
 
         // RFM breakdown for health score detail
         const daysSinceLastOrder = customer.lastOrderDate
-            ? Math.floor((Date.now() - new Date(customer.lastOrderDate).getTime()) / (1000 * 60 * 60 * 24))
+            ? Math.floor((now - new Date(customer.lastOrderDate).getTime()) / (1000 * 60 * 60 * 24))
             : 365;
         const monthsSinceFirst = customer.firstOrderDate
-            ? Math.max(1, Math.floor((Date.now() - new Date(customer.firstOrderDate).getTime()) / (1000 * 60 * 60 * 24 * 30)))
+            ? Math.max(1, Math.floor((now - new Date(customer.firstOrderDate).getTime()) / (1000 * 60 * 60 * 24 * 30)))
             : 1;
         const ordersPerMonth = (customer.totalOrders || 0) / monthsSinceFirst;
         const recencyScore = Math.round(Math.max(0, (60 - daysSinceLastOrder) / 60) * 25);
@@ -137,9 +138,10 @@ export default function CustomerDetail() {
             healthScore, tierProgress, tenure, daysSinceOrder,
             rfm: { recencyScore, frequencyScore, monetaryScore, returnPenalty },
         };
-    }, [customer]);
+    }, [customer, now]);
 
     // Size preferences from orders
+    // eslint-disable-next-line react-hooks/preserve-manual-memoization -- only orders sub-property is used
     const sizePreferences = useMemo(() => {
         if (!customer?.orders) return [];
         const sizeCounts: Record<string, number> = {};
@@ -194,6 +196,7 @@ export default function CustomerDetail() {
     }, [customer, metrics]);
 
     // Count orders with returns/RTOs for badges
+    // eslint-disable-next-line react-hooks/preserve-manual-memoization -- only orders sub-property is used
     const returnRtoStats = useMemo(() => {
         if (!customer?.orders) return { returnOrders: 0, rtoOrders: 0 };
         let returnOrders = 0;

@@ -621,6 +621,7 @@ export const createProductDraft = createServerFn({ method: 'POST' })
             const { sql } = await import('kysely');
             type SqlBool = import('kysely').SqlBool;
             const db = await getKysely();
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Kysely table name requires dynamic cast
             const result = await db.selectFrom('Sku' as any)
                 .select(sql<string>`MAX("skuCode")`.as('maxCode'))
                 .where(sql<SqlBool>`"skuCode" ~ '^[0-9]{8}$'`)
@@ -739,6 +740,7 @@ export const getNextSkuCode = createServerFn({ method: 'GET' })
         const { sql } = await import('kysely');
         type SqlBool = import('kysely').SqlBool;
         const db = await getKysely();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Kysely table name requires dynamic cast
         const result = await db.selectFrom('Sku' as any)
             .select(sql<string>`MAX("skuCode")`.as('maxCode'))
             .where(sql<SqlBool>`"skuCode" ~ '^[0-9]{8}$'`)

@@ -115,8 +115,8 @@ export default function Bom() {
         queryFn: () => getBomListFn({ data: undefined }),
     });
 
-    const roles = data?.roles ?? [];
-    const allRows = data?.rows ?? [];
+    const roles = useMemo(() => data?.roles ?? [], [data?.roles]);
+    const allRows = useMemo(() => data?.rows ?? [], [data?.rows]);
 
     // Separate main fabric role from any extra roles
     const mainRole = useMemo(() => findMainFabricRole(roles), [roles]);
@@ -162,11 +162,6 @@ export default function Bom() {
     const handleLoadMore = useCallback(() => {
         setVisibleCount(prev => prev + ROWS_PER_PAGE);
     }, []);
-
-    // Reset pagination when filters change
-    useMemo(() => {
-        setVisibleCount(ROWS_PER_PAGE);
-    }, [search, hideEmpty]);
 
     if (isLoading) {
         return (
@@ -217,12 +212,12 @@ export default function Bom() {
                             type="text"
                             placeholder="Search SKU, product, color, fabric..."
                             value={search}
-                            onChange={e => setSearch(e.target.value)}
+                            onChange={e => { setSearch(e.target.value); setVisibleCount(ROWS_PER_PAGE); }}
                             className="pl-8 h-8 text-sm"
                         />
                         {search && (
                             <button
-                                onClick={() => setSearch('')}
+                                onClick={() => { setSearch(''); setVisibleCount(ROWS_PER_PAGE); }}
                                 className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
                             >
                                 <X className="h-3.5 w-3.5" />
@@ -233,7 +228,7 @@ export default function Bom() {
                     <div className="w-px h-6 bg-gray-200" />
 
                     <button
-                        onClick={() => setHideEmpty(prev => !prev)}
+                        onClick={() => { setHideEmpty(prev => !prev); setVisibleCount(ROWS_PER_PAGE); }}
                         className={`
                             px-2.5 py-1 text-xs font-medium rounded-md border transition-colors
                             ${hideEmpty

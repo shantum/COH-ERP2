@@ -333,7 +333,7 @@ export function UnifiedOrderModal({
       console.error('Failed to add line:', error);
       reportError(error, { component: 'UnifiedOrderModal', action: 'addLine', orderId: order.id, orderNumber: order.orderNumber });
     }
-  }, [order.id, mutations, handleAddLine]);
+  }, [order.id, order.orderNumber, mutations, handleAddLine]);
 
   // Handle update line
   const handleUpdateLineWithMutation = useCallback(async (lineId: string, data: { qty?: number; unitPrice?: number }) => {
@@ -353,20 +353,20 @@ export function UnifiedOrderModal({
         return next;
       });
     }
-  }, [mutations, handleUpdateLine, queryClient, order.id]);
+  }, [mutations, handleUpdateLine, queryClient, order.id, order.orderNumber]);
 
   // Handle cancel line — DISABLED (fulfillment managed in Google Sheets)
-  const handleCancelLineWithMutation = useCallback(async (_lineId: string) => {
+  const handleCancelLineWithMutation = useCallback(async () => {
     toast.info('Line-level cancel is now managed in Google Sheets.');
   }, []);
 
   // Handle uncancel line — DISABLED (fulfillment managed in Google Sheets)
-  const handleUncancelLineWithMutation = useCallback(async (_lineId: string) => {
+  const handleUncancelLineWithMutation = useCallback(async () => {
     toast.info('Line-level restore is now managed in Google Sheets.');
   }, []);
 
   // Handle mark line as delivered — DISABLED (tracking sync handles this automatically)
-  const handleMarkLineDeliveredWithMutation = useCallback(async (_lineId: string) => {
+  const handleMarkLineDeliveredWithMutation = useCallback(async () => {
     toast.info('Delivery status is now updated automatically via tracking sync.');
   }, []);
 
@@ -416,19 +416,7 @@ export function UnifiedOrderModal({
       reportError(error, { component: 'UnifiedOrderModal', action: 'initiateReturn', orderId: order.id, orderNumber: order.orderNumber });
       showReturnError(error, 'Initiate return');
     }
-  }, [returnForm, queryClient, order.id, order.orderLines, resetReturnForm, onSuccess]);
-
-  // Handle cancel return
-  const handleCancelReturn = useCallback(async (lineId: string) => {
-    setConfirmModal({
-      isOpen: true,
-      title: 'Cancel Return',
-      message: 'Are you sure you want to cancel this return?',
-      confirmText: 'Cancel Return',
-      confirmVariant: 'danger',
-      onConfirm: () => doCancelReturn(lineId),
-    });
-  }, []);
+  }, [returnForm, queryClient, order.id, order.orderNumber, order.orderLines, resetReturnForm, onSuccess]);
 
   const doCancelReturn = useCallback(async (lineId: string) => {
     try {
@@ -454,7 +442,19 @@ export function UnifiedOrderModal({
       reportError(error, { component: 'UnifiedOrderModal', action: 'cancelReturn', orderId: order.id, orderNumber: order.orderNumber, lineId });
       showReturnError(error, 'Cancel return');
     }
-  }, [queryClient, order.id, onSuccess]);
+  }, [queryClient, order.id, order.orderNumber, onSuccess]);
+
+  // Handle cancel return
+  const handleCancelReturn = useCallback(async (lineId: string) => {
+    setConfirmModal({
+      isOpen: true,
+      title: 'Cancel Return',
+      message: 'Are you sure you want to cancel this return?',
+      confirmText: 'Cancel Return',
+      confirmVariant: 'danger',
+      onConfirm: () => doCancelReturn(lineId),
+    });
+  }, [doCancelReturn]);
 
   // Handle schedule return pickup - opens dialog for iThink booking
   const handleSchedulePickup = useCallback((lineId: string) => {
@@ -502,7 +502,7 @@ export function UnifiedOrderModal({
       const message = error instanceof Error ? error.message : 'Unknown error';
       return { success: false, error: message };
     }
-  }, [pickupDialogLineId, queryClient, order.id, onSuccess]);
+  }, [pickupDialogLineId, queryClient, order.id, order.orderNumber, onSuccess]);
 
   // Handle receive return
   const handleReceiveReturn = useCallback(async (lineId: string, condition: 'good' | 'damaged' | 'defective' | 'wrong_item' | 'used') => {
@@ -526,7 +526,7 @@ export function UnifiedOrderModal({
       reportError(error, { component: 'UnifiedOrderModal', action: 'receiveReturn', orderId: order.id, orderNumber: order.orderNumber, lineId });
       showReturnError(error, 'Receive return');
     }
-  }, [queryClient, order.id, onSuccess]);
+  }, [queryClient, order.id, order.orderNumber, onSuccess]);
 
   // Handle process refund
   const handleProcessRefund = useCallback(async (lineId: string, grossAmount: number) => {
@@ -549,7 +549,7 @@ export function UnifiedOrderModal({
       reportError(error, { component: 'UnifiedOrderModal', action: 'processRefund', orderId: order.id, orderNumber: order.orderNumber, lineId });
       showReturnError(error, 'Process refund');
     }
-  }, [queryClient, order.id, onSuccess]);
+  }, [queryClient, order.id, order.orderNumber, onSuccess]);
 
   // Handle complete return
   const handleCompleteReturn = useCallback(async (lineId: string) => {
@@ -570,7 +570,7 @@ export function UnifiedOrderModal({
       reportError(error, { component: 'UnifiedOrderModal', action: 'completeReturn', orderId: order.id, orderNumber: order.orderNumber, lineId });
       showReturnError(error, 'Complete return');
     }
-  }, [queryClient, order.id, onSuccess]);
+  }, [queryClient, order.id, order.orderNumber, onSuccess]);
 
   // Handle create exchange order
   const handleCreateExchange = useCallback(async (lineId: string, exchangeSkuId: string, exchangeQty: number) => {
@@ -593,7 +593,7 @@ export function UnifiedOrderModal({
       reportError(error, { component: 'UnifiedOrderModal', action: 'createExchange', orderId: order.id, orderNumber: order.orderNumber, lineId });
       showReturnError(error, 'Create exchange');
     }
-  }, [queryClient, order.id, onSuccess]);
+  }, [queryClient, order.id, order.orderNumber, onSuccess]);
 
   // Handle update return notes
   const handleUpdateReturnNotes = useCallback(async (lineId: string, notes: string) => {
@@ -615,7 +615,7 @@ export function UnifiedOrderModal({
       reportError(error, { component: 'UnifiedOrderModal', action: 'updateNotes', orderId: order.id, orderNumber: order.orderNumber, lineId });
       showReturnError(error, 'Update notes');
     }
-  }, [queryClient, order.id]);
+  }, [queryClient, order.id, order.orderNumber]);
 
   return (
     <div

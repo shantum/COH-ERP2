@@ -31,7 +31,7 @@ import {
 } from '@/components/ui/select';
 import { SkuWiseDataTable } from './SkuWiseDataTable';
 import { useProductsTree } from './hooks/useProductsTree';
-import { buildProductSlug } from '../../pages/EditProduct';
+import { buildProductSlug } from '../../utils/productSlug';
 import type { ProductTreeNode } from './types';
 
 interface ProductsViewSwitcherProps {

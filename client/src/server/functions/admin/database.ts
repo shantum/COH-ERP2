@@ -321,7 +321,7 @@ export const inspectTable = createServerFn({ method: 'GET' })
                     table: tableName,
                 },
             };
-        } catch (err) {
+        } catch {
             // Try without ordering if createdAt doesn't exist
             try {
                 const model = prismaModels[tableName]!;

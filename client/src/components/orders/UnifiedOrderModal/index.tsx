@@ -9,7 +9,9 @@
  * - NotesModal (notes editing)
  */
 
+// eslint-disable-next-line react-refresh/only-export-components -- barrel file for module re-exports
 export { UnifiedOrderModal, default } from './UnifiedOrderModal';
+// eslint-disable-next-line react-refresh/only-export-components -- barrel file for module re-exports
 export { useUnifiedOrderModal } from './hooks/useUnifiedOrderModal';
 export type { ModalMode, EditFormState, ShipFormState, AddressData, CategorizedLines, NavigationEntry, NavigationState, OrderWithShopifyDetails, ShopifyLineItem } from './types';
 

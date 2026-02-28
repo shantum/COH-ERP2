@@ -104,7 +104,7 @@ export function useOrderCrudMutations(options: UseOrderCrudMutationsOptions = {}
         isPending: deleteOrderMutation.isPending,
         isError: deleteOrderMutation.isError,
         error: deleteOrderMutation.error,
-    }), [deleteOrderMutation.isPending, deleteOrderMutation.isError, deleteOrderMutation.error]);
+    }), [deleteOrderMutation]);
 
     // ============================================
     // UPDATE ORDER
@@ -133,7 +133,7 @@ export function useOrderCrudMutations(options: UseOrderCrudMutationsOptions = {}
         isPending: updateOrderMutation.isPending,
         isError: updateOrderMutation.isError,
         error: updateOrderMutation.error,
-    }), [updateOrderMutation.isPending, updateOrderMutation.isError, updateOrderMutation.error]);
+    }), [updateOrderMutation]);
 
     // ============================================
     // UPDATE ORDER NOTES
@@ -163,7 +163,7 @@ export function useOrderCrudMutations(options: UseOrderCrudMutationsOptions = {}
         isPending: updateOrderNotesMutation.isPending,
         isError: updateOrderNotesMutation.isError,
         error: updateOrderNotesMutation.error,
-    }), [updateOrderNotesMutation.isPending, updateOrderNotesMutation.isError, updateOrderNotesMutation.error]);
+    }), [updateOrderNotesMutation]);
 
     // ============================================
     // UPDATE LINE NOTES
@@ -195,7 +195,7 @@ export function useOrderCrudMutations(options: UseOrderCrudMutationsOptions = {}
         isPending: updateLineNotesMutation.isPending,
         isError: updateLineNotesMutation.isError,
         error: updateLineNotesMutation.error,
-    }), [updateLineNotesMutation.isPending, updateLineNotesMutation.isError, updateLineNotesMutation.error]);
+    }), [updateLineNotesMutation]);
 
     // ============================================
     // UPDATE SHIP BY DATE
@@ -227,7 +227,7 @@ export function useOrderCrudMutations(options: UseOrderCrudMutationsOptions = {}
         isPending: updateShipByDateMutation.isPending,
         isError: updateShipByDateMutation.isError,
         error: updateShipByDateMutation.error,
-    }), [updateShipByDateMutation.isPending, updateShipByDateMutation.isError, updateShipByDateMutation.error]);
+    }), [updateShipByDateMutation]);
 
     return {
         createOrder,

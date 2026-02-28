@@ -5,6 +5,7 @@
  * Toggle allows override with custom value.
  */
 
+/* eslint-disable @typescript-eslint/no-explicit-any -- generic form control accepts any shape */
 import { Controller, type Control } from 'react-hook-form';
 import { ArrowUp } from 'lucide-react';
 // Types defined locally since cost cascade was removed from the shared types

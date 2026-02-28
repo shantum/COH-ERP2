@@ -45,6 +45,7 @@ export function SettingsTab({ config, loading, onRefresh }: SettingsTabProps) {
         if (configKey !== prevConfigRef.current) {
             prevConfigRef.current = configKey;
             if (!hasChanges) {
+                // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing server config to local form state
                 setWindowDays(config.windowDays);
                 setWindowWarningDays(config.windowWarningDays);
                 setAutoRejectAfterDays(config.autoRejectAfterDays);

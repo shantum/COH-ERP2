@@ -52,7 +52,7 @@ export function useOrderLineMutations(options: UseOrderLineMutationsOptions = {}
         isPending: updateLineMutation.isPending,
         isError: updateLineMutation.isError,
         error: updateLineMutation.error,
-    }), [updateLineMutation.isPending, updateLineMutation.isError, updateLineMutation.error]);
+    }), [updateLineMutation]);
 
     // ============================================
     // ADD LINE
@@ -81,7 +81,7 @@ export function useOrderLineMutations(options: UseOrderLineMutationsOptions = {}
         isPending: addLineMutation.isPending,
         isError: addLineMutation.isError,
         error: addLineMutation.error,
-    }), [addLineMutation.isPending, addLineMutation.isError, addLineMutation.error]);
+    }), [addLineMutation]);
 
     // ============================================
     // CUSTOMIZE LINE
@@ -116,7 +116,7 @@ export function useOrderLineMutations(options: UseOrderLineMutationsOptions = {}
         isPending: customizeLineMutation.isPending,
         isError: customizeLineMutation.isError,
         error: customizeLineMutation.error,
-    }), [customizeLineMutation.isPending, customizeLineMutation.isError, customizeLineMutation.error]);
+    }), [customizeLineMutation]);
 
     // ============================================
     // REMOVE CUSTOMIZATION
@@ -164,7 +164,7 @@ export function useOrderLineMutations(options: UseOrderLineMutationsOptions = {}
         isPending: removeCustomizationMutation.isPending,
         isError: removeCustomizationMutation.isError,
         error: removeCustomizationMutation.error,
-    }), [removeCustomizationMutation.isPending, removeCustomizationMutation.isError, removeCustomizationMutation.error]);
+    }), [removeCustomizationMutation]);
 
     return {
         updateLine,

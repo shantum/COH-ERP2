@@ -156,6 +156,7 @@ function TailorCell({
     // Sync external value changes
     useEffect(() => {
         if (!isEditing) {
+            // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing prop to local state when not editing
             setValue(currentValue || '');
         }
     }, [currentValue, isEditing]);

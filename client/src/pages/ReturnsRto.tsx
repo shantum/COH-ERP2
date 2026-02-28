@@ -112,18 +112,19 @@ export default function ReturnsRto() {
     });
 
     // Filter and paginate queue items
+    const queueItems = queueData?.items;
     const filteredItems = useMemo(() => {
-        if (!queueData?.items) return [];
-        if (!searchFilter.trim()) return queueData.items;
+        if (!queueItems) return [];
+        if (!searchFilter.trim()) return queueItems;
 
         const search = searchFilter.toLowerCase();
-        return queueData.items.filter(item =>
+        return queueItems.filter(item =>
             item.skuCode.toLowerCase().includes(search) ||
             item.productName.toLowerCase().includes(search) ||
             item.contextValue?.toLowerCase().includes(search) ||
             item.customerName?.toLowerCase().includes(search)
         );
-    }, [queueData?.items, searchFilter]);
+    }, [queueItems, searchFilter]);
 
     const totalPages = Math.ceil(filteredItems.length / pageSize);
     const paginatedItems = filteredItems.slice(

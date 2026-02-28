@@ -19,7 +19,9 @@ export default function BomTab() {
 
     const selectedProductId = search.productId;
 
-    const handleSelectProduct = useCallback((productId: string, _productName: string) => {
+    const handleSelectProduct = useCallback(
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        (productId: string, _productName: string) => {
         navigate({
             to: '/fabrics',
             search: { tab: 'bom', productId },

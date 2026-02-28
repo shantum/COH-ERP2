@@ -31,6 +31,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
  * Auth query options - shared between AuthProvider and route beforeLoad
  * Exported so _authenticated.tsx can use the same query configuration
  */
+// eslint-disable-next-line react-refresh/only-export-components -- shared query options used by route beforeLoad
 export const authQueryOptions = {
     queryKey: authQueryKeys.user,
     queryFn: async (): Promise<AuthUser | null> => {
@@ -122,6 +123,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     );
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- hook must be co-located with AuthProvider
 export function useAuth() {
     const context = useContext(AuthContext);
     if (context === undefined) {

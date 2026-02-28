@@ -588,6 +588,7 @@ export function useOrderSSE({
             reconnectAttempts.current++;
 
             reconnectTimeoutRef.current = setTimeout(() => {
+                // eslint-disable-next-line react-hooks/immutability -- reconnect references connect which is declared after this callback
                 connect();
             }, delay);
         };

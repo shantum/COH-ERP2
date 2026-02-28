@@ -253,12 +253,13 @@ export default function DemandForecast() {
         } finally {
             setAnalysisLoading(false);
         }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- forecastId triggers data refetch, analysis depends on data
     }, [data]);
 
     const toggleProduct = (name: string) => {
         setExpandedProducts(prev => {
             const next = new Set(prev);
-            next.has(name) ? next.delete(name) : next.add(name);
+            if (next.has(name)) { next.delete(name); } else { next.add(name); }
             return next;
         });
     };
@@ -751,7 +752,7 @@ function FabricRequirements({ fabrics, unit }: { fabrics: FabricRequirement[]; u
     const toggleColour = (code: string) => {
         setExpandedColours(prev => {
             const next = new Set(prev);
-            next.has(code) ? next.delete(code) : next.add(code);
+            if (next.has(code)) { next.delete(code); } else { next.add(code); }
             return next;
         });
     };

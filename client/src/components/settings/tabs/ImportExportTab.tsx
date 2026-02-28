@@ -64,7 +64,7 @@ export function ImportExportTab() {
             a.download = filename;
             a.click();
             window.URL.revokeObjectURL(url);
-        } catch (error: unknown) {
+        } catch {
             toast.error('Export failed');
         }
     };

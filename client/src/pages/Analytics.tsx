@@ -61,6 +61,7 @@ export default function Analytics() {
     const [columnWidths, setColumnWidths] = useState<Record<string, number>>({});
     useEffect(() => {
         const saved = localStorage.getItem('analyticsGridColumnWidths');
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- hydrating from localStorage on mount only
         if (saved) { try { setColumnWidths(JSON.parse(saved)); } catch { /* ignore */ } }
     }, []);
 
@@ -95,6 +96,7 @@ export default function Analytics() {
 
     // Reset expanded state when dimension changes
     useEffect(() => {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- resetting derived state when dimension changes
         setExpandedProducts(new Set());
     }, [dimension]);
 
@@ -116,6 +118,7 @@ export default function Analytics() {
     };
 
     // Flatten breakdown data for product dimension (parent + expanded children)
+    // eslint-disable-next-line react-hooks/preserve-manual-memoization -- deps are correct, compiler infers broader `data`
     const flatRowData = useMemo((): DisplayRow[] => {
         if (!data?.breakdown) return [];
         if (dimension !== 'product') return data.breakdown;

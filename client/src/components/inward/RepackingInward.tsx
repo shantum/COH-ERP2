@@ -40,7 +40,8 @@ const WRITE_OFF_REASONS = [
     { value: 'other', label: 'Other' },
 ];
 
-export default function RepackingInward({ onSuccess: _onSuccess, onError: _onError }: RepackingInwardProps) {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export default function RepackingInward(_props: RepackingInwardProps) {
     const queryClient = useQueryClient();
     const inputRef = useRef<HTMLInputElement>(null);
 

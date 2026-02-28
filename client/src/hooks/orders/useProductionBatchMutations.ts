@@ -20,6 +20,7 @@ export interface UseProductionBatchMutationsOptions {
     page?: number;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function useProductionBatchMutations(_options: UseProductionBatchMutationsOptions = {}) {
     const queryClient = useQueryClient();
     const { invalidateOpenOrders } = useOrderInvalidation();

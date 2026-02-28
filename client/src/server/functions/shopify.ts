@@ -149,32 +149,28 @@ async function callExpressApi<T>(
 
     const authToken = getCookie('auth_token');
 
-    try {
-        const response = await fetch(`${apiUrl}${path}`, {
-            ...options,
-            headers: {
-                'Content-Type': 'application/json',
-                ...(authToken ? { Cookie: `auth_token=${authToken}` } : {}),
-                ...options.headers,
-            },
-        });
+    const response = await fetch(`${apiUrl}${path}`, {
+        ...options,
+        headers: {
+            'Content-Type': 'application/json',
+            ...(authToken ? { Cookie: `auth_token=${authToken}` } : {}),
+            ...options.headers,
+        },
+    });
 
-        if (!response.ok) {
-            const errorBody = await response.text();
-            let errorMessage: string;
-            try {
-                const errorJson = JSON.parse(errorBody) as { error?: string; message?: string };
-                errorMessage = errorJson.error || errorJson.message || `API call failed: ${response.status}`;
-            } catch {
-                errorMessage = `API call failed: ${response.status} - ${errorBody}`;
-            }
-            throw new Error(errorMessage);
+    if (!response.ok) {
+        const errorBody = await response.text();
+        let errorMessage: string;
+        try {
+            const errorJson = JSON.parse(errorBody) as { error?: string; message?: string };
+            errorMessage = errorJson.error || errorJson.message || `API call failed: ${response.status}`;
+        } catch {
+            errorMessage = `API call failed: ${response.status} - ${errorBody}`;
         }
-
-        return response.json() as Promise<T>;
-    } catch (error) {
-        throw error;
+        throw new Error(errorMessage);
     }
+
+    return response.json() as Promise<T>;
 }
 
 // ============================================

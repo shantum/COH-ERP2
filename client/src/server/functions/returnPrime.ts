@@ -48,7 +48,9 @@ const ReturnPrimeRequestIdSchema = z.object({
 // ============================================
 
 /** Prisma-derived type for ReturnPrimeRequest rows */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type -- Prisma payload type requires empty object
 type LocalRequest = Prisma.ReturnPrimeRequestGetPayload<{}>;
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type -- Prisma payload type requires empty object
 type CsvEnrichment = Prisma.ReturnPrimeCsvEnrichmentGetPayload<{}>;
 
 type ParsedLineItem = z.infer<typeof ReturnPrimeApiLineItemSchema>;

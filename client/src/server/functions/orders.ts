@@ -1116,7 +1116,7 @@ export const getOrderById = createServerFn({ method: 'GET' })
             }
 
             // Parse Shopify rawData for additional details (UTM, gateway, shipping lines, etc.)
-            let shopifyAttributes: Record<string, string> = {};
+            const shopifyAttributes: Record<string, string> = {};
             let shippingLines: Array<{ title: string; price: string }> = [];
             let subtotalPrice: string | null = null;
             let totalTax: string | null = null;

@@ -129,45 +129,20 @@ export default function Layout() {
     // Auto-update document title based on current route
     useDocumentTitle();
 
-    // Restricted user: only sees fabric-count, no sidebar
-    const isRestricted = user?.email === 'prabhakar@coh.one';
-    if (isRestricted) {
-        return (
-            <div className="min-h-screen bg-gray-50">
-                <div className="flex items-center justify-between px-4 py-3 bg-white border-b border-gray-200">
-                    <span className="text-lg font-bold text-brand-charcoal">COH ERP</span>
-                    <div className="flex items-center gap-3">
-                        <span className="text-sm text-gray-600">{user?.name}</span>
-                        <button
-                            onClick={() => { logout(); navigate({ to: '/login' }); }}
-                            className="p-1.5 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100"
-                            title="Logout"
-                        >
-                            <LogOut size={18} />
-                        </button>
-                    </div>
-                </div>
-                <div className="p-4 md:p-6 lg:p-8">
-                    <Outlet />
-                </div>
-            </div>
-        );
-    }
-
     const [sidebarOpen, setSidebarOpen] = useState(false);
-    const [collapsed, setCollapsed] = useState(false);
+    const [collapsed, setCollapsed] = useState(() => {
+        if (typeof window === 'undefined') return false;
+        return localStorage.getItem('sidebar-collapsed') === 'true';
+    });
     const [isHovering, setIsHovering] = useState(false);
-    const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
-
-    // Hydrate from localStorage after mount to avoid SSR mismatch
-    useEffect(() => {
-        const savedCollapsed = localStorage.getItem('sidebar-collapsed');
-        if (savedCollapsed === 'true') setCollapsed(true);
-        const savedGroups = localStorage.getItem('sidebar-collapsed-groups');
-        if (savedGroups) {
-            try { setCollapsedGroups(JSON.parse(savedGroups)); } catch { /* ignore */ }
+    const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>(() => {
+        if (typeof window === 'undefined') return {};
+        const saved = localStorage.getItem('sidebar-collapsed-groups');
+        if (saved) {
+            try { return JSON.parse(saved); } catch { /* ignore */ }
         }
-    }, []);
+        return {};
+    });
 
     // Fetch admin-configured sidebar order (client-only to avoid SSR 401)
     const getSidebarOrderFn = useServerFn(getSidebarOrder);
@@ -216,6 +191,31 @@ export default function Layout() {
     useEffect(() => {
         localStorage.setItem('sidebar-collapsed-groups', JSON.stringify(collapsedGroups));
     }, [collapsedGroups]);
+
+    // Restricted user: only sees fabric-count, no sidebar
+    const isRestricted = user?.email === 'prabhakar@coh.one';
+    if (isRestricted) {
+        return (
+            <div className="min-h-screen bg-gray-50">
+                <div className="flex items-center justify-between px-4 py-3 bg-white border-b border-gray-200">
+                    <span className="text-lg font-bold text-brand-charcoal">COH ERP</span>
+                    <div className="flex items-center gap-3">
+                        <span className="text-sm text-gray-600">{user?.name}</span>
+                        <button
+                            onClick={() => { logout(); navigate({ to: '/login' }); }}
+                            className="p-1.5 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100"
+                            title="Logout"
+                        >
+                            <LogOut size={18} />
+                        </button>
+                    </div>
+                </div>
+                <div className="p-4 md:p-6 lg:p-8">
+                    <Outlet />
+                </div>
+            </div>
+        );
+    }
 
     const handleLogout = () => {
         logout();

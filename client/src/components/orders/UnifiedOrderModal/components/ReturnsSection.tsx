@@ -512,6 +512,8 @@ function ActiveReturnCard({
   const [receiveCondition, setReceiveCondition] = useState<string>('');
   const [isEditingNotes, setIsEditingNotes] = useState(false);
   const [notesValue, setNotesValue] = useState(line.returnNotes || '');
+  const [showExchangeSearch, setShowExchangeSearch] = useState(false);
+  const [now] = useState(() => Date.now());
 
   const statusConfig = RETURN_STATUS_CONFIG[line.returnStatus || ''];
   if (!statusConfig) return null;
@@ -567,9 +569,7 @@ function ActiveReturnCard({
     }
   };
 
-  const [showExchangeSearch, setShowExchangeSearch] = useState(false);
-
-  const handleExchangeSkuSelect = (sku: SKUData, _stock: number) => {
+  const handleExchangeSkuSelect = (sku: SKUData) => {
     if (onCreateExchange) {
       onCreateExchange(sku.id, line.returnQty || 1);
     }
@@ -578,7 +578,7 @@ function ActiveReturnCard({
 
   // Calculate days since request
   const daysSinceRequest = line.returnRequestedAt
-    ? Math.floor((Date.now() - new Date(line.returnRequestedAt).getTime()) / (1000 * 60 * 60 * 24))
+    ? Math.floor((now - new Date(line.returnRequestedAt).getTime()) / (1000 * 60 * 60 * 24))
     : 0;
 
   return (

@@ -19,6 +19,7 @@ export const NotesCell = memo(function NotesCell({ row }: NotesCellProps) {
     useEffect(() => {
         if (textRef.current && !isExpanded) {
             const el = textRef.current;
+            // eslint-disable-next-line react-hooks/set-state-in-effect -- measuring DOM to sync truncation state
             setIsTruncated(el.scrollHeight > el.clientHeight || el.scrollWidth > el.clientWidth);
         }
     }, [notes, isExpanded]);

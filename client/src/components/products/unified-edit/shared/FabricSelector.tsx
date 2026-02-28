@@ -15,6 +15,7 @@ import type { FabricColour } from '../types';
 interface FabricSelectorProps {
   name: string;
   label: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- generic form control type
   control: Control<any>;
   fabricColours: FabricColour[];
   materialId?: string | null;

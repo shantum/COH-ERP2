@@ -352,6 +352,7 @@ export default function Catalog() {
     }, []);
 
     // Filtered products based on selected gender/category
+    // eslint-disable-next-line react-hooks/preserve-manual-memoization -- deps are correct, compiler infers broader filterOptions
     const filteredProducts = useMemo(() => {
         if (!filterOptions?.products) return [];
         return filterOptions.products.filter((p: { id: string; name: string; gender: string | null; category: string | null }) => {
@@ -795,7 +796,7 @@ export default function Catalog() {
                                 return params.data.skuId;
                             }}
                             // Handle cell edits (MRP inline editing)
-                            onCellValueChanged={(_params) => {
+                            onCellValueChanged={() => {
                                 // Inline edits handled by individual column editable callbacks
                             }}
                             // Pagination

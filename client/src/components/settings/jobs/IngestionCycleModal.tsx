@@ -67,40 +67,43 @@ function StepRow({ step }: { step: CycleStep }) {
 
 export function IngestionCycleModal({ open, type, onClose }: IngestionCycleModalProps) {
     const queryClient = useQueryClient();
-    // Track whether we've ever seen isRunning=true for this session
-    const hasSeenRunning = useRef(false);
+    // Track whether we've ever seen isRunning=true for this session (ref for refetchInterval callback)
+    const hasSeenRunningRef = useRef(false);
 
     const { data: progressData } = useQuery({
         queryKey: ['cycleProgress'],
         queryFn: async () => {
             const result = await getCycleProgress();
             if (!result.success) return null;
-            return result.data as unknown as CycleProgressState;
+            const data = result.data as unknown as CycleProgressState;
+            // Track running state inside queryFn (not during render)
+            if (data?.isRunning) {
+                hasSeenRunningRef.current = true;
+            }
+            return data;
         },
         enabled: open,
         refetchInterval: (query) => {
             const data = query.state.data;
             // Keep polling until we see the cycle start AND finish
-            if (!hasSeenRunning.current) return 2000;
+            if (!hasSeenRunningRef.current) return 2000;
             if (data?.isRunning) return 2000;
             // One final poll after it finishes
             return false;
         },
     });
 
-    // Track if we've seen the running state (to ignore stale data)
-    if (progressData?.isRunning) {
-        hasSeenRunning.current = true;
-    }
-
     const isRunning = progressData?.isRunning ?? false;
-    const hasValidData = hasSeenRunning.current && progressData != null;
+    // Derive hasSeenRunning from the ref — safe to read here because it's only set
+    // in queryFn which runs before render receives the new data
+    // eslint-disable-next-line react-hooks/refs -- hasSeenRunningRef is set in queryFn (not render), read here is safe and consistent with query data
+    const hasValidData = hasSeenRunningRef.current && progressData != null;
     const steps = hasValidData ? (progressData?.steps ?? []) : [];
     const isDone = hasValidData && !isRunning && steps.length > 0;
 
     // Invalidate job queries when cycle finishes
     const handleClose = () => {
-        hasSeenRunning.current = false;
+        hasSeenRunningRef.current = false;
         if (isDone) {
             queryClient.invalidateQueries({ queryKey: ['backgroundJobs'] });
             queryClient.invalidateQueries({ queryKey: ['sheetOffloadStatus'] });

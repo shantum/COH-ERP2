@@ -285,7 +285,7 @@ function ProductionContent() {
             setShowComplete(null);
             // Also invalidate inventory
             queryClient.invalidateQueries({ queryKey: ['inventory'] });
-        } catch (error) {
+        } catch {
             // Revert on error
             invalidateAll();
         }
@@ -301,7 +301,7 @@ function ProductionContent() {
 
         try {
             await mutations.deleteBatch.mutateAsync({ batchId });
-        } catch (error) {
+        } catch {
             // Revert on error
             invalidateAll();
         }
@@ -316,7 +316,7 @@ function ProductionContent() {
             await mutations.uncompleteBatch.mutateAsync({ batchId });
             // Also invalidate inventory
             queryClient.invalidateQueries({ queryKey: ['inventory'] });
-        } catch (error) {
+        } catch {
             // Revert on error
             invalidateAll();
         }
@@ -601,6 +601,7 @@ function ProductionContent() {
         setExpandedDates(newSet);
     };
 
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- groupBatchesByDate captures closure vars but we only want to recompute when batches change
     const dateGroups = useMemo(() => groupBatchesByDate(batches || []), [batches]);
 
     // Today's date for UI - use local date to match batch dates (stable across renders within a day)
@@ -614,7 +615,8 @@ function ProductionContent() {
         return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     }, []);
 
-    // Expand today and tomorrow by default
+    // Expand today and tomorrow by default (only on first data load)
+     
     useEffect(() => {
         if (expandedDates.size > 0 || dateGroups.length === 0) return;
 

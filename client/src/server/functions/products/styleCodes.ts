@@ -33,7 +33,7 @@ export interface StyleCodesResponse {
  */
 export const getStyleCodes = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
-    .inputValidator((_input: unknown) => ({}))
+    .inputValidator(() => ({}))
     .handler(async (): Promise<StyleCodesResponse> => {
         try {
             const db = await getKysely();

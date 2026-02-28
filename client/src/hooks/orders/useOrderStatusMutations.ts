@@ -21,6 +21,7 @@ export interface UseOrderStatusMutationsOptions {
     page?: number;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- options reserved for future use
 export function useOrderStatusMutations(_options: UseOrderStatusMutationsOptions = {}) {
     const queryClient = useQueryClient();
     const { invalidateOpenOrders, invalidateCancelledOrders } = useOrderInvalidation();
@@ -57,7 +58,7 @@ export function useOrderStatusMutations(_options: UseOrderStatusMutationsOptions
         isPending: cancelOrderMutation.isPending,
         isError: cancelOrderMutation.isError,
         error: cancelOrderMutation.error,
-    }), [cancelOrderMutation.isPending, cancelOrderMutation.isError, cancelOrderMutation.error]);
+    }), [cancelOrderMutation]);
 
     // ============================================
     // UNCANCEL ORDER
@@ -86,7 +87,7 @@ export function useOrderStatusMutations(_options: UseOrderStatusMutationsOptions
         isPending: uncancelOrderMutation.isPending,
         isError: uncancelOrderMutation.isError,
         error: uncancelOrderMutation.error,
-    }), [uncancelOrderMutation.isPending, uncancelOrderMutation.isError, uncancelOrderMutation.error]);
+    }), [uncancelOrderMutation]);
 
     return {
         cancelOrder,

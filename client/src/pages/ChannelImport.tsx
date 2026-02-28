@@ -448,6 +448,7 @@ export default function ChannelImport() {
 
   // Ref for selectedOrderIds so checkbox renderer doesn't cause columnDefs rebuild
   const selectedOrderIdsRef = useRef(selectedOrderIds);
+  // eslint-disable-next-line react-hooks/refs -- intentional ref sync to avoid columnDefs rebuild on selection change
   selectedOrderIdsRef.current = selectedOrderIds;
 
   const columnDefs: ColDef<GridRow>[] = useMemo(() => [

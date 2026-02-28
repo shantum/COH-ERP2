@@ -119,6 +119,7 @@ export function SidebarTab() {
 
     useEffect(() => {
         if (savedOrder) {
+            // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing local state from fetched order
             setOrder(savedOrder);
         }
     }, [savedOrder]);

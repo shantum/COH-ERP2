@@ -33,7 +33,7 @@ const POLL_INTERVAL_PASSIVE = 45000;
 
 export type OrderView = 'all' | 'in_transit' | 'delivered' | 'rto' | 'cancelled';
 
-export const getPageSize = (_view: OrderView): number => {
+export const getPageSize = (): number => {
     return ORDERS_PAGE_SIZE;
 };
 
@@ -112,12 +112,12 @@ export function useUnifiedOrdersData({
         staleTime: 300000,
     });
 
-    const rows = ordersQuery.data?.rows || [];
+    const rows = useMemo(() => ordersQuery.data?.rows || [], [ordersQuery.data?.rows]);
     const pagination = ordersQuery.data?.pagination;
 
     const orders = useMemo(() => {
         if (rows.length === 0) return [];
-        const orderMap = new Map<string, any>();
+        const orderMap = new Map<string, Record<string, unknown>>();
         for (const row of rows) {
             if (!orderMap.has(row.orderId) && row.order) {
                 orderMap.set(row.orderId, {

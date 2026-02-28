@@ -128,7 +128,7 @@ export default function StockReport() {
 
     const snapshot = snapshotQuery.data;
     const summary = summaryQuery.data;
-    const items = snapshot?.items ?? [];
+    const items = useMemo(() => snapshot?.items ?? [], [snapshot?.items]);
 
     // Navigation
     const updateSearch = useCallback((updates: Partial<typeof search>) => {

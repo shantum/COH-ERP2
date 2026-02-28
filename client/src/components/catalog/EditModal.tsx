@@ -58,6 +58,7 @@ export function EditModal({
     useEffect(() => {
         if (data) {
             if (level === 'sku') {
+                // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing form state from external data
                 setFormData({
                     mrp: String(data.mrp || ''),
                     targetStockQty: String(data.targetStockQty || ''),

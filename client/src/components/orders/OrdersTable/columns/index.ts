@@ -38,6 +38,7 @@ export function buildAllColumns(ctx: OrdersTableContext): ColumnDef<FlattenedOrd
  */
 export function getColumnsForView(
     columns: ColumnDef<FlattenedOrderRow>[],
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     _view: string
 ): ColumnDef<FlattenedOrderRow>[] {
     // All views use the same columns now

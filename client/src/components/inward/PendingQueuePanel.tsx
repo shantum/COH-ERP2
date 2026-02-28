@@ -68,6 +68,7 @@ export default function PendingQueuePanel({ source, onSelectItem, title, classNa
     });
 
     // Filter items based on search
+    // eslint-disable-next-line react-hooks/preserve-manual-memoization -- memoization deps are correct
     const filteredItems = useMemo(() => {
         if (!queueData?.items) return [];
         if (!searchInput.trim()) return queueData.items;

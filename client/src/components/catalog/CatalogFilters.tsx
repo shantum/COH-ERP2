@@ -13,10 +13,9 @@ import { Search, RefreshCw } from 'lucide-react';
 import { ColumnVisibilityDropdown, GridPreferencesToolbar } from '../common/grid';
 import type { ViewLevel } from './FabricEditPopover';
 
-// Page size options
 export const PAGE_SIZE_OPTIONS = [100, 500, 1000, 0] as const; // 0 = All
 
-// View options for data grouping
+// eslint-disable-next-line react-refresh/only-export-components -- intentional shared constants
 export const VIEW_OPTIONS: { value: ViewLevel; label: string }[] = [
     { value: 'product', label: 'By Product' },
     { value: 'variation', label: 'By Color' },

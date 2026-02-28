@@ -5,6 +5,8 @@
  * Production uses SSR mode with real TanStack Start.
  */
 
+/* eslint-disable @typescript-eslint/no-unused-vars */
+
 export function getCookie(_name: string): string | undefined {
     return undefined;
 }

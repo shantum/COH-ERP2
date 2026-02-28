@@ -292,6 +292,7 @@ export default function Customers() {
                 replace: true,
             });
         }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only trigger on search text change, not on navigate/urlSearch
     }, [debouncedSearch]);
 
     // Fetch customer's most recent order when selected
@@ -392,7 +393,7 @@ export default function Customers() {
 
     // Extract customers from high value response
     // Server Function returns array of customers, calculate stats on client side
-    const highValue = highValueData || [];
+    const highValue = useMemo(() => highValueData || [], [highValueData]);
     const highValueStats = highValue.length > 0 ? {
         totalCustomers: highValue.length,
         totalRevenue: highValue.reduce((sum, c) => sum + c.totalSpent, 0),

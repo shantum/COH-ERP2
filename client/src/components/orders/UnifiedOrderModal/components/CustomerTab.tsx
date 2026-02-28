@@ -5,7 +5,7 @@
  * with navigation capability to other orders.
  */
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import {
   Mail, Phone, MessageCircle,
   Palette, Package, Layers,
@@ -229,7 +229,10 @@ function TierProgressBar({ progress, nextTier, amountToNext, shouldUpgrade }: { 
 // ============================================================================
 
 export function CustomerTab({ customer, currentOrderId, onSelectOrder, isLoading }: CustomerTabProps) {
+  const [now] = useState(() => Date.now());
+
   // Calculate size preferences from orders
+  // eslint-disable-next-line react-hooks/preserve-manual-memoization -- customer can be null, optional chaining is intentional
   const sizePreferences = useMemo(() => {
     if (!customer?.orders) return [];
     const sizeCounts: Record<string, number> = {};
@@ -279,7 +282,7 @@ export function CustomerTab({ customer, currentOrderId, onSelectOrder, isLoading
     customer.customerTier || 'bronze'
   );
   const daysSinceOrder = customer.lastOrderDate
-    ? Math.floor((Date.now() - new Date(customer.lastOrderDate).getTime()) / (1000 * 60 * 60 * 24))
+    ? Math.floor((now - new Date(customer.lastOrderDate).getTime()) / (1000 * 60 * 60 * 24))
     : null;
 
   // Calculate AVG order value

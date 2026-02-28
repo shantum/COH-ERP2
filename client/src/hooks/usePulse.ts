@@ -66,6 +66,8 @@ export function usePulse(enabled = true) {
         debounceTimersRef.current.set(table, timer);
     }, [queryClient]);
 
+    const connectRef = useRef<() => void>(() => {});
+
     const connect = useCallback(() => {
         // Skip during SSR (no window/EventSource available)
         if (typeof window === 'undefined') return;
@@ -121,14 +123,18 @@ export function usePulse(enabled = true) {
             reconnectAttempts.current++;
 
             console.log(`[Pulse] Reconnecting in ${delay}ms (attempt ${reconnectAttempts.current})`);
-            reconnectTimeoutRef.current = setTimeout(connect, delay);
+            reconnectTimeoutRef.current = setTimeout(() => connectRef.current(), delay);
         };
 
         eventSourceRef.current = es;
     }, [enabled, scheduleInvalidation]);
 
     useEffect(() => {
+        connectRef.current = connect;
         connect();
+
+        const timers = debounceTimersRef.current;
+        const pending = pendingInvalidationsRef.current;
 
         return () => {
             // Cleanup EventSource
@@ -144,9 +150,9 @@ export function usePulse(enabled = true) {
             }
 
             // Clear pending debounce timers
-            debounceTimersRef.current.forEach((timer) => clearTimeout(timer));
-            debounceTimersRef.current.clear();
-            pendingInvalidationsRef.current.clear();
+            timers.forEach((timer) => clearTimeout(timer));
+            timers.clear();
+            pending.clear();
         };
     }, [connect]);
 

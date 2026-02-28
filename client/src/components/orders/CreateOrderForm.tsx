@@ -320,7 +320,7 @@ export function CreateOrderForm({
             } else {
                 setOrderSearchError(result.error || 'Order not found');
             }
-        } catch (error: unknown) {
+        } catch {
             setOrderSearchError('Failed to look up order');
         } finally {
             setIsSearchingOrder(false);

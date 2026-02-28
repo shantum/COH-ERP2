@@ -226,7 +226,7 @@ export function useProductionMutations() {
         isPending: createTailorMutation.isPending,
         isError: createTailorMutation.isError,
         error: createTailorMutation.error,
-    }), [createTailorMutation.isPending, createTailorMutation.isError, createTailorMutation.error]);
+    }), [createTailorMutation]);
 
     // ============================================
     // CREATE BATCH
@@ -252,7 +252,7 @@ export function useProductionMutations() {
         isPending: createBatchMutation.isPending,
         isError: createBatchMutation.isError,
         error: createBatchMutation.error,
-    }), [createBatchMutation.isPending, createBatchMutation.isError, createBatchMutation.error]);
+    }), [createBatchMutation]);
 
     // ============================================
     // UPDATE BATCH
@@ -277,7 +277,7 @@ export function useProductionMutations() {
         isPending: updateBatchMutation.isPending,
         isError: updateBatchMutation.isError,
         error: updateBatchMutation.error,
-    }), [updateBatchMutation.isPending, updateBatchMutation.isError, updateBatchMutation.error]);
+    }), [updateBatchMutation]);
 
     // ============================================
     // DELETE BATCH
@@ -302,7 +302,7 @@ export function useProductionMutations() {
         isPending: deleteBatchMutation.isPending,
         isError: deleteBatchMutation.isError,
         error: deleteBatchMutation.error,
-    }), [deleteBatchMutation.isPending, deleteBatchMutation.isError, deleteBatchMutation.error]);
+    }), [deleteBatchMutation]);
 
     // ============================================
     // COMPLETE BATCH
@@ -328,7 +328,7 @@ export function useProductionMutations() {
         isPending: completeBatchMutation.isPending,
         isError: completeBatchMutation.isError,
         error: completeBatchMutation.error,
-    }), [completeBatchMutation.isPending, completeBatchMutation.isError, completeBatchMutation.error]);
+    }), [completeBatchMutation]);
 
     // ============================================
     // UNCOMPLETE BATCH
@@ -354,7 +354,7 @@ export function useProductionMutations() {
         isPending: uncompleteBatchMutation.isPending,
         isError: uncompleteBatchMutation.isError,
         error: uncompleteBatchMutation.error,
-    }), [uncompleteBatchMutation.isPending, uncompleteBatchMutation.isError, uncompleteBatchMutation.error]);
+    }), [uncompleteBatchMutation]);
 
     // ============================================
     // LOCK DATE
@@ -379,7 +379,7 @@ export function useProductionMutations() {
         isPending: lockDateMutation.isPending,
         isError: lockDateMutation.isError,
         error: lockDateMutation.error,
-    }), [lockDateMutation.isPending, lockDateMutation.isError, lockDateMutation.error]);
+    }), [lockDateMutation]);
 
     // ============================================
     // UNLOCK DATE
@@ -404,7 +404,7 @@ export function useProductionMutations() {
         isPending: unlockDateMutation.isPending,
         isError: unlockDateMutation.isError,
         error: unlockDateMutation.error,
-    }), [unlockDateMutation.isPending, unlockDateMutation.isError, unlockDateMutation.error]);
+    }), [unlockDateMutation]);
 
     return {
         createTailor: createTailorWrapper,

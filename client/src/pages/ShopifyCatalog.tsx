@@ -410,8 +410,13 @@ function MetafieldValue({ value, type, namespace, fieldKey }: {
 
     // 2. JSON arrays — parse and show items
     if (isJsonArray(value)) {
+        let arr: unknown[] | null = null;
         try {
-            const arr = JSON.parse(value) as unknown[];
+            arr = JSON.parse(value) as unknown[];
+        } catch {
+            // Not valid JSON, fall through
+        }
+        if (arr != null) {
             if (arr.length === 0) return <span className="text-gray-300">Empty list</span>;
 
             // Array of GIDs
@@ -463,16 +468,19 @@ function MetafieldValue({ value, type, namespace, fieldKey }: {
 
             // Fallback: just show count
             return <span className="text-gray-500">{arr.length} item{arr.length !== 1 ? 's' : ''}</span>;
-        } catch {
-            // Not valid JSON, fall through
         }
     }
 
     // 3. JSON objects — show key-value pairs
     if (isJsonObject(value)) {
+        let entries: [string, unknown][] | null = null;
         try {
             const obj = JSON.parse(value) as Record<string, unknown>;
-            const entries = Object.entries(obj);
+            entries = Object.entries(obj);
+        } catch {
+            // Not valid JSON, fall through
+        }
+        if (entries != null) {
             return (
                 <div className="space-y-0.5">
                     {entries.slice(0, 4).map(([k, v]) => (
@@ -486,8 +494,6 @@ function MetafieldValue({ value, type, namespace, fieldKey }: {
                     )}
                 </div>
             );
-        } catch {
-            // Not valid JSON, fall through
         }
     }
 

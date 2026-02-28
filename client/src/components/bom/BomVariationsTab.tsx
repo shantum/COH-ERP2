@@ -76,6 +76,7 @@ interface BomVariationsTabProps {
         trims: Array<{ id: string; code: string; name: string; costPerUnit: number }>;
         services: Array<{ id: string; code: string; name: string; costPerJob: number }>;
     };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- BOM update payload is polymorphic
     onUpdate: (updates: any) => void;
 }
 

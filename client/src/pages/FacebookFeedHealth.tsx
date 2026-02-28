@@ -207,7 +207,7 @@ export default function FacebookFeedHealth() {
     // Extract data
     const result: FeedHealthResult | undefined = data?.success ? data.data : undefined;
     const stats = result?.stats;
-    const allIssues = result?.issues ?? [];
+    const allIssues = useMemo(() => result?.issues ?? [], [result?.issues]);
 
     // Client-side filtering
     const filteredIssues = useMemo(() => {

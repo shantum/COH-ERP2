@@ -67,9 +67,11 @@ export interface PartyBalance {
 }
 
 import { formatCurrency as _fmt } from '../../utils/formatting';
+// eslint-disable-next-line react-refresh/only-export-components -- shared utility used by finance tab components
 export const formatCurrency = (amount: number) => _fmt(amount, { compact: false });
 
 /** "2026-01" -> "Jan 2026" */
+// eslint-disable-next-line react-refresh/only-export-components -- shared utility used by finance tab components
 export function formatPeriod(period: string): string {
   const [year, month] = period.split('-');
   if (!year || !month) return period;
@@ -78,6 +80,7 @@ export function formatPeriod(period: string): string {
 }
 
 /** "draft" -> "Draft", "partially_paid" -> "Partially Paid" */
+// eslint-disable-next-line react-refresh/only-export-components -- shared utility used by finance tab components
 export function formatStatus(status: string): string {
   return status.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
@@ -126,6 +129,7 @@ export function Pagination({ page, total, limit, onPageChange }: {
   );
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- shared utility used by finance tab components
 export function downloadCsv(rows: string[][], filename: string) {
   const csv = rows.map(row => row.map(cell => {
     const str = String(cell ?? '');

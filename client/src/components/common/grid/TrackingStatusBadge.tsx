@@ -11,6 +11,7 @@ interface TrackingStatusBadgeProps {
     ofdCount?: number;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Lucide icon components have complex types
 const STATUS_ICONS: Record<string, any> = {
     in_transit: Package,
     manifested: Package,

@@ -37,7 +37,7 @@ export default function InlineFabricPicker({
     staleTime: 5 * 60 * 1000,
   });
 
-  const allColours = coloursResponse?.items ?? [];
+  const allColours = useMemo(() => coloursResponse?.items ?? [], [coloursResponse?.items]);
 
   // Client-side filter by search text
   const filtered = useMemo(() => {

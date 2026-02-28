@@ -68,28 +68,7 @@ export default function CashFlowTab() {
 
   const [view, setView] = useState<'monthly' | 'quarterly' | 'fy'>('monthly');
 
-  if (isLoading) return <LoadingState />;
-  if (!data?.success) return <div className="text-muted-foreground text-center py-8">Failed to load cash flow data</div>;
-
-  const months = data.months;
-
-  const fmt = (n: number) => {
-    const sign = n < 0 ? '-' : '';
-    return `${sign}Rs ${Math.abs(n).toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
-  };
-
-  const toggle = (period: string) => {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(period)) next.delete(period);
-      else next.add(period);
-      return next;
-    });
-  };
-
-  const toggleDrilldown = (key: string) => {
-    setDrilldown((prev) => (prev === key ? null : key));
-  };
+  const months = useMemo(() => data?.success ? data.months : [], [data]);
 
   // Aggregate months into quarterly or FY rows
   const displayRows: CashFlowMonth[] = useMemo(() => {
@@ -125,6 +104,27 @@ export default function CashFlowTab() {
         } satisfies CashFlowMonth;
       });
   }, [months, view]);
+
+  if (isLoading) return <LoadingState />;
+  if (!data?.success) return <div className="text-muted-foreground text-center py-8">Failed to load cash flow data</div>;
+
+  const fmt = (n: number) => {
+    const sign = n < 0 ? '-' : '';
+    return `${sign}Rs ${Math.abs(n).toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+  };
+
+  const toggle = (period: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(period)) next.delete(period);
+      else next.add(period);
+      return next;
+    });
+  };
+
+  const toggleDrilldown = (key: string) => {
+    setDrilldown((prev) => (prev === key ? null : key));
+  };
 
   return (
     <div className="space-y-4">

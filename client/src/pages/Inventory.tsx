@@ -54,6 +54,7 @@ export default function Inventory() {
 
     // Ref for search to avoid unstable object dep in callbacks/effects
     const searchRef = useRef(search);
+    // eslint-disable-next-line react-hooks/refs -- intentional ref sync to avoid unstable object dep in callbacks
     searchRef.current = search;
 
     // Pagination from URL

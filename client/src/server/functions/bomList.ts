@@ -86,7 +86,8 @@ export const getBomList = createServerFn({ method: 'GET' })
         }
         const roles = Array.from(rolesMap.values())
             .sort((a, b) => a.sortOrder - b.sortOrder)
-            .map(({ sortOrder: _, ...r }) => r);
+            // eslint-disable-next-line @typescript-eslint/no-unused-vars
+            .map(({ sortOrder, ...r }) => r);
 
         // 2. Fetch all active products with templates, variations (bom lines), and SKUs
         const products = await prisma.product.findMany({

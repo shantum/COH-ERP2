@@ -125,6 +125,7 @@ export function MaterialEditModal({ type, item, isOpen, onClose, onSuccess }: Ma
 
         switch (type) {
             case 'material':
+                // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing form state from external data
                 setMaterialForm({
                     name: item.name || '',
                     description: item.description || '',

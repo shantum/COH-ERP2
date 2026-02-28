@@ -25,7 +25,7 @@ jobs:
       - run: npx prisma generate
       - run: pnpm --filter @coh/shared build
       - run: pnpm typecheck
-      - run: pnpm lint || true # TODO: fix 236 pre-existing lint errors, then remove || true
+      - run: pnpm lint
       - run: pnpm test
 
   deploy:

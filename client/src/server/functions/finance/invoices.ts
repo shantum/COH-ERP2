@@ -192,6 +192,7 @@ export const getInvoice = createServerFn({ method: 'GET' })
     if (!invoice) return { success: false as const, error: 'Invoice not found' };
 
     // Strip file binary from response
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { fileData: _, ...rest } = invoice;
 
     // Enrich payment info from Shopify rawData when cache columns are empty
@@ -561,6 +562,7 @@ async function confirmInvoiceWithLinkedBankTxn(
   bankTransactionId: string,
   tdsAmount: number,
   userId: string,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   _expenseAccountOverride: string | null = null,
   partyName: string | null = null,
   periodOffset: number | null = null,

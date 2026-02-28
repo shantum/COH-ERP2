@@ -190,7 +190,7 @@ export function SchedulePickupDialog({
                     message: result.error || 'Failed to check serviceability',
                 });
             }
-        } catch (err) {
+        } catch {
             setServiceability({
                 checking: false,
                 serviceable: false,

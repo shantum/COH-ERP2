@@ -62,7 +62,7 @@ export function AllReturnsTab() {
     }, [handleSearch]);
 
     const totalPages = data ? Math.ceil(data.total / data.limit) : 0;
-    const items = data?.items || [];
+    const items = useMemo(() => data?.items || [], [data?.items]);
 
     // Batch-fetch tracking for all AWBs on this page (single API call instead of N)
     const awbNumbers = useMemo(

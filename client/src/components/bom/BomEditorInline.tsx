@@ -44,7 +44,9 @@ export default function BomEditorInline({ productId }: BomEditorInlineProps) {
 
     // Reset state when product changes
     useEffect(() => {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing local state to prop change
         setActiveTab('template');
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing local state to prop change
         setHasUnsavedChanges(false);
     }, [productId]);
 

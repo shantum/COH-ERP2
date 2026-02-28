@@ -65,7 +65,7 @@ export default function FabricCount() {
         queryKey: ['fabricStockCount', 'colours'],
         queryFn: () => getColoursFn({ data: undefined }),
     });
-    const colours = coloursData?.items ?? [];
+    const colours = useMemo(() => coloursData?.items ?? [], [coloursData?.items]);
 
     // Fetch recent counts
     const { data: recentData } = useQuery({

@@ -90,6 +90,7 @@ export function SkuWiseDataTable({
     const hasMore = visibleCount < filteredRows.length;
 
     useEffect(() => {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- reset pagination on filter change
         setVisibleCount(BATCH_SIZE);
     }, [searchQuery, filteredData]);
 

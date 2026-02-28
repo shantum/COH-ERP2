@@ -17,6 +17,82 @@ interface OrdersAnalyticsBarProps {
     initialData?: OrdersAnalyticsResponse | null;
 }
 
+function ChangeIndicator({ change }: { change: number | null | undefined }) {
+    if (change === null || change === undefined) return null;
+    const isPositive = change > 0;
+    const isNegative = change < 0;
+    return (
+        <span className={`inline-flex items-center gap-0.5 text-[10px] sm:text-xs font-medium px-1 sm:px-1.5 py-0.5 rounded ${
+            isPositive ? 'bg-emerald-50 text-emerald-600' :
+            isNegative ? 'bg-red-50 text-red-600' :
+            'bg-gray-50 text-gray-500'
+        }`}>
+            {isPositive ? <TrendingUp size={10} /> : isNegative ? <TrendingDown size={10} /> : <Minus size={10} />}
+            {Math.abs(change).toFixed(0)}%
+        </span>
+    );
+}
+
+function PipelineStep({ color, label, count }: { color: string; label: string; count: number }) {
+    return (
+        <div className="flex items-center gap-1.5 sm:gap-2">
+            <div className={`w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full ${color}`}></div>
+            <div>
+                <div className="text-[10px] sm:text-xs text-gray-500 leading-none">{label}</div>
+                <div className="text-sm sm:text-base font-semibold text-gray-900 leading-tight">{count}</div>
+            </div>
+        </div>
+    );
+}
+
+function RevenueCard({
+    label,
+    total,
+    orderCount,
+    change,
+    avgDays,
+    customers
+}: {
+    label: string;
+    total: number;
+    orderCount: number;
+    change: number | null | undefined;
+    avgDays?: number;
+    customers?: CustomerStats;
+}) {
+    return (
+        <div className="bg-white rounded-lg border border-gray-100 p-2 sm:p-3 min-w-[85px] sm:min-w-[100px] flex-shrink-0">
+            <div className="text-[9px] sm:text-[10px] uppercase tracking-wider text-gray-400 font-medium mb-0.5 sm:mb-1">{label}</div>
+            <div className="flex items-baseline gap-1 sm:gap-2 flex-wrap">
+                <span className="text-base sm:text-lg font-semibold text-gray-900">{formatCurrency(total)}</span>
+                <ChangeIndicator change={change} />
+            </div>
+            <div className="text-[10px] sm:text-xs text-gray-400 mt-0.5">
+                {orderCount} orders
+                {avgDays && avgDays > 0 && (
+                    <span className="text-gray-300 ml-1 hidden sm:inline">
+                        ({formatCurrency(total / avgDays)}/d)
+                    </span>
+                )}
+            </div>
+            {/* New vs Returning Customers - hide on mobile for space */}
+            {customers && (customers.newCustomers > 0 || customers.returningCustomers > 0) && (
+                <div className="hidden sm:flex items-center gap-2 mt-1.5 text-[10px]">
+                    <span className="inline-flex items-center gap-0.5 text-emerald-600">
+                        <UserPlus size={9} />
+                        {customers.newPercent}%
+                    </span>
+                    <span className="text-gray-300">|</span>
+                    <span className="inline-flex items-center gap-0.5 text-blue-600">
+                        <Users size={9} />
+                        {customers.returningPercent}%
+                    </span>
+                </div>
+            )}
+        </div>
+    );
+}
+
 export function OrdersAnalyticsBar({ initialData }: OrdersAnalyticsBarProps) {
     const [isExpanded, setIsExpanded] = useState(true);
     const { data: analytics, isLoading, error, refetch } = useQuery<OrdersAnalyticsResponse>({
@@ -67,78 +143,6 @@ export function OrdersAnalyticsBar({ initialData }: OrdersAnalyticsBarProps) {
 
     // Use server-computed values for SSR consistency (avoids hydration mismatch)
     const { daysInThisMonth, daysInLastMonth } = analytics;
-
-    const ChangeIndicator = ({ change }: { change: number | null | undefined }) => {
-        if (change === null || change === undefined) return null;
-        const isPositive = change > 0;
-        const isNegative = change < 0;
-        return (
-            <span className={`inline-flex items-center gap-0.5 text-[10px] sm:text-xs font-medium px-1 sm:px-1.5 py-0.5 rounded ${
-                isPositive ? 'bg-emerald-50 text-emerald-600' :
-                isNegative ? 'bg-red-50 text-red-600' :
-                'bg-gray-50 text-gray-500'
-            }`}>
-                {isPositive ? <TrendingUp size={10} /> : isNegative ? <TrendingDown size={10} /> : <Minus size={10} />}
-                {Math.abs(change).toFixed(0)}%
-            </span>
-        );
-    };
-
-    const PipelineStep = ({ color, label, count }: { color: string; label: string; count: number }) => (
-        <div className="flex items-center gap-1.5 sm:gap-2">
-            <div className={`w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full ${color}`}></div>
-            <div>
-                <div className="text-[10px] sm:text-xs text-gray-500 leading-none">{label}</div>
-                <div className="text-sm sm:text-base font-semibold text-gray-900 leading-tight">{count}</div>
-            </div>
-        </div>
-    );
-
-    const RevenueCard = ({
-        label,
-        total,
-        orderCount,
-        change,
-        avgDays,
-        customers
-    }: {
-        label: string;
-        total: number;
-        orderCount: number;
-        change: number | null | undefined;
-        avgDays?: number;
-        customers?: CustomerStats;
-    }) => (
-        <div className="bg-white rounded-lg border border-gray-100 p-2 sm:p-3 min-w-[85px] sm:min-w-[100px] flex-shrink-0">
-            <div className="text-[9px] sm:text-[10px] uppercase tracking-wider text-gray-400 font-medium mb-0.5 sm:mb-1">{label}</div>
-            <div className="flex items-baseline gap-1 sm:gap-2 flex-wrap">
-                <span className="text-base sm:text-lg font-semibold text-gray-900">{formatCurrency(total)}</span>
-                <ChangeIndicator change={change} />
-            </div>
-            <div className="text-[10px] sm:text-xs text-gray-400 mt-0.5">
-                {orderCount} orders
-                {avgDays && avgDays > 0 && (
-                    <span className="text-gray-300 ml-1 hidden sm:inline">
-                        ({formatCurrency(total / avgDays)}/d)
-                    </span>
-                )}
-            </div>
-            {/* New vs Returning Customers - hide on mobile for space */}
-            {customers && (customers.newCustomers > 0 || customers.returningCustomers > 0) && (
-                <div className="hidden sm:flex items-center gap-2 mt-1.5 text-[10px]">
-                    <span className="inline-flex items-center gap-0.5 text-emerald-600">
-                        <UserPlus size={9} />
-                        {customers.newPercent}%
-                    </span>
-                    <span className="text-gray-300">|</span>
-                    <span className="inline-flex items-center gap-0.5 text-blue-600">
-                        <Users size={9} />
-                        {customers.returningPercent}%
-                    </span>
-                </div>
-            )}
-        </div>
-    );
 
     return (
         <div className="bg-gradient-to-b from-gray-50 to-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">

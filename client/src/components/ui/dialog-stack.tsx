@@ -488,7 +488,7 @@ export const DialogStackPrevious = ({
   );
 };
 
-// Export context hook for custom controls
+// eslint-disable-next-line react-refresh/only-export-components -- hook export alongside component is intentional
 export const useDialogStack = () => {
   const context = useContext(DialogStackContext);
   if (!context) {

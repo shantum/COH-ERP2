@@ -338,7 +338,8 @@ function RtoInwardForm({ scanResult, rtoData, onSuccess, onCancel }: RtoInwardFo
     );
 }
 
-export default function RtoInward({ onSuccess: _onSuccess, onError: _onError }: RtoInwardProps) {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export default function RtoInward(_props: RtoInwardProps) {
     const [scanCode, setScanCode] = useState('');
     const [isSearching, setIsSearching] = useState(false);
     const [scanResult, setScanResult] = useState<ScanLookupResult | null>(null);

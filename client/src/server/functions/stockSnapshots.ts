@@ -359,6 +359,7 @@ export const getMonthlySnapshot = createServerFn({ method: 'POST' })
         const total = enriched.length;
         const offset = (page - 1) * limit;
         const items = enriched.slice(offset, offset + limit).map(r => {
+            // eslint-disable-next-line @typescript-eslint/no-unused-vars
             const { _category, _productId, ...clean } = r as SnapshotRow & { _category?: string | null; _productId?: string };
             return clean;
         });

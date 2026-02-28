@@ -202,7 +202,7 @@ export function GeneralTab() {
         if (!/[A-Z]/.test(password)) errors.push('One uppercase letter');
         if (!/[a-z]/.test(password)) errors.push('One lowercase letter');
         if (!/[0-9]/.test(password)) errors.push('One number');
-        if (!/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password)) errors.push('One special character');
+        if (!/[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]/.test(password)) errors.push('One special character');
         return errors;
     };
 

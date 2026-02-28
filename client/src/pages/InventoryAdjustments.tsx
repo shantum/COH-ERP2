@@ -101,6 +101,7 @@ function FinishedGoodsTab() {
     }, [error]);
 
     // Reset reason when direction changes
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- resetting dependent state when direction changes
     useEffect(() => { setReason(''); }, [direction]);
 
     const reasons = direction === 'add' ? SKU_ADD_REASONS : SKU_REMOVE_REASONS;
@@ -364,6 +365,7 @@ function FabricTab() {
     }, [error]);
 
     // Reset reason when direction changes
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- resetting dependent state when direction changes
     useEffect(() => { setReason(''); }, [direction]);
 
     const reasons = direction === 'add' ? FABRIC_ADD_REASONS : FABRIC_REMOVE_REASONS;

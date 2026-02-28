@@ -35,7 +35,8 @@ const CONDITIONS: Array<{ value: ReturnCondition; label: string; description: st
     { value: 'wrong_item', label: 'Wrong Item', description: 'Different item than expected', color: 'orange' },
 ];
 
-export default function ReturnsInward({ onSuccess: _onSuccess, onError: _onError }: ReturnsInwardProps) {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export default function ReturnsInward(_props: ReturnsInwardProps) {
     const queryClient = useQueryClient();
     const inputRef = useRef<HTMLInputElement>(null);
 

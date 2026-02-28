@@ -231,7 +231,7 @@ export default function Returns() {
                 }),
             });
         },
-        [navigate]
+        [navigate, search]
     );
 
     const handleViewChange = useCallback(
@@ -243,7 +243,7 @@ export default function Returns() {
                 }),
             });
         },
-        [navigate]
+        [navigate, search]
     );
 
     const handleDatePresetChange = useCallback(
@@ -256,7 +256,7 @@ export default function Returns() {
                 }),
             });
         },
-        [navigate]
+        [navigate, search]
     );
 
     const handleSearch = useCallback(() => {

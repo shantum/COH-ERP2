@@ -452,6 +452,7 @@ export function CustomerDetailModal({
     const isLoading = providedLoading || fetchLoading;
 
     // Calculate size preferences from orders - MUST be before any early return
+    // eslint-disable-next-line react-hooks/preserve-manual-memoization -- memoization deps are correct
     const sizePreferences = useMemo(() => {
         if (!customer?.orders) return [];
         const sizeCounts: Record<string, number> = {};

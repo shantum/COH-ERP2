@@ -94,15 +94,6 @@ export default function UserManagement() {
     const [showCreateModal, setShowCreateModal] = useState(false);
     const [selectedUser, setSelectedUser] = useState<User | null>(null);
 
-    // Check permission to view this page
-    if (!hasPermission('users:view')) {
-        return (
-            <div className="p-8">
-                <AccessDenied message="You do not have permission to manage users." />
-            </div>
-        );
-    }
-
     // Fetch users using Server Function
     const { data: users, isLoading: usersLoading } = useQuery({
         queryKey: ['admin-users'],
@@ -166,11 +157,14 @@ export default function UserManagement() {
 
     // Stable refs for mutation functions so columnDefs don't rebuild every render
     const updateRoleMutateRef = useRef(updateRoleMutation.mutate);
-    updateRoleMutateRef.current = updateRoleMutation.mutate;
     const updateUserMutateRef = useRef(updateUserMutation.mutate);
-    updateUserMutateRef.current = updateUserMutation.mutate;
     const setSelectedUserRef = useRef(setSelectedUser);
-    setSelectedUserRef.current = setSelectedUser;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally runs every render to keep refs current
+    useEffect(() => {
+        updateRoleMutateRef.current = updateRoleMutation.mutate;
+        updateUserMutateRef.current = updateUserMutation.mutate;
+        setSelectedUserRef.current = setSelectedUser;
+    });
 
     // Column definitions — deps are only truly structural values (roles list, permissions)
     const columnDefs = useMemo<ColDef<User>[]>(() => [
@@ -342,6 +336,15 @@ export default function UserManagement() {
             inactive: users.filter((u: AdminUser) => !u.isActive).length,
         };
     }, [users]);
+
+    // Check permission to view this page (after all hooks)
+    if (!hasPermission('users:view')) {
+        return (
+            <div className="p-8">
+                <AccessDenied message="You do not have permission to manage users." />
+            </div>
+        );
+    }
 
     return (
         <div className="space-y-4 md:space-y-6">

@@ -293,7 +293,7 @@ export default function QuickOrder() {
             return { tone: 'info' as const, text: `${phoneMatches.length} possible existing customer match${phoneMatches.length === 1 ? '' : 'es'} found.` };
         }
         return { tone: 'warning' as const, text: 'No existing customer found. Continue as a new customer.' };
-    }, [phoneDigits, isSearchingPhoneCustomers, customerId, exactPhoneMatch, phoneMatches.length]);
+    }, [phoneDigits, isSearchingPhoneCustomers, customerId, exactPhoneMatch, phoneMatches.length, sourceOrder]);
 
     const applyCustomerAddress = async (nextCustomerId: string) => {
         try {

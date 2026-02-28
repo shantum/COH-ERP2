@@ -68,7 +68,6 @@ export default function PermissionEditorModal({
     isOpen,
     onClose,
     user,
-    roles: _roles, // Accept but ignore for backward compatibility
 }: PermissionEditorModalProps) {
     const queryClient = useQueryClient();
 
@@ -84,11 +83,12 @@ export default function PermissionEditorModal({
     // Reset state when modal opens with different user
     useEffect(() => {
         if (isOpen) {
+            // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing local state from props when modal opens
             setSelectedRole((user.role as UserRole) || 'staff');
             setSelectedExtras(new Set((user.extraAccess ?? []) as AccessFeature[]));
             setHasChanges(false);
         }
-    }, [isOpen, user.id]);
+    }, [isOpen, user.id, user.role, user.extraAccess]);
 
     // Get features for current role
     const roleFeatures = useMemo(() => getRoleFeatures(selectedRole), [selectedRole]);

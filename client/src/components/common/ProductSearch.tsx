@@ -152,7 +152,7 @@ export function ProductSearch({
   }, [serverSearchQuery.data]);
 
   // Use server results or legacy allSkus based on mode
-  const allSkus = useServerSearch ? serverSkus : propsSkus || [];
+  const allSkus = useMemo(() => useServerSearch ? serverSkus : propsSkus || [], [useServerSearch, serverSkus, propsSkus]);
 
   // Auto-focus input on mount
   useEffect(() => {
@@ -280,6 +280,7 @@ export function ProductSearch({
         fetchBalancesForSkus(skuIds);
       }
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- getBalance is stable, adding it causes infinite loop
   }, [sortedSkus, onFetchBalances, inventoryBalance, fetchBalancesForSkus, useServerSearch]);
 
   // Get balance for a SKU from various sources

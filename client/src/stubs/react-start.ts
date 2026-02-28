@@ -5,6 +5,8 @@
  * Production uses SSR mode with real TanStack Start.
  */
 
+/* eslint-disable @typescript-eslint/no-unused-vars -- stub parameters intentionally unused */
+
 // Server function stub - returns a chainable builder that produces a no-op function
 // In SPA mode, Server Functions return null/empty data - components should handle this gracefully
 export function createServerFn(_options?: unknown) {

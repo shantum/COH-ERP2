@@ -52,17 +52,6 @@ export default function Costing() {
     const queryClient = useQueryClient();
     const { hasAccess } = useAccess();
 
-    // Costing dashboard access check
-    if (!hasAccess('costing-dashboard')) {
-        return (
-            <div className="flex items-center justify-center h-64">
-                <div className="text-center">
-                    <p className="text-gray-500">Access restricted. You need costing dashboard permission.</p>
-                </div>
-            </div>
-        );
-    }
-
     // Editing state for config panel
     const [isEditingConfig, setIsEditingConfig] = useState(false);
     const [editLaborOverhead, setEditLaborOverhead] = useState<string>('');
@@ -74,20 +63,25 @@ export default function Costing() {
     const getCostingConfigFn = useServerFn(getCostingConfig);
     const updateCostingConfigFn = useServerFn(updateCostingConfig);
 
+    const hasAccessCosting = hasAccess('costing-dashboard');
+
     // Queries
     const { data: dashboardData, isLoading: isDashboardLoading } = useQuery({
         queryKey: costingQueryKeys.dashboard(period, channel),
         queryFn: () => getCostingDashboardFn({ data: { period, channel } }),
+        enabled: hasAccessCosting,
     });
 
     const { data: productData, isLoading: isProductLoading } = useQuery({
         queryKey: costingQueryKeys.products(period, channel),
         queryFn: () => getProductContributionFn({ data: { period, channel, limit: 50 } }),
+        enabled: hasAccessCosting,
     });
 
     const { data: configData } = useQuery({
         queryKey: costingQueryKeys.config,
         queryFn: () => getCostingConfigFn(),
+        enabled: hasAccessCosting,
     });
 
     // Mutation for updating config
@@ -221,6 +215,17 @@ export default function Costing() {
 
     const summary = dashboardData?.summary;
     const breakeven = dashboardData?.breakeven;
+
+    // Costing dashboard access check (after all hooks)
+    if (!hasAccessCosting) {
+        return (
+            <div className="flex items-center justify-center h-64">
+                <div className="text-center">
+                    <p className="text-gray-500">Access restricted. You need costing dashboard permission.</p>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="h-full flex flex-col">

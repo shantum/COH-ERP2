@@ -102,7 +102,7 @@ class NetworkMonitor {
     this.page.on('response', async (response: Response) => {
       const request = response.request();
       const matchingRequest = Array.from(this.requests.entries()).find(
-        ([_, req]) => req.url === request.url() && req.method === request.method() && !req.endTime
+        ([, req]) => req.url === request.url() && req.method === request.method() && !req.endTime
       );
 
       if (matchingRequest) {
@@ -134,7 +134,7 @@ class NetworkMonitor {
 
     this.page.on('requestfailed', (request: Request) => {
       const matchingRequest = Array.from(this.requests.entries()).find(
-        ([_, req]) => req.url === request.url() && req.method === request.method() && !req.endTime
+        ([, req]) => req.url === request.url() && req.method === request.method() && !req.endTime
       );
 
       if (matchingRequest) {
@@ -163,7 +163,7 @@ class NetworkMonitor {
       urlCounts.set(key, (urlCounts.get(key) || 0) + 1);
     });
     const duplicateRequests = Array.from(urlCounts.entries())
-      .filter(([_, count]) => count > 1)
+      .filter(([, count]) => count > 1)
       .map(([url, count]) => ({ url, count }));
 
     // Find large responses
@@ -236,7 +236,8 @@ class NetworkMonitor {
   }
 }
 
-// Helper: Login to the application
+// Helper: Login to the application (used when storage state is unavailable)
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function login(page: Page): Promise<void> {
   await page.goto('/login');
   await page.waitForLoadState('networkidle');
@@ -276,13 +277,11 @@ async function waitForGridData(page: Page, timeout = 30000): Promise<number> {
   // Wait for AG-Grid rows to appear
   await page.waitForSelector('.ag-row', { timeout });
 
-  // Count rows
-  const rows = await page.locator('.ag-row').count();
-
   return Date.now() - startTime;
 }
 
-// Helper: Get API response timing
+// Helper: Get API response timing (available for future tests)
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function measureApiCall(page: Page, urlPattern: RegExp): Promise<number> {
   return new Promise((resolve) => {
     const startTime = Date.now();
@@ -356,7 +355,7 @@ test.describe('Orders Page Production Tests', () => {
       if (response.url().includes('/api/trpc/orders.list') ||
           response.url().includes('orders.list')) {
         try {
-          const data = await response.json();
+          await response.json();
           // The response should be recent
           responseTimestamp = Date.now();
         } catch {

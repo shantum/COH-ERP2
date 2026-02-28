@@ -183,7 +183,7 @@ export default function Channels() {
   });
 
   // Time series data - reserved for future chart implementation
-  const { data: _timeSeriesData } = useQuery({
+  useQuery({
     queryKey: channelQueryKeys.timeSeries(channel, 'day', dateRange.startDate, dateRange.endDate),
     queryFn: () =>
       getChannelTimeSeriesFn({
@@ -198,7 +198,7 @@ export default function Channels() {
   });
 
   // Breakdown data - reserved for future chart implementation
-  const { data: _breakdownData } = useQuery({
+  useQuery({
     queryKey: channelQueryKeys.breakdown(channel, 'channel', dateRange.startDate, dateRange.endDate),
     queryFn: () =>
       getChannelBreakdownFn({
@@ -251,7 +251,7 @@ export default function Channels() {
   });
 
   // Filter options - reserved for future advanced filtering
-  const { data: _filterOptions } = useQuery({
+  useQuery({
     queryKey: channelQueryKeys.filterOptions,
     queryFn: () => getChannelFilterOptionsFn(),
   });

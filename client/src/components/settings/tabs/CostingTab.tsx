@@ -35,6 +35,7 @@ export function CostingTab() {
 
     useEffect(() => {
         if (config) {
+            // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing form state from fetched config
             setFormData({
                 laborRatePerMin: config.laborRatePerMin,
                 defaultPackagingCost: config.defaultPackagingCost,

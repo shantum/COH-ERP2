@@ -429,9 +429,11 @@ export function ItemsSection({
 
   // Order-level totals for summary
   // Calculate from line items for accurate display (order.totalAmount may be 0 for exchanges)
-  const calculatedLineTotal = useMemo(() => {
-    return activeLines.reduce((sum, l) => sum + l.qty * l.unitPrice, 0);
-  }, [activeLines]);
+  const calculatedLineTotal = useMemo(
+    () => activeLines.reduce((sum, l) => sum + l.qty * l.unitPrice, 0),
+    // eslint-disable-next-line react-hooks/preserve-manual-memoization -- activeLines comes from props, not mutated locally
+    [activeLines],
+  );
 
   const orderTotals = useMemo(() => {
     // Use Shopify data if available, otherwise calculate from line items
@@ -467,7 +469,7 @@ export function ItemsSection({
         ? (totalDiscount / itemTotalWithGst) * 100
         : 0,
     };
-  }, [order, shopifyDetails, calculatedLineTotal]);
+  }, [shopifyDetails, calculatedLineTotal]);
 
   // Build map of SKU -> full financial info from Shopify line items
   const financialInfoBySku = useMemo<Map<string, LineFinancialInfo>>(() => {
@@ -519,7 +521,7 @@ export function ItemsSection({
   const hasShopifyData = !!shopifyDetails?.subtotalPrice;
 
   // Handle product selection from search
-  const handleSelectProduct = useCallback((sku: SKUData, _stock: number) => {
+  const handleSelectProduct = useCallback((sku: SKUData) => {
     if (onAddLine) {
       const unitPrice = Number(sku.mrp) || 0;
       onAddLine({
