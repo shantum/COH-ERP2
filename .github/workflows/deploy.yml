@@ -5,29 +5,7 @@ on:
     branches: [main]
 
 jobs:
-  verify:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: pnpm
-
-      - run: pnpm install --frozen-lockfile
-      - run: npx prisma generate
-      - run: pnpm --filter @coh/shared build
-      - run: pnpm typecheck
-      - run: pnpm lint
-      - run: pnpm test
-
   deploy:
-    needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -50,6 +28,11 @@ jobs:
             npx prisma generate
             npx prisma migrate deploy --schema=prisma/schema.prisma
             cd shared && pnpm build && cd ..
+
+            # Typecheck + lint before building (fail early)
+            pnpm typecheck
+            pnpm lint
+
             cd client && pnpm build && cd ..
             EXPECTED_COMMIT=$(git rev-parse --short HEAD)
             echo "$EXPECTED_COMMIT" > VERSION
