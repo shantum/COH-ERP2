@@ -101,10 +101,14 @@ export function DatabaseTab() {
                             <p className="text-sm text-gray-500">Fabrics</p>
                         </div>
                         <div className="p-4 bg-gray-50 rounded-lg text-center">
+                            <p className="text-2xl font-bold text-gray-900">{stats?.fabricColours || 0}</p>
+                            <p className="text-sm text-gray-500">Fabric Colours</p>
+                        </div>
+                        <div className="p-4 bg-gray-50 rounded-lg text-center">
                             <p className="text-2xl font-bold text-gray-900">{stats?.variations || 0}</p>
                             <p className="text-sm text-gray-500">Variations</p>
                         </div>
-                        <div className="p-4 bg-gray-50 rounded-lg text-center col-span-2">
+                        <div className="p-4 bg-gray-50 rounded-lg text-center">
                             <p className="text-2xl font-bold text-gray-900">{stats?.inventoryTransactions || 0}</p>
                             <p className="text-sm text-gray-500">Inventory Transactions</p>
                         </div>

@@ -61,18 +61,6 @@ export interface GridPreferences {
     updatedBy?: string;
 }
 
-/** Delete operation model interface */
-export interface DeleteModel {
-    count: () => Promise<number>;
-    deleteMany: () => Promise<{ count: number }>;
-}
-
-/** Delete operation config */
-export interface DeleteOperation {
-    name: string;
-    model: DeleteModel;
-}
-
 /** Password validation result */
 export interface PasswordValidationResult {
     isValid: boolean;
@@ -110,12 +98,6 @@ export interface CleanupResult {
         totalErrors: number;
         durationMs: number;
     };
-}
-
-/** Clear tables request body */
-export interface ClearTablesBody {
-    tables: string[];
-    confirmPhrase: string;
 }
 
 /** Channels update body */

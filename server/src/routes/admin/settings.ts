@@ -7,129 +7,14 @@ import { DEFAULT_TIER_THRESHOLDS, recalculateAllCustomerLtvs } from '../../utils
 import type {
     Channel,
     TierThresholds,
-    ClearTablesBody,
     ChannelsUpdateBody,
     TierThresholdsUpdateBody,
-    DeleteOperation,
 } from './types.js';
 
 const router = Router();
 
-/**
- * Get database entity counts for dashboard
- * @route GET /api/admin/stats
- * @returns {Object} { products, variations, skus, orders, customers, fabrics, inventoryTransactions }
- */
-router.get('/stats', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
-    const [
-        productCount,
-        variationCount,
-        skuCount,
-        orderCount,
-        customerCount,
-        fabricCount,
-        inventoryTxnCount,
-    ] = await Promise.all([
-        req.prisma.product.count(),
-        req.prisma.variation.count(),
-        req.prisma.sku.count(),
-        req.prisma.order.count(),
-        req.prisma.customer.count(),
-        req.prisma.fabric.count(),
-        req.prisma.inventoryTransaction.count(),
-    ]);
-
-    res.json({
-        products: productCount,
-        variations: variationCount,
-        skus: skuCount,
-        orders: orderCount,
-        customers: customerCount,
-        fabrics: fabricCount,
-        inventoryTransactions: inventoryTxnCount,
-    });
-}));
-
-/**
- * Bulk delete data from specified tables (requires 'DELETE ALL DATA' phrase)
- * @route POST /api/admin/clear
- * @param {string[]} body.tables - Table names to clear (or ['all'])
- * @param {string} body.confirmPhrase - Must be exactly 'DELETE ALL DATA'
- * @returns {Object} { message, deleted: { tableName: count } }
- * @description Respects FK constraints (deletes children first). Uses transaction for atomicity.
- */
-router.post('/clear', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
-    const { tables, confirmPhrase } = req.body as ClearTablesBody;
-
-    // Require confirmation phrase
-    if (confirmPhrase !== 'DELETE ALL DATA') {
-        throw new ValidationError('Invalid confirmation phrase');
-    }
-
-    if (!tables || !Array.isArray(tables) || tables.length === 0) {
-        throw new ValidationError('No tables specified');
-    }
-
-    const results: Record<string, number | string> = {};
-
-    // Use a transaction for PostgreSQL to ensure all deletes succeed or none do
-    await req.prisma.$transaction(async (prisma) => {
-        // Clear in correct order to respect foreign key constraints
-        const deleteOperations: DeleteOperation[] = [
-            // Order-related (references customers, SKUs)
-            { name: 'orderLines', model: prisma.orderLine },
-            { name: 'orders', model: prisma.order },
-            // Production (references SKUs)
-            { name: 'productionBatches', model: prisma.productionBatch },
-            // Inventory (references SKUs)
-            { name: 'inventoryTransactions', model: prisma.inventoryTransaction },
-            { name: 'shopifyInventoryCache', model: prisma.shopifyInventoryCache },
-            // Feedback (references SKUs, products, variations)
-            { name: 'feedbackProductLinks', model: prisma.feedbackProductLink },
-            { name: 'feedbackMedia', model: prisma.feedbackMedia },
-            { name: 'feedbackTags', model: prisma.feedbackTag },
-            { name: 'feedbackContents', model: prisma.feedbackContent },
-            { name: 'feedbackRatings', model: prisma.feedbackRating },
-            { name: 'feedback', model: prisma.feedback },
-            // SKU related
-            { name: 'skus', model: prisma.sku },
-            // Variations and Products
-            { name: 'variations', model: prisma.variation },
-            { name: 'products', model: prisma.product },
-            // Customers
-            { name: 'customers', model: prisma.customer },
-            // Fabric related
-            // NOTE: fabricTransaction and fabricType removed - using FabricColour hierarchy now
-            { name: 'fabricOrders', model: prisma.fabricOrder },
-            { name: 'fabrics', model: prisma.fabric },
-            // Other
-            { name: 'costConfigs', model: prisma.costConfig },
-            { name: 'tailors', model: prisma.tailor },
-            { name: 'parties', model: prisma.party },
-        ];
-
-        for (const { name, model } of deleteOperations) {
-            if (tables.includes(name) || tables.includes('all')) {
-                try {
-                    const count = await model.count();
-                    await model.deleteMany();
-                    results[name] = count;
-                } catch (tableError) {
-                    const errorMessage = tableError instanceof Error ? tableError.message : String(tableError);
-                    console.error(`Error deleting ${name}:`, errorMessage);
-                    results[name] = `Error: ${errorMessage}`;
-                }
-            }
-        }
-    }, {
-        timeout: 60000, // 60 second timeout for large deletes
-    });
-
-    res.json({
-        message: 'Database cleared',
-        deleted: results,
-    });
-}));
+// NOTE: /stats and /clear endpoints removed — consolidated into server functions
+// at client/src/server/functions/admin/database.ts
 
 // Get order channels
 router.get('/channels', authenticateToken, asyncHandler(async (req: Request, res: Response) => {

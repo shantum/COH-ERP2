@@ -16,6 +16,7 @@ export interface DatabaseStats {
     orders: number;
     customers: number;
     fabrics: number;
+    fabricColours: number;
     variations: number;
     inventoryTransactions: number;
 }
@@ -79,6 +80,7 @@ export const getDatabaseStats = createServerFn({ method: 'GET' })
             orders,
             customers,
             fabrics,
+            fabricColours,
             variations,
             inventoryTransactions,
         ] = await Promise.all([
@@ -86,6 +88,7 @@ export const getDatabaseStats = createServerFn({ method: 'GET' })
             prisma.sku.count(),
             prisma.order.count(),
             prisma.customer.count(),
+            prisma.fabric.count(),
             prisma.fabricColour.count(),
             prisma.variation.count(),
             prisma.inventoryTransaction.count(),
@@ -99,6 +102,7 @@ export const getDatabaseStats = createServerFn({ method: 'GET' })
                 orders,
                 customers,
                 fabrics,
+                fabricColours,
                 variations,
                 inventoryTransactions,
             },
@@ -138,58 +142,54 @@ export const clearTables = createServerFn({ method: 'POST' })
         const prisma = await getPrisma();
 
         // Wrap all deletes in a transaction for atomicity
+        // Delete order respects FK constraints (children before parents)
         const deleted = await prisma.$transaction(async (tx: PrismaTransaction) => {
             const counts: Record<string, number> = {};
 
-            // Process tables in order to respect foreign key constraints
+            const del = async (name: string, model: { deleteMany: () => Promise<{ count: number }> }) => {
+                const result = await model.deleteMany();
+                counts[name] = result.count;
+            };
+
             if (tables.includes('all') || tables.includes('orders')) {
-                // Delete order lines first (child table)
-                const orderLinesResult = await tx.orderLine.deleteMany();
-                counts.orderLines = orderLinesResult.count;
-
-                const ordersResult = await tx.order.deleteMany();
-                counts.orders = ordersResult.count;
-            }
-
-            if (tables.includes('all') || tables.includes('inventoryTransactions')) {
-                const txnsResult = await tx.inventoryTransaction.deleteMany();
-                counts.inventoryTransactions = txnsResult.count;
-            }
-
-            if (tables.includes('all') || tables.includes('customers')) {
-                const customersResult = await tx.customer.deleteMany();
-                counts.customers = customersResult.count;
+                await del('orderLines', tx.orderLine);
+                await del('orders', tx.order);
             }
 
             if (tables.includes('all') || tables.includes('products')) {
-                // Delete in order: SKU BOM → SKU → Variation → Product
-                const skuBomResult = await tx.skuBomLine.deleteMany();
-                counts.skuBom = skuBomResult.count;
+                // Production batches reference SKUs
+                await del('productionBatches', tx.productionBatch);
+                // Feedback chain references SKUs/products/variations
+                await del('feedbackProductLinks', tx.feedbackProductLink);
+                await del('feedbackMedia', tx.feedbackMedia);
+                await del('feedbackTags', tx.feedbackTag);
+                await del('feedbackContents', tx.feedbackContent);
+                await del('feedbackRatings', tx.feedbackRating);
+                await del('feedback', tx.feedback);
+                // SKU BOM → SKU → Variation → Product
+                await del('skuBomLines', tx.skuBomLine);
+                await del('skus', tx.sku);
+                await del('variations', tx.variation);
+                await del('products', tx.product);
+            }
 
-                const skusResult = await tx.sku.deleteMany();
-                counts.skus = skusResult.count;
+            if (tables.includes('all') || tables.includes('inventoryTransactions')) {
+                await del('inventoryTransactions', tx.inventoryTransaction);
+                await del('shopifyInventoryCache', tx.shopifyInventoryCache);
+            }
 
-                const variationsResult = await tx.variation.deleteMany();
-                counts.variations = variationsResult.count;
-
-                const productsResult = await tx.product.deleteMany();
-                counts.products = productsResult.count;
+            if (tables.includes('all') || tables.includes('customers')) {
+                await del('customers', tx.customer);
             }
 
             if (tables.includes('all') || tables.includes('fabrics')) {
-                // Delete in order: FabricColour → Fabric → Material
-                const coloursResult = await tx.fabricColour.deleteMany();
-                counts.fabricColours = coloursResult.count;
-
-                const fabricsResult = await tx.fabric.deleteMany();
-                counts.fabrics = fabricsResult.count;
-
-                const materialsResult = await tx.material.deleteMany();
-                counts.materials = materialsResult.count;
+                await del('fabricOrders', tx.fabricOrder);
+                await del('fabricColours', tx.fabricColour);
+                await del('fabrics', tx.fabric);
             }
 
             return counts;
-        });
+        }, { timeout: 60_000 });
 
         return { success: true, data: { deleted } };
     });
