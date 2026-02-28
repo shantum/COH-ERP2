@@ -19,7 +19,7 @@ interface OtpEntry {
   attempts: number;
 }
 
-// In-memory OTP store keyed by phone number (e.g. "91Enter 10-digit number")
+// In-memory OTP store keyed by phone number (e.g. "919XXXXXXXXX")
 const otpStore = new Map<string, OtpEntry>();
 
 function generateOtp(): string {
