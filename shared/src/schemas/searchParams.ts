@@ -377,6 +377,15 @@ export const FacebookFeedHealthSearchParams = z.object({
 export type FacebookFeedHealthSearchParams = z.infer<typeof FacebookFeedHealthSearchParams>;
 
 // ============================================
+// TAILOR PERFORMANCE SEARCH PARAMS
+// ============================================
+
+export const TailorPerformanceSearchParams = z.object({
+    period: z.enum(['all', '12m', '6m', '3m', '1m']).catch('all'),
+});
+export type TailorPerformanceSearchParams = z.infer<typeof TailorPerformanceSearchParams>;
+
+// ============================================
 // EMPTY SEARCH PARAMS (for pages without params)
 // ============================================
 

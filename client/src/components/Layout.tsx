@@ -73,6 +73,7 @@ const navGroups: NavGroup[] = [
         label: 'Operations',
         items: [
             { to: '/production', icon: Factory, label: 'Production Plan' },
+            { to: '/tailor-performance', icon: Users, label: 'Tailor Performance' },
             { to: '/inventory-inward', icon: PackagePlus, label: 'Inventory Inward' },
             { to: '/inventory-adjustments', icon: Sliders, label: 'Adjustments' },
         ],
