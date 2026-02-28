@@ -5,6 +5,7 @@ import { defineConfig, type Plugin } from 'vite'
 import tsConfigPaths from 'vite-tsconfig-paths'
 import { tanstackStart } from '@tanstack/react-start/plugin/vite'
 import viteReact from '@vitejs/plugin-react'
+import { sentryVitePlugin } from '@sentry/vite-plugin'
 import path from 'path'
 import { fileURLToPath } from 'url'
 
@@ -88,7 +89,17 @@ export default defineConfig({
     tsConfigPaths(),
     tanstackStart(),
     viteReact(),
-  ],
+    // Upload source maps to Sentry on production builds (needs SENTRY_AUTH_TOKEN env var)
+    process.env.SENTRY_AUTH_TOKEN ? sentryVitePlugin({
+      org: 'canoe-design-pvt-ltd',
+      project: 'coh-erp-frontend',
+      url: 'https://de.sentry.io/',
+      authToken: process.env.SENTRY_AUTH_TOKEN,
+      sourcemaps: {
+        filesToDeleteAfterUpload: ['./dist/client/**/*.map'],
+      },
+    }) : undefined,
+  ].filter(Boolean),
   // Note: @server alias NOT defined here - we handle it in the plugin above
   // SSR configuration: externalize Node.js-only packages
   ssr: {
@@ -108,6 +119,8 @@ export default defineConfig({
     exclude: ['pg', 'pg-pool'],
   },
   build: {
+    // Generate source maps for Sentry (deleted after upload by the plugin)
+    sourcemap: true,
     // AG-Grid alone is >1MB — suppress warning for known large vendor chunks
     chunkSizeWarningLimit: 600,
     rollupOptions: {
