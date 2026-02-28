@@ -3,3 +3,4 @@ export { renderOrderConfirmation, type OrderConfirmationData } from './orderConf
 export { renderShippingUpdate, type ShippingUpdateData } from './shippingUpdate.js';
 export { renderInwardReport, type InwardReportData } from './inwardReport.js';
 export { renderDailyReport, type DailyReportData } from './dailyReport.js';
+export { renderWelcomeUser, renderNewUserAdminNotice, type WelcomeUserData } from './welcomeUser.js';

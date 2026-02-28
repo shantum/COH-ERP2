@@ -13,8 +13,8 @@ import { type MutationResult, type User, requireAdminRole, parsePermissionsArray
 
 const createUserSchema = z.object({
     email: z.string().email('Invalid email address'),
-    password: z.string().min(8, 'Password must be at least 8 characters'),
     name: z.string().min(1, 'Name is required').trim(),
+    phone: z.string().min(10, 'Phone number is required'),
     roleId: z.string().uuid().optional().nullable(),
 });
 
@@ -149,7 +149,7 @@ export const getUsers = createServerFn({ method: 'GET' })
 export const createUser = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => createUserSchema.parse(input))
-    .handler(async ({ data, context }): Promise<MutationResult<User>> => {
+    .handler(async ({ data, context }): Promise<MutationResult<User & { generatedPassword: string }>> => {
         try {
             requireAdminRole(context.user.role);
         } catch {
@@ -159,7 +159,7 @@ export const createUser = createServerFn({ method: 'POST' })
             };
         }
 
-        const { email, password, name, roleId } = data;
+        const { email, name, phone, roleId } = data;
 
         // Delegate to Express endpoint which has bcryptjs working correctly
         const baseUrl = getApiBaseUrl();
@@ -172,15 +172,14 @@ export const createUser = createServerFn({ method: 'POST' })
                     'Content-Type': 'application/json',
                     ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
                 },
-                body: JSON.stringify({ email, password, name, role: 'staff', roleId }),
+                body: JSON.stringify({ email, name, phone, role: 'staff', roleId }),
             });
 
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({}));
                 const errorMessage = errorData.message || errorData.error || `Request failed with status ${response.status}`;
 
-                // Map HTTP status to error code
-                let code: 'BAD_REQUEST' | 'CONFLICT' | 'FORBIDDEN' | 'NOT_FOUND' | 'BAD_REQUEST' = 'BAD_REQUEST';
+                let code: 'BAD_REQUEST' | 'CONFLICT' | 'FORBIDDEN' | 'NOT_FOUND' = 'BAD_REQUEST';
                 if (response.status === 400) code = 'BAD_REQUEST';
                 else if (response.status === 409) code = 'CONFLICT';
                 else if (response.status === 403) code = 'FORBIDDEN';
@@ -205,6 +204,7 @@ export const createUser = createServerFn({ method: 'POST' })
                     roleName: user.roleName || user.role,
                     isActive: user.isActive,
                     createdAt: typeof user.createdAt === 'string' ? user.createdAt : new Date(user.createdAt).toISOString(),
+                    generatedPassword: user.generatedPassword,
                 },
             };
         } catch (error) {

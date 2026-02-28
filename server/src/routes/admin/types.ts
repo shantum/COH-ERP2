@@ -22,8 +22,8 @@ export interface PermissionOverride {
 /** User creation/update body */
 export interface CreateUserBody {
     email: string;
-    password: string;
     name: string;
+    phone: string;
     role?: string;
     roleId?: string;
 }

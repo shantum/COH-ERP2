@@ -1,13 +1,12 @@
 /**
  * Create User Modal
- * Form modal for creating new users with role assignment
- *
- * Uses Server Functions for data mutations (TanStack Start migration)
+ * Collects name, email, phone, and role. Password is auto-generated server-side
+ * and emailed to the user + admin.
  */
 
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Eye, EyeOff, AlertCircle } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Copy } from 'lucide-react';
 import Modal from '../Modal';
 import { createUser } from '../../server/functions/admin';
 import type { Role } from '../../types';
@@ -21,25 +20,23 @@ interface CreateUserModalProps {
 export default function CreateUserModal({ isOpen, onClose, roles }: CreateUserModalProps) {
     const queryClient = useQueryClient();
 
-    // Form state
     const [formData, setFormData] = useState({
         name: '',
         email: '',
-        password: '',
-        confirmPassword: '',
+        phone: '',
         roleId: '',
     });
-    const [showPassword, setShowPassword] = useState(false);
     const [errors, setErrors] = useState<Record<string, string>>({});
+    const [generatedPassword, setGeneratedPassword] = useState<string | null>(null);
+    const [copied, setCopied] = useState(false);
 
-    // Create user mutation
     const createUserMutation = useMutation({
-        mutationFn: async (data: { email: string; password: string; name: string; roleId?: string }) => {
+        mutationFn: async (data: { email: string; name: string; phone: string; roleId?: string }) => {
             const response = await createUser({
                 data: {
                     email: data.email,
-                    password: data.password,
                     name: data.name,
+                    phone: data.phone,
                     roleId: data.roleId || null,
                 },
             });
@@ -48,25 +45,23 @@ export default function CreateUserModal({ isOpen, onClose, roles }: CreateUserMo
             }
             return response.data;
         },
-        onSuccess: () => {
+        onSuccess: (data) => {
             queryClient.invalidateQueries({ queryKey: ['admin-users'] });
-            handleClose();
+            // Show generated password before closing
+            if (data && 'generatedPassword' in data) {
+                setGeneratedPassword((data as { generatedPassword: string }).generatedPassword);
+            }
         },
         onError: (error: Error) => {
-            const message = error.message || 'Failed to create user';
-            setErrors({ submit: message });
+            setErrors({ submit: error.message || 'Failed to create user' });
         },
     });
 
     const handleClose = () => {
-        setFormData({
-            name: '',
-            email: '',
-            password: '',
-            confirmPassword: '',
-            roleId: '',
-        });
+        setFormData({ name: '', email: '', phone: '', roleId: '' });
         setErrors({});
+        setGeneratedPassword(null);
+        setCopied(false);
         onClose();
     };
 
@@ -83,20 +78,11 @@ export default function CreateUserModal({ isOpen, onClose, roles }: CreateUserMo
             newErrors.email = 'Invalid email format';
         }
 
-        if (!formData.password) {
-            newErrors.password = 'Password is required';
-        } else if (formData.password.length < 8) {
-            newErrors.password = 'Password must be at least 8 characters';
-        } else if (!/[A-Z]/.test(formData.password)) {
-            newErrors.password = 'Password must contain an uppercase letter';
-        } else if (!/[a-z]/.test(formData.password)) {
-            newErrors.password = 'Password must contain a lowercase letter';
-        } else if (!/[0-9]/.test(formData.password)) {
-            newErrors.password = 'Password must contain a number';
-        }
-
-        if (formData.password !== formData.confirmPassword) {
-            newErrors.confirmPassword = 'Passwords do not match';
+        const cleanPhone = formData.phone.replace(/\D/g, '');
+        if (!cleanPhone) {
+            newErrors.phone = 'Phone number is required';
+        } else if (cleanPhone.length !== 10 && cleanPhone.length !== 12) {
+            newErrors.phone = 'Enter a 10-digit phone number';
         }
 
         setErrors(newErrors);
@@ -105,23 +91,80 @@ export default function CreateUserModal({ isOpen, onClose, roles }: CreateUserMo
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-
         if (!validateForm()) return;
 
         createUserMutation.mutate({
             name: formData.name.trim(),
             email: formData.email.trim().toLowerCase(),
-            password: formData.password,
+            phone: formData.phone.trim(),
             roleId: formData.roleId || undefined,
         });
     };
+
+    const handleCopyPassword = async () => {
+        if (!generatedPassword) return;
+        await navigator.clipboard.writeText(generatedPassword);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+    };
+
+    // Success state — show generated password
+    if (generatedPassword) {
+        return (
+            <Modal
+                isOpen={isOpen}
+                onClose={handleClose}
+                title="User Created"
+                subtitle="Login credentials have been emailed"
+                size="md"
+                footer={
+                    <div className="flex justify-end">
+                        <button
+                            type="button"
+                            onClick={handleClose}
+                            className="px-4 py-2 text-sm font-medium text-white bg-gray-900 rounded-lg hover:bg-gray-800"
+                        >
+                            Done
+                        </button>
+                    </div>
+                }
+            >
+                <div className="space-y-4">
+                    <div className="flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-lg text-green-700 text-sm">
+                        <CheckCircle2 size={16} />
+                        User created successfully. Credentials emailed to {formData.email} and admin.
+                    </div>
+
+                    <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg">
+                        <p className="text-xs text-gray-500 mb-2">Auto-generated password</p>
+                        <div className="flex items-center gap-2">
+                            <code className="flex-1 text-lg font-mono bg-white px-3 py-2 rounded border border-gray-200">
+                                {generatedPassword}
+                            </code>
+                            <button
+                                type="button"
+                                onClick={handleCopyPassword}
+                                className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+                                title="Copy password"
+                            >
+                                {copied ? <CheckCircle2 size={18} className="text-green-600" /> : <Copy size={18} />}
+                            </button>
+                        </div>
+                        <p className="text-xs text-gray-400 mt-2">
+                            User can also log in via WhatsApp OTP using their phone number.
+                        </p>
+                    </div>
+                </div>
+            </Modal>
+        );
+    }
 
     return (
         <Modal
             isOpen={isOpen}
             onClose={handleClose}
             title="Create New User"
-            subtitle="Add a new user to the system"
+            subtitle="A password will be auto-generated and emailed"
             size="md"
             footer={
                 <div className="flex justify-end gap-3">
@@ -164,7 +207,7 @@ export default function CreateUserModal({ isOpen, onClose, roles }: CreateUserMo
                         className={`w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent ${
                             errors.name ? 'border-red-300' : 'border-gray-300'
                         }`}
-                        placeholder="John Doe"
+                        placeholder="Pallavi Desai"
                     />
                     {errors.name && (
                         <p className="mt-1 text-xs text-red-600">{errors.name}</p>
@@ -183,61 +226,42 @@ export default function CreateUserModal({ isOpen, onClose, roles }: CreateUserMo
                         className={`w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent ${
                             errors.email ? 'border-red-300' : 'border-gray-300'
                         }`}
-                        placeholder="john@example.com"
+                        placeholder="name@creaturesofhabit.in"
                     />
                     {errors.email && (
                         <p className="mt-1 text-xs text-red-600">{errors.email}</p>
                     )}
                 </div>
 
-                {/* Password */}
+                {/* Phone */}
                 <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Password
+                        Phone Number
                     </label>
-                    <div className="relative">
+                    <div className="flex">
+                        <span className="inline-flex items-center px-3 text-sm text-gray-500 bg-gray-50 border border-r-0 border-gray-300 rounded-l-lg">
+                            +91
+                        </span>
                         <input
-                            type={showPassword ? 'text' : 'password'}
-                            value={formData.password}
-                            onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                            className={`w-full px-3 py-2 pr-10 border rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent ${
-                                errors.password ? 'border-red-300' : 'border-gray-300'
+                            type="tel"
+                            value={formData.phone}
+                            onChange={(e) => {
+                                const val = e.target.value.replace(/\D/g, '').slice(0, 10);
+                                setFormData({ ...formData, phone: val });
+                            }}
+                            className={`flex-1 px-3 py-2 border rounded-r-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent ${
+                                errors.phone ? 'border-red-300' : 'border-gray-300'
                             }`}
-                            placeholder="Enter password"
+                            placeholder="9876543210"
+                            maxLength={10}
                         />
-                        <button
-                            type="button"
-                            onClick={() => setShowPassword(!showPassword)}
-                            className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600"
-                        >
-                            {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                        </button>
                     </div>
-                    {errors.password && (
-                        <p className="mt-1 text-xs text-red-600">{errors.password}</p>
+                    {errors.phone && (
+                        <p className="mt-1 text-xs text-red-600">{errors.phone}</p>
                     )}
                     <p className="mt-1 text-xs text-gray-500">
-                        Min 8 characters, with uppercase, lowercase, and number
+                        Used for WhatsApp OTP login
                     </p>
-                </div>
-
-                {/* Confirm Password */}
-                <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Confirm Password
-                    </label>
-                    <input
-                        type={showPassword ? 'text' : 'password'}
-                        value={formData.confirmPassword}
-                        onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
-                        className={`w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent ${
-                            errors.confirmPassword ? 'border-red-300' : 'border-gray-300'
-                        }`}
-                        placeholder="Confirm password"
-                    />
-                    {errors.confirmPassword && (
-                        <p className="mt-1 text-xs text-red-600">{errors.confirmPassword}</p>
-                    )}
                 </div>
 
                 {/* Role Selection */}
