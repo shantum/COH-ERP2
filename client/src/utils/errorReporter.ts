@@ -8,6 +8,7 @@
  * Deduplicates: same message won't be sent twice within 10s.
  */
 
+import * as Sentry from '@sentry/react';
 import { getDiagnostics } from './breadcrumbTracker';
 
 const DEDUP_WINDOW_MS = 10_000;
@@ -55,6 +56,13 @@ export function reportError(
         for (const [key, ts] of recentErrors) {
             if (now - ts > DEDUP_WINDOW_MS) recentErrors.delete(key);
         }
+    }
+
+    // Send to Sentry
+    if (error instanceof Error) {
+        Sentry.captureException(error, { extra: context });
+    } else {
+        Sentry.captureMessage(message, { level: 'error', extra: context });
     }
 
     const diagnostics = getDiagnostics(error instanceof Error ? error : undefined);

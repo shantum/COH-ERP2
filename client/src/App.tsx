@@ -9,6 +9,7 @@
  */
 
 import { useEffect } from 'react';
+import * as Sentry from '@sentry/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RouterProvider } from '@tanstack/react-router';
 import { Toaster } from 'sonner';
@@ -38,6 +39,15 @@ const queryClient = new QueryClient({
  */
 function InnerApp() {
     const auth = useAuth();
+
+    // Set Sentry user context for error attribution
+    useEffect(() => {
+        if (auth.user) {
+            Sentry.setUser({ id: String(auth.user.id), username: auth.user.name });
+        } else {
+            Sentry.setUser(null);
+        }
+    }, [auth.user]);
 
     // Show loading state while auth is being determined
     if (auth.isLoading) {
