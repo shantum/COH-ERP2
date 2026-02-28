@@ -65,8 +65,7 @@ router.post('/confirm/:reportId', requireAdmin, asyncHandler(async (req: Request
     return;
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const userId: string = (req as any).user.id;
+  const userId = req.user!.id;
   log.info({ reportId, userId }, 'Confirming marketplace payout report');
 
   const result = await confirmReport(reportId as string, userId);

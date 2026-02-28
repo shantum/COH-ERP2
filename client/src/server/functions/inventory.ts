@@ -11,6 +11,7 @@ import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth';
 import { getPrisma } from '@coh/shared/services/db';
+import type { Prisma } from '@prisma/client';
 
 // ============================================
 // INPUT SCHEMAS
@@ -740,9 +741,7 @@ export const getInventoryTransactions = createServerFn({ method: 'GET' })
 
         const { skuId, txnType, reason, limit, offset, days } = data ?? {};
 
-        // Build where clause
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const where: Record<string, any> = {};
+        const where: Prisma.InventoryTransactionWhereInput = {};
 
         if (skuId) {
             where.skuId = skuId;

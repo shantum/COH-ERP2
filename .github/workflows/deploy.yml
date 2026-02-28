@@ -5,7 +5,31 @@ on:
     branches: [main]
 
 jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: npx prisma generate
+      - run: pnpm --filter @coh/shared build
+      - run: pnpm typecheck
+      - run: pnpm lint || true # TODO: fix 236 pre-existing lint errors, then remove || true
+      - run: pnpm test
+
   deploy:
+    needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 10
 

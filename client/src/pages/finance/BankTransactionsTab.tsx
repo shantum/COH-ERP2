@@ -11,6 +11,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { useNavigate } from '@tanstack/react-router';
 import { useDebounce } from '../../hooks/useDebounce';
+import { useDebouncedSearch } from '../../hooks/useDebouncedSearch';
 import {
   listBankTransactionsUnified, createFinanceParty,
   getAutoMatchSuggestions, applyAutoMatches,
@@ -115,13 +116,10 @@ function BankTransactionListView({ bank, search, updateSearch }: {
   } | null>(null);
 
   // Debounced search input
-  const [searchInput, setSearchInput] = useState(search.search ?? '');
-  const debouncedSearch = useDebounce(searchInput, 300);
-  useEffect(() => {
-    if (debouncedSearch !== (search.search ?? '')) {
-      updateSearch({ search: debouncedSearch || undefined, page: 1 });
-    }
-  }, [debouncedSearch]); // eslint-disable-line react-hooks/exhaustive-deps
+  const { searchInput, setSearchInput } = useDebouncedSearch({
+    urlValue: search.search,
+    onSync: (value) => updateSearch({ search: value, page: 1 }),
+  });
 
   const status = search.bankStatus && search.bankStatus !== 'all' ? search.bankStatus : undefined;
 

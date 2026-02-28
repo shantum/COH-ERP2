@@ -19,7 +19,7 @@ import { useAuth } from '../hooks/useAuth';
 import { invalidateOrderView } from '../hooks/orders/orderMutationUtils';
 import { Route } from '../routes/_authenticated/ledgers';
 import type { LedgersLoaderData } from '../routes/_authenticated/ledgers';
-import { useDebounce } from '../hooks/useDebounce';
+import { useDebouncedSearch } from '../hooks/useDebouncedSearch';
 import ConfirmModal from '../components/common/ConfirmModal';
 import { toast } from 'sonner';
 
@@ -63,30 +63,19 @@ export default function Ledgers() {
     const page = search.page;
     const limit = search.limit;
 
-    // Local search input state with debounce
-    const [searchInput, setSearchInput] = useState(search.search || '');
-    const debouncedSearch = useDebounce(searchInput, 400);
-
-    // Sync debounced search to URL (resets to page 1)
-    useEffect(() => {
-        const currentUrlSearch = search.search || '';
-        if (debouncedSearch !== currentUrlSearch) {
-            navigate({
-                to: '/ledgers',
-                search: {
-                    ...search,
-                    search: debouncedSearch || undefined,
-                    page: 1,
-                },
-                replace: true,
-            });
-        }
-    }, [debouncedSearch]); // eslint-disable-line react-hooks/exhaustive-deps
+    // Local search input state with debounced URL sync
+    const { searchInput, setSearchInput, resetToUrl } = useDebouncedSearch({
+        urlValue: search.search,
+        onSync: (value) => navigate({
+            to: '/ledgers',
+            search: { ...search, search: value, page: 1 },
+            replace: true,
+        }),
+        delay: 400,
+    });
 
     // Reset search input when tab changes
-    useEffect(() => {
-        setSearchInput(search.search || '');
-    }, [activeTab]); // eslint-disable-line react-hooks/exhaustive-deps
+    useEffect(() => { resetToUrl(); }, [activeTab]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // URL navigation helper
     const setSearchParam = useCallback((updates: Partial<typeof search>) => {

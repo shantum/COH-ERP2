@@ -7,12 +7,13 @@
   "scripts": {
     "dev": "concurrently -n server,client -c blue,green \"pnpm --filter coh-erp-server dev\" \"pnpm --filter client dev\"",
     "dev:shared": "pnpm --filter @coh/shared dev",
-    "build": "pnpm --filter @coh/shared build && pnpm --filter coh-erp-server build && pnpm --filter client build",
+    "build": "pnpm --filter @coh/shared build && pnpm --filter client build",
     "build:shared": "pnpm --filter @coh/shared build",
-    "build:server": "pnpm --filter coh-erp-server build",
     "build:client": "pnpm --filter client build",
     "start": "pnpm --filter coh-erp-server start",
     "test": "pnpm --filter coh-erp-server test",
+    "lint": "pnpm --filter client lint",
+    "verify": "pnpm typecheck && pnpm test",
     "typecheck": "pnpm --filter @coh/shared typecheck && pnpm --filter coh-erp-server typecheck && pnpm --filter client typecheck",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
@@ -24,7 +25,7 @@
     "db:studio": "prisma studio",
     "db:seed": "node prisma/seed.js",
     "db:reset": "prisma migrate reset",
-    "install:all": "cd server && npm install && cd ../client && npm install",
+    "install:all": "pnpm install",
     "coh": "npx tsx cli/src/index.ts"
   },
   "engines": {

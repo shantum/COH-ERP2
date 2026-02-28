@@ -74,9 +74,7 @@ export function useUnifiedOrderModal({ order, initialMode, onNavigateToOrder }: 
     order.orderLines?.some(l => l.lineStatus === 'packed');
   const canCustomer = !!order.customerId;
 
-  // Returns tab: always enabled for debugging (was: only if delivered lines exist)
-  // TODO: Restore stricter check after debugging
-  const canReturn = (order.orderLines?.length ?? 0) > 0;
+  const canReturn = order.orderLines?.some(l => l.lineStatus === 'delivered') ?? false;
 
   // Initialize mode - default to view, or provided initial mode if available
   const getInitialMode = (): ModalMode => {

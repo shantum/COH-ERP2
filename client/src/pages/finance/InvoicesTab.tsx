@@ -1,9 +1,9 @@
 import InvoiceDetailModal from './InvoiceDetailModal';
-import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
+import { useState, useMemo, useCallback, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { useNavigate } from '@tanstack/react-router';
-import { useDebounce } from '../../hooks/useDebounce';
+import { useDebouncedSearch } from '../../hooks/useDebouncedSearch';
 import {
   listInvoices, confirmInvoice, cancelInvoice, createInvoice, updateInvoice,
   updateInvoiceDueDate, updateInvoiceNotes, findUnmatchedPayments,
@@ -117,14 +117,13 @@ export default function InvoicesTab({ search: rawSearch }: { search: FinanceSear
   } | null>(null);
   const [editingInvoice, setEditingInvoice] = useState<NonNullable<typeof data>['invoices'][number] | null>(null);
 
-  const [searchInput, setSearchInput] = useState(search.search ?? '');
-  const debouncedSearch = useDebounce(searchInput, 300);
-  useEffect(() => {
-    if (debouncedSearch !== (search.search ?? '')) {
+  const { searchInput, setSearchInput } = useDebouncedSearch({
+    urlValue: search.search,
+    onSync: (value) => {
       setSelectedIds(new Set());
-      navigate({ to: '/finance', search: { ...search, search: debouncedSearch || undefined, page: 1 }, replace: true });
-    }
-  }, [debouncedSearch]); // eslint-disable-line react-hooks/exhaustive-deps
+      navigate({ to: '/finance', search: { ...search, search: value, page: 1 }, replace: true });
+    },
+  });
 
   const driveSyncMutation = useMutation({
     mutationFn: async () => {
