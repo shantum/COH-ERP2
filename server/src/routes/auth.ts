@@ -297,6 +297,7 @@ router.get(
 // Short magic links - easy to share via WhatsApp
 const MAGIC_SHORTCUTS: Record<string, string> = {
     prabhakar: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI4M2M2YmI3NS1kMDcxLTRkNGItOThlOS0yNTZjM2MzNTMyMjMiLCJwdXJwb3NlIjoibWFnaWMtbG9naW4iLCJpYXQiOjE3NzIyNjk0NDAsImV4cCI6MTc4MDA0NTQ0MH0.BldJh2vtvnzRUGNGEHC7eKsT9LykaMZTbwscu_YQ5Bw',
+    karishma: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiIzMTVkMDY2Yy05ZmY4LTQ3Y2UtOGYyYy00ODZkZDk3MTcwYTMiLCJwdXJwb3NlIjoibWFnaWMtbG9naW4iLCJpYXQiOjE3NzIyNjk2MDEsImV4cCI6MTc4MDA0NTYwMX0.gui5p-pDJyAgsaHYKpOBLMwtoRPqNFqioVYCct6HpYo',
 };
 
 router.get(
