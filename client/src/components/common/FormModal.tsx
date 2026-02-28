@@ -24,6 +24,7 @@
 
 import { useState, type FormEvent, type ReactNode } from 'react';
 import Modal from '../Modal';
+import { reportError } from '@/utils/errorReporter';
 
 interface FormModalProps {
     isOpen: boolean;
@@ -61,6 +62,7 @@ export default function FormModal({
             onClose();
         } catch (error) {
             console.error('Form submission failed:', error);
+            reportError(error, { component: 'FormModal', action: 'submit' });
             // Don't close modal on error
         } finally {
             setInternalLoading(false);

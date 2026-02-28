@@ -29,6 +29,7 @@ import {
     deleteColour as deleteColourFn,
 } from '../../../server/functions/materialsMutations';
 import type { MaterialNode, MaterialNodeType, MaterialTreeResponse } from '../types';
+import { reportError } from '@/utils/errorReporter';
 
 // Query keys for cache management
 export const materialsTreeKeys = {
@@ -212,6 +213,7 @@ export function useMaterialsTree(options: UseMaterialsTreeOptions = {}): UseMate
             return [];
         } catch (err) {
             console.error(`Failed to load children for ${parentType} ${parentId}:`, err);
+            reportError(err, { hook: 'useMaterialsTree', action: 'loadChildren', parentType, parentId });
             throw err;
         }
     }, [loadedChildren, getChildrenFn]);

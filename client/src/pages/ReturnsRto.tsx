@@ -29,6 +29,7 @@ import {
     updateRepackingQueueItem,
     deleteRepackingQueueItem,
 } from '@/server/functions/repacking';
+import { reportError } from '@/utils/errorReporter';
 import {
     Search,
     PackageX,
@@ -601,6 +602,7 @@ function AllocationModalContent({
             onSuccess();
         } catch (error) {
             console.error('Failed to allocate:', error);
+            reportError(error, { page: 'ReturnsRto', action: 'allocate' });
             setIsLoading(false);
         }
     };

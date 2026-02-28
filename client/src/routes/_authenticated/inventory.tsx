@@ -12,6 +12,7 @@ import {
     getInventoryAll,
     type InventoryAllResult,
 } from '../../server/functions/inventory';
+import { reportError } from '@/utils/errorReporter';
 
 // Direct import (no lazy loading) for SSR routes with loader data
 // React's lazy() causes hydration flicker: SSR content → Suspense fallback → content again
@@ -61,6 +62,7 @@ export const Route = createFileRoute('/_authenticated/inventory')({
             };
         } catch (error) {
             console.error('[Inventory Loader] Error:', error);
+            reportError(error, { loader: 'inventory' });
             return {
                 inventory: null,
                 error: error instanceof Error ? error.message : 'Failed to load inventory',

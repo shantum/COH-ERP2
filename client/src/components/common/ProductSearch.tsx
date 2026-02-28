@@ -33,6 +33,7 @@ import { searchSkusForAutocomplete } from '../../server/functions/products';
 import { getInventoryBalances } from '../../server/functions/inventory';
 import { getOptimizedImageUrl } from '../../utils/imageOptimization';
 import { useDebounce } from '../../hooks/useDebounce';
+import { reportError } from '@/utils/errorReporter';
 
 /** Balance info for a SKU */
 interface BalanceInfo {
@@ -236,6 +237,7 @@ export function ProductSearch({
       });
     } catch (error) {
       console.error('Failed to fetch inventory balances:', error);
+      reportError(error, { component: 'ProductSearch', action: 'fetchInventoryBalances' });
       // On error, set balance to 0 for all requested SKUs to stop loading indicator
       setLocalBalances(prev => {
         const next = new Map(prev);

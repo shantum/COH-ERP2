@@ -23,6 +23,7 @@ import {
     getReconciliationById as getReconciliationByIdFn,
     submitReconciliation as submitReconciliationFn,
 } from '../server/functions/reconciliationMutations';
+import { reportError } from '@/utils/errorReporter';
 
 interface Reconciliation {
     id: string;
@@ -139,6 +140,7 @@ export default function InventoryReconciliation() {
                     }
                 } catch (error) {
                     console.error('Failed to refresh reconciliation after upload:', error);
+                    reportError(error, { page: 'InventoryReconciliation', action: 'refreshAfterUpload' });
                 }
             }
         },

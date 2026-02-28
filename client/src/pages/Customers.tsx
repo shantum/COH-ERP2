@@ -19,6 +19,7 @@ import type { Order, OrderLine } from '../types';
 import { useCustomersUrlModal } from '../hooks/useUrlModal';
 import { Route } from '../routes/_authenticated/customers';
 import type { CustomersSearchParams } from '@coh/shared';
+import { reportError } from '@/utils/errorReporter';
 
 /**
  * Unified customer display type that works across all tabs.
@@ -328,6 +329,7 @@ export default function Customers() {
                     }
                 } catch (error) {
                     console.error('Failed to fetch order:', error);
+                    reportError(error, { page: 'Customers', action: 'fetchOrder' });
                 }
             };
             fetchOrder();

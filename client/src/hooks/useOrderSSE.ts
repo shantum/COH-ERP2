@@ -22,6 +22,7 @@ import { ORDERS_PAGE_SIZE } from '../constants/queryKeys';
 import { getOrdersListQueryKey, invalidateAllOrderViewsStale } from './orders/orderMutationUtils';
 import { suppressedTables } from '../constants/pulseConfig';
 import type { FlattenedOrderRow } from '../server/functions/orders';
+import { reportError } from '@/utils/errorReporter';
 
 // Cache data structure for orders list queries
 interface OrderListCacheData {
@@ -536,6 +537,7 @@ export function useOrderSSE({
 
         } catch (err) {
             console.error('SSE: Failed to parse event', err);
+            reportError(err, { hook: 'useOrderSSE', action: 'parseEvent' });
         }
     // Using refs for currentView/page to avoid reconnection on navigation
     }, [queryClient, scheduleFlush, updateHealth]);

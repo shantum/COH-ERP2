@@ -11,6 +11,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { TABLE_INVALIDATION_MAP, DEBOUNCE_MS, suppressedTables } from '../constants/pulseConfig';
+import { reportError } from '@/utils/errorReporter';
 
 interface PulseSignal {
     type: 'connected' | 'disconnected' | 'signal';
@@ -97,6 +98,7 @@ export function usePulse(enabled = true) {
                 }
             } catch (err) {
                 console.error('[Pulse] Parse error:', err);
+                reportError(err, { hook: 'usePulse', action: 'parseEvent' });
             }
         };
 

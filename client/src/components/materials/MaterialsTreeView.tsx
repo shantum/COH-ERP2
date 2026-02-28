@@ -24,6 +24,7 @@ import { UnifiedMaterialModal } from './UnifiedMaterialModal';
 import { LinkProductsModal } from './LinkProductsModal';
 import { QuickAddButtons } from './QuickAddButtons';
 import { getMaterialsTree } from '../../server/functions/materials';
+import { reportError } from '@/utils/errorReporter';
 import {
     materialsTreeKeys,
     useMaterialsTreeMutations,
@@ -111,12 +112,14 @@ export function MaterialsTreeView({
                     };
                 }
                 console.error('[MaterialsTreeView] Invalid response format:', response);
+                reportError(new Error('Invalid response format'), { component: 'MaterialsTreeView' });
                 return {
                     items: [],
                     summary: { total: 0, materials: 0, fabrics: 0, colours: 0, orderNow: 0, orderSoon: 0, ok: 0 },
                 };
             } catch (error) {
                 console.error('[MaterialsTreeView] Query error:', error);
+                reportError(error, { component: 'MaterialsTreeView', type: 'query' });
                 throw error;
             }
         },
@@ -125,6 +128,7 @@ export function MaterialsTreeView({
     // Log any query errors
     if (queryError) {
         console.error('[MaterialsTreeView] TanStack Query error:', queryError);
+        reportError(queryError, { component: 'MaterialsTreeView', type: 'tanstack-query' });
     }
 
     // Extract materials and fabrics lists for quick add buttons

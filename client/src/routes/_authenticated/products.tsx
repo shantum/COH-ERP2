@@ -10,6 +10,7 @@ import {
     getProductsTree,
     type ProductsTreeResponse,
 } from '../../server/functions/products';
+import { reportError } from '@/utils/errorReporter';
 
 // Direct import (no lazy loading) for SSR routes with loader data
 // React's lazy() causes hydration flicker: SSR content → Suspense fallback → content again
@@ -28,6 +29,7 @@ export const Route = createFileRoute('/_authenticated/products')({
             return { productsTree, error: null };
         } catch (error) {
             console.error('[Products Loader] Error:', error);
+            reportError(error, { loader: 'products' });
             return {
                 productsTree: null,
                 error: error instanceof Error ? error.message : 'Failed to load products',

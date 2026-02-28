@@ -5,11 +5,13 @@
  * Shows error message with options to retry or copy diagnostics.
  */
 
+import { useEffect } from 'react';
 import { useRouter } from '@tanstack/react-router';
 import { AlertTriangle, Copy, RefreshCw, Home } from 'lucide-react';
 import { Link } from '@tanstack/react-router';
 import { Button } from '@/components/ui/button';
 import { getDiagnostics } from '@/utils/breadcrumbTracker';
+import { reportError } from '@/utils/errorReporter';
 import { showSuccess } from '@/utils/toast';
 
 interface RouterErrorComponentProps {
@@ -18,6 +20,14 @@ interface RouterErrorComponentProps {
 
 export function RouterErrorComponent({ error }: RouterErrorComponentProps) {
     const router = useRouter();
+
+    // Report route error to server
+    useEffect(() => {
+        reportError(error, {
+            component: 'RouterErrorComponent',
+            route: window.location.pathname,
+        });
+    }, [error]);
 
     const handleCopyDiagnostics = () => {
         const diagnostics = getDiagnostics(error);

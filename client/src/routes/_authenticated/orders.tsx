@@ -7,6 +7,7 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { OrdersSearchParams } from '@coh/shared';
 import { getOrders, type OrdersResponse } from '../../server/functions/orders';
+import { reportError } from '@/utils/errorReporter';
 
 import Orders from '../../pages/Orders';
 
@@ -41,6 +42,7 @@ export const Route = createFileRoute('/_authenticated/orders')({
             return { orders, error: null };
         } catch (error) {
             console.error('[Orders Loader] Error:', error);
+            reportError(error, { loader: 'orders' });
             return {
                 orders: {
                     rows: [],

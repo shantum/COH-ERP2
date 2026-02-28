@@ -19,6 +19,7 @@ import {
 import type { UserPreferences, AdminGridPreferences } from '../../../server/functions/admin';
 import { usePermissions } from '../../../hooks/usePermissions';
 import { ALL_COLUMN_IDS, DEFAULT_VISIBLE_COLUMNS, DEFAULT_COLUMN_WIDTHS, TABLE_ID } from './constants';
+import { reportError } from '@/utils/errorReporter';
 
 interface AdminPrefs {
     visibleColumns: string[];
@@ -303,6 +304,7 @@ export function useOrdersTableState(): UseOrdersTableStateReturn {
                 }
             } catch (error) {
                 console.error('Failed to fetch grid preferences:', error);
+                reportError(error, { hook: 'useOrdersTableState', action: 'fetchPreferences' });
             } finally {
                 setPrefsLoaded(true);
             }
@@ -387,6 +389,7 @@ export function useOrdersTableState(): UseOrdersTableStateReturn {
             return false;
         } catch (error) {
             console.error('Failed to save user preferences:', error);
+            reportError(error, { hook: 'useOrdersTableState', action: 'savePreferences' });
             return false;
         } finally {
             setIsSavingPrefs(false);
@@ -433,6 +436,7 @@ export function useOrdersTableState(): UseOrdersTableStateReturn {
             return true;
         } catch (error) {
             console.error('Failed to reset preferences:', error);
+            reportError(error, { hook: 'useOrdersTableState', action: 'resetPreferences' });
             return false;
         } finally {
             setIsSavingPrefs(false);
@@ -465,6 +469,7 @@ export function useOrdersTableState(): UseOrdersTableStateReturn {
             return false;
         } catch (error) {
             console.error('Failed to save grid preferences:', error);
+            reportError(error, { hook: 'useOrdersTableState', action: 'saveGridPreferences' });
             return false;
         } finally {
             setIsSavingPrefs(false);

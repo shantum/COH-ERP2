@@ -15,6 +15,7 @@ import { createFileRoute, redirect } from '@tanstack/react-router';
 import { getAuthUser } from '../server/functions/auth';
 import { authQueryKeys } from '../constants/queryKeys';
 import { authQueryOptions } from '../hooks/useAuth';
+import { reportError } from '@/utils/errorReporter';
 
 // Direct import (no lazy loading) for the main layout
 // React's lazy() causes hydration flicker: SSR content → Suspense fallback → content again
@@ -46,6 +47,7 @@ export const Route = createFileRoute('/_authenticated')({
                 // Re-throw redirects (e.g. restricted user redirect)
                 if (error instanceof Response || (error && typeof error === 'object' && 'to' in error)) throw error;
                 console.error('[Auth] Server Function error:', error);
+                reportError(error, { component: 'auth', type: 'server-function' });
             }
 
             // Not authenticated on server — redirect immediately (sends 302)
@@ -74,6 +76,7 @@ export const Route = createFileRoute('/_authenticated')({
             // Re-throw redirects
             if (error instanceof Response || (error && typeof error === 'object' && 'to' in error)) throw error;
             console.error('[Auth] Query error:', error);
+            reportError(error, { component: 'auth', type: 'query' });
         }
 
         // Not authenticated - redirect to login

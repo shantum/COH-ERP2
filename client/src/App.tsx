@@ -8,11 +8,13 @@
  * - RouterProvider for TanStack Router
  */
 
+import { useEffect } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RouterProvider } from '@tanstack/react-router';
 import { Toaster } from 'sonner';
 import ErrorBoundary from './components/ErrorBoundary';
 import { AuthProvider, useAuth } from './hooks/useAuth';
+import { reportError } from './utils/errorReporter';
 import { router } from './router';
 
 // QueryClient configuration
@@ -21,6 +23,11 @@ const queryClient = new QueryClient({
         queries: {
             staleTime: 30000,
             retry: 1,
+        },
+        mutations: {
+            onError: (error: Error) => {
+                reportError(error, { handler: 'QueryClient.mutations.onError' });
+            },
         },
     },
 });
@@ -60,6 +67,29 @@ function InnerApp() {
  * Main App component with provider hierarchy
  */
 function App() {
+    // Global error handlers for uncaught errors and unhandled rejections
+    useEffect(() => {
+        const handleError = (event: ErrorEvent) => {
+            reportError(event.error || new Error(event.message), {
+                handler: 'window.onerror',
+                source: event.filename,
+                line: event.lineno,
+                col: event.colno,
+            });
+        };
+
+        const handleRejection = (event: PromiseRejectionEvent) => {
+            reportError(event.reason, { handler: 'unhandledrejection' });
+        };
+
+        window.addEventListener('error', handleError);
+        window.addEventListener('unhandledrejection', handleRejection);
+        return () => {
+            window.removeEventListener('error', handleError);
+            window.removeEventListener('unhandledrejection', handleRejection);
+        };
+    }, []);
+
     return (
         <ErrorBoundary>
             <QueryClientProvider client={queryClient}>

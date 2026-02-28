@@ -42,6 +42,7 @@ import {
 } from '../../../server/functions/returnsMutations';
 import { showReturnError, showReturnSuccess } from '../../../utils/toast';
 import { isReturnError } from '@coh/shared/errors';
+import { reportError } from '@/utils/errorReporter';
 
 interface UnifiedOrderModalProps {
   order: Order;
@@ -272,6 +273,7 @@ export function UnifiedOrderModal({
     } catch (error) {
       setIsSaving(false);
       console.error('Failed to save order:', error);
+      reportError(error, { component: 'UnifiedOrderModal', action: 'saveOrder' });
     }
   }, [hasUnsavedChanges, editForm, addressForm, order, mutations, onClose]);
 
@@ -318,6 +320,7 @@ export function UnifiedOrderModal({
       handleAddLine(data.skuId, data.qty, data.unitPrice);
     } catch (error) {
       console.error('Failed to add line:', error);
+      reportError(error, { component: 'UnifiedOrderModal', action: 'addLine' });
     }
   }, [order.id, mutations, handleAddLine]);
 
@@ -331,6 +334,7 @@ export function UnifiedOrderModal({
       handleUpdateLine(lineId, data);
     } catch (error) {
       console.error('Failed to update line:', error);
+      reportError(error, { component: 'UnifiedOrderModal', action: 'updateLine' });
     } finally {
       setUpdatingLineIds(prev => {
         const next = new Set(prev);
@@ -398,6 +402,7 @@ export function UnifiedOrderModal({
       onSuccess?.();
     } catch (error) {
       console.error('Failed to initiate return:', error);
+      reportError(error, { component: 'UnifiedOrderModal', action: 'initiateReturn' });
       showReturnError(error, 'Initiate return');
     }
   }, [returnForm, queryClient, order.id, order.orderLines, resetReturnForm, onSuccess]);
@@ -426,6 +431,7 @@ export function UnifiedOrderModal({
       onSuccess?.();
     } catch (error) {
       console.error('Failed to cancel return:', error);
+      reportError(error, { component: 'UnifiedOrderModal', action: 'cancelReturn' });
       showReturnError(error, 'Cancel return');
     }
   }, [queryClient, order.id, onSuccess]);
@@ -472,6 +478,7 @@ export function UnifiedOrderModal({
       };
     } catch (error) {
       console.error('Failed to schedule pickup:', error);
+      reportError(error, { component: 'UnifiedOrderModal', action: 'schedulePickup' });
       const message = error instanceof Error ? error.message : 'Unknown error';
       return { success: false, error: message };
     }
@@ -496,6 +503,7 @@ export function UnifiedOrderModal({
       onSuccess?.();
     } catch (error) {
       console.error('Failed to receive return:', error);
+      reportError(error, { component: 'UnifiedOrderModal', action: 'receiveReturn' });
       showReturnError(error, 'Receive return');
     }
   }, [queryClient, order.id, onSuccess]);
@@ -518,6 +526,7 @@ export function UnifiedOrderModal({
       onSuccess?.();
     } catch (error) {
       console.error('Failed to process refund:', error);
+      reportError(error, { component: 'UnifiedOrderModal', action: 'processRefund' });
       showReturnError(error, 'Process refund');
     }
   }, [queryClient, order.id, onSuccess]);
@@ -538,6 +547,7 @@ export function UnifiedOrderModal({
       onSuccess?.();
     } catch (error) {
       console.error('Failed to complete return:', error);
+      reportError(error, { component: 'UnifiedOrderModal', action: 'completeReturn' });
       showReturnError(error, 'Complete return');
     }
   }, [queryClient, order.id, onSuccess]);
@@ -560,6 +570,7 @@ export function UnifiedOrderModal({
       onSuccess?.();
     } catch (error) {
       console.error('Failed to create exchange:', error);
+      reportError(error, { component: 'UnifiedOrderModal', action: 'createExchange' });
       showReturnError(error, 'Create exchange');
     }
   }, [queryClient, order.id, onSuccess]);
@@ -581,6 +592,7 @@ export function UnifiedOrderModal({
       showReturnSuccess('Notes updated');
     } catch (error) {
       console.error('Failed to update notes:', error);
+      reportError(error, { component: 'UnifiedOrderModal', action: 'updateNotes' });
       showReturnError(error, 'Update notes');
     }
   }, [queryClient, order.id]);

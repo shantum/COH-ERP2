@@ -9,6 +9,7 @@ import {
     getOrdersAnalytics,
     type OrdersAnalyticsResponse,
 } from '../../server/functions/dashboard';
+import { reportError } from '@/utils/errorReporter';
 
 // Direct import (no lazy loading) for SSR routes with loader data
 // React's lazy() causes hydration flicker: SSR content → Suspense fallback → content again
@@ -26,6 +27,7 @@ export const Route = createFileRoute('/_authenticated/')({
             return { analytics, error: null };
         } catch (error) {
             console.error('[Dashboard Loader] Error:', error);
+            reportError(error, { loader: 'dashboard' });
             return {
                 analytics: null,
                 error: error instanceof Error ? error.message : 'Failed to load dashboard',

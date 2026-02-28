@@ -10,6 +10,7 @@ import {
     getCustomersList,
     type CustomersListResponse,
 } from '../../server/functions/customers';
+import { reportError } from '@/utils/errorReporter';
 
 // Direct import (no lazy loading) for SSR routes with loader data
 // React's lazy() causes hydration flicker: SSR content → Suspense fallback → content again
@@ -49,6 +50,7 @@ export const Route = createFileRoute('/_authenticated/customers')({
             return { customers, error: null };
         } catch (error) {
             console.error('[Customers Loader] Error:', error);
+            reportError(error, { loader: 'customers' });
             return {
                 customers: null,
                 error: error instanceof Error ? error.message : 'Failed to load customers',

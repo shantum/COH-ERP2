@@ -24,6 +24,7 @@ import {
 } from '../server/functions/admin';
 import type { UserPreferences, AdminGridPreferences } from '../server/functions/admin';
 import { usePermissions } from './usePermissions';
+import { reportError } from '@/utils/errorReporter';
 
 interface UseGridStateOptions {
     gridId: string;
@@ -191,6 +192,7 @@ export function useGridState({
             } catch (error) {
                 // Preferences not available, continue with localStorage values
                 console.error('Failed to fetch grid preferences:', error);
+                reportError(error, { hook: 'useGridState', action: 'fetchPreferences' });
             } finally {
                 setPrefsLoaded(true);
             }
@@ -290,6 +292,7 @@ export function useGridState({
             return false;
         } catch (error) {
             console.error('Failed to save user preferences:', error);
+            reportError(error, { hook: 'useGridState', action: 'savePreferences' });
             return false;
         } finally {
             setIsSavingPrefs(false);
@@ -342,6 +345,7 @@ export function useGridState({
             return true;
         } catch (error) {
             console.error('Failed to reset preferences:', error);
+            reportError(error, { hook: 'useGridState', action: 'resetPreferences' });
             return false;
         } finally {
             setIsSavingPrefs(false);
@@ -375,6 +379,7 @@ export function useGridState({
             return false;
         } catch (error) {
             console.error('Failed to save grid preferences:', error);
+            reportError(error, { hook: 'useGridState', action: 'saveGridPreferences' });
             return false;
         } finally {
             setIsSavingPrefs(false);

@@ -29,6 +29,7 @@ import {
     type SyncJobResult,
 } from '../../../server/functions/shopify';
 import { invalidateAllOrderViewsStale } from '../../../hooks/orders/orderMutationUtils';
+import { reportError } from '@/utils/errorReporter';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyData = any;
@@ -249,6 +250,7 @@ export function ShopifyTab() {
             setWebhookDetail(res.data);
         } catch (e) {
             console.error('Failed to fetch webhook detail:', e);
+            reportError(e, { component: 'ShopifyTab', action: 'fetchWebhookDetail' });
             setWebhookDetail({ error: 'Failed to load webhook detail' });
         } finally {
             setLoadingWebhookDetail(false);

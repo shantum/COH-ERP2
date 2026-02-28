@@ -19,6 +19,7 @@
 
 import { useState } from 'react';
 import Modal from '../Modal';
+import { reportError } from '@/utils/errorReporter';
 
 interface ConfirmModalProps {
     isOpen: boolean;
@@ -53,6 +54,7 @@ export default function ConfirmModal({
             onClose();
         } catch (error) {
             console.error('Confirm action failed:', error);
+            reportError(error, { component: 'ConfirmModal', action: 'confirm' });
             // Don't close modal on error
         } finally {
             setInternalLoading(false);

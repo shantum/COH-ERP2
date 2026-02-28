@@ -11,6 +11,7 @@
 import { toast } from 'sonner';
 import type { ZodError } from 'zod';
 import { getReturnErrorMessage, isReturnErrorCode } from '@coh/shared/errors';
+import { reportError } from './errorReporter';
 
 /**
  * Format Zod validation errors into user-friendly messages
@@ -102,6 +103,8 @@ export function showMutationError(
         onRetry?: () => void;
     }
 ) {
+    reportError(error, { domain: 'mutation', operation, entityId: options?.entityId });
+
     const errorMessage =
         error instanceof Error ? error.message : 'An unexpected error occurred';
 
@@ -226,8 +229,7 @@ export function showReturnError(
     else if (error instanceof Error) {
         if (isTechnicalError(error.message)) {
             userMessage = 'A database error occurred. Please try again.';
-            // Log technical details for debugging
-            console.error('[Returns] Technical error:', error.message);
+            reportError(error, { domain: 'returns', type: 'technical', operation });
         } else {
             userMessage = error.message;
         }
@@ -235,7 +237,7 @@ export function showReturnError(
     // Unknown error
     else {
         userMessage = 'An unexpected error occurred';
-        console.error('[Returns] Unknown error:', error);
+        reportError(error, { domain: 'returns', type: 'unknown', operation });
     }
 
     toast.error(title, {

@@ -9,6 +9,7 @@
 import { useState, useEffect } from 'react';
 import { getTables, inspectTable, type TableInfo } from '../../../server/functions/admin';
 import { Database, Eye, RefreshCw, Table2, Layers, Search } from 'lucide-react';
+import { reportError } from '@/utils/errorReporter';
 
 export function InspectorTab() {
     const [tables, setTables] = useState<TableInfo[]>([]);
@@ -36,6 +37,7 @@ export function InspectorTab() {
                 }
             } catch (err) {
                 console.error('Failed to fetch tables:', err);
+                reportError(err, { component: 'InspectorTab', action: 'fetchTables' });
             } finally {
                 setTablesLoading(false);
             }
@@ -57,6 +59,7 @@ export function InspectorTab() {
             }
         } catch (err) {
             console.error(err);
+            reportError(err, { component: 'InspectorTab', action: 'runQuery' });
             alert('Failed to fetch data');
         } finally {
             setInspectorLoading(false);
@@ -72,6 +75,7 @@ export function InspectorTab() {
             }
         } catch (err) {
             console.error('Failed to refresh tables:', err);
+            reportError(err, { component: 'InspectorTab', action: 'refreshTables' });
         } finally {
             setTablesLoading(false);
         }
