@@ -89,11 +89,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const handleUnauthorized = () => {
             // Clear the query cache on 401
             queryClient.setQueryData(authQueryKeys.user, null);
-            // Redirect to login with current path as redirect target
-            // Full page navigation ensures clean state (no stale data in components)
+            // Redirect to login — but skip if already on /login to avoid redirect loop
             const currentPath = window.location.pathname;
-            const redirectParam = currentPath !== '/login' ? `?redirect=${encodeURIComponent(currentPath)}` : '';
-            window.location.href = `/login${redirectParam}`;
+            if (currentPath === '/login') return;
+            window.location.href = `/login?redirect=${encodeURIComponent(currentPath)}`;
         };
 
         window.addEventListener('auth:unauthorized', handleUnauthorized);
