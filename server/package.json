@@ -17,6 +17,7 @@
     "@anthropic-ai/sdk": "^0.74.0",
     "@aws-sdk/client-ses": "^3.997.0",
     "@coh/shared": "file:../shared",
+    "@sentry/node": "^10.40.0",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/jsonwebtoken": "^9.0.10",

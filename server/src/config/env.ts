@@ -170,6 +170,16 @@ const envSchema = z.object({
 
     /** Root directory for file storage (invoices, bank transactions) */
     FILE_STORAGE_ROOT: z.string().default('./data/files'),
+
+    // ----------------------------------------
+    // SENTRY ERROR TRACKING
+    // ----------------------------------------
+
+    /** Sentry DSN for backend error tracking */
+    SENTRY_DSN: z.string().optional(),
+
+    /** Sentry DSN for frontend (passed to client via VITE_ prefix) */
+    VITE_SENTRY_DSN: z.string().optional(),
 });
 
 // ============================================

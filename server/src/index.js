@@ -5,6 +5,9 @@ process.env.TZ = 'UTC';
 // dotenv.config() is called inside env.ts before validation
 import './config/env.js';
 
+// Sentry must be initialized before other imports to auto-instrument
+import './instrument.js';
+
 // Import logger EARLY to capture console.log/warn/error from all subsequent imports
 import logger from './utils/logger.js';
 
@@ -66,6 +69,7 @@ import returnPrimeAdminRoutes from './routes/returnPrimeAdminRoutes.js';
 import razorpayxWebhookRoutes from './routes/razorpayxWebhook.js';
 import razorpayxPayoutRoutes from './routes/razorpayxPayout.js';
 import { startAllWorkers, stopAllWorkers } from './services/workerRegistry.js';
+import * as Sentry from '@sentry/node';
 import { errorHandler } from './middleware/errorHandler.js';
 import shutdownCoordinator from './utils/shutdownCoordinator.js';
 
@@ -82,7 +86,7 @@ app.use(helmet({
             scriptSrc: ["'self'", "'unsafe-inline'"],
             styleSrc: ["'self'", "'unsafe-inline'"],
             imgSrc: ["'self'", "data:", "blob:", "https://cdn.shopify.com", "/api/uploads/"],
-            connectSrc: ["'self'"],
+            connectSrc: ["'self'", "https://*.ingest.de.sentry.io"],
             fontSrc: ["'self'", "data:"],
             objectSrc: ["'none'"],
             frameSrc: ["'none'"],
@@ -301,6 +305,9 @@ app.get('/api/health/production', async (req, res) => {
 
   res.json(metrics);
 });
+
+// Sentry error handler must be before our custom error handler
+Sentry.setupExpressErrorHandler(app);
 
 // Centralized error handling middleware
 // Handles custom errors (ValidationError, NotFoundError, etc.), Prisma errors, and Zod errors
