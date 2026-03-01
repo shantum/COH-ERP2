@@ -12,7 +12,13 @@ import { authMiddleware } from '../middleware/auth';
 // RE-EXPORT TYPES
 // ============================================
 
-export type { GAdsAccountSummary, GAdsCampaignRow, GAdsDailyRow } from '@server/services/googleAdsClient.js';
+export type {
+    GAdsAccountSummary, GAdsCampaignRow, GAdsDailyRow,
+    GAdsProductRow, GAdsGeoRow, GAdsHourlyRow, GAdsDeviceRow,
+    GAdsAgeRow, GAdsGenderRow, GAdsSearchTermRow, GAdsKeywordRow,
+    GAdsLandingPageRow, GAdsImpressionShareRow, GAdsBudgetRow,
+    GAdsCreativeRow, GAdsVideoRow, GAdsAssetGroupRow, GAdsAudienceSegmentRow,
+} from '@server/services/googleAdsClient.js';
 
 // ============================================
 // INPUT SCHEMAS
@@ -64,5 +70,170 @@ export const getGAdsDailyTrend = createServerFn({ method: 'POST' })
     .inputValidator((input: unknown) => daysInputSchema.parse(input))
     .handler(async ({ data }) => {
         const { getGAdsDailyTrend: fn } = await getGAdsClient();
+        return fn(data.days);
+    });
+
+/**
+ * Shopping/PMax product-level performance
+ */
+export const getGAdsProducts = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => daysInputSchema.parse(input))
+    .handler(async ({ data }) => {
+        const { getGAdsProducts: fn } = await getGAdsClient();
+        return fn(data.days);
+    });
+
+/**
+ * Geographic performance by location × campaign
+ */
+export const getGAdsGeo = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => daysInputSchema.parse(input))
+    .handler(async ({ data }) => {
+        const { getGAdsGeo: fn } = await getGAdsClient();
+        return fn(data.days);
+    });
+
+/**
+ * Hourly/day-of-week performance
+ */
+export const getGAdsHourly = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => daysInputSchema.parse(input))
+    .handler(async ({ data }) => {
+        const { getGAdsHourly: fn } = await getGAdsClient();
+        return fn(data.days);
+    });
+
+/**
+ * Device breakdown
+ */
+export const getGAdsDevices = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => daysInputSchema.parse(input))
+    .handler(async ({ data }) => {
+        const { getGAdsDevices: fn } = await getGAdsClient();
+        return fn(data.days);
+    });
+
+/**
+ * Age range demographics
+ */
+export const getGAdsAge = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => daysInputSchema.parse(input))
+    .handler(async ({ data }) => {
+        const { getGAdsAge: fn } = await getGAdsClient();
+        return fn(data.days);
+    });
+
+/**
+ * Gender demographics
+ */
+export const getGAdsGender = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => daysInputSchema.parse(input))
+    .handler(async ({ data }) => {
+        const { getGAdsGender: fn } = await getGAdsClient();
+        return fn(data.days);
+    });
+
+/**
+ * Search terms — what people actually searched
+ */
+export const getGAdsSearchTerms = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => daysInputSchema.parse(input))
+    .handler(async ({ data }) => {
+        const { getGAdsSearchTerms: fn } = await getGAdsClient();
+        return fn(data.days);
+    });
+
+/**
+ * Keywords with quality scores
+ */
+export const getGAdsKeywords = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => daysInputSchema.parse(input))
+    .handler(async ({ data }) => {
+        const { getGAdsKeywords: fn } = await getGAdsClient();
+        return fn(data.days);
+    });
+
+/**
+ * Landing page performance
+ */
+export const getGAdsLandingPages = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => daysInputSchema.parse(input))
+    .handler(async ({ data }) => {
+        const { getGAdsLandingPages: fn } = await getGAdsClient();
+        return fn(data.days);
+    });
+
+/**
+ * Impression share & competitive metrics
+ */
+export const getGAdsImpressionShare = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => daysInputSchema.parse(input))
+    .handler(async ({ data }) => {
+        const { getGAdsImpressionShare: fn } = await getGAdsClient();
+        return fn(data.days);
+    });
+
+/**
+ * Budget utilization per campaign
+ */
+export const getGAdsBudgets = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => daysInputSchema.parse(input))
+    .handler(async ({ data }) => {
+        const { getGAdsBudgets: fn } = await getGAdsClient();
+        return fn(data.days);
+    });
+
+/**
+ * Ad creative performance
+ */
+export const getGAdsCreatives = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => daysInputSchema.parse(input))
+    .handler(async ({ data }) => {
+        const { getGAdsCreatives: fn } = await getGAdsClient();
+        return fn(data.days);
+    });
+
+/**
+ * Video/YouTube performance
+ */
+export const getGAdsVideos = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => daysInputSchema.parse(input))
+    .handler(async ({ data }) => {
+        const { getGAdsVideos: fn } = await getGAdsClient();
+        return fn(data.days);
+    });
+
+/**
+ * PMax asset group performance
+ */
+export const getGAdsAssetGroups = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => daysInputSchema.parse(input))
+    .handler(async ({ data }) => {
+        const { getGAdsAssetGroups: fn } = await getGAdsClient();
+        return fn(data.days);
+    });
+
+/**
+ * Audience segment performance
+ */
+export const getGAdsAudienceSegments = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => daysInputSchema.parse(input))
+    .handler(async ({ data }) => {
+        const { getGAdsAudienceSegments: fn } = await getGAdsClient();
         return fn(data.days);
     });
