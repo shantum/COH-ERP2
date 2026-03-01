@@ -52,16 +52,18 @@ function externalizeServerImports(): Plugin {
       const relativePath = source === '@server' ? '' : source.replace('@server/', '');
       const absolutePath = relativePath ? path.join(SERVER_SRC_PATH, relativePath) : SERVER_SRC_PATH;
 
+      // Always resolve .js → .ts since server runs via tsx (no compiled .js output)
+      const resolvedPath = absolutePath.endsWith('.js')
+        ? absolutePath.replace(/\.js$/, '.ts')
+        : absolutePath;
+
       if (options?.ssr) {
-        // SSR build: mark as external — Node.js resolves at runtime
-        return { id: absolutePath, external: true };
+        // SSR: mark as external — Node.js (tsx) resolves .ts at runtime
+        return { id: resolvedPath, external: true };
       }
 
-      // Dev mode: resolve .js → .ts so Vite can process the file
-      if (absolutePath.endsWith('.js')) {
-        return { id: absolutePath.replace(/\.js$/, '.ts'), external: false };
-      }
-      return { id: absolutePath, external: false };
+      // Client dev: let Vite process the file
+      return { id: resolvedPath, external: false };
     },
   };
 }

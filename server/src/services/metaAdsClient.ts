@@ -217,19 +217,21 @@ export async function getAccountSummary(days: number): Promise<MetaAccountSummar
     if (cached) return cached;
 
     const { since, until } = getDateRange(days);
-    const fields = 'spend,impressions,clicks,cpc,cpm,ctr,actions,action_values';
+    const fields = 'spend,impressions,reach,frequency,clicks,cpc,cpm,ctr,actions,action_values';
 
     const url = `${META_BASE_URL}/${META_AD_ACCOUNT_ID}/insights`
         + `?fields=${fields}`
         + `&time_range={"since":"${since}","until":"${until}"}`
         + `&access_token=${META_ACCESS_TOKEN}`;
 
-    const response = await fetchWithRetry<MetaInsightsResponse<RawMetaDailyRow>>(url, 'account-summary');
+    const response = await fetchWithRetry<MetaInsightsResponse<RawSummaryRow>>(url, 'account-summary');
     const raw = response.data?.[0];
 
     const summary: MetaAccountSummary = {
         spend: Number(raw?.spend ?? 0),
         impressions: Number(raw?.impressions ?? 0),
+        reach: Number(raw?.reach ?? 0),
+        frequency: Number(raw?.frequency ?? 0),
         clicks: Number(raw?.clicks ?? 0),
         cpc: Number(raw?.cpc ?? 0),
         cpm: Number(raw?.cpm ?? 0),
@@ -237,6 +239,8 @@ export async function getAccountSummary(days: number): Promise<MetaAccountSummar
         purchases: extractActionValue(raw?.actions, 'purchase'),
         purchaseValue: extractActionValue(raw?.action_values, 'purchase'),
         addToCarts: extractActionValue(raw?.actions, 'add_to_cart'),
+        initiateCheckouts: extractActionValue(raw?.actions, 'initiate_checkout'),
+        viewContents: extractActionValue(raw?.actions, 'view_content'),
         roas: 0,
     };
     if (summary.spend > 0) {
@@ -245,6 +249,189 @@ export async function getAccountSummary(days: number): Promise<MetaAccountSummar
 
     setCache(cacheKey, summary, META_CACHE_TTL);
     return summary;
+}
+
+/**
+ * Get adset-level insights from Meta Ads.
+ */
+export async function getAdsetInsights(days: number): Promise<MetaAdsetRow[]> {
+    const cacheKey = `meta:adsets:${days}`;
+    const cached = getCached<MetaAdsetRow[]>(cacheKey);
+    if (cached) return cached;
+
+    const { since, until } = getDateRange(days);
+    const fields = [
+        'campaign_name', 'campaign_id', 'adset_name', 'adset_id',
+        'spend', 'impressions', 'reach', 'clicks', 'cpc', 'cpm', 'ctr',
+        'actions', 'action_values',
+    ].join(',');
+
+    const url = `${META_BASE_URL}/${META_AD_ACCOUNT_ID}/insights`
+        + `?fields=${fields}`
+        + `&time_range={"since":"${since}","until":"${until}"}`
+        + `&level=adset`
+        + `&limit=200`
+        + `&access_token=${META_ACCESS_TOKEN}`;
+
+    const response = await fetchWithRetry<MetaInsightsResponse<RawAdsetRow>>(url, 'adset-insights');
+
+    let allData = response.data ?? [];
+    let nextUrl = response.paging?.next;
+    while (nextUrl) {
+        const page = await fetchWithRetry<MetaInsightsResponse<RawAdsetRow>>(nextUrl, 'adset-insights-page');
+        allData = allData.concat(page.data ?? []);
+        nextUrl = page.paging?.next;
+    }
+
+    const rows = allData.map(parseAdsetRow);
+    setCache(cacheKey, rows, META_CACHE_TTL);
+    return rows;
+}
+
+/**
+ * Get ad-level insights from Meta Ads.
+ */
+export async function getAdInsights(days: number): Promise<MetaAdRow[]> {
+    const cacheKey = `meta:ads:${days}`;
+    const cached = getCached<MetaAdRow[]>(cacheKey);
+    if (cached) return cached;
+
+    const { since, until } = getDateRange(days);
+    const fields = [
+        'campaign_name', 'campaign_id', 'adset_name', 'adset_id',
+        'ad_name', 'ad_id',
+        'spend', 'impressions', 'clicks', 'cpc', 'ctr',
+        'actions', 'action_values',
+    ].join(',');
+
+    const url = `${META_BASE_URL}/${META_AD_ACCOUNT_ID}/insights`
+        + `?fields=${fields}`
+        + `&time_range={"since":"${since}","until":"${until}"}`
+        + `&level=ad`
+        + `&limit=200`
+        + `&access_token=${META_ACCESS_TOKEN}`;
+
+    const response = await fetchWithRetry<MetaInsightsResponse<RawAdRow>>(url, 'ad-insights');
+
+    let allData = response.data ?? [];
+    let nextUrl = response.paging?.next;
+    while (nextUrl) {
+        const page = await fetchWithRetry<MetaInsightsResponse<RawAdRow>>(nextUrl, 'ad-insights-page');
+        allData = allData.concat(page.data ?? []);
+        nextUrl = page.paging?.next;
+    }
+
+    const rows = allData.map(parseAdRow);
+    setCache(cacheKey, rows, META_CACHE_TTL);
+    return rows;
+}
+
+/**
+ * Get age + gender breakdown.
+ */
+export async function getAgeGenderInsights(days: number): Promise<MetaAgeGenderRow[]> {
+    const cacheKey = `meta:age-gender:${days}`;
+    const cached = getCached<MetaAgeGenderRow[]>(cacheKey);
+    if (cached) return cached;
+
+    const { since, until } = getDateRange(days);
+    const fields = 'spend,impressions,clicks,ctr,actions,action_values';
+
+    const url = `${META_BASE_URL}/${META_AD_ACCOUNT_ID}/insights`
+        + `?fields=${fields}`
+        + `&time_range={"since":"${since}","until":"${until}"}`
+        + `&breakdowns=age,gender`
+        + `&limit=100`
+        + `&access_token=${META_ACCESS_TOKEN}`;
+
+    const response = await fetchWithRetry<MetaInsightsResponse<RawAgeGenderRow>>(url, 'age-gender-insights');
+
+    const rows = (response.data ?? []).map(parseAgeGenderRow);
+    setCache(cacheKey, rows, META_CACHE_TTL);
+    return rows;
+}
+
+/**
+ * Get placement breakdown (publisher_platform + platform_position).
+ */
+export async function getPlacementInsights(days: number): Promise<MetaPlacementRow[]> {
+    const cacheKey = `meta:placements:${days}`;
+    const cached = getCached<MetaPlacementRow[]>(cacheKey);
+    if (cached) return cached;
+
+    const { since, until } = getDateRange(days);
+    const fields = 'spend,impressions,clicks,ctr,cpm,actions,action_values';
+
+    const url = `${META_BASE_URL}/${META_AD_ACCOUNT_ID}/insights`
+        + `?fields=${fields}`
+        + `&time_range={"since":"${since}","until":"${until}"}`
+        + `&breakdowns=publisher_platform,platform_position`
+        + `&limit=100`
+        + `&access_token=${META_ACCESS_TOKEN}`;
+
+    const response = await fetchWithRetry<MetaInsightsResponse<RawPlacementRow>>(url, 'placement-insights');
+
+    const rows = (response.data ?? []).map(parsePlacementRow);
+    setCache(cacheKey, rows, META_CACHE_TTL);
+    return rows;
+}
+
+/**
+ * Get region/country breakdown.
+ */
+export async function getRegionInsights(days: number): Promise<MetaRegionRow[]> {
+    const cacheKey = `meta:regions:${days}`;
+    const cached = getCached<MetaRegionRow[]>(cacheKey);
+    if (cached) return cached;
+
+    const { since, until } = getDateRange(days);
+    const fields = 'spend,impressions,clicks,actions,action_values';
+
+    const url = `${META_BASE_URL}/${META_AD_ACCOUNT_ID}/insights`
+        + `?fields=${fields}`
+        + `&time_range={"since":"${since}","until":"${until}"}`
+        + `&breakdowns=region`
+        + `&limit=100`
+        + `&access_token=${META_ACCESS_TOKEN}`;
+
+    const response = await fetchWithRetry<MetaInsightsResponse<RawRegionRow>>(url, 'region-insights');
+
+    let allData = response.data ?? [];
+    let nextUrl = response.paging?.next;
+    while (nextUrl) {
+        const page = await fetchWithRetry<MetaInsightsResponse<RawRegionRow>>(nextUrl, 'region-insights-page');
+        allData = allData.concat(page.data ?? []);
+        nextUrl = page.paging?.next;
+    }
+
+    const rows = allData.map(parseRegionRow);
+    setCache(cacheKey, rows, META_CACHE_TTL);
+    return rows;
+}
+
+/**
+ * Get device platform breakdown.
+ */
+export async function getDeviceInsights(days: number): Promise<MetaDeviceRow[]> {
+    const cacheKey = `meta:devices:${days}`;
+    const cached = getCached<MetaDeviceRow[]>(cacheKey);
+    if (cached) return cached;
+
+    const { since, until } = getDateRange(days);
+    const fields = 'spend,impressions,clicks,actions,action_values';
+
+    const url = `${META_BASE_URL}/${META_AD_ACCOUNT_ID}/insights`
+        + `?fields=${fields}`
+        + `&time_range={"since":"${since}","until":"${until}"}`
+        + `&breakdowns=device_platform`
+        + `&limit=20`
+        + `&access_token=${META_ACCESS_TOKEN}`;
+
+    const response = await fetchWithRetry<MetaInsightsResponse<RawDeviceRow>>(url, 'device-insights');
+
+    const rows = (response.data ?? []).map(parseDeviceRow);
+    setCache(cacheKey, rows, META_CACHE_TTL);
+    return rows;
 }
 
 /**
@@ -296,6 +483,8 @@ export interface MetaDailyRow {
 export interface MetaAccountSummary {
     spend: number;
     impressions: number;
+    reach: number;
+    frequency: number;
     clicks: number;
     cpc: number;
     cpm: number;
@@ -303,6 +492,89 @@ export interface MetaAccountSummary {
     purchases: number;
     purchaseValue: number;
     addToCarts: number;
+    initiateCheckouts: number;
+    viewContents: number;
+    roas: number;
+}
+
+export interface MetaAdsetRow {
+    adsetId: string;
+    adsetName: string;
+    campaignId: string;
+    campaignName: string;
+    spend: number;
+    impressions: number;
+    reach: number;
+    clicks: number;
+    cpc: number;
+    cpm: number;
+    ctr: number;
+    purchases: number;
+    purchaseValue: number;
+    costPerPurchase: number;
+    roas: number;
+}
+
+export interface MetaAdRow {
+    adId: string;
+    adName: string;
+    adsetName: string;
+    campaignName: string;
+    spend: number;
+    impressions: number;
+    clicks: number;
+    cpc: number;
+    ctr: number;
+    purchases: number;
+    purchaseValue: number;
+    costPerPurchase: number;
+    roas: number;
+}
+
+export interface MetaAgeGenderRow {
+    age: string;
+    gender: string;
+    spend: number;
+    impressions: number;
+    clicks: number;
+    ctr: number;
+    purchases: number;
+    purchaseValue: number;
+    costPerPurchase: number;
+    roas: number;
+}
+
+export interface MetaPlacementRow {
+    platform: string;
+    position: string;
+    label: string;
+    spend: number;
+    impressions: number;
+    clicks: number;
+    ctr: number;
+    cpm: number;
+    purchases: number;
+    purchaseValue: number;
+    roas: number;
+}
+
+export interface MetaRegionRow {
+    region: string;
+    spend: number;
+    impressions: number;
+    clicks: number;
+    purchases: number;
+    purchaseValue: number;
+    roas: number;
+}
+
+export interface MetaDeviceRow {
+    device: string;
+    spend: number;
+    impressions: number;
+    clicks: number;
+    purchases: number;
+    purchaseValue: number;
     roas: number;
 }
 
@@ -330,6 +602,19 @@ interface RawMetaCampaignRow {
     cost_per_action_type?: MetaAction[];
 }
 
+interface RawSummaryRow {
+    spend: string;
+    impressions: string;
+    reach?: string;
+    frequency?: string;
+    clicks: string;
+    cpc?: string;
+    cpm?: string;
+    ctr?: string;
+    actions?: MetaAction[];
+    action_values?: MetaAction[];
+}
+
 interface RawMetaDailyRow {
     date_start: string;
     spend: string;
@@ -338,6 +623,77 @@ interface RawMetaDailyRow {
     cpc?: string;
     cpm?: string;
     ctr?: string;
+    actions?: MetaAction[];
+    action_values?: MetaAction[];
+}
+
+interface RawAdsetRow {
+    adset_id: string;
+    adset_name: string;
+    campaign_id: string;
+    campaign_name: string;
+    spend: string;
+    impressions: string;
+    reach?: string;
+    clicks: string;
+    cpc: string;
+    cpm: string;
+    ctr: string;
+    actions?: MetaAction[];
+    action_values?: MetaAction[];
+}
+
+interface RawAdRow {
+    ad_id: string;
+    ad_name: string;
+    adset_name: string;
+    campaign_name: string;
+    spend: string;
+    impressions: string;
+    clicks: string;
+    cpc: string;
+    ctr: string;
+    actions?: MetaAction[];
+    action_values?: MetaAction[];
+}
+
+interface RawAgeGenderRow {
+    age: string;
+    gender: string;
+    spend: string;
+    impressions: string;
+    clicks: string;
+    ctr: string;
+    actions?: MetaAction[];
+    action_values?: MetaAction[];
+}
+
+interface RawPlacementRow {
+    publisher_platform: string;
+    platform_position: string;
+    spend: string;
+    impressions: string;
+    clicks: string;
+    ctr: string;
+    cpm?: string;
+    actions?: MetaAction[];
+    action_values?: MetaAction[];
+}
+
+interface RawRegionRow {
+    region: string;
+    spend: string;
+    impressions: string;
+    clicks: string;
+    actions?: MetaAction[];
+    action_values?: MetaAction[];
+}
+
+interface RawDeviceRow {
+    device_platform: string;
+    spend: string;
+    impressions: string;
+    clicks: string;
     actions?: MetaAction[];
     action_values?: MetaAction[];
 }
@@ -383,5 +739,141 @@ function parseDailyRow(raw: RawMetaDailyRow): MetaDailyRow {
         clicks: Number(raw.clicks),
         purchases: extractActionValue(raw.actions, 'purchase'),
         purchaseValue: extractActionValue(raw.action_values, 'purchase'),
+    };
+}
+
+function parseAdsetRow(raw: RawAdsetRow): MetaAdsetRow {
+    const spend = Number(raw.spend);
+    const purchases = extractActionValue(raw.actions, 'purchase');
+    const purchaseValue = extractActionValue(raw.action_values, 'purchase');
+    return {
+        adsetId: raw.adset_id,
+        adsetName: raw.adset_name,
+        campaignId: raw.campaign_id,
+        campaignName: raw.campaign_name,
+        spend,
+        impressions: Number(raw.impressions),
+        reach: Number(raw.reach ?? 0),
+        clicks: Number(raw.clicks),
+        cpc: Number(raw.cpc ?? 0),
+        cpm: Number(raw.cpm ?? 0),
+        ctr: Number(raw.ctr ?? 0),
+        purchases,
+        purchaseValue,
+        costPerPurchase: purchases > 0 ? spend / purchases : 0,
+        roas: spend > 0 ? Math.round((purchaseValue / spend) * 100) / 100 : 0,
+    };
+}
+
+function parseAdRow(raw: RawAdRow): MetaAdRow {
+    const spend = Number(raw.spend);
+    const purchases = extractActionValue(raw.actions, 'purchase');
+    const purchaseValue = extractActionValue(raw.action_values, 'purchase');
+    return {
+        adId: raw.ad_id,
+        adName: raw.ad_name,
+        adsetName: raw.adset_name,
+        campaignName: raw.campaign_name,
+        spend,
+        impressions: Number(raw.impressions),
+        clicks: Number(raw.clicks),
+        cpc: Number(raw.cpc ?? 0),
+        ctr: Number(raw.ctr ?? 0),
+        purchases,
+        purchaseValue,
+        costPerPurchase: purchases > 0 ? spend / purchases : 0,
+        roas: spend > 0 ? Math.round((purchaseValue / spend) * 100) / 100 : 0,
+    };
+}
+
+function parseAgeGenderRow(raw: RawAgeGenderRow): MetaAgeGenderRow {
+    const spend = Number(raw.spend);
+    const purchases = extractActionValue(raw.actions, 'purchase');
+    const purchaseValue = extractActionValue(raw.action_values, 'purchase');
+    return {
+        age: raw.age,
+        gender: raw.gender,
+        spend,
+        impressions: Number(raw.impressions),
+        clicks: Number(raw.clicks),
+        ctr: Number(raw.ctr ?? 0),
+        purchases,
+        purchaseValue,
+        costPerPurchase: purchases > 0 ? spend / purchases : 0,
+        roas: spend > 0 ? Math.round((purchaseValue / spend) * 100) / 100 : 0,
+    };
+}
+
+const PLACEMENT_LABELS: Record<string, Record<string, string>> = {
+    facebook: {
+        feed: 'Facebook Feed',
+        story: 'Facebook Stories',
+        right_hand_column: 'Right Column',
+        instant_article: 'Instant Articles',
+        marketplace: 'Marketplace',
+        video_feeds: 'Facebook Video Feeds',
+        search: 'Facebook Search',
+        an_classic: 'Audience Network',
+    },
+    instagram: {
+        stream: 'Instagram Feed',
+        story: 'Instagram Stories',
+        reels: 'Instagram Reels',
+        explore: 'Instagram Explore',
+        ig_search: 'Instagram Search',
+        profile_feed: 'Instagram Profile Feed',
+    },
+};
+
+function parsePlacementRow(raw: RawPlacementRow): MetaPlacementRow {
+    const spend = Number(raw.spend);
+    const purchases = extractActionValue(raw.actions, 'purchase');
+    const purchaseValue = extractActionValue(raw.action_values, 'purchase');
+    const platform = raw.publisher_platform?.toLowerCase() ?? 'unknown';
+    const position = raw.platform_position?.toLowerCase() ?? 'unknown';
+    const label = PLACEMENT_LABELS[platform]?.[position]
+        ?? `${platform.charAt(0).toUpperCase() + platform.slice(1)} ${position}`;
+    return {
+        platform,
+        position,
+        label,
+        spend,
+        impressions: Number(raw.impressions),
+        clicks: Number(raw.clicks),
+        ctr: Number(raw.ctr ?? 0),
+        cpm: Number(raw.cpm ?? 0),
+        purchases,
+        purchaseValue,
+        roas: spend > 0 ? Math.round((purchaseValue / spend) * 100) / 100 : 0,
+    };
+}
+
+function parseRegionRow(raw: RawRegionRow): MetaRegionRow {
+    const spend = Number(raw.spend);
+    const purchases = extractActionValue(raw.actions, 'purchase');
+    const purchaseValue = extractActionValue(raw.action_values, 'purchase');
+    return {
+        region: raw.region ?? 'Unknown',
+        spend,
+        impressions: Number(raw.impressions),
+        clicks: Number(raw.clicks),
+        purchases,
+        purchaseValue,
+        roas: spend > 0 ? Math.round((purchaseValue / spend) * 100) / 100 : 0,
+    };
+}
+
+function parseDeviceRow(raw: RawDeviceRow): MetaDeviceRow {
+    const spend = Number(raw.spend);
+    const purchases = extractActionValue(raw.actions, 'purchase');
+    const purchaseValue = extractActionValue(raw.action_values, 'purchase');
+    return {
+        device: raw.device_platform ?? 'unknown',
+        spend,
+        impressions: Number(raw.impressions),
+        clicks: Number(raw.clicks),
+        purchases,
+        purchaseValue,
+        roas: spend > 0 ? Math.round((purchaseValue / spend) * 100) / 100 : 0,
     };
 }

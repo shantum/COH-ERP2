@@ -4,7 +4,11 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
-import { getMetaCampaigns, getMetaDailyTrend, getMetaSummary } from '../server/functions/metaAds';
+import {
+    getMetaCampaigns, getMetaDailyTrend, getMetaSummary,
+    getMetaAdsets, getMetaAds, getMetaAgeGender,
+    getMetaPlacements, getMetaRegions, getMetaDevices,
+} from '../server/functions/metaAds';
 
 const STALE_TIME = 5 * 60 * 1000;
 
@@ -30,6 +34,60 @@ export function useMetaSummary(days: number) {
     const fn = useServerFn(getMetaSummary);
     return useQuery({
         queryKey: ['meta-ads', 'summary', days],
+        queryFn: () => fn({ data: { days } }),
+        staleTime: STALE_TIME,
+    });
+}
+
+export function useMetaAdsets(days: number) {
+    const fn = useServerFn(getMetaAdsets);
+    return useQuery({
+        queryKey: ['meta-ads', 'adsets', days],
+        queryFn: () => fn({ data: { days } }),
+        staleTime: STALE_TIME,
+    });
+}
+
+export function useMetaAds(days: number) {
+    const fn = useServerFn(getMetaAds);
+    return useQuery({
+        queryKey: ['meta-ads', 'ads', days],
+        queryFn: () => fn({ data: { days } }),
+        staleTime: STALE_TIME,
+    });
+}
+
+export function useMetaAgeGender(days: number) {
+    const fn = useServerFn(getMetaAgeGender);
+    return useQuery({
+        queryKey: ['meta-ads', 'age-gender', days],
+        queryFn: () => fn({ data: { days } }),
+        staleTime: STALE_TIME,
+    });
+}
+
+export function useMetaPlacements(days: number) {
+    const fn = useServerFn(getMetaPlacements);
+    return useQuery({
+        queryKey: ['meta-ads', 'placements', days],
+        queryFn: () => fn({ data: { days } }),
+        staleTime: STALE_TIME,
+    });
+}
+
+export function useMetaRegions(days: number) {
+    const fn = useServerFn(getMetaRegions);
+    return useQuery({
+        queryKey: ['meta-ads', 'regions', days],
+        queryFn: () => fn({ data: { days } }),
+        staleTime: STALE_TIME,
+    });
+}
+
+export function useMetaDevices(days: number) {
+    const fn = useServerFn(getMetaDevices);
+    return useQuery({
+        queryKey: ['meta-ads', 'devices', days],
         queryFn: () => fn({ data: { days } }),
         staleTime: STALE_TIME,
     });

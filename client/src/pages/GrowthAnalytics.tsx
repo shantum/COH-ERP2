@@ -17,14 +17,13 @@ import {
     useCampaigns, useGeoConversion, useDeviceBreakdown, useGrowthOverview,
     useGA4Health,
 } from '../hooks/useGA4Analytics';
-import { useMetaCampaigns, useMetaSummary, useMetaDailyTrend } from '../hooks/useMetaAds';
+import MetaAdsAnalysis from './MetaAdsAnalysis';
 import { useGAdsAccountSummary, useGAdsCampaigns, useGAdsDailyTrend } from '../hooks/useGoogleAds';
 import { compactThemeSmall } from '../utils/agGridHelpers';
 import { formatCurrency } from '../utils/formatting';
 import type {
     FunnelDay, TrafficSourceRow, CampaignRow, LandingPageRow, GeoRow, DeviceRow,
 } from '../server/functions/ga4Analytics';
-import type { MetaCampaignRow } from '../server/functions/metaAds';
 import type { GAdsCampaignRow } from '../server/functions/googleAds';
 
 ModuleRegistry.registerModules([AllCommunityModule]);
@@ -673,131 +672,11 @@ function GoogleAdsTab({ days }: { days: number }) {
 }
 
 // ============================================
-// META ADS TAB
+// META ADS TAB (delegated to MetaAdsAnalysis)
 // ============================================
 
 function MetaAdsTab({ days }: { days: number }) {
-    const summary = useMetaSummary(days);
-    const campaigns = useMetaCampaigns(days);
-    const daily = useMetaDailyTrend(days);
-
-    const isLoading = summary.isLoading || campaigns.isLoading;
-
-    const campaignCols: ColDef<MetaCampaignRow>[] = useMemo(() => [
-        { field: 'campaignName', headerName: 'Campaign', flex: 2, minWidth: 200 },
-        {
-            field: 'spend', headerName: 'Spend',
-            valueFormatter: (p: ValueFormatterParams) => formatCurrency(p.value),
-            width: 110, sort: 'desc' as const,
-        },
-        { field: 'impressions', headerName: 'Impr', valueFormatter: (p: ValueFormatterParams) => formatNum(p.value), width: 90 },
-        { field: 'clicks', headerName: 'Clicks', valueFormatter: (p: ValueFormatterParams) => formatNum(p.value), width: 80 },
-        {
-            field: 'ctr', headerName: 'CTR',
-            valueFormatter: (p: ValueFormatterParams) => formatPct(p.value),
-            width: 75,
-        },
-        {
-            field: 'cpc', headerName: 'CPC',
-            valueFormatter: (p: ValueFormatterParams) => `₹${Number(p.value).toFixed(1)}`,
-            width: 75,
-        },
-        { field: 'purchases', headerName: 'Purchases', width: 90 },
-        {
-            field: 'purchaseValue', headerName: 'Revenue',
-            valueFormatter: (p: ValueFormatterParams) => formatCurrency(p.value),
-            width: 110,
-        },
-        {
-            field: 'costPerPurchase', headerName: 'CPP',
-            valueFormatter: (p: ValueFormatterParams) => p.value > 0 ? `₹${Number(p.value).toFixed(0)}` : '-',
-            width: 80,
-        },
-        {
-            field: 'roas', headerName: 'ROAS',
-            valueFormatter: (p: ValueFormatterParams) => p.value > 0 ? `${Number(p.value).toFixed(2)}x` : '-',
-            width: 80,
-            cellStyle: (params: { value: number }): Record<string, string | number> | null => {
-                if (params.value >= 3) return { color: '#16a34a', fontWeight: 600 };
-                if (params.value >= 1.5) return { color: '#d97706', fontWeight: 600 };
-                if (params.value > 0) return { color: '#dc2626', fontWeight: 600 };
-                return null;
-            },
-        },
-    ], []);
-
-    if (isLoading) {
-        return (
-            <div className="space-y-6">
-                <KPISkeleton />
-                <ChartSkeleton />
-                <GridSkeleton />
-            </div>
-        );
-    }
-
-    if (summary.error || campaigns.error) {
-        return <AdsErrorState platform="Meta Ads" error={summary.error ?? campaigns.error} />;
-    }
-
-    const s = summary.data;
-    const campaignData = campaigns.data ?? [];
-    const dailyData = daily.data ?? [];
-
-    return (
-        <div className="space-y-6">
-            {/* KPI Cards */}
-            {s && (
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                    <KPICard label="Total Spend" value={formatCurrency(s.spend)} />
-                    <KPICard label="ROAS" value={s.roas > 0 ? `${s.roas.toFixed(2)}x` : '-'} subtext={`₹${formatNum(Math.round(s.purchaseValue))} revenue`} />
-                    <KPICard label="Purchases" value={formatNum(s.purchases)} subtext={s.spend > 0 && s.purchases > 0 ? `₹${Math.round(s.spend / s.purchases)} per purchase` : undefined} />
-                    <KPICard label="CTR" value={formatPct(s.ctr)} subtext={`CPC ₹${s.cpc.toFixed(1)} · CPM ₹${s.cpm.toFixed(0)}`} />
-                </div>
-            )}
-
-            {/* Daily Spend Trend */}
-            {dailyData.length > 0 && (
-                <div className="bg-white rounded-lg border border-stone-200 shadow-sm p-4 sm:p-6">
-                    <h3 className="text-sm font-medium text-stone-700 mb-4">Daily Spend & Revenue</h3>
-                    <ResponsiveContainer width="100%" height={280}>
-                        <ComposedChart data={dailyData}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#e7e5e4" />
-                            <XAxis
-                                dataKey="date"
-                                tickFormatter={formatChartDate}
-                                tick={{ fill: '#78716c', fontSize: 11 }}
-                            />
-                            <YAxis yAxisId="left" tick={{ fill: '#78716c', fontSize: 11 }} />
-                            <YAxis yAxisId="right" orientation="right" tick={{ fill: '#78716c', fontSize: 11 }} />
-                            <Tooltip
-                                formatter={(value: number | undefined, name?: string) =>
-                                    [name === 'spend' || name === 'purchaseValue' ? formatCurrency(value ?? 0) : formatNum(value ?? 0), name === 'purchaseValue' ? 'Revenue' : name === 'spend' ? 'Spend' : (name ?? '')]
-                                }
-                                labelFormatter={formatChartDate}
-                            />
-                            <Bar yAxisId="left" dataKey="spend" fill="#292524" name="spend" radius={[2, 2, 0, 0]} />
-                            <Line yAxisId="right" dataKey="purchaseValue" stroke="#16a34a" strokeWidth={2} dot={false} name="purchaseValue" />
-                        </ComposedChart>
-                    </ResponsiveContainer>
-                </div>
-            )}
-
-            {/* Campaign Grid */}
-            <div className="bg-white rounded-lg border border-stone-200 shadow-sm p-4 sm:p-6">
-                <h3 className="text-sm font-medium text-stone-700 mb-4">Campaign Performance</h3>
-                <div style={{ height: 450 }}>
-                    <AgGridReact<MetaCampaignRow>
-                        rowData={campaignData}
-                        columnDefs={campaignCols}
-                        defaultColDef={DEFAULT_COL_DEF}
-                        theme={compactThemeSmall}
-                        suppressCellFocus
-                    />
-                </div>
-            </div>
-        </div>
-    );
+    return <MetaAdsAnalysis days={days} />;
 }
 
 // ============================================
