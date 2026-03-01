@@ -603,6 +603,10 @@ function GoogleAdsTab({ days }: { days: number }) {
         );
     }
 
+    if (summary.error || campaigns.error) {
+        return <AdsErrorState platform="Google Ads" error={summary.error ?? campaigns.error} />;
+    }
+
     const s = summary.data;
     const campaignData = campaigns.data ?? [];
     const dailyData = daily.data ?? [];
@@ -725,6 +729,10 @@ function MetaAdsTab({ days }: { days: number }) {
         );
     }
 
+    if (summary.error || campaigns.error) {
+        return <AdsErrorState platform="Meta Ads" error={summary.error ?? campaigns.error} />;
+    }
+
     const s = summary.data;
     const campaignData = campaigns.data ?? [];
     const dailyData = daily.data ?? [];
@@ -786,8 +794,20 @@ function MetaAdsTab({ days }: { days: number }) {
 }
 
 // ============================================
-// ERROR STATE
+// ERROR STATES
 // ============================================
+
+function AdsErrorState({ platform, error }: { platform: string; error: Error | null | undefined }) {
+    return (
+        <div className="flex flex-col items-center justify-center py-16 text-center">
+            <AlertCircle size={40} className="text-red-300 mb-4" />
+            <h3 className="text-lg font-medium text-stone-700">{platform} data unavailable</h3>
+            <p className="text-sm text-stone-400 mt-2 max-w-md">
+                {error instanceof Error ? error.message : 'Failed to load data. Make sure the server is running and environment variables are configured.'}
+            </p>
+        </div>
+    );
+}
 
 function ErrorState() {
     return (
@@ -811,29 +831,25 @@ export default function GrowthAnalytics() {
     const [tab, setTab] = useState<Tab>('overview');
     const [days, setDays] = useState<DayRange>(30);
     const health = useGA4Health();
-
-    // If health check fails, show error
-    if (health.data && !health.data.exists) {
-        return (
-            <div className="h-full flex flex-col">
-                <Header days={days} setDays={setDays} tab={tab} setTab={setTab} />
-                <div className="flex-1 overflow-auto p-6 bg-stone-50">
-                    <ErrorState />
-                </div>
-            </div>
-        );
-    }
+    const ga4Unavailable = health.data && !health.data.exists;
+    const isGA4Tab = tab === 'overview' || tab === 'acquisition' || tab === 'pages' || tab === 'geography';
 
     return (
         <div className="h-full flex flex-col">
             <Header days={days} setDays={setDays} tab={tab} setTab={setTab} />
             <div className="flex-1 overflow-auto p-6 bg-stone-50">
-                {tab === 'overview' && <OverviewTab days={days} />}
-                {tab === 'acquisition' && <AcquisitionTab days={days} />}
-                {tab === 'pages' && <PagesTab days={days} />}
-                {tab === 'geography' && <GeographyTab days={days} />}
-                {tab === 'google-ads' && <GoogleAdsTab days={days} />}
-                {tab === 'meta-ads' && <MetaAdsTab days={days} />}
+                {isGA4Tab && ga4Unavailable ? (
+                    <ErrorState />
+                ) : (
+                    <>
+                        {tab === 'overview' && <OverviewTab days={days} />}
+                        {tab === 'acquisition' && <AcquisitionTab days={days} />}
+                        {tab === 'pages' && <PagesTab days={days} />}
+                        {tab === 'geography' && <GeographyTab days={days} />}
+                        {tab === 'google-ads' && <GoogleAdsTab days={days} />}
+                        {tab === 'meta-ads' && <MetaAdsTab days={days} />}
+                    </>
+                )}
             </div>
         </div>
     );
