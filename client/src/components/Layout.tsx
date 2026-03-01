@@ -198,14 +198,17 @@ export default function Layout() {
     const isRestricted = user?.email === 'prabhakar@coh.one';
     if (isRestricted) {
         return (
-            <div className="min-h-screen bg-gray-50">
-                <div className="flex items-center justify-between px-4 py-3 bg-white border-b border-gray-200">
-                    <span className="text-lg font-bold text-brand-charcoal">COH ERP</span>
+            <div className="min-h-screen bg-warm-50">
+                <div className="flex items-center justify-between px-4 h-14 bg-white border-b border-warm-300">
+                    <div className="flex items-center gap-2">
+                        <span className="font-display text-lg font-bold text-warm-900 tracking-tight">COH</span>
+                        <span className="text-xs font-medium text-warm-600 uppercase tracking-widest">ERP</span>
+                    </div>
                     <div className="flex items-center gap-3">
-                        <span className="text-sm text-gray-600">{user?.name}</span>
+                        <span className="text-sm text-warm-800">{user?.name}</span>
                         <button
                             onClick={() => { logout(); navigate({ to: '/login' }); }}
-                            className="p-1.5 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100"
+                            className="p-1.5 text-warm-600 hover:text-warm-800 rounded-lg hover:bg-warm-200/50"
                             title="Logout"
                         >
                             <LogOut size={18} />
@@ -257,18 +260,16 @@ export default function Layout() {
 
     const isCompact = collapsed && !isHovering;
 
-    return (
-        <div className="min-h-screen bg-gray-50">
-            {/* Mobile menu button */}
-            <div className="lg:hidden fixed top-4 left-4 z-50">
-                <button onClick={() => setSidebarOpen(!sidebarOpen)} className="p-2 rounded-lg bg-white shadow-md">
-                    {sidebarOpen ? <X size={24} /> : <Menu size={24} />}
-                </button>
-            </div>
+    // Generate user initials for avatar
+    const userInitials = user?.name
+        ? user.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
+        : '?';
 
+    return (
+        <div className="min-h-screen bg-warm-50">
             {/* Sidebar */}
             <aside
-                className={`fixed inset-y-0 left-0 z-40 bg-white border-r border-gray-200 transform transition-all duration-200 ease-in-out ${
+                className={`fixed inset-y-0 left-0 z-40 bg-warm-100 border-r border-warm-300 transform transition-all duration-200 ease-in-out ${
                     sidebarOpen ? 'translate-x-0' : '-translate-x-full'
                 } lg:translate-x-0 ${
                     isCompact ? 'lg:w-16' : 'w-56 lg:w-56'
@@ -277,30 +278,48 @@ export default function Layout() {
                 onMouseLeave={() => setIsHovering(false)}
             >
                 <div className="flex flex-col h-full">
-                    {/* Logo */}
-                    <div className={`flex items-center h-14 border-b border-gray-200 transition-all duration-200 ${
-                        isCompact ? 'px-3 justify-center' : 'px-4'
+                    {/* Brand */}
+                    <div className={`flex items-center h-14 transition-all duration-200 ${
+                        isCompact ? 'px-3 justify-center' : 'px-5'
                     }`}>
-                        <span className="text-xl font-bold text-brand-charcoal">COH</span>
-                        {!isCompact && <span className="ml-2 text-sm text-gray-500">ERP</span>}
+                        {isCompact ? (
+                            <span className="font-display text-lg font-bold text-warm-900 tracking-tight">C</span>
+                        ) : (
+                            <>
+                                <span className="font-display text-[22px] font-bold text-warm-900 tracking-tight">COH</span>
+                                <span className="ml-2 text-xs font-medium text-warm-600 uppercase tracking-widest">ERP</span>
+                                {/* Close button - mobile only */}
+                                <button
+                                    onClick={() => setSidebarOpen(false)}
+                                    className="ml-auto p-1.5 rounded-lg bg-warm-200 text-warm-800 lg:hidden"
+                                >
+                                    <X size={16} />
+                                </button>
+                            </>
+                        )}
                     </div>
 
                     {/* Navigation */}
-                    <nav className={`flex-1 py-2 overflow-y-auto ${isCompact ? 'px-2' : 'px-2'}`}>
+                    <nav className={`flex-1 py-2 overflow-y-auto ${isCompact ? 'px-2' : 'px-3'}`}>
                         {orderedNavGroups.map((group, groupIndex) => {
                             const filteredItems = filterItems(group.items);
                             if (filteredItems.length === 0) return null;
 
                             const groupActive = isGroupActive(filteredItems);
-                            const isCollapsed = group.collapsible && collapsedGroups[group.label] && !groupActive;
+                            const isGroupCollapsed = group.collapsible && collapsedGroups[group.label] && !groupActive;
 
                             return (
-                                <div key={group.label || groupIndex} className={groupIndex > 0 ? 'mt-1' : ''}>
+                                <div key={group.label || groupIndex}>
+                                    {/* Divider before first labelled group */}
+                                    {groupIndex === 1 && (
+                                        <div className="h-px bg-warm-300 mx-1 my-2" />
+                                    )}
+
                                     {/* Group header */}
                                     {group.label && !isCompact && (
                                         <div
-                                            className={`flex items-center justify-between px-2 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-400 ${
-                                                group.collapsible ? 'cursor-pointer hover:text-gray-600' : ''
+                                            className={`flex items-center justify-between px-3 py-1.5 mt-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-warm-500 ${
+                                                group.collapsible ? 'cursor-pointer hover:text-warm-800' : ''
                                             }`}
                                             onClick={() => group.collapsible && toggleGroup(group.label)}
                                         >
@@ -308,23 +327,26 @@ export default function Layout() {
                                             {group.collapsible && (
                                                 <ChevronDown
                                                     size={12}
-                                                    className={`transition-transform ${isCollapsed ? '-rotate-90' : ''}`}
+                                                    className={`transition-transform ${isGroupCollapsed ? '-rotate-90' : ''}`}
                                                 />
                                             )}
                                         </div>
                                     )}
 
+                                    {/* Compact mode: divider between groups */}
+                                    {isCompact && groupIndex > 0 && group.label && (
+                                        <div className="h-px bg-warm-300 mx-2 my-2" />
+                                    )}
+
                                     {/* Group items */}
-                                    {!isCollapsed && (
+                                    {!isGroupCollapsed && (
                                         <div className="space-y-0.5">
                                             {filteredItems.map((item) => {
-                                                // Parse URL to separate path and search params
                                                 const [path, queryString] = item.to.split('?');
                                                 const searchParams = queryString
                                                     ? Object.fromEntries(new URLSearchParams(queryString))
                                                     : undefined;
 
-                                                // Check if this link is active
                                                 const isActive = location.pathname === path ||
                                                     (path !== '/' && location.pathname.startsWith(path));
 
@@ -334,17 +356,17 @@ export default function Layout() {
                                                         to={path as '/'}
                                                         search={searchParams as Record<string, string>}
                                                         onClick={() => setSidebarOpen(false)}
-                                                        className={`flex items-center rounded-md text-sm transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 ${
+                                                        className={`flex items-center rounded-lg text-[13px] transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-warm-accent ${
                                                             isCompact
                                                                 ? 'px-3 py-2 justify-center'
-                                                                : 'px-2.5 py-1.5'
+                                                                : 'px-3 py-2 gap-2.5'
                                                         } ${isActive
-                                                            ? 'bg-primary-50 text-primary-700 font-medium'
-                                                            : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+                                                            ? 'bg-warm-200 text-warm-900 font-semibold'
+                                                            : 'text-warm-800 hover:bg-warm-200/50 hover:text-warm-900'
                                                         }`}
                                                         title={isCompact ? item.label : undefined}
                                                     >
-                                                        <item.icon size={18} className={isCompact ? '' : 'mr-2.5 flex-shrink-0'} />
+                                                        <item.icon size={18} className={`flex-shrink-0 ${isActive ? 'text-warm-900' : 'text-warm-700'}`} />
                                                         {!isCompact && <span className="truncate">{item.label}</span>}
                                                     </Link>
                                                 );
@@ -353,9 +375,9 @@ export default function Layout() {
                                     )}
 
                                     {/* Collapsed group indicator */}
-                                    {isCollapsed && !isCompact && (
+                                    {isGroupCollapsed && !isCompact && (
                                         <div
-                                            className="px-2.5 py-1 text-xs text-gray-400 cursor-pointer hover:text-gray-600"
+                                            className="px-3 py-1 text-xs text-warm-500 cursor-pointer hover:text-warm-800"
                                             onClick={() => toggleGroup(group.label)}
                                         >
                                             {filteredItems.length} items hidden
@@ -367,13 +389,13 @@ export default function Layout() {
                     </nav>
 
                     {/* Toggle button - Desktop only */}
-                    <div className="hidden lg:block border-t border-gray-200">
+                    <div className="hidden lg:block border-t border-warm-300">
                         <button
                             onClick={(e) => {
                                 e.stopPropagation();
                                 toggleCollapsed();
                             }}
-                            className="w-full p-2.5 text-gray-400 hover:text-gray-600 hover:bg-gray-50 transition-colors flex items-center justify-center gap-2"
+                            className="w-full p-2.5 text-warm-600 hover:text-warm-800 hover:bg-warm-200/50 transition-colors flex items-center justify-center gap-2"
                             title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
                         >
                             {isCompact ? (
@@ -388,28 +410,31 @@ export default function Layout() {
                     </div>
 
                     {/* User */}
-                    <div className={`p-2.5 border-t border-gray-200 ${isCompact ? 'px-2' : ''}`}>
-                        <div className={`flex items-center ${isCompact ? 'justify-center' : 'justify-between'}`}>
+                    <div className={`p-2.5 border-t border-warm-300 ${isCompact ? 'px-2' : ''}`}>
+                        <div className={`flex items-center ${isCompact ? 'justify-center' : 'gap-3'}`}>
                             {isCompact ? (
-                                <button
+                                <div
+                                    className="w-8 h-8 rounded-full bg-warm-accent flex items-center justify-center cursor-pointer"
                                     onClick={handleLogout}
-                                    className="p-2 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100"
                                     title="Logout"
                                 >
-                                    <LogOut size={18} />
-                                </button>
+                                    <span className="text-xs font-semibold text-white">{userInitials}</span>
+                                </div>
                             ) : (
                                 <>
-                                    <div className="min-w-0">
-                                        <p className="text-sm font-medium text-gray-900 truncate">{user?.name}</p>
-                                        <p className="text-xs text-gray-500 truncate">{user?.role}</p>
+                                    <div className="w-8 h-8 rounded-full bg-warm-accent flex items-center justify-center flex-shrink-0">
+                                        <span className="text-xs font-semibold text-white">{userInitials}</span>
+                                    </div>
+                                    <div className="min-w-0 flex-1">
+                                        <p className="text-sm font-medium text-warm-900 truncate">{user?.name}</p>
+                                        <p className="text-xs text-warm-600 truncate">{user?.role}</p>
                                     </div>
                                     <button
                                         onClick={handleLogout}
-                                        className="p-1.5 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100 flex-shrink-0"
+                                        className="p-1.5 text-warm-600 hover:text-warm-800 rounded-lg hover:bg-warm-200/50 flex-shrink-0"
                                         title="Logout"
                                     >
-                                        <LogOut size={18} />
+                                        <LogOut size={16} />
                                     </button>
                                 </>
                             )}
@@ -422,22 +447,32 @@ export default function Layout() {
             <main className={`transition-all duration-200 ${
                 collapsed ? 'lg:pl-16' : 'lg:pl-56'
             }`}>
-                <div className="p-4 md:p-6 lg:p-8">
-                    {/* Top bar with live indicator and compact mode toggle */}
-                    <div className="flex items-center justify-between mb-2">
+                {/* Top bar */}
+                <div className="flex items-center justify-between px-4 md:px-6 lg:px-8 h-14 bg-white border-b border-warm-300 sticky top-0 z-20">
+                    {/* Mobile hamburger + breadcrumbs */}
+                    <div className="flex items-center gap-3">
+                        <button
+                            onClick={() => setSidebarOpen(!sidebarOpen)}
+                            className="lg:hidden p-1.5 rounded-lg text-warm-800 hover:bg-warm-200/50"
+                        >
+                            <Menu size={20} />
+                        </button>
                         <Breadcrumbs />
-                        <div className="flex items-center gap-2">
-                            <LiveIndicator />
-                            <button
-                                onClick={toggleCompactMode}
-                                className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors flex items-center gap-1.5"
-                                title={isCompactMode ? 'Switch to normal density' : 'Switch to compact density'}
-                            >
-                                {isCompactMode ? <Maximize2 size={16} /> : <Minimize2 size={16} />}
-                                <span className="text-xs hidden sm:inline">{isCompactMode ? 'Normal' : 'Compact'}</span>
-                            </button>
-                        </div>
                     </div>
+                    <div className="flex items-center gap-3">
+                        <LiveIndicator />
+                        <button
+                            onClick={toggleCompactMode}
+                            className="p-1.5 text-warm-600 hover:text-warm-800 hover:bg-warm-200/50 rounded-lg transition-colors flex items-center gap-1.5"
+                            title={isCompactMode ? 'Switch to normal density' : 'Switch to compact density'}
+                        >
+                            {isCompactMode ? <Maximize2 size={16} /> : <Minimize2 size={16} />}
+                            <span className="text-xs hidden sm:inline">{isCompactMode ? 'Normal' : 'Compact'}</span>
+                        </button>
+                    </div>
+                </div>
+                {/* Page content */}
+                <div className="p-4 md:p-6 lg:p-8">
                     <Outlet />
                 </div>
             </main>
@@ -447,7 +482,7 @@ export default function Layout() {
 
             {/* Overlay for mobile */}
             {sidebarOpen && (
-                <div className="fixed inset-0 bg-black/50 z-30 lg:hidden" onClick={() => setSidebarOpen(false)} />
+                <div className="fixed inset-0 bg-black/35 z-30 lg:hidden" onClick={() => setSidebarOpen(false)} />
             )}
         </div>
     );

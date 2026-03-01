@@ -57,6 +57,20 @@ export default {
                     blue: '#6B8E9F',
                     cream: '#F5F1EB',
                     charcoal: '#2C3E50',
+                },
+                warm: {
+                    50: '#FAFAF8',
+                    100: '#F7F5F2',
+                    200: '#EDE8E1',
+                    300: '#E8E4DF',
+                    400: '#D5D0CA',
+                    500: '#B5AFA7',
+                    600: '#A39E96',
+                    700: '#9C968E',
+                    800: '#6B6560',
+                    900: '#1C1917',
+                    accent: '#C4956A',
+                    'accent-light': '#F0E6DA',
                 }
             },
             borderRadius: {
@@ -66,6 +80,7 @@ export default {
             },
             fontFamily: {
                 sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+                display: ['Space Grotesk', 'Inter', 'system-ui', 'sans-serif'],
             },
         },
     },

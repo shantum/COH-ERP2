@@ -207,7 +207,7 @@ export default function CustomerDetail() {
             if (hasRto) rtoOrders++;
         }
         return { returnOrders, rtoOrders };
-    }, [customer?.orders]);
+    }, [customer.orders]);
 
     // Filtered orders based on order filter
     const filteredOrders = useMemo(() => {

@@ -22,13 +22,13 @@ export function Breadcrumbs() {
   }
 
   return (
-    <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 text-sm text-gray-500 mb-4">
-      <Link to="/" className="flex items-center gap-1 hover:text-gray-700 transition-colors">
+    <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 text-sm text-warm-600">
+      <Link to="/" className="flex items-center gap-1 hover:text-warm-800 transition-colors">
         <Home size={14} />
         <span>Home</span>
       </Link>
-      <ChevronRight size={14} className="text-gray-400" />
-      <span className="text-gray-900 font-medium">{getBreadcrumb(pathname)}</span>
+      <ChevronRight size={14} className="text-warm-400" />
+      <span className="text-warm-900 font-medium">{getBreadcrumb(pathname)}</span>
     </nav>
   );
 }
