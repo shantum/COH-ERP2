@@ -130,12 +130,9 @@ export default defineConfig({
         if (SERVER_PACKAGES.includes(id)) return true;
         // Node.js built-ins (including node: prefix)
         if (NODE_BUILTINS.includes(id) || NODE_BUILTINS.includes(id.replace('node:', ''))) return true;
-        // @server/* imports (backup - plugin should catch these first)
-        if (id.startsWith('@server')) return true;
-        // Resolved server paths (absolute or relative)
-        if (id.includes('server/src') || id.includes('server\\src')) return true;
-        // Already resolved absolute path to server directory
-        if (isResolved && id.includes(SERVER_SRC_PATH.replace(/\\/g, '/'))) return true;
+        // Resolved server paths — the plugin resolves @server/* to absolute paths
+        // and marks them external; this catches any that slip through
+        if (isResolved && (id.includes('server/src') || id.includes('server\\src'))) return true;
         return false;
       },
       output: {
