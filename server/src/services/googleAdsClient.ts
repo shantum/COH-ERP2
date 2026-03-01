@@ -27,8 +27,11 @@ function table(name: string): string {
     return `\`${GOOGLE_ADS_PROJECT}.${GOOGLE_ADS_DATASET}.ads_${name}_${GOOGLE_ADS_CUSTOMER_ID}\``;
 }
 
-function daysAgoSQL(days: number): string {
-    return `DATE_SUB(CURRENT_DATE(), INTERVAL ${days} DAY)`;
+/** Returns a SQL condition for filtering segments_date by the given day range. */
+function dateFilterSQL(days: number, col = 'segments_date'): string {
+    if (days === 1) return `${col} = CURRENT_DATE()`;                                    // Today only
+    if (days === 2) return `${col} = DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY)`;          // Yesterday only
+    return `${col} >= DATE_SUB(CURRENT_DATE(), INTERVAL ${days} DAY)`;                   // Last N days
 }
 
 // ============================================
@@ -86,7 +89,7 @@ SELECT
     SUM(metrics_conversions) AS conversions,
     SUM(metrics_conversions_value) AS conversion_value
 FROM ${table('AccountBasicStats')}
-WHERE segments_date >= ${daysAgoSQL(days)}
+WHERE ${dateFilterSQL(days)}
 `;
     const rows = await runQuery<{
         impressions: number; clicks: number; spend: number;
@@ -133,7 +136,7 @@ SELECT
     SUM(s.metrics_conversions_value) AS conversion_value
 FROM ${table('CampaignBasicStats')} s
 JOIN ${table('Campaign')} c USING(campaign_id)
-WHERE s.segments_date >= ${daysAgoSQL(days)}
+WHERE ${dateFilterSQL(days, 's.segments_date')}
 GROUP BY 1, 2, 3, 4
 ORDER BY spend DESC
 `;
@@ -180,7 +183,7 @@ SELECT
     SUM(metrics_conversions) AS conversions,
     SUM(metrics_conversions_value) AS conversion_value
 FROM ${table('AccountBasicStats')}
-WHERE segments_date >= ${daysAgoSQL(days)}
+WHERE ${dateFilterSQL(days)}
 GROUP BY segments_date
 ORDER BY segments_date
 `;

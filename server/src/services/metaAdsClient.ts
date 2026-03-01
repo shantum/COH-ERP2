@@ -114,10 +114,23 @@ function formatDate(date: Date): string {
 }
 
 function getDateRange(days: number): { since: string; until: string } {
-    const end = new Date();
+    const today = new Date();
+    if (days === 1) {
+        // Today only
+        const d = formatDate(today);
+        return { since: d, until: d };
+    }
+    if (days === 2) {
+        // Yesterday only
+        const yesterday = new Date();
+        yesterday.setDate(yesterday.getDate() - 1);
+        const d = formatDate(yesterday);
+        return { since: d, until: d };
+    }
+    // Last N days
     const start = new Date();
     start.setDate(start.getDate() - days);
-    return { since: formatDate(start), until: formatDate(end) };
+    return { since: formatDate(start), until: formatDate(today) };
 }
 
 // ============================================
