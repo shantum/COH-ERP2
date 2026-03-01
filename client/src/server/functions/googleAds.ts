@@ -18,6 +18,7 @@ export type {
     GAdsAgeRow, GAdsGenderRow, GAdsSearchTermRow, GAdsKeywordRow,
     GAdsLandingPageRow, GAdsImpressionShareRow, GAdsBudgetRow,
     GAdsCreativeRow, GAdsVideoRow, GAdsAssetGroupRow, GAdsAudienceSegmentRow,
+    GAdsProductFunnelRow, GAdsSearchConversionRow, GAdsCampaignConversionRow,
 } from '@server/services/googleAdsClient.js';
 
 // ============================================
@@ -235,5 +236,38 @@ export const getGAdsAudienceSegments = createServerFn({ method: 'POST' })
     .inputValidator((input: unknown) => daysInputSchema.parse(input))
     .handler(async ({ data }) => {
         const { getGAdsAudienceSegments: fn } = await getGAdsClient();
+        return fn(data.days);
+    });
+
+/**
+ * Product conversion funnel — View → ATC → Purchase by product type
+ */
+export const getGAdsProductFunnel = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => daysInputSchema.parse(input))
+    .handler(async ({ data }) => {
+        const { getGAdsProductFunnel: fn } = await getGAdsClient();
+        return fn(data.days);
+    });
+
+/**
+ * Search term conversion breakdown by action
+ */
+export const getGAdsSearchConversions = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => daysInputSchema.parse(input))
+    .handler(async ({ data }) => {
+        const { getGAdsSearchConversions: fn } = await getGAdsClient();
+        return fn(data.days);
+    });
+
+/**
+ * Campaign conversion breakdown by action
+ */
+export const getGAdsCampaignConversions = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => daysInputSchema.parse(input))
+    .handler(async ({ data }) => {
+        const { getGAdsCampaignConversions: fn } = await getGAdsClient();
         return fn(data.days);
     });

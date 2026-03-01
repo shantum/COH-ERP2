@@ -10,6 +10,7 @@ import {
     getGAdsAge, getGAdsGender, getGAdsSearchTerms, getGAdsKeywords,
     getGAdsLandingPages, getGAdsImpressionShare, getGAdsBudgets,
     getGAdsCreatives, getGAdsVideos, getGAdsAssetGroups, getGAdsAudienceSegments,
+    getGAdsProductFunnel, getGAdsSearchConversions, getGAdsCampaignConversions,
 } from '../server/functions/googleAds';
 
 const STALE_TIME = 5 * 60 * 1000;
@@ -171,6 +172,33 @@ export function useGAdsAudienceSegments(days: number) {
     const fn = useServerFn(getGAdsAudienceSegments);
     return useQuery({
         queryKey: ['google-ads', 'audience-segments', days],
+        queryFn: () => fn({ data: { days } }),
+        staleTime: STALE_TIME,
+    });
+}
+
+export function useGAdsProductFunnel(days: number) {
+    const fn = useServerFn(getGAdsProductFunnel);
+    return useQuery({
+        queryKey: ['google-ads', 'product-funnel', days],
+        queryFn: () => fn({ data: { days } }),
+        staleTime: STALE_TIME,
+    });
+}
+
+export function useGAdsSearchConversions(days: number) {
+    const fn = useServerFn(getGAdsSearchConversions);
+    return useQuery({
+        queryKey: ['google-ads', 'search-conversions', days],
+        queryFn: () => fn({ data: { days } }),
+        staleTime: STALE_TIME,
+    });
+}
+
+export function useGAdsCampaignConversions(days: number) {
+    const fn = useServerFn(getGAdsCampaignConversions);
+    return useQuery({
+        queryKey: ['google-ads', 'campaign-conversions', days],
         queryFn: () => fn({ data: { days } }),
         staleTime: STALE_TIME,
     });

@@ -19,6 +19,7 @@ import {
     useGAdsAge, useGAdsGender, useGAdsSearchTerms, useGAdsKeywords,
     useGAdsLandingPages, useGAdsImpressionShare, useGAdsBudgets,
     useGAdsCreatives, useGAdsVideos, useGAdsAssetGroups, useGAdsAudienceSegments,
+    useGAdsProductFunnel, useGAdsSearchConversions, useGAdsCampaignConversions,
 } from '../hooks/useGoogleAds';
 import { compactThemeSmall } from '../utils/agGridHelpers';
 import { formatCurrency } from '../utils/formatting';
@@ -27,6 +28,7 @@ import type {
     GAdsSearchTermRow, GAdsKeywordRow, GAdsLandingPageRow,
     GAdsImpressionShareRow, GAdsBudgetRow, GAdsCreativeRow,
     GAdsVideoRow, GAdsAssetGroupRow, GAdsAudienceSegmentRow,
+    GAdsProductFunnelRow, GAdsSearchConversionRow, GAdsCampaignConversionRow,
 } from '../server/functions/googleAds';
 
 // ============================================
@@ -149,6 +151,7 @@ function OverviewSubTab({ days }: { days: number }) {
     const summary = useGAdsAccountSummary(days);
     const campaigns = useGAdsCampaigns(days);
     const daily = useGAdsDailyTrend(days);
+    const campaignConv = useGAdsCampaignConversions(days);
 
     const campaignCols: ColDef<GAdsCampaignRow>[] = useMemo(() => [
         { field: 'campaignName', headerName: 'Campaign', flex: 2, minWidth: 200 },
@@ -225,6 +228,26 @@ function OverviewSubTab({ days }: { days: number }) {
                         animateRows
                     />
                 </div>
+            </div>
+
+            <div className="bg-white rounded-lg border border-stone-200 shadow-sm p-4 sm:p-6">
+                <h3 className="text-sm font-semibold text-stone-700 mb-4">Conversion Breakdown by Campaign</h3>
+                {campaignConv.data?.length ? (
+                    <div className="ag-theme-custom" style={{ height: 350 }}>
+                        <AgGridReact<GAdsCampaignConversionRow>
+                            rowData={campaignConv.data}
+                            columnDefs={[
+                                { field: 'campaignName', headerName: 'Campaign', flex: 2, minWidth: 200 },
+                                { field: 'action', headerName: 'Conversion Action', flex: 2, minWidth: 180 },
+                                { field: 'conversions', headerName: 'Conversions', valueFormatter: (p: ValueFormatterParams) => Number(p.value).toFixed(1), width: 110, sort: 'desc' as const },
+                                { field: 'conversionValue', headerName: 'Value', valueFormatter: (p: ValueFormatterParams) => formatCurrency(p.value), width: 120 },
+                            ]}
+                            theme={compactThemeSmall}
+                            defaultColDef={DEFAULT_COL_DEF}
+                            animateRows
+                        />
+                    </div>
+                ) : campaignConv.isLoading ? <Skeleton className="h-64 w-full" /> : <EmptyState message="No conversion breakdown data for this period" />}
             </div>
         </div>
     );
@@ -378,9 +401,12 @@ function CompetitiveSubTab({ days }: { days: number }) {
 // PRODUCTS SUB-TAB (Shopping + Asset Groups)
 // ============================================
 
+const FUNNEL_COLORS = ['#4285F4', '#FBBC05', '#34A853'];
+
 function ProductsSubTab({ days }: { days: number }) {
     const { data, isLoading, error } = useGAdsProducts(days);
     const assetGroups = useGAdsAssetGroups(days);
+    const funnel = useGAdsProductFunnel(days);
 
     const cols: ColDef<GAdsProductRow>[] = useMemo(() => [
         { field: 'productType', headerName: 'Product Type', flex: 2, minWidth: 180 },
@@ -420,11 +446,30 @@ function ProductsSubTab({ days }: { days: number }) {
         },
     ], []);
 
+    const funnelCols: ColDef<GAdsProductFunnelRow>[] = useMemo(() => [
+        { field: 'productType', headerName: 'Product Type', flex: 2, minWidth: 200 },
+        { field: 'views', headerName: 'Views', valueFormatter: (p: ValueFormatterParams) => fmt(p.value), width: 90 },
+        { field: 'addToCarts', headerName: 'Add to Cart', valueFormatter: (p: ValueFormatterParams) => fmt(p.value), width: 100 },
+        { field: 'purchases', headerName: 'Purchases', valueFormatter: (p: ValueFormatterParams) => fmt(p.value), width: 100 },
+        { field: 'purchaseValue', headerName: 'Purchase Value', valueFormatter: (p: ValueFormatterParams) => formatCurrency(p.value), width: 130, sort: 'desc' as const },
+        { field: 'viewToAtcRate', headerName: 'View→ATC', valueFormatter: (p: ValueFormatterParams) => fmtPct(p.value), width: 100 },
+        {
+            field: 'atcToPurchaseRate', headerName: 'ATC→Purchase', width: 120,
+            valueFormatter: (p: ValueFormatterParams) => fmtPct(p.value),
+            cellStyle: (params: { value: number }) => {
+                if (params.value >= 10) return { color: '#16a34a', fontWeight: 600 };
+                if (params.value >= 5) return { color: '#d97706', fontWeight: 600 };
+                return params.value > 0 ? { color: '#dc2626', fontWeight: 600 } : null;
+            },
+        },
+    ], []);
+
     if (isLoading) return <GridSkeleton />;
     if (error) return <ErrorState error={error} />;
 
     const top10 = (data ?? []).slice(0, 10);
     const agData = assetGroups.data ?? [];
+    const funnelData = funnel.data ?? [];
 
     return (
         <div className="space-y-6">
@@ -476,6 +521,40 @@ function ProductsSubTab({ days }: { days: number }) {
                         />
                     </div>
                 ) : assetGroups.isLoading ? <Skeleton className="h-64 w-full" /> : <EmptyState message="No PMax asset group data for this period" />}
+            </div>
+
+            <div className="bg-white rounded-lg border border-stone-200 shadow-sm p-4 sm:p-6">
+                <h3 className="text-sm font-semibold text-stone-700 mb-4">Conversion Funnel by Product Type</h3>
+                {funnelData.length > 0 ? (
+                    <>
+                        <div className="mb-4">
+                            <ResponsiveContainer width="100%" height={280}>
+                                <BarChart data={funnelData.slice(0, 8)} layout="vertical">
+                                    <CartesianGrid strokeDasharray="3 3" stroke="#e7e5e4" />
+                                    <XAxis type="number" tick={{ fill: '#78716c', fontSize: 11 }} />
+                                    <YAxis
+                                        dataKey="productType" type="category" width={160}
+                                        tick={{ fill: '#78716c', fontSize: 11 }}
+                                        tickFormatter={(v: string) => v.length > 22 ? v.slice(0, 22) + '...' : v}
+                                    />
+                                    <Tooltip formatter={(value: number | undefined) => [fmt(value ?? 0)]} />
+                                    <Bar dataKey="views" fill={FUNNEL_COLORS[0]} name="Views" stackId="a" />
+                                    <Bar dataKey="addToCarts" fill={FUNNEL_COLORS[1]} name="Add to Cart" stackId="b" />
+                                    <Bar dataKey="purchases" fill={FUNNEL_COLORS[2]} name="Purchases" stackId="c" />
+                                </BarChart>
+                            </ResponsiveContainer>
+                        </div>
+                        <div className="ag-theme-custom" style={{ height: 350 }}>
+                            <AgGridReact<GAdsProductFunnelRow>
+                                rowData={funnelData}
+                                columnDefs={funnelCols}
+                                theme={compactThemeSmall}
+                                defaultColDef={DEFAULT_COL_DEF}
+                                animateRows
+                            />
+                        </div>
+                    </>
+                ) : funnel.isLoading ? <Skeleton className="h-64 w-full" /> : <EmptyState message="No conversion funnel data for this period" />}
             </div>
         </div>
     );
@@ -703,6 +782,7 @@ function VideoSubTab({ days }: { days: number }) {
 function SearchSubTab({ days }: { days: number }) {
     const searchTerms = useGAdsSearchTerms(days);
     const keywords = useGAdsKeywords(days);
+    const searchConv = useGAdsSearchConversions(days);
 
     const stCols: ColDef<GAdsSearchTermRow>[] = useMemo(() => [
         { field: 'searchTerm', headerName: 'Search Term', flex: 2, minWidth: 200 },
@@ -745,6 +825,13 @@ function SearchSubTab({ days }: { days: number }) {
         },
     ], []);
 
+    const scCols: ColDef<GAdsSearchConversionRow>[] = useMemo(() => [
+        { field: 'searchTerm', headerName: 'Search Term', flex: 2, minWidth: 200 },
+        { field: 'action', headerName: 'Conversion Action', flex: 2, minWidth: 180 },
+        { field: 'conversions', headerName: 'Conversions', valueFormatter: (p: ValueFormatterParams) => Number(p.value).toFixed(1), width: 110, sort: 'desc' as const },
+        { field: 'conversionValue', headerName: 'Value', valueFormatter: (p: ValueFormatterParams) => formatCurrency(p.value), width: 120 },
+    ], []);
+
     if (searchTerms.isLoading || keywords.isLoading) return <div className="space-y-6"><GridSkeleton /><GridSkeleton /></div>;
     if (searchTerms.error) return <ErrorState error={searchTerms.error} />;
 
@@ -778,6 +865,21 @@ function SearchSubTab({ days }: { days: number }) {
                         />
                     </div>
                 ) : <EmptyState message="No keyword data for this period" />}
+            </div>
+
+            <div className="bg-white rounded-lg border border-stone-200 shadow-sm p-4 sm:p-6">
+                <h3 className="text-sm font-semibold text-stone-700 mb-4">Search Term Conversions by Action</h3>
+                {searchConv.data?.length ? (
+                    <div className="ag-theme-custom" style={{ height: 350 }}>
+                        <AgGridReact<GAdsSearchConversionRow>
+                            rowData={searchConv.data}
+                            columnDefs={scCols}
+                            theme={compactThemeSmall}
+                            defaultColDef={DEFAULT_COL_DEF}
+                            animateRows
+                        />
+                    </div>
+                ) : searchConv.isLoading ? <Skeleton className="h-64 w-full" /> : <EmptyState message="No search conversion data for this period" />}
             </div>
         </div>
     );
