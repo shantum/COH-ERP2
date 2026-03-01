@@ -103,6 +103,7 @@ const navGroups: NavGroup[] = [
             { to: '/ledgers', icon: BookOpen, label: 'Ledgers' },
             { to: '/channels', icon: Store, label: 'Marketplaces' },
             { to: '/analytics', icon: BarChart3, label: 'Analytics', access: 'view-analytics' },
+            { to: '/growth-analytics', icon: TrendingUp, label: 'Growth', access: 'view-analytics' },
             { to: '/costing', icon: Calculator, label: 'Costing', access: 'costing-dashboard' },
             { to: '/stock-report', icon: Package, label: 'Stock Report' },
             { to: '/demand-forecast', icon: TrendingUp, label: 'Demand Forecast', access: 'manage-users' },

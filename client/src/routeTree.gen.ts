@@ -39,6 +39,7 @@ import { Route as AuthenticatedInventoryInwardRouteImport } from './routes/_auth
 import { Route as AuthenticatedInventoryCountRouteImport } from './routes/_authenticated/inventory-count'
 import { Route as AuthenticatedInventoryAdjustmentsRouteImport } from './routes/_authenticated/inventory-adjustments'
 import { Route as AuthenticatedInventoryRouteImport } from './routes/_authenticated/inventory'
+import { Route as AuthenticatedGrowthAnalyticsRouteImport } from './routes/_authenticated/growth-analytics'
 import { Route as AuthenticatedFinanceRouteImport } from './routes/_authenticated/finance'
 import { Route as AuthenticatedFacebookFeedHealthRouteImport } from './routes/_authenticated/facebook-feed-health'
 import { Route as AuthenticatedFabricsRouteImport } from './routes/_authenticated/fabrics'
@@ -217,6 +218,12 @@ const AuthenticatedInventoryRoute = AuthenticatedInventoryRouteImport.update({
   path: '/inventory',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
+const AuthenticatedGrowthAnalyticsRoute =
+  AuthenticatedGrowthAnalyticsRouteImport.update({
+    id: '/growth-analytics',
+    path: '/growth-analytics',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
 const AuthenticatedFinanceRoute = AuthenticatedFinanceRouteImport.update({
   id: '/finance',
   path: '/finance',
@@ -345,6 +352,7 @@ export interface FileRoutesByFullPath {
   '/fabrics': typeof AuthenticatedFabricsRoute
   '/facebook-feed-health': typeof AuthenticatedFacebookFeedHealthRoute
   '/finance': typeof AuthenticatedFinanceRoute
+  '/growth-analytics': typeof AuthenticatedGrowthAnalyticsRoute
   '/inventory': typeof AuthenticatedInventoryRoute
   '/inventory-adjustments': typeof AuthenticatedInventoryAdjustmentsRoute
   '/inventory-count': typeof AuthenticatedInventoryCountRoute
@@ -394,6 +402,7 @@ export interface FileRoutesByTo {
   '/fabrics': typeof AuthenticatedFabricsRoute
   '/facebook-feed-health': typeof AuthenticatedFacebookFeedHealthRoute
   '/finance': typeof AuthenticatedFinanceRoute
+  '/growth-analytics': typeof AuthenticatedGrowthAnalyticsRoute
   '/inventory': typeof AuthenticatedInventoryRoute
   '/inventory-adjustments': typeof AuthenticatedInventoryAdjustmentsRoute
   '/inventory-count': typeof AuthenticatedInventoryCountRoute
@@ -446,6 +455,7 @@ export interface FileRoutesById {
   '/_authenticated/fabrics': typeof AuthenticatedFabricsRoute
   '/_authenticated/facebook-feed-health': typeof AuthenticatedFacebookFeedHealthRoute
   '/_authenticated/finance': typeof AuthenticatedFinanceRoute
+  '/_authenticated/growth-analytics': typeof AuthenticatedGrowthAnalyticsRoute
   '/_authenticated/inventory': typeof AuthenticatedInventoryRoute
   '/_authenticated/inventory-adjustments': typeof AuthenticatedInventoryAdjustmentsRoute
   '/_authenticated/inventory-count': typeof AuthenticatedInventoryCountRoute
@@ -499,6 +509,7 @@ export interface FileRouteTypes {
     | '/fabrics'
     | '/facebook-feed-health'
     | '/finance'
+    | '/growth-analytics'
     | '/inventory'
     | '/inventory-adjustments'
     | '/inventory-count'
@@ -548,6 +559,7 @@ export interface FileRouteTypes {
     | '/fabrics'
     | '/facebook-feed-health'
     | '/finance'
+    | '/growth-analytics'
     | '/inventory'
     | '/inventory-adjustments'
     | '/inventory-count'
@@ -599,6 +611,7 @@ export interface FileRouteTypes {
     | '/_authenticated/fabrics'
     | '/_authenticated/facebook-feed-health'
     | '/_authenticated/finance'
+    | '/_authenticated/growth-analytics'
     | '/_authenticated/inventory'
     | '/_authenticated/inventory-adjustments'
     | '/_authenticated/inventory-count'
@@ -853,6 +866,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedInventoryRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/growth-analytics': {
+      id: '/_authenticated/growth-analytics'
+      path: '/growth-analytics'
+      fullPath: '/growth-analytics'
+      preLoaderRoute: typeof AuthenticatedGrowthAnalyticsRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/finance': {
       id: '/_authenticated/finance'
       path: '/finance'
@@ -1002,6 +1022,7 @@ interface AuthenticatedRouteChildren {
   AuthenticatedFabricsRoute: typeof AuthenticatedFabricsRoute
   AuthenticatedFacebookFeedHealthRoute: typeof AuthenticatedFacebookFeedHealthRoute
   AuthenticatedFinanceRoute: typeof AuthenticatedFinanceRoute
+  AuthenticatedGrowthAnalyticsRoute: typeof AuthenticatedGrowthAnalyticsRoute
   AuthenticatedInventoryRoute: typeof AuthenticatedInventoryRoute
   AuthenticatedInventoryAdjustmentsRoute: typeof AuthenticatedInventoryAdjustmentsRoute
   AuthenticatedInventoryCountRoute: typeof AuthenticatedInventoryCountRoute
@@ -1046,6 +1067,7 @@ const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedFabricsRoute: AuthenticatedFabricsRoute,
   AuthenticatedFacebookFeedHealthRoute: AuthenticatedFacebookFeedHealthRoute,
   AuthenticatedFinanceRoute: AuthenticatedFinanceRoute,
+  AuthenticatedGrowthAnalyticsRoute: AuthenticatedGrowthAnalyticsRoute,
   AuthenticatedInventoryRoute: AuthenticatedInventoryRoute,
   AuthenticatedInventoryAdjustmentsRoute:
     AuthenticatedInventoryAdjustmentsRoute,
