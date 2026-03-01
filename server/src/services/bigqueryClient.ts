@@ -148,6 +148,8 @@ export interface QueryOptions {
     cacheTtl?: number;
     /** Query parameters */
     params?: Record<string, string | number>;
+    /** BigQuery dataset location (auto-detected if omitted) */
+    location?: string;
 }
 
 /**
@@ -161,7 +163,7 @@ export async function runQuery<T extends Record<string, unknown> = Record<string
     sql: string,
     options: QueryOptions = {},
 ): Promise<T[]> {
-    const { cacheKey, cacheTtl = CACHE_TTL_HISTORICAL, params } = options;
+    const { cacheKey, cacheTtl = CACHE_TTL_HISTORICAL, params, location } = options;
 
     // Check cache
     if (cacheKey) {
@@ -178,7 +180,7 @@ export async function runQuery<T extends Record<string, unknown> = Record<string
         () => client.query({
             query: sql,
             params,
-            location: 'asia-southeast2',
+            ...(location ? { location } : {}),
         }),
         cacheKey ?? 'bigquery',
     );
