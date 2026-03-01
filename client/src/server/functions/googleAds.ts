@@ -12,7 +12,7 @@ import { authMiddleware } from '../middleware/auth';
 // RE-EXPORT TYPES
 // ============================================
 
-export type { GAdsAccountSummary, GAdsCampaignRow, GAdsDailyRow } from '@server/services/googleAdsClient.js';
+export type { GAdsAccountSummary, GAdsCampaignRow, GAdsDailyRow } from '../../../../server/src/services/googleAdsClient.js';
 
 // ============================================
 // INPUT SCHEMAS
@@ -27,7 +27,7 @@ const daysInputSchema = z.object({
 // ============================================
 
 async function getGAdsClient() {
-    return import('@server/services/googleAdsClient.js');
+    return import('../../../../server/src/services/googleAdsClient.js');
 }
 
 // ============================================

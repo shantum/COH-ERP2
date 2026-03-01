@@ -122,7 +122,7 @@ const geoInputSchema = z.object({
 // ============================================
 
 async function getBqClient() {
-    const { runQuery, getDateRange, buildEventsQuery } = await import('@server/services/bigqueryClient.js');
+    const { runQuery, getDateRange, buildEventsQuery } = await import('../../../../server/src/services/bigqueryClient.js');
     return { runQuery, getDateRange, buildEventsQuery };
 }
 
@@ -515,6 +515,6 @@ export const getGrowthOverview = createServerFn({ method: 'POST' })
 export const getGA4Health = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .handler(async () => {
-        const { checkDatasetHealth } = await import('@server/services/bigqueryClient.js');
+        const { checkDatasetHealth } = await import('../../../../server/src/services/bigqueryClient.js');
         return checkDatasetHealth();
     });

@@ -13,7 +13,7 @@ import { authMiddleware } from '../middleware/auth';
 // RE-EXPORT TYPES
 // ============================================
 
-export type { MetaCampaignRow, MetaDailyRow, MetaAccountSummary } from '@server/services/metaAdsClient.js';
+export type { MetaCampaignRow, MetaDailyRow, MetaAccountSummary } from '../../../../server/src/services/metaAdsClient.js';
 
 // ============================================
 // INPUT SCHEMAS
@@ -28,7 +28,7 @@ const daysInputSchema = z.object({
 // ============================================
 
 async function getMetaClient() {
-    return import('@server/services/metaAdsClient.js');
+    return import('../../../../server/src/services/metaAdsClient.js');
 }
 
 // ============================================
