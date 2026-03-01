@@ -13,6 +13,9 @@ import {
     getGAdsProductFunnel, getGAdsSearchConversions, getGAdsCampaignConversions,
     getGAdsGeoConversions, getGAdsUserLocations, getGAdsClickStats,
     getGAdsAssetPerformance, getGAdsAdGroups, getGAdsAdGroupCriteria, getGAdsAudienceConversions,
+    getPMaxCampaigns, getPMaxAssetGroupPerf, getPMaxAssetLabels,
+    getPMaxDailyTrend, getPMaxProductFunnel,
+    getPMaxAssetMedia, getPMaxAssetGroupStrength,
 } from '../server/functions/googleAds';
 
 const STALE_TIME = 5 * 60 * 1000;
@@ -265,6 +268,73 @@ export function useGAdsAudienceConversions(days: number) {
     return useQuery({
         queryKey: ['google-ads', 'audience-conversions', days],
         queryFn: () => fn({ data: { days } }),
+        staleTime: STALE_TIME,
+    });
+}
+
+// ============================================
+// PMAX DEEP DIVE
+// ============================================
+
+export function usePMaxCampaigns(days: number) {
+    const fn = useServerFn(getPMaxCampaigns);
+    return useQuery({
+        queryKey: ['google-ads', 'pmax-campaigns', days],
+        queryFn: () => fn({ data: { days } }),
+        staleTime: STALE_TIME,
+    });
+}
+
+export function usePMaxAssetGroupPerf(days: number) {
+    const fn = useServerFn(getPMaxAssetGroupPerf);
+    return useQuery({
+        queryKey: ['google-ads', 'pmax-assetgroup-perf', days],
+        queryFn: () => fn({ data: { days } }),
+        staleTime: STALE_TIME,
+    });
+}
+
+export function usePMaxAssetLabels(days: number) {
+    const fn = useServerFn(getPMaxAssetLabels);
+    return useQuery({
+        queryKey: ['google-ads', 'pmax-asset-labels', days],
+        queryFn: () => fn({ data: { days } }),
+        staleTime: STALE_TIME,
+    });
+}
+
+export function usePMaxDailyTrend(days: number) {
+    const fn = useServerFn(getPMaxDailyTrend);
+    return useQuery({
+        queryKey: ['google-ads', 'pmax-daily', days],
+        queryFn: () => fn({ data: { days } }),
+        staleTime: STALE_TIME,
+    });
+}
+
+export function usePMaxProductFunnel(days: number) {
+    const fn = useServerFn(getPMaxProductFunnel);
+    return useQuery({
+        queryKey: ['google-ads', 'pmax-product-funnel', days],
+        queryFn: () => fn({ data: { days } }),
+        staleTime: STALE_TIME,
+    });
+}
+
+export function usePMaxAssetMedia() {
+    const fn = useServerFn(getPMaxAssetMedia);
+    return useQuery({
+        queryKey: ['google-ads', 'pmax-asset-media'],
+        queryFn: () => fn({ data: undefined }),
+        staleTime: STALE_TIME,
+    });
+}
+
+export function usePMaxAssetGroupStrength() {
+    const fn = useServerFn(getPMaxAssetGroupStrength);
+    return useQuery({
+        queryKey: ['google-ads', 'pmax-ag-strength'],
+        queryFn: () => fn({ data: undefined }),
         staleTime: STALE_TIME,
     });
 }

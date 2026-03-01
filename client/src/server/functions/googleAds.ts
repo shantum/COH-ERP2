@@ -21,7 +21,13 @@ export type {
     GAdsProductFunnelRow, GAdsSearchConversionRow, GAdsCampaignConversionRow,
     GAdsGeoConversionRow, GAdsUserLocationRow, GAdsClickRow,
     GAdsAssetPerfRow, GAdsAdGroupRow, GAdsAdGroupCriterionRow, GAdsAudienceConversionRow,
+    GPMaxCampaignRow, GPMaxAssetGroupPerfRow, GPMaxAssetLabelRow,
+    GPMaxDailyRow, GPMaxProductFunnelRow,
 } from '@server/services/googleAdsClient.js';
+
+export type {
+    GAdsPMaxAssetMedia, GAdsPMaxAssetGroupStrength,
+} from '@server/services/googleAdsApi.js';
 
 // ============================================
 // INPUT SCHEMAS
@@ -349,4 +355,70 @@ export const getGAdsAudienceConversions = createServerFn({ method: 'POST' })
     .handler(async ({ data }) => {
         const { getGAdsAudienceConversions: fn } = await getGAdsClient();
         return fn(data.days);
+    });
+
+// ============================================
+// PMAX DEEP DIVE
+// ============================================
+
+export const getPMaxCampaigns = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => daysInputSchema.parse(input))
+    .handler(async ({ data }) => {
+        const { getPMaxCampaigns: fn } = await getGAdsClient();
+        return fn(data.days);
+    });
+
+export const getPMaxAssetGroupPerf = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => daysInputSchema.parse(input))
+    .handler(async ({ data }) => {
+        const { getPMaxAssetGroupPerf: fn } = await getGAdsClient();
+        return fn(data.days);
+    });
+
+export const getPMaxAssetLabels = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => daysInputSchema.parse(input))
+    .handler(async ({ data }) => {
+        const { getPMaxAssetLabels: fn } = await getGAdsClient();
+        return fn(data.days);
+    });
+
+export const getPMaxDailyTrend = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => daysInputSchema.parse(input))
+    .handler(async ({ data }) => {
+        const { getPMaxDailyTrend: fn } = await getGAdsClient();
+        return fn(data.days);
+    });
+
+export const getPMaxProductFunnel = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => daysInputSchema.parse(input))
+    .handler(async ({ data }) => {
+        const { getPMaxProductFunnel: fn } = await getGAdsClient();
+        return fn(data.days);
+    });
+
+// ============================================
+// PMAX — Google Ads API (media + strength)
+// ============================================
+
+async function getGAdsApi() {
+    return import('@server/services/googleAdsApi.js');
+}
+
+export const getPMaxAssetMedia = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .handler(async () => {
+        const { getPMaxAssetMedia: fn } = await getGAdsApi();
+        return fn();
+    });
+
+export const getPMaxAssetGroupStrength = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .handler(async () => {
+        const { getPMaxAssetGroupStrength: fn } = await getGAdsApi();
+        return fn();
     });

@@ -1716,3 +1716,308 @@ function simplifyActionName(action: string): string {
     if (action.includes('Search')) return 'Search';
     return action;
 }
+
+// ============================================
+// PMAX DEEP DIVE TYPES
+// ============================================
+
+export interface GPMaxCampaignRow {
+    campaignId: number;
+    campaignName: string;
+    status: string;
+    spend: number;
+    impressions: number;
+    clicks: number;
+    conversions: number;
+    conversionValue: number;
+    cpc: number;
+    ctr: number;
+    roas: number;
+}
+
+export interface GPMaxAssetGroupPerfRow {
+    assetGroupName: string;
+    campaignId: number;
+    campaignName: string;
+    spend: number;
+    impressions: number;
+    clicks: number;
+    conversions: number;
+    conversionValue: number;
+    ctr: number;
+    cpc: number;
+    roas: number;
+}
+
+export interface GPMaxAssetLabelRow {
+    assetId: string;
+    assetGroupName: string;
+    campaignId: number;
+    campaignName: string;
+    assetName: string;
+    assetType: string;
+    performanceLabel: string;
+    fieldType: string;
+}
+
+export interface GPMaxDailyRow {
+    date: string;
+    campaignId: number;
+    spend: number;
+    conversions: number;
+    conversionValue: number;
+}
+
+export interface GPMaxProductFunnelRow {
+    campaignId: number;
+    productType: string;
+    views: number;
+    addToCarts: number;
+    purchases: number;
+    purchaseValue: number;
+    viewToAtcRate: number;
+    atcToPurchaseRate: number;
+}
+
+// ============================================
+// PMAX DEEP DIVE QUERIES
+// ============================================
+
+/**
+ * PMax campaigns — summary stats filtered to PERFORMANCE_MAX channel type.
+ */
+export async function getPMaxCampaigns(days: number): Promise<GPMaxCampaignRow[]> {
+    const sql = `
+SELECT
+    s.campaign_id,
+    c.campaign_name,
+    c.campaign_status AS status,
+    SUM(s.metrics_impressions) AS impressions,
+    SUM(s.metrics_clicks) AS clicks,
+    SUM(s.metrics_cost_micros) / 1000000.0 AS spend,
+    SUM(s.metrics_conversions) AS conversions,
+    SUM(s.metrics_conversions_value) AS conversion_value
+FROM ${table('CampaignBasicStats')} s
+JOIN ${table('Campaign')} c USING(campaign_id)
+WHERE ${dateFilterSQL(days, 's.segments_date')}
+    AND c.campaign_advertising_channel_type = 'PERFORMANCE_MAX'
+GROUP BY 1, 2, 3
+ORDER BY spend DESC
+`;
+    const rows = await runQuery<{
+        campaign_id: number; campaign_name: string; status: string;
+        impressions: number; clicks: number; spend: number;
+        conversions: number; conversion_value: number;
+    }>(sql, { cacheKey: `gads:pmax-campaigns:${days}`, cacheTtl: GADS_CACHE_TTL });
+
+    return rows.map(r => {
+        const spend = Number(r.spend);
+        const clicks = Number(r.clicks);
+        const impressions = Number(r.impressions);
+        const conversions = Number(r.conversions);
+        const conversionValue = Number(r.conversion_value);
+        return {
+            campaignId: r.campaign_id,
+            campaignName: r.campaign_name,
+            status: r.status ?? '',
+            spend,
+            impressions,
+            clicks,
+            conversions: Math.round(conversions * 100) / 100,
+            conversionValue,
+            cpc: clicks > 0 ? Math.round((spend / clicks) * 100) / 100 : 0,
+            ctr: impressions > 0 ? Math.round((clicks / impressions) * 10000) / 100 : 0,
+            roas: spend > 0 ? Math.round((conversionValue / spend) * 100) / 100 : 0,
+        };
+    });
+}
+
+/**
+ * PMax asset group performance — aggregated from AssetGroupProductGroupStats.
+ */
+export async function getPMaxAssetGroupPerf(days: number): Promise<GPMaxAssetGroupPerfRow[]> {
+    const sql = `
+SELECT
+    ag.asset_group_name,
+    c.campaign_id,
+    c.campaign_name,
+    SUM(s.metrics_impressions) AS impressions,
+    SUM(s.metrics_clicks) AS clicks,
+    SUM(s.metrics_cost_micros) / 1000000.0 AS spend,
+    SUM(s.metrics_conversions) AS conversions,
+    SUM(s.metrics_conversions_value) AS conversion_value
+FROM ${table('AssetGroupProductGroupStats')} s
+JOIN ${table('AssetGroup')} ag
+    ON CONCAT('customers/${GOOGLE_ADS_CUSTOMER_ID}/assetGroups/', ag.asset_group_id) = s.asset_group_product_group_view_asset_group
+JOIN ${table('Campaign')} c
+    ON ag.asset_group_campaign = CONCAT('customers/${GOOGLE_ADS_CUSTOMER_ID}/campaigns/', CAST(c.campaign_id AS STRING))
+WHERE ${dateFilterSQL(days, 's.segments_date')}
+    AND c.campaign_advertising_channel_type = 'PERFORMANCE_MAX'
+GROUP BY 1, 2, 3
+HAVING spend > 0
+ORDER BY spend DESC
+`;
+    const rows = await runQuery<{
+        asset_group_name: string; campaign_id: number; campaign_name: string;
+        impressions: number; clicks: number; spend: number;
+        conversions: number; conversion_value: number;
+    }>(sql, { cacheKey: `gads:pmax-assetgroup-perf:${days}`, cacheTtl: GADS_CACHE_TTL });
+
+    return rows.map(r => {
+        const spend = Number(r.spend);
+        const clicks = Number(r.clicks);
+        const impressions = Number(r.impressions);
+        const conversions = Number(r.conversions);
+        const conversionValue = Number(r.conversion_value);
+        return {
+            assetGroupName: r.asset_group_name,
+            campaignId: r.campaign_id,
+            campaignName: r.campaign_name,
+            spend,
+            impressions,
+            clicks,
+            conversions: Math.round(conversions * 100) / 100,
+            conversionValue,
+            ctr: impressions > 0 ? Math.round((clicks / impressions) * 10000) / 100 : 0,
+            cpc: clicks > 0 ? Math.round((spend / clicks) * 100) / 100 : 0,
+            roas: spend > 0 ? Math.round((conversionValue / spend) * 100) / 100 : 0,
+        };
+    });
+}
+
+/**
+ * PMax asset performance labels — BEST/GOOD/LOW/LEARNING labels per asset.
+ */
+export async function getPMaxAssetLabels(days: number): Promise<GPMaxAssetLabelRow[]> {
+    void days; // Not date-filtered — dimension table with current labels
+    const sql = `
+SELECT
+    a.asset_id,
+    ag.asset_group_name,
+    c.campaign_id,
+    c.campaign_name,
+    a.asset_name,
+    a.asset_type,
+    aga.asset_group_asset_performance_label AS performance_label,
+    aga.asset_group_asset_field_type AS field_type
+FROM ${table('AssetGroupAsset')} aga
+JOIN ${table('Asset')} a
+    ON aga.asset_group_asset_asset = CONCAT('customers/${GOOGLE_ADS_CUSTOMER_ID}/assets/', a.asset_id)
+JOIN ${table('AssetGroup')} ag
+    ON aga.asset_group_asset_asset_group = CONCAT('customers/${GOOGLE_ADS_CUSTOMER_ID}/assetGroups/', ag.asset_group_id)
+JOIN ${table('Campaign')} c
+    ON ag.asset_group_campaign = CONCAT('customers/${GOOGLE_ADS_CUSTOMER_ID}/campaigns/', CAST(c.campaign_id AS STRING))
+WHERE c.campaign_advertising_channel_type = 'PERFORMANCE_MAX'
+    AND aga._DATA_DATE = aga._LATEST_DATE
+    AND a._DATA_DATE = a._LATEST_DATE
+    AND ag._DATA_DATE = ag._LATEST_DATE
+    AND c._DATA_DATE = c._LATEST_DATE
+ORDER BY ag.asset_group_name, aga.asset_group_asset_field_type
+`;
+    const rows = await runQuery<{
+        asset_id: number; asset_group_name: string; campaign_id: number; campaign_name: string;
+        asset_name: string; asset_type: string;
+        performance_label: string; field_type: string;
+    }>(sql, { cacheKey: `gads:pmax-asset-labels:${days}`, cacheTtl: GADS_CACHE_TTL });
+
+    return rows.map(r => ({
+        assetId: String(r.asset_id),
+        assetGroupName: r.asset_group_name ?? '',
+        campaignId: r.campaign_id,
+        campaignName: r.campaign_name ?? '',
+        assetName: r.asset_name ?? '(unnamed)',
+        assetType: r.asset_type ?? '',
+        performanceLabel: r.performance_label ?? 'UNKNOWN',
+        fieldType: r.field_type ?? '',
+    }));
+}
+
+/**
+ * PMax daily trend — spend + conversions per day per campaign.
+ */
+export async function getPMaxDailyTrend(days: number): Promise<GPMaxDailyRow[]> {
+    const sql = `
+SELECT
+    CAST(s.segments_date AS STRING) AS date,
+    s.campaign_id,
+    SUM(s.metrics_cost_micros) / 1000000.0 AS spend,
+    SUM(s.metrics_conversions) AS conversions,
+    SUM(s.metrics_conversions_value) AS conversion_value
+FROM ${table('CampaignBasicStats')} s
+JOIN ${table('Campaign')} c USING(campaign_id)
+WHERE ${dateFilterSQL(days, 's.segments_date')}
+    AND c.campaign_advertising_channel_type = 'PERFORMANCE_MAX'
+GROUP BY 1, 2
+ORDER BY date
+`;
+    const rows = await runQuery<{
+        date: string; campaign_id: number;
+        spend: number; conversions: number; conversion_value: number;
+    }>(sql, { cacheKey: `gads:pmax-daily:${days}`, cacheTtl: GADS_CACHE_TTL });
+
+    return rows.map(r => ({
+        date: String(r.date),
+        campaignId: r.campaign_id,
+        spend: Number(r.spend),
+        conversions: Math.round(Number(r.conversions) * 100) / 100,
+        conversionValue: Number(r.conversion_value),
+    }));
+}
+
+/**
+ * PMax product conversion funnel — View → ATC → Purchase per product type per campaign.
+ */
+export async function getPMaxProductFunnel(days: number): Promise<GPMaxProductFunnelRow[]> {
+    const actionList = FUNNEL_ACTIONS.map(a => `'${a}'`).join(', ');
+    const sql = `
+SELECT
+    s.campaign_id,
+    s.segments_product_type_l1 AS product_type,
+    s.segments_conversion_action_name AS action,
+    SUM(s.metrics_all_conversions) AS conv,
+    SUM(s.metrics_all_conversions_value) AS conv_value
+FROM ${table('ShoppingProductConversionStats')} s
+JOIN ${table('Campaign')} c ON s.campaign_id = c.campaign_id
+WHERE ${dateFilterSQL(days, 's.segments_date')}
+    AND c.campaign_advertising_channel_type = 'PERFORMANCE_MAX'
+    AND s.segments_conversion_action_name IN (${actionList})
+    AND s.metrics_all_conversions > 0
+GROUP BY 1, 2, 3
+ORDER BY product_type
+`;
+    const rows = await runQuery<{
+        campaign_id: number; product_type: string; action: string;
+        conv: number; conv_value: number;
+    }>(sql, { cacheKey: `gads:pmax-product-funnel:${days}`, cacheTtl: GADS_CACHE_TTL });
+
+    // Pivot into funnel rows per campaign × product type
+    const map = new Map<string, { campaignId: number; views: number; atc: number; purchases: number; purchaseValue: number }>();
+    for (const r of rows) {
+        const pt = r.product_type || '(unknown)';
+        const key = `${r.campaign_id}::${pt}`;
+        const entry = map.get(key) ?? { campaignId: r.campaign_id, views: 0, atc: 0, purchases: 0, purchaseValue: 0 };
+        const conv = Number(r.conv);
+        const val = Number(r.conv_value);
+        if (VIEW_ACTIONS.has(r.action)) entry.views += conv;
+        else if (ATC_ACTIONS.has(r.action)) entry.atc += conv;
+        else if (PURCHASE_ACTIONS.has(r.action)) { entry.purchases += conv; entry.purchaseValue += val; }
+        map.set(key, entry);
+    }
+
+    return Array.from(map.entries())
+        .map(([key, d]) => {
+            const productType = key.split('::')[1];
+            return {
+                campaignId: d.campaignId,
+                productType,
+                views: Math.round(d.views),
+                addToCarts: Math.round(d.atc * 100) / 100,
+                purchases: Math.round(d.purchases * 100) / 100,
+                purchaseValue: Math.round(d.purchaseValue),
+                viewToAtcRate: d.views > 0 ? Math.round((d.atc / d.views) * 10000) / 100 : 0,
+                atcToPurchaseRate: d.atc > 0 ? Math.round((d.purchases / d.atc) * 10000) / 100 : 0,
+            };
+        })
+        .filter(r => r.views > 0 || r.addToCarts > 0 || r.purchases > 0)
+        .sort((a, b) => b.purchases - a.purchases || b.addToCarts - a.addToCarts);
+}

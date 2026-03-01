@@ -22,6 +22,9 @@ import {
     useGAdsProductFunnel, useGAdsSearchConversions, useGAdsCampaignConversions,
     useGAdsGeoConversions, useGAdsUserLocations, useGAdsClickStats,
     useGAdsAssetPerformance, useGAdsAdGroups, useGAdsAdGroupCriteria, useGAdsAudienceConversions,
+    usePMaxCampaigns, usePMaxAssetGroupPerf, usePMaxAssetLabels,
+    usePMaxDailyTrend, usePMaxProductFunnel,
+    usePMaxAssetMedia, usePMaxAssetGroupStrength,
 } from '../hooks/useGoogleAds';
 import { compactThemeSmall } from '../utils/agGridHelpers';
 import { formatCurrency } from '../utils/formatting';
@@ -39,10 +42,11 @@ import type {
 // SHARED HELPERS
 // ============================================
 
-type GAdsSubTab = 'overview' | 'competitive' | 'products' | 'creatives' | 'video' | 'search' | 'audience' | 'geography' | 'schedule' | 'landing-pages' | 'ad-groups' | 'clicks';
+type GAdsSubTab = 'overview' | 'pmax' | 'competitive' | 'products' | 'creatives' | 'video' | 'search' | 'audience' | 'geography' | 'schedule' | 'landing-pages' | 'ad-groups' | 'clicks';
 
 const SUB_TABS: { key: GAdsSubTab; label: string }[] = [
     { key: 'overview', label: 'Overview' },
+    { key: 'pmax', label: 'PMax' },
     { key: 'competitive', label: 'Competitive' },
     { key: 'products', label: 'Products' },
     { key: 'creatives', label: 'Creatives' },
@@ -1518,6 +1522,493 @@ function ClicksSubTab({ days }: { days: number }) {
 }
 
 // ============================================
+// PMAX DEEP DIVE
+// ============================================
+
+const PERF_LABEL_COLORS: Record<string, string> = {
+    BEST: '#16a34a',
+    GOOD: '#65a30d',
+    LOW: '#dc2626',
+    LEARNING: '#d97706',
+    UNKNOWN: '#a8a29e',
+    UNSPECIFIED: '#a8a29e',
+};
+
+function AssetThumb({ media }: { media: { imageUrl: string | null; youtubeVideoId: string | null } | undefined }) {
+    if (!media) return <span className="text-stone-300 text-[10px]">—</span>;
+    if (media.imageUrl) {
+        return <img src={media.imageUrl} alt="" className="w-10 h-10 rounded object-cover bg-stone-100" loading="lazy" />;
+    }
+    if (media.youtubeVideoId) {
+        return <img src={`https://img.youtube.com/vi/${media.youtubeVideoId}/default.jpg`} alt="" className="w-10 h-10 rounded object-cover bg-stone-100" loading="lazy" />;
+    }
+    return <span className="text-stone-300 text-[10px]">—</span>;
+}
+
+const AD_STRENGTH_COLORS: Record<string, string> = {
+    EXCELLENT: '#16a34a',
+    GOOD: '#65a30d',
+    AVERAGE: '#d97706',
+    POOR: '#dc2626',
+    UNSPECIFIED: '#a8a29e',
+};
+
+function PMaxSubTab({ days }: { days: number }) {
+    const campaigns = usePMaxCampaigns(days);
+    const assetGroups = usePMaxAssetGroupPerf(days);
+    const assetLabels = usePMaxAssetLabels(days);
+    const daily = usePMaxDailyTrend(days);
+    const productFunnel = usePMaxProductFunnel(days);
+    const assetMedia = usePMaxAssetMedia();
+    const agStrength = usePMaxAssetGroupStrength();
+    const [selectedCampaignId, setSelectedCampaignId] = useState<number | null>(null);
+
+    const campaignData = campaigns.data ?? [];
+    const activeCampaigns = useMemo(() =>
+        campaignData.filter(c => c.status === 'ENABLED').sort((a, b) => b.spend - a.spend),
+        [campaignData],
+    );
+    const pausedCampaigns = useMemo(() =>
+        campaignData.filter(c => c.status !== 'ENABLED').sort((a, b) => b.spend - a.spend),
+        [campaignData],
+    );
+
+    // Client-side filter helper
+    const filterByCampaign = <T extends { campaignId: number }>(rows: T[]) =>
+        selectedCampaignId == null ? rows : rows.filter(r => r.campaignId === selectedCampaignId);
+
+    // KPIs
+    const filteredCampaigns = filterByCampaign(campaignData);
+    const kpi = useMemo(() => {
+        const spend = filteredCampaigns.reduce((s, r) => s + r.spend, 0);
+        const clicks = filteredCampaigns.reduce((s, r) => s + r.clicks, 0);
+        const impressions = filteredCampaigns.reduce((s, r) => s + r.impressions, 0);
+        const conversions = filteredCampaigns.reduce((s, r) => s + r.conversions, 0);
+        const convValue = filteredCampaigns.reduce((s, r) => s + r.conversionValue, 0);
+        return {
+            spend,
+            roas: spend > 0 ? convValue / spend : 0,
+            conversions,
+            convValue,
+            cpc: clicks > 0 ? spend / clicks : 0,
+            ctr: impressions > 0 ? (clicks / impressions) * 100 : 0,
+        };
+    }, [filteredCampaigns]);
+
+    // Daily trend aggregated across campaigns (or filtered)
+    const dailyData = useMemo(() => {
+        const filtered = filterByCampaign(daily.data ?? []);
+        const map = new Map<string, { spend: number; convValue: number; conversions: number }>();
+        for (const r of filtered) {
+            const entry = map.get(r.date) ?? { spend: 0, convValue: 0, conversions: 0 };
+            entry.spend += r.spend;
+            entry.convValue += r.conversionValue;
+            entry.conversions += r.conversions;
+            map.set(r.date, entry);
+        }
+        return Array.from(map.entries())
+            .map(([date, d]) => ({ date, spend: d.spend, convValue: d.convValue, conversions: d.conversions }))
+            .sort((a, b) => a.date.localeCompare(b.date));
+    }, [daily.data, selectedCampaignId]);
+
+    // Asset groups aggregated
+    const agData = useMemo(() =>
+        filterByCampaign(assetGroups.data ?? []),
+        [assetGroups.data, selectedCampaignId],
+    );
+
+    // Asset labels: compute structured views for the UI
+    const assetHealth = useMemo(() => {
+        const filtered = filterByCampaign(assetLabels.data ?? []);
+        const cleanFieldType = (ft: string) => ft.replace('ASSET_FIELD_TYPE_', '').replace(/_/g, ' ');
+
+        // Overall distribution
+        const distCounts: Record<string, number> = {};
+        for (const r of filtered) {
+            const label = r.performanceLabel || 'UNKNOWN';
+            distCounts[label] = (distCounts[label] ?? 0) + 1;
+        }
+        const distribution = Object.entries(distCounts)
+            .map(([label, count]) => ({ label, count, color: PERF_LABEL_COLORS[label] ?? '#a8a29e' }))
+            .sort((a, b) => b.count - a.count);
+
+        // Per asset group summary: group → { total, best, good, low, learning, unknown }
+        const groupMap = new Map<string, { campaignName: string; total: number; best: number; good: number; low: number; learning: number; unknown: number; fieldTypes: Record<string, { best: number; good: number; low: number; learning: number; unknown: number }> }>();
+        for (const r of filtered) {
+            const key = r.assetGroupName;
+            const entry = groupMap.get(key) ?? { campaignName: r.campaignName, total: 0, best: 0, good: 0, low: 0, learning: 0, unknown: 0, fieldTypes: {} };
+            entry.total++;
+            const label = r.performanceLabel || 'UNKNOWN';
+            if (label === 'BEST') entry.best++;
+            else if (label === 'GOOD') entry.good++;
+            else if (label === 'LOW') entry.low++;
+            else if (label === 'LEARNING') entry.learning++;
+            else entry.unknown++;
+
+            const ft = cleanFieldType(r.fieldType);
+            const ftEntry = entry.fieldTypes[ft] ?? { best: 0, good: 0, low: 0, learning: 0, unknown: 0 };
+            if (label === 'BEST') ftEntry.best++;
+            else if (label === 'GOOD') ftEntry.good++;
+            else if (label === 'LOW') ftEntry.low++;
+            else if (label === 'LEARNING') ftEntry.learning++;
+            else ftEntry.unknown++;
+            entry.fieldTypes[ft] = ftEntry;
+
+            groupMap.set(key, entry);
+        }
+        const groupSummaries = Array.from(groupMap.entries())
+            .map(([name, d]) => ({ name, ...d }))
+            .sort((a, b) => b.low - a.low || b.total - a.total);
+
+        // LOW-rated assets (actionable)
+        const lowAssets = filtered
+            .filter(r => r.performanceLabel === 'LOW')
+            .map(r => ({ ...r, fieldType: cleanFieldType(r.fieldType) }));
+
+        // BEST-rated assets (what's working)
+        const bestAssets = filtered
+            .filter(r => r.performanceLabel === 'BEST')
+            .map(r => ({ ...r, fieldType: cleanFieldType(r.fieldType) }));
+
+        return { distribution, groupSummaries, lowAssets, bestAssets, total: filtered.length };
+    }, [assetLabels.data, selectedCampaignId]);
+
+    // Product funnel
+    const funnelData = useMemo(() =>
+        filterByCampaign(productFunnel.data ?? []),
+        [productFunnel.data, selectedCampaignId],
+    );
+
+    // Asset group strength lookup (from API)
+    const strengthMap = useMemo(() => {
+        const map = new Map<string, string>();
+        for (const r of (agStrength.data ?? [])) {
+            map.set(r.assetGroupName, r.adStrength);
+        }
+        return map;
+    }, [agStrength.data]);
+
+    // Media lookup: assetId → media info (from API)
+    const mediaById = useMemo(() => {
+        const map = new Map<string, { imageUrl: string | null; youtubeVideoId: string | null }>();
+        for (const r of (assetMedia.data ?? [])) {
+            map.set(r.assetId, { imageUrl: r.imageUrl, youtubeVideoId: r.youtubeVideoId });
+        }
+        return map;
+    }, [assetMedia.data]);
+
+    if (campaigns.isLoading) {
+        return <div className="space-y-6"><KPISkeleton /><ChartSkeleton /><GridSkeleton /></div>;
+    }
+    if (campaigns.error) return <ErrorState error={campaigns.error} />;
+    if (campaignData.length === 0) return <EmptyState message="No PMax campaigns found" />;
+
+    return (
+        <div className="space-y-6">
+            {/* Campaign Selector */}
+            <div className="flex items-center gap-3">
+                <label className="text-sm font-medium text-stone-600">Campaign:</label>
+                <select
+                    value={selectedCampaignId ?? ''}
+                    onChange={e => setSelectedCampaignId(e.target.value ? Number(e.target.value) : null)}
+                    className="rounded-md border border-stone-300 bg-white px-3 py-1.5 text-sm text-stone-900 shadow-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                >
+                    <option value="">All PMax Campaigns ({campaignData.length})</option>
+                    {activeCampaigns.length > 0 && (
+                        <optgroup label="Active">
+                            {activeCampaigns.map(c => (
+                                <option key={c.campaignId} value={c.campaignId}>
+                                    {c.campaignName} ({formatCurrency(c.spend)})
+                                </option>
+                            ))}
+                        </optgroup>
+                    )}
+                    {pausedCampaigns.length > 0 && (
+                        <optgroup label="Paused">
+                            {pausedCampaigns.map(c => (
+                                <option key={c.campaignId} value={c.campaignId}>
+                                    {c.campaignName} ({formatCurrency(c.spend)})
+                                </option>
+                            ))}
+                        </optgroup>
+                    )}
+                </select>
+            </div>
+
+            {/* KPIs */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <KPICard label="Total Spend" value={formatCurrency(kpi.spend)} />
+                <KPICard label="ROAS" value={kpi.roas > 0 ? `${kpi.roas.toFixed(2)}x` : '-'} subtext={`${formatCurrency(kpi.convValue)} conv value`} />
+                <KPICard label="Conversions" value={kpi.conversions > 0 ? kpi.conversions.toFixed(1) : '-'} subtext={kpi.spend > 0 && kpi.conversions > 0 ? `${formatCurrency(Math.round(kpi.spend / kpi.conversions))} per conv` : undefined} />
+                <KPICard label="CPC" value={kpi.cpc > 0 ? `₹${kpi.cpc.toFixed(1)}` : '-'} subtext={`CTR ${fmtPct(kpi.ctr)}`} />
+            </div>
+
+            {/* Daily Trend */}
+            {dailyData.length > 0 && (
+                <div className="bg-white rounded-lg border border-stone-200 shadow-sm p-4 sm:p-6">
+                    <h3 className="text-sm font-semibold text-stone-700 mb-4">Daily PMax Trend</h3>
+                    <ResponsiveContainer width="100%" height={260}>
+                        <ComposedChart data={dailyData} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#e7e5e4" />
+                            <XAxis dataKey="date" tickFormatter={fmtChartDate} tick={{ fontSize: 11 }} />
+                            <YAxis yAxisId="spend" tick={{ fontSize: 11 }} tickFormatter={(v: number) => `₹${(v / 1000).toFixed(0)}k`} />
+                            <YAxis yAxisId="conv" orientation="right" tick={{ fontSize: 11 }} tickFormatter={(v: number) => `₹${(v / 1000).toFixed(0)}k`} />
+                            <Tooltip
+                                formatter={(value: number | undefined, name?: string) => [
+                                    formatCurrency(value ?? 0),
+                                    name === 'spend' ? 'Spend' : 'Conv Value',
+                                ]}
+                                labelFormatter={fmtChartDate}
+                            />
+                            <Bar yAxisId="spend" dataKey="spend" fill="#93c5fd" radius={[2, 2, 0, 0]} />
+                            <Line yAxisId="conv" dataKey="convValue" stroke="#16a34a" strokeWidth={2} dot={false} />
+                        </ComposedChart>
+                    </ResponsiveContainer>
+                </div>
+            )}
+
+            {/* Asset Group Performance Table */}
+            {agData.length > 0 && (
+                <div className="bg-white rounded-lg border border-stone-200 shadow-sm p-4 sm:p-6">
+                    <h3 className="text-sm font-semibold text-stone-700 mb-4">Asset Group Performance</h3>
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                            <thead>
+                                <tr className="border-b border-stone-200 text-left text-xs font-medium text-stone-500 uppercase tracking-wide">
+                                    <th className="pb-2 pr-4">Asset Group</th>
+                                    <th className="pb-2 pr-4">Campaign</th>
+                                    <th className="pb-2 pr-4">Strength</th>
+                                    <th className="pb-2 pr-4 text-right">Spend</th>
+                                    <th className="pb-2 pr-4 text-right">Impr</th>
+                                    <th className="pb-2 pr-4 text-right">Clicks</th>
+                                    <th className="pb-2 pr-4 text-right">CTR</th>
+                                    <th className="pb-2 pr-4 text-right">CPC</th>
+                                    <th className="pb-2 pr-4 text-right">Conv</th>
+                                    <th className="pb-2 pr-4 text-right">Revenue</th>
+                                    <th className="pb-2 text-right">ROAS</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {agData.map((r, i) => {
+                                    const strength = strengthMap.get(r.assetGroupName) ?? '';
+                                    return (
+                                    <tr key={i} className="border-b border-stone-100 hover:bg-stone-50">
+                                        <td className="py-2 pr-4 font-medium text-stone-900">{r.assetGroupName}</td>
+                                        <td className="py-2 pr-4 text-stone-600 truncate max-w-[200px]">{r.campaignName}</td>
+                                        <td className="py-2 pr-4">
+                                            {strength && (
+                                                <span className="text-xs font-semibold px-1.5 py-0.5 rounded" style={{ color: AD_STRENGTH_COLORS[strength] ?? '#a8a29e' }}>
+                                                    {strength}
+                                                </span>
+                                            )}
+                                        </td>
+                                        <td className="py-2 pr-4 text-right">{formatCurrency(r.spend)}</td>
+                                        <td className="py-2 pr-4 text-right">{fmt(r.impressions)}</td>
+                                        <td className="py-2 pr-4 text-right">{fmt(r.clicks)}</td>
+                                        <td className="py-2 pr-4 text-right">{fmtPct(r.ctr)}</td>
+                                        <td className="py-2 pr-4 text-right">₹{r.cpc.toFixed(1)}</td>
+                                        <td className="py-2 pr-4 text-right">{r.conversions > 0 ? r.conversions.toFixed(1) : '-'}</td>
+                                        <td className="py-2 pr-4 text-right">{formatCurrency(r.conversionValue)}</td>
+                                        <td className="py-2 text-right font-semibold" style={roasStyle(r.roas) ?? undefined}>
+                                            {r.roas > 0 ? `${r.roas.toFixed(2)}x` : '-'}
+                                        </td>
+                                    </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            )}
+
+            {/* Asset Health */}
+            {assetHealth.total > 0 && (
+                <div className="space-y-4">
+                    {/* Overall health bar + legend */}
+                    <div className="bg-white rounded-lg border border-stone-200 shadow-sm p-4 sm:p-6">
+                        <h3 className="text-sm font-semibold text-stone-700 mb-3">Asset Health — {assetHealth.total} assets across {assetHealth.groupSummaries.length} groups</h3>
+                        <div className="flex items-center gap-4 mb-2">
+                            {assetHealth.distribution.map(d => (
+                                <span key={d.label} className="flex items-center gap-1.5 text-xs text-stone-600">
+                                    <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ backgroundColor: d.color }} />
+                                    {d.label} ({d.count})
+                                </span>
+                            ))}
+                        </div>
+                        <div className="flex h-3 rounded-full overflow-hidden bg-stone-100">
+                            {assetHealth.distribution.map(d => (
+                                <div
+                                    key={d.label}
+                                    style={{ width: `${(d.count / assetHealth.total) * 100}%`, backgroundColor: d.color }}
+                                    title={`${d.label}: ${d.count}`}
+                                />
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Per-group health matrix */}
+                    <div className="bg-white rounded-lg border border-stone-200 shadow-sm p-4 sm:p-6">
+                        <h3 className="text-sm font-semibold text-stone-700 mb-3">Health by Asset Group</h3>
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-sm">
+                                <thead>
+                                    <tr className="border-b border-stone-200 text-left text-xs font-medium text-stone-500 uppercase tracking-wide">
+                                        <th className="pb-2 pr-4">Asset Group</th>
+                                        <th className="pb-2 pr-4 text-right">Total</th>
+                                        <th className="pb-2 pr-4 text-right text-green-700">Best</th>
+                                        <th className="pb-2 pr-4 text-right text-lime-700">Good</th>
+                                        <th className="pb-2 pr-4 text-right text-red-700">Low</th>
+                                        <th className="pb-2 pr-4 text-right text-amber-700">Learning</th>
+                                        <th className="pb-2 pr-4">Distribution</th>
+                                        <th className="pb-2">Field Types with Issues</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {assetHealth.groupSummaries.map(g => {
+                                        const issueTypes = Object.entries(g.fieldTypes)
+                                            .filter(([, c]) => c.low > 0)
+                                            .map(([ft, c]) => `${ft} (${c.low})`)
+                                            .join(', ');
+                                        return (
+                                            <tr key={g.name} className="border-b border-stone-100 hover:bg-stone-50">
+                                                <td className="py-2 pr-4">
+                                                    <p className="font-medium text-stone-900 text-xs">{g.name}</p>
+                                                    <p className="text-[10px] text-stone-400">{g.campaignName}</p>
+                                                </td>
+                                                <td className="py-2 pr-4 text-right text-stone-600">{g.total}</td>
+                                                <td className="py-2 pr-4 text-right font-semibold text-green-700">{g.best || '-'}</td>
+                                                <td className="py-2 pr-4 text-right font-semibold text-lime-700">{g.good || '-'}</td>
+                                                <td className="py-2 pr-4 text-right font-semibold text-red-700">{g.low || '-'}</td>
+                                                <td className="py-2 pr-4 text-right font-semibold text-amber-700">{g.learning || '-'}</td>
+                                                <td className="py-2 pr-4">
+                                                    <div className="flex h-2 w-24 rounded-full overflow-hidden bg-stone-100">
+                                                        {g.best > 0 && <div style={{ width: `${(g.best / g.total) * 100}%`, backgroundColor: '#16a34a' }} />}
+                                                        {g.good > 0 && <div style={{ width: `${(g.good / g.total) * 100}%`, backgroundColor: '#65a30d' }} />}
+                                                        {g.learning > 0 && <div style={{ width: `${(g.learning / g.total) * 100}%`, backgroundColor: '#d97706' }} />}
+                                                        {g.low > 0 && <div style={{ width: `${(g.low / g.total) * 100}%`, backgroundColor: '#dc2626' }} />}
+                                                    </div>
+                                                </td>
+                                                <td className="py-2 text-xs text-red-600">{issueTypes || <span className="text-green-600">All healthy</span>}</td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    {/* LOW assets — the actionable part */}
+                    {assetHealth.lowAssets.length > 0 && (
+                        <div className="bg-white rounded-lg border border-red-200 shadow-sm p-4 sm:p-6">
+                            <h3 className="text-sm font-semibold text-red-700 mb-1">Assets Rated LOW — Consider Replacing ({assetHealth.lowAssets.length})</h3>
+                            <p className="text-xs text-stone-400 mb-3">These assets are underperforming. Swap them out with fresh creative to improve your PMax results.</p>
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-sm">
+                                    <thead>
+                                        <tr className="border-b border-stone-200 text-left text-xs font-medium text-stone-500 uppercase tracking-wide">
+                                            <th className="pb-2 pr-2 w-12">Preview</th>
+                                            <th className="pb-2 pr-4">Asset Group</th>
+                                            <th className="pb-2 pr-4">Field Type</th>
+                                            <th className="pb-2 pr-4">Asset Type</th>
+                                            <th className="pb-2">Asset Name / Content</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {assetHealth.lowAssets.map((a, i) => (
+                                            <tr key={i} className="border-b border-stone-100">
+                                                <td className="py-1.5 pr-2"><AssetThumb media={mediaById.get(a.assetId)} /></td>
+                                                <td className="py-1.5 pr-4 text-xs text-stone-700">{a.assetGroupName}</td>
+                                                <td className="py-1.5 pr-4">
+                                                    <span className="text-[10px] font-medium uppercase tracking-wide px-1.5 py-0.5 rounded bg-stone-100 text-stone-600">{a.fieldType}</span>
+                                                </td>
+                                                <td className="py-1.5 pr-4 text-xs text-stone-500">{a.assetType}</td>
+                                                <td className="py-1.5 text-xs text-stone-900 max-w-[400px] truncate">{a.assetName}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* BEST assets — what's working */}
+                    {assetHealth.bestAssets.length > 0 && (
+                        <details className="bg-white rounded-lg border border-green-200 shadow-sm">
+                            <summary className="p-4 sm:px-6 cursor-pointer text-sm font-semibold text-green-700 hover:bg-green-50 rounded-lg">
+                                Top Performing Assets — Rated BEST ({assetHealth.bestAssets.length})
+                            </summary>
+                            <div className="px-4 pb-4 sm:px-6 sm:pb-6">
+                                <div className="overflow-x-auto">
+                                    <table className="w-full text-sm">
+                                        <thead>
+                                            <tr className="border-b border-stone-200 text-left text-xs font-medium text-stone-500 uppercase tracking-wide">
+                                                <th className="pb-2 pr-2 w-12">Preview</th>
+                                                <th className="pb-2 pr-4">Asset Group</th>
+                                                <th className="pb-2 pr-4">Field Type</th>
+                                                <th className="pb-2 pr-4">Asset Type</th>
+                                                <th className="pb-2">Asset Name / Content</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {assetHealth.bestAssets.map((a, i) => (
+                                                <tr key={i} className="border-b border-stone-100">
+                                                    <td className="py-1.5 pr-2"><AssetThumb media={mediaById.get(a.assetId)} /></td>
+                                                    <td className="py-1.5 pr-4 text-xs text-stone-700">{a.assetGroupName}</td>
+                                                    <td className="py-1.5 pr-4">
+                                                        <span className="text-[10px] font-medium uppercase tracking-wide px-1.5 py-0.5 rounded bg-stone-100 text-stone-600">{a.fieldType}</span>
+                                                    </td>
+                                                    <td className="py-1.5 pr-4 text-xs text-stone-500">{a.assetType}</td>
+                                                    <td className="py-1.5 text-xs text-stone-900 max-w-[400px] truncate">{a.assetName}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </details>
+                    )}
+                </div>
+            )}
+
+            {/* Product Funnel */}
+            {funnelData.length > 0 && (
+                <div className="bg-white rounded-lg border border-stone-200 shadow-sm p-4 sm:p-6">
+                    <h3 className="text-sm font-semibold text-stone-700 mb-4">Product Conversion Funnel</h3>
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                            <thead>
+                                <tr className="border-b border-stone-200 text-left text-xs font-medium text-stone-500 uppercase tracking-wide">
+                                    <th className="pb-2 pr-4">Product Type</th>
+                                    <th className="pb-2 pr-4 text-right">Views</th>
+                                    <th className="pb-2 pr-4 text-right">Add to Carts</th>
+                                    <th className="pb-2 pr-4 text-right">Purchases</th>
+                                    <th className="pb-2 pr-4 text-right">Purchase Value</th>
+                                    <th className="pb-2 pr-4 text-right">View→ATC</th>
+                                    <th className="pb-2 text-right">ATC→Purchase</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {funnelData.map((r, i) => (
+                                    <tr key={i} className="border-b border-stone-100 hover:bg-stone-50">
+                                        <td className="py-2 pr-4 font-medium text-stone-900">{r.productType}</td>
+                                        <td className="py-2 pr-4 text-right">{fmt(r.views)}</td>
+                                        <td className="py-2 pr-4 text-right">{r.addToCarts > 0 ? r.addToCarts.toFixed(1) : '-'}</td>
+                                        <td className="py-2 pr-4 text-right">{r.purchases > 0 ? r.purchases.toFixed(1) : '-'}</td>
+                                        <td className="py-2 pr-4 text-right">{formatCurrency(r.purchaseValue)}</td>
+                                        <td className="py-2 pr-4 text-right">{fmtPct(r.viewToAtcRate)}</td>
+                                        <td className="py-2 text-right">{fmtPct(r.atcToPurchaseRate)}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
+
+// ============================================
 // MAIN COMPONENT
 // ============================================
 
@@ -1542,6 +2033,7 @@ export default function GoogleAdsAnalysis({ days }: { days: number }) {
                 ))}
             </div>
             {subTab === 'overview' && <OverviewSubTab days={days} />}
+            {subTab === 'pmax' && <PMaxSubTab days={days} />}
             {subTab === 'competitive' && <CompetitiveSubTab days={days} />}
             {subTab === 'products' && <ProductsSubTab days={days} />}
             {subTab === 'creatives' && <CreativesSubTab days={days} />}
