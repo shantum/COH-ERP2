@@ -30,7 +30,7 @@ import type { GAdsCampaignRow } from '../server/functions/googleAds';
 ModuleRegistry.registerModules([AllCommunityModule]);
 
 type Tab = 'overview' | 'acquisition' | 'pages' | 'geography' | 'meta-ads' | 'google-ads';
-type DayRange = 7 | 14 | 30 | 90;
+type DayRange = 1 | 2 | 7 | 14 | 30 | 90;
 
 const TABS: { key: Tab; label: string }[] = [
     { key: 'overview', label: 'Overview' },
@@ -41,7 +41,14 @@ const TABS: { key: Tab; label: string }[] = [
     { key: 'meta-ads', label: 'Meta Ads' },
 ];
 
-const DAY_OPTIONS: DayRange[] = [7, 14, 30, 90];
+const DAY_OPTIONS: { value: DayRange; label: string }[] = [
+    { value: 1, label: 'Today' },
+    { value: 2, label: 'Yesterday' },
+    { value: 7, label: '7d' },
+    { value: 14, label: '14d' },
+    { value: 30, label: '30d' },
+    { value: 90, label: '90d' },
+];
 
 const DEFAULT_COL_DEF = { sortable: true, resizable: true };
 
@@ -879,15 +886,15 @@ function Header({
                 <div className="flex bg-stone-100 rounded-lg p-0.5">
                     {DAY_OPTIONS.map(d => (
                         <button
-                            key={d}
-                            onClick={() => setDays(d)}
+                            key={d.value}
+                            onClick={() => setDays(d.value)}
                             className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
-                                days === d
+                                days === d.value
                                     ? 'bg-stone-900 text-white'
                                     : 'text-stone-600 hover:bg-stone-200'
                             }`}
                         >
-                            {d}d
+                            {d.label}
                         </button>
                     ))}
                 </div>
