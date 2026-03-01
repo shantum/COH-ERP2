@@ -45,22 +45,23 @@ function externalizeServerImports(): Plugin {
   return {
     name: 'externalize-server-imports',
     enforce: 'pre', // Run before other plugins
-    resolveId(source, importer, options) {
-      // Only apply during SSR build
-      if (!options?.ssr) return null;
+    resolveId(source, _importer, options) {
+      if (!source.startsWith('@server/') && source !== '@server') return null;
 
-      // Handle @server/* imports
-      if (source.startsWith('@server/')) {
-        // Resolve to absolute path for Node.js runtime
-        const relativePath = source.replace('@server/', '');
-        const absolutePath = path.join(SERVER_SRC_PATH, relativePath);
-        // Mark as external - Node.js will resolve at runtime
+      // Resolve to absolute path for Node.js runtime
+      const relativePath = source === '@server' ? '' : source.replace('@server/', '');
+      const absolutePath = relativePath ? path.join(SERVER_SRC_PATH, relativePath) : SERVER_SRC_PATH;
+
+      if (options?.ssr) {
+        // SSR build: mark as external — Node.js resolves at runtime
         return { id: absolutePath, external: true };
       }
-      if (source === '@server') {
-        return { id: SERVER_SRC_PATH, external: true };
+
+      // Dev mode: resolve .js → .ts so Vite can process the file
+      if (absolutePath.endsWith('.js')) {
+        return { id: absolutePath.replace(/\.js$/, '.ts'), external: false };
       }
-      return null;
+      return { id: absolutePath, external: false };
     },
   };
 }
