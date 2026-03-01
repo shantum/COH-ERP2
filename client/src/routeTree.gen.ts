@@ -48,6 +48,7 @@ import { Route as AuthenticatedCustomersRouteImport } from './routes/_authentica
 import { Route as AuthenticatedCostingRouteImport } from './routes/_authenticated/costing'
 import { Route as AuthenticatedChannelsRouteImport } from './routes/_authenticated/channels'
 import { Route as AuthenticatedChannelImportRouteImport } from './routes/_authenticated/channel-import'
+import { Route as AuthenticatedCampaignsRouteImport } from './routes/_authenticated/campaigns'
 import { Route as AuthenticatedBomRouteImport } from './routes/_authenticated/bom'
 import { Route as AuthenticatedAnalyticsRouteImport } from './routes/_authenticated/analytics'
 import { Route as AuthenticatedBusinessIndexRouteImport } from './routes/_authenticated/business/index'
@@ -55,6 +56,7 @@ import { Route as AuthenticatedReturnsReturnIdRouteImport } from './routes/_auth
 import { Route as AuthenticatedProductsNewRouteImport } from './routes/_authenticated/products_.new'
 import { Route as AuthenticatedOrdersOrderIdRouteImport } from './routes/_authenticated/orders_.$orderId'
 import { Route as AuthenticatedCustomersCustomerIdRouteImport } from './routes/_authenticated/customers_.$customerId'
+import { Route as AuthenticatedCampaignsCampaignIdRouteImport } from './routes/_authenticated/campaigns_.$campaignId'
 import { Route as AuthenticatedProductsProductSlugEditRouteImport } from './routes/_authenticated/products_/$productSlug/edit'
 
 const ShipmentsRoute = ShipmentsRouteImport.update({
@@ -264,6 +266,11 @@ const AuthenticatedChannelImportRoute =
     path: '/channel-import',
     getParentRoute: () => AuthenticatedRoute,
   } as any)
+const AuthenticatedCampaignsRoute = AuthenticatedCampaignsRouteImport.update({
+  id: '/campaigns',
+  path: '/campaigns',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
 const AuthenticatedBomRoute = AuthenticatedBomRouteImport.update({
   id: '/bom',
   path: '/bom',
@@ -304,6 +311,12 @@ const AuthenticatedCustomersCustomerIdRoute =
     path: '/customers/$customerId',
     getParentRoute: () => AuthenticatedRoute,
   } as any)
+const AuthenticatedCampaignsCampaignIdRoute =
+  AuthenticatedCampaignsCampaignIdRouteImport.update({
+    id: '/campaigns_/$campaignId',
+    path: '/campaigns/$campaignId',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
 const AuthenticatedProductsProductSlugEditRoute =
   AuthenticatedProductsProductSlugEditRouteImport.update({
     id: '/products_/$productSlug/edit',
@@ -322,6 +335,7 @@ export interface FileRoutesByFullPath {
   '/shipments': typeof ShipmentsRoute
   '/analytics': typeof AuthenticatedAnalyticsRoute
   '/bom': typeof AuthenticatedBomRoute
+  '/campaigns': typeof AuthenticatedCampaignsRoute
   '/channel-import': typeof AuthenticatedChannelImportRoute
   '/channels': typeof AuthenticatedChannelsRoute
   '/costing': typeof AuthenticatedCostingRoute
@@ -352,6 +366,7 @@ export interface FileRoutesByFullPath {
   '/tailor-performance': typeof AuthenticatedTailorPerformanceRoute
   '/tracking': typeof AuthenticatedTrackingRoute
   '/users': typeof AuthenticatedUsersRoute
+  '/campaigns/$campaignId': typeof AuthenticatedCampaignsCampaignIdRoute
   '/customers/$customerId': typeof AuthenticatedCustomersCustomerIdRoute
   '/orders/$orderId': typeof AuthenticatedOrdersOrderIdRoute
   '/products/new': typeof AuthenticatedProductsNewRoute
@@ -369,6 +384,7 @@ export interface FileRoutesByTo {
   '/shipments': typeof ShipmentsRoute
   '/analytics': typeof AuthenticatedAnalyticsRoute
   '/bom': typeof AuthenticatedBomRoute
+  '/campaigns': typeof AuthenticatedCampaignsRoute
   '/channel-import': typeof AuthenticatedChannelImportRoute
   '/channels': typeof AuthenticatedChannelsRoute
   '/costing': typeof AuthenticatedCostingRoute
@@ -400,6 +416,7 @@ export interface FileRoutesByTo {
   '/tracking': typeof AuthenticatedTrackingRoute
   '/users': typeof AuthenticatedUsersRoute
   '/': typeof AuthenticatedIndexRoute
+  '/campaigns/$campaignId': typeof AuthenticatedCampaignsCampaignIdRoute
   '/customers/$customerId': typeof AuthenticatedCustomersCustomerIdRoute
   '/orders/$orderId': typeof AuthenticatedOrdersOrderIdRoute
   '/products/new': typeof AuthenticatedProductsNewRoute
@@ -419,6 +436,7 @@ export interface FileRoutesById {
   '/shipments': typeof ShipmentsRoute
   '/_authenticated/analytics': typeof AuthenticatedAnalyticsRoute
   '/_authenticated/bom': typeof AuthenticatedBomRoute
+  '/_authenticated/campaigns': typeof AuthenticatedCampaignsRoute
   '/_authenticated/channel-import': typeof AuthenticatedChannelImportRoute
   '/_authenticated/channels': typeof AuthenticatedChannelsRoute
   '/_authenticated/costing': typeof AuthenticatedCostingRoute
@@ -450,6 +468,7 @@ export interface FileRoutesById {
   '/_authenticated/tracking': typeof AuthenticatedTrackingRoute
   '/_authenticated/users': typeof AuthenticatedUsersRoute
   '/_authenticated/': typeof AuthenticatedIndexRoute
+  '/_authenticated/campaigns_/$campaignId': typeof AuthenticatedCampaignsCampaignIdRoute
   '/_authenticated/customers_/$customerId': typeof AuthenticatedCustomersCustomerIdRoute
   '/_authenticated/orders_/$orderId': typeof AuthenticatedOrdersOrderIdRoute
   '/_authenticated/products_/new': typeof AuthenticatedProductsNewRoute
@@ -470,6 +489,7 @@ export interface FileRouteTypes {
     | '/shipments'
     | '/analytics'
     | '/bom'
+    | '/campaigns'
     | '/channel-import'
     | '/channels'
     | '/costing'
@@ -500,6 +520,7 @@ export interface FileRouteTypes {
     | '/tailor-performance'
     | '/tracking'
     | '/users'
+    | '/campaigns/$campaignId'
     | '/customers/$customerId'
     | '/orders/$orderId'
     | '/products/new'
@@ -517,6 +538,7 @@ export interface FileRouteTypes {
     | '/shipments'
     | '/analytics'
     | '/bom'
+    | '/campaigns'
     | '/channel-import'
     | '/channels'
     | '/costing'
@@ -548,6 +570,7 @@ export interface FileRouteTypes {
     | '/tracking'
     | '/users'
     | '/'
+    | '/campaigns/$campaignId'
     | '/customers/$customerId'
     | '/orders/$orderId'
     | '/products/new'
@@ -566,6 +589,7 @@ export interface FileRouteTypes {
     | '/shipments'
     | '/_authenticated/analytics'
     | '/_authenticated/bom'
+    | '/_authenticated/campaigns'
     | '/_authenticated/channel-import'
     | '/_authenticated/channels'
     | '/_authenticated/costing'
@@ -597,6 +621,7 @@ export interface FileRouteTypes {
     | '/_authenticated/tracking'
     | '/_authenticated/users'
     | '/_authenticated/'
+    | '/_authenticated/campaigns_/$campaignId'
     | '/_authenticated/customers_/$customerId'
     | '/_authenticated/orders_/$orderId'
     | '/_authenticated/products_/new'
@@ -891,6 +916,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedChannelImportRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/campaigns': {
+      id: '/_authenticated/campaigns'
+      path: '/campaigns'
+      fullPath: '/campaigns'
+      preLoaderRoute: typeof AuthenticatedCampaignsRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/bom': {
       id: '/_authenticated/bom'
       path: '/bom'
@@ -940,6 +972,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedCustomersCustomerIdRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/campaigns_/$campaignId': {
+      id: '/_authenticated/campaigns_/$campaignId'
+      path: '/campaigns/$campaignId'
+      fullPath: '/campaigns/$campaignId'
+      preLoaderRoute: typeof AuthenticatedCampaignsCampaignIdRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/products_/$productSlug/edit': {
       id: '/_authenticated/products_/$productSlug/edit'
       path: '/products/$productSlug/edit'
@@ -953,6 +992,7 @@ declare module '@tanstack/react-router' {
 interface AuthenticatedRouteChildren {
   AuthenticatedAnalyticsRoute: typeof AuthenticatedAnalyticsRoute
   AuthenticatedBomRoute: typeof AuthenticatedBomRoute
+  AuthenticatedCampaignsRoute: typeof AuthenticatedCampaignsRoute
   AuthenticatedChannelImportRoute: typeof AuthenticatedChannelImportRoute
   AuthenticatedChannelsRoute: typeof AuthenticatedChannelsRoute
   AuthenticatedCostingRoute: typeof AuthenticatedCostingRoute
@@ -984,6 +1024,7 @@ interface AuthenticatedRouteChildren {
   AuthenticatedTrackingRoute: typeof AuthenticatedTrackingRoute
   AuthenticatedUsersRoute: typeof AuthenticatedUsersRoute
   AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
+  AuthenticatedCampaignsCampaignIdRoute: typeof AuthenticatedCampaignsCampaignIdRoute
   AuthenticatedCustomersCustomerIdRoute: typeof AuthenticatedCustomersCustomerIdRoute
   AuthenticatedOrdersOrderIdRoute: typeof AuthenticatedOrdersOrderIdRoute
   AuthenticatedProductsNewRoute: typeof AuthenticatedProductsNewRoute
@@ -995,6 +1036,7 @@ interface AuthenticatedRouteChildren {
 const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedAnalyticsRoute: AuthenticatedAnalyticsRoute,
   AuthenticatedBomRoute: AuthenticatedBomRoute,
+  AuthenticatedCampaignsRoute: AuthenticatedCampaignsRoute,
   AuthenticatedChannelImportRoute: AuthenticatedChannelImportRoute,
   AuthenticatedChannelsRoute: AuthenticatedChannelsRoute,
   AuthenticatedCostingRoute: AuthenticatedCostingRoute,
@@ -1027,6 +1069,7 @@ const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedTrackingRoute: AuthenticatedTrackingRoute,
   AuthenticatedUsersRoute: AuthenticatedUsersRoute,
   AuthenticatedIndexRoute: AuthenticatedIndexRoute,
+  AuthenticatedCampaignsCampaignIdRoute: AuthenticatedCampaignsCampaignIdRoute,
   AuthenticatedCustomersCustomerIdRoute: AuthenticatedCustomersCustomerIdRoute,
   AuthenticatedOrdersOrderIdRoute: AuthenticatedOrdersOrderIdRoute,
   AuthenticatedProductsNewRoute: AuthenticatedProductsNewRoute,

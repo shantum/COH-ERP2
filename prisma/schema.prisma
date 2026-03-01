@@ -511,10 +511,12 @@ model Customer {
   bankAccountName   String?        // For return refund bank transfers
   bankAccountNumber String?
   bankIfsc          String?
+  emailOptOut       Boolean         @default(false) // Unsubscribe from marketing emails
   feedback          Feedback[]
   orders            Order[]
   financeInvoices   Invoice[] @relation("InvoiceCustomer")
   financePayments   Payment[] @relation("PaymentCustomer")
+  campaignRecipients EmailCampaignRecipient[]
 
   @@index([createdAt])
   @@index([tier])                 // Customer segmentation queries
@@ -2591,6 +2593,84 @@ model EmailLog {
   @@index([entityType, entityId])
   @@index([createdAt])
   @@index([messageId])
+}
+
+/// Email marketing campaign
+model EmailCampaign {
+  id                String    @id @default(uuid())
+  name              String    // Internal campaign name
+  subject           String    // Email subject line
+  preheaderText     String?   // Preview text shown in inbox
+
+  // Template & Content
+  templateKey       String    // "cinematic" | "swiss" | "warm"
+  htmlContent       String?   // Rendered HTML snapshot (populated at send time)
+  shopifyProductIds Json?     // String[] of Shopify product IDs to feature
+
+  // Status
+  status            String    @default("draft") // draft | scheduled | sending | sent | cancelled
+
+  // Audience
+  audienceFilter    Json?     // { tiers: [], tags: [], lastPurchaseDays: number }
+  recipientCount    Int       @default(0)
+
+  // Stats (denormalized, updated by webhooks)
+  sentCount         Int       @default(0)
+  deliveredCount    Int       @default(0)
+  openCount         Int       @default(0)
+  clickCount        Int       @default(0)
+  bounceCount       Int       @default(0)
+  unsubscribeCount  Int       @default(0)
+
+  // UTM Tracking (per-campaign, editable)
+  utmSource         String    @default("email")
+  utmMedium         String    @default("campaign")
+  utmCampaign       String?   // Auto-slugified from name, editable
+  utmContent        String?   // Optional, for variant tracking
+  utmTerm           String?   // Optional
+
+  // Scheduling
+  scheduledAt       DateTime?
+  sentAt            DateTime?
+
+  // Audit
+  createdById       String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  recipients        EmailCampaignRecipient[]
+
+  @@index([status])
+  @@index([createdAt])
+  @@index([sentAt])
+}
+
+/// Individual recipient record for a campaign send
+model EmailCampaignRecipient {
+  id          String    @id @default(uuid())
+  campaignId  String
+  campaign    EmailCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  customerId  String
+  customer    Customer  @relation(fields: [customerId], references: [id])
+  email       String    // Snapshot of customer email at send time
+
+  // Delivery status
+  status      String    @default("pending") // pending | sent | delivered | opened | clicked | bounced | complained | unsubscribed
+  sentAt      DateTime?
+  deliveredAt DateTime?
+  openedAt    DateTime?
+  clickedAt   DateTime?
+
+  // Link to actual email log
+  emailLogId  String?   @unique
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([campaignId, customerId]) // One entry per customer per campaign
+  @@index([campaignId, status])
+  @@index([customerId])
+  @@index([email])
 }
 
 /// Persisted demand forecast runs

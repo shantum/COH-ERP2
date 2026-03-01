@@ -227,6 +227,7 @@ export type Customer = {
     bankAccountName: string | null;
     bankAccountNumber: string | null;
     bankIfsc: string | null;
+    emailOptOut: Generated<boolean>;
 };
 export type DemandForecast = {
     id: Generated<string>;
@@ -261,6 +262,48 @@ export type DomainEvent = {
     meta: unknown | null;
     actorId: string | null;
     createdAt: Generated<Timestamp>;
+};
+export type EmailCampaign = {
+    id: Generated<string>;
+    name: string;
+    subject: string;
+    preheaderText: string | null;
+    templateKey: string;
+    htmlContent: string | null;
+    shopifyProductIds: unknown | null;
+    status: Generated<string>;
+    audienceFilter: unknown | null;
+    recipientCount: Generated<number>;
+    sentCount: Generated<number>;
+    deliveredCount: Generated<number>;
+    openCount: Generated<number>;
+    clickCount: Generated<number>;
+    bounceCount: Generated<number>;
+    unsubscribeCount: Generated<number>;
+    utmSource: Generated<string>;
+    utmMedium: Generated<string>;
+    utmCampaign: string | null;
+    utmContent: string | null;
+    utmTerm: string | null;
+    scheduledAt: Timestamp | null;
+    sentAt: Timestamp | null;
+    createdById: string | null;
+    createdAt: Generated<Timestamp>;
+    updatedAt: Timestamp;
+};
+export type EmailCampaignRecipient = {
+    id: Generated<string>;
+    campaignId: string;
+    customerId: string;
+    email: string;
+    status: Generated<string>;
+    sentAt: Timestamp | null;
+    deliveredAt: Timestamp | null;
+    openedAt: Timestamp | null;
+    clickedAt: Timestamp | null;
+    emailLogId: string | null;
+    createdAt: Generated<Timestamp>;
+    updatedAt: Timestamp;
 };
 export type EmailLog = {
     id: Generated<string>;
@@ -1582,6 +1625,8 @@ export type DB = {
     Customer: Customer;
     DemandForecast: DemandForecast;
     DomainEvent: DomainEvent;
+    EmailCampaign: EmailCampaign;
+    EmailCampaignRecipient: EmailCampaignRecipient;
     EmailLog: EmailLog;
     Employee: Employee;
     Fabric: Fabric;
