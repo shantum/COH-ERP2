@@ -20,6 +20,8 @@ import {
     useGAdsLandingPages, useGAdsImpressionShare, useGAdsBudgets,
     useGAdsCreatives, useGAdsVideos, useGAdsAssetGroups, useGAdsAudienceSegments,
     useGAdsProductFunnel, useGAdsSearchConversions, useGAdsCampaignConversions,
+    useGAdsGeoConversions, useGAdsUserLocations, useGAdsClickStats,
+    useGAdsAssetPerformance, useGAdsAdGroups, useGAdsAdGroupCriteria, useGAdsAudienceConversions,
 } from '../hooks/useGoogleAds';
 import { compactThemeSmall } from '../utils/agGridHelpers';
 import { formatCurrency } from '../utils/formatting';
@@ -29,13 +31,15 @@ import type {
     GAdsImpressionShareRow, GAdsBudgetRow, GAdsCreativeRow,
     GAdsVideoRow, GAdsAssetGroupRow, GAdsAudienceSegmentRow,
     GAdsProductFunnelRow, GAdsSearchConversionRow, GAdsCampaignConversionRow,
+    GAdsGeoConversionRow, GAdsUserLocationRow, GAdsClickRow,
+    GAdsAssetPerfRow, GAdsAdGroupRow, GAdsAdGroupCriterionRow, GAdsAudienceConversionRow,
 } from '../server/functions/googleAds';
 
 // ============================================
 // SHARED HELPERS
 // ============================================
 
-type GAdsSubTab = 'overview' | 'competitive' | 'products' | 'creatives' | 'video' | 'search' | 'audience' | 'geography' | 'schedule' | 'landing-pages';
+type GAdsSubTab = 'overview' | 'competitive' | 'products' | 'creatives' | 'video' | 'search' | 'audience' | 'geography' | 'schedule' | 'landing-pages' | 'ad-groups' | 'clicks';
 
 const SUB_TABS: { key: GAdsSubTab; label: string }[] = [
     { key: 'overview', label: 'Overview' },
@@ -48,6 +52,8 @@ const SUB_TABS: { key: GAdsSubTab; label: string }[] = [
     { key: 'geography', label: 'Geography' },
     { key: 'schedule', label: 'Schedule' },
     { key: 'landing-pages', label: 'Landing Pages' },
+    { key: 'ad-groups', label: 'Ad Groups' },
+    { key: 'clicks', label: 'Clicks' },
 ];
 
 const DEFAULT_COL_DEF = { sortable: true, resizable: true };
@@ -573,6 +579,7 @@ const STRENGTH_COLORS: Record<string, string> = {
 
 function CreativesSubTab({ days }: { days: number }) {
     const { data, isLoading, error } = useGAdsCreatives(days);
+    const assetPerf = useGAdsAssetPerformance(days);
 
     const cols: ColDef<GAdsCreativeRow>[] = useMemo(() => [
         {
@@ -684,6 +691,35 @@ function CreativesSubTab({ days }: { days: number }) {
                         animateRows
                     />
                 </div>
+            </div>
+
+            <div className="bg-white rounded-lg border border-stone-200 shadow-sm p-4 sm:p-6">
+                <h3 className="text-sm font-semibold text-stone-700 mb-4">Asset Performance</h3>
+                <p className="text-xs text-stone-400 mb-3">How individual creative assets (headlines, images, sitelinks) perform across campaigns</p>
+                {assetPerf.data?.length ? (
+                    <div className="ag-theme-custom" style={{ height: 400 }}>
+                        <AgGridReact<GAdsAssetPerfRow>
+                            rowData={assetPerf.data}
+                            columnDefs={[
+                                { field: 'assetName', headerName: 'Asset', flex: 2, minWidth: 200 },
+                                {
+                                    field: 'assetType', headerName: 'Type', width: 100,
+                                    valueFormatter: (p: ValueFormatterParams) => String(p.value ?? '').charAt(0) + String(p.value ?? '').slice(1).toLowerCase(),
+                                },
+                                { field: 'fieldType', headerName: 'Field', width: 120, valueFormatter: (p: ValueFormatterParams) => String(p.value ?? '').replace(/_/g, ' ').toLowerCase() },
+                                { field: 'spend', headerName: 'Spend', valueFormatter: (p: ValueFormatterParams) => formatCurrency(p.value), width: 110, sort: 'desc' as const },
+                                { field: 'impressions', headerName: 'Impr', valueFormatter: (p: ValueFormatterParams) => fmt(p.value), width: 90 },
+                                { field: 'clicks', headerName: 'Clicks', valueFormatter: (p: ValueFormatterParams) => fmt(p.value), width: 80 },
+                                { field: 'ctr', headerName: 'CTR', valueFormatter: (p: ValueFormatterParams) => fmtPct(p.value), width: 75 },
+                                { field: 'conversions', headerName: 'Conv', valueFormatter: (p: ValueFormatterParams) => Number(p.value) > 0 ? Number(p.value).toFixed(1) : '-', width: 70 },
+                                { field: 'conversionValue', headerName: 'Value', valueFormatter: (p: ValueFormatterParams) => formatCurrency(p.value), width: 110 },
+                            ]}
+                            theme={compactThemeSmall}
+                            defaultColDef={DEFAULT_COL_DEF}
+                            animateRows
+                        />
+                    </div>
+                ) : assetPerf.isLoading ? <Skeleton className="h-64 w-full" /> : <EmptyState message="No asset performance data for this period" />}
             </div>
         </div>
     );
@@ -901,6 +937,7 @@ function AudienceSubTab({ days }: { days: number }) {
     const age = useGAdsAge(days);
     const gender = useGAdsGender(days);
     const segments = useGAdsAudienceSegments(days);
+    const audConv = useGAdsAudienceConversions(days);
 
     const segCols: ColDef<GAdsAudienceSegmentRow>[] = useMemo(() => [
         { field: 'campaignName', headerName: 'Campaign', flex: 2, minWidth: 200 },
@@ -1021,6 +1058,29 @@ function AudienceSubTab({ days }: { days: number }) {
                     </div>
                 </div>
             )}
+
+            {/* Audience conversions */}
+            <div className="bg-white rounded-lg border border-stone-200 shadow-sm p-4 sm:p-6">
+                <h3 className="text-sm font-semibold text-stone-700 mb-4">Audience Segment Conversions</h3>
+                <p className="text-xs text-stone-400 mb-3">Which audience segments actually drive conversions</p>
+                {audConv.data?.length ? (
+                    <div className="ag-theme-custom" style={{ height: 350 }}>
+                        <AgGridReact<GAdsAudienceConversionRow>
+                            rowData={audConv.data}
+                            columnDefs={[
+                                { field: 'campaignName', headerName: 'Campaign', flex: 2, minWidth: 200 },
+                                { field: 'criterionId', headerName: 'Audience ID', width: 130 },
+                                { field: 'action', headerName: 'Conversion Action', flex: 2, minWidth: 160 },
+                                { field: 'conversions', headerName: 'Conversions', valueFormatter: (p: ValueFormatterParams) => Number(p.value).toFixed(1), width: 110, sort: 'desc' as const },
+                                { field: 'conversionValue', headerName: 'Value', valueFormatter: (p: ValueFormatterParams) => formatCurrency(p.value), width: 120 },
+                            ]}
+                            theme={compactThemeSmall}
+                            defaultColDef={DEFAULT_COL_DEF}
+                            animateRows
+                        />
+                    </div>
+                ) : audConv.isLoading ? <Skeleton className="h-64 w-full" /> : <EmptyState message="No audience conversion data for this period" />}
+            </div>
         </div>
     );
 }
@@ -1031,6 +1091,8 @@ function AudienceSubTab({ days }: { days: number }) {
 
 function GeoSubTab({ days }: { days: number }) {
     const { data, isLoading, error } = useGAdsGeo(days);
+    const userLocs = useGAdsUserLocations(days);
+    const geoConv = useGAdsGeoConversions(days);
 
     const cols: ColDef<GAdsGeoRow>[] = useMemo(() => [
         { field: 'locationName', headerName: 'Location', flex: 2, minWidth: 180 },
@@ -1049,6 +1111,28 @@ function GeoSubTab({ days }: { days: number }) {
         },
     ], []);
 
+    const ulCols: ColDef<GAdsUserLocationRow>[] = useMemo(() => [
+        { field: 'locationName', headerName: 'User Location', flex: 2, minWidth: 200 },
+        {
+            field: 'isTargeted', headerName: 'Targeted', width: 90,
+            cellRenderer: (params: { value: boolean }) => params.value ? 'Yes' : 'No',
+            cellStyle: (params: { value: boolean }) => params.value ? { color: '#16a34a' } : { color: '#78716c' },
+        },
+        { field: 'spend', headerName: 'Spend', valueFormatter: (p: ValueFormatterParams) => formatCurrency(p.value), width: 110, sort: 'desc' as const },
+        { field: 'impressions', headerName: 'Impr', valueFormatter: (p: ValueFormatterParams) => fmt(p.value), width: 90 },
+        { field: 'clicks', headerName: 'Clicks', valueFormatter: (p: ValueFormatterParams) => fmt(p.value), width: 80 },
+        { field: 'conversions', headerName: 'Conv', valueFormatter: (p: ValueFormatterParams) => Number(p.value) > 0 ? Number(p.value).toFixed(1) : '-', width: 70 },
+        { field: 'ctr', headerName: 'CTR', valueFormatter: (p: ValueFormatterParams) => fmtPct(p.value), width: 75 },
+        { field: 'cpc', headerName: 'CPC', valueFormatter: (p: ValueFormatterParams) => `₹${Number(p.value).toFixed(1)}`, width: 75 },
+    ], []);
+
+    const gcCols: ColDef<GAdsGeoConversionRow>[] = useMemo(() => [
+        { field: 'locationName', headerName: 'Location', flex: 2, minWidth: 180 },
+        { field: 'action', headerName: 'Conversion Action', flex: 2, minWidth: 160 },
+        { field: 'conversions', headerName: 'Conversions', valueFormatter: (p: ValueFormatterParams) => Number(p.value).toFixed(1), width: 110, sort: 'desc' as const },
+        { field: 'conversionValue', headerName: 'Value', valueFormatter: (p: ValueFormatterParams) => formatCurrency(p.value), width: 120 },
+    ], []);
+
     if (isLoading) return <GridSkeleton />;
     if (error) return <ErrorState error={error} />;
     if (!data?.length) return <EmptyState message="No geographic data for this period" />;
@@ -1056,8 +1140,8 @@ function GeoSubTab({ days }: { days: number }) {
     return (
         <div className="space-y-6">
             <div className="bg-white rounded-lg border border-stone-200 shadow-sm p-4 sm:p-6">
-                <h3 className="text-sm font-semibold text-stone-700 mb-4">Geographic Performance</h3>
-                <div className="ag-theme-custom" style={{ height: 500 }}>
+                <h3 className="text-sm font-semibold text-stone-700 mb-4">Geographic Performance (by Campaign Target)</h3>
+                <div className="ag-theme-custom" style={{ height: 400 }}>
                     <AgGridReact<GAdsGeoRow>
                         rowData={data}
                         columnDefs={cols}
@@ -1066,6 +1150,38 @@ function GeoSubTab({ days }: { days: number }) {
                         animateRows
                     />
                 </div>
+            </div>
+
+            <div className="bg-white rounded-lg border border-stone-200 shadow-sm p-4 sm:p-6">
+                <h3 className="text-sm font-semibold text-stone-700 mb-4">User Physical Locations</h3>
+                <p className="text-xs text-stone-400 mb-3">Where users actually are when they see/click your ads</p>
+                {userLocs.data?.length ? (
+                    <div className="ag-theme-custom" style={{ height: 400 }}>
+                        <AgGridReact<GAdsUserLocationRow>
+                            rowData={userLocs.data}
+                            columnDefs={ulCols}
+                            theme={compactThemeSmall}
+                            defaultColDef={DEFAULT_COL_DEF}
+                            animateRows
+                        />
+                    </div>
+                ) : userLocs.isLoading ? <Skeleton className="h-64 w-full" /> : <EmptyState message="No user location data for this period" />}
+            </div>
+
+            <div className="bg-white rounded-lg border border-stone-200 shadow-sm p-4 sm:p-6">
+                <h3 className="text-sm font-semibold text-stone-700 mb-4">Geo Conversions by Action</h3>
+                <p className="text-xs text-stone-400 mb-3">Which locations actually convert, broken down by conversion action</p>
+                {geoConv.data?.length ? (
+                    <div className="ag-theme-custom" style={{ height: 400 }}>
+                        <AgGridReact<GAdsGeoConversionRow>
+                            rowData={geoConv.data}
+                            columnDefs={gcCols}
+                            theme={compactThemeSmall}
+                            defaultColDef={DEFAULT_COL_DEF}
+                            animateRows
+                        />
+                    </div>
+                ) : geoConv.isLoading ? <Skeleton className="h-64 w-full" /> : <EmptyState message="No geo conversion data for this period" />}
             </div>
         </div>
     );
@@ -1244,6 +1360,164 @@ function LandingPagesSubTab({ days }: { days: number }) {
 }
 
 // ============================================
+// AD GROUPS SUB-TAB
+// ============================================
+
+function AdGroupsSubTab({ days }: { days: number }) {
+    const adGroups = useGAdsAdGroups(days);
+    const criteria = useGAdsAdGroupCriteria(days);
+
+    const agCols: ColDef<GAdsAdGroupRow>[] = useMemo(() => [
+        { field: 'adGroupName', headerName: 'Ad Group', flex: 2, minWidth: 200 },
+        { field: 'campaignName', headerName: 'Campaign', flex: 2, minWidth: 180 },
+        { field: 'adGroupType', headerName: 'Type', width: 140 },
+        { field: 'spend', headerName: 'Spend', valueFormatter: (p: ValueFormatterParams) => formatCurrency(p.value), width: 110, sort: 'desc' as const },
+        { field: 'impressions', headerName: 'Impr', valueFormatter: (p: ValueFormatterParams) => fmt(p.value), width: 90 },
+        { field: 'clicks', headerName: 'Clicks', valueFormatter: (p: ValueFormatterParams) => fmt(p.value), width: 80 },
+        { field: 'ctr', headerName: 'CTR', valueFormatter: (p: ValueFormatterParams) => fmtPct(p.value), width: 75 },
+        { field: 'cpc', headerName: 'CPC', valueFormatter: (p: ValueFormatterParams) => `₹${Number(p.value).toFixed(1)}`, width: 75 },
+        { field: 'conversions', headerName: 'Conv', valueFormatter: (p: ValueFormatterParams) => Number(p.value) > 0 ? Number(p.value).toFixed(1) : '-', width: 70 },
+        { field: 'conversionValue', headerName: 'Revenue', valueFormatter: (p: ValueFormatterParams) => formatCurrency(p.value), width: 110 },
+        {
+            field: 'roas', headerName: 'ROAS', width: 80,
+            valueFormatter: (p: ValueFormatterParams) => p.value > 0 ? `${Number(p.value).toFixed(2)}x` : '-',
+            cellStyle: (params: { value: number }) => roasStyle(params.value),
+        },
+    ], []);
+
+    const crCols: ColDef<GAdsAdGroupCriterionRow>[] = useMemo(() => [
+        { field: 'adGroupName', headerName: 'Ad Group', flex: 2, minWidth: 200 },
+        { field: 'criterionType', headerName: 'Type', width: 140 },
+        { field: 'displayName', headerName: 'Criterion', flex: 2, minWidth: 200 },
+        {
+            field: 'isNegative', headerName: 'Negative', width: 90,
+            cellRenderer: (params: { value: boolean }) => params.value ? 'Negative' : '',
+            cellStyle: (params: { value: boolean }) => params.value ? { color: '#dc2626', fontWeight: 600 } : null,
+        },
+        { field: 'status', headerName: 'Status', width: 100 },
+        {
+            field: 'bidModifier', headerName: 'Bid Mod', width: 90,
+            valueFormatter: (p: ValueFormatterParams) => p.value != null ? `${(Number(p.value) * 100).toFixed(0)}%` : '-',
+        },
+    ], []);
+
+    if (adGroups.isLoading) return <GridSkeleton />;
+    if (adGroups.error) return <ErrorState error={adGroups.error} />;
+
+    return (
+        <div className="space-y-6">
+            <div className="bg-white rounded-lg border border-stone-200 shadow-sm p-4 sm:p-6">
+                <h3 className="text-sm font-semibold text-stone-700 mb-4">Ad Group Performance</h3>
+                {adGroups.data?.length ? (
+                    <div className="ag-theme-custom" style={{ height: 450 }}>
+                        <AgGridReact<GAdsAdGroupRow>
+                            rowData={adGroups.data}
+                            columnDefs={agCols}
+                            theme={compactThemeSmall}
+                            defaultColDef={DEFAULT_COL_DEF}
+                            animateRows
+                        />
+                    </div>
+                ) : <EmptyState message="No ad group data for this period" />}
+            </div>
+
+            <div className="bg-white rounded-lg border border-stone-200 shadow-sm p-4 sm:p-6">
+                <h3 className="text-sm font-semibold text-stone-700 mb-4">Ad Group Targeting Criteria</h3>
+                <p className="text-xs text-stone-400 mb-3">Keywords, audiences, and placements configured per ad group</p>
+                {criteria.data?.length ? (
+                    <div className="ag-theme-custom" style={{ height: 400 }}>
+                        <AgGridReact<GAdsAdGroupCriterionRow>
+                            rowData={criteria.data}
+                            columnDefs={crCols}
+                            theme={compactThemeSmall}
+                            defaultColDef={DEFAULT_COL_DEF}
+                            animateRows
+                        />
+                    </div>
+                ) : criteria.isLoading ? <Skeleton className="h-64 w-full" /> : <EmptyState message="No targeting criteria data" />}
+            </div>
+        </div>
+    );
+}
+
+// ============================================
+// CLICKS SUB-TAB
+// ============================================
+
+const SLOT_COLORS: Record<string, string> = {
+    'TOP': '#4285F4',
+    'OTHER': '#FBBC05',
+    'SIDE': '#EA4335',
+    'TOP SLOT': '#4285F4',
+    'BOTTOM': '#a8a29e',
+};
+
+function ClicksSubTab({ days }: { days: number }) {
+    const { data, isLoading, error } = useGAdsClickStats(days);
+
+    const cols: ColDef<GAdsClickRow>[] = useMemo(() => [
+        { field: 'date', headerName: 'Date', width: 110 },
+        { field: 'keyword', headerName: 'Keyword', flex: 2, minWidth: 180 },
+        { field: 'presenceCity', headerName: 'User City', flex: 2, minWidth: 160 },
+        { field: 'device', headerName: 'Device', width: 100, valueFormatter: (p: ValueFormatterParams) => String(p.value ?? '').charAt(0) + String(p.value ?? '').slice(1).toLowerCase() },
+        {
+            field: 'slot', headerName: 'Slot', width: 110,
+            cellStyle: (params: { value: string }) => {
+                const color = SLOT_COLORS[params.value] ?? '#78716c';
+                return { color, fontWeight: 600 };
+            },
+        },
+        { field: 'clickType', headerName: 'Click Type', width: 120 },
+        { field: 'pageNumber', headerName: 'Page', width: 70 },
+        { field: 'clicks', headerName: 'Clicks', valueFormatter: (p: ValueFormatterParams) => fmt(p.value), width: 80, sort: 'desc' as const },
+    ], []);
+
+    if (isLoading) return <GridSkeleton />;
+    if (error) return <ErrorState error={error} />;
+    if (!data?.length) return <EmptyState message="No click data for this period" />;
+
+    // Slot distribution summary
+    const slotMap = new Map<string, number>();
+    const deviceMap = new Map<string, number>();
+    let totalClicks = 0;
+    for (const r of data) {
+        slotMap.set(r.slot, (slotMap.get(r.slot) ?? 0) + r.clicks);
+        deviceMap.set(r.device, (deviceMap.get(r.device) ?? 0) + r.clicks);
+        totalClicks += r.clicks;
+    }
+
+    return (
+        <div className="space-y-6">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <KPICard label="Total Clicks" value={fmt(totalClicks)} />
+                {Array.from(slotMap.entries()).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([slot, clicks]) => (
+                    <KPICard
+                        key={slot}
+                        label={`${slot} Slot`}
+                        value={fmt(clicks)}
+                        subtext={`${((clicks / totalClicks) * 100).toFixed(1)}% of clicks`}
+                    />
+                ))}
+            </div>
+
+            <div className="bg-white rounded-lg border border-stone-200 shadow-sm p-4 sm:p-6">
+                <h3 className="text-sm font-semibold text-stone-700 mb-4">Click Details</h3>
+                <p className="text-xs text-stone-400 mb-3">Individual click records — keyword, location, device, slot position</p>
+                <div className="ag-theme-custom" style={{ height: 500 }}>
+                    <AgGridReact<GAdsClickRow>
+                        rowData={data}
+                        columnDefs={cols}
+                        theme={compactThemeSmall}
+                        defaultColDef={DEFAULT_COL_DEF}
+                        animateRows
+                    />
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// ============================================
 // MAIN COMPONENT
 // ============================================
 
@@ -1277,6 +1551,8 @@ export default function GoogleAdsAnalysis({ days }: { days: number }) {
             {subTab === 'geography' && <GeoSubTab days={days} />}
             {subTab === 'schedule' && <ScheduleSubTab days={days} />}
             {subTab === 'landing-pages' && <LandingPagesSubTab days={days} />}
+            {subTab === 'ad-groups' && <AdGroupsSubTab days={days} />}
+            {subTab === 'clicks' && <ClicksSubTab days={days} />}
         </div>
     );
 }

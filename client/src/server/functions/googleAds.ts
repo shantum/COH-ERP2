@@ -19,6 +19,8 @@ export type {
     GAdsLandingPageRow, GAdsImpressionShareRow, GAdsBudgetRow,
     GAdsCreativeRow, GAdsVideoRow, GAdsAssetGroupRow, GAdsAudienceSegmentRow,
     GAdsProductFunnelRow, GAdsSearchConversionRow, GAdsCampaignConversionRow,
+    GAdsGeoConversionRow, GAdsUserLocationRow, GAdsClickRow,
+    GAdsAssetPerfRow, GAdsAdGroupRow, GAdsAdGroupCriterionRow, GAdsAudienceConversionRow,
 } from '@server/services/googleAdsClient.js';
 
 // ============================================
@@ -269,5 +271,82 @@ export const getGAdsCampaignConversions = createServerFn({ method: 'POST' })
     .inputValidator((input: unknown) => daysInputSchema.parse(input))
     .handler(async ({ data }) => {
         const { getGAdsCampaignConversions: fn } = await getGAdsClient();
+        return fn(data.days);
+    });
+
+/**
+ * Geographic conversion breakdown by location and action
+ */
+export const getGAdsGeoConversions = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => daysInputSchema.parse(input))
+    .handler(async ({ data }) => {
+        const { getGAdsGeoConversions: fn } = await getGAdsClient();
+        return fn(data.days);
+    });
+
+/**
+ * User physical locations — where users are when they see/click ads
+ */
+export const getGAdsUserLocations = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => daysInputSchema.parse(input))
+    .handler(async ({ data }) => {
+        const { getGAdsUserLocations: fn } = await getGAdsClient();
+        return fn(data.days);
+    });
+
+/**
+ * Click-level stats — slot, device, keyword, position
+ */
+export const getGAdsClickStats = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => daysInputSchema.parse(input))
+    .handler(async ({ data }) => {
+        const { getGAdsClickStats: fn } = await getGAdsClient();
+        return fn(data.days);
+    });
+
+/**
+ * Creative asset performance — headlines, images, sitelinks
+ */
+export const getGAdsAssetPerformance = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => daysInputSchema.parse(input))
+    .handler(async ({ data }) => {
+        const { getGAdsAssetPerformance: fn } = await getGAdsClient();
+        return fn(data.days);
+    });
+
+/**
+ * Ad group performance
+ */
+export const getGAdsAdGroups = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => daysInputSchema.parse(input))
+    .handler(async ({ data }) => {
+        const { getGAdsAdGroups: fn } = await getGAdsClient();
+        return fn(data.days);
+    });
+
+/**
+ * Ad group targeting criteria
+ */
+export const getGAdsAdGroupCriteria = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => daysInputSchema.parse(input))
+    .handler(async ({ data }) => {
+        const { getGAdsAdGroupCriteria: fn } = await getGAdsClient();
+        return fn(data.days);
+    });
+
+/**
+ * Audience segment conversion breakdown
+ */
+export const getGAdsAudienceConversions = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => daysInputSchema.parse(input))
+    .handler(async ({ data }) => {
+        const { getGAdsAudienceConversions: fn } = await getGAdsClient();
         return fn(data.days);
     });

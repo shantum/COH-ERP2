@@ -11,6 +11,8 @@ import {
     getGAdsLandingPages, getGAdsImpressionShare, getGAdsBudgets,
     getGAdsCreatives, getGAdsVideos, getGAdsAssetGroups, getGAdsAudienceSegments,
     getGAdsProductFunnel, getGAdsSearchConversions, getGAdsCampaignConversions,
+    getGAdsGeoConversions, getGAdsUserLocations, getGAdsClickStats,
+    getGAdsAssetPerformance, getGAdsAdGroups, getGAdsAdGroupCriteria, getGAdsAudienceConversions,
 } from '../server/functions/googleAds';
 
 const STALE_TIME = 5 * 60 * 1000;
@@ -199,6 +201,69 @@ export function useGAdsCampaignConversions(days: number) {
     const fn = useServerFn(getGAdsCampaignConversions);
     return useQuery({
         queryKey: ['google-ads', 'campaign-conversions', days],
+        queryFn: () => fn({ data: { days } }),
+        staleTime: STALE_TIME,
+    });
+}
+
+export function useGAdsGeoConversions(days: number) {
+    const fn = useServerFn(getGAdsGeoConversions);
+    return useQuery({
+        queryKey: ['google-ads', 'geo-conversions', days],
+        queryFn: () => fn({ data: { days } }),
+        staleTime: STALE_TIME,
+    });
+}
+
+export function useGAdsUserLocations(days: number) {
+    const fn = useServerFn(getGAdsUserLocations);
+    return useQuery({
+        queryKey: ['google-ads', 'user-locations', days],
+        queryFn: () => fn({ data: { days } }),
+        staleTime: STALE_TIME,
+    });
+}
+
+export function useGAdsClickStats(days: number) {
+    const fn = useServerFn(getGAdsClickStats);
+    return useQuery({
+        queryKey: ['google-ads', 'click-stats', days],
+        queryFn: () => fn({ data: { days } }),
+        staleTime: STALE_TIME,
+    });
+}
+
+export function useGAdsAssetPerformance(days: number) {
+    const fn = useServerFn(getGAdsAssetPerformance);
+    return useQuery({
+        queryKey: ['google-ads', 'asset-perf', days],
+        queryFn: () => fn({ data: { days } }),
+        staleTime: STALE_TIME,
+    });
+}
+
+export function useGAdsAdGroups(days: number) {
+    const fn = useServerFn(getGAdsAdGroups);
+    return useQuery({
+        queryKey: ['google-ads', 'ad-groups', days],
+        queryFn: () => fn({ data: { days } }),
+        staleTime: STALE_TIME,
+    });
+}
+
+export function useGAdsAdGroupCriteria(days: number) {
+    const fn = useServerFn(getGAdsAdGroupCriteria);
+    return useQuery({
+        queryKey: ['google-ads', 'adgroup-criteria', days],
+        queryFn: () => fn({ data: { days } }),
+        staleTime: STALE_TIME,
+    });
+}
+
+export function useGAdsAudienceConversions(days: number) {
+    const fn = useServerFn(getGAdsAudienceConversions);
+    return useQuery({
+        queryKey: ['google-ads', 'audience-conversions', days],
         queryFn: () => fn({ data: { days } }),
         staleTime: STALE_TIME,
     });
