@@ -28,7 +28,7 @@ const campaignIdSchema = z.object({
 
 const createCampaignSchema = z.object({
   name: z.string().min(1).max(200),
-  subject: z.string().min(1).max(200),
+  subject: z.string().max(200).default(''),
   preheaderText: z.string().max(200).optional(),
   templateKey: z.string().min(1),
   shopifyProductIds: z.array(z.string()).optional(),
