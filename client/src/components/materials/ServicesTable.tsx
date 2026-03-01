@@ -36,9 +36,9 @@ interface Service {
 }
 
 interface ServicesTableProps {
-    onEdit: (service: Service) => void;
+    onEdit?: (service: Service) => void;
     onViewDetails: (service: Service) => void;
-    onAdd: () => void;
+    onAdd?: () => void;
 }
 
 function formatCostUnit(value: string | null | undefined): string {
@@ -154,7 +154,7 @@ export function ServicesTable({ onEdit, onViewDetails, onAdd }: ServicesTablePro
                     >
                         <Eye size={14} />
                     </button>
-                    <button
+                    {onEdit && <button
                         onClick={(e) => {
                             e.stopPropagation();
                             onEdit(row.original);
@@ -163,7 +163,7 @@ export function ServicesTable({ onEdit, onViewDetails, onAdd }: ServicesTablePro
                         title="Edit service"
                     >
                         <Pencil size={14} />
-                    </button>
+                    </button>}
                 </div>
             ),
         },
@@ -189,10 +189,10 @@ export function ServicesTable({ onEdit, onViewDetails, onAdd }: ServicesTablePro
                         >
                             <RefreshCw className={`h-4 w-4 ${isFetching ? 'animate-spin' : ''}`} />
                         </Button>
-                        <Button size="sm" onClick={onAdd}>
+                        {onAdd && <Button size="sm" onClick={onAdd}>
                             <Plus className="h-4 w-4 mr-1" />
                             Add Service
-                        </Button>
+                        </Button>}
                     </div>
                 }
             />

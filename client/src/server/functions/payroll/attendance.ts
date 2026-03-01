@@ -1,7 +1,7 @@
 'use server';
 
 import { createServerFn } from '@tanstack/react-start';
-import { authMiddleware } from '../../middleware/auth';
+import { authMiddleware, adminMiddleware } from '../../middleware/auth';
 import { getPrisma } from '@coh/shared/services/db';
 import {
   UpsertLeaveRecordSchema,
@@ -64,7 +64,7 @@ export const getAttendanceSummary = createServerFn({ method: 'POST' })
 // ============================================
 
 export const upsertLeaveRecord = createServerFn({ method: 'POST' })
-  .middleware([authMiddleware])
+  .middleware([adminMiddleware])
   .inputValidator((input: unknown) => UpsertLeaveRecordSchema.parse(input))
   .handler(async ({ data, context }) => {
     const prisma = await getPrisma();
@@ -104,7 +104,7 @@ export const upsertLeaveRecord = createServerFn({ method: 'POST' })
 // ============================================
 
 export const deleteLeaveRecord = createServerFn({ method: 'POST' })
-  .middleware([authMiddleware])
+  .middleware([adminMiddleware])
   .inputValidator((input: unknown) => DeleteLeaveRecordSchema.parse(input))
   .handler(async ({ data }) => {
     const prisma = await getPrisma();

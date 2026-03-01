@@ -15,10 +15,14 @@ import { AlertCircle, RefreshCcw } from 'lucide-react';
 import { ProductsViewSwitcher } from '../components/products/ProductsViewSwitcher';
 import type { ProductTreeNode } from '../components/products/types';
 import { Route } from '../routes/_authenticated/products';
+import { useAuth } from '../hooks/useAuth';
+import { isAdminUser } from '../types';
 
 export default function Products() {
     const loaderData = Route.useLoaderData();
     const navigate = useNavigate();
+    const { user } = useAuth();
+    const isAdmin = isAdminUser(user);
 
     const [searchQuery, setSearchQuery] = useState('');
 
@@ -67,7 +71,7 @@ export default function Products() {
                         onSearchChange={setSearchQuery}
                         onViewProduct={handleEditBom}
                         onEditBom={handleEditBom}
-                        onAddProduct={handleAddProduct}
+                        onAddProduct={isAdmin ? handleAddProduct : undefined}
                         initialData={loaderData?.productsTree}
                     />
                 </div>

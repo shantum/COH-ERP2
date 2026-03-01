@@ -39,15 +39,15 @@ interface TabConfig {
 
 const tabs: TabConfig[] = [
     { key: 'general', icon: SettingsIcon, label: 'General' },
-    { key: 'shopify', icon: Store, label: 'Shopify', shortLabel: 'Shop' },
+    { key: 'shopify', icon: Store, label: 'Shopify', shortLabel: 'Shop', adminOnly: true },
     { key: 'importExport', icon: FileSpreadsheet, label: 'CSV Import/Export', shortLabel: 'CSV', adminOnly: true },
     { key: 'remittance', icon: DollarSign, label: 'COD Remittance', shortLabel: 'COD' },
-    { key: 'costing', icon: Calculator, label: 'Costing', shortLabel: 'Cost' },
-    { key: 'pincodes', icon: MapPin, label: 'Pincode Data', shortLabel: 'PIN' },
-    { key: 'database', icon: Database, label: 'Database', shortLabel: 'DB' },
-    { key: 'inspector', icon: Eye, label: 'Inspector' },
-    { key: 'logs', icon: Terminal, label: 'Server Logs', shortLabel: 'Logs' },
-    { key: 'jobs', icon: RefreshCw, label: 'Background Jobs', shortLabel: 'Jobs' },
+    { key: 'costing', icon: Calculator, label: 'Costing', shortLabel: 'Cost', adminOnly: true },
+    { key: 'pincodes', icon: MapPin, label: 'Pincode Data', shortLabel: 'PIN', adminOnly: true },
+    { key: 'database', icon: Database, label: 'Database', shortLabel: 'DB', adminOnly: true },
+    { key: 'inspector', icon: Eye, label: 'Inspector', adminOnly: true },
+    { key: 'logs', icon: Terminal, label: 'Server Logs', shortLabel: 'Logs', adminOnly: true },
+    { key: 'jobs', icon: RefreshCw, label: 'Background Jobs', shortLabel: 'Jobs', adminOnly: true },
     { key: 'sheetSync', icon: Sheet, label: 'Sheet Sync', shortLabel: 'Sync', adminOnly: true },
     { key: 'sidebar', icon: PanelLeft, label: 'Sidebar', adminOnly: true },
 ];

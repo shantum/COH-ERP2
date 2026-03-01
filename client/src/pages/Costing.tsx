@@ -28,6 +28,8 @@ import {
 import { costingQueryKeys } from '../constants/queryKeys';
 import { compactThemeSmall } from '../utils/agGridHelpers';
 import { useAccess } from '../hooks/useAccess';
+import { useAuth } from '../hooks/useAuth';
+import { isAdminUser } from '../types';
 import type { ProductContribution } from '../server/functions/costing';
 
 ModuleRegistry.registerModules([AllCommunityModule]);
@@ -51,6 +53,8 @@ export default function Costing() {
     const { period, channel } = Route.useSearch();
     const queryClient = useQueryClient();
     const { hasAccess } = useAccess();
+    const { user } = useAuth();
+    const isAdmin = isAdminUser(user);
 
     // Editing state for config panel
     const [isEditingConfig, setIsEditingConfig] = useState(false);
@@ -290,7 +294,7 @@ export default function Costing() {
                                 <div className="flex items-center justify-between mb-3">
                                     <h3 className="text-sm font-medium text-gray-700">Monthly Overheads</h3>
                                     {!isEditingConfig ? (
-                                        <button
+                                        isAdmin && <button
                                             onClick={handleStartEdit}
                                             className="p-1 text-gray-400 hover:text-gray-600 rounded"
                                         >

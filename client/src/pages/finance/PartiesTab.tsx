@@ -21,8 +21,12 @@ import {
   PARTY_CATEGORIES,
   getCategoryLabel,
 } from '@coh/shared';
+import { useAuth } from '../../hooks/useAuth';
+import { isAdminUser } from '../../types';
 
 export default function PartiesTab({ search }: { search: FinanceSearchParams }) {
+  const { user } = useAuth();
+  const isAdmin = isAdminUser(user);
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const listFn = useServerFn(listFinanceParties);
@@ -123,9 +127,9 @@ export default function PartiesTab({ search }: { search: FinanceSearchParams }) 
           </SelectContent>
         </Select>
 
-        <Button onClick={() => setIsCreating(true)} size="sm">
+        {isAdmin && <Button onClick={() => setIsCreating(true)} size="sm">
           <Plus className="h-4 w-4 mr-1" /> New Party
-        </Button>
+        </Button>}
       </div>
 
       <div className="text-sm text-muted-foreground">
@@ -204,9 +208,9 @@ export default function PartiesTab({ search }: { search: FinanceSearchParams }) 
                     )}
                   </td>
                   <td className="p-3 text-center">
-                    <Button variant="ghost" size="sm" onClick={() => setEditingParty(party)}>
+                    {isAdmin && <Button variant="ghost" size="sm" onClick={() => setEditingParty(party)}>
                       <Pencil className="h-3.5 w-3.5" />
-                    </Button>
+                    </Button>}
                   </td>
                 </tr>
               ))}

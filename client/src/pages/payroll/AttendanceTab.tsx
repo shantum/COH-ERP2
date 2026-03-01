@@ -45,6 +45,8 @@ import {
   getSundays,
 } from '@coh/shared';
 import { MONTH_NAMES, LoadingState } from './shared';
+import { useAuth } from '../../hooks/useAuth';
+import { isAdminUser } from '../../types';
 
 const ATTENDANCE_API_BASE = import.meta.env.PROD ? '/api' : 'http://localhost:3001/api';
 
@@ -78,6 +80,8 @@ interface ConfirmResult {
 }
 
 export default function AttendanceTab() {
+  const { user } = useAuth();
+  const isAdmin = isAdminUser(user);
   const search = Route.useSearch();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -248,9 +252,9 @@ export default function AttendanceTab() {
           {hasFingerprint && (
             <Badge variant="outline" className="text-xs">Fingerprint data loaded</Badge>
           )}
-          <Button variant="outline" size="sm" onClick={() => setImportOpen(true)}>
+          {isAdmin && <Button variant="outline" size="sm" onClick={() => setImportOpen(true)}>
             <Upload className="h-4 w-4 mr-1" /> Import XLSX
-          </Button>
+          </Button>}
         </div>
       </div>
 
@@ -327,8 +331,8 @@ export default function AttendanceTab() {
                           return (
                             <td
                               key={d}
-                              className="text-center p-0 cursor-pointer hover:bg-muted/40"
-                              onClick={() => openDialog(emp, d)}
+                              className={`text-center p-0 ${isAdmin ? 'cursor-pointer hover:bg-muted/40' : ''}`}
+                              onClick={isAdmin ? () => openDialog(emp, d) : undefined}
                             >
                               <Tooltip>
                                 <TooltipTrigger asChild>{cellContent}</TooltipTrigger>
@@ -354,9 +358,9 @@ export default function AttendanceTab() {
                             className={`text-center p-0 ${
                               isSunday
                                 ? 'bg-muted/60 cursor-default'
-                                : 'cursor-pointer hover:bg-muted/40'
+                                : isAdmin ? 'cursor-pointer hover:bg-muted/40' : ''
                             }`}
-                            onClick={isSunday ? undefined : () => openDialog(emp, d)}
+                            onClick={isSunday || !isAdmin ? undefined : () => openDialog(emp, d)}
                           >
                             {cellContent}
                           </td>

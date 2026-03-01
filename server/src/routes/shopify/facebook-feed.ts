@@ -431,7 +431,7 @@ async function buildFeedHealth(prisma: PrismaClient): Promise<FeedHealthResult> 
 // ENDPOINT
 // ============================================
 
-router.get('/facebook-feed-health', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.get('/facebook-feed-health', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
     // Return cached result if fresh enough
     if (cache && Date.now() - cache.fetchedAt < FEED_HEALTH_CACHE_DURATION_MS) {
         log.debug('Returning cached feed health result');

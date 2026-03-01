@@ -6,6 +6,8 @@
  */
 
 import { useState, useCallback, useRef, useEffect, useMemo, Fragment } from 'react';
+import { useAuth } from '../../hooks/useAuth';
+import { isAdminUser } from '../../types';
 import ConfirmModal from '../../components/common/ConfirmModal';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
@@ -104,6 +106,8 @@ function BankTransactionListView({ bank, search, updateSearch }: {
   search: FinanceSearchParams;
   updateSearch: (updates: Partial<FinanceSearchParams>) => void;
 }) {
+  const { user } = useAuth();
+  const isAdmin = isAdminUser(user);
   const listFn = useServerFn(listBankTransactionsUnified);
   const queryClient = useQueryClient();
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -480,7 +484,7 @@ function BankTransactionListView({ bank, search, updateSearch }: {
                     onSkip={() => handleSkip(txn.id)}
                     onUnskip={() => handleUnskip(txn.id)}
                     onDelete={() => setDeleteTxnId(txn.id)}
-                    onCreateParty={(name) => handleCreateParty(txn.id, name)}
+                    onCreateParty={isAdmin ? (name) => handleCreateParty(txn.id, name) : undefined}
                     creatingParty={creatingPartyFor === txn.id}
                     onLink={(info) => setLinkingTxn(info)}
                     onSaved={() => { invalidate(); setExpandedId(null); }}
@@ -545,7 +549,7 @@ function BankTxnRow({ txn, isExpanded, isSelected, onToggleExpand, onToggleSelec
   onSkip: () => void;
   onUnskip: () => void;
   onDelete: () => void;
-  onCreateParty: (name: string) => void;
+  onCreateParty?: (name: string) => void;
   creatingParty: boolean;
   onLink: (info: { id: string; amount: number; unmatchedAmount: number; partyId: string | null; partyName: string }) => void;
   onSaved: () => void;
@@ -615,7 +619,7 @@ function BankTxnRow({ txn, isExpanded, isSelected, onToggleExpand, onToggleSelec
           ) : txn.counterpartyName ? (
             <span className="inline-flex items-center gap-1">
               <span className="text-amber-600 italic truncate">{txn.counterpartyName}</span>
-              {isPending && (
+              {isPending && onCreateParty && (
                 <button
                   type="button"
                   className="text-xs text-blue-600 hover:text-blue-800 whitespace-nowrap"

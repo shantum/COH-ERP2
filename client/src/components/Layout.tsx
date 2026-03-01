@@ -57,7 +57,7 @@ const navGroups: NavGroup[] = [
             { to: '/fabrics', icon: Layers, label: 'Fabrics' },
             { to: '/bom', icon: ClipboardList, label: 'Bill of Materials' },
             { to: '/shopify-catalog', icon: ShoppingBag, label: 'Shopify Catalog' },
-            { to: '/facebook-feed-health', icon: HeartPulse, label: 'Feed Health' },
+            { to: '/facebook-feed-health', icon: HeartPulse, label: 'Feed Health', permission: 'admin' as const },
             { to: '/inventory', icon: Package, label: 'Inventory' },
         ],
     },

@@ -7,8 +7,12 @@ import { TrimsTable } from '../../components/materials/TrimsTable';
 import { createTrim, updateTrim, getParties } from '@/server/functions/materialsMutations';
 import type { Party } from '@/server/functions/materialsMutations';
 import { TRIM_CATEGORIES, type TrimEditState } from './shared';
+import { useAuth } from '../../hooks/useAuth';
+import { isAdminUser } from '../../types';
 
 export default function TrimsTab() {
+    const { user } = useAuth();
+    const isAdmin = isAdminUser(user);
     const queryClient = useQueryClient();
 
     // Modal state
@@ -111,14 +115,14 @@ export default function TrimsTab() {
     return (
         <div className="p-4 h-full overflow-auto">
             <TrimsTable
-                onEdit={(trim) => setShowEditTrim({
+                onEdit={isAdmin ? (trim) => setShowEditTrim({
                     ...trim,
                     costPerUnit: trim.costPerUnit?.toString() ?? '',
                     leadTimeDays: trim.leadTimeDays?.toString() ?? '',
                     minOrderQty: trim.minOrderQty?.toString() ?? '',
-                })}
+                }) : undefined}
                 onViewDetails={() => {}}
-                onAdd={() => setShowAddTrim(true)}
+                onAdd={isAdmin ? () => setShowAddTrim(true) : undefined}
             />
 
             {/* Add Trim Modal */}

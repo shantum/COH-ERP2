@@ -409,14 +409,14 @@ export function ProductsViewSwitcher({ searchQuery, onSearchChange, onViewProduc
                     )}
 
                     {/* Add Product Button */}
-                    <Button
+                    {onAddProduct && <Button
                         size="sm"
                         onClick={onAddProduct}
                         className="gap-1.5"
                     >
                         <Plus size={16} />
                         <span className="hidden sm:inline">Add Product</span>
-                    </Button>
+                    </Button>}
                 </div>
             </div>
 

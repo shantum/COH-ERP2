@@ -13,6 +13,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { Label } from '@/components/ui/label';
 import { Plus, Loader2, Trash2, History } from 'lucide-react';
 import { showSuccess, showError } from '../../utils/toast';
+import { useAuth } from '../../hooks/useAuth';
+import { isAdminUser } from '../../types';
 import {
   type CreateTransactionTypeInput,
   type UpdateTransactionTypeInput,
@@ -25,6 +27,8 @@ const ACCOUNT_LABELS: Record<string, string> = Object.fromEntries(
 );
 
 export default function TransactionTypesTab() {
+  const { user } = useAuth();
+  const isAdmin = isAdminUser(user);
   const queryClient = useQueryClient();
   const listTTFn = useServerFn(listTransactionTypes);
   const createTTFn = useServerFn(createTransactionType);
@@ -78,9 +82,9 @@ export default function TransactionTypesTab() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">{types.length} transaction types</p>
-        <Button onClick={() => setIsCreating(true)} size="sm">
+        {isAdmin && <Button onClick={() => setIsCreating(true)} size="sm">
           <Plus className="h-4 w-4 mr-1" /> New Type
-        </Button>
+        </Button>}
       </div>
 
       {isLoading ? (
@@ -90,8 +94,8 @@ export default function TransactionTypesTab() {
           {types.map((tt: TxnTypeListItem) => (
             <div
               key={tt.id}
-              className="border rounded-lg p-4 hover:border-blue-300 cursor-pointer transition-colors"
-              onClick={() => setEditingId(tt.id)}
+              className={`border rounded-lg p-4 transition-colors ${isAdmin ? 'hover:border-blue-300 cursor-pointer' : ''}`}
+              onClick={isAdmin ? () => setEditingId(tt.id) : undefined}
             >
               <div className="flex items-start justify-between mb-2">
                 <div>

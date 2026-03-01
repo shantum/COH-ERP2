@@ -6,7 +6,7 @@
  */
 
 import { createServerFn } from '@tanstack/react-start';
-import { authMiddleware } from '../middleware/auth';
+import { adminMiddleware } from '../middleware/auth';
 import { callExpressApi } from '../utils';
 
 // ============================================
@@ -62,7 +62,7 @@ interface MutationResult<T> {
  * Get Facebook feed health report (cached on server, 1 hour)
  */
 export const getFacebookFeedHealth = createServerFn({ method: 'GET' })
-    .middleware([authMiddleware])
+    .middleware([adminMiddleware])
     .handler(async (): Promise<MutationResult<FeedHealthResult>> => {
         try {
             const result = await callExpressApi<FeedHealthResult>(
@@ -83,7 +83,7 @@ export const getFacebookFeedHealth = createServerFn({ method: 'GET' })
  * Force refresh feed health (bypasses cache)
  */
 export const refreshFacebookFeedHealth = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
+    .middleware([adminMiddleware])
     .handler(async (): Promise<MutationResult<FeedHealthResult>> => {
         try {
             const result = await callExpressApi<FeedHealthResult>(

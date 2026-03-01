@@ -6,7 +6,7 @@
 
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
-import { authMiddleware } from '../../middleware/auth';
+import { authMiddleware, adminMiddleware } from '../../middleware/auth';
 import { getPrisma } from '@coh/shared/services/db';
 import type { Prisma } from '@prisma/client';
 import {
@@ -174,7 +174,7 @@ export const getFinanceParty = createServerFn({ method: 'GET' })
 // ============================================
 
 export const updateFinanceParty = createServerFn({ method: 'POST' })
-  .middleware([authMiddleware])
+  .middleware([adminMiddleware])
   .inputValidator((input: unknown) => UpdatePartySchema.parse(input))
   .handler(async ({ data, context }) => {
     const prisma = await getPrisma();
@@ -229,7 +229,7 @@ export const updateFinanceParty = createServerFn({ method: 'POST' })
 // ============================================
 
 export const createFinanceParty = createServerFn({ method: 'POST' })
-  .middleware([authMiddleware])
+  .middleware([adminMiddleware])
   .inputValidator((input: unknown) => CreatePartySchema.parse(input))
   .handler(async ({ data, context }) => {
     const prisma = await getPrisma();

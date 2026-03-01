@@ -11,7 +11,7 @@
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
 import type { Prisma } from '@prisma/client';
-import { authMiddleware } from '../middleware/auth';
+import { authMiddleware, adminMiddleware } from '../middleware/auth';
 import { callExpressApi } from '../utils';
 import { getPrisma } from '@coh/shared/services/db';
 import { serverLog } from './serverLog';
@@ -564,7 +564,7 @@ export const updateCatalogProduct = createServerFn({ method: 'POST' })
  * Calls: POST /api/shopify/sync/products
  */
 export const syncCatalogWithShopify = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
+    .middleware([adminMiddleware])
     .inputValidator((input: unknown) => syncCatalogWithShopifySchema.parse(input ?? {}))
     .handler(async ({ data }): Promise<SyncCatalogResponse> => {
         try {

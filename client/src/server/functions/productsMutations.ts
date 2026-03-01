@@ -137,7 +137,7 @@ const updateSkuSchema = z.object({
  * with fabric type relation.
  */
 export const createProduct = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
+    .middleware([adminMiddleware])
     .inputValidator((input: unknown) => createProductSchema.parse(input))
     .handler(async ({ data }) => {
         try {
@@ -174,7 +174,7 @@ export const createProduct = createServerFn({ method: 'POST' })
  * NOTE: Fabric info comes from variation BOM lines, not product-level fields.
  */
 export const updateProduct = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
+    .middleware([adminMiddleware])
     .inputValidator((input: unknown) => updateProductSchema.parse(input))
     .handler(async ({ data }) => {
         try {
@@ -248,7 +248,7 @@ export const deleteProduct = createServerFn({ method: 'POST' })
  * Returns the created variation with fabric relation.
  */
 export const createVariation = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
+    .middleware([adminMiddleware])
     .inputValidator((input: unknown) => createVariationSchema.parse(input))
     .handler(async ({ data }) => {
         try {
@@ -282,7 +282,7 @@ export const createVariation = createServerFn({ method: 'POST' })
  * Updates variation fields. Fabric assignment is now managed via BOM.
  */
 export const updateVariation = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
+    .middleware([adminMiddleware])
     .inputValidator((input: unknown) => updateVariationSchema.parse(input))
     .handler(async ({ data }) => {
         try {
@@ -330,7 +330,7 @@ export const updateVariation = createServerFn({ method: 'POST' })
  * Returns the created SKU.
  */
 export const createSku = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
+    .middleware([adminMiddleware])
     .inputValidator((input: unknown) => createSkuSchema.parse(input))
     .handler(async ({ data }) => {
         try {
@@ -368,7 +368,7 @@ export const createSku = createServerFn({ method: 'POST' })
  * Updates SKU fields. Cost fields use costing cascade (null = inherit from Variation/Product).
  */
 export const updateSku = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
+    .middleware([adminMiddleware])
     .inputValidator((input: unknown) => updateSkuSchema.parse(input))
     .handler(async ({ data }) => {
         try {
@@ -417,7 +417,7 @@ const updateStyleCodeSchema = z.object({
  * Style codes must be unique across all products.
  */
 export const updateStyleCode = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
+    .middleware([adminMiddleware])
     .inputValidator((input: unknown) => updateStyleCodeSchema.parse(input))
     .handler(async ({ data }) => {
         try {
@@ -612,7 +612,7 @@ const createProductDraftSchema = z.object({
  * Creates: Product → Variations (one per color) → SKUs (one per variation × size).
  */
 export const createProductDraft = createServerFn({ method: 'POST' })
-    .middleware([authMiddleware])
+    .middleware([adminMiddleware])
     .inputValidator((input: unknown) => createProductDraftSchema.parse(input))
     .handler(async ({ data }) => {
         try {

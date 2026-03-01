@@ -37,9 +37,9 @@ interface Trim {
 }
 
 interface TrimsTableProps {
-    onEdit: (trim: Trim) => void;
+    onEdit?: (trim: Trim) => void;
     onViewDetails: (trim: Trim) => void;
-    onAdd: () => void;
+    onAdd?: () => void;
 }
 
 export function TrimsTable({ onEdit, onViewDetails, onAdd }: TrimsTableProps) {
@@ -157,7 +157,7 @@ export function TrimsTable({ onEdit, onViewDetails, onAdd }: TrimsTableProps) {
                     >
                         <Eye size={14} />
                     </button>
-                    <button
+                    {onEdit && <button
                         onClick={(e) => {
                             e.stopPropagation();
                             onEdit(row.original);
@@ -166,7 +166,7 @@ export function TrimsTable({ onEdit, onViewDetails, onAdd }: TrimsTableProps) {
                         title="Edit trim"
                     >
                         <Pencil size={14} />
-                    </button>
+                    </button>}
                 </div>
             ),
         },
@@ -192,10 +192,10 @@ export function TrimsTable({ onEdit, onViewDetails, onAdd }: TrimsTableProps) {
                         >
                             <RefreshCw className={`h-4 w-4 ${isFetching ? 'animate-spin' : ''}`} />
                         </Button>
-                        <Button size="sm" onClick={onAdd}>
+                        {onAdd && <Button size="sm" onClick={onAdd}>
                             <Plus className="h-4 w-4 mr-1" />
                             Add Trim
-                        </Button>
+                        </Button>}
                     </div>
                 }
             />

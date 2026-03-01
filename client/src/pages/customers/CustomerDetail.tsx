@@ -10,13 +10,13 @@ import { useQuery } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { useNavigate } from '@tanstack/react-router';
 import {
-    ArrowLeft, Mail, Phone, MessageCircle, User,
-    ShoppingBag, Package, RotateCcw, Layers,
+    ArrowLeft, Mail, Phone, MessageCircle,
+    ShoppingBag, Package, RotateCcw,
     Palette, MapPin, Tag, AlertCircle, AlertTriangle,
-    CheckCircle2, ChevronRight, Clock, ChevronDown, ChevronUp,
-    TrendingUp, CreditCard, Wallet, BarChart3,
-    MessageSquare, ArrowLeftRight, IndianRupee, Shield,
-    PackageX, RefreshCcw, Ban, FileText, Activity,
+    CheckCircle2, ChevronRight, ChevronDown, ChevronUp,
+    CreditCard, Wallet, BarChart3,
+    MessageSquare, IndianRupee, Shield,
+    RefreshCcw, Ban, FileText,
 } from 'lucide-react';
 
 import { Route } from '../../routes/_authenticated/customers_.$customerId';
@@ -69,12 +69,12 @@ function formatReasonLabel(reason: string): string {
 
 const ORDER_STATUS_CONFIG: Record<string, { bg: string; text: string; dot: string }> = {
     open: { bg: 'bg-sky-50', text: 'text-sky-700', dot: 'bg-sky-500' },
-    pending: { bg: 'bg-gray-50', text: 'text-gray-600', dot: 'bg-gray-400' },
+    pending: { bg: 'bg-[#F5F0EB]', text: 'text-[#6B5E50]', dot: 'bg-[#B5AAA0]' },
     allocated: { bg: 'bg-blue-50', text: 'text-blue-700', dot: 'bg-blue-500' },
     picked: { bg: 'bg-indigo-50', text: 'text-indigo-700', dot: 'bg-indigo-500' },
     packed: { bg: 'bg-violet-50', text: 'text-violet-700', dot: 'bg-violet-500' },
     shipped: { bg: 'bg-amber-50', text: 'text-amber-700', dot: 'bg-amber-500' },
-    delivered: { bg: 'bg-green-50', text: 'text-green-700', dot: 'bg-green-500' },
+    delivered: { bg: 'bg-emerald-50', text: 'text-emerald-700', dot: 'bg-emerald-500' },
     cancelled: { bg: 'bg-red-50', text: 'text-red-600', dot: 'bg-red-500' },
     rto: { bg: 'bg-orange-50', text: 'text-orange-700', dot: 'bg-orange-500' },
     rto_delivered: { bg: 'bg-orange-50', text: 'text-orange-700', dot: 'bg-orange-500' },
@@ -89,10 +89,10 @@ export default function CustomerDetail() {
     const { customerId } = Route.useParams();
     const navigate = useNavigate();
     const [showAllOrders, setShowAllOrders] = useState(false);
+    const [orderFilter, setOrderFilter] = useState<'all' | 'delivered' | 'returns'>('all');
 
     const getCustomerFn = useServerFn(getCustomer);
 
-    // Determine if URL param is a UUID or an email
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(customerId);
 
     const { data: customer, isLoading, error } = useQuery({
@@ -105,7 +105,6 @@ export default function CustomerDetail() {
         staleTime: 60 * 1000,
     });
 
-    // Computed metrics - use stable timestamp to avoid impure Date.now() in render
     const [now] = useState(() => Date.now());
     const metrics = useMemo(() => {
         if (!customer) return null;
@@ -121,7 +120,6 @@ export default function CustomerDetail() {
             ? Math.floor((now - new Date(customer.lastOrderDate).getTime()) / (1000 * 60 * 60 * 24))
             : null;
 
-        // RFM breakdown for health score detail
         const daysSinceLastOrder = customer.lastOrderDate
             ? Math.floor((now - new Date(customer.lastOrderDate).getTime()) / (1000 * 60 * 60 * 24))
             : 365;
@@ -140,7 +138,6 @@ export default function CustomerDetail() {
         };
     }, [customer, now]);
 
-    // Size preferences from orders
     // eslint-disable-next-line react-hooks/preserve-manual-memoization -- only orders sub-property is used
     const sizePreferences = useMemo(() => {
         if (!customer?.orders) return [];
@@ -159,7 +156,6 @@ export default function CustomerDetail() {
             .slice(0, 5);
     }, [customer?.orders]);
 
-    // Risk indicators
     const risks = useMemo(() => {
         if (!customer || !metrics) return [];
         const items: Array<{ type: string; message: string; severity: 'high' | 'medium' | 'low' }> = [];
@@ -195,7 +191,6 @@ export default function CustomerDetail() {
         return items;
     }, [customer, metrics]);
 
-    // Count orders with returns/RTOs for badges
     // eslint-disable-next-line react-hooks/preserve-manual-memoization -- only orders sub-property is used
     const returnRtoStats = useMemo(() => {
         if (!customer?.orders) return { returnOrders: 0, rtoOrders: 0 };
@@ -214,29 +209,58 @@ export default function CustomerDetail() {
         return { returnOrders, rtoOrders };
     }, [customer?.orders]);
 
+    // Filtered orders based on order filter
+    const filteredOrders = useMemo(() => {
+        if (!customer?.orders) return [];
+        if (orderFilter === 'all') return customer.orders;
+        if (orderFilter === 'delivered') {
+            return customer.orders.filter((o) => o.status?.toLowerCase() === 'delivered');
+        }
+        // returns = orders with return lines or RTO
+        return customer.orders.filter((o) =>
+            o.orderLines?.some((l) => l.returnStatus || l.rtoCondition || l.rtoInitiatedAt)
+        );
+    }, [customer.orders, orderFilter]);
+
+    const displayOrders = showAllOrders ? filteredOrders : filteredOrders.slice(0, 10);
+
+    // Revenue trend from timeline (must be before early returns to satisfy hooks rules)
+    const revenueTrend = useMemo(() => {
+        if (!customer?.revenueTimeline || customer.revenueTimeline.length < 2) return null;
+        const recent = customer.revenueTimeline.slice(-3);
+        const earlier = customer.revenueTimeline.slice(-6, -3);
+        if (earlier.length === 0) return null;
+        const recentAvg = recent.reduce((s, d) => s + d.revenue, 0) / recent.length;
+        const earlierAvg = earlier.reduce((s, d) => s + d.revenue, 0) / earlier.length;
+        if (earlierAvg === 0) return null;
+        const pct = Math.round(((recentAvg - earlierAvg) / earlierAvg) * 100);
+        return pct;
+    }, [customer.revenueTimeline]);
+
     // ============================================
     // LOADING STATE
     // ============================================
     if (isLoading) {
         return (
-            <div className="min-h-screen bg-gray-50">
-                <div className="max-w-7xl mx-auto px-6 py-6">
-                    <div className="animate-pulse space-y-4">
-                        <div className="h-8 w-48 bg-gray-200 rounded" />
-                        <div className="grid grid-cols-4 gap-4">
-                            {Array.from({ length: 8 }).map((_, i) => (
-                                <div key={i} className="h-24 bg-gray-200 rounded-lg" />
+            <div className="min-h-screen bg-[#FAF9F7]">
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
+                    <div className="animate-pulse space-y-6">
+                        <div className="h-5 w-32 bg-[#E8E4DF] rounded" />
+                        <div className="flex items-center gap-4">
+                            <div className="w-[72px] h-[72px] bg-[#E8E4DF] rounded-full" />
+                            <div className="space-y-2">
+                                <div className="h-6 w-48 bg-[#E8E4DF] rounded" />
+                                <div className="h-4 w-64 bg-[#F5F0EB] rounded" />
+                            </div>
+                        </div>
+                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                            {Array.from({ length: 4 }).map((_, i) => (
+                                <div key={i} className="h-24 bg-white border border-[#E8E4DF] rounded-xl" />
                             ))}
                         </div>
-                        <div className="grid grid-cols-3 gap-6">
-                            <div className="col-span-2 space-y-4">
-                                <div className="h-48 bg-gray-200 rounded-lg" />
-                                <div className="h-64 bg-gray-200 rounded-lg" />
-                            </div>
-                            <div className="space-y-4">
-                                <div className="h-48 bg-gray-200 rounded-lg" />
-                                <div className="h-32 bg-gray-200 rounded-lg" />
-                            </div>
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                            <div className="lg:col-span-2 h-64 bg-white border border-[#E8E4DF] rounded-xl" />
+                            <div className="h-64 bg-white border border-[#E8E4DF] rounded-xl" />
                         </div>
                     </div>
                 </div>
@@ -249,17 +273,17 @@ export default function CustomerDetail() {
     // ============================================
     if (error || !customer || !metrics) {
         return (
-            <div className="min-h-screen bg-gray-50">
-                <div className="max-w-7xl mx-auto px-6 py-6">
+            <div className="min-h-screen bg-[#FAF9F7]">
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
                     <button
                         onClick={() => navigate({ to: '/customers', search: { tier: 'all', page: 1, limit: 100 } })}
-                        className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-gray-900 mb-4"
+                        className="flex items-center gap-1.5 text-sm text-[#6B5E50] hover:text-[#1A1A1A] mb-6 transition-colors"
                     >
                         <ArrowLeft className="w-4 h-4" />
-                        Back to customers
+                        Back to Customers
                     </button>
-                    <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-8 text-center">
-                        <p className="text-gray-500">
+                    <div className="bg-white rounded-xl border border-[#E8E4DF] p-12 text-center">
+                        <p className="text-[#8C7B6B]">
                             {error instanceof Error ? error.message : 'Customer not found'}
                         </p>
                     </div>
@@ -272,160 +296,167 @@ export default function CustomerDetail() {
     const TierIcon = tierConfig.icon;
     const healthColor = getHealthScoreColor(metrics.healthScore);
     const healthLabel = getHealthScoreLabel(metrics.healthScore);
-    const totalColorQty = customer.colorAffinity?.reduce((sum, c) => sum + c.qty, 0) || 1;
-    const displayOrders = showAllOrders ? customer.orders : customer.orders?.slice(0, 10);
 
     // ============================================
     // RENDER
     // ============================================
     return (
-        <div className="min-h-screen bg-gray-50">
-            <div className="max-w-7xl mx-auto px-6 py-6">
+        <div className="min-h-screen bg-[#FAF9F7]">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
 
-                {/* ===== HEADER ===== */}
-                <div className="mb-6">
+                {/* Top bar */}
+                <div className="flex items-center justify-between mb-6">
                     <button
                         onClick={() => navigate({ to: '/customers', search: { tier: 'all', page: 1, limit: 100 } })}
-                        className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-gray-900 mb-3"
+                        className="flex items-center gap-1.5 text-sm text-[#6B5E50] hover:text-[#1A1A1A] transition-colors"
                     >
                         <ArrowLeft className="w-4 h-4" />
-                        Customers
+                        Back to Customers
                     </button>
-
-                    <div className="flex items-start justify-between">
-                        <div className="flex items-center gap-4">
-                            {/* Avatar */}
-                            <div
-                                className={cn(
-                                    'w-14 h-14 rounded-full flex items-center justify-center text-white text-xl font-bold shadow-md',
-                                    tierConfig.avatarBg || tierConfig.bg,
-                                )}
+                    <div className="flex items-center gap-2">
+                        {customer.email && (
+                            <a
+                                href={`mailto:${customer.email}`}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-[#6B5E50] bg-white border border-[#E8E4DF] rounded-lg hover:bg-[#FAF9F7] transition-colors"
                             >
-                                {getInitials(customer.firstName, customer.lastName)}
-                            </div>
-                            <div>
-                                <h1 className="text-xl font-semibold text-gray-900">
-                                    {[customer.firstName, customer.lastName].filter(Boolean).join(' ') || customer.email}
-                                </h1>
-                                <div className="flex items-center gap-2 mt-1">
-                                    {/* Tier badge */}
-                                    <span className={cn(
-                                        'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold tracking-wider border',
-                                        tierConfig.bg, tierConfig.text, tierConfig.border,
-                                    )}>
-                                        <TierIcon className="w-3 h-3" />
-                                        {tierConfig.label}
-                                    </span>
-                                    {/* Member since */}
-                                    <span className="text-sm text-gray-500">
-                                        Customer for {metrics.tenure}
-                                    </span>
-                                    {/* Store credit badge */}
-                                    {(customer.storeCreditBalance || 0) > 0 && (
-                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
-                                            <Wallet className="w-3 h-3" />
-                                            {formatINR(customer.storeCreditBalance)} credit
-                                        </span>
-                                    )}
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Contact actions */}
-                        <div className="flex items-center gap-2">
-                            {customer.email && (
-                                <a
-                                    href={`mailto:${customer.email}`}
-                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
-                                >
-                                    <Mail className="w-4 h-4" />
-                                    Email
-                                </a>
-                            )}
-                            {customer.phone && (
-                                <a
-                                    href={`https://wa.me/${customer.phone.replace(/\D/g, '')}`}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-green-700 bg-white border border-gray-300 rounded-lg hover:bg-green-50"
-                                >
-                                    <MessageCircle className="w-4 h-4" />
-                                    WhatsApp
-                                </a>
-                            )}
-                        </div>
+                                <Mail className="w-3.5 h-3.5" />
+                                <span className="hidden sm:inline">Email</span>
+                            </a>
+                        )}
+                        {customer.phone && (
+                            <a
+                                href={`https://wa.me/${customer.phone.replace(/\D/g, '')}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-[#5B9A6F] bg-white border border-[#E8E4DF] rounded-lg hover:bg-emerald-50 transition-colors"
+                            >
+                                <MessageCircle className="w-3.5 h-3.5" />
+                                <span className="hidden sm:inline">WhatsApp</span>
+                            </a>
+                        )}
                     </div>
                 </div>
 
-                {/* ===== STATS BAR (8 cards) ===== */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3 mb-6">
-                    <StatCard
+                {/* Profile header */}
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
+                    <div className="flex items-center gap-4">
+                        <div
+                            className={cn(
+                                'w-[72px] h-[72px] rounded-full flex items-center justify-center text-white text-2xl font-bold flex-shrink-0',
+                                tierConfig.avatarBg || tierConfig.bg,
+                            )}
+                        >
+                            {getInitials(customer.firstName, customer.lastName)}
+                        </div>
+                        <div>
+                            <div className="flex items-center gap-2.5 flex-wrap">
+                                <h1 className="text-xl sm:text-2xl font-bold text-[#1A1A1A] tracking-tight font-display">
+                                    {[customer.firstName, customer.lastName].filter(Boolean).join(' ') || customer.email}
+                                </h1>
+                                <span className={cn(
+                                    'inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider',
+                                    tierConfig.bg, tierConfig.text,
+                                )}>
+                                    <TierIcon className="w-3 h-3" />
+                                    {tierConfig.label}
+                                </span>
+                                {(customer.storeCreditBalance || 0) > 0 && (
+                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-50 text-[#5B9A6F] border border-emerald-200">
+                                        <Wallet className="w-3 h-3" />
+                                        {formatINR(customer.storeCreditBalance)} credit
+                                    </span>
+                                )}
+                            </div>
+                            <div className="flex items-center gap-3 mt-1.5 text-sm text-[#8C7B6B] flex-wrap">
+                                {customer.email && (
+                                    <span className="flex items-center gap-1">
+                                        <Mail className="w-3 h-3 text-[#B5AAA0]" />
+                                        {customer.email}
+                                    </span>
+                                )}
+                                {customer.phone && (
+                                    <span className="flex items-center gap-1">
+                                        <Phone className="w-3 h-3 text-[#B5AAA0]" />
+                                        {customer.phone}
+                                    </span>
+                                )}
+                                {customer.defaultAddress && (
+                                    <span className="flex items-center gap-1">
+                                        <MapPin className="w-3 h-3 text-[#B5AAA0]" />
+                                        <AddressOneliner address={customer.defaultAddress} />
+                                    </span>
+                                )}
+                            </div>
+                            <p className="text-xs text-[#B5AAA0] mt-1">
+                                Customer for {metrics.tenure}
+                            </p>
+                        </div>
+                    </div>
+
+                    {/* Health score ring — desktop right-aligned */}
+                    <div className="hidden sm:flex flex-col items-center gap-1">
+                        <div className="relative w-16 h-16">
+                            <svg className="w-full h-full transform -rotate-90" viewBox="0 0 50 50">
+                                <circle cx="25" cy="25" r="20" fill="none" stroke="#F5F0EB" strokeWidth="4" />
+                                <circle
+                                    cx="25" cy="25" r="20" fill="none" stroke={healthColor} strokeWidth="4"
+                                    strokeLinecap="round"
+                                    strokeDasharray={2 * Math.PI * 20}
+                                    strokeDashoffset={2 * Math.PI * 20 - (metrics.healthScore / 100) * 2 * Math.PI * 20}
+                                    style={{ transition: 'stroke-dashoffset 0.5s ease-out' }}
+                                />
+                            </svg>
+                            <div className="absolute inset-0 flex items-center justify-center">
+                                <span className="text-lg font-bold font-display" style={{ color: healthColor }}>
+                                    {metrics.healthScore}
+                                </span>
+                            </div>
+                        </div>
+                        <span className="text-[10px] font-medium uppercase tracking-wider text-[#B5AAA0]">{healthLabel}</span>
+                    </div>
+                </div>
+
+                {/* 4 Metric Cards */}
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-8">
+                    <MetricCard
                         label="Lifetime Value"
                         value={formatINR(customer.lifetimeValue || 0)}
-                        icon={TrendingUp}
-                        accent="sky"
+                        trend={revenueTrend}
+                        trendLabel="90d trend"
                     />
-                    <StatCard
+                    <MetricCard
                         label="Orders"
                         value={String(customer.totalOrders || 0)}
-                        icon={ShoppingBag}
-                        accent="blue"
+                        subtitle={`AOV ${formatINR(customer.avgOrderValue || 0)}`}
                     />
-                    <StatCard
-                        label="Avg Order"
-                        value={formatINR(customer.avgOrderValue || 0)}
-                        icon={CreditCard}
-                        accent="indigo"
-                    />
-                    <StatCard
+                    <MetricCard
                         label="Return Rate"
                         value={`${(customer.returnRate || 0).toFixed(1)}%`}
-                        icon={RotateCcw}
-                        accent={(customer.returnRate || 0) > 20 ? 'red' : 'gray'}
                         subtitle={`${customer.returnCount || 0} returns`}
+                        danger={(customer.returnRate || 0) > 20}
                     />
-                    <StatCard
-                        label="Exchanges"
-                        value={String(customer.exchangeCount || 0)}
-                        icon={ArrowLeftRight}
-                        accent="violet"
-                    />
-                    <StatCard
-                        label="RTOs"
-                        value={String(customer.rtoCount || 0)}
-                        icon={PackageX}
-                        accent={(customer.rtoCount || 0) > 2 ? 'red' : 'gray'}
-                        subtitle={customer.rtoValue ? formatINR(customer.rtoValue) : undefined}
-                    />
-                    <StatCard
-                        label="Store Credit"
-                        value={formatINR(customer.storeCreditBalance || 0)}
-                        icon={Wallet}
-                        accent={(customer.storeCreditBalance || 0) > 0 ? 'emerald' : 'gray'}
-                    />
-                    <StatCard
-                        label="Health"
-                        value={String(metrics.healthScore)}
-                        icon={Activity}
-                        accent={metrics.healthScore >= 70 ? 'green' : metrics.healthScore >= 40 ? 'amber' : 'red'}
-                        subtitle={healthLabel}
+                    <MetricCard
+                        label="Last Order"
+                        value={metrics.daysSinceOrder !== null ? `${metrics.daysSinceOrder}d ago` : 'Never'}
+                        subtitle={customer.lastOrderDate ? formatDate(customer.lastOrderDate) : undefined}
+                        danger={metrics.daysSinceOrder !== null && metrics.daysSinceOrder > 90}
                     />
                 </div>
 
-                {/* ===== TWO COLUMN LAYOUT ===== */}
+                {/* Two-column layout */}
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
-                    {/* ===== LEFT COLUMN (2/3) ===== */}
+                    {/* Left column (2/3) */}
                     <div className="lg:col-span-2 space-y-4">
 
-                        {/* --- RISK ALERTS --- */}
+                        {/* Risk alerts */}
                         {risks.length > 0 && (
                             <div className="space-y-2">
                                 {risks.map((risk, i) => (
                                     <div
                                         key={i}
                                         className={cn(
-                                            'flex items-start gap-3 px-4 py-3 rounded-lg border',
+                                            'flex items-start gap-3 px-4 py-3 rounded-xl border',
                                             risk.severity === 'high'
                                                 ? 'bg-red-50 border-red-200'
                                                 : risk.severity === 'medium'
@@ -448,54 +479,20 @@ export default function CustomerDetail() {
                                             )}>
                                                 {risk.type}
                                             </p>
-                                            <p className="text-xs text-gray-600">{risk.message}</p>
+                                            <p className="text-xs text-[#6B5E50]">{risk.message}</p>
                                         </div>
                                     </div>
                                 ))}
                             </div>
                         )}
 
-                        {/* --- TIER PROGRESS --- */}
-                        {metrics.tierProgress.nextTier && (
-                            <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4">
-                                <div className="flex items-center justify-between mb-2">
-                                    <span className="text-sm font-medium text-gray-700">
-                                        Progress to {metrics.tierProgress.nextTier}
-                                    </span>
-                                    <span className="text-sm font-semibold text-gray-900">
-                                        {Math.round(metrics.tierProgress.progress)}%
-                                    </span>
-                                </div>
-                                <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                                    <div
-                                        className={cn(
-                                            'h-full rounded-full transition-all duration-500',
-                                            metrics.tierProgress.shouldUpgrade
-                                                ? 'bg-green-500'
-                                                : 'bg-sky-500',
-                                        )}
-                                        style={{ width: `${metrics.tierProgress.progress}%` }}
-                                    />
-                                </div>
-                                {metrics.tierProgress.shouldUpgrade ? (
-                                    <p className="text-xs text-green-600 mt-1.5 font-medium">
-                                        Qualifies for {metrics.tierProgress.nextTier} upgrade!
-                                    </p>
-                                ) : (
-                                    <p className="text-xs text-gray-500 mt-1.5">
-                                        {formatINR(metrics.tierProgress.amountToNext)} more to reach {metrics.tierProgress.nextTier}
-                                    </p>
-                                )}
-                            </div>
-                        )}
-
-                        {/* --- REVENUE TIMELINE --- */}
+                        {/* Revenue Timeline */}
                         {customer.revenueTimeline && customer.revenueTimeline.length > 1 && (
-                            <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
-                                <div className="px-4 py-3 border-b border-gray-100">
+                            <div className="bg-white rounded-xl border border-[#E8E4DF] overflow-hidden">
+                                <div className="px-4 py-3 border-b border-[#F5F0EB]">
                                     <div className="flex items-center gap-2">
-                                        <BarChart3 className="w-4 h-4 text-gray-400" />
-                                        <h2 className="text-sm font-semibold text-gray-900">Revenue Timeline</h2>
+                                        <BarChart3 className="w-4 h-4 text-[#B5AAA0]" />
+                                        <h2 className="text-sm font-semibold text-[#1A1A1A]">Revenue Timeline</h2>
                                     </div>
                                 </div>
                                 <div className="p-4">
@@ -504,36 +501,35 @@ export default function CustomerDetail() {
                             </div>
                         )}
 
-                        {/* --- RETURN & RTO ANALYSIS --- */}
+                        {/* Return & RTO Analysis */}
                         {customer.returnAnalysis && (
-                            <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
-                                <div className="px-4 py-3 border-b border-gray-100">
+                            <div className="bg-white rounded-xl border border-[#E8E4DF] overflow-hidden">
+                                <div className="px-4 py-3 border-b border-[#F5F0EB]">
                                     <div className="flex items-center gap-2">
-                                        <RotateCcw className="w-4 h-4 text-gray-400" />
-                                        <h2 className="text-sm font-semibold text-gray-900">Return & RTO Analysis</h2>
-                                        <span className="text-xs text-gray-400 ml-auto">
-                                            {customer.returnAnalysis.totalReturnedLines} returned lines, {customer.returnAnalysis.totalRtoLines} RTO lines
+                                        <RotateCcw className="w-4 h-4 text-[#B5AAA0]" />
+                                        <h2 className="text-sm font-semibold text-[#1A1A1A]">Return & RTO Analysis</h2>
+                                        <span className="text-xs text-[#B5AAA0] ml-auto">
+                                            {customer.returnAnalysis.totalReturnedLines} returned, {customer.returnAnalysis.totalRtoLines} RTO
                                         </span>
                                     </div>
                                 </div>
                                 <div className="p-4">
                                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                                        {/* Return Reasons */}
                                         {customer.returnAnalysis.reasonBreakdown.length > 0 && (
                                             <div>
-                                                <p className="text-xs font-medium text-gray-500 mb-2">Return Reasons</p>
+                                                <p className="text-xs font-medium text-[#B5AAA0] uppercase tracking-wider mb-2">Return Reasons</p>
                                                 <div className="space-y-1.5">
                                                     {customer.returnAnalysis.reasonBreakdown.map((r, i) => (
                                                         <div key={i} className="flex items-center justify-between">
-                                                            <span className="text-xs text-gray-700">{formatReasonLabel(r.reason)}</span>
+                                                            <span className="text-xs text-[#6B5E50]">{formatReasonLabel(r.reason)}</span>
                                                             <div className="flex items-center gap-2">
-                                                                <div className="w-16 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                                                                <div className="w-16 h-1.5 bg-[#F5F0EB] rounded-full overflow-hidden">
                                                                     <div
-                                                                        className="h-full bg-orange-400 rounded-full"
+                                                                        className="h-full bg-[#D4A574] rounded-full"
                                                                         style={{ width: `${(r.count / customer.returnAnalysis!.totalReturnedLines) * 100}%` }}
                                                                     />
                                                                 </div>
-                                                                <span className="text-xs text-gray-500 w-5 text-right">{r.count}</span>
+                                                                <span className="text-xs text-[#B5AAA0] w-5 text-right tabular-nums">{r.count}</span>
                                                             </div>
                                                         </div>
                                                     ))}
@@ -541,10 +537,9 @@ export default function CustomerDetail() {
                                             </div>
                                         )}
 
-                                        {/* Resolution */}
                                         {customer.returnAnalysis.resolutionBreakdown.length > 0 && (
                                             <div>
-                                                <p className="text-xs font-medium text-gray-500 mb-2">Resolution Type</p>
+                                                <p className="text-xs font-medium text-[#B5AAA0] uppercase tracking-wider mb-2">Resolution Type</p>
                                                 <div className="space-y-1.5">
                                                     {customer.returnAnalysis.resolutionBreakdown.map((r, i) => {
                                                         const icon = r.resolution === 'refund' ? IndianRupee
@@ -554,10 +549,10 @@ export default function CustomerDetail() {
                                                             <div key={i} className="flex items-center gap-2">
                                                                 {(() => {
                                                                     const Icon = icon;
-                                                                    return <Icon className="w-3 h-3 text-gray-400" />;
+                                                                    return <Icon className="w-3 h-3 text-[#B5AAA0]" />;
                                                                 })()}
-                                                                <span className="text-xs text-gray-700 flex-1">{formatReasonLabel(r.resolution)}</span>
-                                                                <span className="text-xs font-medium text-gray-900">{r.count}</span>
+                                                                <span className="text-xs text-[#6B5E50] flex-1">{formatReasonLabel(r.resolution)}</span>
+                                                                <span className="text-xs font-medium text-[#1A1A1A] tabular-nums">{r.count}</span>
                                                             </div>
                                                         );
                                                     })}
@@ -565,15 +560,14 @@ export default function CustomerDetail() {
                                             </div>
                                         )}
 
-                                        {/* RTO Conditions */}
                                         {customer.returnAnalysis.rtoConditionBreakdown.length > 0 && (
                                             <div>
-                                                <p className="text-xs font-medium text-gray-500 mb-2">RTO Condition</p>
+                                                <p className="text-xs font-medium text-[#B5AAA0] uppercase tracking-wider mb-2">RTO Condition</p>
                                                 <div className="space-y-1.5">
                                                     {customer.returnAnalysis.rtoConditionBreakdown.map((r, i) => (
                                                         <div key={i} className="flex items-center justify-between">
-                                                            <span className="text-xs text-gray-700">{formatReasonLabel(r.condition)}</span>
-                                                            <span className="text-xs font-medium text-gray-900">{r.count}</span>
+                                                            <span className="text-xs text-[#6B5E50]">{formatReasonLabel(r.condition)}</span>
+                                                            <span className="text-xs font-medium text-[#1A1A1A] tabular-nums">{r.count}</span>
                                                         </div>
                                                     ))}
                                                 </div>
@@ -584,120 +578,41 @@ export default function CustomerDetail() {
                             </div>
                         )}
 
-                        {/* --- STYLE DNA --- */}
-                        {(customer.colorAffinity?.length || customer.productAffinity?.length || customer.fabricAffinity?.length || sizePreferences.length > 0) && (
-                            <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
-                                <div className="px-4 py-3 border-b border-gray-100">
+                        {/* Order History */}
+                        <div className="bg-white rounded-xl border border-[#E8E4DF] overflow-hidden">
+                            <div className="px-4 py-3 border-b border-[#F5F0EB]">
+                                <div className="flex items-center justify-between">
                                     <div className="flex items-center gap-2">
-                                        <Palette className="w-4 h-4 text-gray-400" />
-                                        <h2 className="text-sm font-semibold text-gray-900">Style DNA</h2>
+                                        <ShoppingBag className="w-4 h-4 text-[#B5AAA0]" />
+                                        <h2 className="text-sm font-semibold text-[#1A1A1A]">Order History</h2>
+                                        <span className="text-xs text-[#B5AAA0]">{customer.totalOrders || 0} total</span>
                                     </div>
-                                </div>
-
-                                <div className="p-4 space-y-5">
-                                    {/* Color Palette */}
-                                    {customer.colorAffinity && customer.colorAffinity.length > 0 && (
-                                        <div>
-                                            <p className="text-xs font-medium text-gray-500 mb-2.5">Color Palette</p>
-                                            <div className="flex gap-4 overflow-x-auto pb-1">
-                                                {customer.colorAffinity.slice(0, 10).map((c, i) => {
-                                                    const hex = c.hex || getColorHex(c.color);
-                                                    const pct = Math.round((c.qty / totalColorQty) * 100);
-                                                    return (
-                                                        <div key={i} className="flex flex-col items-center gap-1.5">
-                                                            <div
-                                                                className="w-10 h-10 rounded-full shadow-sm border border-gray-200"
-                                                                style={{ backgroundColor: hex }}
-                                                                title={`${c.color}: ${c.qty} items (${pct}%)`}
-                                                            />
-                                                            <span className="text-[10px] text-gray-500 max-w-[48px] truncate text-center">
-                                                                {c.color}
-                                                            </span>
-                                                            <span className="text-[9px] text-gray-400">{pct}%</span>
-                                                        </div>
-                                                    );
-                                                })}
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {/* Products + Fabrics + Sizes */}
-                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                                        {customer.productAffinity && customer.productAffinity.length > 0 && (
-                                            <div>
-                                                <p className="text-xs font-medium text-gray-500 mb-2 flex items-center gap-1">
-                                                    <Package className="w-3 h-3" />
-                                                    Top Products
-                                                </p>
-                                                <div className="space-y-1.5">
-                                                    {customer.productAffinity.slice(0, 5).map((p, i) => (
-                                                        <div key={i} className="flex items-center justify-between">
-                                                            <span className="text-sm text-gray-700 truncate">{p.productName}</span>
-                                                            <span className="text-xs text-gray-400 ml-2 flex-shrink-0">{p.qty} units</span>
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            </div>
-                                        )}
-
-                                        {customer.fabricAffinity && customer.fabricAffinity.length > 0 && (
-                                            <div>
-                                                <p className="text-xs font-medium text-gray-500 mb-2 flex items-center gap-1">
-                                                    <Layers className="w-3 h-3" />
-                                                    Fabrics
-                                                </p>
-                                                <div className="flex flex-wrap gap-1.5">
-                                                    {customer.fabricAffinity.slice(0, 5).map((f, i) => (
-                                                        <span key={i} className="px-2 py-1 bg-amber-50 text-amber-800 rounded text-xs">
-                                                            {f.fabricType} ({f.qty})
-                                                        </span>
-                                                    ))}
-                                                </div>
-                                            </div>
-                                        )}
-
-                                        {sizePreferences.length > 0 && (
-                                            <div>
-                                                <p className="text-xs font-medium text-gray-500 mb-2">Size Preferences</p>
-                                                <div className="flex flex-wrap gap-1.5">
-                                                    {sizePreferences.map(({ size, count }) => (
-                                                        <span key={size} className="px-2.5 py-1 bg-sky-50 text-sky-800 rounded text-xs font-medium">
-                                                            {size} <span className="text-sky-500 font-normal">({count})</span>
-                                                        </span>
-                                                    ))}
-                                                </div>
-                                            </div>
-                                        )}
+                                    {/* Order filter pills */}
+                                    <div className="flex items-center gap-1">
+                                        {(['all', 'delivered', 'returns'] as const).map((f) => (
+                                            <button
+                                                key={f}
+                                                onClick={() => { setOrderFilter(f); setShowAllOrders(false); }}
+                                                className={cn(
+                                                    'px-2.5 py-1 rounded-full text-[10px] font-medium capitalize transition-colors',
+                                                    orderFilter === f
+                                                        ? 'bg-[#1A1A1A] text-white'
+                                                        : 'text-[#8C7B6B] hover:bg-[#F5F0EB]',
+                                                )}
+                                            >
+                                                {f}
+                                                {f === 'returns' && returnRtoStats.returnOrders > 0 && (
+                                                    <span className="ml-1">{returnRtoStats.returnOrders}</span>
+                                                )}
+                                            </button>
+                                        ))}
                                     </div>
                                 </div>
                             </div>
-                        )}
 
-                        {/* --- ORDER HISTORY (enhanced) --- */}
-                        <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
-                            <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                    <ShoppingBag className="w-4 h-4 text-gray-400" />
-                                    <h2 className="text-sm font-semibold text-gray-900">Order History</h2>
-                                    {returnRtoStats.returnOrders > 0 && (
-                                        <span className="text-[10px] px-1.5 py-0.5 bg-orange-50 text-orange-600 rounded-full font-medium">
-                                            {returnRtoStats.returnOrders} with returns
-                                        </span>
-                                    )}
-                                    {returnRtoStats.rtoOrders > 0 && (
-                                        <span className="text-[10px] px-1.5 py-0.5 bg-red-50 text-red-600 rounded-full font-medium">
-                                            {returnRtoStats.rtoOrders} RTOs
-                                        </span>
-                                    )}
-                                </div>
-                                <span className="text-xs text-gray-500">
-                                    {customer.totalOrders || 0} total
-                                </span>
-                            </div>
-
-                            {customer.orders && customer.orders.length > 0 ? (
+                            {filteredOrders.length > 0 ? (
                                 <>
-                                    <div className="divide-y divide-gray-100">
+                                    <div className="divide-y divide-[#F5F0EB]">
                                         {displayOrders?.map((order) => {
                                             const statusConfig = ORDER_STATUS_CONFIG[order.status?.toLowerCase()] || ORDER_STATUS_CONFIG.open;
                                             const firstLine = order.orderLines?.[0];
@@ -715,27 +630,25 @@ export default function CustomerDetail() {
                                                         to: '/orders/$orderId',
                                                         params: { orderId: order.orderNumber },
                                                     })}
-                                                    className="w-full text-left px-4 py-3 hover:bg-gray-50 transition-colors group"
+                                                    className="w-full text-left px-4 py-3 hover:bg-[#FAF9F7] transition-colors group"
                                                 >
                                                     <div className="flex items-center gap-3">
-                                                        {/* Product thumbnail */}
                                                         {firstImage ? (
                                                             <img
                                                                 src={getOptimizedImageUrl(firstImage, 'sm') || firstImage}
                                                                 alt={productName}
-                                                                className="w-11 h-11 rounded-lg object-cover border border-gray-200 flex-shrink-0"
+                                                                className="w-11 h-11 rounded-lg object-cover border border-[#E8E4DF] flex-shrink-0"
                                                                 loading="lazy"
                                                             />
                                                         ) : (
-                                                            <div className="w-11 h-11 rounded-lg bg-gray-100 flex items-center justify-center flex-shrink-0 border border-gray-200">
-                                                                <Package className="w-4 h-4 text-gray-400" />
+                                                            <div className="w-11 h-11 rounded-lg bg-[#F5F0EB] flex items-center justify-center flex-shrink-0">
+                                                                <Package className="w-4 h-4 text-[#B5AAA0]" />
                                                             </div>
                                                         )}
 
-                                                        {/* Order info */}
                                                         <div className="flex-1 min-w-0">
                                                             <div className="flex items-center gap-1.5 flex-wrap">
-                                                                <span className="text-sm font-semibold text-gray-900">
+                                                                <span className="text-sm font-semibold text-[#1A1A1A]">
                                                                     #{order.orderNumber}
                                                                 </span>
                                                                 <span className={cn(
@@ -760,30 +673,24 @@ export default function CustomerDetail() {
                                                                         RTO
                                                                     </span>
                                                                 )}
-                                                                {order.paymentMethod && (
-                                                                    <span className="text-[10px] text-gray-400">
-                                                                        {order.paymentMethod}
-                                                                    </span>
-                                                                )}
                                                             </div>
-                                                            <p className="text-xs text-gray-500 truncate mt-0.5">
+                                                            <p className="text-xs text-[#8C7B6B] truncate mt-0.5">
                                                                 {productName}
                                                                 {itemCount > 1 && ` + ${itemCount - 1} more`}
                                                             </p>
                                                             {order.internalNotes && (
-                                                                <p className="text-[10px] text-amber-600 truncate mt-0.5 flex items-center gap-1">
+                                                                <p className="text-[10px] text-[#D4A574] truncate mt-0.5 flex items-center gap-1">
                                                                     <MessageSquare className="w-2.5 h-2.5 flex-shrink-0" />
                                                                     {order.internalNotes}
                                                                 </p>
                                                             )}
                                                         </div>
 
-                                                        {/* Amount + date */}
                                                         <div className="text-right flex-shrink-0">
-                                                            <p className="text-sm font-semibold text-gray-900 tabular-nums">
+                                                            <p className="text-sm font-semibold text-[#1A1A1A] tabular-nums font-display">
                                                                 {formatINR(order.totalAmount || 0)}
                                                             </p>
-                                                            <p className="text-[10px] text-gray-400" title={formatDate(order.orderDate)}>
+                                                            <p className="text-[10px] text-[#B5AAA0]" title={formatDate(order.orderDate)}>
                                                                 {getRelativeTime(
                                                                     typeof order.orderDate === 'string'
                                                                         ? order.orderDate
@@ -792,45 +699,46 @@ export default function CustomerDetail() {
                                                             </p>
                                                         </div>
 
-                                                        <ChevronRight className="w-4 h-4 text-gray-300 group-hover:text-gray-500 transition-colors flex-shrink-0" />
+                                                        <ChevronRight className="w-4 h-4 text-[#E8E4DF] group-hover:text-[#B5AAA0] transition-colors flex-shrink-0" />
                                                     </div>
                                                 </button>
                                             );
                                         })}
                                     </div>
-                                    {/* Show more/less toggle */}
-                                    {(customer.orders?.length || 0) > 10 && (
+                                    {filteredOrders.length > 10 && (
                                         <button
                                             onClick={(e) => { e.stopPropagation(); setShowAllOrders(!showAllOrders); }}
-                                            className="w-full px-4 py-2 text-xs text-gray-500 hover:text-gray-700 hover:bg-gray-50 border-t border-gray-100 flex items-center justify-center gap-1"
+                                            className="w-full px-4 py-2.5 text-xs font-medium text-[#8C7B6B] hover:text-[#6B5E50] hover:bg-[#FAF9F7] border-t border-[#F5F0EB] flex items-center justify-center gap-1 transition-colors"
                                         >
                                             {showAllOrders ? (
                                                 <>Show less <ChevronUp className="w-3 h-3" /></>
                                             ) : (
-                                                <>Show all {customer.orders?.length} orders <ChevronDown className="w-3 h-3" /></>
+                                                <>View all {filteredOrders.length} orders <ChevronDown className="w-3 h-3" /></>
                                             )}
                                         </button>
                                     )}
                                 </>
                             ) : (
-                                <div className="px-4 py-8 text-center">
-                                    <ShoppingBag className="w-8 h-8 text-gray-300 mx-auto mb-2" />
-                                    <p className="text-sm text-gray-400">No orders yet</p>
+                                <div className="px-4 py-12 text-center">
+                                    <ShoppingBag className="w-8 h-8 text-[#E8E4DF] mx-auto mb-2" />
+                                    <p className="text-sm text-[#B5AAA0]">
+                                        {orderFilter === 'all' ? 'No orders yet' : `No ${orderFilter} orders`}
+                                    </p>
                                 </div>
                             )}
                         </div>
 
-                        {/* --- ORDER NOTES TIMELINE --- */}
+                        {/* Order Notes */}
                         {customer.orderNotes && customer.orderNotes.length > 0 && (
-                            <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
-                                <div className="px-4 py-3 border-b border-gray-100">
+                            <div className="bg-white rounded-xl border border-[#E8E4DF] overflow-hidden">
+                                <div className="px-4 py-3 border-b border-[#F5F0EB]">
                                     <div className="flex items-center gap-2">
-                                        <FileText className="w-4 h-4 text-gray-400" />
-                                        <h2 className="text-sm font-semibold text-gray-900">Order Notes</h2>
-                                        <span className="text-xs text-gray-400">{customer.orderNotes.length} notes</span>
+                                        <FileText className="w-4 h-4 text-[#B5AAA0]" />
+                                        <h2 className="text-sm font-semibold text-[#1A1A1A]">Notes</h2>
+                                        <span className="text-xs text-[#B5AAA0]">{customer.orderNotes.length}</span>
                                     </div>
                                 </div>
-                                <div className="divide-y divide-gray-50 max-h-64 overflow-y-auto">
+                                <div className="divide-y divide-[#F5F0EB] max-h-64 overflow-y-auto">
                                     {customer.orderNotes.map((note, i) => (
                                         <div key={i} className="px-4 py-2.5">
                                             <div className="flex items-center justify-between mb-0.5">
@@ -839,13 +747,13 @@ export default function CustomerDetail() {
                                                         to: '/orders/$orderId',
                                                         params: { orderId: note.orderNumber },
                                                     })}
-                                                    className="text-xs font-medium text-blue-600 hover:underline"
+                                                    className="text-xs font-medium text-[#D4A574] hover:underline"
                                                 >
                                                     #{note.orderNumber}
                                                 </button>
-                                                <span className="text-[10px] text-gray-400">{formatDate(note.orderDate)}</span>
+                                                <span className="text-[10px] text-[#B5AAA0]">{formatDate(note.orderDate)}</span>
                                             </div>
-                                            <p className="text-xs text-gray-600">{note.note}</p>
+                                            <p className="text-xs text-[#6B5E50]">{note.note}</p>
                                         </div>
                                     ))}
                                 </div>
@@ -853,74 +761,146 @@ export default function CustomerDetail() {
                         )}
                     </div>
 
-                    {/* ===== RIGHT COLUMN (1/3) ===== */}
+                    {/* Right column (1/3) */}
                     <div className="space-y-4">
 
-                        {/* --- CONTACT INFO CARD --- */}
-                        <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
-                            <div className="px-4 py-3 border-b border-gray-100">
-                                <div className="flex items-center gap-2">
-                                    <User className="w-4 h-4 text-gray-400" />
-                                    <h2 className="text-sm font-semibold text-gray-900">Contact information</h2>
-                                </div>
-                            </div>
-                            <div className="px-4 py-3 space-y-2.5">
-                                {customer.email && (
-                                    <div className="flex items-center gap-2 text-sm">
-                                        <Mail className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
-                                        <a
-                                            href={`mailto:${customer.email}`}
-                                            className="text-blue-600 hover:underline truncate"
-                                        >
-                                            {customer.email}
-                                        </a>
-                                    </div>
-                                )}
-                                {customer.phone && (
-                                    <div className="flex items-center gap-2 text-sm text-gray-600">
-                                        <Phone className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
-                                        <span>{customer.phone}</span>
-                                    </div>
-                                )}
-                                {customer.acceptsMarketing !== undefined && (
-                                    <div className="flex items-center gap-2 text-xs text-gray-500">
-                                        <Mail className="w-3 h-3 text-gray-300 flex-shrink-0" />
-                                        <span>
-                                            {customer.acceptsMarketing
-                                                ? 'Subscribed to email marketing'
-                                                : 'Not subscribed to email marketing'}
-                                        </span>
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-
-                        {/* --- DEFAULT ADDRESS CARD --- */}
-                        {customer.defaultAddress && (
-                            <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
-                                <div className="px-4 py-3 border-b border-gray-100">
+                        {/* Style DNA */}
+                        {(customer.colorAffinity?.length || customer.productAffinity?.length || customer.fabricAffinity?.length || sizePreferences.length > 0) && (
+                            <div className="bg-white rounded-xl border border-[#E8E4DF] overflow-hidden">
+                                <div className="px-4 py-3 border-b border-[#F5F0EB]">
                                     <div className="flex items-center gap-2">
-                                        <MapPin className="w-4 h-4 text-gray-400" />
-                                        <h2 className="text-sm font-semibold text-gray-900">Default address</h2>
+                                        <Palette className="w-4 h-4 text-[#B5AAA0]" />
+                                        <h2 className="text-sm font-semibold text-[#1A1A1A]">Style DNA</h2>
                                     </div>
                                 </div>
-                                <div className="px-4 py-3">
-                                    <AddressDisplay address={customer.defaultAddress} />
+
+                                <div className="p-4 space-y-5">
+                                    {/* Top Colours */}
+                                    {customer.colorAffinity && customer.colorAffinity.length > 0 && (
+                                        <div>
+                                            <p className="text-[10px] font-medium text-[#B5AAA0] uppercase tracking-wider mb-2.5">Top Colours</p>
+                                            <div className="flex flex-wrap gap-2">
+                                                {customer.colorAffinity.slice(0, 6).map((c, i) => {
+                                                    const hex = c.hex || getColorHex(c.color);
+                                                    return (
+                                                        <span
+                                                            key={i}
+                                                            className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-[#F5F0EB] rounded-full text-xs text-[#6B5E50]"
+                                                            title={`${c.qty} items`}
+                                                        >
+                                                            <span
+                                                                className="w-2.5 h-2.5 rounded-full flex-shrink-0 border border-[#E8E4DF]"
+                                                                style={{ backgroundColor: hex }}
+                                                            />
+                                                            {c.color}
+                                                        </span>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Preferred Sizes */}
+                                    {sizePreferences.length > 0 && (
+                                        <div>
+                                            <p className="text-[10px] font-medium text-[#B5AAA0] uppercase tracking-wider mb-2">Preferred Sizes</p>
+                                            <div className="flex flex-wrap gap-1.5">
+                                                {sizePreferences.map(({ size }) => (
+                                                    <span key={size} className="inline-flex items-center justify-center min-w-[32px] px-2.5 py-1 border border-[#E8E4DF] rounded-full text-xs font-medium text-[#6B5E50]">
+                                                        {size}
+                                                    </span>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Favourite Categories (from products) */}
+                                    {customer.productAffinity && customer.productAffinity.length > 0 && (
+                                        <div>
+                                            <p className="text-[10px] font-medium text-[#B5AAA0] uppercase tracking-wider mb-2">Favourite Categories</p>
+                                            <div className="flex flex-wrap gap-1.5">
+                                                {customer.productAffinity.slice(0, 5).map((p, i) => (
+                                                    <span key={i} className="inline-flex items-center px-2.5 py-1 border border-[#E8E4DF] rounded-full text-xs text-[#6B5E50]">
+                                                        {p.productName}
+                                                    </span>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Fabrics */}
+                                    {customer.fabricAffinity && customer.fabricAffinity.length > 0 && (
+                                        <div>
+                                            <p className="text-[10px] font-medium text-[#B5AAA0] uppercase tracking-wider mb-2">Fabrics</p>
+                                            <div className="flex flex-wrap gap-1.5">
+                                                {customer.fabricAffinity.slice(0, 5).map((f, i) => (
+                                                    <span key={i} className="px-2.5 py-1 border border-[#E8E4DF] text-[#6B5E50] rounded-full text-xs">
+                                                        {f.fabricType} ({f.qty})
+                                                    </span>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         )}
 
-                        {/* --- HEALTH SCORE CARD (with RFM breakdown) --- */}
-                        <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
-                            <div className="px-4 py-3 border-b border-gray-100">
-                                <h2 className="text-sm font-semibold text-gray-900">Health Score</h2>
+                        {/* Tier Progress */}
+                        {metrics.tierProgress.nextTier && (
+                            <div className="bg-white rounded-xl border border-[#E8E4DF] overflow-hidden">
+                                <div className="px-4 py-3 border-b border-[#F5F0EB]">
+                                    <div className="flex items-center justify-between">
+                                        <h2 className="text-sm font-semibold text-[#1A1A1A]">Tier Progress</h2>
+                                        <span className="text-xs font-medium text-[#D4A574]">
+                                            {(customer.customerTier || customer.tier || 'bronze').charAt(0).toUpperCase() + (customer.customerTier || customer.tier || 'bronze').slice(1)}
+                                        </span>
+                                    </div>
+                                </div>
+                                <div className="px-4 py-4">
+                                    <div className="h-2 bg-[#F5F0EB] rounded-full overflow-hidden mb-2">
+                                        <div
+                                            className={cn(
+                                                'h-full rounded-full transition-all duration-500',
+                                                metrics.tierProgress.shouldUpgrade
+                                                    ? 'bg-[#5B9A6F]'
+                                                    : 'bg-[#D4A574]',
+                                            )}
+                                            style={{ width: `${metrics.tierProgress.progress}%` }}
+                                        />
+                                    </div>
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-xs text-[#8C7B6B] tabular-nums">
+                                            {formatINR(customer.lifetimeValue || 0)} of {formatINR(
+                                                (customer.lifetimeValue || 0) + metrics.tierProgress.amountToNext
+                                            )}
+                                        </span>
+                                        <span className="text-xs font-medium text-[#D4A574]">
+                                            {metrics.tierProgress.nextTier}
+                                        </span>
+                                    </div>
+                                    {metrics.tierProgress.shouldUpgrade ? (
+                                        <p className="text-xs text-[#5B9A6F] mt-1 font-medium">
+                                            Qualifies for {metrics.tierProgress.nextTier} upgrade!
+                                        </p>
+                                    ) : (
+                                        <p className="text-xs text-[#B5AAA0] mt-1">
+                                            {formatINR(metrics.tierProgress.amountToNext)} away from {metrics.tierProgress.nextTier} tier
+                                        </p>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Health Score Card */}
+                        <div className="bg-white rounded-xl border border-[#E8E4DF] overflow-hidden">
+                            <div className="px-4 py-3 border-b border-[#F5F0EB]">
+                                <h2 className="text-sm font-semibold text-[#1A1A1A]">Health Score</h2>
                             </div>
                             <div className="px-4 py-4">
                                 <div className="flex items-center gap-4 mb-4">
-                                    {/* Circular gauge */}
-                                    <div className="relative w-16 h-16 flex-shrink-0">
+                                    <div className="relative w-14 h-14 flex-shrink-0">
                                         <svg className="w-full h-full transform -rotate-90" viewBox="0 0 50 50">
-                                            <circle cx="25" cy="25" r="20" fill="none" stroke="#e5e7eb" strokeWidth="4" />
+                                            <circle cx="25" cy="25" r="20" fill="none" stroke="#F5F0EB" strokeWidth="4" />
                                             <circle
                                                 cx="25" cy="25" r="20" fill="none" stroke={healthColor} strokeWidth="4"
                                                 strokeLinecap="round"
@@ -930,82 +910,52 @@ export default function CustomerDetail() {
                                             />
                                         </svg>
                                         <div className="absolute inset-0 flex items-center justify-center">
-                                            <span className="text-lg font-bold" style={{ color: healthColor }}>
+                                            <span className="text-base font-bold font-display" style={{ color: healthColor }}>
                                                 {metrics.healthScore}
                                             </span>
                                         </div>
                                     </div>
                                     <div>
-                                        <p className="text-sm font-medium text-gray-900">{healthLabel}</p>
-                                        <p className="text-xs text-gray-500 mt-0.5">
-                                            RFM analysis with return penalty
-                                        </p>
+                                        <p className="text-sm font-medium text-[#1A1A1A]">{healthLabel}</p>
+                                        <p className="text-xs text-[#B5AAA0] mt-0.5">RFM analysis</p>
                                     </div>
                                 </div>
-                                {/* RFM Breakdown */}
                                 <div className="space-y-2">
-                                    <RfmBar label="Recency" score={metrics.rfm.recencyScore} max={25} color="bg-sky-500" />
-                                    <RfmBar label="Frequency" score={metrics.rfm.frequencyScore} max={25} color="bg-blue-500" />
-                                    <RfmBar label="Monetary" score={metrics.rfm.monetaryScore} max={25} color="bg-indigo-500" />
-                                    <RfmBar label="Return Penalty" score={-metrics.rfm.returnPenalty} max={25} color="bg-red-400" isNegative />
+                                    <RfmBar label="Recency" score={metrics.rfm.recencyScore} max={25} color="bg-[#D4A574]" />
+                                    <RfmBar label="Frequency" score={metrics.rfm.frequencyScore} max={25} color="bg-[#8C7B6B]" />
+                                    <RfmBar label="Monetary" score={metrics.rfm.monetaryScore} max={25} color="bg-[#6B5E50]" />
+                                    <RfmBar label="Return Penalty" score={-metrics.rfm.returnPenalty} max={25} color="bg-[#C0392B]" isNegative />
                                 </div>
                             </div>
                         </div>
 
-                        {/* --- PAYMENT METHODS CARD --- */}
+                        {/* Payment Methods */}
                         {customer.paymentBreakdown && customer.paymentBreakdown.length > 0 && (
-                            <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
-                                <div className="px-4 py-3 border-b border-gray-100">
+                            <div className="bg-white rounded-xl border border-[#E8E4DF] overflow-hidden">
+                                <div className="px-4 py-3 border-b border-[#F5F0EB]">
                                     <div className="flex items-center gap-2">
-                                        <CreditCard className="w-4 h-4 text-gray-400" />
-                                        <h2 className="text-sm font-semibold text-gray-900">Payment Methods</h2>
+                                        <CreditCard className="w-4 h-4 text-[#B5AAA0]" />
+                                        <h2 className="text-sm font-semibold text-[#1A1A1A]">Payment Methods</h2>
                                     </div>
                                 </div>
                                 <div className="px-4 py-3 space-y-2">
                                     {customer.paymentBreakdown.map((pm, i) => (
                                         <div key={i} className="flex items-center justify-between text-sm">
                                             <div className="flex items-center gap-2">
-                                                <span className="text-gray-700">{pm.method}</span>
-                                                <span className="text-[10px] text-gray-400">({pm.count} orders)</span>
+                                                <span className="text-[#6B5E50]">{pm.method}</span>
+                                                <span className="text-[10px] text-[#B5AAA0]">({pm.count})</span>
                                             </div>
-                                            <span className="text-gray-900 font-medium tabular-nums">{formatINR(pm.total)}</span>
+                                            <span className="text-[#1A1A1A] font-medium tabular-nums">{formatINR(pm.total)}</span>
                                         </div>
                                     ))}
                                 </div>
                             </div>
                         )}
 
-                        {/* --- TAGS CARD --- */}
-                        {customer.tags && (
-                            <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
-                                <div className="px-4 py-3 border-b border-gray-100">
-                                    <div className="flex items-center gap-2">
-                                        <Tag className="w-4 h-4 text-gray-400" />
-                                        <h2 className="text-sm font-semibold text-gray-900">Tags</h2>
-                                    </div>
-                                </div>
-                                <div className="px-4 py-3">
-                                    <div className="flex flex-wrap gap-1.5">
-                                        {customer.tags.split(',').map((tag) => (
-                                            <span
-                                                key={tag.trim()}
-                                                className="inline-flex items-center px-2 py-0.5 bg-gray-100 text-gray-700 rounded-full text-xs"
-                                            >
-                                                {tag.trim()}
-                                            </span>
-                                        ))}
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-
-                        {/* --- CUSTOMER DETAILS CARD --- */}
-                        <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
-                            <div className="px-4 py-3 border-b border-gray-100">
-                                <div className="flex items-center gap-2">
-                                    <Clock className="w-4 h-4 text-gray-400" />
-                                    <h2 className="text-sm font-semibold text-gray-900">Details</h2>
-                                </div>
+                        {/* Contact & Details */}
+                        <div className="bg-white rounded-xl border border-[#E8E4DF] overflow-hidden">
+                            <div className="px-4 py-3 border-b border-[#F5F0EB]">
+                                <h2 className="text-sm font-semibold text-[#1A1A1A]">Details</h2>
                             </div>
                             <div className="px-4 py-3 space-y-2.5">
                                 <DetailRow
@@ -1018,40 +968,70 @@ export default function CustomerDetail() {
                                         ? `${formatDate(customer.lastOrderDate)} (${getRelativeTime(customer.lastOrderDate.toISOString())})`
                                         : 'Never'}
                                 />
-                                <DetailRow
-                                    label="Total orders"
-                                    value={String(customer.totalOrders || 0)}
-                                />
-                                <DetailRow
-                                    label="Returns"
-                                    value={String(customer.returnCount || 0)}
-                                />
-                                <DetailRow
-                                    label="Exchanges"
-                                    value={String(customer.exchangeCount || 0)}
-                                />
+                                <DetailRow label="Total orders" value={String(customer.totalOrders || 0)} />
+                                <DetailRow label="Returns" value={String(customer.returnCount || 0)} />
+                                <DetailRow label="Exchanges" value={String(customer.exchangeCount || 0)} />
                                 <DetailRow
                                     label="RTOs"
                                     value={`${customer.rtoCount || 0} lines (${customer.rtoOrderCount || 0} orders)`}
                                 />
                                 {(customer.rtoValue || 0) > 0 && (
-                                    <DetailRow
-                                        label="RTO value"
-                                        value={formatINR(customer.rtoValue)}
-                                    />
+                                    <DetailRow label="RTO value" value={formatINR(customer.rtoValue)} />
                                 )}
                                 {(customer.storeCreditBalance || 0) > 0 && (
-                                    <DetailRow
-                                        label="Store credit"
-                                        value={formatINR(customer.storeCreditBalance)}
-                                    />
+                                    <DetailRow label="Store credit" value={formatINR(customer.storeCreditBalance)} />
                                 )}
                                 <DetailRow
                                     label="Account created"
                                     value={customer.createdAt ? formatDate(customer.createdAt) : 'N/A'}
                                 />
+                                {customer.acceptsMarketing !== undefined && (
+                                    <DetailRow
+                                        label="Marketing"
+                                        value={customer.acceptsMarketing ? 'Subscribed' : 'Not subscribed'}
+                                    />
+                                )}
                             </div>
                         </div>
+
+                        {/* Default Address */}
+                        {customer.defaultAddress && (
+                            <div className="bg-white rounded-xl border border-[#E8E4DF] overflow-hidden">
+                                <div className="px-4 py-3 border-b border-[#F5F0EB]">
+                                    <div className="flex items-center gap-2">
+                                        <MapPin className="w-4 h-4 text-[#B5AAA0]" />
+                                        <h2 className="text-sm font-semibold text-[#1A1A1A]">Default Address</h2>
+                                    </div>
+                                </div>
+                                <div className="px-4 py-3">
+                                    <AddressDisplay address={customer.defaultAddress} />
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Tags */}
+                        {customer.tags && (
+                            <div className="bg-white rounded-xl border border-[#E8E4DF] overflow-hidden">
+                                <div className="px-4 py-3 border-b border-[#F5F0EB]">
+                                    <div className="flex items-center gap-2">
+                                        <Tag className="w-4 h-4 text-[#B5AAA0]" />
+                                        <h2 className="text-sm font-semibold text-[#1A1A1A]">Tags</h2>
+                                    </div>
+                                </div>
+                                <div className="px-4 py-3">
+                                    <div className="flex flex-wrap gap-1.5">
+                                        {customer.tags.split(',').map((tag) => (
+                                            <span
+                                                key={tag.trim()}
+                                                className="inline-flex items-center px-2.5 py-0.5 bg-[#F5F0EB] text-[#6B5E50] rounded-full text-xs"
+                                            >
+                                                {tag.trim()}
+                                            </span>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </div>
             </div>
@@ -1063,36 +1043,32 @@ export default function CustomerDetail() {
 // SUB-COMPONENTS
 // ============================================
 
-function StatCard({ label, value, icon: Icon, accent, subtitle }: {
+function MetricCard({ label, value, subtitle, trend, trendLabel, danger }: {
     label: string;
     value: string;
-    icon: React.ElementType;
-    accent: string;
     subtitle?: string;
+    trend?: number | null;
+    trendLabel?: string;
+    danger?: boolean;
 }) {
-    const accentMap: Record<string, { iconBg: string; iconText: string }> = {
-        sky: { iconBg: 'bg-sky-50', iconText: 'text-sky-600' },
-        blue: { iconBg: 'bg-blue-50', iconText: 'text-blue-600' },
-        indigo: { iconBg: 'bg-indigo-50', iconText: 'text-indigo-600' },
-        violet: { iconBg: 'bg-violet-50', iconText: 'text-violet-600' },
-        green: { iconBg: 'bg-green-50', iconText: 'text-green-600' },
-        emerald: { iconBg: 'bg-emerald-50', iconText: 'text-emerald-600' },
-        amber: { iconBg: 'bg-amber-50', iconText: 'text-amber-600' },
-        red: { iconBg: 'bg-red-50', iconText: 'text-red-600' },
-        gray: { iconBg: 'bg-gray-50', iconText: 'text-gray-500' },
-    };
-    const colors = accentMap[accent] || accentMap.gray;
-
     return (
-        <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-3">
-            <div className="flex items-center gap-2 mb-1.5">
-                <div className={cn('p-1.5 rounded-lg', colors.iconBg)}>
-                    <Icon className={cn('w-3.5 h-3.5', colors.iconText)} />
-                </div>
-            </div>
-            <p className="text-lg font-bold text-gray-900 tabular-nums leading-tight">{value}</p>
-            <p className="text-[10px] uppercase tracking-wider text-gray-500 mt-0.5">{label}</p>
-            {subtitle && <p className="text-[10px] text-gray-400">{subtitle}</p>}
+        <div className="bg-white rounded-xl border border-[#E8E4DF] p-4">
+            <p className="text-[10px] font-medium uppercase tracking-wider text-[#B5AAA0] mb-1">{label}</p>
+            <p className={cn(
+                'text-xl font-bold tabular-nums leading-tight font-display',
+                danger ? 'text-[#C0392B]' : 'text-[#1A1A1A]',
+            )}>
+                {value}
+            </p>
+            {trend !== undefined && trend !== null && (
+                <p className={cn(
+                    'text-xs mt-1 font-medium',
+                    trend >= 0 ? 'text-[#5B9A6F]' : 'text-[#C0392B]',
+                )}>
+                    {trend >= 0 ? '+' : ''}{trend}% {trendLabel}
+                </p>
+            )}
+            {subtitle && <p className="text-xs text-[#8C7B6B] mt-1">{subtitle}</p>}
         </div>
     );
 }
@@ -1100,8 +1076,8 @@ function StatCard({ label, value, icon: Icon, accent, subtitle }: {
 function DetailRow({ label, value }: { label: string; value: string }) {
     return (
         <div className="flex justify-between text-sm">
-            <span className="text-gray-500">{label}</span>
-            <span className="text-gray-900 text-right">{value}</span>
+            <span className="text-[#8C7B6B]">{label}</span>
+            <span className="text-[#1A1A1A] text-right">{value}</span>
         </div>
     );
 }
@@ -1118,14 +1094,14 @@ function RfmBar({ label, score, max, color, isNegative }: {
 
     return (
         <div className="flex items-center gap-2">
-            <span className="text-[10px] text-gray-500 w-20">{label}</span>
-            <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+            <span className="text-[10px] text-[#8C7B6B] w-20">{label}</span>
+            <div className="flex-1 h-1.5 bg-[#F5F0EB] rounded-full overflow-hidden">
                 <div
                     className={cn('h-full rounded-full', color)}
                     style={{ width: `${pct}%` }}
                 />
             </div>
-            <span className={cn('text-[10px] w-8 text-right tabular-nums', isNegative ? 'text-red-500' : 'text-gray-600')}>
+            <span className={cn('text-[10px] w-8 text-right tabular-nums', isNegative ? 'text-[#C0392B]' : 'text-[#6B5E50]')}>
                 {isNegative ? score : `+${score}`}
             </span>
         </div>
@@ -1147,22 +1123,35 @@ function RevenueChart({ data }: { data: Array<{ month: string; revenue: number; 
                     return (
                         <div key={i} className="flex-1 flex flex-col items-center justify-end h-full group relative">
                             <div
-                                className="w-full bg-sky-400 hover:bg-sky-500 rounded-t transition-colors min-h-[2px]"
+                                className="w-full bg-[#D4A574] hover:bg-[#C4956A] rounded-t transition-colors min-h-[2px]"
                                 style={{ height: `${height}%` }}
                                 title={`${d.month}: ${formatINR(d.revenue)} (${d.orders} orders)`}
                             />
-                            <span className="text-[8px] text-gray-400 mt-1">{shortMonth}</span>
+                            <span className="text-[8px] text-[#B5AAA0] mt-1">{shortMonth}</span>
                         </div>
                     );
                 })}
             </div>
-            <div className="flex justify-between text-[9px] text-gray-400 pt-1 border-t border-gray-100">
+            <div className="flex justify-between text-[9px] text-[#B5AAA0] pt-1 border-t border-[#F5F0EB]">
                 <span>{data[0]?.month}</span>
                 <span>Total: {formatINR(data.reduce((sum, d) => sum + d.revenue, 0))}</span>
                 <span>{data[data.length - 1]?.month}</span>
             </div>
         </div>
     );
+}
+
+function AddressOneliner({ address }: { address: unknown }) {
+    if (!address) return null;
+    let addr: Record<string, unknown>;
+    if (typeof address === 'string') {
+        try { addr = JSON.parse(address); } catch { return <span>{address}</span>; }
+    } else {
+        addr = address as Record<string, unknown>;
+    }
+    const city = addr.city ? String(addr.city) : null;
+    const province = addr.province ? String(addr.province) : null;
+    return <span>{[city, province].filter(Boolean).join(', ') || 'Address on file'}</span>;
 }
 
 function AddressDisplay({ address }: { address: unknown }) {
@@ -1173,7 +1162,7 @@ function AddressDisplay({ address }: { address: unknown }) {
         try {
             addr = JSON.parse(address);
         } catch {
-            return <p className="text-sm text-gray-700">{address}</p>;
+            return <p className="text-sm text-[#6B5E50]">{address}</p>;
         }
     } else {
         addr = address as Record<string, unknown>;
@@ -1190,9 +1179,9 @@ function AddressDisplay({ address }: { address: unknown }) {
 
     return (
         <div>
-            <p className="text-sm text-gray-700 whitespace-pre-line">{parts.join('\n')}</p>
+            <p className="text-sm text-[#6B5E50] whitespace-pre-line">{parts.join('\n')}</p>
             {typeof addr.phone === 'string' && addr.phone && (
-                <div className="flex items-center gap-2 mt-2 text-sm text-gray-500">
+                <div className="flex items-center gap-2 mt-2 text-sm text-[#8C7B6B]">
                     <Phone className="w-3.5 h-3.5" />
                     {addr.phone}
                 </div>

@@ -7,8 +7,12 @@ import { ServicesTable } from '../../components/materials/ServicesTable';
 import { createService, updateService, getParties } from '@/server/functions/materialsMutations';
 import type { Party } from '@/server/functions/materialsMutations';
 import { SERVICE_CATEGORIES, type ServiceEditState } from './shared';
+import { useAuth } from '../../hooks/useAuth';
+import { isAdminUser } from '../../types';
 
 export default function ServicesTab() {
+    const { user } = useAuth();
+    const isAdmin = isAdminUser(user);
     const queryClient = useQueryClient();
 
     // Modal state
@@ -108,13 +112,13 @@ export default function ServicesTab() {
     return (
         <div className="p-4 h-full overflow-auto">
             <ServicesTable
-                onEdit={(service) => setShowEditService({
+                onEdit={isAdmin ? (service) => setShowEditService({
                     ...service,
                     costPerJob: service.costPerJob?.toString() ?? '',
                     leadTimeDays: service.leadTimeDays?.toString() ?? '',
-                })}
+                }) : undefined}
                 onViewDetails={() => {}}
-                onAdd={() => setShowAddService(true)}
+                onAdd={isAdmin ? () => setShowAddService(true) : undefined}
             />
 
             {/* Add Service Modal */}
