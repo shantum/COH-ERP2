@@ -7,6 +7,7 @@
  */
 
 import { resolve } from 'path';
+import { existsSync } from 'fs';
 
 /** GCP project ID */
 export const GA4_PROJECT = 'coh-erp';
@@ -18,8 +19,18 @@ export const GA4_DATASET = process.env.GA4_DATASET || 'analytics_287841955';
 export const GA4_EVENTS_TABLE = `${GA4_PROJECT}.${GA4_DATASET}.events_*`;
 export const GA4_INTRADAY_TABLE = `${GA4_PROJECT}.${GA4_DATASET}.events_intraday_*`;
 
-/** Path to Google service account key file (same as Sheets) */
-export const GOOGLE_SERVICE_ACCOUNT_PATH = resolve(__dirname, '../../../config/google-service-account.json');
+/**
+ * Path to Google service account key file (same as Sheets).
+ * Checks multiple locations to work from both server cwd and client (Vite SSR) cwd.
+ */
+function resolveServiceAccountPath(): string {
+    const candidates = [
+        resolve(process.cwd(), 'config/google-service-account.json'),           // server cwd
+        resolve(process.cwd(), '../server/config/google-service-account.json'),  // client cwd
+    ];
+    return candidates.find(p => existsSync(p)) ?? candidates[0];
+}
+export const GOOGLE_SERVICE_ACCOUNT_PATH = resolveServiceAccountPath();
 
 /** Cache TTLs in milliseconds */
 export const CACHE_TTL_INTRADAY = 5 * 60 * 1000;  // 5 min for today's data
