@@ -25,8 +25,9 @@ export const GA4_INTRADAY_TABLE = `${GA4_PROJECT}.${GA4_DATASET}.events_intraday
  */
 function resolveServiceAccountPath(): string {
     const candidates = [
-        resolve(process.cwd(), 'config/google-service-account.json'),           // server cwd
-        resolve(process.cwd(), '../server/config/google-service-account.json'),  // client cwd
+        resolve(process.cwd(), 'server/config/google-service-account.json'),    // project root cwd (production)
+        resolve(process.cwd(), 'config/google-service-account.json'),           // server cwd (dev)
+        resolve(process.cwd(), '../server/config/google-service-account.json'), // client cwd (Vite SSR dev)
     ];
     return candidates.find(p => existsSync(p)) ?? candidates[0];
 }
