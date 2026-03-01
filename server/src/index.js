@@ -64,6 +64,7 @@ import chatRoutes from './routes/chat.js';
 import forecastRoutes from './routes/forecast.js';
 import imageUploadRoutes from './routes/imageUpload.js';
 import resendWebhookRoutes from './routes/resendWebhook.js';
+import emailCampaignWebhookRoutes from './routes/emailCampaignWebhook.js';
 import returnPrimeWebhooks from './routes/returnPrimeWebhooks.js';
 import returnPrimeSync from './routes/returnPrimeSync.js';
 import returnPrimeAdminRoutes from './routes/returnPrimeAdminRoutes.js';
@@ -131,6 +132,8 @@ app.use(cookieParser());
 
 // Capture raw body for webhook signature verification
 app.use('/api/webhooks', express.json({
+    // SNS sends Content-Type: text/plain — accept it as JSON for SES webhooks
+    type: ['application/json', 'text/plain'],
     verify: (req, res, buf) => {
         req.rawBody = buf.toString();
     }
@@ -195,8 +198,11 @@ app.get('/api/employee-documents-list/:slug', async (req, res) => {
   }
 });
 
-// Resend inbound email webhook
+// Resend inbound email webhook (invoice processing)
 app.use('/api/webhooks/resend', resendWebhookRoutes);
+
+// SES delivery status webhook via SNS (campaign open/click/bounce tracking)
+app.use('/api/webhooks/ses/campaigns', emailCampaignWebhookRoutes);
 
 // RazorpayX payout & transaction webhooks
 app.use('/api/webhooks/razorpayx', razorpayxWebhookRoutes);

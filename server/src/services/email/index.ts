@@ -47,6 +47,9 @@ interface SendOptions {
 
   /** Extra metadata */
   metadata?: Record<string, unknown>;
+
+  /** SES Configuration Set name (enables open/click/bounce tracking via SNS) */
+  configurationSetName?: string;
 }
 
 interface SendResult {
@@ -191,7 +194,7 @@ export async function sendEmail(options: SendOptions): Promise<SendResult> {
     let messageId: string;
 
     if (provider === 'ses') {
-      const result = await sendViaSes({ to: toArray, from, subject: options.subject, html: options.html, text: options.text });
+      const result = await sendViaSes({ to: toArray, from, subject: options.subject, html: options.html, text: options.text, configurationSetName: options.configurationSetName });
       messageId = result.messageId;
     } else {
       const result = await sendViaResend({ to: toArray, from, subject: options.subject, html: options.html, text: options.text });

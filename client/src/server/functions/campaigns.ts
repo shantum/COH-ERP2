@@ -366,11 +366,38 @@ export const sendTestEmail = createServerFn({ method: 'POST' })
         where: { id: data.campaignId },
       });
 
-      // Dynamically import email service (server-only)
-      const { sendEmail } = await import('../../../../server/src/services/emailService.js');
+      // Dynamically import services (server-only)
+      const { sendCustomerEmail } = await import('../../../../server/src/services/email/index.js');
+      const { renderCampaignEmail } = await import('../../../../server/src/services/campaigns/templates.js');
+      type TemplateProduct = import('../../../../server/src/services/campaigns/templates.js').TemplateProduct;
 
-      // Build HTML with UTM params
-      let html = campaign.htmlContent || '<p>No content yet</p>';
+      // If no HTML stored, render from template
+      let html = campaign.htmlContent || '';
+      if (!html) {
+        const productIds = (campaign.shopifyProductIds as string[]) || [];
+        let products: TemplateProduct[] = [];
+        if (productIds.length > 0) {
+          const dbProducts = await prisma.product.findMany({
+            where: { shopifyProductId: { in: productIds } },
+            select: {
+              name: true, imageUrl: true, shopifyHandle: true,
+              variations: { select: { skus: { select: { sellingPrice: true, mrp: true }, take: 1 } }, take: 1 },
+            },
+          });
+          products = dbProducts.filter(p => p.imageUrl && p.shopifyHandle).map(p => ({
+            title: p.name, imageUrl: p.imageUrl!,
+            price: p.variations[0]?.skus[0]?.sellingPrice ?? p.variations[0]?.skus[0]?.mrp ?? 0,
+            url: `https://creaturesofhabit.in/products/${p.shopifyHandle}`,
+          }));
+        }
+        html = renderCampaignEmail(campaign.templateKey, {
+          subject: campaign.subject, preheaderText: campaign.preheaderText ?? undefined,
+          heroHeadline: campaign.subject, bodyHtml: '<p>Your campaign content goes here.</p>',
+          products, ctaText: 'Shop Now', ctaUrl: 'https://creaturesofhabit.in',
+        });
+      }
+
+      // Apply UTM params
       html = appendUtmParams(html, {
         source: campaign.utmSource,
         medium: campaign.utmMedium,
@@ -379,14 +406,17 @@ export const sendTestEmail = createServerFn({ method: 'POST' })
         ...(campaign.utmTerm ? { term: campaign.utmTerm } : {}),
       });
 
-      const result = await sendEmail({
+      const result = await sendCustomerEmail({
         to: data.toEmail,
         subject: `[TEST] ${campaign.subject}`,
         html,
-        from: 'Creatures of Habit <noreply@creaturesofhabit.in>',
+        templateKey: 'campaign-test',
+        entityType: 'EmailCampaign',
+        entityId: data.campaignId,
+        configurationSetName: 'coh-campaigns',
       });
 
-      return { success: true, messageId: result?.id };
+      return { success: true, messageId: result.messageId };
     } catch (error: unknown) {
       serverLog.error({ domain: 'campaigns', fn: 'sendTestEmail' }, 'Failed to send test email', error);
       throw error;
@@ -453,9 +483,38 @@ export const sendCampaign = createServerFn({ method: 'POST' })
         skipDuplicates: true,
       });
 
-      // Build HTML with UTM
+      // Build HTML — render from template if not pre-rendered
+      const { sendCustomerEmail } = await import('../../../../server/src/services/email/index.js');
+      const { renderCampaignEmail } = await import('../../../../server/src/services/campaigns/templates.js');
+      type TemplateProduct = import('../../../../server/src/services/campaigns/templates.js').TemplateProduct;
+
+      let rawHtml = campaign.htmlContent || '';
+      if (!rawHtml) {
+        const productIds = (campaign.shopifyProductIds as string[]) || [];
+        let products: TemplateProduct[] = [];
+        if (productIds.length > 0) {
+          const dbProducts = await prisma.product.findMany({
+            where: { shopifyProductId: { in: productIds } },
+            select: {
+              name: true, imageUrl: true, shopifyHandle: true,
+              variations: { select: { skus: { select: { sellingPrice: true, mrp: true }, take: 1 } }, take: 1 },
+            },
+          });
+          products = dbProducts.filter(p => p.imageUrl && p.shopifyHandle).map(p => ({
+            title: p.name, imageUrl: p.imageUrl!,
+            price: p.variations[0]?.skus[0]?.sellingPrice ?? p.variations[0]?.skus[0]?.mrp ?? 0,
+            url: `https://creaturesofhabit.in/products/${p.shopifyHandle}`,
+          }));
+        }
+        rawHtml = renderCampaignEmail(campaign.templateKey, {
+          subject: campaign.subject, preheaderText: campaign.preheaderText ?? undefined,
+          heroHeadline: campaign.subject, bodyHtml: '<p>Your campaign content goes here.</p>',
+          products, ctaText: 'Shop Now', ctaUrl: 'https://creaturesofhabit.in',
+        });
+      }
+
       const utmCampaign = campaign.utmCampaign || slugify(campaign.name);
-      const html = appendUtmParams(campaign.htmlContent, {
+      const html = appendUtmParams(rawHtml, {
         source: campaign.utmSource,
         medium: campaign.utmMedium,
         campaign: utmCampaign,
@@ -464,7 +523,6 @@ export const sendCampaign = createServerFn({ method: 'POST' })
       });
 
       // Send in batches (fire-and-forget, update status async)
-      const { sendEmail } = await import('../../../../server/src/services/emailService.js');
       const BATCH_SIZE = 50;
 
       // Process async — don't block the response
@@ -475,19 +533,29 @@ export const sendCampaign = createServerFn({ method: 'POST' })
           await Promise.allSettled(
             batch.map(async (customer) => {
               try {
-                const result = await sendEmail({
+                const result = await sendCustomerEmail({
                   to: customer.email,
                   subject: campaign.subject,
                   html,
-                  from: 'Creatures of Habit <noreply@creaturesofhabit.in>',
+                  templateKey: 'campaign',
+                  entityType: 'EmailCampaign',
+                  entityId: data.id,
+                  metadata: { customerId: customer.id },
+                  configurationSetName: 'coh-campaigns',
                 });
 
-                await prisma.emailCampaignRecipient.update({
-                  where: { campaignId_customerId: { campaignId: data.id, customerId: customer.id } },
-                  data: { status: 'sent', sentAt: new Date(), emailLogId: result?.id },
-                });
-
-                sentCount++;
+                if (result.success) {
+                  await prisma.emailCampaignRecipient.update({
+                    where: { campaignId_customerId: { campaignId: data.id, customerId: customer.id } },
+                    data: { status: 'sent', sentAt: new Date(), emailLogId: result.emailLogId },
+                  });
+                  sentCount++;
+                } else {
+                  await prisma.emailCampaignRecipient.update({
+                    where: { campaignId_customerId: { campaignId: data.id, customerId: customer.id } },
+                    data: { status: 'bounced' },
+                  }).catch(() => {});
+                }
               } catch {
                 await prisma.emailCampaignRecipient.update({
                   where: { campaignId_customerId: { campaignId: data.id, customerId: customer.id } },
@@ -618,6 +686,72 @@ export const cancelCampaign = createServerFn({ method: 'POST' })
       return { success: true };
     } catch (error: unknown) {
       serverLog.error({ domain: 'campaigns', fn: 'cancelCampaign' }, 'Failed to cancel campaign', error);
+      throw error;
+    }
+  });
+
+/** Preview campaign — render template with real product data, return HTML */
+export const previewCampaign = createServerFn({ method: 'POST' })
+  .middleware([adminMiddleware])
+  .inputValidator((input: unknown) => z.object({
+    campaignId: z.string().uuid(),
+    heroHeadline: z.string().optional(),
+    bodyHtml: z.string().optional(),
+    ctaText: z.string().optional(),
+    ctaUrl: z.string().optional(),
+  }).parse(input))
+  .handler(async ({ data }): Promise<{ html: string }> => {
+    try {
+      const prisma = await getPrisma();
+      const campaign = await prisma.emailCampaign.findUniqueOrThrow({
+        where: { id: data.campaignId },
+      });
+
+      // Dynamically import the template renderer (server-only)
+      const { renderCampaignEmail } = await import('../../../../server/src/services/campaigns/templates.js');
+      type TemplateProduct = import('../../../../server/src/services/campaigns/templates.js').TemplateProduct;
+
+      // Fetch products if campaign has shopifyProductIds
+      const productIds = (campaign.shopifyProductIds as string[]) || [];
+      let products: TemplateProduct[] = [];
+
+      if (productIds.length > 0) {
+        const dbProducts = await prisma.product.findMany({
+          where: { shopifyProductId: { in: productIds } },
+          select: {
+            name: true,
+            imageUrl: true,
+            shopifyHandle: true,
+            variations: {
+              select: { skus: { select: { sellingPrice: true, mrp: true }, take: 1 } },
+              take: 1,
+            },
+          },
+        });
+
+        products = dbProducts
+          .filter(p => p.imageUrl && p.shopifyHandle)
+          .map(p => ({
+            title: p.name,
+            imageUrl: p.imageUrl!,
+            price: p.variations[0]?.skus[0]?.sellingPrice ?? p.variations[0]?.skus[0]?.mrp ?? 0,
+            url: `https://creaturesofhabit.in/products/${p.shopifyHandle}`,
+          }));
+      }
+
+      const html = renderCampaignEmail(campaign.templateKey, {
+        subject: campaign.subject,
+        preheaderText: campaign.preheaderText ?? undefined,
+        heroHeadline: data.heroHeadline || campaign.subject,
+        bodyHtml: data.bodyHtml || '<p>Your campaign content goes here.</p>',
+        products,
+        ctaText: data.ctaText || 'Shop Now',
+        ctaUrl: data.ctaUrl || 'https://creaturesofhabit.in',
+      });
+
+      return { html };
+    } catch (error: unknown) {
+      serverLog.error({ domain: 'campaigns', fn: 'previewCampaign' }, 'Failed to preview campaign', error);
       throw error;
     }
   });

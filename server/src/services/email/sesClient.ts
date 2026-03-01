@@ -1,17 +1,17 @@
-import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses';
+import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2';
 import { env } from '../../config/env.js';
 import logger from '../../utils/logger.js';
 
 const log = logger.child({ module: 'sesClient' });
 
-let client: SESClient | null = null;
+let client: SESv2Client | null = null;
 
-function getClient(): SESClient {
+function getClient(): SESv2Client {
   if (!client) {
     if (!env.AWS_SES_ACCESS_KEY_ID || !env.AWS_SES_SECRET_ACCESS_KEY) {
       throw new Error('AWS SES credentials not configured');
     }
-    client = new SESClient({
+    client = new SESv2Client({
       region: env.AWS_SES_REGION,
       credentials: {
         accessKeyId: env.AWS_SES_ACCESS_KEY_ID,
@@ -28,22 +28,26 @@ interface SesSendOptions {
   subject: string;
   html: string;
   text?: string;
+  configurationSetName?: string;
 }
 
 export async function sendViaSes(options: SesSendOptions): Promise<{ messageId: string }> {
-  const { to, from, subject, html, text } = options;
+  const { to, from, subject, html, text, configurationSetName } = options;
   const toAddresses = Array.isArray(to) ? to : [to];
 
   const command = new SendEmailCommand({
-    Source: from,
+    FromEmailAddress: from,
     Destination: { ToAddresses: toAddresses },
-    Message: {
-      Subject: { Data: subject, Charset: 'UTF-8' },
-      Body: {
-        Html: { Data: html, Charset: 'UTF-8' },
-        ...(text ? { Text: { Data: text, Charset: 'UTF-8' } } : {}),
+    Content: {
+      Simple: {
+        Subject: { Data: subject, Charset: 'UTF-8' },
+        Body: {
+          Html: { Data: html, Charset: 'UTF-8' },
+          ...(text ? { Text: { Data: text, Charset: 'UTF-8' } } : {}),
+        },
       },
     },
+    ...(configurationSetName ? { ConfigurationSetName: configurationSetName } : {}),
   });
 
   const response = await getClient().send(command);

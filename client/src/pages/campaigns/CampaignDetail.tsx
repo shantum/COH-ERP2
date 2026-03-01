@@ -16,6 +16,7 @@ import {
   sendCampaign,
   getAudiencePreview,
   getCampaignRecipients,
+  previewCampaign,
 } from '../../server/functions/campaigns';
 
 // ============================================
@@ -70,6 +71,7 @@ export default function CampaignDetail() {
   const sendCampaignFn = useServerFn(sendCampaign);
   const getAudiencePreviewFn = useServerFn(getAudiencePreview);
   const getCampaignRecipientsFn = useServerFn(getCampaignRecipients);
+  const previewCampaignFn = useServerFn(previewCampaign);
 
   const [utmExpanded, setUtmExpanded] = useState(false);
   const [recipientFilter, setRecipientFilter] = useState<string>('all');
@@ -124,6 +126,14 @@ export default function CampaignDetail() {
     }),
     enabled: campaign?.status === 'draft' || campaign?.status === 'scheduled',
     staleTime: 10_000,
+  });
+
+  // Email preview — re-renders when template or campaign changes
+  const { data: previewData } = useQuery({
+    queryKey: ['campaign', 'preview', campaignId, templateKey],
+    queryFn: () => previewCampaignFn({ data: { campaignId } }),
+    enabled: !!campaign && (campaign.status === 'draft' || campaign.status === 'scheduled'),
+    staleTime: 30_000,
   });
 
   // Recipients (for sent campaigns)
@@ -509,13 +519,22 @@ export default function CampaignDetail() {
             <span className="text-xs text-stone-400">{preheaderText || 'Preview text...'}</span>
           </div>
 
-          {/* Email body preview placeholder */}
-          <div className="bg-stone-200/50 rounded-xl border border-stone-200 flex-1 flex items-center justify-center min-h-[400px]">
-            <div className="text-center flex flex-col gap-2">
-              <span className="text-sm text-stone-400">Email preview will render here</span>
-              <span className="text-xs text-stone-400">Template: {templateKey} · {audiencePreview?.count || 0} recipients</span>
+          {/* Email body preview */}
+          {previewData?.html ? (
+            <iframe
+              srcDoc={previewData.html}
+              className="rounded-xl border border-stone-200 flex-1 min-h-[500px] w-full bg-white"
+              title="Email preview"
+              sandbox="allow-same-origin"
+            />
+          ) : (
+            <div className="bg-stone-200/50 rounded-xl border border-stone-200 flex-1 flex items-center justify-center min-h-[400px]">
+              <div className="text-center flex flex-col gap-2">
+                <span className="text-sm text-stone-400">Loading email preview...</span>
+                <span className="text-xs text-stone-400">Template: {templateKey} · {audiencePreview?.count || 0} recipients</span>
+              </div>
             </div>
-          </div>
+          )}
         </div>
       </div>
     </div>
