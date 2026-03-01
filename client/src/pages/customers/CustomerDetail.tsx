@@ -85,6 +85,9 @@ const ORDER_STATUS_CONFIG: Record<string, { bg: string; text: string; dot: strin
 // MAIN COMPONENT
 // ============================================
 
+const emptyOrders: never[] = [];
+const emptyTimeline: never[] = [];
+
 export default function CustomerDetail() {
     const { customerId } = Route.useParams();
     const navigate = useNavigate();
@@ -106,6 +109,8 @@ export default function CustomerDetail() {
     });
 
     const [now] = useState(() => Date.now());
+    const orders = customer?.orders ?? emptyOrders;
+    const revenueTimeline = customer?.revenueTimeline ?? emptyTimeline;
     const metrics = useMemo(() => {
         if (!customer) return null;
         const healthScore = calculateHealthScore(customer);
@@ -138,11 +143,10 @@ export default function CustomerDetail() {
         };
     }, [customer, now]);
 
-    // eslint-disable-next-line react-hooks/preserve-manual-memoization -- only orders sub-property is used
     const sizePreferences = useMemo(() => {
-        if (!customer?.orders) return [];
+        if (orders.length === 0) return [];
         const sizeCounts: Record<string, number> = {};
-        customer.orders.forEach((order) => {
+        orders.forEach((order) => {
             order.orderLines?.forEach((line) => {
                 const size = line.sku?.size;
                 if (size) {
@@ -154,7 +158,7 @@ export default function CustomerDetail() {
             .map(([size, count]) => ({ size, count }))
             .sort((a, b) => b.count - a.count)
             .slice(0, 5);
-    }, [customer?.orders]);
+    }, [orders]);
 
     const risks = useMemo(() => {
         if (!customer || !metrics) return [];
@@ -191,12 +195,11 @@ export default function CustomerDetail() {
         return items;
     }, [customer, metrics]);
 
-    // eslint-disable-next-line react-hooks/preserve-manual-memoization -- only orders sub-property is used
     const returnRtoStats = useMemo(() => {
-        if (!customer?.orders) return { returnOrders: 0, rtoOrders: 0 };
+        if (orders.length === 0) return { returnOrders: 0, rtoOrders: 0 };
         let returnOrders = 0;
         let rtoOrders = 0;
-        for (const order of customer.orders) {
+        for (const order of orders) {
             let hasReturn = false;
             let hasRto = false;
             for (const line of order.orderLines || []) {
@@ -207,35 +210,35 @@ export default function CustomerDetail() {
             if (hasRto) rtoOrders++;
         }
         return { returnOrders, rtoOrders };
-    }, [customer.orders]);
+    }, [orders]);
 
     // Filtered orders based on order filter
     const filteredOrders = useMemo(() => {
-        if (!customer?.orders) return [];
-        if (orderFilter === 'all') return customer.orders;
+        if (orders.length === 0) return [];
+        if (orderFilter === 'all') return orders;
         if (orderFilter === 'delivered') {
-            return customer.orders.filter((o) => o.status?.toLowerCase() === 'delivered');
+            return orders.filter((o) => o.status?.toLowerCase() === 'delivered');
         }
         // returns = orders with return lines or RTO
-        return customer.orders.filter((o) =>
+        return orders.filter((o) =>
             o.orderLines?.some((l) => l.returnStatus || l.rtoCondition || l.rtoInitiatedAt)
         );
-    }, [customer.orders, orderFilter]);
+    }, [orders, orderFilter]);
 
     const displayOrders = showAllOrders ? filteredOrders : filteredOrders.slice(0, 10);
 
     // Revenue trend from timeline (must be before early returns to satisfy hooks rules)
     const revenueTrend = useMemo(() => {
-        if (!customer?.revenueTimeline || customer.revenueTimeline.length < 2) return null;
-        const recent = customer.revenueTimeline.slice(-3);
-        const earlier = customer.revenueTimeline.slice(-6, -3);
+        if (revenueTimeline.length < 2) return null;
+        const recent = revenueTimeline.slice(-3);
+        const earlier = revenueTimeline.slice(-6, -3);
         if (earlier.length === 0) return null;
         const recentAvg = recent.reduce((s, d) => s + d.revenue, 0) / recent.length;
         const earlierAvg = earlier.reduce((s, d) => s + d.revenue, 0) / earlier.length;
         if (earlierAvg === 0) return null;
         const pct = Math.round(((recentAvg - earlierAvg) / earlierAvg) * 100);
         return pct;
-    }, [customer.revenueTimeline]);
+    }, [revenueTimeline]);
 
     // ============================================
     // LOADING STATE
