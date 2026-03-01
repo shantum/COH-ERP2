@@ -17,7 +17,7 @@ import {
     useMetaCampaigns, useMetaSummary, useMetaDailyTrend,
     useMetaAdsets, useMetaAds, useMetaAgeGender,
     useMetaPlacements, useMetaRegions, useMetaDevices,
-    useMetaProducts,
+    useMetaProducts, useMetaVideo, useMetaHourly,
 } from '../hooks/useMetaAds';
 import { compactThemeSmall } from '../utils/agGridHelpers';
 import { formatCurrency } from '../utils/formatting';
@@ -31,7 +31,7 @@ import type {
 // SHARED HELPERS
 // ============================================
 
-type MetaSubTab = 'overview' | 'campaigns' | 'audience' | 'placements' | 'creative' | 'landing-page' | 'products' | 'funnel';
+type MetaSubTab = 'overview' | 'campaigns' | 'audience' | 'placements' | 'creative' | 'video' | 'landing-page' | 'products' | 'funnel' | 'hourly';
 
 const SUB_TABS: { key: MetaSubTab; label: string }[] = [
     { key: 'overview', label: 'Overview' },
@@ -39,9 +39,11 @@ const SUB_TABS: { key: MetaSubTab; label: string }[] = [
     { key: 'audience', label: 'Audience' },
     { key: 'placements', label: 'Placements' },
     { key: 'creative', label: 'Creative' },
+    { key: 'video', label: 'Video' },
     { key: 'landing-page', label: 'Landing Page' },
     { key: 'products', label: 'Products' },
     { key: 'funnel', label: 'Funnel' },
+    { key: 'hourly', label: 'Hourly' },
 ];
 
 const DEFAULT_COL_DEF = { sortable: true, resizable: true };
@@ -1366,6 +1368,305 @@ function FunnelSubTab({ days }: { days: number }) {
 }
 
 // ============================================
+// VIDEO SUB-TAB
+// ============================================
+
+function VideoSubTab({ days }: { days: number }) {
+    const video = useMetaVideo(days);
+
+    if (video.isLoading) return <div className="space-y-5"><KPISkeleton /><ChartSkeleton /><GridSkeleton /></div>;
+    if (video.error) return <ErrorState error={video.error} />;
+
+    const rows = video.data ?? [];
+    if (rows.length === 0) {
+        return (
+            <div className="bg-white rounded-lg border border-stone-200 p-8 text-center">
+                <p className="text-stone-500">No video ads found in this period</p>
+            </div>
+        );
+    }
+
+    // KPIs
+    const totalPlays = rows.reduce((s, r) => s + r.plays, 0);
+    const totalThruPlays = rows.reduce((s, r) => s + r.thruPlays, 0);
+    const totalSpend = rows.reduce((s, r) => s + r.spend, 0);
+    const totalRevenue = rows.reduce((s, r) => s + r.purchaseValue, 0);
+    const thruPlayRate = totalPlays > 0 ? (totalThruPlays / totalPlays * 100) : 0;
+    const avgWatch = rows.length > 0 ? rows.reduce((s, r) => s + r.avgWatchTimeSec, 0) / rows.length : 0;
+    const videoRoas = totalSpend > 0 ? totalRevenue / totalSpend : 0;
+
+    // Dropoff curve (aggregate)
+    const aggP25 = rows.reduce((s, r) => s + r.p25, 0);
+    const aggP50 = rows.reduce((s, r) => s + r.p50, 0);
+    const aggP75 = rows.reduce((s, r) => s + r.p75, 0);
+    const aggP95 = rows.reduce((s, r) => s + r.p95, 0);
+    const aggP100 = rows.reduce((s, r) => s + r.p100, 0);
+
+    const dropoffData = [
+        { label: '25%', viewers: aggP25, pct: totalPlays > 0 ? (aggP25 / totalPlays * 100) : 0 },
+        { label: '50%', viewers: aggP50, pct: totalPlays > 0 ? (aggP50 / totalPlays * 100) : 0 },
+        { label: '75%', viewers: aggP75, pct: totalPlays > 0 ? (aggP75 / totalPlays * 100) : 0 },
+        { label: '95%', viewers: aggP95, pct: totalPlays > 0 ? (aggP95 / totalPlays * 100) : 0 },
+        { label: '100%', viewers: aggP100, pct: totalPlays > 0 ? (aggP100 / totalPlays * 100) : 0 },
+    ];
+
+    const sortedRows = [...rows].sort((a, b) => b.spend - a.spend);
+
+    return (
+        <div className="space-y-5">
+            {/* KPIs */}
+            <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+                {[
+                    { label: 'Total Plays', value: fmt(totalPlays) },
+                    { label: 'ThruPlay Rate', value: fmtPct(thruPlayRate) },
+                    { label: 'Avg Watch Time', value: `${avgWatch.toFixed(1)}s` },
+                    { label: 'Video Spend', value: formatCurrency(totalSpend) },
+                    { label: 'Video ROAS', value: videoRoas > 0 ? `${videoRoas.toFixed(2)}x` : '-' },
+                ].map(kpi => (
+                    <div key={kpi.label} className="bg-white rounded-lg border border-stone-200 p-4">
+                        <p className="text-[11px] text-stone-400 uppercase tracking-wider">{kpi.label}</p>
+                        <p className="text-2xl font-bold text-stone-900 mt-1">{kpi.value}</p>
+                    </div>
+                ))}
+            </div>
+
+            {/* Dropoff Chart */}
+            <div className="bg-white rounded-lg border border-stone-200 p-5">
+                <h3 className="text-sm font-semibold text-stone-800">Video Completion Dropoff</h3>
+                <p className="text-xs text-stone-400 mt-0.5">Percentage of viewers reaching each milestone</p>
+                <div className="mt-4 space-y-2.5">
+                    {dropoffData.map(d => (
+                        <div key={d.label} className="flex items-center gap-3">
+                            <span className="text-xs font-mono text-stone-500 w-10 text-right">{d.label}</span>
+                            <div className="flex-1 bg-stone-100 rounded h-7 relative">
+                                <div
+                                    className="h-7 rounded bg-blue-500 transition-all"
+                                    style={{ width: `${Math.max(d.pct, 2)}%`, opacity: 0.7 + (d.pct / 400) }}
+                                />
+                                <span className="absolute inset-y-0 right-2 flex items-center text-xs font-mono text-stone-600">
+                                    {fmt(d.viewers)} ({d.pct.toFixed(1)}%)
+                                </span>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            </div>
+
+            {/* Video Ads Table */}
+            <div className="bg-white rounded-lg border border-stone-200 p-5">
+                <h3 className="text-sm font-semibold text-stone-800 mb-3">Video Ads ({rows.length})</h3>
+                <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                        <thead>
+                            <tr className="border-b border-stone-200 text-left">
+                                <th className="py-2 pr-3 text-xs font-medium text-stone-500 w-10"></th>
+                                <th className="py-2 pr-3 text-xs font-medium text-stone-500">Ad Name</th>
+                                <th className="py-2 pr-3 text-xs font-medium text-stone-500 text-right">Spend</th>
+                                <th className="py-2 pr-3 text-xs font-medium text-stone-500 text-right">Plays</th>
+                                <th className="py-2 pr-3 text-xs font-medium text-stone-500 text-right">ThruPlay%</th>
+                                <th className="py-2 pr-3 text-xs font-medium text-stone-500 text-right">Avg Watch</th>
+                                <th className="py-2 pr-3 text-xs font-medium text-stone-500 text-right">P25%</th>
+                                <th className="py-2 pr-3 text-xs font-medium text-stone-500 text-right">P50%</th>
+                                <th className="py-2 pr-3 text-xs font-medium text-stone-500 text-right">P75%</th>
+                                <th className="py-2 pr-3 text-xs font-medium text-stone-500 text-right">P100%</th>
+                                <th className="py-2 text-xs font-medium text-stone-500 text-right">ROAS</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {sortedRows.map(r => {
+                                const tp = r.plays > 0 ? (r.thruPlays / r.plays * 100) : 0;
+                                return (
+                                    <tr key={r.adId} className="border-b border-stone-100 hover:bg-stone-50">
+                                        <td className="py-2 pr-3">
+                                            {r.imageUrl ? (
+                                                <img src={r.imageUrl} alt="" className="w-8 h-8 rounded object-cover" loading="lazy" referrerPolicy="no-referrer" />
+                                            ) : (
+                                                <div className="w-8 h-8 rounded bg-stone-100" />
+                                            )}
+                                        </td>
+                                        <td className="py-2 pr-3">
+                                            <p className="font-medium text-stone-800 truncate max-w-[220px]">{r.adName}</p>
+                                            <p className="text-[11px] text-stone-400 truncate max-w-[220px]">{r.campaignName}</p>
+                                        </td>
+                                        <td className="py-2 pr-3 text-right font-mono text-stone-800">{formatCurrency(r.spend)}</td>
+                                        <td className="py-2 pr-3 text-right font-mono text-stone-800">{fmt(r.plays)}</td>
+                                        <td className="py-2 pr-3 text-right font-mono text-stone-800">{fmtPct(tp)}</td>
+                                        <td className="py-2 pr-3 text-right font-mono text-stone-800">{r.avgWatchTimeSec.toFixed(1)}s</td>
+                                        <td className="py-2 pr-3 text-right font-mono text-stone-600">{r.plays > 0 ? fmtPct(r.p25 / r.plays * 100) : '-'}</td>
+                                        <td className="py-2 pr-3 text-right font-mono text-stone-600">{r.plays > 0 ? fmtPct(r.p50 / r.plays * 100) : '-'}</td>
+                                        <td className="py-2 pr-3 text-right font-mono text-stone-600">{r.plays > 0 ? fmtPct(r.p75 / r.plays * 100) : '-'}</td>
+                                        <td className="py-2 pr-3 text-right font-mono text-stone-600">{r.plays > 0 ? fmtPct(r.p100 / r.plays * 100) : '-'}</td>
+                                        <td className="py-2 text-right"><RoasBadge value={r.roas} /></td>
+                                    </tr>
+                                );
+                            })}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// ============================================
+// HOURLY SUB-TAB
+// ============================================
+
+const HOUR_LABELS = [
+    '12am', '1am', '2am', '3am', '4am', '5am', '6am', '7am', '8am', '9am', '10am', '11am',
+    '12pm', '1pm', '2pm', '3pm', '4pm', '5pm', '6pm', '7pm', '8pm', '9pm', '10pm', '11pm',
+];
+
+function HourlySubTab({ days }: { days: number }) {
+    const hourly = useMetaHourly(days);
+    const [metric, setMetric] = useState<'spend' | 'roas' | 'purchases' | 'ctr'>('spend');
+
+    if (hourly.isLoading) return <div className="space-y-5"><ChartSkeleton /><GridSkeleton /></div>;
+    if (hourly.error) return <ErrorState error={hourly.error} />;
+
+    const rows = hourly.data ?? [];
+    if (rows.length === 0) {
+        return (
+            <div className="bg-white rounded-lg border border-stone-200 p-8 text-center">
+                <p className="text-stone-500">No hourly data available for this period</p>
+            </div>
+        );
+    }
+
+    // Build 24-hour array, summing data per hour
+    const hourData = Array.from({ length: 24 }, (_, i) => ({
+        hour: i,
+        label: HOUR_LABELS[i],
+        spend: 0, impressions: 0, clicks: 0, purchases: 0, purchaseValue: 0, roas: 0,
+    }));
+
+    for (const r of rows) {
+        // Meta returns hour as "00:00:00" - "23:00:00" format
+        const h = parseInt(r.hour.split(':')[0], 10);
+        if (h >= 0 && h < 24) {
+            hourData[h].spend += r.spend;
+            hourData[h].impressions += r.impressions;
+            hourData[h].clicks += r.clicks;
+            hourData[h].purchases += r.purchases;
+            hourData[h].purchaseValue += r.purchaseValue;
+        }
+    }
+    // Compute derived metrics
+    for (const h of hourData) {
+        h.roas = h.spend > 0 ? Math.round((h.purchaseValue / h.spend) * 100) / 100 : 0;
+    }
+
+    const getValue = (h: typeof hourData[0]) => {
+        if (metric === 'spend') return h.spend;
+        if (metric === 'roas') return h.roas;
+        if (metric === 'purchases') return h.purchases;
+        return h.impressions > 0 ? (h.clicks / h.impressions * 100) : 0;
+    };
+
+    const maxVal = Math.max(...hourData.map(getValue), 1);
+    const bestHour = hourData.reduce((best, h) => getValue(h) > getValue(best) ? h : best, hourData[0]);
+    const worstHour = hourData.reduce((worst, h) => {
+        if (getValue(h) <= 0) return worst;
+        return getValue(h) < getValue(worst) || getValue(worst) <= 0 ? h : worst;
+    }, hourData[0]);
+
+    const getColor = (val: number) => {
+        const intensity = maxVal > 0 ? val / maxVal : 0;
+        if (intensity > 0.75) return 'bg-blue-600 text-white';
+        if (intensity > 0.5) return 'bg-blue-400 text-white';
+        if (intensity > 0.25) return 'bg-blue-200 text-stone-800';
+        if (intensity > 0) return 'bg-blue-100 text-stone-600';
+        return 'bg-stone-50 text-stone-400';
+    };
+
+    const formatVal = (val: number) => {
+        if (metric === 'spend') return formatCurrency(val);
+        if (metric === 'roas') return val > 0 ? `${val.toFixed(2)}x` : '-';
+        if (metric === 'purchases') return fmt(val);
+        return fmtPct(val);
+    };
+
+    return (
+        <div className="space-y-5">
+            {/* Best/Worst Hours */}
+            <div className="grid grid-cols-2 gap-3">
+                <div className="bg-white rounded-lg border border-stone-200 p-4">
+                    <p className="text-[11px] text-stone-400 uppercase tracking-wider">Best Hour ({metric})</p>
+                    <p className="text-2xl font-bold text-green-600 mt-1">{HOUR_LABELS[bestHour.hour]}</p>
+                    <p className="text-xs text-stone-500 mt-0.5">{formatVal(getValue(bestHour))}</p>
+                </div>
+                <div className="bg-white rounded-lg border border-stone-200 p-4">
+                    <p className="text-[11px] text-stone-400 uppercase tracking-wider">Worst Hour ({metric})</p>
+                    <p className="text-2xl font-bold text-red-600 mt-1">{HOUR_LABELS[worstHour.hour]}</p>
+                    <p className="text-xs text-stone-500 mt-0.5">{formatVal(getValue(worstHour))}</p>
+                </div>
+            </div>
+
+            {/* Heatmap */}
+            <div className="bg-white rounded-lg border border-stone-200 p-5">
+                <div className="flex items-center justify-between mb-4">
+                    <div>
+                        <h3 className="text-sm font-semibold text-stone-800">Hourly Performance Heatmap</h3>
+                        <p className="text-xs text-stone-400 mt-0.5">Advertiser timezone ({days === 1 ? 'today' : days === 2 ? 'yesterday' : `last ${days} days`})</p>
+                    </div>
+                    <div className="flex gap-1">
+                        {(['spend', 'roas', 'purchases', 'ctr'] as const).map(m => (
+                            <button
+                                key={m}
+                                onClick={() => setMetric(m)}
+                                className={`px-2.5 py-1 text-xs font-medium rounded transition-colors ${
+                                    metric === m ? 'bg-stone-800 text-white' : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+                                }`}
+                            >
+                                {m === 'ctr' ? 'CTR' : m.charAt(0).toUpperCase() + m.slice(1)}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+                <div className="grid grid-cols-12 gap-1.5">
+                    {hourData.map(h => {
+                        const val = getValue(h);
+                        return (
+                            <div
+                                key={h.hour}
+                                className={`rounded-md p-2 text-center ${getColor(val)}`}
+                                title={`${HOUR_LABELS[h.hour]}: ${formatVal(val)}`}
+                            >
+                                <p className="text-[10px] font-medium opacity-75">{h.label}</p>
+                                <p className="text-xs font-bold mt-0.5">{formatVal(val)}</p>
+                            </div>
+                        );
+                    })}
+                </div>
+            </div>
+
+            {/* Hourly Bar Chart */}
+            <div className="bg-white rounded-lg border border-stone-200 p-5">
+                <h3 className="text-sm font-semibold text-stone-800 mb-4">Hourly Spend & ROAS</h3>
+                <div className="h-64">
+                    <ResponsiveContainer width="100%" height="100%">
+                        <ComposedChart data={hourData}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#e7e5e4" />
+                            <XAxis dataKey="label" tick={{ fill: '#78716c', fontSize: 10 }} interval={1} />
+                            <YAxis yAxisId="left" tick={{ fill: '#78716c', fontSize: 11 }} tickFormatter={v => `₹${(v / 1000).toFixed(0)}k`} />
+                            <YAxis yAxisId="right" orientation="right" tick={{ fill: '#78716c', fontSize: 11 }} tickFormatter={v => `${v}x`} />
+                            <Tooltip
+                                formatter={(value: number | undefined, name?: string) => [
+                                    name === 'roas' ? `${(value ?? 0).toFixed(2)}x` : formatCurrency(value ?? 0),
+                                    name === 'roas' ? 'ROAS' : 'Spend',
+                                ]}
+                            />
+                            <Bar yAxisId="left" dataKey="spend" fill="#1877F2" name="spend" radius={[2, 2, 0, 0]} />
+                            <Line yAxisId="right" dataKey="roas" stroke="#16a34a" strokeWidth={2} dot={false} name="roas" />
+                        </ComposedChart>
+                    </ResponsiveContainer>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// ============================================
 // MAIN COMPONENT
 // ============================================
 
@@ -1397,9 +1698,11 @@ export default function MetaAdsAnalysis({ days }: { days: number }) {
             {subTab === 'audience' && <AudienceSubTab days={days} />}
             {subTab === 'placements' && <PlacementsSubTab days={days} />}
             {subTab === 'creative' && <CreativeSubTab days={days} />}
+            {subTab === 'video' && <VideoSubTab days={days} />}
             {subTab === 'landing-page' && <LandingPageSubTab days={days} />}
             {subTab === 'products' && <ProductsSubTab days={days} />}
             {subTab === 'funnel' && <FunnelSubTab days={days} />}
+            {subTab === 'hourly' && <HourlySubTab days={days} />}
         </div>
     );
 }

@@ -61,6 +61,12 @@ export interface MetaAccountSummary {
     roas: number;
     linkClicks: number;
     landingPageViews: number;
+    outboundClicks: number;
+    uniqueClicks: number;
+    addPaymentInfo: number;
+    addToWishlist: number;
+    searches: number;
+    metaRoas: number;
 }
 
 export interface MetaAdsetRow {
@@ -98,6 +104,11 @@ export interface MetaAdRow {
     imageUrl: string | null;
     linkClicks: number;
     landingPageViews: number;
+    qualityRanking: string | null;
+    engagementRanking: string | null;
+    conversionRanking: string | null;
+    outboundClicks: number;
+    uniqueClicks: number;
 }
 
 export interface MetaProductRow {
@@ -158,6 +169,36 @@ export interface MetaRegionRow {
 
 export interface MetaDeviceRow {
     device: string;
+    spend: number;
+    impressions: number;
+    clicks: number;
+    purchases: number;
+    purchaseValue: number;
+    roas: number;
+}
+
+export interface MetaVideoRow {
+    adId: string;
+    adName: string;
+    campaignName: string;
+    spend: number;
+    impressions: number;
+    plays: number;
+    thruPlays: number;
+    p25: number;
+    p50: number;
+    p75: number;
+    p95: number;
+    p100: number;
+    avgWatchTimeSec: number;
+    purchases: number;
+    purchaseValue: number;
+    roas: number;
+    imageUrl: string | null;
+}
+
+export interface MetaHourlyRow {
+    hour: string;
     spend: number;
     impressions: number;
     clicks: number;
@@ -503,4 +544,26 @@ export const getMetaProducts = createServerFn({ method: 'POST' })
         }
 
         return result;
+    });
+
+/**
+ * Video ad performance — completion rates, watch time, dropoff
+ */
+export const getMetaVideo = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => daysInputSchema.parse(input))
+    .handler(async ({ data }): Promise<MetaVideoRow[]> => {
+        const { getVideoInsights } = await getMetaClient();
+        return getVideoInsights(data.days);
+    });
+
+/**
+ * Hourly performance breakdown — which hours perform best
+ */
+export const getMetaHourly = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => daysInputSchema.parse(input))
+    .handler(async ({ data }): Promise<MetaHourlyRow[]> => {
+        const { getHourlyInsights } = await getMetaClient();
+        return getHourlyInsights(data.days);
     });

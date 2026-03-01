@@ -8,7 +8,7 @@ import {
     getMetaCampaigns, getMetaDailyTrend, getMetaSummary,
     getMetaAdsets, getMetaAds, getMetaAgeGender,
     getMetaPlacements, getMetaRegions, getMetaDevices,
-    getMetaProducts,
+    getMetaProducts, getMetaVideo, getMetaHourly,
 } from '../server/functions/metaAds';
 
 const STALE_TIME = 5 * 60 * 1000;
@@ -98,6 +98,24 @@ export function useMetaProducts(days: number) {
     const fn = useServerFn(getMetaProducts);
     return useQuery({
         queryKey: ['meta-ads', 'products', days],
+        queryFn: () => fn({ data: { days } }),
+        staleTime: STALE_TIME,
+    });
+}
+
+export function useMetaVideo(days: number) {
+    const fn = useServerFn(getMetaVideo);
+    return useQuery({
+        queryKey: ['meta-ads', 'video', days],
+        queryFn: () => fn({ data: { days } }),
+        staleTime: STALE_TIME,
+    });
+}
+
+export function useMetaHourly(days: number) {
+    const fn = useServerFn(getMetaHourly);
+    return useQuery({
+        queryKey: ['meta-ads', 'hourly', days],
         queryFn: () => fn({ data: { days } }),
         staleTime: STALE_TIME,
     });

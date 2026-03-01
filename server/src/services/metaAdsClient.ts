@@ -217,7 +217,7 @@ export async function getAccountSummary(days: number): Promise<MetaAccountSummar
     if (cached) return cached;
 
     const { since, until } = getDateRange(days);
-    const fields = 'spend,impressions,reach,frequency,clicks,cpc,cpm,ctr,actions,action_values';
+    const fields = 'spend,impressions,reach,frequency,clicks,cpc,cpm,ctr,actions,action_values,outbound_clicks,unique_clicks,purchase_roas';
 
     const url = `${META_BASE_URL}/${META_AD_ACCOUNT_ID}/insights`
         + `?fields=${fields}`
@@ -244,6 +244,12 @@ export async function getAccountSummary(days: number): Promise<MetaAccountSummar
         roas: 0,
         linkClicks: extractActionValue(raw?.actions, 'link_click'),
         landingPageViews: extractActionValue(raw?.actions, 'landing_page_view'),
+        outboundClicks: raw?.outbound_clicks?.[0] ? Number(raw.outbound_clicks[0].value) : 0,
+        uniqueClicks: Number(raw?.unique_clicks ?? 0),
+        addPaymentInfo: extractActionValue(raw?.actions, 'add_payment_info'),
+        addToWishlist: extractActionValue(raw?.actions, 'add_to_wishlist'),
+        searches: extractActionValue(raw?.actions, 'search'),
+        metaRoas: raw?.purchase_roas?.[0] ? Number(raw.purchase_roas[0].value) : 0,
     };
     if (summary.spend > 0) {
         summary.roas = Math.round((summary.purchaseValue / summary.spend) * 100) / 100;
@@ -347,6 +353,8 @@ export async function getAdInsights(days: number): Promise<MetaAdRow[]> {
         'ad_name', 'ad_id',
         'spend', 'impressions', 'clicks', 'cpc', 'ctr',
         'actions', 'action_values',
+        'quality_ranking', 'engagement_rate_ranking', 'conversion_rate_ranking',
+        'outbound_clicks', 'unique_clicks',
     ].join(',');
 
     const url = `${META_BASE_URL}/${META_AD_ACCOUNT_ID}/insights`
@@ -527,6 +535,90 @@ export async function getProductInsights(days: number): Promise<MetaProductRow[]
 }
 
 /**
+ * Get video ad performance — completion rates, watch time, dropoff curve.
+ * Only returns ads that have video plays.
+ */
+export async function getVideoInsights(days: number): Promise<MetaVideoRow[]> {
+    const cacheKey = `meta:video:${days}`;
+    const cached = getCached<MetaVideoRow[]>(cacheKey);
+    if (cached) return cached;
+
+    const { since, until } = getDateRange(days);
+    const fields = [
+        'ad_name', 'ad_id', 'campaign_name',
+        'spend', 'impressions', 'actions', 'action_values',
+        'video_play_actions', 'video_thruplay_actions',
+        'video_p25_watched_actions', 'video_p50_watched_actions',
+        'video_p75_watched_actions', 'video_p95_watched_actions',
+        'video_p100_watched_actions', 'video_avg_time_watched_actions',
+    ].join(',');
+
+    const url = `${META_BASE_URL}/${META_AD_ACCOUNT_ID}/insights`
+        + `?fields=${fields}`
+        + `&time_range={"since":"${since}","until":"${until}"}`
+        + `&level=ad`
+        + `&limit=200`
+        + `&access_token=${META_ACCESS_TOKEN}`;
+
+    const response = await fetchWithRetry<MetaInsightsResponse<RawVideoRow>>(url, 'video-insights');
+
+    let allData = response.data ?? [];
+    let nextUrl = response.paging?.next;
+    while (nextUrl) {
+        const page = await fetchWithRetry<MetaInsightsResponse<RawVideoRow>>(nextUrl, 'video-insights-page');
+        allData = allData.concat(page.data ?? []);
+        nextUrl = page.paging?.next;
+    }
+
+    // Filter to only ads with video plays
+    const videoData = allData.filter(r => r.video_play_actions && r.video_play_actions.length > 0);
+
+    // Fetch thumbnails
+    const adIds = [...new Set(videoData.map(r => r.ad_id))];
+    const thumbnails = await fetchAdCreativeThumbnails(adIds);
+
+    const rows = videoData.map(raw => ({
+        ...parseVideoRow(raw),
+        imageUrl: thumbnails.get(raw.ad_id) ?? null,
+    }));
+    setCache(cacheKey, rows, META_CACHE_TTL);
+    return rows;
+}
+
+/**
+ * Get hourly performance breakdown — which hours perform best.
+ */
+export async function getHourlyInsights(days: number): Promise<MetaHourlyRow[]> {
+    const cacheKey = `meta:hourly:${days}`;
+    const cached = getCached<MetaHourlyRow[]>(cacheKey);
+    if (cached) return cached;
+
+    const { since, until } = getDateRange(days);
+    const fields = 'spend,impressions,clicks,actions,action_values';
+
+    const url = `${META_BASE_URL}/${META_AD_ACCOUNT_ID}/insights`
+        + `?fields=${fields}`
+        + `&time_range={"since":"${since}","until":"${until}"}`
+        + `&breakdowns=hourly_stats_aggregated_by_advertiser_time_zone`
+        + `&limit=100`
+        + `&access_token=${META_ACCESS_TOKEN}`;
+
+    const response = await fetchWithRetry<MetaInsightsResponse<RawHourlyRow>>(url, 'hourly-insights');
+
+    let allData = response.data ?? [];
+    let nextUrl = response.paging?.next;
+    while (nextUrl) {
+        const page = await fetchWithRetry<MetaInsightsResponse<RawHourlyRow>>(nextUrl, 'hourly-insights-page');
+        allData = allData.concat(page.data ?? []);
+        nextUrl = page.paging?.next;
+    }
+
+    const rows = allData.map(parseHourlyRow);
+    setCache(cacheKey, rows, META_CACHE_TTL);
+    return rows;
+}
+
+/**
  * Refresh the long-lived token (call before it expires, ~every 50 days).
  * Returns the new token string.
  */
@@ -591,6 +683,12 @@ export interface MetaAccountSummary {
     roas: number;
     linkClicks: number;
     landingPageViews: number;
+    outboundClicks: number;
+    uniqueClicks: number;
+    addPaymentInfo: number;
+    addToWishlist: number;
+    searches: number;
+    metaRoas: number;
 }
 
 export interface MetaAdsetRow {
@@ -628,6 +726,11 @@ export interface MetaAdRow {
     imageUrl: string | null;
     linkClicks: number;
     landingPageViews: number;
+    qualityRanking: string | null;
+    engagementRanking: string | null;
+    conversionRanking: string | null;
+    outboundClicks: number;
+    uniqueClicks: number;
 }
 
 export interface MetaProductRow {
@@ -697,6 +800,36 @@ export interface MetaDeviceRow {
     roas: number;
 }
 
+export interface MetaVideoRow {
+    adId: string;
+    adName: string;
+    campaignName: string;
+    spend: number;
+    impressions: number;
+    plays: number;
+    thruPlays: number;
+    p25: number;
+    p50: number;
+    p75: number;
+    p95: number;
+    p100: number;
+    avgWatchTimeSec: number;
+    purchases: number;
+    purchaseValue: number;
+    roas: number;
+    imageUrl: string | null;
+}
+
+export interface MetaHourlyRow {
+    hour: string;
+    spend: number;
+    impressions: number;
+    clicks: number;
+    purchases: number;
+    purchaseValue: number;
+    roas: number;
+}
+
 // ============================================
 // RAW TYPES & PARSERS
 // ============================================
@@ -732,6 +865,9 @@ interface RawSummaryRow {
     ctr?: string;
     actions?: MetaAction[];
     action_values?: MetaAction[];
+    outbound_clicks?: Array<{action_type: string; value: string}>;
+    unique_clicks?: string;
+    purchase_roas?: Array<{action_type: string; value: string}>;
 }
 
 interface RawMetaDailyRow {
@@ -774,6 +910,11 @@ interface RawAdRow {
     ctr: string;
     actions?: MetaAction[];
     action_values?: MetaAction[];
+    quality_ranking?: string;
+    engagement_rate_ranking?: string;
+    conversion_rate_ranking?: string;
+    outbound_clicks?: Array<{action_type: string; value: string}>;
+    unique_clicks?: string;
 }
 
 interface RawAgeGenderRow {
@@ -824,6 +965,33 @@ interface RawProductRow {
     clicks: string;
     cpc?: string;
     ctr?: string;
+}
+
+interface RawVideoRow {
+    ad_id: string;
+    ad_name: string;
+    campaign_name: string;
+    spend: string;
+    impressions: string;
+    actions?: MetaAction[];
+    action_values?: MetaAction[];
+    video_play_actions?: MetaAction[];
+    video_thruplay_actions?: MetaAction[];
+    video_p25_watched_actions?: MetaAction[];
+    video_p50_watched_actions?: MetaAction[];
+    video_p75_watched_actions?: MetaAction[];
+    video_p95_watched_actions?: MetaAction[];
+    video_p100_watched_actions?: MetaAction[];
+    video_avg_time_watched_actions?: MetaAction[];
+}
+
+interface RawHourlyRow {
+    hourly_stats_aggregated_by_advertiser_time_zone: string;
+    spend: string;
+    impressions: string;
+    clicks: string;
+    actions?: MetaAction[];
+    action_values?: MetaAction[];
 }
 
 function extractActionValue(actions: MetaAction[] | undefined, actionType: string): number {
@@ -915,6 +1083,11 @@ function parseAdRow(raw: RawAdRow): Omit<MetaAdRow, 'imageUrl'> {
         roas: spend > 0 ? Math.round((purchaseValue / spend) * 100) / 100 : 0,
         linkClicks: extractActionValue(raw.actions, 'link_click'),
         landingPageViews: extractActionValue(raw.actions, 'landing_page_view'),
+        qualityRanking: raw.quality_ranking ?? null,
+        engagementRanking: raw.engagement_rate_ranking ?? null,
+        conversionRanking: raw.conversion_rate_ranking ?? null,
+        outboundClicks: raw.outbound_clicks?.[0] ? Number(raw.outbound_clicks[0].value) : 0,
+        uniqueClicks: Number(raw.unique_clicks ?? 0),
     };
 }
 
@@ -1024,5 +1197,50 @@ function parseProductRow(raw: RawProductRow): MetaProductRow {
         clicks,
         cpc: Number(raw.cpc ?? (clicks > 0 ? spend / clicks : 0)),
         ctr: Number(raw.ctr ?? (impressions > 0 ? (clicks / impressions) * 100 : 0)),
+    };
+}
+
+function extractVideoActionValue(actions: MetaAction[] | undefined): number {
+    if (!actions || actions.length === 0) return 0;
+    // Video action arrays typically have a single entry with action_type "video_view"
+    return Number(actions[0].value);
+}
+
+function parseVideoRow(raw: RawVideoRow): Omit<MetaVideoRow, 'imageUrl'> {
+    const spend = Number(raw.spend);
+    const purchases = extractActionValue(raw.actions, 'purchase');
+    const purchaseValue = extractActionValue(raw.action_values, 'purchase');
+    return {
+        adId: raw.ad_id,
+        adName: raw.ad_name,
+        campaignName: raw.campaign_name,
+        spend,
+        impressions: Number(raw.impressions),
+        plays: extractVideoActionValue(raw.video_play_actions),
+        thruPlays: extractVideoActionValue(raw.video_thruplay_actions),
+        p25: extractVideoActionValue(raw.video_p25_watched_actions),
+        p50: extractVideoActionValue(raw.video_p50_watched_actions),
+        p75: extractVideoActionValue(raw.video_p75_watched_actions),
+        p95: extractVideoActionValue(raw.video_p95_watched_actions),
+        p100: extractVideoActionValue(raw.video_p100_watched_actions),
+        avgWatchTimeSec: extractVideoActionValue(raw.video_avg_time_watched_actions),
+        purchases,
+        purchaseValue,
+        roas: spend > 0 ? Math.round((purchaseValue / spend) * 100) / 100 : 0,
+    };
+}
+
+function parseHourlyRow(raw: RawHourlyRow): MetaHourlyRow {
+    const spend = Number(raw.spend);
+    const purchases = extractActionValue(raw.actions, 'purchase');
+    const purchaseValue = extractActionValue(raw.action_values, 'purchase');
+    return {
+        hour: raw.hourly_stats_aggregated_by_advertiser_time_zone,
+        spend,
+        impressions: Number(raw.impressions),
+        clicks: Number(raw.clicks),
+        purchases,
+        purchaseValue,
+        roas: spend > 0 ? Math.round((purchaseValue / spend) * 100) / 100 : 0,
     };
 }
