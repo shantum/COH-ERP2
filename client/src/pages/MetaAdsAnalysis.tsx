@@ -12,7 +12,7 @@ import {
 } from 'recharts';
 import { AgGridReact } from 'ag-grid-react';
 import type { ColDef, ValueFormatterParams } from 'ag-grid-community';
-import { AlertCircle } from 'lucide-react';
+import { AlertCircle, ChevronDown, ChevronRight } from 'lucide-react';
 import {
     useMetaCampaigns, useMetaSummary, useMetaDailyTrend,
     useMetaAdsets, useMetaAds, useMetaAgeGender,
@@ -968,21 +968,138 @@ function LandingPageSubTab({ days }: { days: number }) {
 // PRODUCTS SUB-TAB
 // ============================================
 
-const ProductThumbnail = React.memo(function ProductThumbnail(props: { data?: MetaProductEnrichedRow }) {
-    const url = props.data?.imageUrl;
-    if (!url) return <div className="w-10 h-10 rounded bg-stone-100" />;
-    return <img src={url} alt="" className="w-10 h-10 rounded object-cover" loading="lazy" />;
-});
+interface ProductGroupRow {
+    productName: string;
+    imageUrl: string | null;
+    variations: number;
+    children: MetaProductEnrichedRow[];
+    spend: number;
+    impressions: number;
+    clicks: number;
+    ctr: number;
+    orders: number;
+    unitsSold: number;
+    revenue: number;
+    roas: number;
+}
+
+function groupByProduct(data: MetaProductEnrichedRow[]): ProductGroupRow[] {
+    const groups = new Map<string, ProductGroupRow>();
+    for (const row of data) {
+        const name = row.productName ?? row.productId;
+        const existing = groups.get(name);
+        if (existing) {
+            existing.variations += 1;
+            existing.children.push(row);
+            existing.spend += row.spend;
+            existing.impressions += row.impressions;
+            existing.clicks += row.clicks;
+            existing.orders += row.orders;
+            existing.unitsSold += row.unitsSold;
+            existing.revenue += row.revenue;
+            if (!existing.imageUrl && row.imageUrl) existing.imageUrl = row.imageUrl;
+        } else {
+            groups.set(name, {
+                productName: name,
+                imageUrl: row.imageUrl,
+                variations: 1,
+                children: [row],
+                spend: row.spend,
+                impressions: row.impressions,
+                clicks: row.clicks,
+                ctr: 0,
+                orders: row.orders,
+                unitsSold: row.unitsSold,
+                revenue: row.revenue,
+                roas: 0,
+            });
+        }
+    }
+    // Recompute derived fields
+    for (const g of groups.values()) {
+        g.ctr = g.impressions > 0 ? Math.round((g.clicks / g.impressions) * 10000) / 100 : 0;
+        g.roas = g.spend > 0 ? Math.round((g.revenue / g.spend) * 100) / 100 : 0;
+    }
+    return [...groups.values()];
+}
+
+const roasColor = (v: number) => {
+    if (v >= 3) return 'text-green-600 font-semibold';
+    if (v >= 1.5) return 'text-amber-600 font-semibold';
+    if (v > 0) return 'text-red-600 font-semibold';
+    return 'text-stone-400';
+};
+
+function ProductAccordionRow({ group, defaultOpen }: { group: ProductGroupRow; defaultOpen?: boolean }) {
+    const [open, setOpen] = useState(defaultOpen ?? false);
+    const hasChildren = group.children.length > 1;
+
+    return (
+        <>
+            <tr
+                className={`border-b border-stone-100 hover:bg-stone-50 transition-colors ${hasChildren ? 'cursor-pointer' : ''}`}
+                onClick={() => hasChildren && setOpen(!open)}
+            >
+                <td className="py-3 pl-4 pr-2 w-10">
+                    {hasChildren ? (
+                        open ? <ChevronDown size={14} className="text-stone-400" /> : <ChevronRight size={14} className="text-stone-400" />
+                    ) : <span className="w-3.5 inline-block" />}
+                </td>
+                <td className="py-3 pr-3 w-10">
+                    {group.imageUrl ? <img src={group.imageUrl} alt="" className="w-8 h-8 rounded object-cover" /> : <div className="w-8 h-8 rounded bg-stone-100" />}
+                </td>
+                <td className="py-3 pr-3">
+                    <span className="text-[13px] font-medium text-stone-800">{group.productName}</span>
+                    {hasChildren && <span className="ml-2 text-[11px] text-stone-400">{group.variations} colors</span>}
+                </td>
+                <td className="py-3 pr-3 text-right font-mono text-[13px] text-stone-700">{formatCurrency(group.spend)}</td>
+                <td className="py-3 pr-3 text-right font-mono text-[13px] text-stone-500">{fmt(group.impressions)}</td>
+                <td className="py-3 pr-3 text-right font-mono text-[13px] text-stone-500">{fmt(group.clicks)}</td>
+                <td className="py-3 pr-3 text-right font-mono text-[13px] text-stone-500">{fmtPct(group.ctr)}</td>
+                <td className="py-3 pr-3 text-right font-mono text-[13px] text-stone-700">{group.orders || '-'}</td>
+                <td className="py-3 pr-3 text-right font-mono text-[13px] text-stone-500">{group.unitsSold || '-'}</td>
+                <td className="py-3 pr-3 text-right font-mono text-[13px] text-stone-700">{group.revenue > 0 ? formatCurrency(group.revenue) : '-'}</td>
+                <td className={`py-3 pr-4 text-right font-mono text-[13px] ${roasColor(group.roas)}`}>
+                    {group.roas > 0 ? `${group.roas.toFixed(2)}x` : '-'}
+                </td>
+            </tr>
+            {open && hasChildren && group.children
+                .sort((a, b) => b.spend - a.spend)
+                .map((child, i) => (
+                <tr key={child.productId + '-' + i} className="bg-stone-50/60 border-b border-stone-50">
+                    <td className="py-2 pl-4 pr-2" />
+                    <td className="py-2 pr-3">
+                        {child.imageUrl ? <img src={child.imageUrl} alt="" className="w-6 h-6 rounded object-cover" /> : <div className="w-6 h-6" />}
+                    </td>
+                    <td className="py-2 pr-3">
+                        <span className="text-xs text-stone-500 pl-2">{child.colorName ?? child.productId}</span>
+                    </td>
+                    <td className="py-2 pr-3 text-right font-mono text-xs text-stone-500">{formatCurrency(child.spend)}</td>
+                    <td className="py-2 pr-3 text-right font-mono text-xs text-stone-400">{fmt(child.impressions)}</td>
+                    <td className="py-2 pr-3 text-right font-mono text-xs text-stone-400">{fmt(child.clicks)}</td>
+                    <td className="py-2 pr-3 text-right font-mono text-xs text-stone-400">{fmtPct(child.ctr)}</td>
+                    <td className="py-2 pr-3 text-right font-mono text-xs text-stone-500">{child.orders || '-'}</td>
+                    <td className="py-2 pr-3 text-right font-mono text-xs text-stone-400">{child.unitsSold || '-'}</td>
+                    <td className="py-2 pr-3 text-right font-mono text-xs text-stone-500">{child.revenue > 0 ? formatCurrency(child.revenue) : '-'}</td>
+                    <td className={`py-2 pr-4 text-right font-mono text-xs ${roasColor(child.roas)}`}>
+                        {child.roas > 0 ? `${child.roas.toFixed(2)}x` : '-'}
+                    </td>
+                </tr>
+            ))}
+        </>
+    );
+}
 
 function ProductsSubTab({ days }: { days: number }) {
     const products = useMetaProducts(days);
+    const [sortField, setSortField] = useState<'spend' | 'revenue' | 'roas' | 'orders' | 'clicks'>('spend');
 
     if (products.isLoading) return <div className="space-y-5"><KPISkeleton /><GridSkeleton /></div>;
     if (products.error) return <ErrorState error={products.error} />;
 
-    const data = (products.data ?? []) as MetaProductEnrichedRow[];
+    const rawData = (products.data ?? []) as MetaProductEnrichedRow[];
 
-    if (data.length === 0) {
+    if (rawData.length === 0) {
         return (
             <div className="flex flex-col items-center justify-center py-16 text-center">
                 <AlertCircle size={40} className="text-stone-300 mb-4" />
@@ -995,55 +1112,37 @@ function ProductsSubTab({ days }: { days: number }) {
         );
     }
 
-    const totalSpend = data.reduce((s, p) => s + p.spend, 0);
-    const totalClicks = data.reduce((s, p) => s + p.clicks, 0);
-    const totalRevenue = data.reduce((s, p) => s + p.revenue, 0);
-    const totalOrders = data.reduce((s, p) => s + p.orders, 0);
+    const grouped = groupByProduct(rawData);
+    const sorted = [...grouped].sort((a, b) => b[sortField] - a[sortField]);
+
+    const totalSpend = grouped.reduce((s, p) => s + p.spend, 0);
+    const totalClicks = grouped.reduce((s, p) => s + p.clicks, 0);
+    const totalRevenue = grouped.reduce((s, p) => s + p.revenue, 0);
+    const totalOrders = grouped.reduce((s, p) => s + p.orders, 0);
     const overallRoas = totalSpend > 0 ? Math.round((totalRevenue / totalSpend) * 100) / 100 : 0;
 
     // Top performers by ROAS (with min spend threshold)
-    const minSpend = totalSpend / data.length * 0.2; // at least 20% of avg
-    const topByRoas = [...data].filter(p => p.spend >= minSpend && p.roas > 0).sort((a, b) => b.roas - a.roas).slice(0, 5);
-    // Worst performers — high spend, low ROAS
-    const worstByRoas = [...data].filter(p => p.spend >= minSpend).sort((a, b) => a.roas - b.roas).slice(0, 5);
+    const minSpend = totalSpend / grouped.length * 0.2;
+    const topByRoas = [...grouped].filter(p => p.spend >= minSpend && p.roas > 0).sort((a, b) => b.roas - a.roas).slice(0, 5);
+    const worstByRoas = [...grouped].filter(p => p.spend >= minSpend).sort((a, b) => a.roas - b.roas).slice(0, 5);
 
-    const displayName = (p: MetaProductEnrichedRow) => {
-        if (p.productName && p.colorName) return `${p.productName} — ${p.colorName}`;
-        if (p.productName) return p.productName;
-        return p.productId;
-    };
+    const performerName = (p: ProductGroupRow) => p.productName;
 
-    const cols: ColDef<MetaProductEnrichedRow>[] = [
-        { headerName: '', width: 56, cellRenderer: ProductThumbnail, sortable: false, filter: false, resizable: false },
-        {
-            headerName: 'Product', flex: 2, minWidth: 220,
-            valueGetter: (params: { data?: MetaProductEnrichedRow }) => params.data ? displayName(params.data) : '',
-        },
-        { field: 'spend', headerName: 'Spend', width: 100, sort: 'desc' as const, valueFormatter: (p: ValueFormatterParams) => formatCurrency(p.value) },
-        { field: 'impressions', headerName: 'Impr', width: 90, valueFormatter: (p: ValueFormatterParams) => fmt(p.value) },
-        { field: 'clicks', headerName: 'Clicks', width: 80, valueFormatter: (p: ValueFormatterParams) => fmt(p.value) },
-        { field: 'ctr', headerName: 'CTR', width: 70, valueFormatter: (p: ValueFormatterParams) => fmtPct(p.value) },
-        { field: 'orders', headerName: 'Orders', width: 80 },
-        { field: 'unitsSold', headerName: 'Units', width: 70 },
-        { field: 'revenue', headerName: 'Revenue', width: 100, valueFormatter: (p: ValueFormatterParams) => formatCurrency(p.value) },
-        {
-            field: 'roas', headerName: 'ROAS', width: 85,
-            valueFormatter: (p: ValueFormatterParams) => p.value > 0 ? `${Number(p.value).toFixed(2)}x` : '-',
-            cellStyle: (params: { value: number }) => {
-                if (params.value >= 3) return { color: '#16a34a', fontWeight: 600 };
-                if (params.value >= 1.5) return { color: '#d97706', fontWeight: 600 };
-                if (params.value > 0) return { color: '#dc2626', fontWeight: 600 };
-                return null;
-            },
-        },
-    ];
+    const SortHeader = ({ field, label, className = '' }: { field: typeof sortField; label: string; className?: string }) => (
+        <th
+            className={`py-2.5 pr-3 text-[11px] font-semibold text-stone-400 cursor-pointer hover:text-stone-600 select-none ${className}`}
+            onClick={() => setSortField(field)}
+        >
+            {label}{sortField === field ? ' ↓' : ''}
+        </th>
+    );
 
     return (
         <div className="space-y-5">
             {/* Summary KPIs */}
             <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-                <KPICard label="Products Shown" value={fmt(data.length)} subtext="Unique products in catalog ads" />
-                <KPICard label="Ad Spend" value={formatCurrency(totalSpend)} subtext={`${formatCurrency(Math.round(totalSpend / Math.max(data.length, 1)))}/product avg`} />
+                <KPICard label="Products" value={fmt(grouped.length)} subtext={`${fmt(rawData.length)} variations total`} />
+                <KPICard label="Ad Spend" value={formatCurrency(totalSpend)} subtext={`${formatCurrency(Math.round(totalSpend / Math.max(grouped.length, 1)))}/product avg`} />
                 <KPICard label="Shopify Revenue" value={formatCurrency(totalRevenue)} subtext={`${fmt(totalOrders)} orders in period`} />
                 <KPICard label="Blended ROAS" value={overallRoas > 0 ? `${overallRoas.toFixed(2)}x` : '-'} subtext="Revenue ÷ Ad Spend" accent={overallRoas >= 3} />
                 <KPICard label="Total Clicks" value={fmt(totalClicks)} subtext={`CPC ${formatCurrency(totalClicks > 0 ? Math.round(totalSpend / totalClicks) : 0)}`} />
@@ -1060,7 +1159,6 @@ function ProductsSubTab({ days }: { days: number }) {
 
             {/* Top & Worst performers */}
             <div className="flex gap-3">
-                {/* Best ROAS */}
                 <div className="flex-1 bg-white rounded-lg border border-stone-200 p-5">
                     <h3 className="text-sm font-semibold text-green-700">Top Performers by ROAS</h3>
                     <p className="text-xs text-stone-400 mt-0.5">Best return on ad spend</p>
@@ -1072,10 +1170,10 @@ function ProductsSubTab({ days }: { days: number }) {
                             <span className="text-[11px] font-semibold text-stone-400 w-16 text-right">ROAS</span>
                         </div>
                         {topByRoas.map(p => (
-                            <div key={p.productId} className="flex py-2.5 border-b border-stone-50 items-center">
+                            <div key={p.productName} className="flex py-2.5 border-b border-stone-50 items-center">
                                 <div className="flex items-center gap-2 flex-[3] min-w-0">
                                     {p.imageUrl && <img src={p.imageUrl} alt="" className="w-8 h-8 rounded object-cover flex-shrink-0" />}
-                                    <span className="text-xs text-stone-800 truncate">{displayName(p)}</span>
+                                    <span className="text-xs text-stone-800 truncate">{performerName(p)}</span>
                                 </div>
                                 <span className="text-xs font-mono text-stone-500 flex-1 text-right">{formatCurrency(p.spend)}</span>
                                 <span className="text-xs font-mono text-stone-800 flex-1 text-right">{formatCurrency(p.revenue)}</span>
@@ -1085,7 +1183,6 @@ function ProductsSubTab({ days }: { days: number }) {
                     </div>
                 </div>
 
-                {/* Worst ROAS */}
                 <div className="flex-1 bg-white rounded-lg border border-stone-200 p-5">
                     <h3 className="text-sm font-semibold text-red-700">Underperformers</h3>
                     <p className="text-xs text-stone-400 mt-0.5">High spend, low return — consider pausing</p>
@@ -1097,10 +1194,10 @@ function ProductsSubTab({ days }: { days: number }) {
                             <span className="text-[11px] font-semibold text-stone-400 w-16 text-right">ROAS</span>
                         </div>
                         {worstByRoas.map(p => (
-                            <div key={p.productId} className="flex py-2.5 border-b border-stone-50 items-center">
+                            <div key={p.productName} className="flex py-2.5 border-b border-stone-50 items-center">
                                 <div className="flex items-center gap-2 flex-[3] min-w-0">
                                     {p.imageUrl && <img src={p.imageUrl} alt="" className="w-8 h-8 rounded object-cover flex-shrink-0" />}
-                                    <span className="text-xs text-stone-800 truncate">{displayName(p)}</span>
+                                    <span className="text-xs text-stone-800 truncate">{performerName(p)}</span>
                                 </div>
                                 <span className="text-xs font-mono text-stone-500 flex-1 text-right">{formatCurrency(p.spend)}</span>
                                 <span className="text-xs font-mono text-stone-800 flex-1 text-right">{formatCurrency(p.revenue)}</span>
@@ -1111,18 +1208,35 @@ function ProductsSubTab({ days }: { days: number }) {
                 </div>
             </div>
 
-            {/* Full Product Grid */}
+            {/* Accordion Product Table */}
             <div className="bg-white rounded-lg border border-stone-200 p-5">
-                <h3 className="text-sm font-semibold text-stone-800 mb-3">All Products ({data.length} products)</h3>
-                <div style={{ height: 500 }}>
-                    <AgGridReact<MetaProductEnrichedRow>
-                        rowData={data}
-                        columnDefs={cols}
-                        rowHeight={48}
-                        defaultColDef={DEFAULT_COL_DEF}
-                        theme={compactThemeSmall}
-                        suppressCellFocus
-                    />
+                <h3 className="text-sm font-semibold text-stone-800 mb-3">
+                    All Products ({grouped.length})
+                    <span className="text-stone-400 font-normal ml-1.5">— click a row to expand variations</span>
+                </h3>
+                <div className="overflow-auto max-h-[600px]">
+                    <table className="w-full">
+                        <thead className="sticky top-0 bg-white z-10">
+                            <tr className="border-b border-stone-200">
+                                <th className="py-2.5 pl-4 pr-2 w-10" />
+                                <th className="py-2.5 pr-3 w-10" />
+                                <th className="py-2.5 pr-3 text-[11px] font-semibold text-stone-400 text-left">Product</th>
+                                <SortHeader field="spend" label="Spend" className="text-right" />
+                                <th className="py-2.5 pr-3 text-[11px] font-semibold text-stone-400 text-right">Impr</th>
+                                <SortHeader field="clicks" label="Clicks" className="text-right" />
+                                <th className="py-2.5 pr-3 text-[11px] font-semibold text-stone-400 text-right">CTR</th>
+                                <SortHeader field="orders" label="Orders" className="text-right" />
+                                <th className="py-2.5 pr-3 text-[11px] font-semibold text-stone-400 text-right">Units</th>
+                                <SortHeader field="revenue" label="Revenue" className="text-right" />
+                                <SortHeader field="roas" label="ROAS" className="text-right pr-4" />
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {sorted.map(g => (
+                                <ProductAccordionRow key={g.productName} group={g} />
+                            ))}
+                        </tbody>
+                    </table>
                 </div>
             </div>
         </div>
