@@ -65,6 +65,7 @@ import forecastRoutes from './routes/forecast.js';
 import imageUploadRoutes from './routes/imageUpload.js';
 import resendWebhookRoutes from './routes/resendWebhook.js';
 import emailCampaignWebhookRoutes from './routes/emailCampaignWebhook.js';
+import campaignAiRoutes from './routes/campaignAi.js';
 import returnPrimeWebhooks from './routes/returnPrimeWebhooks.js';
 import returnPrimeSync from './routes/returnPrimeSync.js';
 import returnPrimeAdminRoutes from './routes/returnPrimeAdminRoutes.js';
@@ -203,6 +204,9 @@ app.use('/api/webhooks/resend', resendWebhookRoutes);
 
 // SES delivery status webhook via SNS (campaign open/click/bounce tracking)
 app.use('/api/webhooks/ses/campaigns', emailCampaignWebhookRoutes);
+
+// Campaign AI email generation (SSE)
+app.use('/api/campaigns/ai', campaignAiRoutes);
 
 // RazorpayX payout & transaction webhooks
 app.use('/api/webhooks/razorpayx', razorpayxWebhookRoutes);

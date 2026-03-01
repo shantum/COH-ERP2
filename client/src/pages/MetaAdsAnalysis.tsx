@@ -5,7 +5,7 @@
  * Data from Meta Marketing API via metaAdsClient.ts
  */
 
-import { useState, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
     ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid,
     Tooltip, ResponsiveContainer,
@@ -17,19 +17,21 @@ import {
     useMetaCampaigns, useMetaSummary, useMetaDailyTrend,
     useMetaAdsets, useMetaAds, useMetaAgeGender,
     useMetaPlacements, useMetaRegions, useMetaDevices,
+    useMetaProducts,
 } from '../hooks/useMetaAds';
 import { compactThemeSmall } from '../utils/agGridHelpers';
 import { formatCurrency } from '../utils/formatting';
 import type {
     MetaCampaignRow, MetaAdsetRow, MetaAdRow,
     MetaAgeGenderRow, MetaPlacementRow, MetaRegionRow,
+    MetaProductEnrichedRow,
 } from '../server/functions/metaAds';
 
 // ============================================
 // SHARED HELPERS
 // ============================================
 
-type MetaSubTab = 'overview' | 'campaigns' | 'audience' | 'placements' | 'creative' | 'funnel';
+type MetaSubTab = 'overview' | 'campaigns' | 'audience' | 'placements' | 'creative' | 'landing-page' | 'products' | 'funnel';
 
 const SUB_TABS: { key: MetaSubTab; label: string }[] = [
     { key: 'overview', label: 'Overview' },
@@ -37,6 +39,8 @@ const SUB_TABS: { key: MetaSubTab; label: string }[] = [
     { key: 'audience', label: 'Audience' },
     { key: 'placements', label: 'Placements' },
     { key: 'creative', label: 'Creative' },
+    { key: 'landing-page', label: 'Landing Page' },
+    { key: 'products', label: 'Products' },
     { key: 'funnel', label: 'Funnel' },
 ];
 
@@ -694,9 +698,19 @@ function CreativeSubTab({ days }: { days: number }) {
                     <div className="flex gap-3">
                         {topAds.map(ad => (
                             <div key={ad.adId} className="flex-1 bg-white rounded-lg border border-stone-200 overflow-hidden">
-                                <div className="h-36 bg-gradient-to-br from-stone-800 to-stone-600 flex items-center justify-center">
-                                    <span className="text-sm text-stone-400">Ad Preview</span>
-                                </div>
+                                {ad.imageUrl ? (
+                                    <img
+                                        src={ad.imageUrl}
+                                        alt={ad.adName}
+                                        className="h-36 w-full object-cover"
+                                        loading="lazy"
+                                        referrerPolicy="no-referrer"
+                                    />
+                                ) : (
+                                    <div className="h-36 bg-gradient-to-br from-stone-800 to-stone-600 flex items-center justify-center">
+                                        <span className="text-sm text-stone-400">No Preview</span>
+                                    </div>
+                                )}
                                 <div className="p-4 space-y-2.5">
                                     <p className="text-sm font-semibold text-stone-800 truncate">{ad.adName}</p>
                                     <p className="text-[11px] text-stone-400 truncate">{ad.campaignName}</p>
@@ -720,8 +734,15 @@ function CreativeSubTab({ days }: { days: number }) {
     );
 }
 
+const AdThumbnail = React.memo(function AdThumbnail(props: { data?: MetaAdRow }) {
+    const url = props.data?.imageUrl;
+    if (!url) return <div className="w-10 h-10 rounded bg-stone-100" />;
+    return <img src={url} alt="" className="w-10 h-10 rounded object-cover" loading="lazy" referrerPolicy="no-referrer" />;
+});
+
 function AdGrid({ data }: { data: MetaAdRow[] }) {
     const cols: ColDef<MetaAdRow>[] = useMemo(() => [
+        { headerName: '', width: 56, cellRenderer: AdThumbnail, sortable: false, filter: false, resizable: false },
         { field: 'adName', headerName: 'Ad Name', flex: 2, minWidth: 200 },
         { field: 'campaignName', headerName: 'Campaign', flex: 1, minWidth: 140 },
         { field: 'adsetName', headerName: 'Ad Set', flex: 1, minWidth: 140 },
@@ -748,10 +769,361 @@ function AdGrid({ data }: { data: MetaAdRow[] }) {
                 <AgGridReact<MetaAdRow>
                     rowData={data}
                     columnDefs={cols}
+                    rowHeight={48}
                     defaultColDef={DEFAULT_COL_DEF}
                     theme={compactThemeSmall}
                     suppressCellFocus
                 />
+            </div>
+        </div>
+    );
+}
+
+// ============================================
+// LANDING PAGE SUB-TAB
+// ============================================
+
+function LandingPageSubTab({ days }: { days: number }) {
+    const summary = useMetaSummary(days);
+    const campaigns = useMetaCampaigns(days);
+    const ads = useMetaAds(days);
+
+    if (summary.isLoading || campaigns.isLoading) return <div className="space-y-5"><KPISkeleton /><GridSkeleton /></div>;
+    if (summary.error) return <ErrorState error={summary.error} />;
+
+    const s = summary.data;
+    if (!s) return <ErrorState error={null} />;
+
+    const dropOffRate = s.linkClicks > 0 ? ((s.linkClicks - s.landingPageViews) / s.linkClicks * 100) : 0;
+    const costPerLpv = s.landingPageViews > 0 ? s.spend / s.landingPageViews : 0;
+    const lpvRate = s.linkClicks > 0 ? (s.landingPageViews / s.linkClicks * 100) : 0;
+    const lpvToPurchase = s.landingPageViews > 0 ? (s.purchases / s.landingPageViews * 100) : 0;
+
+    // Campaign-level landing page data
+    const campaignLpData = (campaigns.data ?? [])
+        .filter(c => c.linkClicks > 0)
+        .map(c => ({
+            ...c,
+            dropOffRate: c.linkClicks > 0 ? ((c.linkClicks - c.landingPageViews) / c.linkClicks * 100) : 0,
+            lpvRate: c.linkClicks > 0 ? (c.landingPageViews / c.linkClicks * 100) : 0,
+            costPerLpv: c.landingPageViews > 0 ? c.spend / c.landingPageViews : 0,
+        }))
+        .sort((a, b) => b.spend - a.spend);
+
+    // Ad-level landing page data
+    const adLpData = (ads.data ?? [])
+        .filter(a => a.linkClicks > 0)
+        .map(a => ({
+            ...a,
+            dropOffRate: a.linkClicks > 0 ? ((a.linkClicks - a.landingPageViews) / a.linkClicks * 100) : 0,
+            lpvRate: a.linkClicks > 0 ? (a.landingPageViews / a.linkClicks * 100) : 0,
+            costPerLpv: a.landingPageViews > 0 ? a.spend / a.landingPageViews : 0,
+        }))
+        .sort((a, b) => b.spend - a.spend);
+
+    return (
+        <div className="space-y-5">
+            {/* KPI Cards */}
+            <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+                <KPICard label="Link Clicks" value={fmt(s.linkClicks)} subtext={`CPC ${formatCurrency(s.linkClicks > 0 ? s.spend / s.linkClicks : 0)}`} />
+                <KPICard label="Landing Page Views" value={fmt(s.landingPageViews)} subtext={`${lpvRate.toFixed(1)}% of link clicks`} />
+                <KPICard
+                    label="Drop-off Rate"
+                    value={dropOffRate > 0 ? `${dropOffRate.toFixed(1)}%` : '-'}
+                    subtext={`${fmt(s.linkClicks - s.landingPageViews)} clicks lost`}
+                />
+                <KPICard label="Cost per LPV" value={costPerLpv > 0 ? formatCurrency(Math.round(costPerLpv)) : '-'} subtext="Landing page view cost" />
+                <KPICard label="LPV → Purchase" value={lpvToPurchase > 0 ? `${lpvToPurchase.toFixed(2)}%` : '-'} subtext={`${fmt(s.purchases)} purchases`} accent={lpvToPurchase >= 3} />
+            </div>
+
+            {/* Insight Banner */}
+            {dropOffRate > 15 && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                    <p className="text-sm text-amber-800">
+                        <span className="font-semibold">High drop-off detected:</span> {dropOffRate.toFixed(1)}% of link clicks
+                        don't result in a landing page view. This could indicate slow page load times, misleading ad content,
+                        or landing page issues. Investigate campaigns with the highest drop-off below.
+                    </p>
+                </div>
+            )}
+
+            {/* Visual Flow */}
+            <div className="bg-white rounded-lg border border-stone-200 p-5">
+                <h3 className="text-sm font-semibold text-stone-800">Click-to-Page Flow</h3>
+                <div className="flex items-center gap-4 mt-4">
+                    <div className="flex-1 text-center">
+                        <p className="text-[11px] font-semibold text-stone-400 uppercase tracking-wider">Link Clicks</p>
+                        <p className="text-3xl font-bold text-stone-900 mt-1">{fmt(s.linkClicks)}</p>
+                    </div>
+                    <div className="flex flex-col items-center">
+                        <svg width="40" height="20" viewBox="0 0 40 20"><path d="M0 10h30M26 4l8 6-8 6" fill="none" stroke="#a8a29e" strokeWidth="1.5" /></svg>
+                        <span className="text-xs text-stone-400 mt-1">{lpvRate.toFixed(1)}%</span>
+                    </div>
+                    <div className="flex-1 text-center">
+                        <p className="text-[11px] font-semibold text-stone-400 uppercase tracking-wider">Page Views</p>
+                        <p className="text-3xl font-bold text-blue-600 mt-1">{fmt(s.landingPageViews)}</p>
+                    </div>
+                    <div className="flex flex-col items-center">
+                        <svg width="40" height="20" viewBox="0 0 40 20"><path d="M0 10h30M26 4l8 6-8 6" fill="none" stroke="#a8a29e" strokeWidth="1.5" /></svg>
+                        <span className="text-xs text-stone-400 mt-1">{lpvToPurchase.toFixed(2)}%</span>
+                    </div>
+                    <div className="flex-1 text-center">
+                        <p className="text-[11px] font-semibold text-stone-400 uppercase tracking-wider">Purchases</p>
+                        <p className="text-3xl font-bold text-green-600 mt-1">{fmt(s.purchases)}</p>
+                    </div>
+                    <div className="flex-1 text-center border-l border-stone-200 ml-4 pl-4">
+                        <p className="text-[11px] font-semibold text-red-400 uppercase tracking-wider">Lost to Drop-off</p>
+                        <p className="text-3xl font-bold text-red-500 mt-1">{fmt(s.linkClicks - s.landingPageViews)}</p>
+                        <p className="text-xs text-stone-400 mt-1">{dropOffRate.toFixed(1)}% of clicks</p>
+                    </div>
+                </div>
+            </div>
+
+            {/* Campaign Landing Page Table */}
+            <div className="bg-white rounded-lg border border-stone-200 p-5">
+                <h3 className="text-sm font-semibold text-stone-800 mb-3">Campaign Landing Page Performance</h3>
+                <div style={{ height: 350 }}>
+                    <AgGridReact
+                        rowData={campaignLpData}
+                        columnDefs={[
+                            { field: 'campaignName', headerName: 'Campaign', flex: 2, minWidth: 200 },
+                            { field: 'linkClicks', headerName: 'Link Clicks', width: 100, sort: 'desc' as const, valueFormatter: (p: ValueFormatterParams) => fmt(p.value) },
+                            { field: 'landingPageViews', headerName: 'LPV', width: 80, valueFormatter: (p: ValueFormatterParams) => fmt(p.value) },
+                            { field: 'lpvRate', headerName: 'LPV Rate', width: 90, valueFormatter: (p: ValueFormatterParams) => `${Number(p.value).toFixed(1)}%` },
+                            {
+                                field: 'dropOffRate', headerName: 'Drop-off', width: 90,
+                                valueFormatter: (p: ValueFormatterParams) => `${Number(p.value).toFixed(1)}%`,
+                                cellStyle: (params: { value: number }) => {
+                                    if (params.value >= 20) return { color: '#dc2626', fontWeight: 600 };
+                                    if (params.value >= 10) return { color: '#d97706', fontWeight: 600 };
+                                    return { color: '#16a34a', fontWeight: 400 };
+                                },
+                            },
+                            { field: 'costPerLpv', headerName: 'Cost/LPV', width: 90, valueFormatter: (p: ValueFormatterParams) => p.value > 0 ? formatCurrency(Math.round(p.value)) : '-' },
+                            { field: 'purchases', headerName: 'Purch', width: 70 },
+                            {
+                                field: 'roas', headerName: 'ROAS', width: 85,
+                                valueFormatter: (p: ValueFormatterParams) => p.value > 0 ? `${Number(p.value).toFixed(2)}x` : '-',
+                                cellStyle: (params: { value: number }) => {
+                                    if (params.value >= 3) return { color: '#16a34a', fontWeight: 600 };
+                                    if (params.value >= 1.5) return { color: '#d97706', fontWeight: 600 };
+                                    if (params.value > 0) return { color: '#dc2626', fontWeight: 600 };
+                                    return null;
+                                },
+                            },
+                        ]}
+                        defaultColDef={DEFAULT_COL_DEF}
+                        theme={compactThemeSmall}
+                        suppressCellFocus
+                    />
+                </div>
+            </div>
+
+            {/* Ad-Level Landing Page Table */}
+            {!ads.isLoading && adLpData.length > 0 && (
+                <div className="bg-white rounded-lg border border-stone-200 p-5">
+                    <h3 className="text-sm font-semibold text-stone-800 mb-3">Ad-Level Landing Page Performance ({adLpData.length} ads)</h3>
+                    <div style={{ height: 400 }}>
+                        <AgGridReact
+                            rowData={adLpData}
+                            columnDefs={[
+                                { field: 'adName', headerName: 'Ad', flex: 2, minWidth: 200 },
+                                { field: 'campaignName', headerName: 'Campaign', flex: 1, minWidth: 140 },
+                                { field: 'linkClicks', headerName: 'Link Clicks', width: 100, sort: 'desc' as const, valueFormatter: (p: ValueFormatterParams) => fmt(p.value) },
+                                { field: 'landingPageViews', headerName: 'LPV', width: 80, valueFormatter: (p: ValueFormatterParams) => fmt(p.value) },
+                                {
+                                    field: 'dropOffRate', headerName: 'Drop-off', width: 90,
+                                    valueFormatter: (p: ValueFormatterParams) => `${Number(p.value).toFixed(1)}%`,
+                                    cellStyle: (params: { value: number }) => {
+                                        if (params.value >= 20) return { color: '#dc2626', fontWeight: 600 };
+                                        if (params.value >= 10) return { color: '#d97706', fontWeight: 600 };
+                                        return { color: '#16a34a', fontWeight: 400 };
+                                    },
+                                },
+                                { field: 'costPerLpv', headerName: 'Cost/LPV', width: 90, valueFormatter: (p: ValueFormatterParams) => p.value > 0 ? formatCurrency(Math.round(p.value)) : '-' },
+                                { field: 'purchases', headerName: 'Purch', width: 70 },
+                                {
+                                    field: 'roas', headerName: 'ROAS', width: 85,
+                                    valueFormatter: (p: ValueFormatterParams) => p.value > 0 ? `${Number(p.value).toFixed(2)}x` : '-',
+                                    cellStyle: (params: { value: number }) => {
+                                        if (params.value >= 3) return { color: '#16a34a', fontWeight: 600 };
+                                        if (params.value >= 1.5) return { color: '#d97706', fontWeight: 600 };
+                                        if (params.value > 0) return { color: '#dc2626', fontWeight: 600 };
+                                        return null;
+                                    },
+                                },
+                            ]}
+                            defaultColDef={DEFAULT_COL_DEF}
+                            theme={compactThemeSmall}
+                            suppressCellFocus
+                        />
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
+
+// ============================================
+// PRODUCTS SUB-TAB
+// ============================================
+
+const ProductThumbnail = React.memo(function ProductThumbnail(props: { data?: MetaProductEnrichedRow }) {
+    const url = props.data?.imageUrl;
+    if (!url) return <div className="w-10 h-10 rounded bg-stone-100" />;
+    return <img src={url} alt="" className="w-10 h-10 rounded object-cover" loading="lazy" />;
+});
+
+function ProductsSubTab({ days }: { days: number }) {
+    const products = useMetaProducts(days);
+
+    if (products.isLoading) return <div className="space-y-5"><KPISkeleton /><GridSkeleton /></div>;
+    if (products.error) return <ErrorState error={products.error} />;
+
+    const data = (products.data ?? []) as MetaProductEnrichedRow[];
+
+    if (data.length === 0) {
+        return (
+            <div className="flex flex-col items-center justify-center py-16 text-center">
+                <AlertCircle size={40} className="text-stone-300 mb-4" />
+                <h3 className="text-lg font-medium text-stone-700">No product-level data</h3>
+                <p className="text-sm text-stone-400 mt-2 max-w-md">
+                    Product breakdown is only available for catalog/DPA campaigns.
+                    If you're running Advantage+ Catalog ads, data will appear here.
+                </p>
+            </div>
+        );
+    }
+
+    const totalSpend = data.reduce((s, p) => s + p.spend, 0);
+    const totalClicks = data.reduce((s, p) => s + p.clicks, 0);
+    const totalRevenue = data.reduce((s, p) => s + p.revenue, 0);
+    const totalOrders = data.reduce((s, p) => s + p.orders, 0);
+    const overallRoas = totalSpend > 0 ? Math.round((totalRevenue / totalSpend) * 100) / 100 : 0;
+
+    // Top performers by ROAS (with min spend threshold)
+    const minSpend = totalSpend / data.length * 0.2; // at least 20% of avg
+    const topByRoas = [...data].filter(p => p.spend >= minSpend && p.roas > 0).sort((a, b) => b.roas - a.roas).slice(0, 5);
+    // Worst performers — high spend, low ROAS
+    const worstByRoas = [...data].filter(p => p.spend >= minSpend).sort((a, b) => a.roas - b.roas).slice(0, 5);
+
+    const displayName = (p: MetaProductEnrichedRow) => {
+        if (p.productName && p.colorName) return `${p.productName} — ${p.colorName}`;
+        if (p.productName) return p.productName;
+        return p.productId;
+    };
+
+    const cols: ColDef<MetaProductEnrichedRow>[] = [
+        { headerName: '', width: 56, cellRenderer: ProductThumbnail, sortable: false, filter: false, resizable: false },
+        {
+            headerName: 'Product', flex: 2, minWidth: 220,
+            valueGetter: (params: { data?: MetaProductEnrichedRow }) => params.data ? displayName(params.data) : '',
+        },
+        { field: 'spend', headerName: 'Spend', width: 100, sort: 'desc' as const, valueFormatter: (p: ValueFormatterParams) => formatCurrency(p.value) },
+        { field: 'impressions', headerName: 'Impr', width: 90, valueFormatter: (p: ValueFormatterParams) => fmt(p.value) },
+        { field: 'clicks', headerName: 'Clicks', width: 80, valueFormatter: (p: ValueFormatterParams) => fmt(p.value) },
+        { field: 'ctr', headerName: 'CTR', width: 70, valueFormatter: (p: ValueFormatterParams) => fmtPct(p.value) },
+        { field: 'orders', headerName: 'Orders', width: 80 },
+        { field: 'unitsSold', headerName: 'Units', width: 70 },
+        { field: 'revenue', headerName: 'Revenue', width: 100, valueFormatter: (p: ValueFormatterParams) => formatCurrency(p.value) },
+        {
+            field: 'roas', headerName: 'ROAS', width: 85,
+            valueFormatter: (p: ValueFormatterParams) => p.value > 0 ? `${Number(p.value).toFixed(2)}x` : '-',
+            cellStyle: (params: { value: number }) => {
+                if (params.value >= 3) return { color: '#16a34a', fontWeight: 600 };
+                if (params.value >= 1.5) return { color: '#d97706', fontWeight: 600 };
+                if (params.value > 0) return { color: '#dc2626', fontWeight: 600 };
+                return null;
+            },
+        },
+    ];
+
+    return (
+        <div className="space-y-5">
+            {/* Summary KPIs */}
+            <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+                <KPICard label="Products Shown" value={fmt(data.length)} subtext="Unique products in catalog ads" />
+                <KPICard label="Ad Spend" value={formatCurrency(totalSpend)} subtext={`${formatCurrency(Math.round(totalSpend / Math.max(data.length, 1)))}/product avg`} />
+                <KPICard label="Shopify Revenue" value={formatCurrency(totalRevenue)} subtext={`${fmt(totalOrders)} orders in period`} />
+                <KPICard label="Blended ROAS" value={overallRoas > 0 ? `${overallRoas.toFixed(2)}x` : '-'} subtext="Revenue ÷ Ad Spend" accent={overallRoas >= 3} />
+                <KPICard label="Total Clicks" value={fmt(totalClicks)} subtext={`CPC ${formatCurrency(totalClicks > 0 ? Math.round(totalSpend / totalClicks) : 0)}`} />
+            </div>
+
+            {/* Info */}
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <p className="text-sm text-blue-800">
+                    <span className="font-semibold">How this works:</span> Ad spend, clicks, and impressions come from Meta's API per product.
+                    Orders and revenue come from your Shopify data in the same date range.
+                    ROAS = Shopify Revenue ÷ Meta Ad Spend per product.
+                </p>
+            </div>
+
+            {/* Top & Worst performers */}
+            <div className="flex gap-3">
+                {/* Best ROAS */}
+                <div className="flex-1 bg-white rounded-lg border border-stone-200 p-5">
+                    <h3 className="text-sm font-semibold text-green-700">Top Performers by ROAS</h3>
+                    <p className="text-xs text-stone-400 mt-0.5">Best return on ad spend</p>
+                    <div className="mt-4 space-y-0">
+                        <div className="flex py-2 border-b border-stone-100">
+                            <span className="text-[11px] font-semibold text-stone-400 flex-[3]">PRODUCT</span>
+                            <span className="text-[11px] font-semibold text-stone-400 flex-1 text-right">SPEND</span>
+                            <span className="text-[11px] font-semibold text-stone-400 flex-1 text-right">REVENUE</span>
+                            <span className="text-[11px] font-semibold text-stone-400 w-16 text-right">ROAS</span>
+                        </div>
+                        {topByRoas.map(p => (
+                            <div key={p.productId} className="flex py-2.5 border-b border-stone-50 items-center">
+                                <div className="flex items-center gap-2 flex-[3] min-w-0">
+                                    {p.imageUrl && <img src={p.imageUrl} alt="" className="w-8 h-8 rounded object-cover flex-shrink-0" />}
+                                    <span className="text-xs text-stone-800 truncate">{displayName(p)}</span>
+                                </div>
+                                <span className="text-xs font-mono text-stone-500 flex-1 text-right">{formatCurrency(p.spend)}</span>
+                                <span className="text-xs font-mono text-stone-800 flex-1 text-right">{formatCurrency(p.revenue)}</span>
+                                <span className="w-16 text-right"><RoasBadge value={p.roas} /></span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+
+                {/* Worst ROAS */}
+                <div className="flex-1 bg-white rounded-lg border border-stone-200 p-5">
+                    <h3 className="text-sm font-semibold text-red-700">Underperformers</h3>
+                    <p className="text-xs text-stone-400 mt-0.5">High spend, low return — consider pausing</p>
+                    <div className="mt-4 space-y-0">
+                        <div className="flex py-2 border-b border-stone-100">
+                            <span className="text-[11px] font-semibold text-stone-400 flex-[3]">PRODUCT</span>
+                            <span className="text-[11px] font-semibold text-stone-400 flex-1 text-right">SPEND</span>
+                            <span className="text-[11px] font-semibold text-stone-400 flex-1 text-right">REVENUE</span>
+                            <span className="text-[11px] font-semibold text-stone-400 w-16 text-right">ROAS</span>
+                        </div>
+                        {worstByRoas.map(p => (
+                            <div key={p.productId} className="flex py-2.5 border-b border-stone-50 items-center">
+                                <div className="flex items-center gap-2 flex-[3] min-w-0">
+                                    {p.imageUrl && <img src={p.imageUrl} alt="" className="w-8 h-8 rounded object-cover flex-shrink-0" />}
+                                    <span className="text-xs text-stone-800 truncate">{displayName(p)}</span>
+                                </div>
+                                <span className="text-xs font-mono text-stone-500 flex-1 text-right">{formatCurrency(p.spend)}</span>
+                                <span className="text-xs font-mono text-stone-800 flex-1 text-right">{formatCurrency(p.revenue)}</span>
+                                <span className="w-16 text-right"><RoasBadge value={p.roas} /></span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            </div>
+
+            {/* Full Product Grid */}
+            <div className="bg-white rounded-lg border border-stone-200 p-5">
+                <h3 className="text-sm font-semibold text-stone-800 mb-3">All Products ({data.length} products)</h3>
+                <div style={{ height: 500 }}>
+                    <AgGridReact<MetaProductEnrichedRow>
+                        rowData={data}
+                        columnDefs={cols}
+                        rowHeight={48}
+                        defaultColDef={DEFAULT_COL_DEF}
+                        theme={compactThemeSmall}
+                        suppressCellFocus
+                    />
+                </div>
             </div>
         </div>
     );
@@ -911,6 +1283,8 @@ export default function MetaAdsAnalysis({ days }: { days: number }) {
             {subTab === 'audience' && <AudienceSubTab days={days} />}
             {subTab === 'placements' && <PlacementsSubTab days={days} />}
             {subTab === 'creative' && <CreativeSubTab days={days} />}
+            {subTab === 'landing-page' && <LandingPageSubTab days={days} />}
+            {subTab === 'products' && <ProductsSubTab days={days} />}
             {subTab === 'funnel' && <FunnelSubTab days={days} />}
         </div>
     );

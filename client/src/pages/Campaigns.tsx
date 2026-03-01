@@ -205,7 +205,6 @@ export default function Campaigns() {
       data: {
         name: 'Untitled Campaign',
         subject: '',
-        templateKey: 'cinematic',
       },
     });
     navigate({ to: '/campaigns/$campaignId', params: { campaignId: result.id } });
@@ -219,7 +218,7 @@ export default function Campaigns() {
       data: {
         name: `${c.name} (copy)`,
         subject: c.subject,
-        templateKey: c.templateKey,
+        sourceId: c.id, // Copy HTML from source campaign
       },
     });
     queryClient.invalidateQueries({ queryKey: ['campaign'] });

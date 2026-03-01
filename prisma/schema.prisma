@@ -2602,10 +2602,10 @@ model EmailCampaign {
   subject           String    // Email subject line
   preheaderText     String?   // Preview text shown in inbox
 
-  // Template & Content
-  templateKey       String    // "cinematic" | "swiss" | "warm"
-  htmlContent       String?   // Rendered HTML snapshot (populated at send time)
+  // Content
+  htmlContent       String?   // Full email HTML (AI-generated or manually edited)
   shopifyProductIds Json?     // String[] of Shopify product IDs to feature
+  sourceId          String?   // FK to another campaign used as starting point
 
   // Status
   status            String    @default("draft") // draft | scheduled | sending | sent | cancelled

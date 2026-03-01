@@ -242,6 +242,8 @@ export async function getAccountSummary(days: number): Promise<MetaAccountSummar
         initiateCheckouts: extractActionValue(raw?.actions, 'initiate_checkout'),
         viewContents: extractActionValue(raw?.actions, 'view_content'),
         roas: 0,
+        linkClicks: extractActionValue(raw?.actions, 'link_click'),
+        landingPageViews: extractActionValue(raw?.actions, 'landing_page_view'),
     };
     if (summary.spend > 0) {
         summary.roas = Math.round((summary.purchaseValue / summary.spend) * 100) / 100;
@@ -289,7 +291,50 @@ export async function getAdsetInsights(days: number): Promise<MetaAdsetRow[]> {
 }
 
 /**
- * Get ad-level insights from Meta Ads.
+ * Fetch ad creative thumbnail URLs for a batch of ad IDs.
+ * Uses the Meta Graph API ads endpoint with creative{image_url,thumbnail_url} expansion.
+ */
+async function fetchAdCreativeThumbnails(adIds: string[]): Promise<Map<string, string>> {
+    const thumbnails = new Map<string, string>();
+    if (adIds.length === 0) return thumbnails;
+
+    // Fetch in batches of 50 (Meta allows up to 50 IDs per request)
+    const BATCH_SIZE = 50;
+    for (let i = 0; i < adIds.length; i += BATCH_SIZE) {
+        const batch = adIds.slice(i, i + BATCH_SIZE);
+        const ids = batch.join(',');
+        const url = `${META_BASE_URL}/`
+            + `?ids=${ids}`
+            + `&fields=id,creative{image_url,thumbnail_url}`
+            + `&access_token=${META_ACCESS_TOKEN}`;
+
+        try {
+            const response = await fetchWithRetry<Record<string, {
+                id: string;
+                creative?: {
+                    image_url?: string;
+                    thumbnail_url?: string;
+                    id: string;
+                };
+            }>>(url, 'ad-creative-thumbnails');
+
+            for (const [adId, adObj] of Object.entries(response)) {
+                // Skip non-ad entries (e.g. paging metadata)
+                if (!adObj?.creative) continue;
+                const imgUrl = adObj.creative.image_url ?? adObj.creative.thumbnail_url;
+                if (imgUrl) thumbnails.set(adId, imgUrl);
+            }
+        } catch (error: unknown) {
+            // Non-fatal: log and continue without thumbnails
+            log.warn({ error: error instanceof Error ? error.message : String(error), batch: i }, 'Failed to fetch ad creative thumbnails');
+        }
+    }
+
+    return thumbnails;
+}
+
+/**
+ * Get ad-level insights from Meta Ads (with creative thumbnails).
  */
 export async function getAdInsights(days: number): Promise<MetaAdRow[]> {
     const cacheKey = `meta:ads:${days}`;
@@ -321,7 +366,14 @@ export async function getAdInsights(days: number): Promise<MetaAdRow[]> {
         nextUrl = page.paging?.next;
     }
 
-    const rows = allData.map(parseAdRow);
+    // Fetch creative thumbnails for all ads
+    const adIds = [...new Set(allData.map(r => r.ad_id))];
+    const thumbnails = await fetchAdCreativeThumbnails(adIds);
+
+    const rows = allData.map(raw => ({
+        ...parseAdRow(raw),
+        imageUrl: thumbnails.get(raw.ad_id) ?? null,
+    }));
     setCache(cacheKey, rows, META_CACHE_TTL);
     return rows;
 }
@@ -435,6 +487,46 @@ export async function getDeviceInsights(days: number): Promise<MetaDeviceRow[]> 
 }
 
 /**
+ * Get product-level insights from catalog/DPA ads.
+ * Uses breakdowns=product_id — only impressions, clicks, spend available (no conversions).
+ */
+export async function getProductInsights(days: number): Promise<MetaProductRow[]> {
+    const cacheKey = `meta:products:${days}`;
+    const cached = getCached<MetaProductRow[]>(cacheKey);
+    if (cached) return cached;
+
+    const { since, until } = getDateRange(days);
+    const fields = 'spend,impressions,clicks,cpc,ctr';
+
+    const url = `${META_BASE_URL}/${META_AD_ACCOUNT_ID}/insights`
+        + `?fields=${fields}`
+        + `&time_range={"since":"${since}","until":"${until}"}`
+        + `&breakdowns=product_id`
+        + `&limit=500`
+        + `&access_token=${META_ACCESS_TOKEN}`;
+
+    try {
+        const response = await fetchWithRetry<MetaInsightsResponse<RawProductRow>>(url, 'product-insights');
+
+        let allData = response.data ?? [];
+        let nextUrl = response.paging?.next;
+        while (nextUrl) {
+            const page = await fetchWithRetry<MetaInsightsResponse<RawProductRow>>(nextUrl, 'product-insights-page');
+            allData = allData.concat(page.data ?? []);
+            nextUrl = page.paging?.next;
+        }
+
+        const rows = allData.map(parseProductRow);
+        setCache(cacheKey, rows, META_CACHE_TTL);
+        return rows;
+    } catch (error: unknown) {
+        // Product breakdown may not be available if no catalog ads are running
+        log.warn({ error: error instanceof Error ? error.message : String(error) }, 'Product insights unavailable (no catalog ads?)');
+        return [];
+    }
+}
+
+/**
  * Refresh the long-lived token (call before it expires, ~every 50 days).
  * Returns the new token string.
  */
@@ -469,6 +561,8 @@ export interface MetaCampaignRow {
     costPerPurchase: number;
     roas: number;
     addToCarts: number;
+    linkClicks: number;
+    landingPageViews: number;
 }
 
 export interface MetaDailyRow {
@@ -495,6 +589,8 @@ export interface MetaAccountSummary {
     initiateCheckouts: number;
     viewContents: number;
     roas: number;
+    linkClicks: number;
+    landingPageViews: number;
 }
 
 export interface MetaAdsetRow {
@@ -528,6 +624,29 @@ export interface MetaAdRow {
     purchases: number;
     purchaseValue: number;
     costPerPurchase: number;
+    roas: number;
+    imageUrl: string | null;
+    linkClicks: number;
+    landingPageViews: number;
+}
+
+export interface MetaProductRow {
+    productId: string;
+    spend: number;
+    impressions: number;
+    clicks: number;
+    cpc: number;
+    ctr: number;
+}
+
+/** Enriched product row with Shopify sales data joined from DB */
+export interface MetaProductEnrichedRow extends MetaProductRow {
+    productName: string | null;
+    colorName: string | null;
+    imageUrl: string | null;
+    orders: number;
+    unitsSold: number;
+    revenue: number;
     roas: number;
 }
 
@@ -698,6 +817,15 @@ interface RawDeviceRow {
     action_values?: MetaAction[];
 }
 
+interface RawProductRow {
+    product_id: string;
+    spend: string;
+    impressions: string;
+    clicks: string;
+    cpc?: string;
+    ctr?: string;
+}
+
 function extractActionValue(actions: MetaAction[] | undefined, actionType: string): number {
     if (!actions) return 0;
     // Try exact match first, then omni_ prefix (Meta reports both)
@@ -728,6 +856,8 @@ function parseCampaignRow(raw: RawMetaCampaignRow): MetaCampaignRow {
         costPerPurchase: costPerPurchase || (purchases > 0 ? spend / purchases : 0),
         roas: spend > 0 ? Math.round((purchaseValue / spend) * 100) / 100 : 0,
         addToCarts: extractActionValue(raw.actions, 'add_to_cart'),
+        linkClicks: extractActionValue(raw.actions, 'link_click'),
+        landingPageViews: extractActionValue(raw.actions, 'landing_page_view'),
     };
 }
 
@@ -765,7 +895,7 @@ function parseAdsetRow(raw: RawAdsetRow): MetaAdsetRow {
     };
 }
 
-function parseAdRow(raw: RawAdRow): MetaAdRow {
+function parseAdRow(raw: RawAdRow): Omit<MetaAdRow, 'imageUrl'> {
     const spend = Number(raw.spend);
     const purchases = extractActionValue(raw.actions, 'purchase');
     const purchaseValue = extractActionValue(raw.action_values, 'purchase');
@@ -783,6 +913,8 @@ function parseAdRow(raw: RawAdRow): MetaAdRow {
         purchaseValue,
         costPerPurchase: purchases > 0 ? spend / purchases : 0,
         roas: spend > 0 ? Math.round((purchaseValue / spend) * 100) / 100 : 0,
+        linkClicks: extractActionValue(raw.actions, 'link_click'),
+        landingPageViews: extractActionValue(raw.actions, 'landing_page_view'),
     };
 }
 
@@ -875,5 +1007,22 @@ function parseDeviceRow(raw: RawDeviceRow): MetaDeviceRow {
         purchases,
         purchaseValue,
         roas: spend > 0 ? Math.round((purchaseValue / spend) * 100) / 100 : 0,
+    };
+}
+
+function parseProductRow(raw: RawProductRow): MetaProductRow {
+    const spend = Number(raw.spend);
+    const clicks = Number(raw.clicks);
+    const impressions = Number(raw.impressions);
+    // Meta returns product_id as "41448969896133, The Pima Boxy - Carbon Black"
+    // or "shopify_IN_123_456". Extract just the ID portion before any comma.
+    const rawId = raw.product_id.split(',')[0].trim();
+    return {
+        productId: rawId,
+        spend,
+        impressions,
+        clicks,
+        cpc: Number(raw.cpc ?? (clicks > 0 ? spend / clicks : 0)),
+        ctr: Number(raw.ctr ?? (impressions > 0 ? (clicks / impressions) * 100 : 0)),
     };
 }

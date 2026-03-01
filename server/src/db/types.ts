@@ -268,9 +268,9 @@ export type EmailCampaign = {
     name: string;
     subject: string;
     preheaderText: string | null;
-    templateKey: string;
     htmlContent: string | null;
     shopifyProductIds: unknown | null;
+    sourceId: string | null;
     status: Generated<string>;
     audienceFilter: unknown | null;
     recipientCount: Generated<number>;

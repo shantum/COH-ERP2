@@ -30,7 +30,7 @@ const createCampaignSchema = z.object({
   name: z.string().min(1).max(200),
   subject: z.string().max(200).default(''),
   preheaderText: z.string().max(200).optional(),
-  templateKey: z.string().min(1),
+  sourceId: z.string().uuid().optional(), // Copy HTML from a previous campaign
   shopifyProductIds: z.array(z.string()).optional(),
   audienceFilter: z.object({
     tiers: z.array(z.string()).optional(),
@@ -49,7 +49,7 @@ const updateCampaignSchema = z.object({
   name: z.string().min(1).max(200).optional(),
   subject: z.string().min(1).max(200).optional(),
   preheaderText: z.string().max(200).optional(),
-  templateKey: z.string().min(1).optional(),
+  htmlContent: z.string().optional(), // Full email HTML (AI-generated or manually edited)
   shopifyProductIds: z.array(z.string()).optional(),
   audienceFilter: z.object({
     tiers: z.array(z.string()).optional(),
@@ -93,7 +93,6 @@ export interface CampaignListItem {
   name: string;
   subject: string;
   status: string;
-  templateKey: string;
   recipientCount: number;
   sentCount: number;
   openCount: number;
@@ -107,6 +106,7 @@ export interface CampaignListItem {
 export interface CampaignDetail extends CampaignListItem {
   preheaderText: string | null;
   htmlContent: string | null;
+  sourceId: string | null;
   shopifyProductIds: string[] | null;
   audienceFilter: { tiers?: string[]; tags?: string[]; lastPurchaseDays?: number } | null;
   utmSource: string;
@@ -211,7 +211,7 @@ export const getCampaignsList = createServerFn({ method: 'GET' })
         prisma.emailCampaign.findMany({
           where,
           select: {
-            id: true, name: true, subject: true, status: true, templateKey: true,
+            id: true, name: true, subject: true, status: true,
             recipientCount: true, sentCount: true, openCount: true, clickCount: true, bounceCount: true,
             scheduledAt: true, sentAt: true, createdAt: true,
           },
@@ -262,12 +262,23 @@ export const createCampaign = createServerFn({ method: 'POST' })
       const prisma = await getPrisma();
       const utmCampaign = data.utmCampaign || slugify(data.name);
 
+      // If starting from a previous campaign, copy its HTML
+      let htmlContent: string | null = null;
+      if (data.sourceId) {
+        const source = await prisma.emailCampaign.findUnique({
+          where: { id: data.sourceId },
+          select: { htmlContent: true },
+        });
+        htmlContent = source?.htmlContent ?? null;
+      }
+
       const campaign = await prisma.emailCampaign.create({
         data: {
           name: data.name,
           subject: data.subject,
           preheaderText: data.preheaderText,
-          templateKey: data.templateKey,
+          ...(htmlContent ? { htmlContent } : {}),
+          ...(data.sourceId ? { sourceId: data.sourceId } : {}),
           shopifyProductIds: data.shopifyProductIds ?? [],
           audienceFilter: data.audienceFilter ?? {},
           utmSource: data.utmSource,
@@ -312,7 +323,7 @@ export const updateCampaign = createServerFn({ method: 'POST' })
       }
       if (updates.subject !== undefined) updateData.subject = updates.subject;
       if (updates.preheaderText !== undefined) updateData.preheaderText = updates.preheaderText;
-      if (updates.templateKey !== undefined) updateData.templateKey = updates.templateKey;
+      if (updates.htmlContent !== undefined) updateData.htmlContent = updates.htmlContent;
       if (updates.shopifyProductIds !== undefined) updateData.shopifyProductIds = updates.shopifyProductIds;
       if (updates.audienceFilter !== undefined) updateData.audienceFilter = updates.audienceFilter;
       if (updates.utmSource !== undefined) updateData.utmSource = updates.utmSource;
@@ -368,33 +379,10 @@ export const sendTestEmail = createServerFn({ method: 'POST' })
 
       // Dynamically import services (server-only)
       const { sendCustomerEmail } = await import('../../../../server/src/services/email/index.js');
-      const { renderCampaignEmail } = await import('../../../../server/src/services/campaigns/templates.js');
-      type TemplateProduct = import('../../../../server/src/services/campaigns/templates.js').TemplateProduct;
 
-      // If no HTML stored, render from template
       let html = campaign.htmlContent || '';
       if (!html) {
-        const productIds = (campaign.shopifyProductIds as string[]) || [];
-        let products: TemplateProduct[] = [];
-        if (productIds.length > 0) {
-          const dbProducts = await prisma.product.findMany({
-            where: { shopifyProductId: { in: productIds } },
-            select: {
-              name: true, imageUrl: true, shopifyHandle: true,
-              variations: { select: { skus: { select: { sellingPrice: true, mrp: true }, take: 1 } }, take: 1 },
-            },
-          });
-          products = dbProducts.filter(p => p.imageUrl && p.shopifyHandle).map(p => ({
-            title: p.name, imageUrl: p.imageUrl!,
-            price: p.variations[0]?.skus[0]?.sellingPrice ?? p.variations[0]?.skus[0]?.mrp ?? 0,
-            url: `https://creaturesofhabit.in/products/${p.shopifyHandle}`,
-          }));
-        }
-        html = renderCampaignEmail(campaign.templateKey, {
-          subject: campaign.subject, preheaderText: campaign.preheaderText ?? undefined,
-          heroHeadline: campaign.subject, bodyHtml: '<p>Your campaign content goes here.</p>',
-          products, ctaText: 'Shop Now', ctaUrl: 'https://creaturesofhabit.in',
-        });
+        throw new Error('Campaign has no email content. Generate or write HTML first.');
       }
 
       // Apply UTM params
@@ -483,35 +471,8 @@ export const sendCampaign = createServerFn({ method: 'POST' })
         skipDuplicates: true,
       });
 
-      // Build HTML — render from template if not pre-rendered
       const { sendCustomerEmail } = await import('../../../../server/src/services/email/index.js');
-      const { renderCampaignEmail } = await import('../../../../server/src/services/campaigns/templates.js');
-      type TemplateProduct = import('../../../../server/src/services/campaigns/templates.js').TemplateProduct;
-
-      let rawHtml = campaign.htmlContent || '';
-      if (!rawHtml) {
-        const productIds = (campaign.shopifyProductIds as string[]) || [];
-        let products: TemplateProduct[] = [];
-        if (productIds.length > 0) {
-          const dbProducts = await prisma.product.findMany({
-            where: { shopifyProductId: { in: productIds } },
-            select: {
-              name: true, imageUrl: true, shopifyHandle: true,
-              variations: { select: { skus: { select: { sellingPrice: true, mrp: true }, take: 1 } }, take: 1 },
-            },
-          });
-          products = dbProducts.filter(p => p.imageUrl && p.shopifyHandle).map(p => ({
-            title: p.name, imageUrl: p.imageUrl!,
-            price: p.variations[0]?.skus[0]?.sellingPrice ?? p.variations[0]?.skus[0]?.mrp ?? 0,
-            url: `https://creaturesofhabit.in/products/${p.shopifyHandle}`,
-          }));
-        }
-        rawHtml = renderCampaignEmail(campaign.templateKey, {
-          subject: campaign.subject, preheaderText: campaign.preheaderText ?? undefined,
-          heroHeadline: campaign.subject, bodyHtml: '<p>Your campaign content goes here.</p>',
-          products, ctaText: 'Shop Now', ctaUrl: 'https://creaturesofhabit.in',
-        });
-      }
+      const rawHtml = campaign.htmlContent || '';
 
       const utmCampaign = campaign.utmCampaign || slugify(campaign.name);
       const html = appendUtmParams(rawHtml, {
@@ -690,68 +651,20 @@ export const cancelCampaign = createServerFn({ method: 'POST' })
     }
   });
 
-/** Preview campaign — render template with real product data, return HTML */
-export const previewCampaign = createServerFn({ method: 'POST' })
+/** Get sent campaigns for "start from" picker */
+export const getSentCampaigns = createServerFn({ method: 'GET' })
   .middleware([adminMiddleware])
-  .inputValidator((input: unknown) => z.object({
-    campaignId: z.string().uuid(),
-    heroHeadline: z.string().optional(),
-    bodyHtml: z.string().optional(),
-    ctaText: z.string().optional(),
-    ctaUrl: z.string().optional(),
-  }).parse(input))
-  .handler(async ({ data }): Promise<{ html: string }> => {
+  .handler(async (): Promise<Array<{ id: string; name: string; subject: string; sentAt: Date | null }>> => {
     try {
       const prisma = await getPrisma();
-      const campaign = await prisma.emailCampaign.findUniqueOrThrow({
-        where: { id: data.campaignId },
+      return prisma.emailCampaign.findMany({
+        where: { status: 'sent', htmlContent: { not: null } },
+        select: { id: true, name: true, subject: true, sentAt: true },
+        orderBy: { sentAt: 'desc' },
+        take: 20,
       });
-
-      // Dynamically import the template renderer (server-only)
-      const { renderCampaignEmail } = await import('../../../../server/src/services/campaigns/templates.js');
-      type TemplateProduct = import('../../../../server/src/services/campaigns/templates.js').TemplateProduct;
-
-      // Fetch products if campaign has shopifyProductIds
-      const productIds = (campaign.shopifyProductIds as string[]) || [];
-      let products: TemplateProduct[] = [];
-
-      if (productIds.length > 0) {
-        const dbProducts = await prisma.product.findMany({
-          where: { shopifyProductId: { in: productIds } },
-          select: {
-            name: true,
-            imageUrl: true,
-            shopifyHandle: true,
-            variations: {
-              select: { skus: { select: { sellingPrice: true, mrp: true }, take: 1 } },
-              take: 1,
-            },
-          },
-        });
-
-        products = dbProducts
-          .filter(p => p.imageUrl && p.shopifyHandle)
-          .map(p => ({
-            title: p.name,
-            imageUrl: p.imageUrl!,
-            price: p.variations[0]?.skus[0]?.sellingPrice ?? p.variations[0]?.skus[0]?.mrp ?? 0,
-            url: `https://creaturesofhabit.in/products/${p.shopifyHandle}`,
-          }));
-      }
-
-      const html = renderCampaignEmail(campaign.templateKey, {
-        subject: campaign.subject,
-        preheaderText: campaign.preheaderText ?? undefined,
-        heroHeadline: data.heroHeadline || campaign.subject,
-        bodyHtml: data.bodyHtml || '<p>Your campaign content goes here.</p>',
-        products,
-        ctaText: data.ctaText || 'Shop Now',
-        ctaUrl: data.ctaUrl || 'https://creaturesofhabit.in',
-      });
-
-      return { html };
     } catch (error: unknown) {
-      serverLog.error({ domain: 'campaigns', fn: 'previewCampaign' }, 'Failed to preview campaign', error);
+      serverLog.error({ domain: 'campaigns', fn: 'getSentCampaigns' }, 'Failed to get sent campaigns', error);
       throw error;
     }
   });

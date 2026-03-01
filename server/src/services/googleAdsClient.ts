@@ -283,6 +283,30 @@ export interface GAdsAudienceSegmentRow {
     roas: number;
 }
 
+export interface GAdsProductFunnelRow {
+    productType: string;
+    views: number;
+    addToCarts: number;
+    purchases: number;
+    purchaseValue: number;
+    viewToAtcRate: number;
+    atcToPurchaseRate: number;
+}
+
+export interface GAdsSearchConversionRow {
+    searchTerm: string;
+    action: string;
+    conversions: number;
+    conversionValue: number;
+}
+
+export interface GAdsCampaignConversionRow {
+    campaignName: string;
+    action: string;
+    conversions: number;
+    conversionValue: number;
+}
+
 // ============================================
 // QUERIES
 // ============================================
@@ -1150,4 +1174,157 @@ LIMIT 200
             roas: spend > 0 ? Math.round((conversionValue / spend) * 100) / 100 : 0,
         };
     });
+}
+
+// ============================================
+// CONVERSION FUNNEL QUERIES
+// ============================================
+
+/** Conversion actions we care about, in funnel order */
+const FUNNEL_ACTIONS = [
+    'Google Shopping App View Item',
+    'Creatures of Habit - GA4 (web) view_item',
+    'Google Shopping App Add To Cart',
+    'Creatures of Habit - GA4 (web) add_to_cart',
+    'Google Shopping App Begin Checkout',
+    'Google Shopping App Purchase',
+    'Shopify Purchase (Elevar GTM Server)',
+    'Shopify Purchase (Elevar GTM Web)',
+    'Creatures of Habit - GA4 (web) purchase',
+];
+
+const VIEW_ACTIONS = new Set([
+    'Google Shopping App View Item',
+    'Creatures of Habit - GA4 (web) view_item',
+]);
+const ATC_ACTIONS = new Set([
+    'Google Shopping App Add To Cart',
+    'Creatures of Habit - GA4 (web) add_to_cart',
+]);
+const PURCHASE_ACTIONS = new Set([
+    'Google Shopping App Purchase',
+    'Shopify Purchase (Elevar GTM Server)',
+    'Shopify Purchase (Elevar GTM Web)',
+    'Creatures of Habit - GA4 (web) purchase',
+]);
+
+/**
+ * Product conversion funnel — View → ATC → Purchase per product type.
+ */
+export async function getGAdsProductFunnel(days: number): Promise<GAdsProductFunnelRow[]> {
+    const actionList = FUNNEL_ACTIONS.map(a => `'${a}'`).join(', ');
+    const sql = `
+SELECT
+    segments_product_type_l1 AS product_type,
+    segments_conversion_action_name AS action,
+    SUM(metrics_all_conversions) AS conv,
+    SUM(metrics_all_conversions_value) AS conv_value
+FROM ${table('ShoppingProductConversionStats')}
+WHERE ${dateFilterSQL(days)}
+    AND segments_conversion_action_name IN (${actionList})
+    AND metrics_all_conversions > 0
+GROUP BY 1, 2
+ORDER BY product_type
+`;
+    const rows = await runQuery<{
+        product_type: string; action: string; conv: number; conv_value: number;
+    }>(sql, { cacheKey: `gads:product-funnel:${days}`, cacheTtl: GADS_CACHE_TTL });
+
+    // Pivot into funnel rows per product type
+    const map = new Map<string, { views: number; atc: number; purchases: number; purchaseValue: number }>();
+    for (const r of rows) {
+        const pt = r.product_type || '(unknown)';
+        const entry = map.get(pt) ?? { views: 0, atc: 0, purchases: 0, purchaseValue: 0 };
+        const conv = Number(r.conv);
+        const val = Number(r.conv_value);
+        if (VIEW_ACTIONS.has(r.action)) entry.views += conv;
+        else if (ATC_ACTIONS.has(r.action)) entry.atc += conv;
+        else if (PURCHASE_ACTIONS.has(r.action)) { entry.purchases += conv; entry.purchaseValue += val; }
+        map.set(pt, entry);
+    }
+
+    return Array.from(map.entries())
+        .map(([productType, d]) => ({
+            productType,
+            views: Math.round(d.views),
+            addToCarts: Math.round(d.atc * 100) / 100,
+            purchases: Math.round(d.purchases * 100) / 100,
+            purchaseValue: Math.round(d.purchaseValue),
+            viewToAtcRate: d.views > 0 ? Math.round((d.atc / d.views) * 10000) / 100 : 0,
+            atcToPurchaseRate: d.atc > 0 ? Math.round((d.purchases / d.atc) * 10000) / 100 : 0,
+        }))
+        .filter(r => r.views > 0 || r.addToCarts > 0 || r.purchases > 0)
+        .sort((a, b) => b.purchases - a.purchases || b.addToCarts - a.addToCarts);
+}
+
+/**
+ * Search term conversion breakdown — which terms drive ATCs and purchases.
+ */
+export async function getGAdsSearchConversions(days: number): Promise<GAdsSearchConversionRow[]> {
+    const actionList = FUNNEL_ACTIONS.map(a => `'${a}'`).join(', ');
+    const sql = `
+SELECT
+    search_term_view_search_term AS search_term,
+    segments_conversion_action_name AS action,
+    SUM(metrics_all_conversions) AS conv,
+    SUM(metrics_all_conversions_value) AS conv_value
+FROM ${table('SearchQueryConversionStats')}
+WHERE ${dateFilterSQL(days)}
+    AND segments_conversion_action_name IN (${actionList})
+    AND metrics_all_conversions > 0
+GROUP BY 1, 2
+ORDER BY conv DESC
+LIMIT 200
+`;
+    const rows = await runQuery<{
+        search_term: string; action: string; conv: number; conv_value: number;
+    }>(sql, { cacheKey: `gads:search-conversions:${days}`, cacheTtl: GADS_CACHE_TTL });
+
+    return rows.map(r => ({
+        searchTerm: r.search_term,
+        action: simplifyActionName(r.action),
+        conversions: Math.round(Number(r.conv) * 100) / 100,
+        conversionValue: Math.round(Number(r.conv_value)),
+    }));
+}
+
+/**
+ * Campaign conversion breakdown — conversions per action per campaign.
+ */
+export async function getGAdsCampaignConversions(days: number): Promise<GAdsCampaignConversionRow[]> {
+    const sql = `
+SELECT
+    c.campaign_name,
+    s.segments_conversion_action_name AS action,
+    SUM(s.metrics_conversions) AS conv,
+    SUM(s.metrics_conversions_value) AS conv_value
+FROM ${table('CampaignConversionStats')} s
+JOIN ${table('Campaign')} c ON s.campaign_id = c.campaign_id
+WHERE ${dateFilterSQL(days, 's.segments_date')}
+    AND c.campaign_status = 'ENABLED'
+GROUP BY 1, 2
+HAVING conv > 0
+ORDER BY campaign_name, conv DESC
+`;
+    const rows = await runQuery<{
+        campaign_name: string; action: string; conv: number; conv_value: number;
+    }>(sql, { cacheKey: `gads:campaign-conversions:${days}`, cacheTtl: GADS_CACHE_TTL });
+
+    return rows.map(r => ({
+        campaignName: r.campaign_name,
+        action: simplifyActionName(r.action),
+        conversions: Math.round(Number(r.conv) * 100) / 100,
+        conversionValue: Math.round(Number(r.conv_value)),
+    }));
+}
+
+/** Shorten verbose conversion action names for display */
+function simplifyActionName(action: string): string {
+    if (action.includes('View Item') || action.includes('view_item')) return 'View Item';
+    if (action.includes('Page View')) return 'Page View';
+    if (action.includes('Add To Cart') || action.includes('add_to_cart')) return 'Add to Cart';
+    if (action.includes('Begin Checkout')) return 'Begin Checkout';
+    if (action.includes('Purchase') || action.includes('purchase')) return 'Purchase';
+    if (action.includes('Search')) return 'Search';
+    return action;
 }

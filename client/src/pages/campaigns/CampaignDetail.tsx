@@ -1,14 +1,14 @@
 /**
  * Campaign Detail Page
  *
- * - Draft/Scheduled → Builder view (edit subject, template, audience, UTM, preview)
+ * - Draft/Scheduled → 3-panel builder: Settings | AI Editor | Live Preview
  * - Sent → Analytics view (stats, funnel, recipients)
  */
-import { useState } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { useNavigate, useParams } from '@tanstack/react-router';
-import { ArrowLeft, Send, TestTube, Save, ChevronDown, ChevronUp } from 'lucide-react';
+import { ArrowLeft, Send, TestTube, Save, ChevronDown, ChevronUp, Code, Sparkles, Loader2 } from 'lucide-react';
 import {
   getCampaignDetail,
   updateCampaign,
@@ -16,7 +16,6 @@ import {
   sendCampaign,
   getAudiencePreview,
   getCampaignRecipients,
-  previewCampaign,
 } from '../../server/functions/campaigns';
 
 // ============================================
@@ -32,14 +31,16 @@ const statusStyles: Record<string, string> = {
 };
 
 // ============================================
-// TEMPLATE OPTIONS
+// QUICK PROMPTS
 // ============================================
 
-const TEMPLATES = [
-  { key: 'cinematic', label: 'Cinematic', gradient: 'from-stone-900 to-amber-950' },
-  { key: 'swiss', label: 'Swiss', gradient: 'from-gray-100 to-gray-200' },
-  { key: 'warm', label: 'Warm', gradient: 'from-orange-50 to-amber-100' },
-] as const;
+const QUICK_PROMPTS = [
+  { label: 'Product Launch', prompt: 'Write a product launch announcement email. Highlight the new product, its features, and why customers will love it.' },
+  { label: 'Seasonal Sale', prompt: 'Write a seasonal sale email with a compelling headline, urgency, and a clear discount offer.' },
+  { label: 'Re-engagement', prompt: 'Write a re-engagement email for customers who haven\'t purchased in a while. Warm, personal, with a soft incentive to return.' },
+  { label: 'Newsletter', prompt: 'Write a brand newsletter email with updates, behind-the-scenes content, and a gentle product highlight.' },
+  { label: 'Back in Stock', prompt: 'Write a back-in-stock notification email. Create urgency with limited availability messaging.' },
+];
 
 // ============================================
 // TIER PILLS
@@ -71,10 +72,17 @@ export default function CampaignDetail() {
   const sendCampaignFn = useServerFn(sendCampaign);
   const getAudiencePreviewFn = useServerFn(getAudiencePreview);
   const getCampaignRecipientsFn = useServerFn(getCampaignRecipients);
-  const previewCampaignFn = useServerFn(previewCampaign);
 
   const [utmExpanded, setUtmExpanded] = useState(false);
   const [recipientFilter, setRecipientFilter] = useState<string>('all');
+  const [showHtml, setShowHtml] = useState(false);
+  const [mobilePreview, setMobilePreview] = useState(false);
+
+  // AI state
+  const [aiPrompt, setAiPrompt] = useState('');
+  const [aiStreaming, setAiStreaming] = useState(false);
+  const [aiStreamedHtml, setAiStreamedHtml] = useState('');
+  const abortRef = useRef<AbortController | null>(null);
 
   // Fetch campaign
   const { data: campaign, isLoading } = useQuery({
@@ -82,11 +90,11 @@ export default function CampaignDetail() {
     queryFn: () => getCampaignDetailFn({ data: { id: campaignId } }),
   });
 
-  // Form state — initialized empty, populated when campaign loads
+  // Form state
   const [name, setName] = useState('');
   const [subject, setSubject] = useState('');
   const [preheaderText, setPreheaderText] = useState('');
-  const [templateKey, setTemplateKey] = useState('cinematic');
+  const [htmlContent, setHtmlContent] = useState('');
   const [selectedTiers, setSelectedTiers] = useState<string[]>([]);
   const [lastPurchaseDays, setLastPurchaseDays] = useState<number | undefined>();
   const [utmSource, setUtmSource] = useState('email');
@@ -94,14 +102,14 @@ export default function CampaignDetail() {
   const [utmCampaign, setUtmCampaign] = useState('');
   const [utmContent, setUtmContent] = useState('');
 
-  // Track which campaign we've populated the form from
+  // Populate form from campaign data
   const [populatedId, setPopulatedId] = useState<string | null>(null);
   if (campaign && campaign.id !== populatedId) {
     setPopulatedId(campaign.id);
     setName(campaign.name);
     setSubject(campaign.subject);
     setPreheaderText(campaign.preheaderText || '');
-    setTemplateKey(campaign.templateKey);
+    setHtmlContent(campaign.htmlContent || '');
     setUtmSource(campaign.utmSource);
     setUtmMedium(campaign.utmMedium);
     setUtmCampaign(campaign.utmCampaign || '');
@@ -128,14 +136,6 @@ export default function CampaignDetail() {
     staleTime: 10_000,
   });
 
-  // Email preview — re-renders when template or campaign changes
-  const { data: previewData } = useQuery({
-    queryKey: ['campaign', 'preview', campaignId, templateKey],
-    queryFn: () => previewCampaignFn({ data: { campaignId } }),
-    enabled: !!campaign && (campaign.status === 'draft' || campaign.status === 'scheduled'),
-    staleTime: 30_000,
-  });
-
   // Recipients (for sent campaigns)
   const { data: recipientsData } = useQuery({
     queryKey: ['campaign', 'recipients', campaignId, recipientFilter],
@@ -153,7 +153,7 @@ export default function CampaignDetail() {
         name,
         subject,
         preheaderText: preheaderText || undefined,
-        templateKey,
+        htmlContent: htmlContent || undefined,
         audienceFilter: {
           ...(selectedTiers.length > 0 ? { tiers: selectedTiers } : {}),
           ...(lastPurchaseDays ? { lastPurchaseDays } : {}),
@@ -183,6 +183,87 @@ export default function CampaignDetail() {
       prev.includes(tier) ? prev.filter(t => t !== tier) : [...prev, tier]
     );
   };
+
+  // ============================================
+  // AI GENERATION
+  // ============================================
+
+  const generateEmail = useCallback(async (promptText: string) => {
+    if (!promptText.trim() || aiStreaming) return;
+
+    // Abort previous stream if any
+    if (abortRef.current) abortRef.current.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    setAiStreaming(true);
+    setAiStreamedHtml('');
+
+    try {
+      const response = await fetch('/api/campaigns/ai/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: promptText,
+          ...(htmlContent ? { currentHtml: htmlContent } : {}),
+        }),
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('No response body');
+
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let accumulated = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          try {
+            const parsed = JSON.parse(line.slice(6));
+            if (parsed.type === 'text_delta') {
+              accumulated += parsed.text;
+              setAiStreamedHtml(accumulated);
+            } else if (parsed.type === 'error') {
+              console.error('AI error:', parsed.message);
+            }
+          } catch {
+            // Skip malformed JSON
+          }
+        }
+      }
+    } catch (err: unknown) {
+      if (err instanceof Error && err.name === 'AbortError') return;
+      console.error('AI generation failed:', err);
+    } finally {
+      setAiStreaming(false);
+      abortRef.current = null;
+    }
+  }, [aiStreaming, htmlContent]);
+
+  const handleUseGenerated = useCallback(() => {
+    if (aiStreamedHtml) {
+      setHtmlContent(aiStreamedHtml);
+      setAiStreamedHtml('');
+    }
+  }, [aiStreamedHtml]);
+
+  // Cleanup abort controller on unmount
+  useEffect(() => {
+    return () => { abortRef.current?.abort(); };
+  }, []);
 
   if (isLoading || !campaign) {
     return (
@@ -219,14 +300,6 @@ export default function CampaignDetail() {
                 {' · '}{campaign.recipientCount.toLocaleString()} recipients
               </span>
             </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <button className="px-4 py-2 text-sm font-medium text-stone-600 border border-stone-200 rounded-lg hover:bg-stone-50">
-              Duplicate
-            </button>
-            <button className="px-4 py-2 text-sm font-medium text-stone-600 border border-stone-200 rounded-lg hover:bg-stone-50">
-              Export CSV
-            </button>
           </div>
         </div>
 
@@ -321,12 +394,16 @@ export default function CampaignDetail() {
   }
 
   // ============================================
-  // DRAFT/SCHEDULED → BUILDER VIEW
+  // DRAFT/SCHEDULED → 3-PANEL BUILDER VIEW
   // ============================================
+
+  // The HTML shown in preview — prefer live streamed content while generating
+  const previewHtml = aiStreaming ? aiStreamedHtml : htmlContent;
+
   return (
     <div className="flex flex-col h-full bg-stone-50">
       {/* Header */}
-      <div className="flex items-center justify-between px-8 py-4 bg-white border-b border-stone-200">
+      <div className="flex items-center justify-between px-6 py-3 bg-white border-b border-stone-200">
         <div className="flex items-center gap-4">
           <button onClick={() => navigate({ to: '/campaigns' })} className="text-stone-400 hover:text-stone-600">
             <ArrowLeft className="w-5 h-5" />
@@ -335,7 +412,7 @@ export default function CampaignDetail() {
             <input
               value={name}
               onChange={e => setName(e.target.value)}
-              className="text-xl font-bold text-stone-900 tracking-tight bg-transparent border-none outline-none"
+              className="text-lg font-bold text-stone-900 tracking-tight bg-transparent border-none outline-none"
               placeholder="Campaign name"
             />
             <span className="text-xs text-stone-400">
@@ -346,14 +423,14 @@ export default function CampaignDetail() {
             </span>
           </div>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           <button
             onClick={() => saveMutation.mutate()}
             disabled={saveMutation.isPending}
-            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-stone-600 border border-stone-200 rounded-lg hover:bg-stone-50"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-stone-600 border border-stone-200 rounded-lg hover:bg-stone-50"
           >
-            <Save className="w-4 h-4" />
-            {saveMutation.isPending ? 'Saving...' : 'Save Draft'}
+            <Save className="w-3.5 h-3.5" />
+            {saveMutation.isPending ? 'Saving...' : 'Save'}
           </button>
           <button
             onClick={() => {
@@ -362,10 +439,10 @@ export default function CampaignDetail() {
                 sendTestEmailFn({ data: { campaignId, toEmail: email } });
               }
             }}
-            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-stone-600 border border-stone-200 rounded-lg hover:bg-stone-50"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-stone-600 border border-stone-200 rounded-lg hover:bg-stone-50"
           >
-            <TestTube className="w-4 h-4" />
-            Send Test
+            <TestTube className="w-3.5 h-3.5" />
+            Test
           </button>
           <button
             onClick={() => {
@@ -373,27 +450,27 @@ export default function CampaignDetail() {
                 sendMutation.mutate();
               }
             }}
-            disabled={sendMutation.isPending || !subject}
-            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-red-700 rounded-lg hover:bg-red-800 disabled:opacity-50"
+            disabled={sendMutation.isPending || !subject || !htmlContent}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-red-700 rounded-lg hover:bg-red-800 disabled:opacity-50"
           >
-            <Send className="w-4 h-4" />
-            {sendMutation.isPending ? 'Sending...' : 'Send Campaign'}
+            <Send className="w-3.5 h-3.5" />
+            {sendMutation.isPending ? 'Sending...' : 'Send'}
           </button>
         </div>
       </div>
 
-      {/* Builder body */}
+      {/* 3-Panel Builder body */}
       <div className="flex flex-1 overflow-hidden">
-        {/* Left panel — settings */}
-        <div className="w-[440px] flex-shrink-0 overflow-auto p-6 flex flex-col gap-5 border-r border-stone-200 bg-stone-50">
+        {/* ===== LEFT PANEL: Settings ===== */}
+        <div className="w-[320px] flex-shrink-0 overflow-auto p-4 flex flex-col gap-3 border-r border-stone-200 bg-stone-50">
           {/* Email Details */}
-          <div className="bg-white rounded-xl border border-stone-200 p-5 flex flex-col gap-4">
-            <h3 className="text-base font-semibold text-stone-900">Email Details</h3>
+          <div className="bg-white rounded-xl border border-stone-200 p-4 flex flex-col gap-3">
+            <h3 className="text-sm font-semibold text-stone-900">Email Details</h3>
             <Field label="Subject Line">
               <input
                 value={subject}
                 onChange={e => setSubject(e.target.value)}
-                className="w-full px-3 py-2.5 text-sm rounded-lg border border-stone-200 bg-stone-50 outline-none focus:border-stone-400"
+                className="w-full px-3 py-2 text-sm rounded-lg border border-stone-200 bg-stone-50 outline-none focus:border-stone-400"
                 placeholder="Email subject line"
               />
             </Field>
@@ -401,55 +478,34 @@ export default function CampaignDetail() {
               <input
                 value={preheaderText}
                 onChange={e => setPreheaderText(e.target.value)}
-                className="w-full px-3 py-2.5 text-sm rounded-lg border border-stone-200 bg-stone-50 outline-none focus:border-stone-400"
+                className="w-full px-3 py-2 text-sm rounded-lg border border-stone-200 bg-stone-50 outline-none focus:border-stone-400"
                 placeholder="Text shown after subject in inbox"
               />
             </Field>
             <Field label="From">
-              <div className="px-3 py-2.5 text-sm rounded-lg border border-stone-200 bg-stone-50 text-stone-500">
+              <div className="px-3 py-2 text-sm rounded-lg border border-stone-200 bg-stone-50 text-stone-500">
                 Creatures of Habit &lt;noreply@creaturesofhabit.in&gt;
               </div>
             </Field>
           </div>
 
-          {/* Template picker */}
-          <div className="bg-white rounded-xl border border-stone-200 p-5 flex flex-col gap-3">
-            <h3 className="text-base font-semibold text-stone-900">Template</h3>
-            <div className="flex gap-3">
-              {TEMPLATES.map(t => (
-                <button
-                  key={t.key}
-                  onClick={() => setTemplateKey(t.key)}
-                  className={`flex flex-col items-center gap-2 p-3 rounded-lg flex-1 transition-all ${
-                    templateKey === t.key
-                      ? 'border-2 border-red-700 bg-red-50/30'
-                      : 'border border-stone-200 bg-white hover:border-stone-300'
-                  }`}
-                >
-                  <div className={`w-full h-16 rounded bg-gradient-to-br ${t.gradient}`} />
-                  <span className="text-xs font-medium text-stone-700">{t.label}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-
           {/* Audience */}
-          <div className="bg-white rounded-xl border border-stone-200 p-5 flex flex-col gap-4">
+          <div className="bg-white rounded-xl border border-stone-200 p-4 flex flex-col gap-3">
             <div className="flex items-center justify-between">
-              <h3 className="text-base font-semibold text-stone-900">Audience</h3>
+              <h3 className="text-sm font-semibold text-stone-900">Audience</h3>
               {audiencePreview && (
-                <span className="text-xs font-semibold text-amber-800 bg-stone-100 px-2.5 py-1 rounded-md">
-                  {audiencePreview.count.toLocaleString()} recipients
+                <span className="text-xs font-semibold text-amber-800 bg-stone-100 px-2 py-0.5 rounded-md">
+                  {audiencePreview.count.toLocaleString()}
                 </span>
               )}
             </div>
             <Field label="Tier">
-              <div className="flex gap-2 flex-wrap">
+              <div className="flex gap-1.5 flex-wrap">
                 {TIERS.map(tier => (
                   <button
                     key={tier}
                     onClick={() => toggleTier(tier)}
-                    className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+                    className={`px-2.5 py-0.5 rounded-full text-xs font-medium transition-colors ${
                       selectedTiers.includes(tier) ? tierColors[tier].active : tierColors[tier].inactive
                     }`}
                   >
@@ -462,7 +518,7 @@ export default function CampaignDetail() {
               <select
                 value={lastPurchaseDays || ''}
                 onChange={e => setLastPurchaseDays(e.target.value ? Number(e.target.value) : undefined)}
-                className="w-full px-3 py-2.5 text-sm rounded-lg border border-stone-200 bg-stone-50 outline-none"
+                className="w-full px-3 py-2 text-sm rounded-lg border border-stone-200 bg-stone-50 outline-none"
               >
                 <option value="">All customers</option>
                 <option value="30">Within 30 days</option>
@@ -475,63 +531,202 @@ export default function CampaignDetail() {
           </div>
 
           {/* UTM Tracking */}
-          <div className="bg-white rounded-xl border border-stone-200 p-5 flex flex-col gap-3">
+          <div className="bg-white rounded-xl border border-stone-200 p-4 flex flex-col gap-2">
             <button
               onClick={() => setUtmExpanded(!utmExpanded)}
               className="flex items-center justify-between w-full"
             >
-              <h3 className="text-base font-semibold text-stone-900">UTM Tracking</h3>
+              <h3 className="text-sm font-semibold text-stone-900">UTM Tracking</h3>
               {utmExpanded ? <ChevronUp className="w-4 h-4 text-stone-400" /> : <ChevronDown className="w-4 h-4 text-stone-400" />}
             </button>
+            {!utmExpanded && (
+              <span className="text-[11px] text-stone-400 truncate">
+                {utmSource}/{utmMedium}/{utmCampaign || 'auto'}
+              </span>
+            )}
             {utmExpanded && (
-              <div className="flex flex-col gap-3 pt-1">
+              <div className="flex flex-col gap-2 pt-1">
                 <UtmField label="Source" value={utmSource} onChange={setUtmSource} />
                 <UtmField label="Medium" value={utmMedium} onChange={setUtmMedium} />
-                <UtmField label="Campaign" value={utmCampaign} onChange={setUtmCampaign} placeholder="Auto-generated from name" />
-                <UtmField label="Content" value={utmContent} onChange={setUtmContent} placeholder="Auto-tagged per link" />
-                <div className="px-3 py-2 bg-stone-50 rounded-lg">
-                  <span className="text-[11px] text-amber-800 break-all">
-                    Links → creaturesofhabit.in/...?utm_source={utmSource}&utm_medium={utmMedium}&utm_campaign={utmCampaign || 'auto-slug'}
+                <UtmField label="Campaign" value={utmCampaign} onChange={setUtmCampaign} placeholder="Auto from name" />
+                <UtmField label="Content" value={utmContent} onChange={setUtmContent} placeholder="Auto per link" />
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* ===== CENTER PANEL: Content Editor ===== */}
+        <div className="flex-1 overflow-auto p-5 flex flex-col gap-4 bg-white">
+          {/* AI Prompt Section */}
+          <div className="flex flex-col gap-3 p-4 bg-stone-50 rounded-xl border border-stone-200">
+            <div className="flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-stone-700" />
+              <span className="text-sm font-semibold text-stone-900">AI Email Generator</span>
+              {htmlContent && (
+                <span className="text-[11px] text-stone-400 ml-1">· Will modify current email</span>
+              )}
+            </div>
+
+            {/* Prompt input */}
+            <div className="flex gap-2">
+              <textarea
+                value={aiPrompt}
+                onChange={e => setAiPrompt(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    generateEmail(aiPrompt);
+                  }
+                }}
+                placeholder="Describe the email you want to create..."
+                className="flex-1 px-3 py-2.5 text-sm rounded-lg border border-stone-200 bg-white outline-none focus:border-stone-400 resize-none min-h-[40px] max-h-[120px]"
+                rows={2}
+              />
+              <button
+                onClick={() => generateEmail(aiPrompt)}
+                disabled={aiStreaming || !aiPrompt.trim()}
+                className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-stone-900 rounded-lg hover:bg-stone-800 disabled:opacity-50 self-end flex-shrink-0"
+              >
+                {aiStreaming ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                {aiStreaming ? 'Generating...' : 'Generate'}
+              </button>
+            </div>
+
+            {/* Quick prompts */}
+            <div className="flex gap-1.5 flex-wrap">
+              {QUICK_PROMPTS.map(qp => (
+                <button
+                  key={qp.label}
+                  onClick={() => {
+                    setAiPrompt(qp.prompt);
+                    generateEmail(qp.prompt);
+                  }}
+                  disabled={aiStreaming}
+                  className="px-2.5 py-1 text-[11px] font-medium text-stone-600 bg-white border border-stone-200 rounded-full hover:bg-stone-100 disabled:opacity-50"
+                >
+                  {qp.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* AI Streaming Output */}
+          {(aiStreaming || aiStreamedHtml) && (
+            <div className="flex flex-col gap-2 p-4 bg-stone-50 rounded-xl border border-stone-200">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  {aiStreaming && <Loader2 className="w-3.5 h-3.5 animate-spin text-stone-500" />}
+                  <span className="text-sm font-medium text-stone-700">
+                    {aiStreaming ? 'Generating email...' : 'Generated email ready'}
                   </span>
+                </div>
+                {!aiStreaming && aiStreamedHtml && (
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setAiStreamedHtml('')}
+                      className="px-3 py-1 text-xs font-medium text-stone-500 border border-stone-200 rounded-lg hover:bg-stone-100"
+                    >
+                      Discard
+                    </button>
+                    <button
+                      onClick={handleUseGenerated}
+                      className="px-3 py-1 text-xs font-medium text-white bg-stone-900 rounded-lg hover:bg-stone-800"
+                    >
+                      Use this email
+                    </button>
+                  </div>
+                )}
+              </div>
+              <div className="bg-stone-900 rounded-lg p-3 max-h-[200px] overflow-auto">
+                <pre className="text-[11px] text-stone-300 font-mono whitespace-pre-wrap break-all leading-relaxed">
+                  {aiStreamedHtml.slice(0, 500)}{aiStreamedHtml.length > 500 ? '...' : ''}
+                </pre>
+              </div>
+            </div>
+          )}
+
+          {/* Raw HTML Editor */}
+          <div className="flex flex-col gap-2">
+            <button
+              onClick={() => setShowHtml(!showHtml)}
+              className="flex items-center gap-2 self-start"
+            >
+              <Code className="w-4 h-4 text-stone-500" />
+              <span className="text-sm font-semibold text-stone-900">Email HTML</span>
+              {showHtml ? <ChevronUp className="w-3.5 h-3.5 text-stone-400" /> : <ChevronDown className="w-3.5 h-3.5 text-stone-400" />}
+              {htmlContent && !showHtml && (
+                <span className="text-[11px] text-emerald-600 font-medium">{(htmlContent.length / 1024).toFixed(1)}KB</span>
+              )}
+            </button>
+
+            {showHtml && (
+              <textarea
+                value={htmlContent}
+                onChange={e => setHtmlContent(e.target.value)}
+                className="w-full h-[400px] px-4 py-3 text-[12px] font-mono text-stone-300 bg-stone-900 rounded-xl border border-stone-700 outline-none resize-y leading-relaxed"
+                placeholder="Paste or generate email HTML here..."
+                spellCheck={false}
+              />
+            )}
+
+            {!showHtml && !htmlContent && (
+              <div className="flex items-center justify-center py-12 bg-stone-50 rounded-xl border border-dashed border-stone-300">
+                <div className="text-center flex flex-col gap-2">
+                  <Sparkles className="w-8 h-8 text-stone-300 mx-auto" />
+                  <span className="text-sm text-stone-400">No email content yet</span>
+                  <span className="text-xs text-stone-400">Use the AI generator above or paste HTML directly</span>
                 </div>
               </div>
             )}
           </div>
         </div>
 
-        {/* Right panel — preview */}
-        <div className="flex-1 overflow-auto p-6 flex flex-col gap-4">
+        {/* ===== RIGHT PANEL: Live Preview ===== */}
+        <div className="w-[420px] flex-shrink-0 overflow-auto p-4 flex flex-col gap-3 border-l border-stone-200 bg-stone-50">
           <div className="flex items-center justify-between">
-            <h3 className="text-base font-semibold text-stone-900">Preview</h3>
+            <h3 className="text-sm font-semibold text-stone-900">Preview</h3>
             <div className="flex gap-1">
-              <button className="px-3 py-1 rounded-md text-xs font-medium bg-stone-900 text-white">Desktop</button>
-              <button className="px-3 py-1 rounded-md text-xs font-medium bg-stone-100 text-stone-500">Mobile</button>
+              <button
+                onClick={() => setMobilePreview(false)}
+                className={`px-2.5 py-1 rounded-md text-xs font-medium ${!mobilePreview ? 'bg-stone-900 text-white' : 'bg-stone-100 text-stone-500'}`}
+              >
+                Desktop
+              </button>
+              <button
+                onClick={() => setMobilePreview(true)}
+                className={`px-2.5 py-1 rounded-md text-xs font-medium ${mobilePreview ? 'bg-stone-900 text-white' : 'bg-stone-100 text-stone-500'}`}
+              >
+                Mobile
+              </button>
             </div>
           </div>
 
           {/* Inbox preview strip */}
-          <div className="bg-white rounded-xl border border-stone-200 p-4 flex flex-col gap-1">
+          <div className="bg-white rounded-xl border border-stone-200 p-3 flex flex-col gap-1">
             <div className="flex items-center gap-2">
-              <span className="text-sm font-semibold text-stone-900">Creatures of Habit</span>
-              <span className="text-xs text-stone-400">noreply@creaturesofhabit.in</span>
+              <span className="text-xs font-semibold text-stone-900">Creatures of Habit</span>
+              <span className="text-[11px] text-stone-400">noreply@creaturesofhabit.in</span>
             </div>
             <span className="text-sm font-medium text-stone-900">{subject || 'Subject line...'}</span>
             <span className="text-xs text-stone-400">{preheaderText || 'Preview text...'}</span>
           </div>
 
           {/* Email body preview */}
-          {previewData?.html ? (
-            <iframe
-              srcDoc={previewData.html}
-              className="rounded-xl border border-stone-200 flex-1 min-h-[500px] w-full bg-white"
-              title="Email preview"
-              sandbox="allow-same-origin"
-            />
+          {previewHtml ? (
+            <div className="flex justify-center">
+              <iframe
+                srcDoc={previewHtml}
+                className="rounded-xl border border-stone-200 bg-white flex-shrink-0"
+                style={{ width: mobilePreview ? 375 : '100%', minHeight: 500, height: '100%' }}
+                title="Email preview"
+                sandbox="allow-same-origin"
+              />
+            </div>
           ) : (
             <div className="bg-stone-200/50 rounded-xl border border-stone-200 flex-1 flex items-center justify-center min-h-[400px]">
               <div className="text-center flex flex-col gap-2">
-                <span className="text-sm text-stone-400">Loading email preview...</span>
-                <span className="text-xs text-stone-400">Template: {templateKey} · {audiencePreview?.count || 0} recipients</span>
+                <span className="text-sm text-stone-400">No preview available</span>
+                <span className="text-xs text-stone-400">Generate or write email HTML to see preview</span>
               </div>
             </div>
           )}
@@ -547,8 +742,8 @@ export default function CampaignDetail() {
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="flex flex-col gap-1.5">
-      <span className="text-[11px] font-medium text-amber-800 uppercase tracking-wider">{label}</span>
+    <div className="flex flex-col gap-1">
+      <span className="text-[10px] font-medium text-amber-800 uppercase tracking-wider">{label}</span>
       {children}
     </div>
   );
@@ -556,13 +751,13 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 function UtmField({ label, value, onChange, placeholder }: { label: string; value: string; onChange: (v: string) => void; placeholder?: string }) {
   return (
-    <div className="flex items-center gap-3">
-      <span className="text-[11px] font-medium text-amber-800 uppercase tracking-wider w-[80px] flex-shrink-0">{label}</span>
+    <div className="flex items-center gap-2">
+      <span className="text-[10px] font-medium text-amber-800 uppercase tracking-wider w-[70px] flex-shrink-0">{label}</span>
       <input
         value={value}
         onChange={e => onChange(e.target.value)}
         placeholder={placeholder}
-        className="flex-1 px-3 py-2 text-sm rounded-lg border border-stone-200 bg-stone-50 outline-none focus:border-stone-400"
+        className="flex-1 px-2.5 py-1.5 text-sm rounded-lg border border-stone-200 bg-stone-50 outline-none focus:border-stone-400"
       />
     </div>
   );

@@ -71,20 +71,20 @@ export const TIER_THRESHOLDS = {
  */
 export const TIER_CONFIG: Record<string, TierConfig> = {
   platinum: {
-    bg: 'bg-slate-700',
+    bg: 'bg-slate-600',
     text: 'text-white',
     icon: Crown,
     label: 'PLATINUM',
-    border: 'border-slate-500',
-    avatarBg: 'bg-slate-700',
+    border: 'border-slate-400',
+    avatarBg: 'bg-slate-600',
   },
   gold: {
-    bg: 'bg-amber-500',
+    bg: 'bg-[#D4A574]',
     text: 'text-white',
     icon: Medal,
     label: 'GOLD',
-    border: 'border-amber-400',
-    avatarBg: 'bg-amber-500',
+    border: 'border-[#D4A574]',
+    avatarBg: 'bg-[#D4A574]',
   },
   silver: {
     bg: 'bg-slate-400',
@@ -95,12 +95,20 @@ export const TIER_CONFIG: Record<string, TierConfig> = {
     avatarBg: 'bg-slate-400',
   },
   bronze: {
-    bg: 'bg-amber-700',
-    text: 'text-amber-100',
+    bg: 'bg-[#B45309]',
+    text: 'text-white',
     icon: Award,
     label: 'BRONZE',
-    border: 'border-amber-600',
-    avatarBg: 'bg-amber-700',
+    border: 'border-[#B45309]',
+    avatarBg: 'bg-[#B45309]',
+  },
+  new: {
+    bg: 'bg-stone-400',
+    text: 'text-white',
+    icon: Award,
+    label: 'NEW',
+    border: 'border-stone-300',
+    avatarBg: 'bg-stone-400',
   },
 };
 
