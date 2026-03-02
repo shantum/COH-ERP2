@@ -122,7 +122,8 @@ app.use('/api/auth/login', authLimiter);
 app.use('/api/auth/register', authLimiter);
 
 // Pixel endpoint — wildcard CORS (Shopify sandbox sends Origin: null)
-app.use('/api/pixel', cors({ origin: '*' }), pixelRoutes);
+// Must include express.json() here because global body parser is registered later
+app.use('/api/pixel', cors({ origin: '*' }), express.json({ limit: '100kb' }), pixelRoutes);
 
 // CORS configuration
 app.use(cors({
