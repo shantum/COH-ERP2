@@ -344,37 +344,85 @@ function LiveFeed({ events, isLoading }: { events: LiveFeedEvent[]; isLoading: b
                     <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
                 </span>
             </div>
-            <div className="space-y-1 max-h-[400px] overflow-y-auto">
+            <div className="space-y-0 max-h-[400px] overflow-y-auto">
                 {events.length === 0 && (
                     <p className="text-sm text-stone-400">No events yet</p>
                 )}
-                {events.map((e) => (
-                    <div key={e.id} className="flex items-start gap-3 py-2 border-b border-stone-100 last:border-0">
-                        <div className="mt-0.5">{eventIcon(e.eventName)}</div>
-                        <div className="flex-1 min-w-0">
-                            <p className="text-sm text-stone-700 truncate">
-                                {eventLabel(e.eventName)}
-                                {e.productTitle && (
-                                    <span className="text-stone-500"> — {e.productTitle}</span>
+                {events.map((e) => {
+                    const hasProduct = !!e.productTitle;
+                    const hasCollection = !!e.collectionTitle && !hasProduct;
+                    const location = [e.city, e.region].filter(Boolean).join(', ') || e.country;
+                    const variantParts = e.variantTitle?.split(' / ') ?? [];
+                    const variantColor = variantParts[0];
+                    const variantSize = variantParts[1];
+
+                    return (
+                        <div key={e.id} className="flex items-start gap-3 py-2.5 border-b border-stone-100 last:border-0">
+                            {/* Thumbnail or icon */}
+                            {hasProduct && e.imageUrl ? (
+                                <img
+                                    src={e.imageUrl}
+                                    alt={e.productTitle ?? ''}
+                                    className="w-9 h-9 rounded object-cover flex-shrink-0 mt-0.5"
+                                />
+                            ) : (
+                                <div className="w-9 h-9 rounded bg-stone-100 flex items-center justify-center flex-shrink-0 mt-0.5">
+                                    {eventIcon(e.eventName)}
+                                </div>
+                            )}
+
+                            <div className="flex-1 min-w-0">
+                                {/* Main line — event + product/collection */}
+                                <p className="text-sm text-stone-800 leading-snug">
+                                    <span className="font-medium">{eventLabel(e.eventName)}</span>
+                                    {hasProduct && (
+                                        <span className="text-stone-600"> — {e.productTitle}</span>
+                                    )}
+                                    {hasCollection && (
+                                        <span className="text-stone-600"> — {e.collectionTitle}</span>
+                                    )}
+                                    {e.searchQuery && (
+                                        <span className="text-purple-600"> "{e.searchQuery}"</span>
+                                    )}
+                                </p>
+
+                                {/* Variant info */}
+                                {hasProduct && variantColor && (
+                                    <div className="flex items-center gap-1.5 mt-0.5">
+                                        <span className="text-[11px] text-stone-500">{variantColor}</span>
+                                        {variantSize && (
+                                            <span className="text-[10px] font-medium text-stone-400 bg-stone-100 px-1.5 py-0.5 rounded">
+                                                {variantSize}
+                                            </span>
+                                        )}
+                                    </div>
                                 )}
-                                {e.searchQuery && (
-                                    <span className="text-purple-600"> "{e.searchQuery}"</span>
-                                )}
-                            </p>
-                            <div className="flex items-center gap-2 mt-0.5 text-xs text-stone-400">
-                                {e.region && <span>{e.region}</span>}
-                                {e.deviceType && <span>{e.deviceType}</span>}
-                                {e.utmSource && (
-                                    <span style={{ color: sourceColor(e.utmSource) }}>{e.utmSource}</span>
-                                )}
-                                {e.orderValue != null && e.orderValue > 0 && (
-                                    <span className="text-green-600 font-medium">{formatCurrency(e.orderValue)}</span>
-                                )}
+
+                                {/* Meta line — location, device, source, value */}
+                                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-1 text-[11px] text-stone-400">
+                                    {location && <span>{location}</span>}
+                                    {e.deviceType && <span className="capitalize">{e.deviceType}</span>}
+                                    {e.utmSource && (
+                                        <span className="font-medium" style={{ color: sourceColor(e.utmSource) }}>
+                                            {e.utmSource}
+                                            {e.utmCampaign && (
+                                                <span className="font-normal text-stone-400"> / {e.utmCampaign}</span>
+                                            )}
+                                        </span>
+                                    )}
+                                    {e.orderValue != null && e.orderValue > 0 && (
+                                        <span className="text-green-600 font-semibold">{formatCurrency(e.orderValue)}</span>
+                                    )}
+                                    {e.cartValue != null && e.cartValue > 0 && e.eventName === 'product_added_to_cart' && (
+                                        <span className="text-amber-600">Cart: {formatCurrency(e.cartValue)}</span>
+                                    )}
+                                </div>
                             </div>
+
+                            <span className="text-[11px] text-stone-400 whitespace-nowrap mt-0.5">{timeAgo(e.createdAt)}</span>
                         </div>
-                        <span className="text-xs text-stone-400 whitespace-nowrap">{timeAgo(e.createdAt)}</span>
-                    </div>
-                ))}
+                    );
+                })}
             </div>
         </div>
     );

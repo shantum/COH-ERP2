@@ -2759,6 +2759,14 @@ model StorefrontEvent {
   utmCampaign     String?
   utmContent      String?
   utmTerm         String?
+  fbclid          String?
+  gclid           String?
+  gbraid          String?
+  wbraid          String?
+  ttclid          String?
+  msclkid         String?
+  gadSource       String?
+  gadCampaignId   String?
   productId       String?
   productTitle    String?
   variantId       String?

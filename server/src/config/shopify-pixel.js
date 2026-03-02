@@ -48,21 +48,20 @@ async function initSession() {
 
 function captureFirstTouch(pageUrl, referrer) {
   if (firstTouch) return; // Already captured this session
-  const utms = getUtmParams(pageUrl);
-  firstTouch = {
-    ...(utms.utmSource ? { utmSource: utms.utmSource } : {}),
-    ...(utms.utmMedium ? { utmMedium: utms.utmMedium } : {}),
-    ...(utms.utmCampaign ? { utmCampaign: utms.utmCampaign } : {}),
-    ...(utms.utmContent ? { utmContent: utms.utmContent } : {}),
-    ...(utms.utmTerm ? { utmTerm: utms.utmTerm } : {}),
-    ...(pageUrl ? { landingUrl: pageUrl } : {}),
-    ...(referrer ? { initialReferrer: referrer } : {}),
-  };
+  const utms = getTrackingParams(pageUrl);
+  // Store all non-undefined tracking params + landing context
+  const ft = {};
+  for (const [k, v] of Object.entries(utms)) {
+    if (v) ft[k] = v;
+  }
+  if (pageUrl) ft.landingUrl = pageUrl;
+  if (referrer) ft.initialReferrer = referrer;
+  firstTouch = ft;
   browser.sessionStorage.setItem('coh_ft', JSON.stringify(firstTouch)).catch(() => {});
 }
 
-// --- UTM extraction ---
-function getUtmParams(url) {
+// --- UTM + click ID extraction ---
+function getTrackingParams(url) {
   try {
     const u = new URL(url);
     return {
@@ -71,6 +70,14 @@ function getUtmParams(url) {
       utmCampaign: u.searchParams.get('utm_campaign') || undefined,
       utmContent: u.searchParams.get('utm_content') || undefined,
       utmTerm: u.searchParams.get('utm_term') || undefined,
+      fbclid: u.searchParams.get('fbclid') || undefined,
+      gclid: u.searchParams.get('gclid') || undefined,
+      gbraid: u.searchParams.get('gbraid') || undefined,
+      wbraid: u.searchParams.get('wbraid') || undefined,
+      ttclid: u.searchParams.get('ttclid') || undefined,
+      msclkid: u.searchParams.get('msclkid') || undefined,
+      gadSource: u.searchParams.get('gad_source') || undefined,
+      gadCampaignId: u.searchParams.get('gad_campaignid') || undefined,
     };
   } catch {
     return {};
@@ -101,7 +108,7 @@ async function enqueue(extraData, event) {
   const ctx = event.context || {};
   const pageUrl = ctx.document?.location?.href || '';
   const referrer = ctx.document?.referrer || undefined;
-  const currentUtms = getUtmParams(pageUrl);
+  const currentUtms = getTrackingParams(pageUrl);
   const innerWidth = ctx.window?.innerWidth || undefined;
 
   // Capture first-touch on first event of the session

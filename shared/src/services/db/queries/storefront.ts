@@ -73,13 +73,19 @@ export interface LiveFeedEvent {
     visitorId: string;
     pageUrl: string | null;
     productTitle: string | null;
+    variantTitle: string | null;
+    collectionTitle: string | null;
+    productId: string | null;
     searchQuery: string | null;
     cartValue: number | null;
     orderValue: number | null;
     deviceType: string | null;
     country: string | null;
     region: string | null;
+    city: string | null;
     utmSource: string | null;
+    utmCampaign: string | null;
+    imageUrl: string | null;
 }
 
 export interface TrafficSourceRow {
@@ -297,11 +303,17 @@ export async function getLiveFeed(limit = 20): Promise<LiveFeedEvent[]> {
     const { sql } = await import('kysely');
 
     const result = await sql<LiveFeedEvent>`
-        SELECT "id", "eventName", "eventTime", "createdAt", "sessionId", "visitorId",
-               "pageUrl", "productTitle", "searchQuery", "cartValue", "orderValue",
-               "deviceType", "country", "region", "utmSource"
-        FROM "StorefrontEvent"
-        ORDER BY "createdAt" DESC
+        SELECT se."id", se."eventName", se."eventTime", se."createdAt",
+               se."sessionId", se."visitorId", se."pageUrl",
+               se."productTitle", se."variantTitle", se."collectionTitle",
+               se."productId", se."searchQuery",
+               se."cartValue", se."orderValue",
+               se."deviceType", se."country", se."region", se."city",
+               se."utmSource", se."utmCampaign",
+               p."imageUrl"
+        FROM "StorefrontEvent" se
+        LEFT JOIN "Product" p ON se."productId" = p."shopifyProductId"
+        ORDER BY se."createdAt" DESC
         LIMIT ${limit}
     `.execute(db);
 
