@@ -17,6 +17,7 @@ import { generateDraftInvoice } from '../orderInvoiceGenerator.js';
 import { settleOrderInvoice } from '../orderSettlement.js';
 import { updateCustomerTier, incrementCustomerOrderCount } from '../../utils/tierUtils.js';
 import { syncFulfillmentsToOrderLines } from './fulfillmentSync.js';
+import { syncOrderToStorefront } from '../storefrontOrderSync.js';
 import type {
     ExtendedShopifyOrder,
     OrderWithLines,
@@ -419,6 +420,17 @@ export async function createNewOrderWithLines(
         } catch (err: unknown) {
             syncLogger.warn({ orderId: newOrder.id, error: err instanceof Error ? err.message : String(err) },
                 'Failed to lazy-link RP exchange order');
+        }
+    });
+
+    // Create synthetic checkout_completed storefront event for analytics
+    // (Pixel misses purchases through Shopflo checkout)
+    deferredExecutor.enqueue(async () => {
+        try {
+            await syncOrderToStorefront(prisma, newOrder.id);
+        } catch (err: unknown) {
+            syncLogger.warn({ orderId: newOrder.id, error: err instanceof Error ? err.message : String(err) },
+                'Failed to sync order to storefront events');
         }
     });
 
