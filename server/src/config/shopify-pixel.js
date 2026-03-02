@@ -1,5 +1,5 @@
 // ================================================
-// COH Storefront Pixel — v2
+// COH Storefront Pixel — v3
 // Paste into: Shopify Admin > Settings > Customer events > Add custom pixel
 // Name: COH ERP Pixel
 // Permission: Required (data collection for analytics)
@@ -157,34 +157,17 @@ function flush(retryCount) {
   });
 }
 
-// --- Privacy gating ---
-// Only send events if the customer has consented to analytics
-// Shopify's customerPrivacy API handles consent banners and GDPR
-function withConsent(handler) {
-  return async (event) => {
-    try {
-      const consent = await browser.cookie.get('_tracking_consent');
-      // If consent cookie exists and analytics is denied, skip
-      if (consent) {
-        const parsed = JSON.parse(decodeURIComponent(consent));
-        if (parsed.con?.CMP?.a === '' || parsed.con?.CMP?.a === '0') {
-          return; // Analytics not consented
-        }
-      }
-    } catch {
-      // If we can't read consent, proceed (most Shopify stores don't have consent banners)
-    }
-    handler(event);
-  };
-}
-
 // --- Subscribe to Shopify Customer Events ---
+// Privacy/consent is handled by Shopify at the platform level.
+// Shopify gates pixel execution based on the pixel's configured permission
+// and the shop's Customer Privacy settings per region. No client-side
+// consent check needed — _tracking_consent cookie was deprecated Sep 2025.
 
-analytics.subscribe('page_viewed', withConsent((event) => {
+analytics.subscribe('page_viewed', (event) => {
   enqueue('page_viewed', {}, event);
-}));
+});
 
-analytics.subscribe('product_viewed', withConsent((event) => {
+analytics.subscribe('product_viewed', (event) => {
   const d = event.data?.productVariant;
   enqueue('product_viewed', {
     productId: d?.product?.id ? String(d.product.id) : undefined,
@@ -193,17 +176,17 @@ analytics.subscribe('product_viewed', withConsent((event) => {
     variantTitle: d?.title || undefined,
     rawData: { price: d?.price?.amount, currency: d?.price?.currencyCode },
   }, event);
-}));
+});
 
-analytics.subscribe('collection_viewed', withConsent((event) => {
+analytics.subscribe('collection_viewed', (event) => {
   const c = event.data?.collection;
   enqueue('collection_viewed', {
     collectionId: c?.id ? String(c.id) : undefined,
     collectionTitle: c?.title || undefined,
   }, event);
-}));
+});
 
-analytics.subscribe('product_added_to_cart', withConsent((event) => {
+analytics.subscribe('product_added_to_cart', (event) => {
   const cv = event.data?.cartLine;
   enqueue('product_added_to_cart', {
     productId: cv?.merchandise?.product?.id ? String(cv.merchandise.product.id) : undefined,
@@ -213,25 +196,25 @@ analytics.subscribe('product_added_to_cart', withConsent((event) => {
     cartValue: cv?.cost?.totalAmount?.amount ? parseFloat(cv.cost.totalAmount.amount) : undefined,
     rawData: { quantity: cv?.quantity },
   }, event);
-}));
+});
 
-analytics.subscribe('cart_viewed', withConsent((event) => {
+analytics.subscribe('cart_viewed', (event) => {
   const cart = event.data?.cart;
   enqueue('cart_viewed', {
     cartValue: cart?.cost?.totalAmount?.amount ? parseFloat(cart.cost.totalAmount.amount) : undefined,
     rawData: { lineCount: cart?.lines?.length },
   }, event);
-}));
+});
 
-analytics.subscribe('checkout_started', withConsent((event) => {
+analytics.subscribe('checkout_started', (event) => {
   const co = event.data?.checkout;
   enqueue('checkout_started', {
     orderValue: co?.totalPrice?.amount ? parseFloat(co.totalPrice.amount) : undefined,
     rawData: { lineCount: co?.lineItems?.length },
   }, event);
-}));
+});
 
-analytics.subscribe('checkout_completed', withConsent((event) => {
+analytics.subscribe('checkout_completed', (event) => {
   const co = event.data?.checkout;
   // Send ALL line items, not just the first one
   const items = (co?.lineItems || []).map(li => ({
@@ -243,7 +226,6 @@ analytics.subscribe('checkout_completed', withConsent((event) => {
     linePrice: li?.finalLinePrice?.amount ? parseFloat(li.finalLinePrice.amount) : undefined,
   }));
   enqueue('checkout_completed', {
-    // First item for top-level fields (backwards compatible)
     productId: items[0]?.productId || undefined,
     productTitle: items[0]?.productTitle || undefined,
     variantId: items[0]?.variantId || undefined,
@@ -257,23 +239,23 @@ analytics.subscribe('checkout_completed', withConsent((event) => {
       items,
     },
   }, event);
-}));
+});
 
-analytics.subscribe('search_submitted', withConsent((event) => {
+analytics.subscribe('search_submitted', (event) => {
   enqueue('search_submitted', {
     searchQuery: event.data?.searchResult?.query || undefined,
     rawData: { resultCount: event.data?.searchResult?.productVariants?.length },
   }, event);
-}));
+});
 
-analytics.subscribe('checkout_address_info_submitted', withConsent((event) => {
+analytics.subscribe('checkout_address_info_submitted', (event) => {
   enqueue('checkout_address_info_submitted', {}, event);
-}));
+});
 
-analytics.subscribe('checkout_contact_info_submitted', withConsent((event) => {
+analytics.subscribe('checkout_contact_info_submitted', (event) => {
   enqueue('checkout_contact_info_submitted', {}, event);
-}));
+});
 
-analytics.subscribe('checkout_shipping_info_submitted', withConsent((event) => {
+analytics.subscribe('checkout_shipping_info_submitted', (event) => {
   enqueue('checkout_shipping_info_submitted', {}, event);
-}));
+});
