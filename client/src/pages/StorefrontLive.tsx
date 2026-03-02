@@ -384,8 +384,8 @@ function LiveFeed({ events, isLoading }: { events: LiveFeedEvent[]; isLoading: b
 // PRODUCTS TAB
 // ============================================
 
-function ProductVariantRows({ productId, days }: { productId: string; days: number }) {
-    const variants = useProductVariants(productId, days, true);
+function ProductVariantRows({ productTitle, gender, days }: { productTitle: string; gender: string | null; days: number }) {
+    const variants = useProductVariants(productTitle, gender, days, true);
 
     if (variants.isLoading) {
         return (
@@ -410,7 +410,7 @@ function ProductVariantRows({ productId, days }: { productId: string; days: numb
                 const color = parts[0] ?? v.variantTitle;
                 const size = parts[1] ?? '';
                 return (
-                    <tr key={`${v.productId}-${v.variantTitle}`} className="bg-stone-50/50 border-b border-stone-100">
+                    <tr key={v.variantTitle} className="bg-stone-50/50 border-b border-stone-100">
                         <td className="py-2 pr-4 pl-16">
                             <div className="flex items-center gap-2">
                                 <span className="text-xs text-stone-600">{color}</span>
@@ -449,11 +449,15 @@ function ProductsTab({ days }: { days: number }) {
 
     const rows = funnel.data ?? [];
 
-    function toggleExpand(productId: string) {
+    function productKey(p: ProductFunnelRow) {
+        return `${p.productTitle}::${p.gender ?? ''}`;
+    }
+
+    function toggleExpand(key: string) {
         setExpanded(prev => {
             const next = new Set(prev);
-            if (next.has(productId)) next.delete(productId);
-            else next.add(productId);
+            if (next.has(key)) next.delete(key);
+            else next.add(key);
             return next;
         });
     }
@@ -480,13 +484,14 @@ function ProductsTab({ days }: { days: number }) {
                             {rows.map((p: ProductFunnelRow) => {
                                 const viewToAtc = p.views > 0 ? (p.atcCount / p.views * 100) : 0;
                                 const atcToPurchase = p.atcCount > 0 ? (p.purchases / p.atcCount * 100) : 0;
-                                const isExpanded = expanded.has(p.productId);
+                                const key = productKey(p);
+                                const isExpanded = expanded.has(key);
                                 const initial = (p.productTitle ?? '?')[0].toUpperCase();
                                 return (
-                                    <React.Fragment key={p.productId}>
+                                    <React.Fragment key={key}>
                                         <tr
                                             className="border-b border-stone-100 hover:bg-stone-50 cursor-pointer"
-                                            onClick={() => toggleExpand(p.productId)}
+                                            onClick={() => toggleExpand(key)}
                                         >
                                             <td className="py-3 pr-4">
                                                 <div className="flex items-center gap-3">
@@ -507,9 +512,16 @@ function ProductsTab({ days }: { days: number }) {
                                                             {initial}
                                                         </div>
                                                     )}
-                                                    <span className="text-stone-900 truncate max-w-[240px] font-medium">
-                                                        {p.productTitle}
-                                                    </span>
+                                                    <div className="min-w-0">
+                                                        <span className="text-stone-900 truncate max-w-[240px] font-medium block">
+                                                            {p.productTitle}
+                                                        </span>
+                                                        {p.gender && (
+                                                            <span className="text-[10px] uppercase tracking-wider text-stone-400">
+                                                                {p.gender}
+                                                            </span>
+                                                        )}
+                                                    </div>
                                                 </div>
                                             </td>
                                             <td className="text-right py-3 px-3 text-stone-900 font-medium">{formatNum(p.views)}</td>
@@ -521,7 +533,7 @@ function ProductsTab({ days }: { days: number }) {
                                             <td className="text-right py-3 pl-3 text-stone-900 font-medium">{formatCurrency(p.revenue)}</td>
                                         </tr>
                                         {isExpanded && (
-                                            <ProductVariantRows productId={p.productId} days={days} />
+                                            <ProductVariantRows productTitle={p.productTitle} gender={p.gender} days={days} />
                                         )}
                                     </React.Fragment>
                                 );

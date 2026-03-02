@@ -17,6 +17,7 @@ export type {
     HeroMetrics,
     OnSiteNow,
     ProductFunnelRow,
+    ProductVariantRow,
     LiveFeedEvent,
     TrafficSourceRow,
     CampaignAttributionRow,
@@ -41,6 +42,12 @@ const paginatedInputSchema = z.object({
 
 const feedInputSchema = z.object({
     limit: z.number().int().min(1).max(100).default(20),
+});
+
+const variantInputSchema = z.object({
+    productTitle: z.string().min(1),
+    gender: z.string().nullable().default(null),
+    days: z.number().int().min(1).max(365).default(1),
 });
 
 // ============================================
@@ -132,4 +139,12 @@ export const getStorefrontDeviceBreakdown = createServerFn({ method: 'POST' })
     .handler(async ({ data }) => {
         const { getDeviceBreakdown } = await getQueries();
         return getDeviceBreakdown(data.days);
+    });
+
+export const getStorefrontProductVariants = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => variantInputSchema.parse(input))
+    .handler(async ({ data }) => {
+        const { getProductVariantBreakdown } = await getQueries();
+        return getProductVariantBreakdown(data.productTitle, data.gender, data.days);
     });

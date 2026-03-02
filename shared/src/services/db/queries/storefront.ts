@@ -44,13 +44,22 @@ export interface OnSiteNow {
 }
 
 export interface ProductFunnelRow {
-    productId: string;
     productTitle: string;
+    gender: string | null;
+    imageUrl: string | null;
     views: number;
     atcCount: number;
     purchases: number;
     revenue: number;
     netConversion: number;
+}
+
+export interface ProductVariantRow {
+    variantTitle: string;
+    views: number;
+    atcCount: number;
+    purchases: number;
+    revenue: number;
 }
 
 export interface LiveFeedEvent {
@@ -210,24 +219,26 @@ export async function getProductFunnel(days: number, limit = 10): Promise<Produc
 
     const result = await sql<ProductFunnelRow>`
         SELECT
-            "productId",
-            "productTitle",
-            COUNT(*) FILTER (WHERE "eventName" = 'product_viewed')::int AS "views",
-            COUNT(*) FILTER (WHERE "eventName" = 'product_added_to_cart')::int AS "atcCount",
-            COUNT(*) FILTER (WHERE "eventName" = 'checkout_completed')::int AS "purchases",
-            COALESCE(SUM("orderValue") FILTER (WHERE "eventName" = 'checkout_completed'), 0)::numeric AS "revenue",
+            se."productTitle",
+            p."gender",
+            MIN(p."imageUrl") AS "imageUrl",
+            COUNT(*) FILTER (WHERE se."eventName" = 'product_viewed')::int AS "views",
+            COUNT(*) FILTER (WHERE se."eventName" = 'product_added_to_cart')::int AS "atcCount",
+            COUNT(*) FILTER (WHERE se."eventName" = 'checkout_completed')::int AS "purchases",
+            COALESCE(SUM(se."orderValue") FILTER (WHERE se."eventName" = 'checkout_completed'), 0)::numeric AS "revenue",
             CASE
-                WHEN COUNT(*) FILTER (WHERE "eventName" = 'product_viewed') = 0 THEN 0
+                WHEN COUNT(*) FILTER (WHERE se."eventName" = 'product_viewed') = 0 THEN 0
                 ELSE ROUND(
-                    COUNT(*) FILTER (WHERE "eventName" = 'checkout_completed')::numeric /
-                    COUNT(*) FILTER (WHERE "eventName" = 'product_viewed')::numeric * 100, 2
+                    COUNT(*) FILTER (WHERE se."eventName" = 'checkout_completed')::numeric /
+                    COUNT(*) FILTER (WHERE se."eventName" = 'product_viewed')::numeric * 100, 2
                 )
             END AS "netConversion"
-        FROM "StorefrontEvent"
-        WHERE "productId" IS NOT NULL
-          AND "createdAt" >= now() - make_interval(days => ${days})
-        GROUP BY "productId", "productTitle"
-        ORDER BY COUNT(*) FILTER (WHERE "eventName" = 'product_viewed') DESC
+        FROM "StorefrontEvent" se
+        LEFT JOIN "Product" p ON se."productId" = p."shopifyProductId"
+        WHERE se."productTitle" IS NOT NULL
+          AND se."createdAt" >= now() - make_interval(days => ${days})
+        GROUP BY se."productTitle", p."gender"
+        ORDER BY COUNT(*) FILTER (WHERE se."eventName" = 'product_viewed') DESC
         LIMIT ${limit}
     `.execute(db);
 
@@ -235,6 +246,39 @@ export async function getProductFunnel(days: number, limit = 10): Promise<Produc
         ...r,
         revenue: Number(r.revenue),
         netConversion: Number(r.netConversion),
+    }));
+}
+
+/**
+ * Product variant breakdown — views/ATC/purchases per variant for a specific product.
+ */
+export async function getProductVariantBreakdown(
+    productTitle: string,
+    gender: string | null,
+    days: number,
+): Promise<ProductVariantRow[]> {
+    const db = await getKysely();
+    const { sql } = await import('kysely');
+
+    const result = await sql<ProductVariantRow>`
+        SELECT
+            COALESCE(se."variantTitle", 'Unknown') AS "variantTitle",
+            COUNT(*) FILTER (WHERE se."eventName" = 'product_viewed')::int AS "views",
+            COUNT(*) FILTER (WHERE se."eventName" = 'product_added_to_cart')::int AS "atcCount",
+            COUNT(*) FILTER (WHERE se."eventName" = 'checkout_completed')::int AS "purchases",
+            COALESCE(SUM(se."orderValue") FILTER (WHERE se."eventName" = 'checkout_completed'), 0)::numeric AS "revenue"
+        FROM "StorefrontEvent" se
+        LEFT JOIN "Product" p ON se."productId" = p."shopifyProductId"
+        WHERE se."productTitle" = ${productTitle}
+          AND (${gender}::text IS NULL AND p."gender" IS NULL OR p."gender" = ${gender})
+          AND se."createdAt" >= now() - make_interval(days => ${days})
+        GROUP BY se."variantTitle"
+        ORDER BY COUNT(*) FILTER (WHERE se."eventName" = 'product_viewed') DESC
+    `.execute(db);
+
+    return result.rows.map(r => ({
+        ...r,
+        revenue: Number(r.revenue),
     }));
 }
 

@@ -11,6 +11,7 @@ import {
     getStorefrontHeroMetrics,
     getStorefrontOnSiteNow,
     getStorefrontProductFunnel,
+    getStorefrontProductVariants,
     getStorefrontLiveFeed,
     getStorefrontTrafficSources,
     getStorefrontCampaignAttribution,
@@ -59,6 +60,16 @@ export function useLiveFeed(limit = 20) {
         queryFn: () => fn({ data: { limit } }),
         staleTime: LIVE_STALE,
         refetchInterval: LIVE_REFETCH,
+    });
+}
+
+export function useProductVariants(productTitle: string, gender: string | null, days: number, enabled: boolean) {
+    const fn = useServerFn(getStorefrontProductVariants);
+    return useQuery({
+        queryKey: ['storefront', 'product-variants', productTitle, gender, days],
+        queryFn: () => fn({ data: { productTitle, gender, days } }),
+        staleTime: AGGREGATE_STALE,
+        enabled,
     });
 }
 
