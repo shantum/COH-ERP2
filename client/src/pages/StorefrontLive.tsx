@@ -270,11 +270,11 @@ function OverviewTab({ days }: { days: number }) {
 // CONVERSION FUNNEL
 // ============================================
 
-function ConversionFunnel({ data }: { data?: { visitors: number; productViews: number; addToCarts: number; checkouts: number; purchases: number } }) {
+function ConversionFunnel({ data }: { data?: { sessions: number; productViews: number; addToCarts: number; checkouts: number; purchases: number } }) {
     if (!data) return <SectionSkeleton />;
 
     const steps = [
-        { name: 'Sessions', value: data.visitors, color: FUNNEL_COLORS[0] },
+        { name: 'Sessions', value: data.sessions, color: FUNNEL_COLORS[0] },
         { name: 'Product Views', value: data.productViews, color: FUNNEL_COLORS[1] },
         { name: 'Add to Cart', value: data.addToCarts, color: FUNNEL_COLORS[2] },
         { name: 'Checkout', value: data.checkouts, color: FUNNEL_COLORS[3] },
@@ -288,8 +288,8 @@ function ConversionFunnel({ data }: { data?: { visitors: number; productViews: n
             <h3 className="text-sm font-medium text-stone-700 mb-4">Conversion Funnel</h3>
             <div className="space-y-3">
                 {steps.map((step, i) => {
-                    const widthPct = step.value === 0 ? 0 : Math.max((step.value / maxVal) * 100, 4);
-                    const dropOff = i > 0 && steps[i - 1].value > 0
+                    const widthPct = step.value === 0 ? 0 : Math.min(Math.max((step.value / maxVal) * 100, 4), 100);
+                    const dropOff = i > 0 && steps[i - 1].value > 0 && step.value < steps[i - 1].value
                         ? ((steps[i - 1].value - step.value) / steps[i - 1].value * 100).toFixed(1)
                         : null;
                     return (

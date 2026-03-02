@@ -16,6 +16,7 @@ import { getKysely } from '../kysely.js';
 // ============================================
 
 export interface HeroMetrics {
+    sessions: number;
     visitors: number;
     pageViews: number;
     productViews: number;
@@ -24,6 +25,7 @@ export interface HeroMetrics {
     purchases: number;
     revenue: number;
     orderCount: number;
+    prevSessions: number;
     prevVisitors: number;
     prevPageViews: number;
     prevProductViews: number;
@@ -126,6 +128,7 @@ export async function getHeroMetrics(days: number): Promise<HeroMetrics> {
     const result = await sql<HeroMetrics>`
         SELECT
             -- Current period
+            COUNT(DISTINCT "sessionId") FILTER (WHERE "createdAt" >= now() - make_interval(days => ${days}))::int AS "sessions",
             COUNT(DISTINCT "visitorId") FILTER (WHERE "createdAt" >= now() - make_interval(days => ${days}))::int AS "visitors",
             COUNT(*) FILTER (WHERE "eventName" = 'page_viewed' AND "createdAt" >= now() - make_interval(days => ${days}))::int AS "pageViews",
             COUNT(*) FILTER (WHERE "eventName" = 'product_viewed' AND "createdAt" >= now() - make_interval(days => ${days}))::int AS "productViews",
@@ -135,6 +138,7 @@ export async function getHeroMetrics(days: number): Promise<HeroMetrics> {
             COALESCE(SUM("orderValue") FILTER (WHERE "eventName" = 'checkout_completed' AND "createdAt" >= now() - make_interval(days => ${days})), 0)::numeric AS "revenue",
             COUNT(*) FILTER (WHERE "eventName" = 'checkout_completed' AND "createdAt" >= now() - make_interval(days => ${days}))::int AS "orderCount",
             -- Previous period (for delta comparison)
+            COUNT(DISTINCT "sessionId") FILTER (WHERE "createdAt" >= now() - make_interval(days => ${days * 2}) AND "createdAt" < now() - make_interval(days => ${days}))::int AS "prevSessions",
             COUNT(DISTINCT "visitorId") FILTER (WHERE "createdAt" >= now() - make_interval(days => ${days * 2}) AND "createdAt" < now() - make_interval(days => ${days}))::int AS "prevVisitors",
             COUNT(*) FILTER (WHERE "eventName" = 'page_viewed' AND "createdAt" >= now() - make_interval(days => ${days * 2}) AND "createdAt" < now() - make_interval(days => ${days}))::int AS "prevPageViews",
             COUNT(*) FILTER (WHERE "eventName" = 'product_viewed' AND "createdAt" >= now() - make_interval(days => ${days * 2}) AND "createdAt" < now() - make_interval(days => ${days}))::int AS "prevProductViews",
@@ -149,6 +153,7 @@ export async function getHeroMetrics(days: number): Promise<HeroMetrics> {
 
     const r = result.rows[0];
     return {
+        sessions: r?.sessions ?? 0,
         visitors: r?.visitors ?? 0,
         pageViews: r?.pageViews ?? 0,
         productViews: r?.productViews ?? 0,
@@ -157,6 +162,7 @@ export async function getHeroMetrics(days: number): Promise<HeroMetrics> {
         purchases: r?.purchases ?? 0,
         revenue: Number(r?.revenue ?? 0),
         orderCount: r?.orderCount ?? 0,
+        prevSessions: r?.prevSessions ?? 0,
         prevVisitors: r?.prevVisitors ?? 0,
         prevPageViews: r?.prevPageViews ?? 0,
         prevProductViews: r?.prevProductViews ?? 0,
