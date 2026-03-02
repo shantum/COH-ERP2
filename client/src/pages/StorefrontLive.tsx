@@ -5,19 +5,22 @@
  * Light theme matching the rest of the app. Near-real-time polling for live feed + on-site-now.
  */
 
-import { useState } from 'react';
+import React, { useState, lazy, Suspense } from 'react';
 import {
     Eye, ShoppingCart, CreditCard, Search, ArrowRight,
     Smartphone, Monitor, Tablet, TrendingUp, TrendingDown, Activity,
+    ChevronDown, ChevronRight, Map, List,
 } from 'lucide-react';
+
+const GeoMap = lazy(() => import('../components/GeoMap').then(m => ({ default: m.GeoMap })));
 import {
-    useHeroMetrics, useOnSiteNow, useProductFunnel, useLiveFeed,
+    useHeroMetrics, useOnSiteNow, useProductFunnel, useProductVariants, useLiveFeed,
     useTrafficSources, useCampaignAttribution, useGeoBreakdown,
     useTopPages, useTopSearches, useDeviceBreakdown,
 } from '../hooks/useStorefrontAnalytics';
 import { formatCurrency } from '../utils/formatting';
 import type {
-    LiveFeedEvent, ProductFunnelRow, TrafficSourceRow,
+    LiveFeedEvent, ProductFunnelRow, ProductVariantRow, TrafficSourceRow,
     CampaignAttributionRow, GeoBreakdownRow, TopPageRow,
     TopSearchRow, DeviceBreakdownRow,
 } from '../server/functions/storefrontAnalytics';
@@ -381,12 +384,79 @@ function LiveFeed({ events, isLoading }: { events: LiveFeedEvent[]; isLoading: b
 // PRODUCTS TAB
 // ============================================
 
+function ProductVariantRows({ productId, days }: { productId: string; days: number }) {
+    const variants = useProductVariants(productId, days, true);
+
+    if (variants.isLoading) {
+        return (
+            <tr>
+                <td colSpan={8} className="py-2 pl-16">
+                    <div className="animate-pulse flex gap-4">
+                        <div className="h-3 w-20 bg-stone-200 rounded" />
+                        <div className="h-3 w-16 bg-stone-200 rounded" />
+                    </div>
+                </td>
+            </tr>
+        );
+    }
+
+    const rows = variants.data ?? [];
+    if (rows.length === 0) return null;
+
+    return (
+        <>
+            {rows.map((v: ProductVariantRow) => {
+                const parts = v.variantTitle.split(' / ');
+                const color = parts[0] ?? v.variantTitle;
+                const size = parts[1] ?? '';
+                return (
+                    <tr key={`${v.productId}-${v.variantTitle}`} className="bg-stone-50/50 border-b border-stone-100">
+                        <td className="py-2 pr-4 pl-16">
+                            <div className="flex items-center gap-2">
+                                <span className="text-xs text-stone-600">{color}</span>
+                                {size && (
+                                    <span className="text-[10px] font-medium text-stone-400 bg-stone-200 px-1.5 py-0.5 rounded">
+                                        {size}
+                                    </span>
+                                )}
+                            </div>
+                        </td>
+                        <td className="text-right py-2 px-3 text-xs text-stone-600">{formatNum(v.views)}</td>
+                        <td className="text-right py-2 px-3 text-xs text-stone-400">
+                            {v.views > 0 ? formatPct(v.atcCount / v.views * 100) : '-'}
+                        </td>
+                        <td className="text-right py-2 px-3 text-xs text-amber-600">{formatNum(v.atcCount)}</td>
+                        <td className="text-right py-2 px-3 text-xs text-stone-400">
+                            {v.atcCount > 0 ? formatPct(v.purchases / v.atcCount * 100) : '-'}
+                        </td>
+                        <td className="text-right py-2 px-3 text-xs text-green-600">{formatNum(v.purchases)}</td>
+                        <td className="text-right py-2 px-3 text-xs text-stone-400">
+                            {v.views > 0 ? formatPct(v.purchases / v.views * 100) : '-'}
+                        </td>
+                        <td className="text-right py-2 pl-3 text-xs text-stone-600">{formatCurrency(v.revenue)}</td>
+                    </tr>
+                );
+            })}
+        </>
+    );
+}
+
 function ProductsTab({ days }: { days: number }) {
     const funnel = useProductFunnel(days, 20);
+    const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
     if (funnel.isLoading) return <SectionSkeleton />;
 
     const rows = funnel.data ?? [];
+
+    function toggleExpand(productId: string) {
+        setExpanded(prev => {
+            const next = new Set(prev);
+            if (next.has(productId)) next.delete(productId);
+            else next.add(productId);
+            return next;
+        });
+    }
 
     return (
         <div className="space-y-6">
@@ -398,9 +468,9 @@ function ProductsTab({ days }: { days: number }) {
                             <tr className="text-xs text-stone-500 uppercase tracking-wider border-b border-stone-200">
                                 <th className="text-left py-3 pr-4">Product</th>
                                 <th className="text-right py-3 px-3">Views</th>
-                                <th className="text-right py-3 px-3">Conv%</th>
+                                <th className="text-right py-3 px-3">View→ATC</th>
                                 <th className="text-right py-3 px-3">ATC</th>
-                                <th className="text-right py-3 px-3">Conv%</th>
+                                <th className="text-right py-3 px-3">ATC→Buy</th>
                                 <th className="text-right py-3 px-3">Purchased</th>
                                 <th className="text-right py-3 px-3">Net Conv</th>
                                 <th className="text-right py-3 pl-3">Revenue</th>
@@ -410,25 +480,50 @@ function ProductsTab({ days }: { days: number }) {
                             {rows.map((p: ProductFunnelRow) => {
                                 const viewToAtc = p.views > 0 ? (p.atcCount / p.views * 100) : 0;
                                 const atcToPurchase = p.atcCount > 0 ? (p.purchases / p.atcCount * 100) : 0;
+                                const isExpanded = expanded.has(p.productId);
                                 const initial = (p.productTitle ?? '?')[0].toUpperCase();
                                 return (
-                                    <tr key={p.productId} className="border-b border-stone-100 hover:bg-stone-50">
-                                        <td className="py-3 pr-4">
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-8 h-8 rounded bg-stone-200 flex items-center justify-center text-xs font-bold text-stone-500 flex-shrink-0">
-                                                    {initial}
+                                    <React.Fragment key={p.productId}>
+                                        <tr
+                                            className="border-b border-stone-100 hover:bg-stone-50 cursor-pointer"
+                                            onClick={() => toggleExpand(p.productId)}
+                                        >
+                                            <td className="py-3 pr-4">
+                                                <div className="flex items-center gap-3">
+                                                    <button className="text-stone-400 flex-shrink-0">
+                                                        {isExpanded
+                                                            ? <ChevronDown size={14} />
+                                                            : <ChevronRight size={14} />
+                                                        }
+                                                    </button>
+                                                    {p.imageUrl ? (
+                                                        <img
+                                                            src={p.imageUrl}
+                                                            alt={p.productTitle}
+                                                            className="w-10 h-10 rounded object-cover flex-shrink-0"
+                                                        />
+                                                    ) : (
+                                                        <div className="w-10 h-10 rounded bg-stone-200 flex items-center justify-center text-xs font-bold text-stone-500 flex-shrink-0">
+                                                            {initial}
+                                                        </div>
+                                                    )}
+                                                    <span className="text-stone-900 truncate max-w-[240px] font-medium">
+                                                        {p.productTitle}
+                                                    </span>
                                                 </div>
-                                                <span className="text-stone-900 truncate max-w-[200px]">{p.productTitle}</span>
-                                            </div>
-                                        </td>
-                                        <td className="text-right py-3 px-3 text-stone-900 font-medium">{formatNum(p.views)}</td>
-                                        <td className="text-right py-3 px-3 text-stone-400">{formatPct(viewToAtc)}</td>
-                                        <td className="text-right py-3 px-3 text-amber-600 font-medium">{formatNum(p.atcCount)}</td>
-                                        <td className="text-right py-3 px-3 text-stone-400">{formatPct(atcToPurchase)}</td>
-                                        <td className="text-right py-3 px-3 text-green-600 font-medium">{formatNum(p.purchases)}</td>
-                                        <td className="text-right py-3 px-3 text-stone-500">{formatPct(p.netConversion)}</td>
-                                        <td className="text-right py-3 pl-3 text-stone-900 font-medium">{formatCurrency(p.revenue)}</td>
-                                    </tr>
+                                            </td>
+                                            <td className="text-right py-3 px-3 text-stone-900 font-medium">{formatNum(p.views)}</td>
+                                            <td className="text-right py-3 px-3 text-stone-400">{formatPct(viewToAtc)}</td>
+                                            <td className="text-right py-3 px-3 text-amber-600 font-medium">{formatNum(p.atcCount)}</td>
+                                            <td className="text-right py-3 px-3 text-stone-400">{formatPct(atcToPurchase)}</td>
+                                            <td className="text-right py-3 px-3 text-green-600 font-medium">{formatNum(p.purchases)}</td>
+                                            <td className="text-right py-3 px-3 text-stone-500">{formatPct(p.netConversion)}</td>
+                                            <td className="text-right py-3 pl-3 text-stone-900 font-medium">{formatCurrency(p.revenue)}</td>
+                                        </tr>
+                                        {isExpanded && (
+                                            <ProductVariantRows productId={p.productId} days={days} />
+                                        )}
+                                    </React.Fragment>
                                 );
                             })}
                             {rows.length === 0 && (
@@ -547,11 +642,13 @@ function GeographyTab({ days }: { days: number }) {
     const devices = useDeviceBreakdown(days);
     const pages = useTopPages(days, 15);
     const searches = useTopSearches(days, 15);
+    const [geoView, setGeoView] = useState<'map' | 'table'>('map');
 
     if (geo.isLoading) return <SectionSkeleton />;
 
     const deviceRows = devices.data ?? [];
     const totalDeviceSessions = deviceRows.reduce((s: number, r: DeviceBreakdownRow) => s + r.sessions, 0);
+    const geoRows = geo.data ?? [];
 
     return (
         <div className="space-y-6">
@@ -573,36 +670,69 @@ function GeographyTab({ days }: { days: number }) {
                 })}
             </div>
 
-            {/* Geo Table */}
+            {/* Geo Map / Table */}
             <div className="bg-white rounded-lg border border-stone-200 shadow-sm p-4 sm:p-6">
-                <h3 className="text-sm font-medium text-stone-700 mb-4">Geography</h3>
-                <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                        <thead>
-                            <tr className="text-xs text-stone-500 uppercase tracking-wider border-b border-stone-200">
-                                <th className="text-left py-3 pr-4">Region</th>
-                                <th className="text-left py-3 px-3">Country</th>
-                                <th className="text-right py-3 px-3">Sessions</th>
-                                <th className="text-right py-3 px-3">ATC</th>
-                                <th className="text-right py-3 pl-3">Orders</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {(geo.data ?? []).map((r: GeoBreakdownRow, i: number) => (
-                                <tr key={`${r.region}-${r.country}-${i}`} className="border-b border-stone-100 hover:bg-stone-50">
-                                    <td className="py-3 pr-4 text-stone-900">{r.region ?? '-'}</td>
-                                    <td className="py-3 px-3 text-stone-500">{r.country ?? '-'}</td>
-                                    <td className="text-right py-3 px-3 text-stone-700">{formatNum(r.sessions)}</td>
-                                    <td className="text-right py-3 px-3 text-amber-600 font-medium">{formatNum(r.atcCount)}</td>
-                                    <td className="text-right py-3 pl-3 text-green-600 font-medium">{formatNum(r.orders)}</td>
-                                </tr>
-                            ))}
-                            {(geo.data ?? []).length === 0 && (
-                                <tr><td colSpan={5} className="py-8 text-center text-stone-400">No geo data yet</td></tr>
-                            )}
-                        </tbody>
-                    </table>
+                <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-sm font-medium text-stone-700">Geography</h3>
+                    <div className="flex gap-1 bg-stone-100 rounded-md p-0.5">
+                        <button
+                            onClick={() => setGeoView('map')}
+                            className={`flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded transition-colors ${
+                                geoView === 'map'
+                                    ? 'bg-white text-stone-900 shadow-sm'
+                                    : 'text-stone-500 hover:text-stone-700'
+                            }`}
+                        >
+                            <Map size={12} />
+                            Map
+                        </button>
+                        <button
+                            onClick={() => setGeoView('table')}
+                            className={`flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded transition-colors ${
+                                geoView === 'table'
+                                    ? 'bg-white text-stone-900 shadow-sm'
+                                    : 'text-stone-500 hover:text-stone-700'
+                            }`}
+                        >
+                            <List size={12} />
+                            Table
+                        </button>
+                    </div>
                 </div>
+
+                {geoView === 'map' ? (
+                    <Suspense fallback={<div className="flex items-center justify-center py-16 text-sm text-stone-400">Loading map…</div>}>
+                        <GeoMap data={geoRows} />
+                    </Suspense>
+                ) : (
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                            <thead>
+                                <tr className="text-xs text-stone-500 uppercase tracking-wider border-b border-stone-200">
+                                    <th className="text-left py-3 pr-4">Region</th>
+                                    <th className="text-left py-3 px-3">Country</th>
+                                    <th className="text-right py-3 px-3">Sessions</th>
+                                    <th className="text-right py-3 px-3">ATC</th>
+                                    <th className="text-right py-3 pl-3">Orders</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {geoRows.map((r: GeoBreakdownRow, i: number) => (
+                                    <tr key={`${r.region}-${r.country}-${i}`} className="border-b border-stone-100 hover:bg-stone-50">
+                                        <td className="py-3 pr-4 text-stone-900">{r.region ?? '-'}</td>
+                                        <td className="py-3 px-3 text-stone-500">{r.country ?? '-'}</td>
+                                        <td className="text-right py-3 px-3 text-stone-700">{formatNum(r.sessions)}</td>
+                                        <td className="text-right py-3 px-3 text-amber-600 font-medium">{formatNum(r.atcCount)}</td>
+                                        <td className="text-right py-3 pl-3 text-green-600 font-medium">{formatNum(r.orders)}</td>
+                                    </tr>
+                                ))}
+                                {geoRows.length === 0 && (
+                                    <tr><td colSpan={5} className="py-8 text-center text-stone-400">No geo data yet</td></tr>
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
             </div>
 
             {/* Two-column: Top Pages + Top Searches */}
