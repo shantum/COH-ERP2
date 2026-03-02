@@ -16,6 +16,7 @@ import remittanceSync from './remittanceSync.js';
 import payuSettlementSync from './payuSettlementSync.js';
 import returnPrimeSyncWorker from './returnPrimeSyncWorker.js';
 import { returnPrimeInboundSyncWorker } from './returnPrimeInboundSync.js';
+import storefrontEventCleanup from './storefrontEventCleanup.js';
 import { pulseBroadcaster } from './pulseBroadcaster.js';
 import { sseEventBridge } from './sseEventBridge.js';
 import { reconcileSheetOrders, syncSheetOrderStatus, syncSheetAwb } from './sheetOrderPush.js';
@@ -44,6 +45,7 @@ const workers: WorkerEntry[] = [
   { name: 'payuSettlementSync',  start: () => payuSettlementSync.start(),  stop: () => payuSettlementSync.stop() },
   { name: 'returnPrimeSyncWorker', start: () => returnPrimeSyncWorker.start(), stop: () => returnPrimeSyncWorker.stop() },
   { name: 'returnPrimeInboundSync', start: () => returnPrimeInboundSyncWorker.start(), stop: () => returnPrimeInboundSyncWorker.stop() },
+  { name: 'storefrontEventCleanup', start: () => storefrontEventCleanup.start(), stop: () => storefrontEventCleanup.stop() },
 ];
 
 // Interval handles for cleanup

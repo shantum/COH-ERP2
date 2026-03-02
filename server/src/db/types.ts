@@ -1431,6 +1431,37 @@ export type SkuBomLine = {
     createdAt: Generated<Timestamp>;
     updatedAt: Timestamp;
 };
+export type StorefrontEvent = {
+    id: Generated<string>;
+    eventName: string;
+    eventTime: Timestamp;
+    createdAt: Generated<Timestamp>;
+    sessionId: string;
+    visitorId: string;
+    pageUrl: string | null;
+    referrer: string | null;
+    utmSource: string | null;
+    utmMedium: string | null;
+    utmCampaign: string | null;
+    utmContent: string | null;
+    utmTerm: string | null;
+    productId: string | null;
+    productTitle: string | null;
+    variantId: string | null;
+    variantTitle: string | null;
+    collectionId: string | null;
+    collectionTitle: string | null;
+    searchQuery: string | null;
+    cartValue: number | null;
+    orderValue: number | null;
+    userAgent: string | null;
+    screenWidth: number | null;
+    screenHeight: number | null;
+    deviceType: string | null;
+    country: string | null;
+    region: string | null;
+    rawData: unknown | null;
+};
 export type StyleMeasurement = {
     id: Generated<string>;
     styleCode: string;
@@ -1702,6 +1733,7 @@ export type DB = {
     ShopifyProductCache: ShopifyProductCache;
     Sku: Sku;
     SkuBomLine: SkuBomLine;
+    StorefrontEvent: StorefrontEvent;
     StyleMeasurement: StyleMeasurement;
     SyncJob: SyncJob;
     SystemSetting: SystemSetting;

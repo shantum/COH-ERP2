@@ -2738,3 +2738,46 @@ model StyleMeasurement {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 }
+
+// ============================================
+// STOREFRONT ANALYTICS (Custom Web Pixel)
+// ============================================
+
+/// Raw storefront events from Shopify Custom Web Pixel — first-party, unsampled click-level data
+model StorefrontEvent {
+  id              String   @id @default(uuid())
+  eventName       String
+  eventTime       DateTime
+  createdAt       DateTime @default(now())
+  sessionId       String
+  visitorId       String
+  pageUrl         String?
+  referrer        String?
+  utmSource       String?
+  utmMedium       String?
+  utmCampaign     String?
+  utmContent      String?
+  utmTerm         String?
+  productId       String?
+  productTitle    String?
+  variantId       String?
+  variantTitle    String?
+  collectionId    String?
+  collectionTitle String?
+  searchQuery     String?
+  cartValue       Float?
+  orderValue      Float?
+  userAgent       String?
+  screenWidth     Int?
+  screenHeight    Int?
+  deviceType      String?
+  country         String?
+  region          String?
+  rawData         Json?
+
+  @@index([eventName, createdAt])
+  @@index([sessionId])
+  @@index([visitorId, createdAt])
+  @@index([createdAt])
+  @@index([productId, createdAt])
+}

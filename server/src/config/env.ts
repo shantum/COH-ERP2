@@ -183,6 +183,13 @@ const envSchema = z.object({
 
     /** Sentry auth token for API access and source map uploads */
     SENTRY_AUTH_TOKEN: z.string().optional(),
+
+    // ----------------------------------------
+    // STOREFRONT PIXEL
+    // ----------------------------------------
+
+    /** Shared secret for Shopify Custom Web Pixel (basic auth via query param) */
+    PIXEL_SHARED_SECRET: z.string().optional(),
 });
 
 // ============================================

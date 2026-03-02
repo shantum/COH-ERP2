@@ -70,6 +70,7 @@ import returnPrimeWebhooks from './routes/returnPrimeWebhooks.js';
 import returnPrimeSync from './routes/returnPrimeSync.js';
 import returnPrimeAdminRoutes from './routes/returnPrimeAdminRoutes.js';
 import razorpayxWebhookRoutes from './routes/razorpayxWebhook.js';
+import pixelRoutes from './routes/pixel.js';
 import razorpayxPayoutRoutes from './routes/razorpayxPayout.js';
 import { startAllWorkers, stopAllWorkers } from './services/workerRegistry.js';
 import * as Sentry from '@sentry/node';
@@ -119,6 +120,9 @@ const authLimiter = rateLimit({
 app.use('/api', apiLimiter);
 app.use('/api/auth/login', authLimiter);
 app.use('/api/auth/register', authLimiter);
+
+// Pixel endpoint — permissive CORS (runs in Shopify sandbox with opaque origin)
+app.use('/api/pixel', cors({ origin: true }), pixelRoutes);
 
 // CORS configuration
 app.use(cors({
