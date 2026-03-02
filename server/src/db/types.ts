@@ -1467,12 +1467,26 @@ export type StorefrontEvent = {
     screenWidth: number | null;
     screenHeight: number | null;
     deviceType: string | null;
+    browser: string | null;
+    os: string | null;
     country: string | null;
     region: string | null;
     city: string | null;
+    browserTimezone: string | null;
+    browserLanguage: string | null;
+    pageTitle: string | null;
     latitude: string | null;
     longitude: string | null;
     clientIp: string | null;
+    cfTimezone: string | null;
+    postalCode: string | null;
+    asOrganization: string | null;
+    asn: number | null;
+    continent: string | null;
+    regionCode: string | null;
+    httpProtocol: string | null;
+    tlsVersion: string | null;
+    isVpn: boolean | null;
     rawData: unknown | null;
 };
 export type StyleMeasurement = {

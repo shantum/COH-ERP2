@@ -1,5 +1,5 @@
 // ================================================
-// COH Storefront Pixel — v4
+// COH Storefront Pixel — v5
 // Paste into: Shopify Admin > Settings > Customer events > Add custom pixel
 // Name: COH ERP Pixel
 // Permission: Required (data collection for analytics)
@@ -11,11 +11,11 @@ const MAX_BATCH_SIZE = 20;
 const MAX_RETRIES = 1;
 const MAX_QUEUE_SIZE = 200;
 const MAX_LINE_ITEMS = 10;
-const PIXEL_VERSION = 4;
+const PIXEL_VERSION = 5;
 
 // --- Session ID + first-touch attribution (persisted in sessionStorage) ---
 let sessionId = null;
-let firstTouch = null; // { utmSource, utmMedium, utmCampaign, utmContent, utmTerm, landingUrl, initialReferrer }
+let firstTouch = null;
 
 const idsReady = initSession();
 
@@ -48,10 +48,9 @@ async function initSession() {
 
 function captureFirstTouch(pageUrl, referrer) {
   if (firstTouch) return; // Already captured this session
-  const utms = getTrackingParams(pageUrl);
-  // Store all non-undefined tracking params + landing context
+  const params = getTrackingParams(pageUrl);
   const ft = {};
-  for (const [k, v] of Object.entries(utms)) {
+  for (const [k, v] of Object.entries(params)) {
     if (v) ft[k] = v;
   }
   if (pageUrl) ft.landingUrl = pageUrl;
@@ -92,6 +91,15 @@ function getDeviceType(width) {
   return 'desktop';
 }
 
+// --- Browser timezone (for VPN detection — compared against CF geo timezone) ---
+function getBrowserTimezone() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 // --- Event queue + batching ---
 let eventQueue = [];
 
@@ -108,8 +116,10 @@ async function enqueue(extraData, event) {
   const ctx = event.context || {};
   const pageUrl = ctx.document?.location?.href || '';
   const referrer = ctx.document?.referrer || undefined;
-  const currentUtms = getTrackingParams(pageUrl);
+  const currentParams = getTrackingParams(pageUrl);
   const innerWidth = ctx.window?.innerWidth || undefined;
+  const innerHeight = ctx.window?.innerHeight || undefined;
+  const nav = ctx.navigator || {};
 
   // Capture first-touch on first event of the session
   captureFirstTouch(pageUrl, referrer);
@@ -123,13 +133,18 @@ async function enqueue(extraData, event) {
     shopifyEventId: event.id || undefined,
     shopifySeq: event.seq || undefined,
     pageUrl,
+    pageTitle: ctx.document?.title || undefined,
     referrer,
-    // Current-page UTMs (last-touch)
-    ...currentUtms,
+    // Current-page tracking params (last-touch)
+    ...currentParams,
+    userAgent: nav.userAgent || undefined,
+    browserLanguage: nav.language || undefined,
+    browserTimezone: getBrowserTimezone(),
     screenWidth: innerWidth,
+    screenHeight: innerHeight,
     deviceType: getDeviceType(innerWidth),
     ...extraData,
-    // First-touch attribution in rawData alongside event-specific data
+    // First-touch attribution + event-specific data in rawData
     rawData: {
       ...(extraData.rawData || {}),
       ...(firstTouch ? { firstTouch } : {}),
@@ -314,9 +329,15 @@ analytics.subscribe('checkout_completed', (event) => {
     orderValue: co?.totalPrice?.amount ? parseFloat(co.totalPrice.amount) : undefined,
     rawData: {
       orderId: co?.order?.id,
+      email: co?.email || undefined,
+      phone: co?.phone || undefined,
       lineCount: allItems.length,
       currency: co?.currencyCode,
       discountAmount: co?.discountsAmount?.amount ? parseFloat(co.discountsAmount.amount) : undefined,
+      discountCodes: co?.discountApplications?.map(d => d.title).filter(Boolean) || undefined,
+      shippingCity: co?.shippingAddress?.city || undefined,
+      shippingZip: co?.shippingAddress?.zip || undefined,
+      shippingCountry: co?.shippingAddress?.countryCode || undefined,
       items,
     },
   }, event);

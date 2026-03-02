@@ -2780,12 +2780,26 @@ model StorefrontEvent {
   screenWidth     Int?
   screenHeight    Int?
   deviceType      String?
+  browser         String?
+  os              String?
   country         String?
   region          String?
   city            String?
+  browserTimezone String?
+  browserLanguage String?
+  pageTitle       String?
   latitude        String?
   longitude       String?
   clientIp        String?
+  cfTimezone      String?
+  postalCode      String?
+  asOrganization  String?
+  asn             Int?
+  continent       String?
+  regionCode      String?
+  httpProtocol    String?
+  tlsVersion      String?
+  isVpn           Boolean?
   rawData         Json?
 
   @@index([eventName, createdAt])
