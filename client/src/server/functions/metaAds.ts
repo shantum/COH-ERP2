@@ -633,7 +633,7 @@ export const getMetaAdAttribution = createServerFn({ method: 'POST' })
             ])
             .where('orderDate', '>=', daysAgo)
             .where('utmSource', 'in', META_SOURCES)
-            .where('orderStatus', '!=', 'cancelled')
+            .where('status', '!=', 'cancelled')
             .execute();
 
         // 3. Match each order to a Meta ad
