@@ -123,6 +123,7 @@ async function enqueue(eventName, extraData, event) {
 // Lazy flush timer — only runs when the queue has events
 let flushTimer = null;
 let isFlushing = false;
+let flushPending = false; // Set when an immediate event arrives during an in-flight request
 
 function startFlushTimer() {
   if (flushTimer) return;
@@ -132,12 +133,23 @@ function startFlushTimer() {
   }, FLUSH_INTERVAL_MS);
 }
 
+function enforceQueueCap() {
+  if (eventQueue.length > MAX_QUEUE_SIZE) {
+    eventQueue.splice(0, eventQueue.length - MAX_QUEUE_SIZE);
+  }
+}
+
 function flush(retryCount) {
-  if (eventQueue.length === 0 || isFlushing) return;
+  if (eventQueue.length === 0) return;
+  if (isFlushing) {
+    // An immediate event wants to flush but a request is in flight — flush as soon as it settles
+    flushPending = true;
+    return;
+  }
   isFlushing = true;
+  flushPending = false;
   retryCount = retryCount || 0;
 
-  // Cancel any pending lazy timer — we're flushing now
   if (flushTimer) {
     clearTimeout(flushTimer);
     flushTimer = null;
@@ -146,28 +158,39 @@ function flush(retryCount) {
   const batch = eventQueue.splice(0, MAX_BATCH_SIZE);
   const body = JSON.stringify({ events: batch });
 
+  function onSettled() {
+    isFlushing = false;
+    if (flushPending || eventQueue.length > 0) {
+      flushPending = false;
+      // Use setTimeout(0) so the call stack clears before re-entering flush
+      setTimeout(flush, 0);
+    }
+  }
+
   fetch(ENDPOINT, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body,
     keepalive: true,
   }).then(response => {
-    isFlushing = false;
-    // Retry once on server errors (5xx) or rate limiting (429)
-    // Don't retry 4xx client errors — payload is invalid, retrying won't help
     const retryable = response.status >= 500 || response.status === 429;
     if (retryable && retryCount < MAX_RETRIES) {
       eventQueue.unshift(...batch);
+      enforceQueueCap();
+      isFlushing = false;
       setTimeout(() => flush(retryCount + 1), 1000);
+    } else {
+      onSettled();
     }
-    if (eventQueue.length > 0) startFlushTimer();
   }).catch(() => {
-    isFlushing = false;
     if (retryCount < MAX_RETRIES) {
       eventQueue.unshift(...batch);
+      enforceQueueCap();
+      isFlushing = false;
       setTimeout(() => flush(retryCount + 1), 1000);
+    } else {
+      onSettled();
     }
-    if (eventQueue.length > 0) startFlushTimer();
   });
 }
 
