@@ -57,8 +57,10 @@ function getDeviceType() {
 // --- Event queue + batching ---
 let eventQueue = [];
 
-function enqueue(eventName, extraData) {
-  const pageUrl = document.location.href;
+function enqueue(eventName, extraData, eventContext) {
+  // Use event.context for real page data (pixel runs in sandboxed iframe)
+  const ctx = eventContext || {};
+  const pageUrl = ctx.document?.location?.href || '';
   const utms = getUtmParams(pageUrl);
 
   const event = {
@@ -67,11 +69,11 @@ function enqueue(eventName, extraData) {
     sessionId,
     visitorId,
     pageUrl,
-    referrer: document.referrer || undefined,
+    referrer: ctx.document?.referrer || undefined,
     ...utms,
-    userAgent: navigator.userAgent,
-    screenWidth: screen.width,
-    screenHeight: screen.height,
+    userAgent: ctx.navigator?.userAgent || navigator.userAgent,
+    screenWidth: ctx.window?.screen?.width || screen.width,
+    screenHeight: ctx.window?.screen?.height || screen.height,
     deviceType: getDeviceType(),
     ...extraData,
   };
@@ -117,8 +119,8 @@ setInterval(flush, FLUSH_INTERVAL_MS);
 
 // --- Subscribe to Shopify Customer Events ---
 
-analytics.subscribe('page_viewed', () => {
-  enqueue('page_viewed', {});
+analytics.subscribe('page_viewed', (event) => {
+  enqueue('page_viewed', {}, event.context);
 });
 
 analytics.subscribe('product_viewed', (event) => {
@@ -129,7 +131,7 @@ analytics.subscribe('product_viewed', (event) => {
     variantId: d?.id ? String(d.id) : undefined,
     variantTitle: d?.title || undefined,
     rawData: { price: d?.price?.amount, currency: d?.price?.currencyCode },
-  });
+  }, event.context);
 });
 
 analytics.subscribe('collection_viewed', (event) => {
@@ -137,7 +139,7 @@ analytics.subscribe('collection_viewed', (event) => {
   enqueue('collection_viewed', {
     collectionId: c?.id ? String(c.id) : undefined,
     collectionTitle: c?.title || undefined,
-  });
+  }, event.context);
 });
 
 analytics.subscribe('product_added_to_cart', (event) => {
@@ -149,7 +151,7 @@ analytics.subscribe('product_added_to_cart', (event) => {
     variantTitle: cv?.merchandise?.title || undefined,
     cartValue: cv?.cost?.totalAmount?.amount ? parseFloat(cv.cost.totalAmount.amount) : undefined,
     rawData: { quantity: cv?.quantity },
-  });
+  }, event.context);
 });
 
 analytics.subscribe('cart_viewed', (event) => {
@@ -157,7 +159,7 @@ analytics.subscribe('cart_viewed', (event) => {
   enqueue('cart_viewed', {
     cartValue: cart?.cost?.totalAmount?.amount ? parseFloat(cart.cost.totalAmount.amount) : undefined,
     rawData: { lineCount: cart?.lines?.length },
-  });
+  }, event.context);
 });
 
 analytics.subscribe('checkout_started', (event) => {
@@ -165,7 +167,7 @@ analytics.subscribe('checkout_started', (event) => {
   enqueue('checkout_started', {
     orderValue: co?.totalPrice?.amount ? parseFloat(co.totalPrice.amount) : undefined,
     rawData: { lineCount: co?.lineItems?.length },
-  });
+  }, event.context);
 });
 
 analytics.subscribe('checkout_completed', (event) => {
@@ -183,24 +185,24 @@ analytics.subscribe('checkout_completed', (event) => {
       currency: co?.currencyCode,
       discountAmount: co?.discountsAmount?.amount,
     },
-  });
+  }, event.context);
 });
 
 analytics.subscribe('search_submitted', (event) => {
   enqueue('search_submitted', {
     searchQuery: event.data?.searchResult?.query || undefined,
     rawData: { resultCount: event.data?.searchResult?.productVariants?.length },
-  });
+  }, event.context);
 });
 
-analytics.subscribe('checkout_address_info_submitted', () => {
-  enqueue('checkout_address_info_submitted', {});
+analytics.subscribe('checkout_address_info_submitted', (event) => {
+  enqueue('checkout_address_info_submitted', {}, event.context);
 });
 
-analytics.subscribe('checkout_contact_info_submitted', () => {
-  enqueue('checkout_contact_info_submitted', {});
+analytics.subscribe('checkout_contact_info_submitted', (event) => {
+  enqueue('checkout_contact_info_submitted', {}, event.context);
 });
 
-analytics.subscribe('checkout_shipping_info_submitted', () => {
-  enqueue('checkout_shipping_info_submitted', {});
+analytics.subscribe('checkout_shipping_info_submitted', (event) => {
+  enqueue('checkout_shipping_info_submitted', {}, event.context);
 });
