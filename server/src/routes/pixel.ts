@@ -32,18 +32,31 @@ const VALID_EVENTS = new Set([
     'checkout_shipping_info_submitted',
 ]);
 
+// Simple counters for observability (logged periodically)
+let insertedCount = 0;
+let droppedCount = 0;
+let dedupedCount = 0;
+
+setInterval(() => {
+    if (insertedCount > 0 || droppedCount > 0 || dedupedCount > 0) {
+        console.log(`[Pixel] inserted=${insertedCount} dropped=${droppedCount} deduped=${dedupedCount}`);
+        insertedCount = 0;
+        droppedCount = 0;
+        dedupedCount = 0;
+    }
+}, 5 * 60_000);
+
 // ============================================
 // Zod schemas
 // ============================================
 
 const storefrontEventSchema = z.object({
+    v: z.number().int().optional(),
     eventName: z.string().min(1).max(100),
     eventTime: z.string(),
     sessionId: z.string().min(1).max(100),
     visitorId: z.string().min(1).max(100),
     shopifyEventId: z.string().max(100).optional(),
-    shopifyClientId: z.string().max(100).optional(),
-    shopifyTimestamp: z.string().optional(),
     shopifySeq: z.number().int().optional(),
     pageUrl: z.string().max(2000).optional(),
     referrer: z.string().max(2000).optional(),
@@ -61,9 +74,7 @@ const storefrontEventSchema = z.object({
     searchQuery: z.string().max(500).optional(),
     cartValue: z.number().optional(),
     orderValue: z.number().optional(),
-    userAgent: z.string().max(500).optional(),
     screenWidth: z.number().int().positive().optional(),
-    screenHeight: z.number().int().positive().optional(),
     deviceType: z.enum(['mobile', 'tablet', 'desktop']).optional(),
     rawData: z.record(z.string(), z.any()).optional(),
 });
@@ -73,11 +84,24 @@ const pixelBatchSchema = z.object({
 });
 
 // ============================================
+// Dedupe cache (shopifyEventId → true, TTL 5 min)
+// ============================================
+
+const recentEventIds = new Map<string, number>();
+
+setInterval(() => {
+    const cutoff = Date.now() - 5 * 60_000;
+    for (const [id, ts] of recentEventIds) {
+        if (ts < cutoff) recentEventIds.delete(id);
+    }
+}, 60_000);
+
+// ============================================
 // POST /api/pixel/events
 // ============================================
 
 router.post('/events', asyncHandler(async (req: Request, res: Response) => {
-    // Origin validation — only accept from our store in production
+    // Origin validation
     const origin = req.headers.origin || req.headers.referer || '';
     const isAllowedOrigin = /creaturesofhabit\.in|coh\.one/i.test(origin)
         || process.env.NODE_ENV !== 'production';
@@ -103,18 +127,30 @@ router.post('/events', asyncHandler(async (req: Request, res: Response) => {
     // Validate
     const parsed = pixelBatchSchema.safeParse(req.body);
     if (!parsed.success) {
+        droppedCount++;
         res.status(400).json({ error: 'Invalid payload' });
         return;
     }
 
-    // Filter to only valid event names (reject spam)
-    const validEvents = parsed.data.events.filter(e => VALID_EVENTS.has(e.eventName));
+    // Filter valid events + dedupe by shopifyEventId
+    const validEvents = parsed.data.events.filter(e => {
+        if (!VALID_EVENTS.has(e.eventName)) return false;
+        if (e.shopifyEventId) {
+            if (recentEventIds.has(e.shopifyEventId)) {
+                dedupedCount++;
+                return false;
+            }
+            recentEventIds.set(e.shopifyEventId, Date.now());
+        }
+        return true;
+    });
+
     if (validEvents.length === 0) {
         res.status(204).end();
         return;
     }
 
-    // Geo from reverse proxy headers (Cloudflare / Caddy)
+    // Geo from reverse proxy headers
     const country = (req.headers['cf-ipcountry'] as string)
         || (req.headers['x-country'] as string)
         || undefined;
@@ -123,7 +159,7 @@ router.post('/events', asyncHandler(async (req: Request, res: Response) => {
     // Bulk insert
     const rows = validEvents.map(e => ({
         eventName: e.eventName,
-        eventTime: new Date(e.shopifyTimestamp || e.eventTime),
+        eventTime: new Date(e.eventTime),
         sessionId: e.sessionId,
         visitorId: e.visitorId,
         ...(e.pageUrl ? { pageUrl: e.pageUrl } : {}),
@@ -142,25 +178,23 @@ router.post('/events', asyncHandler(async (req: Request, res: Response) => {
         ...(e.searchQuery ? { searchQuery: e.searchQuery } : {}),
         ...(e.cartValue != null ? { cartValue: e.cartValue } : {}),
         ...(e.orderValue != null ? { orderValue: e.orderValue } : {}),
-        ...(e.userAgent ? { userAgent: e.userAgent } : {}),
         ...(e.screenWidth ? { screenWidth: e.screenWidth } : {}),
-        ...(e.screenHeight ? { screenHeight: e.screenHeight } : {}),
         ...(e.deviceType ? { deviceType: e.deviceType } : {}),
         ...(country ? { country } : {}),
         ...(region ? { region } : {}),
-        // Pack Shopify metadata + any extra data into rawData
         rawData: {
             ...(e.rawData || {}),
             ...(e.shopifyEventId ? { shopifyEventId: e.shopifyEventId } : {}),
-            ...(e.shopifyClientId ? { shopifyClientId: e.shopifyClientId } : {}),
-            ...(e.shopifyTimestamp ? { shopifyTimestamp: e.shopifyTimestamp } : {}),
             ...(e.shopifySeq != null ? { shopifySeq: e.shopifySeq } : {}),
+            ...(e.v != null ? { pixelVersion: e.v } : {}),
         },
     }));
 
     try {
         await prisma.storefrontEvent.createMany({ data: rows });
+        insertedCount += rows.length;
     } catch (error: unknown) {
+        droppedCount += rows.length;
         console.error('[Pixel] Failed to insert events:', error instanceof Error ? error.message : error);
         res.status(500).end();
         return;
