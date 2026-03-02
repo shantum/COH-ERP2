@@ -817,6 +817,20 @@ export type Order = {
     fbclid: string | null;
     gclid: string | null;
     landingPage: string | null;
+    referringSite: string | null;
+    landingPageUrl: string | null;
+    customerType: string | null;
+    origReferrer: string | null;
+    checkoutId: string | null;
+    sourceName: string | null;
+    elevarFbc: string | null;
+    elevarFbp: string | null;
+    elevarGaClientId: string | null;
+    elevarVisitorId: string | null;
+    elevarSessionId: string | null;
+    shopfloSessionId: string | null;
+    storefrontVisitorId: string | null;
+    storefrontSessionId: string | null;
 };
 export type OrderLine = {
     id: Generated<string>;

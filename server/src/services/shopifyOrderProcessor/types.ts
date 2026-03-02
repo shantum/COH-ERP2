@@ -193,9 +193,25 @@ export interface OrderDataPayload {
     utmMedium: string | null;
     utmCampaign: string | null;
     utmTerm: string | null;
+    utmContent: string | null;
     fbclid: string | null;
     gclid: string | null;
     landingPage: string | null;
+    // Extended attribution
+    referringSite: string | null;
+    landingPageUrl: string | null;
+    customerType: string | null;
+    origReferrer: string | null;
+    checkoutId: string | null;
+    sourceName: string | null;
+    // Shopflo session
+    shopfloSessionId: string | null;
+    // Elevar identity cookies
+    elevarFbc: string | null;
+    elevarFbp: string | null;
+    elevarGaClientId: string | null;
+    elevarVisitorId: string | null;
+    elevarSessionId: string | null;
     // Prepaid settlement fields (set at import for prepaid orders)
     paymentStatus?: string;
     paymentConfirmedAt?: Date | null;

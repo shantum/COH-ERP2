@@ -575,6 +575,24 @@ model Order {
   fbclid               String?
   gclid                String?
   landingPage          String?
+  // Extended attribution (from Shopify cache)
+  referringSite        String?            // rawData.referring_site (google.com, facebook.com, etc.)
+  landingPageUrl       String?            // rawData.landing_site (full URL with query params)
+  customerType         String?            // noteAttr customer_type (NEW/RETURNING)
+  origReferrer         String?            // noteAttr orig_referrer
+  checkoutId           String?            // noteAttr checkout_id
+  sourceName           String?            // rawData.source_name (web, pos, Shopflo)
+  // Elevar identity cookies
+  elevarFbc            String?            // _elevar__fbc (contains embedded fbclid)
+  elevarFbp            String?            // _elevar__fbp (FB browser ID — persistent cross-session)
+  elevarGaClientId     String?            // _elevar__ga parsed to GA client ID
+  elevarVisitorId      String?            // _elevar_visitor_info.user_id
+  elevarSessionId      String?            // _elevar_visitor_info.session_id
+  // Shopflo session
+  shopfloSessionId     String?            // Shopflo long_session_id from note_attributes (per-checkout-session)
+  // Pixel linkage
+  storefrontVisitorId  String?            // Matched StorefrontEvent.visitorId
+  storefrontSessionId  String?            // Matched StorefrontEvent.sessionId
   customer             Customer?          @relation(fields: [customerId], references: [id])
   shopifyCache         ShopifyOrderCache? @relation(fields: [shopifyOrderId], references: [id])
   orderLines           OrderLine[]
@@ -606,6 +624,9 @@ model Order {
   @@index([paymentMethod, codRemittedAt])
   @@index([paymentMethod, settledAt])
   @@index([channelOrderId])
+  @@index([storefrontVisitorId])
+  @@index([elevarFbp])
+  @@index([fbclid])
 }
 
 // ============================================
@@ -2807,4 +2828,5 @@ model StorefrontEvent {
   @@index([visitorId, createdAt])
   @@index([createdAt])
   @@index([productId, createdAt])
+  @@index([fbclid])
 }

@@ -221,6 +221,9 @@ export interface ShopifyOrder {
     total_discounts: string;
     currency: string;
     source_name?: string;
+    landing_site?: string | null;
+    referring_site?: string | null;
+    browser_ip?: string | null;
     discount_codes?: Array<{ code: string; amount: string; type: string }>;
     customer?: ShopifyCustomer;
     billing_address?: ShopifyAddress;

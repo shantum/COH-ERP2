@@ -9,7 +9,7 @@ import type { PrismaClient, Prisma } from '@prisma/client';
 import shopifyClient from '../shopify/index.js';
 import type { ShopifyAddress, ShopifyCustomer } from '../shopify/index.js';
 import type { ShopifyCustomerData } from '../../utils/customerUtils.js';
-import { detectPaymentMethod, extractInternalNote, extractUtmFields, calculateEffectiveUnitPrice } from '../../utils/shopifyHelpers.js';
+import { detectPaymentMethod, extractInternalNote, extractOrderAttribution, calculateEffectiveUnitPrice } from '../../utils/shopifyHelpers.js';
 import { syncLogger } from '../../utils/logger.js';
 import { recomputeOrderStatus } from '../../utils/orderStatus.js';
 import { deferredExecutor } from '../deferredExecutor.js';
@@ -18,6 +18,7 @@ import { settleOrderInvoice } from '../orderSettlement.js';
 import { updateCustomerTier, incrementCustomerOrderCount } from '../../utils/tierUtils.js';
 import { syncFulfillmentsToOrderLines } from './fulfillmentSync.js';
 import { syncOrderToStorefront } from '../storefrontOrderSync.js';
+import { linkOrderToVisitor } from '../orderVisitorLinker.js';
 import type {
     ExtendedShopifyOrder,
     OrderWithLines,
@@ -142,7 +143,11 @@ export function buildOrderData(
     const customerName = buildCustomerName(shippingAddress, customer);
     const paymentMethod = detectPaymentMethod(shopifyOrder, existingOrder?.paymentMethod);
     const internalNote = extractInternalNote(shopifyOrder.note_attributes);
-    const utm = extractUtmFields(shopifyOrder.note_attributes);
+    const attribution = extractOrderAttribution(shopifyOrder.note_attributes, {
+        landing_site: shopifyOrder.landing_site,
+        referring_site: shopifyOrder.referring_site,
+        source_name: shopifyOrder.source_name,
+    });
 
     let internalNotes = existingOrder?.internalNotes || internalNote || null;
 
@@ -173,8 +178,8 @@ export function buildOrderData(
         paymentMethod,
         paymentGateway: shopifyOrder.payment_gateway_names?.join(', ') || null,
         syncedAt: new Date(),
-        // UTM attribution
-        ...utm,
+        // Full attribution (UTM + extended + Elevar)
+        ...attribution,
         // Prepaid: customer already paid at checkout
         ...(isPrepaid ? {
             paymentStatus: 'paid',
@@ -431,6 +436,16 @@ export async function createNewOrderWithLines(
         } catch (err: unknown) {
             syncLogger.warn({ orderId: newOrder.id, error: err instanceof Error ? err.message : String(err) },
                 'Failed to sync order to storefront events');
+        }
+    });
+
+    // Link order to pixel visitor session (fbclid match → product ATC fallback)
+    deferredExecutor.enqueue(async () => {
+        try {
+            await linkOrderToVisitor(prisma, newOrder.id);
+        } catch (err: unknown) {
+            syncLogger.warn({ orderId: newOrder.id, error: err instanceof Error ? err.message : String(err) },
+                'Failed to link order to visitor');
         }
     });
 

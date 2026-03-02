@@ -206,6 +206,32 @@ export interface UtmFields {
     landingPage: string | null;
 }
 
+/**
+ * Full order attribution — extracted from noteAttributes, Elevar cookies,
+ * landing_site URL params, and referring_site inference.
+ */
+export interface OrderAttribution extends UtmFields {
+    referringSite: string | null;
+    landingPageUrl: string | null;
+    customerType: string | null;
+    origReferrer: string | null;
+    checkoutId: string | null;
+    sourceName: string | null;
+    shopfloSessionId: string | null;
+    elevarFbc: string | null;
+    elevarFbp: string | null;
+    elevarGaClientId: string | null;
+    elevarVisitorId: string | null;
+    elevarSessionId: string | null;
+}
+
+/** Raw Shopify order fields relevant to attribution */
+export interface ShopifyOrderAttribution {
+    landing_site?: string | null;
+    referring_site?: string | null;
+    source_name?: string | null;
+}
+
 const UTM_FIELD_MAP: Record<string, keyof UtmFields> = {
     utm_source: 'utmSource',
     utm_medium: 'utmMedium',
@@ -218,21 +244,208 @@ const UTM_FIELD_MAP: Record<string, keyof UtmFields> = {
     '_landing_page': 'landingPage',
 };
 
+// Referrer → source/medium inference map
+const REFERRER_MAP: Array<{ pattern: RegExp; source: string; medium: string }> = [
+    { pattern: /google\./i, source: 'google', medium: 'organic' },
+    { pattern: /facebook\.com|fb\.com/i, source: 'facebook', medium: 'social' },
+    { pattern: /instagram\.com/i, source: 'instagram', medium: 'social' },
+    { pattern: /youtube\.com/i, source: 'youtube', medium: 'social' },
+    { pattern: /t\.co|twitter\.com|x\.com/i, source: 'twitter', medium: 'social' },
+    { pattern: /pinterest\./i, source: 'pinterest', medium: 'social' },
+    { pattern: /bing\./i, source: 'bing', medium: 'organic' },
+    { pattern: /yahoo\./i, source: 'yahoo', medium: 'organic' },
+    { pattern: /duckduckgo\./i, source: 'duckduckgo', medium: 'organic' },
+];
+
+// ---- Parser helpers ----
+
+/** Parse _elevar__fbc cookie → fbclid. Format: fb.1.<timestamp>.<fbclid> */
+function parseFbclidFromElevarFbc(fbc: string): string | null {
+    if (!fbc) return null;
+    // fbclid is everything after the 3rd dot (fbclid itself may contain dots)
+    const parts = fbc.split('.');
+    if (parts.length < 4) return null;
+    return parts.slice(3).join('.');
+}
+
+/** Parse _elevar__ga cookie → GA client ID. Format: GA1.1.<clientId>.<timestamp> */
+function parseGaClientId(ga: string): string | null {
+    if (!ga) return null;
+    const parts = ga.split('.');
+    if (parts.length < 4) return null;
+    // Client ID is typically <random>.<timestamp> (parts 2+3)
+    return `${parts[2]}.${parts[3]}`;
+}
+
+/** Parse _elevar_visitor_info JSON → user_id + session_id */
+function parseElevarVisitorInfo(json: string): { userId: string | null; sessionId: string | null } {
+    try {
+        const data = JSON.parse(json);
+        return {
+            userId: data?.user_id || null,
+            sessionId: data?.session_id || null,
+        };
+    } catch {
+        return { userId: null, sessionId: null };
+    }
+}
+
+/** Parse URL query params from a landing_site path (may or may not have origin) */
+function parseUrlParams(landingSite: string): URLSearchParams | null {
+    try {
+        const url = new URL(landingSite, 'https://placeholder.com');
+        return url.searchParams;
+    } catch {
+        return null;
+    }
+}
+
+/** Infer source/medium from a referring_site URL */
+function inferSourceFromReferrer(referrer: string): { source: string; medium: string } | null {
+    if (!referrer || referrer === 'undefined') return null;
+    for (const entry of REFERRER_MAP) {
+        if (entry.pattern.test(referrer)) {
+            return { source: entry.source, medium: entry.medium };
+        }
+    }
+    return null;
+}
+
+/**
+ * Backward-compatible extraction — returns only the original 8 UTM fields.
+ * Used by existing callers that only need UtmFields.
+ */
 export function extractUtmFields(
     noteAttributes: NoteAttribute[] | undefined
 ): UtmFields {
-    const result: UtmFields = {
+    const full = extractOrderAttribution(noteAttributes);
+    return {
+        utmSource: full.utmSource,
+        utmMedium: full.utmMedium,
+        utmCampaign: full.utmCampaign,
+        utmTerm: full.utmTerm,
+        utmContent: full.utmContent,
+        fbclid: full.fbclid,
+        gclid: full.gclid,
+        landingPage: full.landingPage,
+    };
+}
+
+/**
+ * Comprehensive order attribution extraction.
+ *
+ * Priority cascade:
+ *   1. noteAttributes (explicit UTM params set by checkout scripts)
+ *   2. Elevar cookies in noteAttributes (_elevar__fbc → fbclid, etc.)
+ *   3. landing_site URL query params (from rawData)
+ *   4. referring_site inference (from rawData)
+ *
+ * @param noteAttributes - Shopify note_attributes array
+ * @param shopifyOrder - Optional raw Shopify order fields (landing_site, referring_site, source_name)
+ */
+export function extractOrderAttribution(
+    noteAttributes: NoteAttribute[] | undefined,
+    shopifyOrder?: ShopifyOrderAttribution,
+): OrderAttribution {
+    const result: OrderAttribution = {
         utmSource: null, utmMedium: null, utmCampaign: null,
         utmTerm: null, utmContent: null, fbclid: null, gclid: null, landingPage: null,
+        referringSite: null, landingPageUrl: null, customerType: null,
+        origReferrer: null, checkoutId: null, sourceName: null,
+        shopfloSessionId: null,
+        elevarFbc: null, elevarFbp: null, elevarGaClientId: null,
+        elevarVisitorId: null, elevarSessionId: null,
     };
-    if (!noteAttributes || noteAttributes.length === 0) return result;
 
-    for (const attr of noteAttributes) {
-        const key = UTM_FIELD_MAP[attr.name?.toLowerCase()];
-        if (key && attr.value) {
-            result[key] = attr.value;
+    // Build a lookup map from noteAttributes
+    const attrMap = new Map<string, string>();
+    if (noteAttributes) {
+        for (const attr of noteAttributes) {
+            if (attr.name && attr.value) {
+                attrMap.set(attr.name.toLowerCase(), attr.value);
+            }
         }
     }
+
+    // ---- Source 1: Direct noteAttributes ----
+    for (const [noteKey, fieldKey] of Object.entries(UTM_FIELD_MAP)) {
+        const val = attrMap.get(noteKey);
+        if (val) result[fieldKey] = val;
+    }
+
+    // Single-source noteAttribute fields
+    result.customerType = attrMap.get('customer_type') || null;
+    result.origReferrer = attrMap.get('orig_referrer') || null;
+    result.checkoutId = attrMap.get('checkout_id') || null;
+    result.shopfloSessionId = attrMap.get('long_session_id') || null;
+
+    // ---- Source 2: Elevar cookies in noteAttributes ----
+    const elevarFbc = attrMap.get('_elevar__fbc') || null;
+    const elevarFbp = attrMap.get('_elevar__fbp') || null;
+    const elevarGa = attrMap.get('_elevar__ga') || null;
+    const elevarVisitorInfoRaw = attrMap.get('_elevar_visitor_info') || null;
+
+    result.elevarFbc = elevarFbc;
+    result.elevarFbp = elevarFbp;
+    result.elevarGaClientId = elevarGa ? parseGaClientId(elevarGa) : null;
+
+    if (elevarVisitorInfoRaw) {
+        const { userId, sessionId } = parseElevarVisitorInfo(elevarVisitorInfoRaw);
+        result.elevarVisitorId = userId;
+        result.elevarSessionId = sessionId;
+    }
+
+    // fbclid fallback: parse from _elevar__fbc if not already set
+    if (!result.fbclid && elevarFbc) {
+        result.fbclid = parseFbclidFromElevarFbc(elevarFbc);
+    }
+
+    // ---- Source 3: landing_site URL params ----
+    const landingSite = shopifyOrder?.landing_site;
+    if (landingSite) {
+        result.landingPageUrl = landingSite;
+
+        // Extract path for landingPage fallback
+        if (!result.landingPage) {
+            try {
+                const url = new URL(landingSite, 'https://placeholder.com');
+                result.landingPage = url.pathname;
+            } catch { /* ignore */ }
+        }
+
+        // Parse query params for UTM/click ID fallbacks
+        const params = parseUrlParams(landingSite);
+        if (params) {
+            if (!result.utmSource) result.utmSource = params.get('utm_source');
+            if (!result.utmMedium) result.utmMedium = params.get('utm_medium');
+            if (!result.utmCampaign) result.utmCampaign = params.get('utm_campaign');
+            if (!result.utmTerm) result.utmTerm = params.get('utm_term');
+            if (!result.utmContent) result.utmContent = params.get('utm_content');
+            if (!result.fbclid) result.fbclid = params.get('fbclid');
+            if (!result.gclid) result.gclid = params.get('gclid');
+        }
+    }
+
+    // ---- Source 4: referring_site ----
+    const referringSite = shopifyOrder?.referring_site;
+    if (referringSite && referringSite !== 'undefined') {
+        result.referringSite = referringSite;
+
+        // Infer source/medium from referrer if not already set
+        if (!result.utmSource) {
+            const inferred = inferSourceFromReferrer(referringSite);
+            if (inferred) {
+                result.utmSource = inferred.source;
+                if (!result.utmMedium) result.utmMedium = inferred.medium;
+            }
+        }
+    }
+
+    // ---- Source 5: Raw order fields ----
+    if (shopifyOrder?.source_name) {
+        result.sourceName = shopifyOrder.source_name;
+    }
+
     return result;
 }
 
