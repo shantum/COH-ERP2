@@ -40,3 +40,16 @@ export const CACHE_TTL_HISTORICAL = 60 * 60 * 1000; // 1 hr for past data
 /** BigQuery API limits */
 export const BQ_MAX_RETRIES = 3;
 export const BQ_RETRY_DELAY_MS = 1000;
+
+// ============================================
+// GA4 Analytics Data API (live query fallback)
+// ============================================
+
+/** GA4 Property ID */
+export const GA4_PROPERTY_ID = '287841955';
+
+/** Analytics Data API scope */
+export const ANALYTICS_DATA_SCOPE = 'https://www.googleapis.com/auth/analytics.readonly';
+
+/** Cache TTL for API queries (5 min) */
+export const API_CACHE_TTL = 5 * 60 * 1000;
