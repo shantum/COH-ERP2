@@ -7,8 +7,10 @@
 
 const ENDPOINT = 'https://erp.creaturesofhabit.in/api/pixel/events';
 const FLUSH_INTERVAL_MS = 2000;
-const MAX_BATCH_SIZE = 50;
+const MAX_BATCH_SIZE = 20;
 const MAX_RETRIES = 1;
+const MAX_QUEUE_SIZE = 200; // Cap queue so it can't grow indefinitely if endpoint is down
+const MAX_LINE_ITEMS = 10; // Cap line items per checkout to keep payload under keepalive body limit (~64KB)
 
 // --- Session ID (only thing we generate locally) ---
 let sessionId = null;
@@ -101,6 +103,11 @@ async function enqueue(eventName, extraData, event) {
     if (v !== undefined && v !== null && v !== '') {
       cleaned[k] = v;
     }
+  }
+
+  // Drop oldest events if queue is at capacity (endpoint likely down)
+  if (eventQueue.length >= MAX_QUEUE_SIZE) {
+    eventQueue.splice(0, eventQueue.length - MAX_QUEUE_SIZE + 1);
   }
 
   eventQueue.push(cleaned);
@@ -223,8 +230,9 @@ analytics.subscribe('checkout_started', (event) => {
 
 analytics.subscribe('checkout_completed', (event) => {
   const co = event.data?.checkout;
-  // Send ALL line items, not just the first one
-  const items = (co?.lineItems || []).map(li => ({
+  // Send line items (capped to keep payload under keepalive body limit)
+  const allItems = co?.lineItems || [];
+  const items = allItems.slice(0, MAX_LINE_ITEMS).map(li => ({
     productId: li?.variant?.product?.id ? String(li.variant.product.id) : undefined,
     productTitle: li?.variant?.product?.title || undefined,
     variantId: li?.variant?.id ? String(li.variant.id) : undefined,
@@ -240,9 +248,9 @@ analytics.subscribe('checkout_completed', (event) => {
     orderValue: co?.totalPrice?.amount ? parseFloat(co.totalPrice.amount) : undefined,
     rawData: {
       orderId: co?.order?.id,
-      lineCount: co?.lineItems?.length,
+      lineCount: allItems.length,
       currency: co?.currencyCode,
-      discountAmount: co?.discountsAmount?.amount,
+      discountAmount: co?.discountsAmount?.amount ? parseFloat(co.discountsAmount.amount) : undefined,
       items,
     },
   }, event);
