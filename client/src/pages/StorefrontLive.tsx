@@ -429,11 +429,12 @@ function LiveFeed({ events, isLoading }: { events: LiveFeedEvent[]; isLoading: b
                                     {e.isVpn && (
                                         <span className="font-medium text-red-500 flex items-center gap-0.5">
                                             <Shield size={9} />VPN
-                                            {e.browserTimezone && (
-                                                <span className="font-normal text-stone-400 ml-0.5">
-                                                    ({e.browserTimezone.split('/').pop()?.replace(/_/g, ' ')})
-                                                </span>
-                                            )}
+                                            {e.browserTimezone && (() => {
+                                                try {
+                                                    const abbr = new Intl.DateTimeFormat('en', { timeZone: e.browserTimezone, timeZoneName: 'short' }).formatToParts(new Date()).find(p => p.type === 'timeZoneName')?.value;
+                                                    return abbr ? <span className="font-normal text-stone-400 ml-0.5">({abbr})</span> : null;
+                                                } catch { return null; }
+                                            })()}
                                         </span>
                                     )}
                                     {e.utmSource && (
