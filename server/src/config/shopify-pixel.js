@@ -9,26 +9,42 @@ const ENDPOINT = 'https://erp.creaturesofhabit.in/api/pixel/events?secret=72cf24
 const FLUSH_INTERVAL_MS = 3000;
 const MAX_BATCH_SIZE = 50;
 
-// --- Visitor & Session IDs ---
-function getOrCreateId(key, storage) {
+// --- Visitor & Session IDs (async — Shopify sandbox wraps storage) ---
+let visitorId = 'pending';
+let sessionId = 'pending';
+
+async function generateId() {
+  return crypto.randomUUID ? crypto.randomUUID() :
+    'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+      const r = Math.random() * 16 | 0;
+      return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+    });
+}
+
+async function initIds() {
   try {
-    let id = storage.getItem(key);
-    if (!id) {
-      id = crypto.randomUUID ? crypto.randomUUID() :
-        'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
-          const r = Math.random() * 16 | 0;
-          return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
-        });
-      storage.setItem(key, id);
+    visitorId = await browser.localStorage.getItem('coh_vid');
+    if (!visitorId) {
+      visitorId = await generateId();
+      await browser.localStorage.setItem('coh_vid', visitorId);
     }
-    return id;
   } catch {
-    return 'unknown';
+    visitorId = await generateId();
+  }
+
+  try {
+    sessionId = await browser.sessionStorage.getItem('coh_sid');
+    if (!sessionId) {
+      sessionId = await generateId();
+      await browser.sessionStorage.setItem('coh_sid', sessionId);
+    }
+  } catch {
+    sessionId = await generateId();
   }
 }
 
-const visitorId = getOrCreateId('coh_vid', localStorage);
-const sessionId = getOrCreateId('coh_sid', sessionStorage);
+// Initialize IDs immediately
+initIds();
 
 // --- UTM extraction ---
 function getUtmParams(url) {
@@ -47,8 +63,8 @@ function getUtmParams(url) {
 }
 
 // --- Device classification ---
-function getDeviceType() {
-  const w = screen.width || 0;
+function getDeviceType(width) {
+  const w = width || 0;
   if (w < 768) return 'mobile';
   if (w < 1024) return 'tablet';
   return 'desktop';
@@ -62,6 +78,8 @@ function enqueue(eventName, extraData, eventContext) {
   const ctx = eventContext || {};
   const pageUrl = ctx.document?.location?.href || '';
   const utms = getUtmParams(pageUrl);
+  const screenWidth = ctx.window?.screen?.width || undefined;
+  const screenHeight = ctx.window?.screen?.height || undefined;
 
   const event = {
     eventName,
@@ -71,10 +89,10 @@ function enqueue(eventName, extraData, eventContext) {
     pageUrl,
     referrer: ctx.document?.referrer || undefined,
     ...utms,
-    userAgent: ctx.navigator?.userAgent || navigator.userAgent,
-    screenWidth: ctx.window?.screen?.width || screen.width,
-    screenHeight: ctx.window?.screen?.height || screen.height,
-    deviceType: getDeviceType(),
+    userAgent: ctx.navigator?.userAgent || undefined,
+    screenWidth,
+    screenHeight,
+    deviceType: getDeviceType(screenWidth),
     ...extraData,
   };
 
@@ -99,19 +117,13 @@ function flush() {
   const batch = eventQueue.splice(0, MAX_BATCH_SIZE);
   const body = JSON.stringify({ events: batch });
 
-  // sendBeacon for reliability (works on page unload), fetch as fallback
-  const sent = navigator.sendBeacon
-    ? navigator.sendBeacon(ENDPOINT, new Blob([body], { type: 'application/json' }))
-    : false;
-
-  if (!sent) {
-    fetch(ENDPOINT, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body,
-      keepalive: true,
-    }).catch(() => {});
-  }
+  // Use fetch with keepalive (Shopify deprecated sendBeacon in sandbox)
+  fetch(ENDPOINT, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body,
+    keepalive: true,
+  }).catch(() => {});
 }
 
 // Flush on interval
