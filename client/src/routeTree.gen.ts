@@ -21,6 +21,7 @@ import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/
 import { Route as AuthenticatedUsersRouteImport } from './routes/_authenticated/users'
 import { Route as AuthenticatedTrackingRouteImport } from './routes/_authenticated/tracking'
 import { Route as AuthenticatedTailorPerformanceRouteImport } from './routes/_authenticated/tailor-performance'
+import { Route as AuthenticatedStorefrontRouteImport } from './routes/_authenticated/storefront'
 import { Route as AuthenticatedStockReportRouteImport } from './routes/_authenticated/stock-report'
 import { Route as AuthenticatedShopifyCatalogRouteImport } from './routes/_authenticated/shopify-catalog'
 import { Route as AuthenticatedSheetsMonitorRouteImport } from './routes/_authenticated/sheets-monitor'
@@ -121,6 +122,11 @@ const AuthenticatedTailorPerformanceRoute =
     path: '/tailor-performance',
     getParentRoute: () => AuthenticatedRoute,
   } as any)
+const AuthenticatedStorefrontRoute = AuthenticatedStorefrontRouteImport.update({
+  id: '/storefront',
+  path: '/storefront',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
 const AuthenticatedStockReportRoute =
   AuthenticatedStockReportRouteImport.update({
     id: '/stock-report',
@@ -378,6 +384,7 @@ export interface FileRoutesByFullPath {
   '/sheets-monitor': typeof AuthenticatedSheetsMonitorRoute
   '/shopify-catalog': typeof AuthenticatedShopifyCatalogRoute
   '/stock-report': typeof AuthenticatedStockReportRoute
+  '/storefront': typeof AuthenticatedStorefrontRoute
   '/tailor-performance': typeof AuthenticatedTailorPerformanceRoute
   '/tracking': typeof AuthenticatedTrackingRoute
   '/users': typeof AuthenticatedUsersRoute
@@ -429,6 +436,7 @@ export interface FileRoutesByTo {
   '/sheets-monitor': typeof AuthenticatedSheetsMonitorRoute
   '/shopify-catalog': typeof AuthenticatedShopifyCatalogRoute
   '/stock-report': typeof AuthenticatedStockReportRoute
+  '/storefront': typeof AuthenticatedStorefrontRoute
   '/tailor-performance': typeof AuthenticatedTailorPerformanceRoute
   '/tracking': typeof AuthenticatedTrackingRoute
   '/users': typeof AuthenticatedUsersRoute
@@ -483,6 +491,7 @@ export interface FileRoutesById {
   '/_authenticated/sheets-monitor': typeof AuthenticatedSheetsMonitorRoute
   '/_authenticated/shopify-catalog': typeof AuthenticatedShopifyCatalogRoute
   '/_authenticated/stock-report': typeof AuthenticatedStockReportRoute
+  '/_authenticated/storefront': typeof AuthenticatedStorefrontRoute
   '/_authenticated/tailor-performance': typeof AuthenticatedTailorPerformanceRoute
   '/_authenticated/tracking': typeof AuthenticatedTrackingRoute
   '/_authenticated/users': typeof AuthenticatedUsersRoute
@@ -538,6 +547,7 @@ export interface FileRouteTypes {
     | '/sheets-monitor'
     | '/shopify-catalog'
     | '/stock-report'
+    | '/storefront'
     | '/tailor-performance'
     | '/tracking'
     | '/users'
@@ -589,6 +599,7 @@ export interface FileRouteTypes {
     | '/sheets-monitor'
     | '/shopify-catalog'
     | '/stock-report'
+    | '/storefront'
     | '/tailor-performance'
     | '/tracking'
     | '/users'
@@ -642,6 +653,7 @@ export interface FileRouteTypes {
     | '/_authenticated/sheets-monitor'
     | '/_authenticated/shopify-catalog'
     | '/_authenticated/stock-report'
+    | '/_authenticated/storefront'
     | '/_authenticated/tailor-performance'
     | '/_authenticated/tracking'
     | '/_authenticated/users'
@@ -750,6 +762,13 @@ declare module '@tanstack/react-router' {
       path: '/tailor-performance'
       fullPath: '/tailor-performance'
       preLoaderRoute: typeof AuthenticatedTailorPerformanceRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/storefront': {
+      id: '/_authenticated/storefront'
+      path: '/storefront'
+      fullPath: '/storefront'
+      preLoaderRoute: typeof AuthenticatedStorefrontRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
     '/_authenticated/stock-report': {
@@ -1061,6 +1080,7 @@ interface AuthenticatedRouteChildren {
   AuthenticatedSheetsMonitorRoute: typeof AuthenticatedSheetsMonitorRoute
   AuthenticatedShopifyCatalogRoute: typeof AuthenticatedShopifyCatalogRoute
   AuthenticatedStockReportRoute: typeof AuthenticatedStockReportRoute
+  AuthenticatedStorefrontRoute: typeof AuthenticatedStorefrontRoute
   AuthenticatedTailorPerformanceRoute: typeof AuthenticatedTailorPerformanceRoute
   AuthenticatedTrackingRoute: typeof AuthenticatedTrackingRoute
   AuthenticatedUsersRoute: typeof AuthenticatedUsersRoute
@@ -1108,6 +1128,7 @@ const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedSheetsMonitorRoute: AuthenticatedSheetsMonitorRoute,
   AuthenticatedShopifyCatalogRoute: AuthenticatedShopifyCatalogRoute,
   AuthenticatedStockReportRoute: AuthenticatedStockReportRoute,
+  AuthenticatedStorefrontRoute: AuthenticatedStorefrontRoute,
   AuthenticatedTailorPerformanceRoute: AuthenticatedTailorPerformanceRoute,
   AuthenticatedTrackingRoute: AuthenticatedTrackingRoute,
   AuthenticatedUsersRoute: AuthenticatedUsersRoute,

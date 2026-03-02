@@ -1,0 +1,728 @@
+/**
+ * Storefront Live — Real-Time D2C Analytics Dashboard
+ *
+ * First-party, unsampled storefront analytics from our Shopify Web Pixel.
+ * Dark theme. Near-real-time polling for live feed + on-site-now.
+ */
+
+import { useState } from 'react';
+// recharts reserved for future sparklines/charts
+// import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import {
+    Eye, ShoppingCart, CreditCard, Search, ArrowRight,
+    Smartphone, Monitor, Tablet, TrendingUp, TrendingDown, Activity,
+} from 'lucide-react';
+import {
+    useHeroMetrics, useOnSiteNow, useProductFunnel, useLiveFeed,
+    useTrafficSources, useCampaignAttribution, useGeoBreakdown,
+    useTopPages, useTopSearches, useDeviceBreakdown,
+} from '../hooks/useStorefrontAnalytics';
+import { formatCurrency } from '../utils/formatting';
+import type {
+    LiveFeedEvent, ProductFunnelRow, TrafficSourceRow,
+    CampaignAttributionRow, GeoBreakdownRow, TopPageRow,
+    TopSearchRow, DeviceBreakdownRow,
+} from '../server/functions/storefrontAnalytics';
+
+// ============================================
+// TYPES & CONSTANTS
+// ============================================
+
+type Tab = 'overview' | 'products' | 'acquisition' | 'geography';
+type DayRange = 1 | 7 | 30 | 90;
+
+const TABS: { key: Tab; label: string }[] = [
+    { key: 'overview', label: 'Overview' },
+    { key: 'products', label: 'Products' },
+    { key: 'acquisition', label: 'Acquisition' },
+    { key: 'geography', label: 'Geography' },
+];
+
+const DAY_OPTIONS: { value: DayRange; label: string }[] = [
+    { value: 1, label: 'Today' },
+    { value: 7, label: '7d' },
+    { value: 30, label: '30d' },
+    { value: 90, label: '90d' },
+];
+
+const GREEN = '#22c55e';
+const AMBER = '#f59e0b';
+const PURPLE = '#c084fc';
+const BLUE = '#60a5fa';
+
+const FUNNEL_COLORS = ['#a8a29e', '#f59e0b', '#fb923c', '#22c55e'];
+
+// ============================================
+// HELPERS
+// ============================================
+
+function formatNum(value: number): string {
+    return value.toLocaleString('en-IN');
+}
+
+function formatPct(value: number): string {
+    return `${value.toFixed(1)}%`;
+}
+
+function delta(current: number, previous: number): { value: string; positive: boolean } | null {
+    if (previous === 0) return current > 0 ? { value: '+100%', positive: true } : null;
+    const pct = ((current - previous) / previous) * 100;
+    return {
+        value: `${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`,
+        positive: pct >= 0,
+    };
+}
+
+function timeAgo(date: Date | string): string {
+    const now = Date.now();
+    const then = typeof date === 'string' ? new Date(date).getTime() : date.getTime();
+    const seconds = Math.floor((now - then) / 1000);
+    if (seconds < 60) return `${seconds}s ago`;
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}h ago`;
+    return `${Math.floor(hours / 24)}d ago`;
+}
+
+function truncateUrl(url: string): string {
+    try {
+        const parsed = new URL(url);
+        const path = parsed.pathname;
+        return path.length > 40 ? path.slice(0, 40) + '...' : path;
+    } catch {
+        return url.length > 40 ? url.slice(0, 40) + '...' : url;
+    }
+}
+
+function eventIcon(eventName: string) {
+    switch (eventName) {
+        case 'page_viewed': return <Eye size={14} className="text-stone-400" />;
+        case 'product_viewed': return <Eye size={14} className="text-blue-400" />;
+        case 'product_added_to_cart': return <ShoppingCart size={14} className="text-amber-400" />;
+        case 'checkout_started': return <CreditCard size={14} className="text-orange-400" />;
+        case 'checkout_completed': return <CreditCard size={14} className="text-green-400" />;
+        case 'search_submitted': return <Search size={14} className="text-purple-400" />;
+        default: return <Activity size={14} className="text-stone-400" />;
+    }
+}
+
+function eventLabel(eventName: string): string {
+    switch (eventName) {
+        case 'page_viewed': return 'Viewed page';
+        case 'product_viewed': return 'Viewed product';
+        case 'product_added_to_cart': return 'Added to cart';
+        case 'checkout_started': return 'Started checkout';
+        case 'checkout_completed': return 'Completed purchase';
+        case 'search_submitted': return 'Searched';
+        case 'payment_info_submitted': return 'Submitted payment';
+        case 'product_removed_from_cart': return 'Removed from cart';
+        default: return eventName.replace(/_/g, ' ');
+    }
+}
+
+function sourceColor(source: string): string {
+    const s = source.toLowerCase();
+    if (s.includes('facebook') || s.includes('instagram') || s === 'meta') return PURPLE;
+    if (s.includes('google')) return BLUE;
+    if (s === 'direct') return '#a8a29e';
+    if (s.includes('email')) return GREEN;
+    return AMBER;
+}
+
+// ============================================
+// SKELETONS (dark theme)
+// ============================================
+
+function Skeleton({ className = '' }: { className?: string }) {
+    return <div className={`animate-pulse bg-stone-800 rounded ${className}`} />;
+}
+
+function KPISkeleton() {
+    return (
+        <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
+            {Array.from({ length: 6 }).map((_, i) => (
+                <div key={i} className="bg-stone-900/80 border border-stone-700 rounded-lg p-4">
+                    <Skeleton className="h-3 w-16 mb-3" />
+                    <Skeleton className="h-7 w-24" />
+                </div>
+            ))}
+        </div>
+    );
+}
+
+function SectionSkeleton() {
+    return (
+        <div className="bg-stone-900/80 border border-stone-700 rounded-lg p-5">
+            <Skeleton className="h-4 w-40 mb-4" />
+            <Skeleton className="h-48 w-full" />
+        </div>
+    );
+}
+
+// ============================================
+// KPI CARD (dark theme)
+// ============================================
+
+function KPICard({ label, value, delta: d, pulse }: {
+    label: string;
+    value: string;
+    delta?: { value: string; positive: boolean } | null;
+    pulse?: boolean;
+}) {
+    return (
+        <div className="bg-stone-900/80 border border-stone-700 rounded-lg p-4">
+            <div className="flex items-center gap-2">
+                {pulse && <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
+                </span>}
+                <p className="text-xs font-medium text-stone-400 uppercase tracking-wide">{label}</p>
+            </div>
+            <p className="text-2xl font-semibold text-stone-100 mt-1 font-mono">{value}</p>
+            {d && (
+                <p className={`text-xs mt-1 font-medium ${d.positive ? 'text-green-400' : 'text-red-400'}`}>
+                    {d.positive ? <TrendingUp size={12} className="inline mr-1" /> : <TrendingDown size={12} className="inline mr-1" />}
+                    {d.value} vs prev period
+                </p>
+            )}
+        </div>
+    );
+}
+
+// ============================================
+// OVERVIEW TAB
+// ============================================
+
+function OverviewTab({ days }: { days: number }) {
+    const hero = useHeroMetrics(days);
+    const onSite = useOnSiteNow();
+    const feed = useLiveFeed();
+
+    if (hero.isLoading) {
+        return (
+            <div className="space-y-4">
+                <KPISkeleton />
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    <SectionSkeleton />
+                    <SectionSkeleton />
+                </div>
+            </div>
+        );
+    }
+
+    const h = hero.data;
+    const os = onSite.data;
+
+    return (
+        <div className="space-y-4">
+            {/* Hero Metrics */}
+            <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
+                <KPICard
+                    label="On Site Now"
+                    value={os ? formatNum(os.total) : '...'}
+                    pulse
+                />
+                <KPICard
+                    label="Visitors"
+                    value={h ? formatNum(h.visitors) : '-'}
+                    delta={h ? delta(h.visitors, h.prevVisitors) : null}
+                />
+                <KPICard
+                    label="Page Views"
+                    value={h ? formatNum(h.pageViews) : '-'}
+                    delta={h ? delta(h.pageViews, h.prevPageViews) : null}
+                />
+                <KPICard
+                    label="Add to Carts"
+                    value={h ? formatNum(h.addToCarts) : '-'}
+                    delta={h ? delta(h.addToCarts, h.prevAddToCarts) : null}
+                />
+                <KPICard
+                    label="Checkouts"
+                    value={h ? formatNum(h.checkouts) : '-'}
+                    delta={h ? delta(h.checkouts, h.prevCheckouts) : null}
+                />
+                <KPICard
+                    label="Revenue"
+                    value={h ? formatCurrency(h.revenue) : '-'}
+                    delta={h ? delta(h.revenue, h.prevRevenue) : null}
+                />
+            </div>
+
+            {/* On-site device split */}
+            {os && os.total > 0 && (
+                <div className="flex gap-4 text-xs text-stone-400">
+                    <span className="flex items-center gap-1"><Smartphone size={12} /> {os.mobile} mobile</span>
+                    <span className="flex items-center gap-1"><Monitor size={12} /> {os.desktop} desktop</span>
+                    <span className="flex items-center gap-1"><Tablet size={12} /> {os.tablet} tablet</span>
+                </div>
+            )}
+
+            {/* Two-column: funnel + live feed */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <ConversionFunnel data={h} />
+                <LiveFeed events={feed.data ?? []} isLoading={feed.isLoading} />
+            </div>
+        </div>
+    );
+}
+
+// ============================================
+// CONVERSION FUNNEL
+// ============================================
+
+function ConversionFunnel({ data }: { data?: { visitors: number; productViews: number; addToCarts: number; checkouts: number; purchases: number } }) {
+    if (!data) return <SectionSkeleton />;
+
+    const steps = [
+        { name: 'Sessions', value: data.visitors, color: FUNNEL_COLORS[0] },
+        { name: 'Product Views', value: data.productViews, color: FUNNEL_COLORS[1] },
+        { name: 'Add to Cart', value: data.addToCarts, color: FUNNEL_COLORS[2] },
+        { name: 'Checkout', value: data.checkouts, color: '#fb923c' },
+        { name: 'Purchase', value: data.purchases, color: FUNNEL_COLORS[3] },
+    ];
+
+    const maxVal = steps[0].value || 1;
+
+    return (
+        <div className="bg-stone-900/80 border border-stone-700 rounded-lg p-5">
+            <h3 className="text-sm font-medium text-stone-300 mb-4">Conversion Funnel</h3>
+            <div className="space-y-3">
+                {steps.map((step, i) => {
+                    const widthPct = Math.max((step.value / maxVal) * 100, 3);
+                    const dropOff = i > 0 && steps[i - 1].value > 0
+                        ? ((steps[i - 1].value - step.value) / steps[i - 1].value * 100).toFixed(1)
+                        : null;
+                    return (
+                        <div key={step.name}>
+                            <div className="flex items-center justify-between mb-1">
+                                <span className="text-sm text-stone-400">{step.name}</span>
+                                <span className="text-sm font-medium text-stone-200 font-mono">
+                                    {formatNum(step.value)}
+                                    {i > 0 && steps[0].value > 0 && (
+                                        <span className="text-xs text-stone-500 ml-2">
+                                            ({((step.value / steps[0].value) * 100).toFixed(1)}%)
+                                        </span>
+                                    )}
+                                </span>
+                            </div>
+                            <div className="w-full bg-stone-800 rounded-full h-5">
+                                <div
+                                    className="h-5 rounded-full transition-all"
+                                    style={{ width: `${widthPct}%`, backgroundColor: step.color }}
+                                />
+                            </div>
+                            {dropOff && (
+                                <div className="flex items-center gap-1 mt-1 ml-2">
+                                    <ArrowRight size={10} className="text-stone-500" />
+                                    <span className="text-xs text-red-400">{dropOff}% drop-off</span>
+                                </div>
+                            )}
+                        </div>
+                    );
+                })}
+            </div>
+        </div>
+    );
+}
+
+// ============================================
+// LIVE FEED
+// ============================================
+
+function LiveFeed({ events, isLoading }: { events: LiveFeedEvent[]; isLoading: boolean }) {
+    if (isLoading) return <SectionSkeleton />;
+
+    return (
+        <div className="bg-stone-900/80 border border-stone-700 rounded-lg p-5">
+            <div className="flex items-center justify-between mb-4">
+                <h3 className="text-sm font-medium text-stone-300">Live Activity</h3>
+                <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
+                </span>
+            </div>
+            <div className="space-y-2 max-h-[400px] overflow-y-auto">
+                {events.length === 0 && (
+                    <p className="text-sm text-stone-500">No events yet</p>
+                )}
+                {events.map((e) => (
+                    <div key={e.id} className="flex items-start gap-3 py-2 border-b border-stone-800 last:border-0">
+                        <div className="mt-0.5">{eventIcon(e.eventName)}</div>
+                        <div className="flex-1 min-w-0">
+                            <p className="text-sm text-stone-200 truncate">
+                                {eventLabel(e.eventName)}
+                                {e.productTitle && (
+                                    <span className="text-stone-400"> — {e.productTitle}</span>
+                                )}
+                                {e.searchQuery && (
+                                    <span className="text-purple-400"> "{e.searchQuery}"</span>
+                                )}
+                            </p>
+                            <div className="flex items-center gap-2 mt-0.5 text-xs text-stone-500">
+                                {e.region && <span>{e.region}</span>}
+                                {e.deviceType && <span>{e.deviceType}</span>}
+                                {e.utmSource && (
+                                    <span style={{ color: sourceColor(e.utmSource) }}>{e.utmSource}</span>
+                                )}
+                                {e.orderValue != null && e.orderValue > 0 && (
+                                    <span className="text-green-400 font-mono">{formatCurrency(e.orderValue)}</span>
+                                )}
+                            </div>
+                        </div>
+                        <span className="text-xs text-stone-600 whitespace-nowrap">{timeAgo(e.createdAt)}</span>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+}
+
+// ============================================
+// PRODUCTS TAB
+// ============================================
+
+function ProductsTab({ days }: { days: number }) {
+    const funnel = useProductFunnel(days, 20);
+
+    if (funnel.isLoading) return <SectionSkeleton />;
+
+    const rows = funnel.data ?? [];
+
+    return (
+        <div className="space-y-4">
+            <div className="bg-stone-900/80 border border-stone-700 rounded-lg p-5">
+                <h3 className="text-sm font-medium text-stone-300 mb-4">Top Products — View → Cart → Purchase</h3>
+                <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                        <thead>
+                            <tr className="text-xs text-stone-500 uppercase tracking-wider border-b border-stone-700">
+                                <th className="text-left py-3 pr-4">Product</th>
+                                <th className="text-right py-3 px-3">Views</th>
+                                <th className="text-right py-3 px-3">Conv%</th>
+                                <th className="text-right py-3 px-3">ATC</th>
+                                <th className="text-right py-3 px-3">Conv%</th>
+                                <th className="text-right py-3 px-3">Purchased</th>
+                                <th className="text-right py-3 px-3">Net Conv</th>
+                                <th className="text-right py-3 pl-3">Revenue</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {rows.map((p: ProductFunnelRow) => {
+                                const viewToAtc = p.views > 0 ? (p.atcCount / p.views * 100) : 0;
+                                const atcToPurchase = p.atcCount > 0 ? (p.purchases / p.atcCount * 100) : 0;
+                                const initial = (p.productTitle ?? '?')[0].toUpperCase();
+                                return (
+                                    <tr key={p.productId} className="border-b border-stone-800 hover:bg-stone-800/50">
+                                        <td className="py-3 pr-4">
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-8 h-8 rounded bg-stone-700 flex items-center justify-center text-xs font-bold text-stone-300 flex-shrink-0">
+                                                    {initial}
+                                                </div>
+                                                <span className="text-stone-200 truncate max-w-[200px]">{p.productTitle}</span>
+                                            </div>
+                                        </td>
+                                        <td className="text-right py-3 px-3 text-stone-300 font-mono">{formatNum(p.views)}</td>
+                                        <td className="text-right py-3 px-3 text-stone-500 font-mono">{formatPct(viewToAtc)}</td>
+                                        <td className="text-right py-3 px-3 text-amber-400 font-mono">{formatNum(p.atcCount)}</td>
+                                        <td className="text-right py-3 px-3 text-stone-500 font-mono">{formatPct(atcToPurchase)}</td>
+                                        <td className="text-right py-3 px-3 text-green-400 font-mono">{formatNum(p.purchases)}</td>
+                                        <td className="text-right py-3 px-3 text-stone-400 font-mono">{formatPct(p.netConversion)}</td>
+                                        <td className="text-right py-3 pl-3 text-stone-200 font-mono">{formatCurrency(p.revenue)}</td>
+                                    </tr>
+                                );
+                            })}
+                            {rows.length === 0 && (
+                                <tr><td colSpan={8} className="py-8 text-center text-stone-500">No product data yet</td></tr>
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// ============================================
+// ACQUISITION TAB
+// ============================================
+
+function AcquisitionTab({ days }: { days: number }) {
+    const sources = useTrafficSources(days);
+    const campaigns = useCampaignAttribution(days);
+
+    if (sources.isLoading) return <SectionSkeleton />;
+
+    const srcRows = sources.data ?? [];
+    const totalSessions = srcRows.reduce((s: number, r: TrafficSourceRow) => s + r.sessions, 0);
+
+    return (
+        <div className="space-y-4">
+            {/* Traffic Sources */}
+            <div className="bg-stone-900/80 border border-stone-700 rounded-lg p-5">
+                <h3 className="text-sm font-medium text-stone-300 mb-4">Traffic Sources</h3>
+                <div className="space-y-3">
+                    {srcRows.map((r: TrafficSourceRow) => {
+                        const pct = totalSessions > 0 ? (r.sessions / totalSessions * 100) : 0;
+                        return (
+                            <div key={r.source}>
+                                <div className="flex items-center justify-between mb-1">
+                                    <span className="text-sm text-stone-300 capitalize">{r.source}</span>
+                                    <span className="text-sm text-stone-400 font-mono">
+                                        {formatNum(r.sessions)} <span className="text-stone-600">({formatPct(pct)})</span>
+                                    </span>
+                                </div>
+                                <div className="w-full bg-stone-800 rounded-full h-4">
+                                    <div
+                                        className="h-4 rounded-full transition-all"
+                                        style={{
+                                            width: `${Math.max(pct, 2)}%`,
+                                            backgroundColor: sourceColor(r.source),
+                                        }}
+                                    />
+                                </div>
+                            </div>
+                        );
+                    })}
+                    {srcRows.length === 0 && (
+                        <p className="text-sm text-stone-500">No traffic data yet</p>
+                    )}
+                </div>
+            </div>
+
+            {/* Campaign Attribution */}
+            <div className="bg-stone-900/80 border border-stone-700 rounded-lg p-5">
+                <h3 className="text-sm font-medium text-stone-300 mb-4">Campaign Attribution</h3>
+                <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                        <thead>
+                            <tr className="text-xs text-stone-500 uppercase tracking-wider border-b border-stone-700">
+                                <th className="text-left py-3 pr-4">Campaign</th>
+                                <th className="text-left py-3 px-3">Source</th>
+                                <th className="text-right py-3 px-3">Clicks</th>
+                                <th className="text-right py-3 px-3">ATC</th>
+                                <th className="text-right py-3 px-3">Orders</th>
+                                <th className="text-right py-3 px-3">Revenue</th>
+                                <th className="text-right py-3 pl-3">Conv%</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {(campaigns.data ?? []).map((c: CampaignAttributionRow, i: number) => (
+                                <tr key={`${c.utmCampaign}-${i}`} className="border-b border-stone-800 hover:bg-stone-800/50">
+                                    <td className="py-3 pr-4 text-stone-200 truncate max-w-[200px]">{c.utmCampaign}</td>
+                                    <td className="py-3 px-3">
+                                        <span
+                                            className="text-xs font-medium px-2 py-0.5 rounded-full"
+                                            style={{
+                                                color: sourceColor(c.utmSource),
+                                                backgroundColor: sourceColor(c.utmSource) + '20',
+                                            }}
+                                        >
+                                            {c.utmSource}
+                                        </span>
+                                    </td>
+                                    <td className="text-right py-3 px-3 text-stone-300 font-mono">{formatNum(c.clicks)}</td>
+                                    <td className="text-right py-3 px-3 text-amber-400 font-mono">{formatNum(c.atcCount)}</td>
+                                    <td className="text-right py-3 px-3 text-green-400 font-mono">{formatNum(c.orders)}</td>
+                                    <td className="text-right py-3 px-3 text-stone-200 font-mono">{formatCurrency(c.revenue)}</td>
+                                    <td className="text-right py-3 pl-3 text-stone-400 font-mono">{formatPct(c.conversionRate)}</td>
+                                </tr>
+                            ))}
+                            {(campaigns.data ?? []).length === 0 && (
+                                <tr><td colSpan={7} className="py-8 text-center text-stone-500">No campaign data yet</td></tr>
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// ============================================
+// GEOGRAPHY TAB
+// ============================================
+
+function GeographyTab({ days }: { days: number }) {
+    const geo = useGeoBreakdown(days, 15);
+    const devices = useDeviceBreakdown(days);
+    const pages = useTopPages(days, 15);
+    const searches = useTopSearches(days, 15);
+
+    if (geo.isLoading) return <SectionSkeleton />;
+
+    const deviceRows = devices.data ?? [];
+    const totalDeviceSessions = deviceRows.reduce((s: number, r: DeviceBreakdownRow) => s + r.sessions, 0);
+
+    return (
+        <div className="space-y-4">
+            {/* Device Breakdown */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {deviceRows.map((d: DeviceBreakdownRow) => {
+                    const pct = totalDeviceSessions > 0 ? (d.sessions / totalDeviceSessions * 100) : 0;
+                    const Icon = d.deviceType === 'mobile' ? Smartphone : d.deviceType === 'desktop' ? Monitor : Tablet;
+                    return (
+                        <div key={d.deviceType} className="bg-stone-900/80 border border-stone-700 rounded-lg p-4">
+                            <div className="flex items-center gap-2 text-stone-400 mb-2">
+                                <Icon size={16} />
+                                <span className="text-xs uppercase tracking-wide font-medium">{d.deviceType}</span>
+                            </div>
+                            <p className="text-2xl font-semibold text-stone-100 font-mono">{formatPct(pct)}</p>
+                            <p className="text-xs text-stone-500 mt-1">{formatNum(d.sessions)} sessions</p>
+                        </div>
+                    );
+                })}
+            </div>
+
+            {/* Geo Table */}
+            <div className="bg-stone-900/80 border border-stone-700 rounded-lg p-5">
+                <h3 className="text-sm font-medium text-stone-300 mb-4">Geography</h3>
+                <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                        <thead>
+                            <tr className="text-xs text-stone-500 uppercase tracking-wider border-b border-stone-700">
+                                <th className="text-left py-3 pr-4">Region</th>
+                                <th className="text-left py-3 px-3">Country</th>
+                                <th className="text-right py-3 px-3">Sessions</th>
+                                <th className="text-right py-3 px-3">ATC</th>
+                                <th className="text-right py-3 pl-3">Orders</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {(geo.data ?? []).map((r: GeoBreakdownRow, i: number) => (
+                                <tr key={`${r.region}-${r.country}-${i}`} className="border-b border-stone-800 hover:bg-stone-800/50">
+                                    <td className="py-3 pr-4 text-stone-200">{r.region ?? '-'}</td>
+                                    <td className="py-3 px-3 text-stone-400">{r.country ?? '-'}</td>
+                                    <td className="text-right py-3 px-3 text-stone-300 font-mono">{formatNum(r.sessions)}</td>
+                                    <td className="text-right py-3 px-3 text-amber-400 font-mono">{formatNum(r.atcCount)}</td>
+                                    <td className="text-right py-3 pl-3 text-green-400 font-mono">{formatNum(r.orders)}</td>
+                                </tr>
+                            ))}
+                            {(geo.data ?? []).length === 0 && (
+                                <tr><td colSpan={5} className="py-8 text-center text-stone-500">No geo data yet</td></tr>
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            {/* Two-column: Top Pages + Top Searches */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {/* Top Pages */}
+                <div className="bg-stone-900/80 border border-stone-700 rounded-lg p-5">
+                    <h3 className="text-sm font-medium text-stone-300 mb-4">Top Pages</h3>
+                    <div className="space-y-2">
+                        {(pages.data ?? []).map((p: TopPageRow, i: number) => (
+                            <div key={`${p.pageUrl}-${i}`} className="flex items-center justify-between py-1.5 border-b border-stone-800 last:border-0">
+                                <span className="text-sm text-stone-300 truncate max-w-[250px]">{truncateUrl(p.pageUrl)}</span>
+                                <div className="flex items-center gap-3 text-sm font-mono">
+                                    <span className="text-stone-400">{formatNum(p.views)}</span>
+                                    <span className="text-stone-600">({formatNum(p.uniqueViews)} unique)</span>
+                                </div>
+                            </div>
+                        ))}
+                        {(pages.data ?? []).length === 0 && (
+                            <p className="text-sm text-stone-500">No page data yet</p>
+                        )}
+                    </div>
+                </div>
+
+                {/* Top Searches */}
+                <div className="bg-stone-900/80 border border-stone-700 rounded-lg p-5">
+                    <h3 className="text-sm font-medium text-stone-300 mb-4">Top Searches</h3>
+                    <div className="space-y-2">
+                        {(searches.data ?? []).map((s: TopSearchRow, i: number) => (
+                            <div key={`${s.searchQuery}-${i}`} className="flex items-center justify-between py-1.5 border-b border-stone-800 last:border-0">
+                                <span className="text-sm text-purple-300">"{s.searchQuery}"</span>
+                                <span className="text-sm text-stone-400 font-mono">{formatNum(s.count)}</span>
+                            </div>
+                        ))}
+                        {(searches.data ?? []).length === 0 && (
+                            <p className="text-sm text-stone-500">No search data yet</p>
+                        )}
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// ============================================
+// HEADER (dark theme)
+// ============================================
+
+function Header({
+    days, setDays, tab, setTab,
+}: {
+    days: DayRange;
+    setDays: (d: DayRange) => void;
+    tab: Tab;
+    setTab: (t: Tab) => void;
+}) {
+    return (
+        <div className="flex-none px-6 py-4 border-b border-stone-700 bg-stone-900">
+            <div className="flex items-center justify-between flex-wrap gap-4">
+                <div>
+                    <h1 className="text-xl font-semibold text-stone-100">Storefront Live</h1>
+                    <p className="text-sm text-stone-500 mt-0.5">First-party storefront analytics — unsampled</p>
+                </div>
+
+                {/* Day range pills */}
+                <div className="flex bg-stone-800 rounded-lg p-0.5">
+                    {DAY_OPTIONS.map(d => (
+                        <button
+                            key={d.value}
+                            onClick={() => setDays(d.value)}
+                            className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                                days === d.value
+                                    ? 'bg-stone-100 text-stone-900'
+                                    : 'text-stone-400 hover:text-stone-200'
+                            }`}
+                        >
+                            {d.label}
+                        </button>
+                    ))}
+                </div>
+            </div>
+
+            {/* Tabs */}
+            <div className="flex gap-1 mt-4 overflow-x-auto pb-1">
+                {TABS.map(t => (
+                    <button
+                        key={t.key}
+                        onClick={() => setTab(t.key)}
+                        className={`px-3 py-1.5 text-sm font-medium rounded-md whitespace-nowrap transition-colors ${
+                            tab === t.key
+                                ? 'bg-stone-100 text-stone-900'
+                                : 'bg-stone-800 text-stone-400 hover:text-stone-200'
+                        }`}
+                    >
+                        {t.label}
+                    </button>
+                ))}
+            </div>
+        </div>
+    );
+}
+
+// ============================================
+// MAIN PAGE
+// ============================================
+
+export default function StorefrontLive() {
+    const [tab, setTab] = useState<Tab>('overview');
+    const [days, setDays] = useState<DayRange>(1);
+
+    return (
+        <div className="h-full flex flex-col bg-stone-950">
+            <Header days={days} setDays={setDays} tab={tab} setTab={setTab} />
+            <div className="flex-1 overflow-auto p-6">
+                {tab === 'overview' && <OverviewTab days={days} />}
+                {tab === 'products' && <ProductsTab days={days} />}
+                {tab === 'acquisition' && <AcquisitionTab days={days} />}
+                {tab === 'geography' && <GeographyTab days={days} />}
+            </div>
+        </div>
+    );
+}
