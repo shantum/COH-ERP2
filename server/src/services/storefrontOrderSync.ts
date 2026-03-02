@@ -7,9 +7,13 @@
  *
  * Solution: After each order is created via Shopify sync, insert a synthetic
  * checkout_completed event into StorefrontEvent. If the order can be matched
- * to an existing pixel session (via product_added_to_cart events), we inherit
- * that session's attribution (UTMs, device, geo). Otherwise we fall back to
- * the order's own UTM data.
+ * to an existing pixel session, we inherit that session's attribution.
+ *
+ * Matching cascade (deterministic first, probabilistic last):
+ *   1. fbclid exact match (±7 days)
+ *   2. gclid exact match (±7 days)
+ *   3. product_added_to_cart for same products (24h before order)
+ *   4. product_viewed for same products (24h before order)
  *
  * Dedup: Uses rawData->>'shopifyOrderId' to prevent duplicate events.
  */
@@ -24,6 +28,8 @@ interface OrderForSync {
     orderDate: Date;
     totalAmount: number;
     customerEmail: string | null;
+    fbclid: string | null;
+    gclid: string | null;
     utmSource: string | null;
     utmMedium: string | null;
     utmCampaign: string | null;
@@ -31,7 +37,27 @@ interface OrderForSync {
     utmTerm: string | null;
 }
 
-interface MatchedSession {
+/** Session fields inherited from a matched StorefrontEvent */
+const SESSION_SELECT = {
+    sessionId: true,
+    visitorId: true,
+    utmSource: true,
+    utmMedium: true,
+    utmCampaign: true,
+    utmContent: true,
+    utmTerm: true,
+    fbclid: true,
+    gclid: true,
+    deviceType: true,
+    screenWidth: true,
+    country: true,
+    region: true,
+    city: true,
+    referrer: true,
+    pageUrl: true,
+} as const;
+
+export type MatchedSession = {
     sessionId: string;
     visitorId: string;
     utmSource: string | null;
@@ -39,6 +65,8 @@ interface MatchedSession {
     utmCampaign: string | null;
     utmContent: string | null;
     utmTerm: string | null;
+    fbclid: string | null;
+    gclid: string | null;
     deviceType: string | null;
     screenWidth: number | null;
     country: string | null;
@@ -46,6 +74,13 @@ interface MatchedSession {
     city: string | null;
     referrer: string | null;
     pageUrl: string | null;
+};
+
+export type MatchType = 'fbclid' | 'gclid' | 'product_atc' | 'product_viewed' | 'none';
+
+export interface SessionMatchResult {
+    session: MatchedSession | null;
+    matchType: MatchType;
 }
 
 /**
@@ -57,9 +92,9 @@ interface MatchedSession {
 export async function syncOrderToStorefront(
     prisma: PrismaClient,
     orderId: string,
-): Promise<{ action: 'created' | 'skipped' | 'error'; sessionMatched: boolean }> {
+): Promise<{ action: 'created' | 'skipped' | 'error'; sessionMatched: boolean; matchType: MatchType }> {
     try {
-        // Load order with line items to get product IDs
+        // Load order with line items to get product IDs + click IDs
         const order = await prisma.order.findUnique({
             where: { id: orderId },
             select: {
@@ -69,6 +104,8 @@ export async function syncOrderToStorefront(
                 orderDate: true,
                 totalAmount: true,
                 customerEmail: true,
+                fbclid: true,
+                gclid: true,
                 utmSource: true,
                 utmMedium: true,
                 utmCampaign: true,
@@ -81,7 +118,7 @@ export async function syncOrderToStorefront(
                                 variation: {
                                     select: {
                                         product: {
-                                            select: { shopifyProductId: true, name: true },
+                                            select: { shopifyProductId: true },
                                         },
                                     },
                                 },
@@ -93,12 +130,10 @@ export async function syncOrderToStorefront(
         });
 
         if (!order || !order.shopifyOrderId) {
-            return { action: 'skipped', sessionMatched: false };
+            return { action: 'skipped', sessionMatched: false, matchType: 'none' };
         }
 
         // Dedup: check if any checkout_completed already exists for this order
-        // Could be a synthetic (order_sync) event OR a pixel-native event
-        // (international customers who go through native Shopify checkout)
         const existingSynthetic = await prisma.storefrontEvent.findFirst({
             where: {
                 eventName: 'checkout_completed',
@@ -108,7 +143,7 @@ export async function syncOrderToStorefront(
         });
 
         if (existingSynthetic) {
-            return { action: 'skipped', sessionMatched: false };
+            return { action: 'skipped', sessionMatched: false, matchType: 'none' };
         }
 
         // Also check for pixel-native checkout_completed (orderId format: gid://shopify/Order/...)
@@ -122,7 +157,7 @@ export async function syncOrderToStorefront(
         });
 
         if (existingPixel) {
-            return { action: 'skipped', sessionMatched: false };
+            return { action: 'skipped', sessionMatched: false, matchType: 'none' };
         }
 
         // Get Shopify product IDs from order lines
@@ -131,49 +166,86 @@ export async function syncOrderToStorefront(
             .filter((id): id is string => id != null);
 
         // Try to match to a pixel session
-        const session = await findMatchingSession(prisma, order, productIds);
+        const { session, matchType } = await findMatchingSession(prisma, order, productIds);
 
         // Build the synthetic event
-        const eventData = buildSyntheticEvent(order, session, productIds);
+        const eventData = buildSyntheticEvent(order, session, matchType, productIds);
 
         await prisma.storefrontEvent.create({ data: eventData });
 
         syncLogger.info(
-            { orderId, orderNumber: order.orderNumber, sessionMatched: !!session },
+            { orderId, orderNumber: order.orderNumber, matchType, sessionMatched: !!session },
             'Created synthetic checkout_completed event',
         );
 
-        return { action: 'created', sessionMatched: !!session };
+        return { action: 'created', sessionMatched: !!session, matchType };
     } catch (error: unknown) {
         syncLogger.warn(
             { orderId, error: error instanceof Error ? error.message : String(error) },
             'Failed to sync order to storefront events',
         );
-        return { action: 'error', sessionMatched: false };
+        return { action: 'error', sessionMatched: false, matchType: 'none' };
     }
 }
 
 /**
  * Find a pixel session that likely belongs to this order.
  *
- * Strategy (in priority order):
- * 1. Sessions with product_added_to_cart for the same products within 24h before orderDate
- * 2. Sessions with product_viewed for the same products within 24h before orderDate
- * 3. No match — fall back to order UTMs
+ * Matching cascade (deterministic → probabilistic):
+ *   1. fbclid exact match (±7 days) — Facebook ad click
+ *   2. gclid exact match (±7 days) — Google ad click
+ *   3. product_added_to_cart for same products (24h before order)
+ *   4. product_viewed for same products (24h before order)
  *
- * When multiple sessions match, pick the most recent one (closest to purchase).
+ * Exported so orderVisitorLinker can reuse the same logic.
  */
-async function findMatchingSession(
+export async function findMatchingSession(
     prisma: PrismaClient,
-    order: OrderForSync,
+    order: { orderDate: Date; fbclid: string | null; gclid: string | null },
     productIds: string[],
-): Promise<MatchedSession | null> {
-    if (productIds.length === 0) return null;
+): Promise<SessionMatchResult> {
+    const noMatch: SessionMatchResult = { session: null, matchType: 'none' };
+
+    // ---- Strategy 1: fbclid exact match ----
+    if (order.fbclid) {
+        const clickWindow = 7 * 24 * 60 * 60 * 1000;
+        const match = await prisma.storefrontEvent.findFirst({
+            where: {
+                fbclid: order.fbclid,
+                createdAt: {
+                    gte: new Date(order.orderDate.getTime() - clickWindow),
+                    lte: new Date(order.orderDate.getTime() + clickWindow),
+                },
+            },
+            orderBy: { createdAt: 'desc' },
+            select: SESSION_SELECT,
+        });
+        if (match) return { session: match, matchType: 'fbclid' };
+    }
+
+    // ---- Strategy 2: gclid exact match ----
+    if (order.gclid) {
+        const clickWindow = 7 * 24 * 60 * 60 * 1000;
+        const match = await prisma.storefrontEvent.findFirst({
+            where: {
+                gclid: order.gclid,
+                createdAt: {
+                    gte: new Date(order.orderDate.getTime() - clickWindow),
+                    lte: new Date(order.orderDate.getTime() + clickWindow),
+                },
+            },
+            orderBy: { createdAt: 'desc' },
+            select: SESSION_SELECT,
+        });
+        if (match) return { session: match, matchType: 'gclid' };
+    }
+
+    if (productIds.length === 0) return noMatch;
 
     const windowStart = new Date(order.orderDate.getTime() - 24 * 60 * 60 * 1000);
     const windowEnd = order.orderDate;
 
-    // Try ATC events first (stronger signal)
+    // ---- Strategy 3: product_added_to_cart match ----
     const atcMatch = await prisma.storefrontEvent.findFirst({
         where: {
             eventName: 'product_added_to_cart',
@@ -181,27 +253,11 @@ async function findMatchingSession(
             createdAt: { gte: windowStart, lte: windowEnd },
         },
         orderBy: { createdAt: 'desc' },
-        select: {
-            sessionId: true,
-            visitorId: true,
-            utmSource: true,
-            utmMedium: true,
-            utmCampaign: true,
-            utmContent: true,
-            utmTerm: true,
-            deviceType: true,
-            screenWidth: true,
-            country: true,
-            region: true,
-            city: true,
-            referrer: true,
-            pageUrl: true,
-        },
+        select: SESSION_SELECT,
     });
+    if (atcMatch) return { session: atcMatch, matchType: 'product_atc' };
 
-    if (atcMatch) return atcMatch;
-
-    // Fall back to product_viewed
+    // ---- Strategy 4: product_viewed match ----
     const viewMatch = await prisma.storefrontEvent.findFirst({
         where: {
             eventName: 'product_viewed',
@@ -209,40 +265,22 @@ async function findMatchingSession(
             createdAt: { gte: windowStart, lte: windowEnd },
         },
         orderBy: { createdAt: 'desc' },
-        select: {
-            sessionId: true,
-            visitorId: true,
-            utmSource: true,
-            utmMedium: true,
-            utmCampaign: true,
-            utmContent: true,
-            utmTerm: true,
-            deviceType: true,
-            screenWidth: true,
-            country: true,
-            region: true,
-            city: true,
-            referrer: true,
-            pageUrl: true,
-        },
+        select: SESSION_SELECT,
     });
+    if (viewMatch) return { session: viewMatch, matchType: 'product_viewed' };
 
-    return viewMatch;
+    return noMatch;
 }
 
 /**
  * Build the StorefrontEvent data for a synthetic checkout_completed.
- *
- * If a session was matched, inherit its attribution. Otherwise use order UTMs.
  */
 function buildSyntheticEvent(
     order: OrderForSync,
     session: MatchedSession | null,
+    matchType: MatchType,
     productIds: string[],
 ) {
-    // Build line items for rawData
-    const items = order.orderNumber ? [] : []; // placeholder, actual items below
-
     return {
         eventName: 'checkout_completed' as const,
         eventTime: order.orderDate,
@@ -254,6 +292,9 @@ function buildSyntheticEvent(
         utmCampaign: session?.utmCampaign ?? order.utmCampaign ?? null,
         utmContent: session?.utmContent ?? order.utmContent ?? null,
         utmTerm: session?.utmTerm ?? order.utmTerm ?? null,
+        // Click IDs from session if matched
+        fbclid: session?.fbclid ?? order.fbclid ?? null,
+        gclid: session?.gclid ?? order.gclid ?? null,
         // Device/geo from session (unavailable for unmatched)
         deviceType: session?.deviceType ?? null,
         screenWidth: session?.screenWidth ?? null,
@@ -268,10 +309,10 @@ function buildSyntheticEvent(
         // Metadata
         rawData: {
             source: 'order_sync',
+            matchType,
             shopifyOrderId: order.shopifyOrderId,
             orderNumber: order.orderNumber,
             productIds,
-            items,
         },
     };
 }
@@ -283,10 +324,10 @@ function buildSyntheticEvent(
 export async function bulkSyncOrdersToStorefront(
     prisma: PrismaClient,
     options: { since?: Date; dryRun?: boolean; batchSize?: number },
-): Promise<{ total: number; created: number; matched: number; skipped: number; errors: number }> {
+): Promise<{ total: number; created: number; matched: number; byType: Record<string, number>; skipped: number; errors: number }> {
     const { since, dryRun = false, batchSize = 100 } = options;
 
-    const stats = { total: 0, created: 0, matched: 0, skipped: 0, errors: 0 };
+    const stats = { total: 0, created: 0, matched: 0, byType: {} as Record<string, number>, skipped: 0, errors: 0 };
 
     // Get all shopifyOrderIds that already have synthetic events
     const existingRaw = await prisma.storefrontEvent.findMany({
@@ -360,7 +401,10 @@ export async function bulkSyncOrdersToStorefront(
             const result = await syncOrderToStorefront(prisma, order.id);
             if (result.action === 'created') {
                 stats.created++;
-                if (result.sessionMatched) stats.matched++;
+                if (result.sessionMatched) {
+                    stats.matched++;
+                    stats.byType[result.matchType] = (stats.byType[result.matchType] || 0) + 1;
+                }
             } else if (result.action === 'skipped') {
                 stats.skipped++;
             } else {
@@ -368,7 +412,7 @@ export async function bulkSyncOrdersToStorefront(
             }
         }
 
-        console.log(`Batch ${batch}: processed ${orders.length} orders (total: ${stats.total}, created: ${stats.created}, matched: ${stats.matched})`);
+        console.log(`Batch ${batch}: processed ${orders.length} orders (total: ${stats.total}, created: ${stats.created}, matched: ${stats.matched}, by: ${JSON.stringify(stats.byType)})`);
     }
 
     return stats;

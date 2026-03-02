@@ -2829,4 +2829,5 @@ model StorefrontEvent {
   @@index([createdAt])
   @@index([productId, createdAt])
   @@index([fbclid])
+  @@index([gclid])
 }

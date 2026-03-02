@@ -19,5 +19,6 @@ CREATE INDEX "Order_storefrontVisitorId_idx" ON "Order"("storefrontVisitorId");
 CREATE INDEX "Order_elevarFbp_idx" ON "Order"("elevarFbp");
 CREATE INDEX "Order_fbclid_idx" ON "Order"("fbclid");
 
--- Index for pixel linkage via fbclid
-CREATE INDEX "StorefrontEvent_fbclid_idx" ON "StorefrontEvent"("fbclid");
+-- Indexes for pixel linkage via click IDs
+CREATE INDEX IF NOT EXISTS "StorefrontEvent_fbclid_idx" ON "StorefrontEvent"("fbclid");
+CREATE INDEX IF NOT EXISTS "StorefrontEvent_gclid_idx" ON "StorefrontEvent"("gclid");
