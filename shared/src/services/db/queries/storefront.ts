@@ -21,7 +21,6 @@ export interface HeroMetrics {
     pageViews: number;
     productViews: number;
     addToCarts: number;
-    checkouts: number;
     purchases: number;
     revenue: number;
     orderCount: number;
@@ -30,7 +29,6 @@ export interface HeroMetrics {
     prevPageViews: number;
     prevProductViews: number;
     prevAddToCarts: number;
-    prevCheckouts: number;
     prevPurchases: number;
     prevRevenue: number;
     prevOrderCount: number;
@@ -228,7 +226,6 @@ export async function getHeroMetrics(days: number): Promise<HeroMetrics> {
             COUNT(*) FILTER (WHERE "eventName" = 'page_viewed' AND "createdAt" >= now() - make_interval(days => ${days}))::int AS "pageViews",
             COUNT(*) FILTER (WHERE "eventName" = 'product_viewed' AND "createdAt" >= now() - make_interval(days => ${days}))::int AS "productViews",
             COUNT(*) FILTER (WHERE "eventName" = 'product_added_to_cart' AND "createdAt" >= now() - make_interval(days => ${days}))::int AS "addToCarts",
-            COUNT(*) FILTER (WHERE "eventName" = 'checkout_started' AND "createdAt" >= now() - make_interval(days => ${days}))::int AS "checkouts",
             COUNT(*) FILTER (WHERE "eventName" = 'checkout_completed' AND "createdAt" >= now() - make_interval(days => ${days}))::int AS "purchases",
             COALESCE(SUM("orderValue") FILTER (WHERE "eventName" = 'checkout_completed' AND "createdAt" >= now() - make_interval(days => ${days})), 0)::numeric AS "revenue",
             COUNT(*) FILTER (WHERE "eventName" = 'checkout_completed' AND "createdAt" >= now() - make_interval(days => ${days}))::int AS "orderCount",
@@ -238,7 +235,6 @@ export async function getHeroMetrics(days: number): Promise<HeroMetrics> {
             COUNT(*) FILTER (WHERE "eventName" = 'page_viewed' AND "createdAt" >= now() - make_interval(days => ${days * 2}) AND "createdAt" < now() - make_interval(days => ${days}))::int AS "prevPageViews",
             COUNT(*) FILTER (WHERE "eventName" = 'product_viewed' AND "createdAt" >= now() - make_interval(days => ${days * 2}) AND "createdAt" < now() - make_interval(days => ${days}))::int AS "prevProductViews",
             COUNT(*) FILTER (WHERE "eventName" = 'product_added_to_cart' AND "createdAt" >= now() - make_interval(days => ${days * 2}) AND "createdAt" < now() - make_interval(days => ${days}))::int AS "prevAddToCarts",
-            COUNT(*) FILTER (WHERE "eventName" = 'checkout_started' AND "createdAt" >= now() - make_interval(days => ${days * 2}) AND "createdAt" < now() - make_interval(days => ${days}))::int AS "prevCheckouts",
             COUNT(*) FILTER (WHERE "eventName" = 'checkout_completed' AND "createdAt" >= now() - make_interval(days => ${days * 2}) AND "createdAt" < now() - make_interval(days => ${days}))::int AS "prevPurchases",
             COALESCE(SUM("orderValue") FILTER (WHERE "eventName" = 'checkout_completed' AND "createdAt" >= now() - make_interval(days => ${days * 2}) AND "createdAt" < now() - make_interval(days => ${days})), 0)::numeric AS "prevRevenue",
             COUNT(*) FILTER (WHERE "eventName" = 'checkout_completed' AND "createdAt" >= now() - make_interval(days => ${days * 2}) AND "createdAt" < now() - make_interval(days => ${days}))::int AS "prevOrderCount"
@@ -253,7 +249,6 @@ export async function getHeroMetrics(days: number): Promise<HeroMetrics> {
         pageViews: r?.pageViews ?? 0,
         productViews: r?.productViews ?? 0,
         addToCarts: r?.addToCarts ?? 0,
-        checkouts: r?.checkouts ?? 0,
         purchases: r?.purchases ?? 0,
         revenue: Number(r?.revenue ?? 0),
         orderCount: r?.orderCount ?? 0,
@@ -262,7 +257,6 @@ export async function getHeroMetrics(days: number): Promise<HeroMetrics> {
         prevPageViews: r?.prevPageViews ?? 0,
         prevProductViews: r?.prevProductViews ?? 0,
         prevAddToCarts: r?.prevAddToCarts ?? 0,
-        prevCheckouts: r?.prevCheckouts ?? 0,
         prevPurchases: r?.prevPurchases ?? 0,
         prevRevenue: Number(r?.prevRevenue ?? 0),
         prevOrderCount: r?.prevOrderCount ?? 0,
@@ -583,8 +577,7 @@ export async function getVisitorList(
                 MIN("eventTime") AS "firstSeen",
                 MAX("eventTime") AS "lastSeen",
                 CASE
-                    WHEN COUNT(*) FILTER (WHERE "eventName" = 'checkout_completed') > 0 THEN 3
-                    WHEN COUNT(*) FILTER (WHERE "eventName" = 'checkout_started') > 0 THEN 2
+                    WHEN COUNT(*) FILTER (WHERE "eventName" = 'checkout_completed') > 0 THEN 2
                     WHEN COUNT(*) FILTER (WHERE "eventName" = 'product_added_to_cart') > 0 THEN 1
                     ELSE 0
                 END AS "maxFunnelStep",

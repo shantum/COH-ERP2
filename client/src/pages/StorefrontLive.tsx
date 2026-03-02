@@ -244,11 +244,6 @@ function OverviewTab({ days }: { days: number }) {
                     delta={h ? calcDelta(h.addToCarts, h.prevAddToCarts) : null}
                 />
                 <KPICard
-                    label="Checkouts"
-                    value={h ? formatNum(h.checkouts) : '-'}
-                    delta={h ? calcDelta(h.checkouts, h.prevCheckouts) : null}
-                />
-                <KPICard
                     label="Revenue"
                     value={h ? formatCurrency(h.revenue) : '-'}
                     delta={h ? calcDelta(h.revenue, h.prevRevenue) : null}
@@ -277,14 +272,13 @@ function OverviewTab({ days }: { days: number }) {
 // CONVERSION FUNNEL
 // ============================================
 
-function ConversionFunnel({ data }: { data?: { sessions: number; productViews: number; addToCarts: number; checkouts: number; purchases: number } }) {
+function ConversionFunnel({ data }: { data?: { sessions: number; productViews: number; addToCarts: number; purchases: number } }) {
     if (!data) return <SectionSkeleton />;
 
     const steps = [
         { name: 'Sessions', value: data.sessions, color: FUNNEL_COLORS[0] },
         { name: 'Product Views', value: data.productViews, color: FUNNEL_COLORS[1] },
         { name: 'Add to Cart', value: data.addToCarts, color: FUNNEL_COLORS[2] },
-        { name: 'Checkout', value: data.checkouts, color: FUNNEL_COLORS[3] },
         { name: 'Purchase', value: data.purchases, color: '#22c55e' },
     ];
 

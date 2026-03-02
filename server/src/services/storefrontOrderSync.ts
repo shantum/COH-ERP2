@@ -96,8 +96,10 @@ export async function syncOrderToStorefront(
             return { action: 'skipped', sessionMatched: false };
         }
 
-        // Dedup: check if synthetic event already exists for this order
-        const existing = await prisma.storefrontEvent.findFirst({
+        // Dedup: check if any checkout_completed already exists for this order
+        // Could be a synthetic (order_sync) event OR a pixel-native event
+        // (international customers who go through native Shopify checkout)
+        const existingSynthetic = await prisma.storefrontEvent.findFirst({
             where: {
                 eventName: 'checkout_completed',
                 rawData: { path: ['shopifyOrderId'], equals: order.shopifyOrderId },
@@ -105,7 +107,21 @@ export async function syncOrderToStorefront(
             select: { id: true },
         });
 
-        if (existing) {
+        if (existingSynthetic) {
+            return { action: 'skipped', sessionMatched: false };
+        }
+
+        // Also check for pixel-native checkout_completed (orderId format: gid://shopify/Order/...)
+        const shopifyGid = `gid://shopify/Order/${order.shopifyOrderId}`;
+        const existingPixel = await prisma.storefrontEvent.findFirst({
+            where: {
+                eventName: 'checkout_completed',
+                rawData: { path: ['orderId'], equals: shopifyGid },
+            },
+            select: { id: true },
+        });
+
+        if (existingPixel) {
             return { action: 'skipped', sessionMatched: false };
         }
 
