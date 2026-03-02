@@ -571,6 +571,7 @@ model Order {
   utmMedium            String?
   utmCampaign          String?
   utmTerm              String?
+  utmContent           String?
   fbclid               String?
   gclid                String?
   landingPage          String?

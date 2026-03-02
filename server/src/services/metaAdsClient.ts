@@ -619,6 +619,109 @@ export async function getHourlyInsights(days: number): Promise<MetaHourlyRow[]> 
 }
 
 /**
+ * Get all ads with their creative url_tags, campaign, and adset info.
+ * Used to build a lookup of ad ID → UTM template for attribution matching.
+ */
+export async function getAdCreativeUtms(): Promise<MetaAdCreativeUtmRow[]> {
+    const cacheKey = 'meta:ad-creative-utms';
+    const cached = getCached<MetaAdCreativeUtmRow[]>(cacheKey);
+    if (cached) return cached;
+
+    const fields = 'id,name,campaign_id,adset_id,creative{id,url_tags}';
+    const url = `${META_BASE_URL}/${META_AD_ACCOUNT_ID}/ads`
+        + `?fields=${fields}`
+        + `&limit=200`
+        + `&access_token=${META_ACCESS_TOKEN}`;
+
+    let allData: RawAdCreativeUtmRow[] = [];
+    let pageUrl: string | undefined = url;
+
+    while (pageUrl) {
+        const resp: MetaInsightsResponse<RawAdCreativeUtmRow> = await fetchWithRetry(pageUrl, 'ad-creative-utms');
+        allData = allData.concat(resp.data ?? []);
+        pageUrl = resp.paging?.next;
+    }
+
+    const rows: MetaAdCreativeUtmRow[] = allData.map(raw => ({
+        adId: raw.id,
+        adName: raw.name,
+        campaignId: raw.campaign_id,
+        adsetId: raw.adset_id,
+        urlTags: raw.creative?.url_tags ?? null,
+    }));
+
+    setCache(cacheKey, rows, META_CACHE_TTL);
+    return rows;
+}
+
+/**
+ * Get all campaigns (id + name) for lookup purposes.
+ * Paginates through all campaigns in the account.
+ */
+export async function getAllCampaigns(): Promise<MetaCampaignLookup[]> {
+    const cacheKey = 'meta:all-campaigns';
+    const cached = getCached<MetaCampaignLookup[]>(cacheKey);
+    if (cached) return cached;
+
+    const url = `${META_BASE_URL}/${META_AD_ACCOUNT_ID}/campaigns`
+        + `?fields=id,name,status`
+        + `&limit=200`
+        + `&access_token=${META_ACCESS_TOKEN}`;
+
+    type CampRaw = { id: string; name: string; status: string };
+    let allData: CampRaw[] = [];
+    let pageUrl: string | undefined = url;
+
+    while (pageUrl) {
+        const resp: MetaInsightsResponse<CampRaw> = await fetchWithRetry(pageUrl, 'all-campaigns');
+        allData = allData.concat(resp.data ?? []);
+        pageUrl = resp.paging?.next;
+    }
+
+    const rows: MetaCampaignLookup[] = allData.map(c => ({
+        campaignId: c.id,
+        campaignName: c.name,
+        status: c.status,
+    }));
+
+    setCache(cacheKey, rows, META_CACHE_TTL);
+    return rows;
+}
+
+/**
+ * Get all adsets (id + name + campaign_id) for lookup purposes.
+ */
+export async function getAllAdsets(): Promise<MetaAdsetLookup[]> {
+    const cacheKey = 'meta:all-adsets';
+    const cached = getCached<MetaAdsetLookup[]>(cacheKey);
+    if (cached) return cached;
+
+    const url = `${META_BASE_URL}/${META_AD_ACCOUNT_ID}/adsets`
+        + `?fields=id,name,campaign_id`
+        + `&limit=200`
+        + `&access_token=${META_ACCESS_TOKEN}`;
+
+    type AdsetRaw = { id: string; name: string; campaign_id: string };
+    let allData: AdsetRaw[] = [];
+    let pageUrl: string | undefined = url;
+
+    while (pageUrl) {
+        const resp: MetaInsightsResponse<AdsetRaw> = await fetchWithRetry(pageUrl, 'all-adsets');
+        allData = allData.concat(resp.data ?? []);
+        pageUrl = resp.paging?.next;
+    }
+
+    const rows: MetaAdsetLookup[] = allData.map(a => ({
+        adsetId: a.id,
+        adsetName: a.name,
+        campaignId: a.campaign_id,
+    }));
+
+    setCache(cacheKey, rows, META_CACHE_TTL);
+    return rows;
+}
+
+/**
  * Refresh the long-lived token (call before it expires, ~every 50 days).
  * Returns the new token string.
  */
@@ -830,6 +933,26 @@ export interface MetaHourlyRow {
     roas: number;
 }
 
+export interface MetaAdCreativeUtmRow {
+    adId: string;
+    adName: string;
+    campaignId: string;
+    adsetId: string;
+    urlTags: string | null;
+}
+
+export interface MetaCampaignLookup {
+    campaignId: string;
+    campaignName: string;
+    status: string;
+}
+
+export interface MetaAdsetLookup {
+    adsetId: string;
+    adsetName: string;
+    campaignId: string;
+}
+
 // ============================================
 // RAW TYPES & PARSERS
 // ============================================
@@ -965,6 +1088,14 @@ interface RawProductRow {
     clicks: string;
     cpc?: string;
     ctr?: string;
+}
+
+interface RawAdCreativeUtmRow {
+    id: string;
+    name: string;
+    campaign_id: string;
+    adset_id: string;
+    creative?: { id: string; url_tags?: string };
 }
 
 interface RawVideoRow {

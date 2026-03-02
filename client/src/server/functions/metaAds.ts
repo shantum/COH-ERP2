@@ -207,6 +207,28 @@ export interface MetaHourlyRow {
     roas: number;
 }
 
+/** Ad-level attribution: Meta ad matched to actual orders */
+export interface MetaAdAttributionRow {
+    adId: string;
+    adName: string;
+    adsetId: string;
+    adsetName: string;
+    campaignId: string;
+    campaignName: string;
+    spend: number;
+    impressions: number;
+    clicks: number;
+    metaPurchases: number;
+    metaPurchaseValue: number;
+    metaRoas: number;
+    /** Actual orders matched via UTM */
+    orders: number;
+    revenue: number;
+    actualRoas: number;
+    matchMethod: 'ad_id' | 'ad_name' | 'adset_proportional' | 'unmatched';
+    imageUrl: string | null;
+}
+
 // ============================================
 // INPUT SCHEMAS
 // ============================================
@@ -566,4 +588,155 @@ export const getMetaHourly = createServerFn({ method: 'POST' })
     .handler(async ({ data }): Promise<MetaHourlyRow[]> => {
         const { getHourlyInsights } = await getMetaClient();
         return getHourlyInsights(data.days);
+    });
+
+/**
+ * Ad-level attribution — match Meta ads to actual orders via UTM fields.
+ *
+ * Three matching conventions:
+ * 1. "facebook/paid" (BL campaigns): utmCampaign=campaign_id, utmTerm=adset_id, utmContent=ad_id
+ * 2. "facebook/cpc" (newer TVC): utmCampaign=campaign_name, utmContent=adset_id, utmTerm=ad_id
+ * 3. "COH_fb" (old TVC): utmCampaign=campaign_name, utmTerm=label, utmContent=ad_descriptor
+ */
+export const getMetaAdAttribution = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => daysInputSchema.parse(input))
+    .handler(async ({ data }): Promise<MetaAdAttributionRow[]> => {
+        const { getAdInsights, getAllCampaigns, getAllAdsets } = await getMetaClient();
+        const { getKysely } = await import('@coh/shared/services/db');
+        const db = await getKysely();
+
+        // 1. Fetch Meta ad insights for the period
+        const adRows = await getAdInsights(data.days);
+        const campaigns = await getAllCampaigns();
+        const adsets = await getAllAdsets();
+
+        // Build lookup maps
+        const campaignByName = new Map(campaigns.map(c => [c.campaignName, c.campaignId]));
+
+        // 2. Query orders with Meta UTMs in the date range
+        const daysAgo = new Date();
+        daysAgo.setDate(daysAgo.getDate() - data.days);
+
+        const META_SOURCES = ['facebook', 'fb', 'COH_fb', 'etmedialabs-fb', 'Facebook_Ads', 'ig', 'meta'];
+
+        const orders = await db
+            .selectFrom('Order')
+            .select([
+                'id',
+                'utmSource',
+                'utmMedium',
+                'utmCampaign',
+                'utmTerm',
+                'utmContent',
+                'totalAmount',
+            ])
+            .where('orderDate', '>=', daysAgo)
+            .where('utmSource', 'in', META_SOURCES)
+            .where('orderStatus', '!=', 'cancelled')
+            .execute();
+
+        // 3. Match each order to a Meta ad
+        // Build ad lookup by ID and by name
+        const adById = new Map(adRows.map(a => [a.adId, a]));
+
+        // Track order counts and revenue per ad
+        const adOrderCount = new Map<string, number>();
+        const adRevenue = new Map<string, number>();
+        const adMatchMethod = new Map<string, 'ad_id' | 'ad_name' | 'adset_proportional'>();
+
+        for (const order of orders) {
+            const amount = Number(order.totalAmount ?? 0);
+            let matchedAdId: string | null = null;
+            let method: 'ad_id' | 'ad_name' | 'adset_proportional' = 'ad_id';
+
+            // Convention 1: "facebook/paid" — utmContent is ad_id (numeric)
+            if (order.utmContent && /^\d+$/.test(order.utmContent) && adById.has(order.utmContent)) {
+                matchedAdId = order.utmContent;
+                method = 'ad_id';
+            }
+            // Convention 2: "facebook/cpc" newer — utmTerm is ad_id (numeric)
+            else if (order.utmTerm && /^\d+$/.test(order.utmTerm) && adById.has(order.utmTerm)) {
+                matchedAdId = order.utmTerm;
+                method = 'ad_id';
+            }
+            // Convention 3: "COH_fb" — utmContent is ad descriptor, match against ad names
+            else if (order.utmContent && !/^\d+$/.test(order.utmContent)) {
+                const descriptor = order.utmContent.toLowerCase();
+                for (const ad of adRows) {
+                    if (ad.adName.toLowerCase().includes(descriptor) ||
+                        descriptor.includes(ad.adName.toLowerCase().replace(/\s+/g, '_'))) {
+                        matchedAdId = ad.adId;
+                        method = 'ad_name';
+                        break;
+                    }
+                }
+            }
+
+            // Fallback: proportional attribution within adset
+            if (!matchedAdId && order.utmTerm) {
+                // utmTerm might be adset_id (for convention 1) or utmContent might be adset_id (convention 2)
+                const possibleAdsetId = /^\d+$/.test(order.utmTerm) ? order.utmTerm
+                    : (order.utmContent && /^\d+$/.test(order.utmContent) ? order.utmContent : null);
+
+                if (possibleAdsetId) {
+                    // Check if this is actually a known adset
+                    const knownAdset = adsets.find(as => as.adsetId === possibleAdsetId);
+                    // Find ads in this adset by matching adsetName from insights
+                    const adsetAds = knownAdset
+                        ? adRows.filter(ad => ad.adsetName === knownAdset.adsetName)
+                        : [];
+
+                    if (adsetAds.length > 0) {
+                        // Assign to highest-spend ad in adset as proxy
+                        adsetAds.sort((a, b) => b.spend - a.spend);
+                        matchedAdId = adsetAds[0].adId;
+                        method = 'adset_proportional';
+                    }
+                }
+            }
+
+            if (matchedAdId) {
+                adOrderCount.set(matchedAdId, (adOrderCount.get(matchedAdId) ?? 0) + 1);
+                adRevenue.set(matchedAdId, (adRevenue.get(matchedAdId) ?? 0) + amount);
+                if (!adMatchMethod.has(matchedAdId)) adMatchMethod.set(matchedAdId, method);
+            }
+        }
+
+        // 4. Build result rows — one per Meta ad, enriched with order data
+        const result: MetaAdAttributionRow[] = adRows.map(ad => {
+            const orderCount = adOrderCount.get(ad.adId) ?? 0;
+            const revenue = adRevenue.get(ad.adId) ?? 0;
+            const method = adMatchMethod.get(ad.adId) ?? 'unmatched';
+
+            // Look up adset info
+            // adRows already have adsetName and campaignName from insights
+            // But we need IDs — find them from lookup
+            const campaignId = campaignByName.get(ad.campaignName) ?? '';
+            const adsetMatch = adsets.find(a => a.adsetName === ad.adsetName && a.campaignId === campaignId);
+
+            return {
+                adId: ad.adId,
+                adName: ad.adName,
+                adsetId: adsetMatch?.adsetId ?? '',
+                adsetName: ad.adsetName,
+                campaignId,
+                campaignName: ad.campaignName,
+                spend: ad.spend,
+                impressions: ad.impressions,
+                clicks: ad.clicks,
+                metaPurchases: ad.purchases,
+                metaPurchaseValue: ad.purchaseValue,
+                metaRoas: ad.roas,
+                orders: orderCount,
+                revenue: Math.round(revenue * 100) / 100,
+                actualRoas: ad.spend > 0 ? Math.round((revenue / ad.spend) * 100) / 100 : 0,
+                matchMethod: orderCount > 0 ? method : 'unmatched',
+                imageUrl: ad.imageUrl,
+            };
+        });
+
+        // Sort by spend descending
+        result.sort((a, b) => b.spend - a.spend);
+        return result;
     });

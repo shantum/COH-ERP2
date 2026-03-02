@@ -813,6 +813,7 @@ export type Order = {
     utmMedium: string | null;
     utmCampaign: string | null;
     utmTerm: string | null;
+    utmContent: string | null;
     fbclid: string | null;
     gclid: string | null;
     landingPage: string | null;

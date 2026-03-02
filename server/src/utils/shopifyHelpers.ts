@@ -200,6 +200,7 @@ export interface UtmFields {
     utmMedium: string | null;
     utmCampaign: string | null;
     utmTerm: string | null;
+    utmContent: string | null;
     fbclid: string | null;
     gclid: string | null;
     landingPage: string | null;
@@ -210,6 +211,7 @@ const UTM_FIELD_MAP: Record<string, keyof UtmFields> = {
     utm_medium: 'utmMedium',
     utm_campaign: 'utmCampaign',
     utm_term: 'utmTerm',
+    utm_content: 'utmContent',
     fbclid: 'fbclid',
     gclid: 'gclid',
     landing_page: 'landingPage',
@@ -221,7 +223,7 @@ export function extractUtmFields(
 ): UtmFields {
     const result: UtmFields = {
         utmSource: null, utmMedium: null, utmCampaign: null,
-        utmTerm: null, fbclid: null, gclid: null, landingPage: null,
+        utmTerm: null, utmContent: null, fbclid: null, gclid: null, landingPage: null,
     };
     if (!noteAttributes || noteAttributes.length === 0) return result;
 

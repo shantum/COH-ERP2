@@ -33,6 +33,7 @@ const UTM_KEYS: Record<string, string> = {
     utm_medium: 'utmMedium',
     utm_campaign: 'utmCampaign',
     utm_term: 'utmTerm',
+    utm_content: 'utmContent',
     fbclid: 'fbclid',
     gclid: 'gclid',
     landing_page: 'landingPage',
@@ -77,21 +78,26 @@ async function backfillFromNoteAttributes(prisma: PrismaClient) {
     since.setMonth(since.getMonth() - MONTHS);
     console.log(`\n--- Source 1: Shopify note_attributes (last ${MONTHS} months, since ${since.toISOString().slice(0, 10)}) ---`);
 
-    // Get orders in date range that don't have UTM yet and have a shopify cache
+    // Get orders missing any UTM field (either no UTM at all, or missing utmContent)
     const orders = await prisma.order.findMany({
         where: {
             orderDate: { gte: since },
-            utmSource: null,
             shopifyOrderId: { not: null },
+            OR: [
+                { utmSource: null },
+                { utmContent: null },
+            ],
         },
         select: {
             id: true,
             shopifyOrderId: true,
+            utmSource: true,
+            utmContent: true,
         },
         orderBy: { orderDate: 'desc' },
     });
 
-    console.log(`  Found ${orders.length} orders without UTM in date range`);
+    console.log(`  Found ${orders.length} orders missing UTM fields in date range`);
 
     let totalUpdated = 0;
     let totalWithUtm = 0;
@@ -124,9 +130,18 @@ async function backfillFromNoteAttributes(prisma: PrismaClient) {
             const utm = extractUtm(noteAttrs);
             if (!utm) continue;
 
+            // Only write fields that are currently null (don't overwrite existing data)
+            const data: Record<string, string> = {};
+            for (const [key, value] of Object.entries(utm)) {
+                if (value && !(order as Record<string, unknown>)[key]) {
+                    data[key] = value;
+                }
+            }
+            if (Object.keys(data).length === 0) continue;
+
             totalWithUtm++;
             if (!DRY_RUN) {
-                await prisma.order.update({ where: { id: order.id }, data: utm });
+                await prisma.order.update({ where: { id: order.id }, data });
                 totalUpdated++;
             }
         }
@@ -163,24 +178,26 @@ async function backfillFromShopfloCsv(prisma: PrismaClient, csvPath: string) {
         const utmMedium = cols[5] || null;
         const utmCampaign = cols[6] || null;
         const utmTerm = cols[7] || null;
+        const utmContent = cols[8] || null;
 
         if (!shopifyId) continue;
         if (!utmSource && !landingPage) { noUtm++; continue; }
 
         const order = await prisma.order.findUnique({
             where: { shopifyOrderId: shopifyId },
-            select: { id: true, utmSource: true },
+            select: { id: true, utmSource: true, utmContent: true },
         });
 
         if (!order) { noMatch++; continue; }
-        if (order.utmSource) { skipped++; continue; }
+        if (order.utmSource && order.utmContent) { skipped++; continue; }
 
         const data: Record<string, string> = {};
-        if (utmSource) data.utmSource = utmSource;
-        if (utmMedium) data.utmMedium = utmMedium;
-        if (utmCampaign) data.utmCampaign = utmCampaign;
-        if (utmTerm) data.utmTerm = utmTerm;
-        if (landingPage) data.landingPage = landingPage;
+        if (utmSource && !order.utmSource) data.utmSource = utmSource;
+        if (utmMedium && !order.utmSource) data.utmMedium = utmMedium;
+        if (utmCampaign && !order.utmSource) data.utmCampaign = utmCampaign;
+        if (utmTerm && !order.utmSource) data.utmTerm = utmTerm;
+        if (utmContent && !order.utmContent) data.utmContent = utmContent;
+        if (landingPage && !order.utmSource) data.landingPage = landingPage;
 
         if (Object.keys(data).length === 0) { noUtm++; continue; }
 
