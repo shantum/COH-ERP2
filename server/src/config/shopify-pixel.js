@@ -76,7 +76,7 @@ async function enqueue(eventName, extraData, event) {
 
   const payload = {
     eventName,
-    eventTime: new Date().toISOString(),
+    eventTime: event.timestamp || new Date().toISOString(),
     sessionId,
     // Use Shopify's native client ID as visitor ID (cross-session, managed by Shopify)
     visitorId: event.clientId || 'unknown',
