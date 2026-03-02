@@ -1,13 +1,14 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { getInvoice } from '../../server/functions/finance';
 import { formatCurrency, formatPeriod, formatStatus, StatusBadge, LoadingState } from './shared';
 import { getCategoryLabel } from '@coh/shared';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { ArrowUpRight, ArrowDownLeft, ExternalLink, Download, Printer } from 'lucide-react';
+import { ArrowUpRight, ArrowDownLeft, ExternalLink, Download, Printer, Send, Loader2 } from 'lucide-react';
 import InlineFabricPicker from './InlineFabricPicker';
 import { Button } from '@/components/ui/button';
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
+import { showSuccess, showError } from '../../utils/toast';
 
 // Company details for GST invoice header
 const COMPANY_INFO = {
@@ -244,6 +245,7 @@ export default function InvoiceDetailModal({
   onClose: () => void;
 }) {
   const getInvoiceFn = useServerFn(getInvoice);
+  const queryClient = useQueryClient();
 
   const { data, isLoading } = useQuery({
     queryKey: ['finance', 'invoice', invoiceId],
@@ -252,6 +254,46 @@ export default function InvoiceDetailModal({
   });
 
   const invoice = data?.success ? data.invoice : null;
+
+  // ============================================
+  // PAY VIA RAZORPAYX
+  // ============================================
+
+  const [showPayConfirm, setShowPayConfirm] = useState(false);
+  const [payProcessing, setPayProcessing] = useState(false);
+
+  const canPay = invoice
+    && invoice.type === 'payable'
+    && (invoice.status === 'confirmed' || invoice.status === 'partially_paid')
+    && invoice.balanceDue > 0
+    && invoice.party?.bankAccountNumber
+    && invoice.party?.bankIfsc;
+
+  const handlePay = useCallback(async () => {
+    if (!invoice || !canPay) return;
+    setPayProcessing(true);
+    const mode = invoice.balanceDue >= 500000 ? 'NEFT' : 'IMPS';
+    try {
+      const res = await fetch('/api/razorpayx/payout', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ invoiceId: invoice.id, mode }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Request failed' }));
+        throw new Error(err.error || `HTTP ${res.status}`);
+      }
+      setShowPayConfirm(false);
+      showSuccess(`Payout initiated — ${formatCurrency(invoice.balanceDue)} to ${invoice.party?.name} via ${mode}`);
+      queryClient.invalidateQueries({ queryKey: ['finance', 'invoice', invoiceId] });
+      queryClient.invalidateQueries({ queryKey: ['finance'] });
+    } catch (err: unknown) {
+      showError('Payout failed', { description: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setPayProcessing(false);
+    }
+  }, [invoice, canPay, invoiceId, queryClient]);
 
   const handlePrintInvoice = useCallback(() => {
     if (!invoice) return;
@@ -300,6 +342,17 @@ export default function InvoiceDetailModal({
                       </a>
                     </Button>
                   )}
+                  {invoice.type === 'payable' && (invoice.status === 'confirmed' || invoice.status === 'partially_paid') && invoice.balanceDue > 0 && (
+                    <Button
+                      variant="default"
+                      size="sm"
+                      onClick={() => setShowPayConfirm(true)}
+                      disabled={!canPay}
+                      title={!invoice.party?.bankAccountNumber ? 'Party missing bank details' : undefined}
+                    >
+                      <Send className="h-3.5 w-3.5 mr-1" /> Pay
+                    </Button>
+                  )}
                 </div>
               </div>
               <div className="flex items-center gap-2 mt-1">
@@ -310,6 +363,29 @@ export default function InvoiceDetailModal({
                 <span className="text-xs text-muted-foreground">{getCategoryLabel(invoice.category)}</span>
               </div>
             </DialogHeader>
+
+            {/* ========== PAY CONFIRMATION ========== */}
+            {showPayConfirm && invoice && canPay && (
+              <div className="border border-blue-200 bg-blue-50 dark:bg-blue-950 dark:border-blue-800 rounded-lg p-4 flex items-center justify-between">
+                <div className="text-sm">
+                  <p className="font-medium">
+                    Pay {formatCurrency(invoice.balanceDue)} to {invoice.party?.name}?
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    via {invoice.balanceDue >= 500000 ? 'NEFT' : 'IMPS'} &middot; A/C {invoice.party?.bankAccountNumber}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button variant="ghost" size="sm" onClick={() => setShowPayConfirm(false)} disabled={payProcessing}>
+                    Cancel
+                  </Button>
+                  <Button variant="default" size="sm" onClick={handlePay} disabled={payProcessing}>
+                    {payProcessing ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Send className="h-3.5 w-3.5 mr-1" />}
+                    Confirm
+                  </Button>
+                </div>
+              </div>
+            )}
 
             {/* ========== COMPANY + CUSTOMER / VENDOR ========== */}
             <div className="grid grid-cols-2 gap-4 mt-4">
