@@ -115,6 +115,7 @@ async function enqueue(eventName, extraData, event) {
 
 // Lazy flush timer — only runs when the queue has events
 let flushTimer = null;
+let isFlushing = false;
 
 function startFlushTimer() {
   if (flushTimer) return;
@@ -125,7 +126,8 @@ function startFlushTimer() {
 }
 
 function flush(retryCount) {
-  if (eventQueue.length === 0) return;
+  if (eventQueue.length === 0 || isFlushing) return;
+  isFlushing = true;
   retryCount = retryCount || 0;
 
   const batch = eventQueue.splice(0, MAX_BATCH_SIZE);
@@ -136,17 +138,23 @@ function flush(retryCount) {
     headers: { 'Content-Type': 'application/json' },
     body,
     keepalive: true,
+  }).then(response => {
+    isFlushing = false;
+    if (!response.ok && retryCount < MAX_RETRIES) {
+      // Requeue on server error (5xx) or rate limit (429)
+      eventQueue.unshift(...batch);
+      setTimeout(() => flush(retryCount + 1), 1000);
+    }
+    // Schedule next flush if queue still has events
+    if (eventQueue.length > 0) startFlushTimer();
   }).catch(() => {
+    isFlushing = false;
     if (retryCount < MAX_RETRIES) {
       eventQueue.unshift(...batch);
       setTimeout(() => flush(retryCount + 1), 1000);
     }
+    if (eventQueue.length > 0) startFlushTimer();
   });
-
-  // If queue still has events after splice, keep the timer going
-  if (eventQueue.length > 0) {
-    startFlushTimer();
-  }
 }
 
 // --- Privacy gating ---
