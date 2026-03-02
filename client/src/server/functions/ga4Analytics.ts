@@ -20,6 +20,7 @@ export type {
     FunnelDay,
     FunnelSummary,
     ConversionFunnelResponse,
+    CampaignFunnelRow,
     LandingPageRow,
     TrafficSourceRow,
     CampaignRow,
@@ -151,6 +152,17 @@ export const getProductPerformance = createServerFn({ method: 'POST' })
     .handler(async ({ data }) => {
         const { queryProductPerformance } = await getGa4Client();
         return queryProductPerformance(data.days, data.limit);
+    });
+
+/**
+ * Campaign Funnel — funnel stages per Google Ads campaign (via GA4 sessionCampaignName)
+ */
+export const getCampaignFunnel = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => daysInputSchema.parse(input))
+    .handler(async ({ data }) => {
+        const { queryCampaignFunnel } = await getGa4Client();
+        return queryCampaignFunnel(data.days);
     });
 
 /**

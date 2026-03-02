@@ -7,6 +7,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import {
     getConversionFunnel,
+    getCampaignFunnel,
     getLandingPages,
     getTrafficSources,
     getCampaigns,
@@ -87,6 +88,15 @@ export function useProductPerformance(days: number, limit = 50) {
     return useQuery({
         queryKey: ['ga4', 'products', days, limit],
         queryFn: () => fn({ data: { days, limit } }),
+        staleTime: STALE_TIME,
+    });
+}
+
+export function useCampaignFunnel(days: number) {
+    const fn = useServerFn(getCampaignFunnel);
+    return useQuery({
+        queryKey: ['ga4', 'campaign-funnel', days],
+        queryFn: () => fn({ data: { days } }),
         staleTime: STALE_TIME,
     });
 }

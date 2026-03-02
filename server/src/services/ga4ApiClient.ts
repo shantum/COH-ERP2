@@ -52,6 +52,15 @@ export interface ConversionFunnelResponse {
     summary: FunnelSummary;
 }
 
+export interface CampaignFunnelRow {
+    campaign: string;
+    sessions: number;
+    addToCarts: number;
+    checkouts: number;
+    purchases: number;
+    revenue: number;
+}
+
 export interface LandingPageRow {
     landingPage: string;
     sessions: number;
@@ -313,6 +322,59 @@ export async function queryConversionFunnel(days: number): Promise<ConversionFun
             purchaseRate: safeDiv(totals.purchases, totals.sessions),
         },
     };
+}
+
+/**
+ * Campaign Funnel — sessions → ATC → checkout → purchase, grouped by campaign name.
+ * Filters to Google/CPC traffic so it aligns with Google Ads campaigns.
+ */
+export async function queryCampaignFunnel(days: number): Promise<CampaignFunnelRow[]> {
+    const { startDate, endDate } = getDateRange(days);
+
+    const rows = await runReport({
+        dateRanges: [{ startDate, endDate }],
+        dimensions: [{ name: 'sessionCampaignName' }],
+        metrics: [
+            { name: 'sessions' },
+            { name: 'addToCarts' },
+            { name: 'checkouts' },
+            { name: 'ecommercePurchases' },
+            { name: 'purchaseRevenue' },
+        ],
+        dimensionFilter: {
+            andGroup: {
+                expressions: [
+                    {
+                        notExpression: {
+                            filter: {
+                                fieldName: 'sessionCampaignName',
+                                stringFilter: { value: '(not set)', matchType: 'EXACT' },
+                            },
+                        },
+                    },
+                    {
+                        filter: {
+                            fieldName: 'sessionMedium',
+                            stringFilter: { value: 'cpc', matchType: 'EXACT' },
+                        },
+                    },
+                ],
+            },
+        },
+        orderBys: [{ metric: { metricName: 'purchaseRevenue' }, desc: true }],
+        limit: '20',
+    }, `ga4api:campaign-funnel:${days}`);
+
+    return rows
+        .map(r => ({
+            campaign: r.dims.sessionCampaignName,
+            sessions: r.mets.sessions,
+            addToCarts: r.mets.addToCarts,
+            checkouts: r.mets.checkouts,
+            purchases: r.mets.ecommercePurchases,
+            revenue: r.mets.purchaseRevenue,
+        }))
+        .filter(r => r.sessions > 0);
 }
 
 /**

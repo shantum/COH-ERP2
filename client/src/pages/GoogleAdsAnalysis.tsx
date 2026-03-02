@@ -12,14 +12,15 @@ import {
 } from 'recharts';
 import { AgGridReact } from 'ag-grid-react';
 import type { ColDef, ValueFormatterParams } from 'ag-grid-community';
-import { AlertCircle } from 'lucide-react';
+import { AlertCircle, ArrowRight } from 'lucide-react';
+import { useCampaignFunnel } from '../hooks/useGA4Analytics';
 import {
     useGAdsAccountSummary, useGAdsCampaigns, useGAdsDailyTrend,
     useGAdsProducts, useGAdsGeo, useGAdsHourly, useGAdsDevices,
     useGAdsAge, useGAdsGender, useGAdsSearchTerms, useGAdsKeywords,
     useGAdsLandingPages, useGAdsImpressionShare, useGAdsBudgets,
     useGAdsCreatives, useGAdsVideos, useGAdsAssetGroups, useGAdsAudienceSegments,
-    useGAdsProductFunnel, useGAdsSearchConversions, useGAdsCampaignConversions,
+    useGAdsProductFunnel, useGAdsSearchConversions,
     useGAdsGeoConversions, useGAdsUserLocations, useGAdsClickStats,
     useGAdsAssetPerformance, useGAdsAdGroups, useGAdsAdGroupCriteria, useGAdsAudienceConversions,
     usePMaxCampaigns, usePMaxAssetGroupPerf, usePMaxAssetLabels,
@@ -29,11 +30,11 @@ import {
 import { compactThemeSmall } from '../utils/agGridHelpers';
 import { formatCurrency } from '../utils/formatting';
 import type {
-    GAdsCampaignRow, GAdsProductRow, GAdsGeoRow,
+    GAdsProductRow, GAdsGeoRow,
     GAdsSearchTermRow, GAdsKeywordRow, GAdsLandingPageRow,
     GAdsImpressionShareRow, GAdsBudgetRow, GAdsCreativeRow,
     GAdsVideoRow, GAdsAssetGroupRow, GAdsAudienceSegmentRow,
-    GAdsProductFunnelRow, GAdsSearchConversionRow, GAdsCampaignConversionRow,
+    GAdsProductFunnelRow, GAdsSearchConversionRow,
     GAdsGeoConversionRow, GAdsUserLocationRow, GAdsClickRow,
     GAdsAssetPerfRow, GAdsAdGroupRow, GAdsAdGroupCriterionRow, GAdsAudienceConversionRow,
 } from '../server/functions/googleAds';
@@ -157,34 +158,145 @@ function EmptyState({ message }: { message: string }) {
 // OVERVIEW SUB-TAB
 // ============================================
 
+/** Percentage change between two values */
+function pctChange(current: number, previous: number): number | null {
+    if (previous === 0) return current > 0 ? 100 : null;
+    return ((current - previous) / previous) * 100;
+}
+
+/** Format a change value for display */
+function fmtChange(change: number | null, opts?: { invert?: boolean; suffix?: string }): { text: string; color: string } | null {
+    if (change === null) return null;
+    const positive = opts?.invert ? change < 0 : change > 0;
+    const color = positive ? '#16a34a' : change === 0 ? '#78716c' : '#dc2626';
+    const sign = change > 0 ? '+' : '';
+    const suffix = opts?.suffix ?? '%';
+    return { text: `${sign}${Math.abs(change) < 10 ? change.toFixed(1) : Math.round(change)}${suffix}`, color };
+}
+
+/** Normalize channel type for display */
+function channelTypeLabel(raw: string): string {
+    const map: Record<string, string> = {
+        'PERFORMANCE MAX': 'PMax',
+        'SEARCH': 'Search',
+        'SHOPPING': 'Shopping',
+        'DISPLAY': 'Display',
+        'VIDEO': 'Video',
+        'DISCOVERY': 'Discovery',
+        'DEMAND GEN': 'Demand Gen',
+    };
+    return map[raw] ?? raw.charAt(0) + raw.slice(1).toLowerCase().replace(/_/g, ' ');
+}
+
+const CHANNEL_COLORS: Record<string, string> = {
+    'PMax': '#4285F4',
+    'Search': '#FBBC05',
+    'Shopping': '#34A853',
+    'Display': '#EA4335',
+    'Video': '#9334E6',
+    'Discovery': '#FF6D01',
+    'Demand Gen': '#FF6D01',
+};
+
+const CHANNEL_BADGE_STYLES: Record<string, { bg: string; text: string }> = {
+    'PMax': { bg: 'rgba(66,133,244,0.1)', text: '#4285F4' },
+    'Search': { bg: 'rgba(251,188,5,0.15)', text: '#b45309' },
+    'Shopping': { bg: 'rgba(52,168,83,0.1)', text: '#16a34a' },
+    'Display': { bg: 'rgba(234,67,53,0.1)', text: '#dc2626' },
+    'Video': { bg: 'rgba(147,52,230,0.1)', text: '#9334E6' },
+};
+
+
+function OverviewKPICard({ label, value, change, highlight }: {
+    label: string; value: string; change?: { text: string; color: string } | null; highlight?: boolean;
+}) {
+    return (
+        <div className={`bg-white rounded-lg ${highlight ? 'border-2 border-green-500' : 'border border-stone-200'} shadow-sm p-4 sm:p-5`}>
+            <p className="text-[11px] font-medium text-stone-400 uppercase tracking-wider">{label}</p>
+            <p className={`text-2xl font-bold mt-1 ${highlight ? 'text-green-600' : 'text-stone-900'}`} style={{ letterSpacing: '-0.02em' }}>{value}</p>
+            {change && (
+                <p className="text-[11px] mt-1.5">
+                    <span className="font-semibold" style={{ color: change.color }}>{change.text}</span>
+                    <span className="text-stone-400 ml-1">vs prev period</span>
+                </p>
+            )}
+        </div>
+    );
+}
+
 function OverviewSubTab({ days }: { days: number }) {
+    const [statusFilter, setStatusFilter] = useState<'active' | 'all'>('active');
     const summary = useGAdsAccountSummary(days);
+    const prevSummary = useGAdsAccountSummary(days * 2);
     const campaigns = useGAdsCampaigns(days);
     const daily = useGAdsDailyTrend(days);
-    const campaignConv = useGAdsCampaignConversions(days);
+    const campaignFunnel = useCampaignFunnel(days);
 
-    const campaignCols: ColDef<GAdsCampaignRow>[] = useMemo(() => [
-        { field: 'campaignName', headerName: 'Campaign', flex: 2, minWidth: 200 },
-        {
-            field: 'channelType', headerName: 'Type', width: 130,
-            valueFormatter: (p: ValueFormatterParams) => {
-                const v = String(p.value ?? '');
-                return v.charAt(0) + v.slice(1).toLowerCase();
-            },
-        },
-        { field: 'spend', headerName: 'Spend', valueFormatter: (p: ValueFormatterParams) => formatCurrency(p.value), width: 110, sort: 'desc' as const },
-        { field: 'impressions', headerName: 'Impr', valueFormatter: (p: ValueFormatterParams) => fmt(p.value), width: 90 },
-        { field: 'clicks', headerName: 'Clicks', valueFormatter: (p: ValueFormatterParams) => fmt(p.value), width: 80 },
-        { field: 'ctr', headerName: 'CTR', valueFormatter: (p: ValueFormatterParams) => fmtPct(p.value), width: 75 },
-        { field: 'cpc', headerName: 'CPC', valueFormatter: (p: ValueFormatterParams) => `₹${Number(p.value).toFixed(1)}`, width: 75 },
-        { field: 'conversions', headerName: 'Conv', valueFormatter: (p: ValueFormatterParams) => Number(p.value) > 0 ? Number(p.value).toFixed(1) : '-', width: 70 },
-        { field: 'conversionValue', headerName: 'Revenue', valueFormatter: (p: ValueFormatterParams) => formatCurrency(p.value), width: 110 },
-        {
-            field: 'roas', headerName: 'ROAS', width: 80,
-            valueFormatter: (p: ValueFormatterParams) => p.value > 0 ? `${Number(p.value).toFixed(2)}x` : '-',
-            cellStyle: (params: { value: number }) => roasStyle(params.value),
-        },
-    ], []);
+    // Derive previous period summary by subtracting current from doubled range
+    const prev = useMemo(() => {
+        if (!summary.data || !prevSummary.data) return null;
+        const c = summary.data;
+        const d = prevSummary.data;
+        const spend = d.spend - c.spend;
+        if (spend <= 0) return null;
+        const clicks = d.clicks - c.clicks;
+        const impressions = d.impressions - c.impressions;
+        const conversions = d.conversions - c.conversions;
+        const conversionValue = d.conversionValue - c.conversionValue;
+        return {
+            spend, clicks, impressions, conversions, conversionValue,
+            cpc: clicks > 0 ? spend / clicks : 0,
+            ctr: impressions > 0 ? (clicks / impressions) * 100 : 0,
+            roas: spend > 0 ? conversionValue / spend : 0,
+        };
+    }, [summary.data, prevSummary.data]);
+
+    // Derive spend by campaign type
+    const spendByType = useMemo(() => {
+        const campaignData = campaigns.data ?? [];
+        const grouped = new Map<string, { spend: number; conversionValue: number }>();
+        for (const c of campaignData) {
+            const label = channelTypeLabel(c.channelType);
+            const existing = grouped.get(label) ?? { spend: 0, conversionValue: 0 };
+            existing.spend += c.spend;
+            existing.conversionValue += c.conversionValue;
+            grouped.set(label, existing);
+        }
+        const totalSpend = campaignData.reduce((s, c) => s + c.spend, 0);
+        return Array.from(grouped.entries())
+            .map(([type, data]) => ({
+                type,
+                spend: data.spend,
+                roas: data.spend > 0 ? data.conversionValue / data.spend : 0,
+                pct: totalSpend > 0 ? (data.spend / totalSpend) * 100 : 0,
+            }))
+            .sort((a, b) => b.spend - a.spend);
+    }, [campaigns.data]);
+
+    // Daily data with ROAS computed
+    const dailyChartData = useMemo(() => {
+        return (daily.data ?? []).map(d => ({
+            ...d,
+            roas: d.spend > 0 ? Math.round((d.conversionValue / d.spend) * 100) / 100 : 0,
+        }));
+    }, [daily.data]);
+
+    // GA4 campaign funnel data — enriched with Google Ads spend for ROAS
+    const funnelRows = useMemo(() => {
+        const ga4Data = campaignFunnel.data ?? [];
+        const adsCampaigns = campaigns.data ?? [];
+        return ga4Data.map(f => {
+            const adsCampaign = adsCampaigns.find(c => c.campaignName === f.campaign);
+            const spend = adsCampaign?.spend ?? 0;
+            return { ...f, spend, roas: spend > 0 ? f.revenue / spend : 0 };
+        });
+    }, [campaignFunnel.data, campaigns.data]);
+
+    // Filtered campaign data
+    const filteredCampaigns = useMemo(() => {
+        const data = campaigns.data ?? [];
+        return statusFilter === 'active' ? data.filter(c => c.status === 'ENABLED') : data;
+    }, [campaigns.data, statusFilter]);
 
     if (summary.isLoading || campaigns.isLoading) {
         return <div className="space-y-6"><KPISkeleton /><ChartSkeleton /><GridSkeleton /></div>;
@@ -192,73 +304,226 @@ function OverviewSubTab({ days }: { days: number }) {
     if (summary.error || campaigns.error) return <ErrorState error={summary.error ?? campaigns.error} />;
 
     const s = summary.data;
-    const campaignData = campaigns.data ?? [];
-    const dailyData = daily.data ?? [];
+    if (!s) return <EmptyState message="No data available" />;
+
+    const purchases = Math.round(s.conversions);
+    const cpa = purchases > 0 ? s.spend / purchases : 0;
+    const prevPurchases = prev ? Math.round(prev.conversions) : 0;
+    const prevCpa = prevPurchases > 0 ? prev!.spend / prevPurchases : 0;
 
     return (
         <div className="space-y-6">
-            {s && (
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                    <KPICard label="Total Spend" value={formatCurrency(s.spend)} />
-                    <KPICard label="ROAS" value={s.roas > 0 ? `${s.roas.toFixed(2)}x` : '-'} subtext={`₹${fmt(Math.round(s.conversionValue))} conv value`} />
-                    <KPICard label="Conversions" value={s.conversions > 0 ? s.conversions.toFixed(1) : '-'} subtext={s.spend > 0 && s.conversions > 0 ? `₹${Math.round(s.spend / s.conversions)} per conv` : undefined} />
-                    <KPICard label="CTR" value={fmtPct(s.ctr)} subtext={`CPC ₹${s.cpc.toFixed(1)}`} />
+            {/* KPI Cards */}
+            <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+                <OverviewKPICard
+                    label="Total Spend"
+                    value={formatCurrency(s.spend)}
+                    change={prev ? fmtChange(pctChange(s.spend, prev.spend), { invert: true }) : undefined}
+                />
+                <OverviewKPICard
+                    label="Ad Revenue"
+                    value={formatCurrency(s.conversionValue)}
+                    change={prev ? fmtChange(pctChange(s.conversionValue, prev.conversionValue)) : undefined}
+                />
+                <OverviewKPICard
+                    label="ROAS"
+                    value={s.roas > 0 ? `${s.roas.toFixed(2)}x` : '-'}
+                    change={prev ? fmtChange(pctChange(s.roas, prev.roas)) : undefined}
+                    highlight
+                />
+                <OverviewKPICard
+                    label="Purchases"
+                    value={purchases > 0 ? fmt(purchases) : '-'}
+                    change={prev ? fmtChange(pctChange(purchases, prevPurchases)) : undefined}
+                />
+                <OverviewKPICard
+                    label="Cost / Purchase"
+                    value={cpa > 0 ? `₹${fmt(Math.round(cpa))}` : '-'}
+                    change={prev && prevCpa > 0 ? fmtChange(pctChange(cpa, prevCpa), { invert: true }) : undefined}
+                />
+                <OverviewKPICard
+                    label="CTR"
+                    value={fmtPct(s.ctr)}
+                    change={prev ? fmtChange(pctChange(s.ctr, prev.ctr), { suffix: 'pp' }) : undefined}
+                />
+            </div>
+
+            {/* Daily Trend + Spend by Type */}
+            <div className="flex gap-4">
+                <div className="flex-[3] bg-white rounded-lg border border-stone-200 shadow-sm p-4 sm:p-6">
+                    <div className="flex items-center justify-between mb-4">
+                        <h3 className="text-sm font-semibold text-stone-700">Daily Spend, Revenue & ROAS</h3>
+                        <div className="flex items-center gap-4 text-[10px] text-stone-400">
+                            <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-[#4285F4]" /> Spend</span>
+                            <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-[#34A853] opacity-30" /> Revenue</span>
+                            <span className="flex items-center gap-1.5"><span className="w-2.5 h-1 rounded-sm bg-[#EA4335]" /> ROAS</span>
+                        </div>
+                    </div>
+                    <ResponsiveContainer width="100%" height={280}>
+                        <ComposedChart data={dailyChartData}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#e7e5e4" />
+                            <XAxis dataKey="date" tickFormatter={fmtChartDate} tick={{ fill: '#78716c', fontSize: 11 }} />
+                            <YAxis yAxisId="left" tick={{ fill: '#78716c', fontSize: 11 }} tickFormatter={(v: number) => v >= 1000 ? `₹${(v / 1000).toFixed(0)}k` : `₹${v}`} />
+                            <YAxis yAxisId="right" orientation="right" tick={{ fill: '#EA4335', fontSize: 11 }} tickFormatter={(v: number) => `${v}x`} />
+                            <Tooltip
+                                formatter={(value: number | undefined, name?: string) => {
+                                    if (name === 'roas') return [`${(value ?? 0).toFixed(2)}x`, 'ROAS'];
+                                    return [formatCurrency(value ?? 0), name === 'conversionValue' ? 'Revenue' : 'Spend'];
+                                }}
+                                labelFormatter={fmtChartDate}
+                            />
+                            <Bar yAxisId="left" dataKey="spend" fill="#4285F4" name="spend" radius={[2, 2, 0, 0]} />
+                            <Bar yAxisId="left" dataKey="conversionValue" fill="#34A853" fillOpacity={0.2} name="conversionValue" radius={[2, 2, 0, 0]} />
+                            <Line yAxisId="right" dataKey="roas" stroke="#EA4335" strokeWidth={2} dot={false} name="roas" />
+                        </ComposedChart>
+                    </ResponsiveContainer>
+                </div>
+
+                <div className="flex-[1] bg-white rounded-lg border border-stone-200 shadow-sm p-4 sm:p-6">
+                    <h3 className="text-sm font-semibold text-stone-700 mb-5">Spend by Campaign Type</h3>
+                    <div className="flex flex-col gap-5">
+                        {spendByType.map(item => (
+                            <div key={item.type} className="flex flex-col gap-1.5">
+                                <div className="flex justify-between items-baseline">
+                                    <span className="text-xs font-medium text-stone-700">{item.type}</span>
+                                    <span className="text-xs font-semibold text-stone-900">{formatCurrency(item.spend)}</span>
+                                </div>
+                                <div className="h-2 bg-stone-100 rounded-full overflow-hidden">
+                                    <div className="h-full rounded-full" style={{ width: `${Math.min(item.pct, 100)}%`, backgroundColor: CHANNEL_COLORS[item.type] ?? '#78716c' }} />
+                                </div>
+                                <div className="flex justify-between">
+                                    <span className="text-[10px] text-stone-400">{Math.round(item.pct)}% of spend</span>
+                                    <span className="text-[10px] font-medium" style={{ color: item.roas >= 3 ? '#16a34a' : item.roas >= 1.5 ? '#d97706' : '#dc2626' }}>
+                                        {item.roas > 0 ? `${item.roas.toFixed(1)}x ROAS` : '-'}
+                                    </span>
+                                </div>
+                            </div>
+                        ))}
+                        {spendByType.length === 0 && <p className="text-xs text-stone-400">No campaign data</p>}
+                    </div>
+                </div>
+            </div>
+
+            {/* Campaign Performance — HTML Table */}
+            <div className="bg-white rounded-lg border border-stone-200 shadow-sm p-4 sm:p-6">
+                <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-sm font-semibold text-stone-700">Campaign Performance</h3>
+                    <div className="flex gap-1">
+                        <button
+                            onClick={() => setStatusFilter('active')}
+                            className={`px-3 py-1 rounded-md text-[10px] font-semibold transition-colors ${statusFilter === 'active' ? 'bg-stone-900 text-white' : 'bg-stone-100 text-stone-400 hover:text-stone-600'}`}
+                        >Active</button>
+                        <button
+                            onClick={() => setStatusFilter('all')}
+                            className={`px-3 py-1 rounded-md text-[10px] font-semibold transition-colors ${statusFilter === 'all' ? 'bg-stone-900 text-white' : 'bg-stone-100 text-stone-400 hover:text-stone-600'}`}
+                        >All</button>
+                    </div>
+                </div>
+                <div className="overflow-x-auto">
+                    <div className="flex flex-col min-w-[900px]">
+                        {/* Header */}
+                        <div className="flex items-center px-3 py-2.5 bg-stone-50 rounded-t-md border-b border-stone-200 text-[10px] font-semibold text-stone-500 uppercase tracking-wider">
+                            <span className="flex-[2.5]">Campaign</span>
+                            <span className="w-[80px] text-center">Type</span>
+                            <span className="w-[90px] text-right">Spend</span>
+                            <span className="w-[70px] text-right">Clicks</span>
+                            <span className="w-[60px] text-right">CTR</span>
+                            <span className="w-[60px] text-right">CPC</span>
+                            <span className="w-[60px] text-right">Purch</span>
+                            <span className="w-[90px] text-right">Revenue</span>
+                            <span className="w-[65px] text-right">ROAS</span>
+                        </div>
+                        {/* Rows */}
+                        {filteredCampaigns.map((c, i) => {
+                            const label = channelTypeLabel(c.channelType);
+                            const badgeStyle = CHANNEL_BADGE_STYLES[label] ?? { bg: '#f5f5f4', text: '#78716c' };
+                            return (
+                                <div key={c.campaignId ?? i} className="flex items-center px-3 py-3 border-b border-stone-100 last:border-0 hover:bg-stone-50/50 transition-colors text-xs">
+                                    <span className="flex-[2.5] font-medium text-stone-900 truncate pr-2">{c.campaignName}</span>
+                                    <span className="w-[80px] flex justify-center">
+                                        <span className="inline-flex px-2 py-0.5 rounded text-[10px] font-medium" style={{ backgroundColor: badgeStyle.bg, color: badgeStyle.text }}>{label}</span>
+                                    </span>
+                                    <span className="w-[90px] text-right text-stone-700">{formatCurrency(c.spend)}</span>
+                                    <span className="w-[70px] text-right text-stone-600">{fmt(c.clicks)}</span>
+                                    <span className="w-[60px] text-right text-stone-600">{fmtPct(c.ctr)}</span>
+                                    <span className="w-[60px] text-right text-stone-600">₹{c.cpc.toFixed(1)}</span>
+                                    <span className="w-[60px] text-right font-semibold text-stone-900">{c.conversions > 0 ? Math.round(c.conversions) : '-'}</span>
+                                    <span className="w-[90px] text-right text-stone-700">{formatCurrency(c.conversionValue)}</span>
+                                    <span className="w-[65px] text-right font-bold" style={roasStyle(c.roas) ?? undefined}>
+                                        {c.roas > 0 ? `${c.roas.toFixed(2)}x` : '-'}
+                                    </span>
+                                </div>
+                            );
+                        })}
+                        {filteredCampaigns.length === 0 && (
+                            <div className="py-8 text-center text-sm text-stone-400">No campaigns found</div>
+                        )}
+                    </div>
+                </div>
+            </div>
+
+            {/* Conversion Funnel by Campaign (GA4 data) */}
+            {funnelRows.length > 0 && (
+                <div className="bg-white rounded-lg border border-stone-200 shadow-sm p-4 sm:p-6">
+                    <div className="flex items-center justify-between mb-6">
+                        <h3 className="text-sm font-semibold text-stone-700">Conversion Funnel by Campaign</h3>
+                        <p className="text-[10px] text-stone-400">GA4 session data for CPC campaigns · bar height = volume</p>
+                    </div>
+                    <div className="flex flex-col gap-8">
+                        {funnelRows.map(f => {
+                            const stages = [f.sessions, f.addToCarts, f.checkouts, f.purchases];
+                            const stageLabels = ['Sessions', 'Add to Cart', 'Checkout', 'Purchase'];
+                            const stageColors = ['#4285F4', '#FBBC05', '#F4A742', '#34A853'];
+                            const maxVal = Math.max(...stages, 1);
+                            return (
+                                <div key={f.campaign} className="flex flex-col gap-3 pb-6 border-b border-stone-100 last:border-0 last:pb-0">
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-xs font-semibold text-stone-900">{f.campaign}</span>
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-[11px] text-stone-400">{formatCurrency(f.revenue)}</span>
+                                            {f.roas > 0 && (
+                                                <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-md" style={{ backgroundColor: 'rgba(52,168,83,0.08)', color: '#16a34a' }}>
+                                                    {f.roas.toFixed(2)}x ROAS
+                                                </span>
+                                            )}
+                                        </div>
+                                    </div>
+                                    <div className="flex items-end gap-0" style={{ height: 110 }}>
+                                        {stages.map((val, i) => {
+                                            const barH = maxVal > 0 ? Math.max((val / maxVal) * 100, val > 0 ? 4 : 0) : 0;
+                                            const dropoff = i > 0 && stages[i - 1] > 0
+                                                ? Math.round(((stages[i - 1] - val) / stages[i - 1]) * 100)
+                                                : null;
+                                            return (
+                                                <div key={stageLabels[i]} className="flex items-end flex-1" style={{ height: '100%' }}>
+                                                    {i > 0 && (
+                                                        <div className="flex flex-col items-center justify-end flex-shrink-0 pb-5" style={{ width: 36 }}>
+                                                            <ArrowRight className="w-3.5 h-3.5 text-stone-300" />
+                                                            {dropoff !== null && (
+                                                                <span className="text-[9px] font-semibold mt-0.5" style={{ color: dropoff > 70 ? '#dc2626' : dropoff > 40 ? '#d97706' : '#16a34a' }}>
+                                                                    -{dropoff}%
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    )}
+                                                    <div className="flex flex-col items-center flex-1 gap-1" style={{ height: '100%', justifyContent: 'flex-end' }}>
+                                                        <span className="text-sm font-bold text-stone-900">{val > 0 ? fmt(val) : '-'}</span>
+                                                        {barH > 0 && (
+                                                            <div className="rounded-t" style={{ width: '75%', height: `${barH}%`, backgroundColor: stageColors[i], minHeight: 4 }} />
+                                                        )}
+                                                        <span className="text-[9px] font-medium text-stone-400 mt-0.5">{stageLabels[i]}</span>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
                 </div>
             )}
-
-            <div className="bg-white rounded-lg border border-stone-200 shadow-sm p-4 sm:p-6">
-                <h3 className="text-sm font-semibold text-stone-700 mb-4">Daily Spend vs Conversion Value</h3>
-                <ResponsiveContainer width="100%" height={280}>
-                    <ComposedChart data={dailyData}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#e7e5e4" />
-                        <XAxis dataKey="date" tickFormatter={fmtChartDate} tick={{ fill: '#78716c', fontSize: 11 }} />
-                        <YAxis yAxisId="left" tick={{ fill: '#78716c', fontSize: 11 }} />
-                        <YAxis yAxisId="right" orientation="right" tick={{ fill: '#78716c', fontSize: 11 }} />
-                        <Tooltip
-                            formatter={(value: number | undefined, name?: string) =>
-                                [name === 'spend' || name === 'conversionValue' ? formatCurrency(value ?? 0) : fmt(value ?? 0),
-                                 name === 'conversionValue' ? 'Conv Value' : name === 'spend' ? 'Spend' : (name ?? '')]
-                            }
-                            labelFormatter={fmtChartDate}
-                        />
-                        <Bar yAxisId="left" dataKey="spend" fill="#4285F4" name="spend" radius={[2, 2, 0, 0]} />
-                        <Line yAxisId="right" dataKey="conversionValue" stroke="#34A853" strokeWidth={2} dot={false} name="conversionValue" />
-                    </ComposedChart>
-                </ResponsiveContainer>
-            </div>
-
-            <div className="bg-white rounded-lg border border-stone-200 shadow-sm p-4 sm:p-6">
-                <h3 className="text-sm font-semibold text-stone-700 mb-4">Campaign Performance</h3>
-                <div className="ag-theme-custom" style={{ height: 400 }}>
-                    <AgGridReact<GAdsCampaignRow>
-                        rowData={campaignData}
-                        columnDefs={campaignCols}
-                        theme={compactThemeSmall}
-                        defaultColDef={DEFAULT_COL_DEF}
-                        animateRows
-                    />
-                </div>
-            </div>
-
-            <div className="bg-white rounded-lg border border-stone-200 shadow-sm p-4 sm:p-6">
-                <h3 className="text-sm font-semibold text-stone-700 mb-4">Conversion Breakdown by Campaign</h3>
-                {campaignConv.data?.length ? (
-                    <div className="ag-theme-custom" style={{ height: 350 }}>
-                        <AgGridReact<GAdsCampaignConversionRow>
-                            rowData={campaignConv.data}
-                            columnDefs={[
-                                { field: 'campaignName', headerName: 'Campaign', flex: 2, minWidth: 200 },
-                                { field: 'action', headerName: 'Conversion Action', flex: 2, minWidth: 180 },
-                                { field: 'conversions', headerName: 'Conversions', valueFormatter: (p: ValueFormatterParams) => Number(p.value).toFixed(1), width: 110, sort: 'desc' as const },
-                                { field: 'conversionValue', headerName: 'Value', valueFormatter: (p: ValueFormatterParams) => formatCurrency(p.value), width: 120 },
-                            ]}
-                            theme={compactThemeSmall}
-                            defaultColDef={DEFAULT_COL_DEF}
-                            animateRows
-                        />
-                    </div>
-                ) : campaignConv.isLoading ? <Skeleton className="h-64 w-full" /> : <EmptyState message="No conversion breakdown data for this period" />}
-            </div>
+            {campaignFunnel.isLoading && <ChartSkeleton />}
         </div>
     );
 }
