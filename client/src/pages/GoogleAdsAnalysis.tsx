@@ -1563,22 +1563,21 @@ function PMaxSubTab({ days }: { days: number }) {
     const agStrength = usePMaxAssetGroupStrength();
     const [selectedCampaignId, setSelectedCampaignId] = useState<number | null>(null);
 
-    const campaignData = campaigns.data ?? [];
+    const campaignData = campaigns.data;
     const activeCampaigns = useMemo(() =>
-        campaignData.filter(c => c.status === 'ENABLED').sort((a, b) => b.spend - a.spend),
+        (campaignData ?? []).filter(c => c.status === 'ENABLED').sort((a, b) => b.spend - a.spend),
         [campaignData],
     );
     const pausedCampaigns = useMemo(() =>
-        campaignData.filter(c => c.status !== 'ENABLED').sort((a, b) => b.spend - a.spend),
+        (campaignData ?? []).filter(c => c.status !== 'ENABLED').sort((a, b) => b.spend - a.spend),
         [campaignData],
     );
 
-    // Client-side filter helper
-    const filterByCampaign = <T extends { campaignId: number }>(rows: T[]) =>
-        selectedCampaignId == null ? rows : rows.filter(r => r.campaignId === selectedCampaignId);
-
     // KPIs
-    const filteredCampaigns = filterByCampaign(campaignData);
+    const filteredCampaigns = useMemo(() => {
+        const rows = campaignData ?? [];
+        return selectedCampaignId == null ? rows : rows.filter(r => r.campaignId === selectedCampaignId);
+    }, [campaignData, selectedCampaignId]);
     const kpi = useMemo(() => {
         const spend = filteredCampaigns.reduce((s, r) => s + r.spend, 0);
         const clicks = filteredCampaigns.reduce((s, r) => s + r.clicks, 0);
@@ -1597,7 +1596,8 @@ function PMaxSubTab({ days }: { days: number }) {
 
     // Daily trend aggregated across campaigns (or filtered)
     const dailyData = useMemo(() => {
-        const filtered = filterByCampaign(daily.data ?? []);
+        const rows = daily.data ?? [];
+        const filtered = selectedCampaignId == null ? rows : rows.filter(r => r.campaignId === selectedCampaignId);
         const map = new Map<string, { spend: number; convValue: number; conversions: number }>();
         for (const r of filtered) {
             const entry = map.get(r.date) ?? { spend: 0, convValue: 0, conversions: 0 };
@@ -1612,14 +1612,15 @@ function PMaxSubTab({ days }: { days: number }) {
     }, [daily.data, selectedCampaignId]);
 
     // Asset groups aggregated
-    const agData = useMemo(() =>
-        filterByCampaign(assetGroups.data ?? []),
-        [assetGroups.data, selectedCampaignId],
-    );
+    const agData = useMemo(() => {
+        const rows = assetGroups.data ?? [];
+        return selectedCampaignId == null ? rows : rows.filter(r => r.campaignId === selectedCampaignId);
+    }, [assetGroups.data, selectedCampaignId]);
 
     // Asset labels: compute structured views for the UI
     const assetHealth = useMemo(() => {
-        const filtered = filterByCampaign(assetLabels.data ?? []);
+        const rows = assetLabels.data ?? [];
+        const filtered = selectedCampaignId == null ? rows : rows.filter(r => r.campaignId === selectedCampaignId);
         const cleanFieldType = (ft: string) => ft.replace('ASSET_FIELD_TYPE_', '').replace(/_/g, ' ');
 
         // Overall distribution
@@ -1674,10 +1675,10 @@ function PMaxSubTab({ days }: { days: number }) {
     }, [assetLabels.data, selectedCampaignId]);
 
     // Product funnel
-    const funnelData = useMemo(() =>
-        filterByCampaign(productFunnel.data ?? []),
-        [productFunnel.data, selectedCampaignId],
-    );
+    const funnelData = useMemo(() => {
+        const rows = productFunnel.data ?? [];
+        return selectedCampaignId == null ? rows : rows.filter(r => r.campaignId === selectedCampaignId);
+    }, [productFunnel.data, selectedCampaignId]);
 
     // Asset group strength lookup (from API)
     const strengthMap = useMemo(() => {
@@ -1701,7 +1702,7 @@ function PMaxSubTab({ days }: { days: number }) {
         return <div className="space-y-6"><KPISkeleton /><ChartSkeleton /><GridSkeleton /></div>;
     }
     if (campaigns.error) return <ErrorState error={campaigns.error} />;
-    if (campaignData.length === 0) return <EmptyState message="No PMax campaigns found" />;
+    if ((campaignData?.length ?? 0) === 0) return <EmptyState message="No PMax campaigns found" />;
 
     return (
         <div className="space-y-6">
@@ -1713,7 +1714,7 @@ function PMaxSubTab({ days }: { days: number }) {
                     onChange={e => setSelectedCampaignId(e.target.value ? Number(e.target.value) : null)}
                     className="rounded-md border border-stone-300 bg-white px-3 py-1.5 text-sm text-stone-900 shadow-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                 >
-                    <option value="">All PMax Campaigns ({campaignData.length})</option>
+                    <option value="">All PMax Campaigns ({campaignData?.length ?? 0})</option>
                     {activeCampaigns.length > 0 && (
                         <optgroup label="Active">
                             {activeCampaigns.map(c => (

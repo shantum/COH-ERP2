@@ -220,11 +220,8 @@ export function BookShipmentSection({
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing local state to order change
     setStep('idle');
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing local state to order change
     setRates([]);
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing local state to order change
     setSelectedCourier(null);
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing local state to order change
     setError(null);
   }, [order.id]);
 

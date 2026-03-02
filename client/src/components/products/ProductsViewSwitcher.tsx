@@ -302,7 +302,7 @@ export function ProductsViewSwitcher({ searchQuery, onSearchChange, onViewProduc
         }
 
         return { all: baseFiltered.length, active, draft, archived, not_on_shopify: notOnShopify };
-    }, [treeData, filters.gender, filters.category, filters.fabricFilter, matchesFabricFilter]);
+    }, [treeData, filters.gender, filters.category, filters.fabricFilter, matchesFabricFilter, getProductShopifyStatus]);
 
     // Count active filters
     const activeFilterCount = useMemo(() => {

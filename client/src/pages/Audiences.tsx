@@ -82,12 +82,13 @@ export default function Audiences() {
 
   const allAudiences = listData?.audiences ?? [];
   const audiences = useMemo(() => {
+    const allAudiences = listData?.audiences ?? [];
     if (!search) return allAudiences;
     const q = search.toLowerCase();
     return allAudiences.filter(a =>
       a.name.toLowerCase().includes(q) || (a.description?.toLowerCase().includes(q))
     );
-  }, [allAudiences, search]);
+  }, [listData?.audiences, search]);
 
   // Mutations
   const deleteM = useMutation({

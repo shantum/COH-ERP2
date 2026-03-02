@@ -374,7 +374,7 @@ export const getMetaProducts = createServerFn({ method: 'POST' })
         const db = await getKysely();
 
         if (unresolvedVariantIds.length > 0) {
-            const variantLookup = await (db as any)
+            const variantLookup = await db
                 .selectFrom('Sku as s')
                 .innerJoin('Variation as v', 'v.id', 's.variationId')
                 .innerJoin('Product as p', 'p.id', 'v.productId')
@@ -418,7 +418,7 @@ export const getMetaProducts = createServerFn({ method: 'POST' })
         }
 
         // Fetch product names, colors, images by shopifyProductId
-        const productInfo = await (db as any)
+        const productInfo = await db
             .selectFrom('Product as p')
             .innerJoin('Variation as v', 'v.productId', 'p.id')
             .select([
@@ -436,7 +436,7 @@ export const getMetaProducts = createServerFn({ method: 'POST' })
             }>;
 
         // Fetch sales data by shopifyProductId for the date range
-        const salesData = await (db as any)
+        const salesData = await db
             .selectFrom('OrderLine as ol')
             .innerJoin('Order as o', 'o.id', 'ol.orderId')
             .innerJoin('Sku as s', 's.id', 'ol.skuId')

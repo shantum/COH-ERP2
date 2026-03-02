@@ -985,6 +985,32 @@ interface ProductGroupRow {
     roas: number;
 }
 
+type ProductSortField = 'spend' | 'revenue' | 'roas' | 'orders' | 'clicks';
+
+function ProductSortHeader({
+    field,
+    label,
+    className = '',
+    activeField,
+    onSort,
+}: {
+    field: ProductSortField;
+    label: string;
+    className?: string;
+    activeField: ProductSortField;
+    onSort: (field: ProductSortField) => void;
+}) {
+    return (
+        <th
+            className={`py-2.5 pr-3 text-[11px] font-semibold text-stone-400 cursor-pointer hover:text-stone-600 select-none ${className}`}
+            onClick={() => onSort(field)}
+        >
+            {label}
+            {activeField === field ? ' ↓' : ''}
+        </th>
+    );
+}
+
 function groupByProduct(data: MetaProductEnrichedRow[]): ProductGroupRow[] {
     const groups = new Map<string, ProductGroupRow>();
     for (const row of data) {
@@ -1094,7 +1120,7 @@ function ProductAccordionRow({ group, defaultOpen }: { group: ProductGroupRow; d
 
 function ProductsSubTab({ days }: { days: number }) {
     const products = useMetaProducts(days);
-    const [sortField, setSortField] = useState<'spend' | 'revenue' | 'roas' | 'orders' | 'clicks'>('spend');
+    const [sortField, setSortField] = useState<ProductSortField>('spend');
 
     if (products.isLoading) return <div className="space-y-5"><KPISkeleton /><GridSkeleton /></div>;
     if (products.error) return <ErrorState error={products.error} />;
@@ -1129,15 +1155,6 @@ function ProductsSubTab({ days }: { days: number }) {
     const worstByRoas = [...grouped].filter(p => p.spend >= minSpend).sort((a, b) => a.roas - b.roas).slice(0, 5);
 
     const performerName = (p: ProductGroupRow) => p.productName;
-
-    const SortHeader = ({ field, label, className = '' }: { field: typeof sortField; label: string; className?: string }) => (
-        <th
-            className={`py-2.5 pr-3 text-[11px] font-semibold text-stone-400 cursor-pointer hover:text-stone-600 select-none ${className}`}
-            onClick={() => setSortField(field)}
-        >
-            {label}{sortField === field ? ' ↓' : ''}
-        </th>
-    );
 
     return (
         <div className="space-y-5">
@@ -1223,14 +1240,14 @@ function ProductsSubTab({ days }: { days: number }) {
                                 <th className="py-2.5 pl-4 pr-2 w-10" />
                                 <th className="py-2.5 pr-3 w-10" />
                                 <th className="py-2.5 pr-3 text-[11px] font-semibold text-stone-400 text-left">Product</th>
-                                <SortHeader field="spend" label="Spend" className="text-right" />
+                                <ProductSortHeader field="spend" label="Spend" className="text-right" activeField={sortField} onSort={setSortField} />
                                 <th className="py-2.5 pr-3 text-[11px] font-semibold text-stone-400 text-right">Impr</th>
-                                <SortHeader field="clicks" label="Clicks" className="text-right" />
+                                <ProductSortHeader field="clicks" label="Clicks" className="text-right" activeField={sortField} onSort={setSortField} />
                                 <th className="py-2.5 pr-3 text-[11px] font-semibold text-stone-400 text-right">CTR</th>
-                                <SortHeader field="orders" label="Orders" className="text-right" />
+                                <ProductSortHeader field="orders" label="Orders" className="text-right" activeField={sortField} onSort={setSortField} />
                                 <th className="py-2.5 pr-3 text-[11px] font-semibold text-stone-400 text-right">Units</th>
-                                <SortHeader field="revenue" label="Revenue" className="text-right" />
-                                <SortHeader field="roas" label="ROAS" className="text-right pr-4" />
+                                <ProductSortHeader field="revenue" label="Revenue" className="text-right" activeField={sortField} onSort={setSortField} />
+                                <ProductSortHeader field="roas" label="ROAS" className="text-right pr-4" activeField={sortField} onSort={setSortField} />
                             </tr>
                         </thead>
                         <tbody>

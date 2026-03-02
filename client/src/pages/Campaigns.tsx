@@ -190,14 +190,14 @@ export default function Campaigns() {
   });
 
   // Filter campaigns by search
-  const allCampaigns = listData?.campaigns ?? [];
   const campaigns = useMemo(() => {
+    const allCampaigns = listData?.campaigns ?? [];
     if (!search) return allCampaigns;
     const q = search.toLowerCase();
     return allCampaigns.filter(
       c => c.name.toLowerCase().includes(q) || c.subject.toLowerCase().includes(q)
     );
-  }, [allCampaigns, search]);
+  }, [listData?.campaigns, search]);
 
   // Handlers
   const handleNewCampaign = async () => {
