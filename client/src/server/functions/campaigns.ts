@@ -11,6 +11,7 @@ import type { Prisma } from '@prisma/client';
 import { getPrisma } from '@coh/shared/services/db';
 import { adminMiddleware } from '../middleware/auth';
 import { serverLog } from './serverLog';
+import { buildAudienceWhere as buildAudienceWhereShared, legacyToAudienceFilters, type AudienceFilters as AudienceFiltersType } from './audienceFilters';
 
 // ============================================
 // INPUT SCHEMAS
@@ -56,6 +57,7 @@ const updateCampaignSchema = z.object({
     tags: z.array(z.string()).optional(),
     lastPurchaseDays: z.number().int().positive().optional(),
   }).optional(),
+  audienceId: z.string().uuid().nullable().optional(), // FK to saved Audience
   utmSource: z.string().optional(),
   utmMedium: z.string().optional(),
   utmCampaign: z.string().optional(),
@@ -109,6 +111,7 @@ export interface CampaignDetail extends CampaignListItem {
   sourceId: string | null;
   shopifyProductIds: string[] | null;
   audienceFilter: { tiers?: string[]; tags?: string[]; lastPurchaseDays?: number } | null;
+  audienceId: string | null;
   utmSource: string;
   utmMedium: string;
   utmCampaign: string | null;
@@ -128,31 +131,9 @@ export interface AudiencePreviewResult {
 // HELPERS
 // ============================================
 
-/** Build a Prisma where clause from audience filter */
+/** Build a Prisma where clause from legacy audience filter — delegates to shared builder */
 function buildAudienceWhere(filter: { tiers?: string[]; tags?: string[]; lastPurchaseDays?: number }): Prisma.CustomerWhereInput {
-  const where: Prisma.CustomerWhereInput = {
-    emailOptOut: false,
-    email: { not: '' },
-  };
-
-  if (filter.tiers && filter.tiers.length > 0) {
-    where.tier = { in: filter.tiers };
-  }
-
-  if (filter.tags && filter.tags.length > 0) {
-    // Tags is a comma-separated string field — match any
-    where.OR = filter.tags.map(tag => ({
-      tags: { contains: tag, mode: 'insensitive' as const },
-    }));
-  }
-
-  if (filter.lastPurchaseDays) {
-    const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - filter.lastPurchaseDays);
-    where.lastOrderDate = { gte: cutoff };
-  }
-
-  return where;
+  return buildAudienceWhereShared(legacyToAudienceFilters(filter));
 }
 
 /** Slugify a campaign name for UTM */
@@ -326,6 +307,13 @@ export const updateCampaign = createServerFn({ method: 'POST' })
       if (updates.htmlContent !== undefined) updateData.htmlContent = updates.htmlContent;
       if (updates.shopifyProductIds !== undefined) updateData.shopifyProductIds = updates.shopifyProductIds;
       if (updates.audienceFilter !== undefined) updateData.audienceFilter = updates.audienceFilter;
+      if (updates.audienceId !== undefined) {
+        if (updates.audienceId) {
+          updateData.audience = { connect: { id: updates.audienceId } };
+        } else {
+          updateData.audience = { disconnect: true };
+        }
+      }
       if (updates.utmSource !== undefined) updateData.utmSource = updates.utmSource;
       if (updates.utmMedium !== undefined) updateData.utmMedium = updates.utmMedium;
       if (updates.utmCampaign !== undefined) updateData.utmCampaign = updates.utmCampaign;
@@ -430,9 +418,20 @@ export const sendCampaign = createServerFn({ method: 'POST' })
         throw new Error('Campaign has no HTML content. Preview and save before sending.');
       }
 
-      // Build audience
-      const audienceFilter = (campaign.audienceFilter as { tiers?: string[]; tags?: string[]; lastPurchaseDays?: number }) || {};
-      const where = buildAudienceWhere(audienceFilter);
+      // Build audience — use saved audience filters if linked, otherwise fall back to inline filter
+      let where: Prisma.CustomerWhereInput;
+      if (campaign.audienceId) {
+        const audience = await prisma.audience.findUnique({ where: { id: campaign.audienceId }, select: { filters: true } });
+        if (audience) {
+          where = buildAudienceWhereShared(audience.filters as AudienceFiltersType);
+        } else {
+          const audienceFilter = (campaign.audienceFilter as { tiers?: string[]; tags?: string[]; lastPurchaseDays?: number }) || {};
+          where = buildAudienceWhere(audienceFilter);
+        }
+      } else {
+        const audienceFilter = (campaign.audienceFilter as { tiers?: string[]; tags?: string[]; lastPurchaseDays?: number }) || {};
+        where = buildAudienceWhere(audienceFilter);
+      }
       const customers = await prisma.customer.findMany({
         where,
         select: { id: true, email: true },

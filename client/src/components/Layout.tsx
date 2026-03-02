@@ -114,6 +114,7 @@ const navGroups: NavGroup[] = [
         collapsible: true,
         items: [
             { to: '/campaigns', icon: Mail, label: 'Campaigns', permission: 'admin' },
+            { to: '/audiences', icon: Users, label: 'Audiences', permission: 'admin' },
         ],
     },
     {

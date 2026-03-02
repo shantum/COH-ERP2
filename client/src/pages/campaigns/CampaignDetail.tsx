@@ -17,6 +17,9 @@ import {
   getAudiencePreview,
   getCampaignRecipients,
 } from '../../server/functions/campaigns';
+import {
+  getAudiencesList,
+} from '../../server/functions/audiences';
 
 // ============================================
 // STATUS BADGE (reused)
@@ -72,11 +75,16 @@ export default function CampaignDetail() {
   const sendCampaignFn = useServerFn(sendCampaign);
   const getAudiencePreviewFn = useServerFn(getAudiencePreview);
   const getCampaignRecipientsFn = useServerFn(getCampaignRecipients);
+  const getAudiencesListFn = useServerFn(getAudiencesList);
 
   const [utmExpanded, setUtmExpanded] = useState(false);
   const [recipientFilter, setRecipientFilter] = useState<string>('all');
   const [showHtml, setShowHtml] = useState(false);
   const [mobilePreview, setMobilePreview] = useState(false);
+
+  // Audience mode: 'quick' for inline filters, 'saved' for picking a saved audience
+  const [audienceMode, setAudienceMode] = useState<'quick' | 'saved'>('quick');
+  const [selectedAudienceId, setSelectedAudienceId] = useState<string | null>(null);
 
   // AI state
   const [aiPrompt, setAiPrompt] = useState('');
@@ -119,21 +127,40 @@ export default function CampaignDetail() {
       setSelectedTiers(af.tiers || []);
       setLastPurchaseDays(af.lastPurchaseDays);
     }
+    if (campaign.audienceId) {
+      setAudienceMode('saved');
+      setSelectedAudienceId(campaign.audienceId);
+    }
   }
 
-  // Audience preview
+  // Audience preview — use inline filters or saved audience count
   const { data: audiencePreview } = useQuery({
-    queryKey: ['campaign', 'audiencePreview', selectedTiers, lastPurchaseDays],
-    queryFn: () => getAudiencePreviewFn({
-      data: {
-        audienceFilter: {
-          ...(selectedTiers.length > 0 ? { tiers: selectedTiers } : {}),
-          ...(lastPurchaseDays ? { lastPurchaseDays } : {}),
+    queryKey: ['campaign', 'audiencePreview', audienceMode, selectedTiers, lastPurchaseDays, selectedAudienceId],
+    queryFn: () => {
+      if (audienceMode === 'saved' && selectedAudienceId) {
+        // For saved audience, look up the count from the list
+        const audience = savedAudiences?.audiences.find(a => a.id === selectedAudienceId);
+        return { count: audience?.customerCount ?? 0, sample: [] };
+      }
+      return getAudiencePreviewFn({
+        data: {
+          audienceFilter: {
+            ...(selectedTiers.length > 0 ? { tiers: selectedTiers } : {}),
+            ...(lastPurchaseDays ? { lastPurchaseDays } : {}),
+          },
         },
-      },
-    }),
+      });
+    },
     enabled: campaign?.status === 'draft' || campaign?.status === 'scheduled',
     staleTime: 10_000,
+  });
+
+  // Saved audiences list (for audience picker)
+  const { data: savedAudiences } = useQuery({
+    queryKey: ['audience', 'list', 'getAudiencesList'],
+    queryFn: () => getAudiencesListFn({}),
+    staleTime: 60_000,
+    enabled: campaign?.status === 'draft' || campaign?.status === 'scheduled',
   });
 
   // Recipients (for sent campaigns)
@@ -154,10 +181,11 @@ export default function CampaignDetail() {
         subject,
         preheaderText: preheaderText || undefined,
         htmlContent: htmlContent || undefined,
-        audienceFilter: {
+        audienceFilter: audienceMode === 'quick' ? {
           ...(selectedTiers.length > 0 ? { tiers: selectedTiers } : {}),
           ...(lastPurchaseDays ? { lastPurchaseDays } : {}),
-        },
+        } : undefined,
+        audienceId: audienceMode === 'saved' ? (selectedAudienceId || null) : null,
         utmSource,
         utmMedium,
         utmCampaign: utmCampaign || undefined,
@@ -499,35 +527,75 @@ export default function CampaignDetail() {
                 </span>
               )}
             </div>
-            <Field label="Tier">
-              <div className="flex gap-1.5 flex-wrap">
-                {TIERS.map(tier => (
-                  <button
-                    key={tier}
-                    onClick={() => toggleTier(tier)}
-                    className={`px-2.5 py-0.5 rounded-full text-xs font-medium transition-colors ${
-                      selectedTiers.includes(tier) ? tierColors[tier].active : tierColors[tier].inactive
-                    }`}
-                  >
-                    {tier.charAt(0).toUpperCase() + tier.slice(1)}
-                  </button>
-                ))}
-              </div>
-            </Field>
-            <Field label="Last Purchase">
-              <select
-                value={lastPurchaseDays || ''}
-                onChange={e => setLastPurchaseDays(e.target.value ? Number(e.target.value) : undefined)}
-                className="w-full px-3 py-2 text-sm rounded-lg border border-stone-200 bg-stone-50 outline-none"
+
+            {/* Mode toggle */}
+            <div className="flex gap-1">
+              <button
+                onClick={() => { setAudienceMode('quick'); setSelectedAudienceId(null); }}
+                className={`px-2.5 py-1 rounded-md text-xs font-medium ${
+                  audienceMode === 'quick' ? 'bg-stone-900 text-white' : 'bg-stone-100 text-stone-500'
+                }`}
               >
-                <option value="">All customers</option>
-                <option value="30">Within 30 days</option>
-                <option value="60">Within 60 days</option>
-                <option value="90">Within 90 days</option>
-                <option value="180">Within 180 days</option>
-                <option value="365">Within 1 year</option>
-              </select>
-            </Field>
+                Quick Filter
+              </button>
+              <button
+                onClick={() => setAudienceMode('saved')}
+                className={`px-2.5 py-1 rounded-md text-xs font-medium ${
+                  audienceMode === 'saved' ? 'bg-stone-900 text-white' : 'bg-stone-100 text-stone-500'
+                }`}
+              >
+                Saved Audience
+              </button>
+            </div>
+
+            {audienceMode === 'quick' ? (
+              <>
+                <Field label="Tier">
+                  <div className="flex gap-1.5 flex-wrap">
+                    {TIERS.map(tier => (
+                      <button
+                        key={tier}
+                        onClick={() => toggleTier(tier)}
+                        className={`px-2.5 py-0.5 rounded-full text-xs font-medium transition-colors ${
+                          selectedTiers.includes(tier) ? tierColors[tier].active : tierColors[tier].inactive
+                        }`}
+                      >
+                        {tier.charAt(0).toUpperCase() + tier.slice(1)}
+                      </button>
+                    ))}
+                  </div>
+                </Field>
+                <Field label="Last Purchase">
+                  <select
+                    value={lastPurchaseDays || ''}
+                    onChange={e => setLastPurchaseDays(e.target.value ? Number(e.target.value) : undefined)}
+                    className="w-full px-3 py-2 text-sm rounded-lg border border-stone-200 bg-stone-50 outline-none"
+                  >
+                    <option value="">All customers</option>
+                    <option value="30">Within 30 days</option>
+                    <option value="60">Within 60 days</option>
+                    <option value="90">Within 90 days</option>
+                    <option value="180">Within 180 days</option>
+                    <option value="365">Within 1 year</option>
+                  </select>
+                </Field>
+              </>
+            ) : (
+              <Field label="Select Audience">
+                <select
+                  value={selectedAudienceId || ''}
+                  onChange={e => setSelectedAudienceId(e.target.value || null)}
+                  className="w-full px-3 py-2 text-sm rounded-lg border border-stone-200 bg-stone-50 outline-none"
+                >
+                  <option value="">Choose a saved audience...</option>
+                  {savedAudiences?.audiences.map(a => (
+                    <option key={a.id} value={a.id}>
+                      {a.name} ({a.customerCount.toLocaleString()})
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            )}
           </div>
 
           {/* UTM Tracking */}
