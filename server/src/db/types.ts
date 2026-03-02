@@ -1462,6 +1462,9 @@ export type StorefrontEvent = {
     country: string | null;
     region: string | null;
     city: string | null;
+    latitude: string | null;
+    longitude: string | null;
+    clientIp: string | null;
     rawData: unknown | null;
 };
 export type StyleMeasurement = {

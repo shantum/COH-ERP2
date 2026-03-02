@@ -3,7 +3,6 @@ import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import prisma from '../lib/prisma.js';
-import { lookupIp } from '../utils/geoip.js';
 
 const router = Router();
 
@@ -77,6 +76,13 @@ const storefrontEventSchema = z.object({
     orderValue: z.number().optional(),
     screenWidth: z.number().int().positive().optional(),
     deviceType: z.enum(['mobile', 'tablet', 'desktop']).optional(),
+    // Geo fields injected by Cloudflare Worker
+    country: z.string().max(100).optional(),
+    region: z.string().max(200).optional(),
+    city: z.string().max(200).optional(),
+    latitude: z.string().max(20).optional(),
+    longitude: z.string().max(20).optional(),
+    clientIp: z.string().max(50).optional(),
     rawData: z.record(z.string(), z.any()).optional(),
 });
 
@@ -154,17 +160,7 @@ router.post('/events', asyncHandler(async (req: Request, res: Response) => {
         return;
     }
 
-    // Geo from MaxMind GeoLite2, falling back to reverse proxy headers
-    const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip;
-    const geo = await lookupIp(clientIp);
-    const country = geo.country
-        || (req.headers['cf-ipcountry'] as string)
-        || (req.headers['x-country'] as string)
-        || undefined;
-    const region = geo.region
-        || (req.headers['x-region'] as string)
-        || undefined;
-    const city = geo.city || undefined;
+    // Geo is injected into the payload by the Cloudflare Worker — no server-side lookup needed
 
     // Bulk insert
     const rows = validEvents.map(e => ({
@@ -190,9 +186,12 @@ router.post('/events', asyncHandler(async (req: Request, res: Response) => {
         ...(e.orderValue != null ? { orderValue: e.orderValue } : {}),
         ...(e.screenWidth ? { screenWidth: e.screenWidth } : {}),
         ...(e.deviceType ? { deviceType: e.deviceType } : {}),
-        ...(country ? { country } : {}),
-        ...(region ? { region } : {}),
-        ...(city ? { city } : {}),
+        ...(e.country ? { country: e.country } : {}),
+        ...(e.region ? { region: e.region } : {}),
+        ...(e.city ? { city: e.city } : {}),
+        ...(e.latitude ? { latitude: e.latitude } : {}),
+        ...(e.longitude ? { longitude: e.longitude } : {}),
+        ...(e.clientIp ? { clientIp: e.clientIp } : {}),
         rawData: {
             ...(e.rawData || {}),
             ...(e.shopifyEventId ? { shopifyEventId: e.shopifyEventId } : {}),

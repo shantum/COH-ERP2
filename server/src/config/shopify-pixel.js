@@ -5,7 +5,7 @@
 // Permission: Required (data collection for analytics)
 // ================================================
 
-const ENDPOINT = 'https://www.coh.one/api/pixel/events';
+const ENDPOINT = 'https://coh-pixel-buffer.coh-erp.workers.dev';
 const FLUSH_INTERVAL_MS = 2000;
 const MAX_BATCH_SIZE = 20;
 const MAX_RETRIES = 1;

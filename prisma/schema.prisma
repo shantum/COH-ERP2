@@ -2775,6 +2775,9 @@ model StorefrontEvent {
   country         String?
   region          String?
   city            String?
+  latitude        String?
+  longitude       String?
+  clientIp        String?
   rawData         Json?
 
   @@index([eventName, createdAt])

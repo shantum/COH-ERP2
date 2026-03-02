@@ -1,0 +1,15 @@
+name = "coh-pixel-buffer"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+
+[[kv_namespaces]]
+binding = "PIXEL_KV"
+id = "fdf422b1a02948738c345482676f2827"
+
+[triggers]
+crons = ["* * * * *"]   # Every minute — drain buffered events
+
+[vars]
+ORIGIN_URL = "https://www.coh.one/api/pixel/events"
+# How long buffered events stay in KV before auto-expiring (seconds)
+KV_TTL_SECONDS = "86400"   # 24 hours
