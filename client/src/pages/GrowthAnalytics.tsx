@@ -22,7 +22,8 @@ import GoogleAdsAnalysis from './GoogleAdsAnalysis';
 import { compactThemeSmall } from '../utils/agGridHelpers';
 import { formatCurrency } from '../utils/formatting';
 import type {
-    FunnelDay, TrafficSourceRow, CampaignRow, LandingPageRow, GeoRow, DeviceRow, ProductRow,
+    FunnelDay, TrafficSourceRow, CampaignRow, LandingPageRow, GeoRow, DeviceRow,
+    ProductRow, ProductPerformanceResponse,
 } from '../server/functions/ga4Analytics';
 
 ModuleRegistry.registerModules([AllCommunityModule]);
@@ -462,28 +463,42 @@ function PagesTab({ days }: { days: number }) {
 // PRODUCTS TAB
 // ============================================
 
+type ProductView = 'product' | 'variant' | 'sku';
+const PRODUCT_VIEWS: { key: ProductView; label: string }[] = [
+    { key: 'product', label: 'By Product' },
+    { key: 'variant', label: 'By Variant' },
+    { key: 'sku', label: 'By SKU' },
+];
+
 function ProductsTab({ days }: { days: number }) {
+    const [view, setView] = useState<ProductView>('product');
     const products = useProductPerformance(days);
 
+    const data = useMemo((): ProductRow[] => {
+        if (!products.data) return [];
+        const resp = products.data as ProductPerformanceResponse;
+        if (view === 'product') return resp.byProduct;
+        if (view === 'variant') return resp.byVariant;
+        return resp.bySku;
+    }, [products.data, view]);
+
     const colDefs = useMemo((): ColDef<ProductRow>[] => [
-        { field: 'itemName', headerName: 'Product', flex: 2, minWidth: 200 },
+        { field: 'name', headerName: view === 'sku' ? 'SKU' : view === 'variant' ? 'Variant' : 'Product', flex: 2, minWidth: 200 },
         { field: 'viewed', headerName: 'Views', width: 90, cellClass: 'text-right', headerClass: 'ag-right-aligned-header', valueFormatter: (p: ValueFormatterParams) => formatNum(p.value ?? 0) },
         { field: 'addedToCart', headerName: 'Add to Cart', width: 110, cellClass: 'text-right', headerClass: 'ag-right-aligned-header', valueFormatter: (p: ValueFormatterParams) => formatNum(p.value ?? 0) },
         { field: 'purchased', headerName: 'Purchased', width: 100, cellClass: 'text-right', headerClass: 'ag-right-aligned-header', valueFormatter: (p: ValueFormatterParams) => formatNum(p.value ?? 0) },
         { field: 'revenue', headerName: 'Revenue', width: 110, cellClass: 'text-right font-medium', headerClass: 'ag-right-aligned-header', valueFormatter: (p: ValueFormatterParams) => formatCurrency(p.value ?? 0) },
         { field: 'cartRate', headerName: 'Cart %', width: 90, headerClass: 'ag-right-aligned-header', cellRenderer: ConvRateCellRenderer },
         { field: 'purchaseRate', headerName: 'Buy %', width: 90, headerClass: 'ag-right-aligned-header', cellRenderer: ConvRateCellRenderer },
-    ], []);
+    ], [view]);
 
-    // Top 10 products by add-to-cart for bar chart
     const top10 = useMemo(() => {
-        if (!products.data) return [];
-        return products.data.slice(0, 10).map(r => ({
-            name: r.itemName.length > 25 ? r.itemName.slice(0, 25) + '...' : r.itemName,
+        return data.slice(0, 10).map(r => ({
+            name: r.name.length > 30 ? r.name.slice(0, 30) + '...' : r.name,
             addedToCart: r.addedToCart,
             purchased: r.purchased,
         }));
-    }, [products.data]);
+    }, [data]);
 
     if (products.isLoading) {
         return (
@@ -496,15 +511,32 @@ function ProductsTab({ days }: { days: number }) {
 
     return (
         <div className="space-y-6">
+            {/* View toggle */}
+            <div className="flex gap-1 bg-stone-100 rounded-lg p-1 w-fit">
+                {PRODUCT_VIEWS.map(v => (
+                    <button
+                        key={v.key}
+                        onClick={() => setView(v.key)}
+                        className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                            view === v.key
+                                ? 'bg-white text-stone-900 shadow-sm'
+                                : 'text-stone-500 hover:text-stone-700'
+                        }`}
+                    >
+                        {v.label}
+                    </button>
+                ))}
+            </div>
+
             {/* Top 10 bar chart */}
             {top10.length > 0 && (
                 <div className="bg-white rounded-lg border border-stone-200 shadow-sm p-4 sm:p-6">
-                    <h3 className="text-sm font-medium text-stone-700 mb-4">Top Products — Add to Cart vs Purchased</h3>
+                    <h3 className="text-sm font-medium text-stone-700 mb-4">Top {view === 'product' ? 'Products' : view === 'variant' ? 'Variants' : 'SKUs'} — Add to Cart vs Purchased</h3>
                     <ResponsiveContainer width="100%" height={300}>
-                        <BarChart data={top10} layout="vertical" margin={{ left: 120 }}>
+                        <BarChart data={top10} layout="vertical" margin={{ left: 140 }}>
                             <CartesianGrid strokeDasharray="3 3" stroke="#e7e5e4" />
                             <XAxis type="number" tick={{ fontSize: 11 }} />
-                            <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={120} />
+                            <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={140} />
                             <Tooltip />
                             <Bar dataKey="addedToCart" name="Add to Cart" fill="#57534e" radius={[0, 3, 3, 0]} />
                             <Bar dataKey="purchased" name="Purchased" fill="#292524" radius={[0, 3, 3, 0]} />
@@ -516,11 +548,11 @@ function ProductsTab({ days }: { days: number }) {
             {/* Full table */}
             <div className="bg-white rounded-lg border border-stone-200 shadow-sm p-4 sm:p-6">
                 <h3 className="text-sm font-medium text-stone-700 mb-3">
-                    Product Performance ({products.data?.length ?? 0} products)
+                    {view === 'product' ? 'Product' : view === 'variant' ? 'Variant' : 'SKU'} Performance ({data.length})
                 </h3>
                 <div className="h-[500px]">
                     <AgGridReact<ProductRow>
-                        rowData={products.data ?? []}
+                        rowData={data}
                         columnDefs={colDefs}
                         theme={compactThemeSmall}
                         defaultColDef={DEFAULT_COL_DEF}

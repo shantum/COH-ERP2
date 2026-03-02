@@ -27,6 +27,7 @@ export type {
     DeviceRow,
     GrowthOverview,
     ProductRow,
+    ProductPerformanceResponse,
 } from '@server/services/ga4ApiClient.js';
 
 // ============================================

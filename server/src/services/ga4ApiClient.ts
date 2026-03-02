@@ -100,14 +100,19 @@ export interface DeviceRow {
 }
 
 export interface ProductRow {
-    itemName: string;
-    itemId: string;
+    name: string;
     viewed: number;
     addedToCart: number;
     purchased: number;
     revenue: number;
     cartRate: number;
     purchaseRate: number;
+}
+
+export interface ProductPerformanceResponse {
+    byProduct: ProductRow[];
+    byVariant: ProductRow[];
+    bySku: ProductRow[];
 }
 
 export interface GrowthOverview {
@@ -605,14 +610,55 @@ export async function queryGrowthOverview(days: number): Promise<GrowthOverview>
 }
 
 /**
- * Product Performance — which products are viewed, added to cart, purchased
+ * Parse Shopify item names: "Product - Colour / Size"
+ * Returns { product, variant (product - colour), sku (full name) }
  */
-export async function queryProductPerformance(days: number, limit: number): Promise<ProductRow[]> {
+function parseItemName(name: string): { product: string; variant: string; sku: string } {
+    const sku = name;
+    // Strip size suffix: " / S", " / M", " / L", " / XL", etc.
+    const variant = name.replace(/\s*\/\s*\w+$/, '');
+    // Strip colour: everything after first " - "
+    const dashIdx = variant.indexOf(' - ');
+    const product = dashIdx > 0 ? variant.slice(0, dashIdx) : variant;
+    return { product, variant, sku };
+}
+
+function aggregateRows(
+    rows: { name: string; viewed: number; addedToCart: number; purchased: number; revenue: number }[],
+    keyFn: (name: string) => string,
+): ProductRow[] {
+    const map = new Map<string, { viewed: number; addedToCart: number; purchased: number; revenue: number }>();
+    for (const r of rows) {
+        const key = keyFn(r.name);
+        const acc = map.get(key) ?? { viewed: 0, addedToCart: 0, purchased: 0, revenue: 0 };
+        acc.viewed += r.viewed;
+        acc.addedToCart += r.addedToCart;
+        acc.purchased += r.purchased;
+        acc.revenue += r.revenue;
+        map.set(key, acc);
+    }
+    return Array.from(map.entries())
+        .map(([name, a]) => ({
+            name,
+            viewed: a.viewed,
+            addedToCart: a.addedToCart,
+            purchased: a.purchased,
+            revenue: a.revenue,
+            cartRate: safeDiv(a.addedToCart, a.viewed),
+            purchaseRate: safeDiv(a.purchased, a.addedToCart),
+        }))
+        .sort((a, b) => b.addedToCart - a.addedToCart);
+}
+
+/**
+ * Product Performance — three aggregation levels: product, variant, SKU
+ */
+export async function queryProductPerformance(days: number, limit: number): Promise<ProductPerformanceResponse> {
     const { startDate, endDate } = getDateRange(days);
 
     const rows = await runReport({
         dateRanges: [{ startDate, endDate }],
-        dimensions: [{ name: 'itemName' }, { name: 'itemId' }],
+        dimensions: [{ name: 'itemName' }],
         metrics: [
             { name: 'itemsViewed' },
             { name: 'itemsAddedToCart' },
@@ -623,18 +669,21 @@ export async function queryProductPerformance(days: number, limit: number): Prom
         limit: String(limit),
     }, `ga4api:products:${days}:${limit}`);
 
-    return rows
+    const raw = rows
         .filter(r => r.dims.itemName && r.dims.itemName !== '(not set)')
         .map(r => ({
-            itemName: r.dims.itemName,
-            itemId: r.dims.itemId ?? '',
+            name: r.dims.itemName,
             viewed: r.mets.itemsViewed,
             addedToCart: r.mets.itemsAddedToCart,
             purchased: r.mets.itemsPurchased,
             revenue: r.mets.itemRevenue,
-            cartRate: safeDiv(r.mets.itemsAddedToCart, r.mets.itemsViewed),
-            purchaseRate: safeDiv(r.mets.itemsPurchased, r.mets.itemsAddedToCart),
         }));
+
+    return {
+        byProduct: aggregateRows(raw, n => parseItemName(n).product),
+        byVariant: aggregateRows(raw, n => parseItemName(n).variant),
+        bySku: aggregateRows(raw, n => n),
+    };
 }
 
 /**
