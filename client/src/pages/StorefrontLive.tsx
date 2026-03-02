@@ -381,6 +381,9 @@ function LiveFeed({ events, isLoading }: { events: LiveFeedEvent[]; isLoading: b
                                     {hasCollection && (
                                         <span className="text-stone-600"> — {e.collectionTitle}</span>
                                     )}
+                                    {!hasProduct && !hasCollection && e.pageUrl && (
+                                        <span className="text-stone-500"> — {truncateUrl(e.pageUrl)}</span>
+                                    )}
                                     {e.searchQuery && (
                                         <span className="text-purple-600"> "{e.searchQuery}"</span>
                                     )}
