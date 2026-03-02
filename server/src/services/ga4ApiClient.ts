@@ -652,10 +652,17 @@ function aggregateRows(
 
 /**
  * Product Performance — three aggregation levels: product, variant, SKU
+ *
+ * NOTE: GA4 item names differ by event type:
+ *   - view_item / add_to_cart: "Product - Colour / Size"
+ *   - purchase: bare product name (e.g. "The Rib V Neck")
+ * We fetch a high limit (500) to capture all rows, then aggregate.
+ * At the "byProduct" level these naturally merge.
  */
-export async function queryProductPerformance(days: number, limit: number): Promise<ProductPerformanceResponse> {
+export async function queryProductPerformance(days: number, _limit: number): Promise<ProductPerformanceResponse> {
     const { startDate, endDate } = getDateRange(days);
 
+    // Fetch up to 500 raw item rows to capture both naming conventions
     const rows = await runReport({
         dateRanges: [{ startDate, endDate }],
         dimensions: [{ name: 'itemName' }],
@@ -666,8 +673,8 @@ export async function queryProductPerformance(days: number, limit: number): Prom
             { name: 'itemRevenue' },
         ],
         orderBys: [{ metric: { metricName: 'itemsAddedToCart' }, desc: true }],
-        limit: String(limit),
-    }, `ga4api:products:${days}:${limit}`);
+        limit: '500',
+    }, `ga4api:products:${days}`);
 
     const raw = rows
         .filter(r => r.dims.itemName && r.dims.itemName !== '(not set)')
