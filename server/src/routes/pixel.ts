@@ -24,9 +24,9 @@ setInterval(() => {
 // Allowed event names (whitelist to reject spam payloads)
 const VALID_EVENTS = new Set([
     'page_viewed', 'product_viewed', 'collection_viewed',
-    'product_added_to_cart', 'cart_viewed',
+    'product_added_to_cart', 'product_removed_from_cart', 'cart_viewed',
     'checkout_started', 'checkout_completed',
-    'search_submitted',
+    'payment_info_submitted', 'search_submitted',
     'checkout_address_info_submitted',
     'checkout_contact_info_submitted',
     'checkout_shipping_info_submitted',

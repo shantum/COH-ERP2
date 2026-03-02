@@ -64,6 +64,7 @@ const IMMEDIATE_FLUSH_EVENTS = new Set([
   'product_added_to_cart',
   'checkout_started',
   'checkout_completed',
+  'payment_info_submitted',
 ]);
 
 async function enqueue(eventName, extraData, event) {
@@ -276,6 +277,24 @@ analytics.subscribe('checkout_completed', (event) => {
       discountAmount: co?.discountsAmount?.amount ? parseFloat(co.discountsAmount.amount) : undefined,
       items,
     },
+  }, event);
+});
+
+analytics.subscribe('product_removed_from_cart', (event) => {
+  const cv = event.data?.cartLine;
+  enqueue('product_removed_from_cart', {
+    productId: cv?.merchandise?.product?.id ? String(cv.merchandise.product.id) : undefined,
+    productTitle: cv?.merchandise?.product?.title || undefined,
+    variantId: cv?.merchandise?.id ? String(cv.merchandise.id) : undefined,
+    variantTitle: cv?.merchandise?.title || undefined,
+    rawData: { quantity: cv?.quantity },
+  }, event);
+});
+
+analytics.subscribe('payment_info_submitted', (event) => {
+  const co = event.data?.checkout;
+  enqueue('payment_info_submitted', {
+    orderValue: co?.totalPrice?.amount ? parseFloat(co.totalPrice.amount) : undefined,
   }, event);
 });
 
