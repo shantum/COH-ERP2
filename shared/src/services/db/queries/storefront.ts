@@ -313,7 +313,10 @@ export async function getLiveFeed(limit = 20): Promise<LiveFeedEvent[]> {
                p."imageUrl"
         FROM "StorefrontEvent" se
         LEFT JOIN "Product" p ON se."productId" = p."shopifyProductId"
-        WHERE se."eventName" != 'page_viewed'
+        WHERE NOT (
+            se."eventName" = 'page_viewed'
+            AND (se."pageUrl" LIKE '%/products/%' OR se."pageUrl" LIKE '%/collections/%')
+        )
         ORDER BY se."createdAt" DESC
         LIMIT ${limit}
     `.execute(db);
