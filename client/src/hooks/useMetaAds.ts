@@ -9,6 +9,7 @@ import {
     getMetaAdsets, getMetaAds, getMetaAgeGender,
     getMetaPlacements, getMetaRegions, getMetaDevices,
     getMetaProducts, getMetaVideo, getMetaHourly,
+    getMetaAdAttribution,
 } from '../server/functions/metaAds';
 
 const STALE_TIME = 5 * 60 * 1000;
@@ -116,6 +117,15 @@ export function useMetaHourly(days: number) {
     const fn = useServerFn(getMetaHourly);
     return useQuery({
         queryKey: ['meta-ads', 'hourly', days],
+        queryFn: () => fn({ data: { days } }),
+        staleTime: STALE_TIME,
+    });
+}
+
+export function useMetaAttribution(days: number) {
+    const fn = useServerFn(getMetaAdAttribution);
+    return useQuery({
+        queryKey: ['meta-ads', 'attribution', days],
         queryFn: () => fn({ data: { days } }),
         staleTime: STALE_TIME,
     });

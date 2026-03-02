@@ -18,20 +18,21 @@ import {
     useMetaAdsets, useMetaAds, useMetaAgeGender,
     useMetaPlacements, useMetaRegions, useMetaDevices,
     useMetaProducts, useMetaVideo, useMetaHourly,
+    useMetaAttribution,
 } from '../hooks/useMetaAds';
 import { compactThemeSmall } from '../utils/agGridHelpers';
 import { formatCurrency } from '../utils/formatting';
 import type {
     MetaCampaignRow, MetaAdsetRow, MetaAdRow,
     MetaAgeGenderRow, MetaPlacementRow, MetaRegionRow,
-    MetaProductEnrichedRow,
+    MetaProductEnrichedRow, MetaAdAttributionRow,
 } from '../server/functions/metaAds';
 
 // ============================================
 // SHARED HELPERS
 // ============================================
 
-type MetaSubTab = 'overview' | 'campaigns' | 'audience' | 'placements' | 'creative' | 'video' | 'landing-page' | 'products' | 'funnel' | 'hourly';
+type MetaSubTab = 'overview' | 'campaigns' | 'audience' | 'placements' | 'creative' | 'video' | 'landing-page' | 'products' | 'funnel' | 'hourly' | 'attribution';
 
 const SUB_TABS: { key: MetaSubTab; label: string }[] = [
     { key: 'overview', label: 'Overview' },
@@ -44,6 +45,7 @@ const SUB_TABS: { key: MetaSubTab; label: string }[] = [
     { key: 'products', label: 'Products' },
     { key: 'funnel', label: 'Funnel' },
     { key: 'hourly', label: 'Hourly' },
+    { key: 'attribution', label: 'Attribution' },
 ];
 
 const DEFAULT_COL_DEF = { sortable: true, resizable: true };
@@ -1684,6 +1686,198 @@ function HourlySubTab({ days }: { days: number }) {
 }
 
 // ============================================
+// ATTRIBUTION SUB-TAB
+// ============================================
+
+const MATCH_LABELS: Record<string, { label: string; color: string }> = {
+    ad_id: { label: 'Ad ID', color: 'text-green-700 bg-green-50' },
+    ad_name: { label: 'Ad Name', color: 'text-blue-700 bg-blue-50' },
+    adset_proportional: { label: 'Adset (est.)', color: 'text-amber-700 bg-amber-50' },
+    unmatched: { label: 'Unmatched', color: 'text-stone-500 bg-stone-100' },
+};
+
+const MatchBadge = React.memo(function MatchBadge(props: { data?: MetaAdAttributionRow }) {
+    const m = props.data?.matchMethod;
+    if (!m) return null;
+    const { label, color } = MATCH_LABELS[m] ?? { label: m, color: 'text-stone-500 bg-stone-100' };
+    return <span className={`px-1.5 py-0.5 rounded text-[11px] font-medium ${color}`}>{label}</span>;
+});
+
+const AttrThumbnail = React.memo(function AttrThumbnail(props: { data?: MetaAdAttributionRow }) {
+    const url = props.data?.imageUrl;
+    if (!url) return <div className="w-10 h-10 rounded bg-stone-100" />;
+    return <img src={url} alt="" className="w-10 h-10 rounded object-cover" loading="lazy" referrerPolicy="no-referrer" />;
+});
+
+function AttributionSubTab({ days }: { days: number }) {
+    const attr = useMetaAttribution(days);
+
+    if (attr.isLoading) return <div className="space-y-5"><KPISkeleton /><GridSkeleton /></div>;
+    if (attr.error) return <ErrorState error={attr.error} />;
+
+    const data = attr.data ?? [];
+
+    // Summary stats
+    const totalSpend = data.reduce((s, r) => s + r.spend, 0);
+    const totalMetaPurch = data.reduce((s, r) => s + r.metaPurchases, 0);
+    const totalOrders = data.reduce((s, r) => s + r.orders, 0);
+    const totalMetaRev = data.reduce((s, r) => s + r.metaPurchaseValue, 0);
+    const totalActualRev = data.reduce((s, r) => s + r.revenue, 0);
+    const metaRoas = totalSpend > 0 ? totalMetaRev / totalSpend : 0;
+    const actualRoas = totalSpend > 0 ? totalActualRev / totalSpend : 0;
+
+    // Match method breakdown
+    const matchCounts = { ad_id: 0, ad_name: 0, adset_proportional: 0, unmatched: 0 };
+    for (const r of data) {
+        if (r.orders > 0) matchCounts[r.matchMethod] += r.orders;
+    }
+
+    // Top discrepancy ads (Meta over-reports vs actual)
+    const discrepancyAds = data
+        .filter(r => r.spend > 500 && (r.metaPurchases > 0 || r.orders > 0))
+        .map(r => ({
+            ...r,
+            discrepancy: r.metaPurchases - r.orders,
+            discrepancyPct: r.metaPurchases > 0 ? ((r.metaPurchases - r.orders) / r.metaPurchases) * 100 : 0,
+        }))
+        .sort((a, b) => Math.abs(b.discrepancy) - Math.abs(a.discrepancy))
+        .slice(0, 5);
+
+    return (
+        <div className="space-y-5">
+            {/* KPIs — Meta vs Actual side by side */}
+            <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+                <KPICard label="Total Spend" value={formatCurrency(totalSpend)} />
+                <KPICard label="Meta Purchases" value={fmt(totalMetaPurch)} subtext={`ROAS ${metaRoas.toFixed(2)}x`} />
+                <KPICard label="Actual Orders" value={fmt(totalOrders)} subtext={`ROAS ${actualRoas.toFixed(2)}x`} accent />
+                <KPICard label="Meta Revenue" value={formatCurrency(totalMetaRev)} />
+                <KPICard label="Actual Revenue" value={formatCurrency(totalActualRev)} accent />
+            </div>
+
+            {/* Match Quality + Discrepancy */}
+            <div className="flex gap-3">
+                {/* Match method breakdown */}
+                <div className="flex-1 bg-white rounded-lg border border-stone-200 p-5">
+                    <h3 className="text-sm font-semibold text-stone-800">Attribution Match Quality</h3>
+                    <p className="text-xs text-stone-400 mt-0.5">How orders were matched to ads</p>
+                    <div className="mt-4 space-y-3">
+                        {Object.entries(matchCounts)
+                            .filter(([, count]) => count > 0)
+                            .sort(([, a], [, b]) => b - a)
+                            .map(([method, count]) => {
+                                const pct = totalOrders > 0 ? (count / totalOrders) * 100 : 0;
+                                const { label, color } = MATCH_LABELS[method] ?? { label: method, color: 'text-stone-500 bg-stone-100' };
+                                return (
+                                    <div key={method}>
+                                        <div className="flex items-center justify-between">
+                                            <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${color}`}>{label}</span>
+                                            <span className="text-xs font-mono text-stone-800">{count} ({pct.toFixed(0)}%)</span>
+                                        </div>
+                                        <div className="w-full h-1.5 bg-stone-100 rounded mt-1.5">
+                                            <div className="h-1.5 bg-blue-500 rounded" style={{ width: `${pct}%` }} />
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                    </div>
+                </div>
+
+                {/* Top discrepancies */}
+                <div className="flex-[2] bg-white rounded-lg border border-stone-200 p-5">
+                    <h3 className="text-sm font-semibold text-stone-800">Biggest Discrepancies</h3>
+                    <p className="text-xs text-stone-400 mt-0.5">Where Meta's numbers differ most from actual orders</p>
+                    <div className="mt-4 space-y-3">
+                        {discrepancyAds.map(d => (
+                            <div key={d.adId} className="flex items-center gap-3 py-2 border-b border-stone-50 last:border-0">
+                                {d.imageUrl ? (
+                                    <img src={d.imageUrl} alt="" className="w-9 h-9 rounded object-cover flex-shrink-0" loading="lazy" referrerPolicy="no-referrer" />
+                                ) : (
+                                    <div className="w-9 h-9 rounded bg-stone-100 flex-shrink-0" />
+                                )}
+                                <div className="flex-1 min-w-0">
+                                    <p className="text-sm text-stone-800 truncate">{d.adName}</p>
+                                    <p className="text-[11px] text-stone-400 truncate">{d.campaignName}</p>
+                                </div>
+                                <div className="text-right flex-shrink-0">
+                                    <div className="flex items-center gap-2 text-xs font-mono">
+                                        <span className="text-stone-500">Meta {d.metaPurchases}</span>
+                                        <span className="text-stone-300">→</span>
+                                        <span className="font-semibold text-stone-800">Actual {d.orders}</span>
+                                    </div>
+                                    <span className={`text-[11px] font-mono ${d.discrepancy > 0 ? 'text-red-500' : 'text-green-600'}`}>
+                                        {d.discrepancy > 0 ? '+' : ''}{d.discrepancy} ({d.discrepancyPct > 0 ? '+' : ''}{d.discrepancyPct.toFixed(0)}%)
+                                    </span>
+                                </div>
+                            </div>
+                        ))}
+                        {discrepancyAds.length === 0 && (
+                            <p className="text-sm text-stone-400 py-4 text-center">No ads with enough spend to compare</p>
+                        )}
+                    </div>
+                </div>
+            </div>
+
+            {/* Full Attribution Grid */}
+            <AttributionGrid data={data} />
+        </div>
+    );
+}
+
+function AttributionGrid({ data }: { data: MetaAdAttributionRow[] }) {
+    const cols: ColDef<MetaAdAttributionRow>[] = useMemo(() => [
+        { headerName: '', width: 56, cellRenderer: AttrThumbnail, sortable: false, filter: false, resizable: false },
+        { field: 'adName', headerName: 'Ad Name', flex: 2, minWidth: 180 },
+        { field: 'campaignName', headerName: 'Campaign', flex: 1, minWidth: 120 },
+        { field: 'adsetName', headerName: 'Ad Set', flex: 1, minWidth: 120 },
+        { field: 'spend', headerName: 'Spend', width: 90, sort: 'desc' as const, valueFormatter: (p: ValueFormatterParams) => formatCurrency(p.value) },
+        { field: 'metaPurchases', headerName: 'Meta Purch', width: 90 },
+        { field: 'orders', headerName: 'Actual Orders', width: 95,
+            cellStyle: (params: { value: number }) => params.value > 0 ? { fontWeight: 600 } : null,
+        },
+        { field: 'metaRoas', headerName: 'Meta ROAS', width: 90,
+            valueFormatter: (p: ValueFormatterParams) => p.value > 0 ? `${Number(p.value).toFixed(2)}x` : '-',
+            cellStyle: (params: { value: number }) => {
+                if (params.value >= 3) return { color: '#16a34a', fontWeight: 600 };
+                if (params.value >= 1.5) return { color: '#d97706', fontWeight: 600 };
+                if (params.value > 0) return { color: '#dc2626', fontWeight: 600 };
+                return null;
+            },
+        },
+        { field: 'actualRoas', headerName: 'Actual ROAS', width: 90,
+            valueFormatter: (p: ValueFormatterParams) => p.value > 0 ? `${Number(p.value).toFixed(2)}x` : '-',
+            cellStyle: (params: { value: number }) => {
+                if (params.value >= 3) return { color: '#16a34a', fontWeight: 600 };
+                if (params.value >= 1.5) return { color: '#d97706', fontWeight: 600 };
+                if (params.value > 0) return { color: '#dc2626', fontWeight: 600 };
+                return null;
+            },
+        },
+        { field: 'revenue', headerName: 'Revenue', width: 95, valueFormatter: (p: ValueFormatterParams) => formatCurrency(p.value) },
+        { headerName: 'Match', width: 100, cellRenderer: MatchBadge, sortable: true,
+            valueGetter: (params: { data?: MetaAdAttributionRow }) => params.data?.matchMethod ?? '',
+        },
+    ], []);
+
+    return (
+        <div className="bg-white rounded-lg border border-stone-200 p-5">
+            <h3 className="text-sm font-semibold text-stone-800 mb-3">
+                Ad Attribution ({data.length} ads)
+            </h3>
+            <div style={{ height: 500 }}>
+                <AgGridReact<MetaAdAttributionRow>
+                    rowData={data}
+                    columnDefs={cols}
+                    rowHeight={48}
+                    defaultColDef={DEFAULT_COL_DEF}
+                    theme={compactThemeSmall}
+                    suppressCellFocus
+                />
+            </div>
+        </div>
+    );
+}
+
+// ============================================
 // MAIN COMPONENT
 // ============================================
 
@@ -1720,6 +1914,7 @@ export default function MetaAdsAnalysis({ days }: { days: number }) {
             {subTab === 'products' && <ProductsSubTab days={days} />}
             {subTab === 'funnel' && <FunnelSubTab days={days} />}
             {subTab === 'hourly' && <HourlySubTab days={days} />}
+            {subTab === 'attribution' && <AttributionSubTab days={days} />}
         </div>
     );
 }
