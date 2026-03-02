@@ -93,6 +93,7 @@ export interface LiveFeedEvent {
     os: string | null;
     fbclid: string | null;
     gclid: string | null;
+    browserTimezone: string | null;
 }
 
 export interface TrafficSourceRow {
@@ -385,7 +386,7 @@ export async function getLiveFeed(limit = 20): Promise<LiveFeedEvent[]> {
                se."deviceType", se."country", se."region", se."city",
                se."utmSource", se."utmCampaign",
                se."asOrganization", se."isVpn", se."browser", se."os",
-               se.fbclid, se.gclid,
+               se.fbclid, se.gclid, se."browserTimezone",
                p."imageUrl"
         FROM "StorefrontEvent" se
         LEFT JOIN "Product" p ON se."productId" = p."shopifyProductId"
