@@ -43,7 +43,7 @@ function enrichPayload(body: string, geo: GeoData, clientIp: string): string {
 		}
 		return JSON.stringify(parsed);
 	} catch {
-		return body; // If JSON parse fails, forward as-is
+		return body;
 	}
 }
 
@@ -56,6 +56,7 @@ async function forwardToOrigin(originUrl: string, body: string): Promise<boolean
 				'Content-Type': 'application/json',
 				'Origin': 'null',
 			},
+			body,
 			signal: AbortSignal.timeout(5000),
 		});
 		return resp.status >= 200 && resp.status < 500;
