@@ -55,7 +55,8 @@ export interface ProductFunnelRow {
 }
 
 export interface ProductVariantRow {
-    variantTitle: string;
+    color: string;
+    size: string;
     views: number;
     atcCount: number;
     purchases: number;
@@ -103,8 +104,10 @@ export interface GeoBreakdownRow {
     country: string | null;
     region: string | null;
     sessions: number;
+    pageViews: number;
     atcCount: number;
     orders: number;
+    revenue: number;
 }
 
 export interface TopPageRow {
@@ -262,7 +265,8 @@ export async function getProductVariantBreakdown(
 
     const result = await sql<ProductVariantRow>`
         SELECT
-            COALESCE(se."variantTitle", 'Unknown') AS "variantTitle",
+            COALESCE(SPLIT_PART(se."variantTitle", ' / ', 1), 'Unknown') AS "color",
+            COALESCE(NULLIF(SPLIT_PART(se."variantTitle", ' / ', 2), ''), '-') AS "size",
             COUNT(*) FILTER (WHERE se."eventName" = 'product_viewed')::int AS "views",
             COUNT(*) FILTER (WHERE se."eventName" = 'product_added_to_cart')::int AS "atcCount",
             COUNT(*) FILTER (WHERE se."eventName" = 'checkout_completed')::int AS "purchases",
@@ -272,8 +276,8 @@ export async function getProductVariantBreakdown(
         WHERE se."productTitle" = ${productTitle}
           AND (${gender}::text IS NULL AND p."gender" IS NULL OR p."gender" = ${gender})
           AND se."createdAt" >= now() - make_interval(days => ${days})
-        GROUP BY se."variantTitle"
-        ORDER BY COUNT(*) FILTER (WHERE se."eventName" = 'product_viewed') DESC
+        GROUP BY "color", "size"
+        ORDER BY "color", COUNT(*) FILTER (WHERE se."eventName" = 'product_viewed') DESC
     `.execute(db);
 
     return result.rows.map(r => ({
@@ -373,8 +377,10 @@ export async function getGeoBreakdown(days: number, limit = 10): Promise<GeoBrea
             "country",
             "region",
             COUNT(DISTINCT "sessionId")::int AS "sessions",
+            COUNT(*) FILTER (WHERE "eventName" = 'page_viewed')::int AS "pageViews",
             COUNT(*) FILTER (WHERE "eventName" = 'product_added_to_cart')::int AS "atcCount",
-            COUNT(*) FILTER (WHERE "eventName" = 'checkout_completed')::int AS "orders"
+            COUNT(*) FILTER (WHERE "eventName" = 'checkout_completed')::int AS "orders",
+            COALESCE(SUM("orderValue") FILTER (WHERE "eventName" = 'checkout_completed'), 0)::numeric AS "revenue"
         FROM "StorefrontEvent"
         WHERE "createdAt" >= now() - make_interval(days => ${days})
         GROUP BY "country", "region"
@@ -382,7 +388,7 @@ export async function getGeoBreakdown(days: number, limit = 10): Promise<GeoBrea
         LIMIT ${limit}
     `.execute(db);
 
-    return result.rows;
+    return result.rows.map(r => ({ ...r, revenue: Number(r.revenue) }));
 }
 
 /**

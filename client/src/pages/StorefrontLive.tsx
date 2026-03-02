@@ -384,8 +384,35 @@ function LiveFeed({ events, isLoading }: { events: LiveFeedEvent[]; isLoading: b
 // PRODUCTS TAB
 // ============================================
 
+interface ColorGroup {
+    color: string;
+    views: number;
+    atcCount: number;
+    purchases: number;
+    revenue: number;
+    sizes: ProductVariantRow[];
+}
+
+function groupByColor(rows: ProductVariantRow[]): ColorGroup[] {
+    const map: Record<string, ColorGroup> = {};
+    for (const r of rows) {
+        let group = map[r.color];
+        if (!group) {
+            group = { color: r.color, views: 0, atcCount: 0, purchases: 0, revenue: 0, sizes: [] };
+            map[r.color] = group;
+        }
+        group.views += r.views;
+        group.atcCount += r.atcCount;
+        group.purchases += r.purchases;
+        group.revenue += r.revenue;
+        group.sizes.push(r);
+    }
+    return Object.values(map).sort((a, b) => b.views - a.views);
+}
+
 function ProductVariantRows({ productTitle, gender, days }: { productTitle: string; gender: string | null; days: number }) {
     const variants = useProductVariants(productTitle, gender, days, true);
+    const [expandedColors, setExpandedColors] = useState<Set<string>>(new Set());
 
     if (variants.isLoading) {
         return (
@@ -403,38 +430,82 @@ function ProductVariantRows({ productTitle, gender, days }: { productTitle: stri
     const rows = variants.data ?? [];
     if (rows.length === 0) return null;
 
+    const colorGroups = groupByColor(rows);
+
+    function toggleColor(color: string) {
+        setExpandedColors(prev => {
+            const next = new Set(prev);
+            if (next.has(color)) next.delete(color);
+            else next.add(color);
+            return next;
+        });
+    }
+
     return (
         <>
-            {rows.map((v: ProductVariantRow) => {
-                const parts = v.variantTitle.split(' / ');
-                const color = parts[0] ?? v.variantTitle;
-                const size = parts[1] ?? '';
+            {colorGroups.map((cg) => {
+                const isOpen = expandedColors.has(cg.color);
+                const hasSizes = cg.sizes.length > 1 || (cg.sizes.length === 1 && cg.sizes[0].size !== '-');
                 return (
-                    <tr key={v.variantTitle} className="bg-stone-50/50 border-b border-stone-100">
-                        <td className="py-2 pr-4 pl-16">
-                            <div className="flex items-center gap-2">
-                                <span className="text-xs text-stone-600">{color}</span>
-                                {size && (
-                                    <span className="text-[10px] font-medium text-stone-400 bg-stone-200 px-1.5 py-0.5 rounded">
-                                        {size}
+                    <React.Fragment key={cg.color}>
+                        {/* Color-level row */}
+                        <tr
+                            className={`bg-stone-50/60 border-b border-stone-100 ${hasSizes ? 'cursor-pointer hover:bg-stone-100/60' : ''}`}
+                            onClick={hasSizes ? () => toggleColor(cg.color) : undefined}
+                        >
+                            <td className="py-2 pr-4 pl-14">
+                                <div className="flex items-center gap-2">
+                                    {hasSizes && (
+                                        <span className="text-stone-400 flex-shrink-0">
+                                            {isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                                        </span>
+                                    )}
+                                    <span className="text-xs font-medium text-stone-700">{cg.color}</span>
+                                    {!hasSizes && cg.sizes[0]?.size !== '-' && (
+                                        <span className="text-[10px] font-medium text-stone-400 bg-stone-200 px-1.5 py-0.5 rounded">
+                                            {cg.sizes[0].size}
+                                        </span>
+                                    )}
+                                </div>
+                            </td>
+                            <td className="text-right py-2 px-3 text-xs text-stone-600">{formatNum(cg.views)}</td>
+                            <td className="text-right py-2 px-3 text-xs text-stone-400">
+                                {cg.views > 0 ? formatPct(cg.atcCount / cg.views * 100) : '-'}
+                            </td>
+                            <td className="text-right py-2 px-3 text-xs text-amber-600">{formatNum(cg.atcCount)}</td>
+                            <td className="text-right py-2 px-3 text-xs text-stone-400">
+                                {cg.atcCount > 0 ? formatPct(cg.purchases / cg.atcCount * 100) : '-'}
+                            </td>
+                            <td className="text-right py-2 px-3 text-xs text-green-600">{formatNum(cg.purchases)}</td>
+                            <td className="text-right py-2 px-3 text-xs text-stone-400">
+                                {cg.views > 0 ? formatPct(cg.purchases / cg.views * 100) : '-'}
+                            </td>
+                            <td className="text-right py-2 pl-3 text-xs text-stone-600">{formatCurrency(cg.revenue)}</td>
+                        </tr>
+                        {/* Size-level rows */}
+                        {isOpen && cg.sizes.map((s) => (
+                            <tr key={`${cg.color}-${s.size}`} className="bg-stone-50/30 border-b border-stone-50">
+                                <td className="py-1.5 pr-4 pl-24">
+                                    <span className="text-[11px] font-medium text-stone-400 bg-stone-200/70 px-1.5 py-0.5 rounded">
+                                        {s.size}
                                     </span>
-                                )}
-                            </div>
-                        </td>
-                        <td className="text-right py-2 px-3 text-xs text-stone-600">{formatNum(v.views)}</td>
-                        <td className="text-right py-2 px-3 text-xs text-stone-400">
-                            {v.views > 0 ? formatPct(v.atcCount / v.views * 100) : '-'}
-                        </td>
-                        <td className="text-right py-2 px-3 text-xs text-amber-600">{formatNum(v.atcCount)}</td>
-                        <td className="text-right py-2 px-3 text-xs text-stone-400">
-                            {v.atcCount > 0 ? formatPct(v.purchases / v.atcCount * 100) : '-'}
-                        </td>
-                        <td className="text-right py-2 px-3 text-xs text-green-600">{formatNum(v.purchases)}</td>
-                        <td className="text-right py-2 px-3 text-xs text-stone-400">
-                            {v.views > 0 ? formatPct(v.purchases / v.views * 100) : '-'}
-                        </td>
-                        <td className="text-right py-2 pl-3 text-xs text-stone-600">{formatCurrency(v.revenue)}</td>
-                    </tr>
+                                </td>
+                                <td className="text-right py-1.5 px-3 text-[11px] text-stone-500">{formatNum(s.views)}</td>
+                                <td className="text-right py-1.5 px-3 text-[11px] text-stone-400">
+                                    {s.views > 0 ? formatPct(s.atcCount / s.views * 100) : '-'}
+                                </td>
+                                <td className="text-right py-1.5 px-3 text-[11px] text-amber-500">{formatNum(s.atcCount)}</td>
+                                <td className="text-right py-1.5 px-3 text-[11px] text-stone-400">
+                                    {s.atcCount > 0 ? formatPct(s.purchases / s.atcCount * 100) : '-'}
+                                </td>
+                                <td className="text-right py-1.5 px-3 text-[11px] text-green-500">{formatNum(s.purchases)}</td>
+                                <td className="text-right py-1.5 px-3 text-[11px] text-stone-400">
+                                    {s.views > 0 ? formatPct(s.purchases / s.views * 100) : '-'}
+                                </td>
+                                <td className="text-right py-1.5 pl-3 text-[11px] text-stone-500">{formatCurrency(s.revenue)}</td>
+                            </tr>
+                        ))}
+                    </React.Fragment>
                 );
             })}
         </>
@@ -649,12 +720,15 @@ function AcquisitionTab({ days }: { days: number }) {
 // GEOGRAPHY TAB
 // ============================================
 
+type GeoMetric = 'sessions' | 'atcCount' | 'orders';
+
 function GeographyTab({ days }: { days: number }) {
-    const geo = useGeoBreakdown(days, 15);
+    const geo = useGeoBreakdown(days, 50);
     const devices = useDeviceBreakdown(days);
     const pages = useTopPages(days, 15);
     const searches = useTopSearches(days, 15);
     const [geoView, setGeoView] = useState<'map' | 'table'>('map');
+    const [metric, setMetric] = useState<GeoMetric>('sessions');
 
     if (geo.isLoading) return <SectionSkeleton />;
 
@@ -713,9 +787,84 @@ function GeographyTab({ days }: { days: number }) {
                 </div>
 
                 {geoView === 'map' ? (
-                    <Suspense fallback={<div className="flex items-center justify-center py-16 text-sm text-stone-400">Loading map…</div>}>
-                        <GeoMap data={geoRows} />
-                    </Suspense>
+                    <div className="flex flex-col lg:flex-row gap-4">
+                        {/* Map — takes most of the space */}
+                        <div className="lg:flex-1 min-w-0">
+                            <Suspense fallback={<div className="flex items-center justify-center py-16 text-sm text-stone-400">Loading map…</div>}>
+                                <GeoMap data={geoRows} />
+                            </Suspense>
+                        </div>
+
+                        {/* Sidebar — ranked regions */}
+                        <div className="lg:w-72 flex-shrink-0">
+                            {/* Metric selector */}
+                            <div className="flex gap-1 bg-stone-100 rounded-md p-0.5 mb-3">
+                                {([
+                                    ['sessions', 'Sessions'],
+                                    ['atcCount', 'ATC'],
+                                    ['orders', 'Orders'],
+                                ] as const).map(([key, label]) => (
+                                    <button
+                                        key={key}
+                                        onClick={() => setMetric(key)}
+                                        className={`flex-1 px-2 py-1 text-xs font-medium rounded transition-colors ${
+                                            metric === key
+                                                ? 'bg-white text-stone-900 shadow-sm'
+                                                : 'text-stone-500 hover:text-stone-700'
+                                        }`}
+                                    >
+                                        {label}
+                                    </button>
+                                ))}
+                            </div>
+
+                            {/* Ranked list */}
+                            <div className="space-y-1 max-h-[380px] overflow-y-auto pr-1">
+                                {[...geoRows]
+                                    .sort((a, b) => b[metric] - a[metric])
+                                    .filter(r => r[metric] > 0)
+                                    .slice(0, 20)
+                                    .map((r, i) => {
+                                        const value = r[metric];
+                                        const maxVal = Math.max(...geoRows.map(g => g[metric]), 1);
+                                        const pct = (value / maxVal) * 100;
+                                        const regionLabel = r.region ?? r.country ?? 'Unknown';
+                                        const metricColor = metric === 'orders'
+                                            ? 'bg-green-500'
+                                            : metric === 'atcCount'
+                                              ? 'bg-amber-500'
+                                              : 'bg-stone-400';
+                                        return (
+                                            <div key={`${r.region}-${r.country}-${i}`} className="relative">
+                                                <div
+                                                    className={`absolute inset-y-0 left-0 ${metricColor} opacity-10 rounded`}
+                                                    style={{ width: `${pct}%` }}
+                                                />
+                                                <div className="relative flex items-center justify-between px-2.5 py-2">
+                                                    <div className="flex items-center gap-2 min-w-0">
+                                                        <span className="text-[10px] font-mono text-stone-400 w-4 text-right flex-shrink-0">{i + 1}</span>
+                                                        <span className="text-xs text-stone-800 truncate">{regionLabel}</span>
+                                                        {r.region && r.country && r.country !== regionLabel && (
+                                                            <span className="text-[10px] text-stone-400 flex-shrink-0">{r.country}</span>
+                                                        )}
+                                                    </div>
+                                                    <span className={`text-xs font-semibold flex-shrink-0 ml-2 ${
+                                                        metric === 'orders' ? 'text-green-600'
+                                                            : metric === 'atcCount' ? 'text-amber-600'
+                                                              : 'text-stone-700'
+                                                    }`}>
+                                                        {formatNum(value)}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                {geoRows.filter(r => r[metric] > 0).length === 0 && (
+                                    <p className="text-xs text-stone-400 text-center py-4">No data</p>
+                                )}
+                            </div>
+                        </div>
+                    </div>
                 ) : (
                     <div className="overflow-x-auto">
                         <table className="w-full text-sm">
@@ -724,8 +873,10 @@ function GeographyTab({ days }: { days: number }) {
                                     <th className="text-left py-3 pr-4">Region</th>
                                     <th className="text-left py-3 px-3">Country</th>
                                     <th className="text-right py-3 px-3">Sessions</th>
+                                    <th className="text-right py-3 px-3">Views</th>
                                     <th className="text-right py-3 px-3">ATC</th>
-                                    <th className="text-right py-3 pl-3">Orders</th>
+                                    <th className="text-right py-3 px-3">Orders</th>
+                                    <th className="text-right py-3 pl-3">Revenue</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -734,12 +885,14 @@ function GeographyTab({ days }: { days: number }) {
                                         <td className="py-3 pr-4 text-stone-900">{r.region ?? '-'}</td>
                                         <td className="py-3 px-3 text-stone-500">{r.country ?? '-'}</td>
                                         <td className="text-right py-3 px-3 text-stone-700">{formatNum(r.sessions)}</td>
+                                        <td className="text-right py-3 px-3 text-stone-500">{formatNum(r.pageViews)}</td>
                                         <td className="text-right py-3 px-3 text-amber-600 font-medium">{formatNum(r.atcCount)}</td>
-                                        <td className="text-right py-3 pl-3 text-green-600 font-medium">{formatNum(r.orders)}</td>
+                                        <td className="text-right py-3 px-3 text-green-600 font-medium">{formatNum(r.orders)}</td>
+                                        <td className="text-right py-3 pl-3 text-stone-700">{r.revenue > 0 ? formatCurrency(r.revenue) : '-'}</td>
                                     </tr>
                                 ))}
                                 {geoRows.length === 0 && (
-                                    <tr><td colSpan={5} className="py-8 text-center text-stone-400">No geo data yet</td></tr>
+                                    <tr><td colSpan={7} className="py-8 text-center text-stone-400">No geo data yet</td></tr>
                                 )}
                             </tbody>
                         </table>

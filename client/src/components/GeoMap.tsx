@@ -128,8 +128,10 @@ const VIEWS = {
 interface MarkerFeatureProps {
     label: string;
     sessions: number;
+    pageViews: number;
     atcCount: number;
     orders: number;
+    revenue: number;
     // 0 = sessions only, 1 = ATC, 2 = orders
     tier: number;
     // normalised 0–1
@@ -148,8 +150,10 @@ function buildGeoJSON(data: GeoBreakdownRow[], maxSessions: number): GeoJSON.Fea
             properties: {
                 label: r.region ? `${r.region}, ${r.country}` : (r.country ?? 'Unknown'),
                 sessions: r.sessions,
+                pageViews: r.pageViews,
                 atcCount: r.atcCount,
                 orders: r.orders,
+                revenue: r.revenue,
                 tier,
                 intensity: r.sessions / maxSessions,
             },
@@ -218,7 +222,8 @@ export const GeoMap = memo(function GeoMap({ data }: GeoMapProps) {
     const [view, setView] = useState<'india' | 'world'>('india');
     const [popup, setPopup] = useState<{
         lng: number; lat: number;
-        label: string; sessions: number; atcCount: number; orders: number;
+        label: string; sessions: number; pageViews: number;
+        atcCount: number; orders: number; revenue: number;
     } | null>(null);
 
     const maxSessions = Math.max(...data.map(r => r.sessions), 1);
@@ -238,7 +243,15 @@ export const GeoMap = memo(function GeoMap({ data }: GeoMapProps) {
         if (!feature || feature.geometry.type !== 'Point') return;
         const props = feature.properties as MarkerFeatureProps;
         const [lng, lat] = feature.geometry.coordinates;
-        setPopup({ lng, lat, label: props.label, sessions: props.sessions, atcCount: props.atcCount, orders: props.orders });
+        setPopup({
+            lng, lat,
+            label: props.label,
+            sessions: props.sessions,
+            pageViews: props.pageViews,
+            atcCount: props.atcCount,
+            orders: props.orders,
+            revenue: props.revenue,
+        });
     }, []);
 
     const handleMouseEnter = useCallback(() => {
@@ -302,12 +315,33 @@ export const GeoMap = memo(function GeoMap({ data }: GeoMapProps) {
                         closeButton={false}
                         className="geo-popup"
                     >
-                        <div className="text-xs">
-                            <p className="font-semibold text-stone-900 mb-1">{popup.label}</p>
-                            <div className="flex gap-3 text-stone-600">
-                                <span>{popup.sessions.toLocaleString()} sessions</span>
-                                {popup.atcCount > 0 && <span className="text-amber-600">{popup.atcCount} ATC</span>}
-                                {popup.orders > 0 && <span className="text-green-600">{popup.orders} orders</span>}
+                        <div className="text-xs min-w-[160px]">
+                            <p className="font-semibold text-stone-900 mb-2">{popup.label}</p>
+                            <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-stone-600">
+                                <span>Sessions</span>
+                                <span className="text-right font-medium text-stone-800">{popup.sessions.toLocaleString()}</span>
+                                <span>Page Views</span>
+                                <span className="text-right font-medium text-stone-800">{popup.pageViews.toLocaleString()}</span>
+                                <span>Add to Cart</span>
+                                <span className="text-right font-medium text-amber-600">{popup.atcCount}</span>
+                                <span>Orders</span>
+                                <span className="text-right font-medium text-green-600">{popup.orders}</span>
+                                {popup.revenue > 0 && (
+                                    <>
+                                        <span>Revenue</span>
+                                        <span className="text-right font-medium text-stone-800">
+                                            {new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(popup.revenue)}
+                                        </span>
+                                    </>
+                                )}
+                                {popup.sessions > 0 && popup.orders > 0 && (
+                                    <>
+                                        <span>Conv. Rate</span>
+                                        <span className="text-right font-medium text-green-600">
+                                            {(popup.orders / popup.sessions * 100).toFixed(1)}%
+                                        </span>
+                                    </>
+                                )}
                             </div>
                         </div>
                     </Popup>
