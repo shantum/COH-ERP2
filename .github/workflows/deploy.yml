@@ -21,7 +21,7 @@ jobs:
             set -e
             cd /app/COH-ERP2
             git checkout .
-            git clean -fd --exclude=server/.env --exclude=node_modules --exclude=VERSION
+            git clean -fd --exclude=server/.env --exclude=node_modules --exclude=VERSION --exclude=server/data
             git pull origin main
             set -a && source server/.env && set +a
             pnpm install --frozen-lockfile

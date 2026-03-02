@@ -3,6 +3,7 @@ import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import prisma from '../lib/prisma.js';
+import { lookupIp } from '../utils/geoip.js';
 
 const router = Router();
 
@@ -153,11 +154,16 @@ router.post('/events', asyncHandler(async (req: Request, res: Response) => {
         return;
     }
 
-    // Geo from reverse proxy headers
-    const country = (req.headers['cf-ipcountry'] as string)
+    // Geo from MaxMind GeoLite2, falling back to reverse proxy headers
+    const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip;
+    const geo = await lookupIp(clientIp);
+    const country = geo.country
+        || (req.headers['cf-ipcountry'] as string)
         || (req.headers['x-country'] as string)
         || undefined;
-    const region = (req.headers['x-region'] as string) || undefined;
+    const region = geo.region
+        || (req.headers['x-region'] as string)
+        || undefined;
 
     // Bulk insert
     const rows = validEvents.map(e => ({

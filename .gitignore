@@ -13,6 +13,10 @@ build/
 # TypeScript incremental build cache
 *.tsbuildinfo
 
+# GeoIP database (downloaded at deploy time)
+*.mmdb
+server/data/
+
 # Database
 *.sqlite
 prisma/dev.db
