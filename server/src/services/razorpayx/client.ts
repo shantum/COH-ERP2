@@ -9,6 +9,7 @@
  */
 
 import { z } from 'zod';
+import { randomUUID } from 'crypto';
 import logger from '../../utils/logger.js';
 
 const log = logger.child({ module: 'razorpayx' });
@@ -44,6 +45,7 @@ interface RequestOptions {
   path: string;
   body?: Record<string, unknown>;
   query?: Record<string, string | number>;
+  idempotencyKey?: string;
 }
 
 async function request<T>(options: RequestOptions): Promise<T> {
@@ -61,12 +63,17 @@ async function request<T>(options: RequestOptions): Promise<T> {
 
   const authHeader = Buffer.from(`${config.keyId}:${config.keySecret}`).toString('base64');
 
+  const headers: Record<string, string> = {
+    'Authorization': `Basic ${authHeader}`,
+    'Content-Type': 'application/json',
+  };
+  if (options.idempotencyKey) {
+    headers['X-Payout-Idempotency'] = options.idempotencyKey;
+  }
+
   const fetchOptions: RequestInit = {
     method: options.method,
-    headers: {
-      'Authorization': `Basic ${authHeader}`,
-      'Content-Type': 'application/json',
-    },
+    headers,
   };
 
   if (options.body && options.method !== 'GET') {
@@ -330,6 +337,7 @@ export async function createPayout(params: CreatePayoutParams): Promise<Razorpay
       ...validated,
       account_number: config.accountNumber,
     },
+    idempotencyKey: validated.reference_id ?? randomUUID(),
   });
 }
 
@@ -364,6 +372,7 @@ export async function createCompositePayout(params: {
       currency: 'INR',
       account_number: config.accountNumber,
     },
+    idempotencyKey: params.reference_id ?? randomUUID(),
   });
 }
 

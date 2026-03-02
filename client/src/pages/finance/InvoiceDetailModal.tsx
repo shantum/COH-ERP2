@@ -337,7 +337,7 @@ export default function InvoiceDetailModal({
                   )}
                   {invoice.fileName && (
                     <Button variant="outline" size="sm" asChild>
-                      <a href={`/api/finance/invoices/${invoice.id}/file`}>
+                      <a href={`/api/finance/${invoice.id}/file`}>
                         <Download className="h-3.5 w-3.5 mr-1" /> Download
                       </a>
                     </Button>
