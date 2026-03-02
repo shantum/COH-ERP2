@@ -15,25 +15,26 @@ import { ArrowRight, AlertCircle } from 'lucide-react';
 import {
     useConversionFunnel, useLandingPages, useTrafficSources,
     useCampaigns, useGeoConversion, useDeviceBreakdown, useGrowthOverview,
-    useGA4Health,
+    useGA4Health, useProductPerformance,
 } from '../hooks/useGA4Analytics';
 import MetaAdsAnalysis from './MetaAdsAnalysis';
 import GoogleAdsAnalysis from './GoogleAdsAnalysis';
 import { compactThemeSmall } from '../utils/agGridHelpers';
 import { formatCurrency } from '../utils/formatting';
 import type {
-    FunnelDay, TrafficSourceRow, CampaignRow, LandingPageRow, GeoRow, DeviceRow,
+    FunnelDay, TrafficSourceRow, CampaignRow, LandingPageRow, GeoRow, DeviceRow, ProductRow,
 } from '../server/functions/ga4Analytics';
 
 ModuleRegistry.registerModules([AllCommunityModule]);
 
-type Tab = 'overview' | 'acquisition' | 'pages' | 'geography' | 'meta-ads' | 'google-ads';
+type Tab = 'overview' | 'acquisition' | 'pages' | 'products' | 'geography' | 'meta-ads' | 'google-ads';
 type DayRange = 1 | 2 | 7 | 14 | 30 | 90;
 
 const TABS: { key: Tab; label: string }[] = [
     { key: 'overview', label: 'Overview' },
     { key: 'acquisition', label: 'Acquisition' },
     { key: 'pages', label: 'Pages' },
+    { key: 'products', label: 'Products' },
     { key: 'geography', label: 'Geography' },
     { key: 'google-ads', label: 'Google Ads' },
     { key: 'meta-ads', label: 'Meta Ads' },
@@ -458,6 +459,83 @@ function PagesTab({ days }: { days: number }) {
 }
 
 // ============================================
+// PRODUCTS TAB
+// ============================================
+
+function ProductsTab({ days }: { days: number }) {
+    const products = useProductPerformance(days);
+
+    const colDefs = useMemo((): ColDef<ProductRow>[] => [
+        { field: 'itemName', headerName: 'Product', flex: 2, minWidth: 200 },
+        { field: 'viewed', headerName: 'Views', width: 90, cellClass: 'text-right', headerClass: 'ag-right-aligned-header', valueFormatter: (p: ValueFormatterParams) => formatNum(p.value ?? 0) },
+        { field: 'addedToCart', headerName: 'Add to Cart', width: 110, cellClass: 'text-right', headerClass: 'ag-right-aligned-header', valueFormatter: (p: ValueFormatterParams) => formatNum(p.value ?? 0) },
+        { field: 'purchased', headerName: 'Purchased', width: 100, cellClass: 'text-right', headerClass: 'ag-right-aligned-header', valueFormatter: (p: ValueFormatterParams) => formatNum(p.value ?? 0) },
+        { field: 'revenue', headerName: 'Revenue', width: 110, cellClass: 'text-right font-medium', headerClass: 'ag-right-aligned-header', valueFormatter: (p: ValueFormatterParams) => formatCurrency(p.value ?? 0) },
+        { field: 'cartRate', headerName: 'Cart %', width: 90, headerClass: 'ag-right-aligned-header', cellRenderer: ConvRateCellRenderer },
+        { field: 'purchaseRate', headerName: 'Buy %', width: 90, headerClass: 'ag-right-aligned-header', cellRenderer: ConvRateCellRenderer },
+    ], []);
+
+    // Top 10 products by add-to-cart for bar chart
+    const top10 = useMemo(() => {
+        if (!products.data) return [];
+        return products.data.slice(0, 10).map(r => ({
+            name: r.itemName.length > 25 ? r.itemName.slice(0, 25) + '...' : r.itemName,
+            addedToCart: r.addedToCart,
+            purchased: r.purchased,
+        }));
+    }, [products.data]);
+
+    if (products.isLoading) {
+        return (
+            <div className="space-y-6">
+                <ChartSkeleton />
+                <GridSkeleton />
+            </div>
+        );
+    }
+
+    return (
+        <div className="space-y-6">
+            {/* Top 10 bar chart */}
+            {top10.length > 0 && (
+                <div className="bg-white rounded-lg border border-stone-200 shadow-sm p-4 sm:p-6">
+                    <h3 className="text-sm font-medium text-stone-700 mb-4">Top Products — Add to Cart vs Purchased</h3>
+                    <ResponsiveContainer width="100%" height={300}>
+                        <BarChart data={top10} layout="vertical" margin={{ left: 120 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#e7e5e4" />
+                            <XAxis type="number" tick={{ fontSize: 11 }} />
+                            <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={120} />
+                            <Tooltip />
+                            <Bar dataKey="addedToCart" name="Add to Cart" fill="#57534e" radius={[0, 3, 3, 0]} />
+                            <Bar dataKey="purchased" name="Purchased" fill="#292524" radius={[0, 3, 3, 0]} />
+                        </BarChart>
+                    </ResponsiveContainer>
+                </div>
+            )}
+
+            {/* Full table */}
+            <div className="bg-white rounded-lg border border-stone-200 shadow-sm p-4 sm:p-6">
+                <h3 className="text-sm font-medium text-stone-700 mb-3">
+                    Product Performance ({products.data?.length ?? 0} products)
+                </h3>
+                <div className="h-[500px]">
+                    <AgGridReact<ProductRow>
+                        rowData={products.data ?? []}
+                        columnDefs={colDefs}
+                        theme={compactThemeSmall}
+                        defaultColDef={DEFAULT_COL_DEF}
+                        pagination
+                        paginationPageSize={20}
+                        enableCellTextSelection
+                        ensureDomOrder
+                    />
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// ============================================
 // GEOGRAPHY TAB
 // ============================================
 
@@ -581,7 +659,7 @@ export default function GrowthAnalytics() {
     const [days, setDays] = useState<DayRange>(30);
     const health = useGA4Health();
     const ga4Unavailable = health.data && !health.data.exists;
-    const isGA4Tab = tab === 'overview' || tab === 'acquisition' || tab === 'pages' || tab === 'geography';
+    const isGA4Tab = tab === 'overview' || tab === 'acquisition' || tab === 'pages' || tab === 'products' || tab === 'geography';
 
     return (
         <div className="h-full flex flex-col">
@@ -594,6 +672,7 @@ export default function GrowthAnalytics() {
                         {tab === 'overview' && <OverviewTab days={days} />}
                         {tab === 'acquisition' && <AcquisitionTab days={days} />}
                         {tab === 'pages' && <PagesTab days={days} />}
+                        {tab === 'products' && <ProductsTab days={days} />}
                         {tab === 'geography' && <GeographyTab days={days} />}
                         {tab === 'google-ads' && <GoogleAdsTab days={days} />}
                         {tab === 'meta-ads' && <MetaAdsTab days={days} />}

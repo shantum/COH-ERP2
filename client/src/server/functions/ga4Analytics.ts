@@ -26,6 +26,7 @@ export type {
     GeoRow,
     DeviceRow,
     GrowthOverview,
+    ProductRow,
 } from '@server/services/ga4ApiClient.js';
 
 // ============================================
@@ -42,6 +43,11 @@ const landingPagesInputSchema = z.object({
 });
 
 const geoInputSchema = z.object({
+    days: z.number().int().min(1).max(365).default(30),
+    limit: z.number().int().min(1).max(200).default(50),
+});
+
+const productInputSchema = z.object({
     days: z.number().int().min(1).max(365).default(30),
     limit: z.number().int().min(1).max(200).default(50),
 });
@@ -133,6 +139,17 @@ export const getGrowthOverview = createServerFn({ method: 'POST' })
     .handler(async ({ data }) => {
         const { queryGrowthOverview } = await getGa4Client();
         return queryGrowthOverview(data.days);
+    });
+
+/**
+ * Product Performance — items viewed, added to cart, purchased
+ */
+export const getProductPerformance = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => productInputSchema.parse(input))
+    .handler(async ({ data }) => {
+        const { queryProductPerformance } = await getGa4Client();
+        return queryProductPerformance(data.days, data.limit);
     });
 
 /**

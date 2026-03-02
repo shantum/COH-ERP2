@@ -14,6 +14,7 @@ import {
     getDeviceBreakdown,
     getGrowthOverview,
     getGA4Health,
+    getProductPerformance,
 } from '../server/functions/ga4Analytics';
 
 const STALE_TIME = 5 * 60 * 1000; // 5 minutes
@@ -77,6 +78,15 @@ export function useGrowthOverview(days: number) {
     return useQuery({
         queryKey: ['ga4', 'overview', days],
         queryFn: () => fn({ data: { days } }),
+        staleTime: STALE_TIME,
+    });
+}
+
+export function useProductPerformance(days: number, limit = 50) {
+    const fn = useServerFn(getProductPerformance);
+    return useQuery({
+        queryKey: ['ga4', 'products', days, limit],
+        queryFn: () => fn({ data: { days, limit } }),
         staleTime: STALE_TIME,
     });
 }

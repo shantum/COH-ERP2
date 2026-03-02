@@ -99,6 +99,17 @@ export interface DeviceRow {
     conversionRate: number;
 }
 
+export interface ProductRow {
+    itemName: string;
+    itemId: string;
+    viewed: number;
+    addedToCart: number;
+    purchased: number;
+    revenue: number;
+    cartRate: number;
+    purchaseRate: number;
+}
+
 export interface GrowthOverview {
     totalSessions: number;
     totalPurchases: number;
@@ -591,6 +602,39 @@ export async function queryGrowthOverview(days: number): Promise<GrowthOverview>
 
     setCache(cacheKey, result, API_CACHE_TTL);
     return result;
+}
+
+/**
+ * Product Performance — which products are viewed, added to cart, purchased
+ */
+export async function queryProductPerformance(days: number, limit: number): Promise<ProductRow[]> {
+    const { startDate, endDate } = getDateRange(days);
+
+    const rows = await runReport({
+        dateRanges: [{ startDate, endDate }],
+        dimensions: [{ name: 'itemName' }, { name: 'itemId' }],
+        metrics: [
+            { name: 'itemsViewed' },
+            { name: 'itemsAddedToCart' },
+            { name: 'itemsPurchased' },
+            { name: 'itemRevenue' },
+        ],
+        orderBys: [{ metric: { metricName: 'itemsAddedToCart' }, desc: true }],
+        limit: String(limit),
+    }, `ga4api:products:${days}:${limit}`);
+
+    return rows
+        .filter(r => r.dims.itemName && r.dims.itemName !== '(not set)')
+        .map(r => ({
+            itemName: r.dims.itemName,
+            itemId: r.dims.itemId ?? '',
+            viewed: r.mets.itemsViewed,
+            addedToCart: r.mets.itemsAddedToCart,
+            purchased: r.mets.itemsPurchased,
+            revenue: r.mets.itemRevenue,
+            cartRate: safeDiv(r.mets.itemsAddedToCart, r.mets.itemsViewed),
+            purchaseRate: safeDiv(r.mets.itemsPurchased, r.mets.itemsAddedToCart),
+        }));
 }
 
 /**
