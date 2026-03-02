@@ -28,6 +28,7 @@ jobs:
             npx prisma generate
             npx prisma migrate deploy --schema=prisma/schema.prisma
             cd shared && pnpm build && cd ..
+            NODE_OPTIONS="--max-old-space-size=3072" && export NODE_OPTIONS
             cd client && pnpm build && cd ..
             # Build succeeded — safe to restart PM2 now
             EXPECTED_COMMIT=$(git rev-parse --short HEAD)
