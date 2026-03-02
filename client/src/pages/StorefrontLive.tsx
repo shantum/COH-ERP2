@@ -445,6 +445,16 @@ function LiveFeed({ events, isLoading }: { events: LiveFeedEvent[]; isLoading: b
                                     {e.cartValue != null && e.cartValue > 0 && e.eventName === 'product_added_to_cart' && (
                                         <span className="text-amber-600">Cart: {formatCurrency(e.cartValue)}</span>
                                     )}
+                                    {/* Visitor / click IDs */}
+                                    <span className="text-stone-300 font-mono">
+                                        {e.visitorId.slice(0, 8)}
+                                    </span>
+                                    {e.fbclid && (
+                                        <span className="font-medium text-purple-400">fb:{e.fbclid.slice(0, 12)}...</span>
+                                    )}
+                                    {e.gclid && (
+                                        <span className="font-medium text-blue-400">g:{e.gclid.slice(0, 12)}...</span>
+                                    )}
                                 </div>
                             </div>
 

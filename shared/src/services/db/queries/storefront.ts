@@ -91,6 +91,8 @@ export interface LiveFeedEvent {
     isVpn: boolean | null;
     browser: string | null;
     os: string | null;
+    fbclid: string | null;
+    gclid: string | null;
 }
 
 export interface TrafficSourceRow {
@@ -383,6 +385,7 @@ export async function getLiveFeed(limit = 20): Promise<LiveFeedEvent[]> {
                se."deviceType", se."country", se."region", se."city",
                se."utmSource", se."utmCampaign",
                se."asOrganization", se."isVpn", se."browser", se."os",
+               se.fbclid, se.gclid,
                p."imageUrl"
         FROM "StorefrontEvent" se
         LEFT JOIN "Product" p ON se."productId" = p."shopifyProductId"
@@ -688,24 +691,29 @@ export async function getVisitorDetail(visitorId: string): Promise<VisitorDetail
     `.execute(db);
 
     // 3. Match orders — find orders where checkout_completed events have an orderId in rawData
-    const ordersResult = await sql<{ orderId: string; orderNumber: string; customerName: string; amount: number; orderDate: Date }>`
-        SELECT DISTINCT
-            o."id" AS "orderId",
-            o."orderNumber"::text AS "orderNumber",
-            COALESCE(o."customerFirstName" || ' ' || o."customerLastName", '') AS "customerName",
-            o."totalPrice"::numeric AS "amount",
-            o."orderDate"
-        FROM "StorefrontEvent" se
-        JOIN "Order" o ON o."shopifyOrderId" = (se."rawData"->>'orderId')::bigint
-        WHERE se."visitorId" = ${visitorId}
-          AND se."eventName" = 'checkout_completed'
-          AND se."rawData"->>'orderId' IS NOT NULL
-    `.execute(db);
+    let matchedOrders: { orderId: string; orderNumber: string; customerName: string; amount: number; orderDate: Date }[] = [];
+    try {
+        const ordersResult = await sql<{ orderId: string; orderNumber: string; customerName: string; amount: number; orderDate: Date }>`
+            SELECT DISTINCT
+                o."id" AS "orderId",
+                o."orderNumber"::text AS "orderNumber",
+                COALESCE(o."customerFirstName" || ' ' || o."customerLastName", '') AS "customerName",
+                o."totalPrice"::numeric AS "amount",
+                o."orderDate"
+            FROM "StorefrontEvent" se
+            JOIN "Order" o ON o."shopifyOrderId" = se."rawData"->>'orderId'
+            WHERE se."visitorId" = ${visitorId}
+              AND se."eventName" = 'checkout_completed'
+              AND se."rawData"->>'orderId' IS NOT NULL
+        `.execute(db);
 
-    const matchedOrders = ordersResult.rows.map(r => ({
-        ...r,
-        amount: Number(r.amount),
-    }));
+        matchedOrders = ordersResult.rows.map(r => ({
+            ...r,
+            amount: Number(r.amount),
+        }));
+    } catch (error: unknown) {
+        console.error('[Storefront] Order matching failed:', error instanceof Error ? error.message : error);
+    }
 
     return {
         visitorId,
