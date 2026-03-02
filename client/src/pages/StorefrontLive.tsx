@@ -363,10 +363,10 @@ function LiveFeed({ events, isLoading }: { events: LiveFeedEvent[]; isLoading: b
                                 <img
                                     src={e.imageUrl}
                                     alt={e.productTitle ?? ''}
-                                    className="w-9 h-9 rounded object-cover flex-shrink-0 mt-0.5"
+                                    className="w-8 h-10 rounded object-cover flex-shrink-0 mt-0.5"
                                 />
                             ) : (
-                                <div className="w-9 h-9 rounded bg-stone-100 flex items-center justify-center flex-shrink-0 mt-0.5">
+                                <div className="w-8 h-10 rounded bg-stone-100 flex items-center justify-center flex-shrink-0 mt-0.5">
                                     {eventIcon(e.eventName)}
                                 </div>
                             )}
