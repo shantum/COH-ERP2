@@ -138,6 +138,7 @@ router.post('/events', asyncHandler(async (req: Request, res: Response) => {
     const parsed = pixelBatchSchema.safeParse(req.body);
     if (!parsed.success) {
         droppedCount++;
+        console.error('[Pixel] Zod validation failed:', JSON.stringify(parsed.error.issues));
         res.status(400).json({ error: 'Invalid payload' });
         return;
     }
