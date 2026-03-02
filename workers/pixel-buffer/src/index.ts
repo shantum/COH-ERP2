@@ -90,14 +90,32 @@ function parseOs(ua: string): string | undefined {
 // VPN detection
 // ---------------------------------------------------------------------------
 
+// IANA timezone aliases — browsers use old names, CF uses current names
+const TZ_ALIASES: Record<string, string> = {
+	'Asia/Calcutta': 'Asia/Kolkata',
+	'Asia/Saigon': 'Asia/Ho_Chi_Minh',
+	'Asia/Katmandu': 'Asia/Kathmandu',
+	'Asia/Rangoon': 'Asia/Yangon',
+	'Pacific/Ponape': 'Pacific/Pohnpei',
+	'Pacific/Truk': 'Pacific/Chuuk',
+	'America/Buenos_Aires': 'America/Argentina/Buenos_Aires',
+	'Europe/Kiev': 'Europe/Kyiv',
+	'Asia/Ulan_Bator': 'Asia/Ulaanbaatar',
+	'Atlantic/Faeroe': 'Atlantic/Faroe',
+};
+
+function normalizeTz(tz: string): string {
+	return TZ_ALIASES[tz] ?? tz;
+}
+
 /** Compare browser timezone vs CF timezone. Mismatch → likely VPN. */
 function detectVpn(browserTz: string | undefined, cfTz: string | undefined, asn: number | undefined): boolean {
 	// Check known VPN ASNs first
 	if (asn && VPN_ASNS.has(asn)) return true;
 
-	// Timezone mismatch check
+	// Timezone mismatch check (normalize aliases first)
 	if (!browserTz || !cfTz) return false;
-	return browserTz !== cfTz;
+	return normalizeTz(browserTz) !== normalizeTz(cfTz);
 }
 
 // ---------------------------------------------------------------------------
