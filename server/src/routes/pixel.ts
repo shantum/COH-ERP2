@@ -102,8 +102,11 @@ setInterval(() => {
 
 router.post('/events', asyncHandler(async (req: Request, res: Response) => {
     // Origin validation
-    const origin = req.headers.origin || req.headers.referer || '';
-    const isAllowedOrigin = /creaturesofhabit\.in|coh\.one/i.test(origin)
+    // Shopify custom pixels run in a sandboxed iframe that sends Origin: null.
+    // We allow null + our own domains. Rate limiting + event whitelist + Zod are the real guards.
+    const origin = (req.headers.origin || '') as string;
+    const isAllowedOrigin = origin === 'null' || origin === ''
+        || /creaturesofhabit\.in|coh\.one|shopify\.com|shopifycdn\.com/i.test(origin)
         || process.env.NODE_ENV !== 'production';
     if (!isAllowedOrigin) {
         res.status(403).end();

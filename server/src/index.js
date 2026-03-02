@@ -121,8 +121,8 @@ app.use('/api', apiLimiter);
 app.use('/api/auth/login', authLimiter);
 app.use('/api/auth/register', authLimiter);
 
-// Pixel endpoint — permissive CORS (runs in Shopify sandbox with opaque origin)
-app.use('/api/pixel', cors({ origin: true }), pixelRoutes);
+// Pixel endpoint — wildcard CORS (Shopify sandbox sends Origin: null)
+app.use('/api/pixel', cors({ origin: '*' }), pixelRoutes);
 
 // CORS configuration
 app.use(cors({
