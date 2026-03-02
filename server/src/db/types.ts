@@ -1446,6 +1446,14 @@ export type StorefrontEvent = {
     utmCampaign: string | null;
     utmContent: string | null;
     utmTerm: string | null;
+    fbclid: string | null;
+    gclid: string | null;
+    gbraid: string | null;
+    wbraid: string | null;
+    ttclid: string | null;
+    msclkid: string | null;
+    gadSource: string | null;
+    gadCampaignId: string | null;
     productId: string | null;
     productTitle: string | null;
     variantId: string | null;

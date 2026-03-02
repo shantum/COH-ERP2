@@ -1,0 +1,9 @@
+-- Add click ID and ad params columns to StorefrontEvent
+ALTER TABLE "StorefrontEvent" ADD COLUMN IF NOT EXISTS "fbclid" TEXT;
+ALTER TABLE "StorefrontEvent" ADD COLUMN IF NOT EXISTS "gclid" TEXT;
+ALTER TABLE "StorefrontEvent" ADD COLUMN IF NOT EXISTS "gbraid" TEXT;
+ALTER TABLE "StorefrontEvent" ADD COLUMN IF NOT EXISTS "wbraid" TEXT;
+ALTER TABLE "StorefrontEvent" ADD COLUMN IF NOT EXISTS "ttclid" TEXT;
+ALTER TABLE "StorefrontEvent" ADD COLUMN IF NOT EXISTS "msclkid" TEXT;
+ALTER TABLE "StorefrontEvent" ADD COLUMN IF NOT EXISTS "gadSource" TEXT;
+ALTER TABLE "StorefrontEvent" ADD COLUMN IF NOT EXISTS "gadCampaignId" TEXT;
