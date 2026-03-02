@@ -386,6 +386,7 @@ function LiveFeed({ events, isLoading }: { events: LiveFeedEvent[]; isLoading: b
 
 interface ColorGroup {
     color: string;
+    imageUrl: string | null;
     views: number;
     atcCount: number;
     purchases: number;
@@ -398,7 +399,7 @@ function groupByColor(rows: ProductVariantRow[]): ColorGroup[] {
     for (const r of rows) {
         let group = map[r.color];
         if (!group) {
-            group = { color: r.color, views: 0, atcCount: 0, purchases: 0, revenue: 0, sizes: [] };
+            group = { color: r.color, imageUrl: r.imageUrl, views: 0, atcCount: 0, purchases: 0, revenue: 0, sizes: [] };
             map[r.color] = group;
         }
         group.views += r.views;
@@ -459,6 +460,15 @@ function ProductVariantRows({ productTitle, gender, days }: { productTitle: stri
                                         <span className="text-stone-400 flex-shrink-0">
                                             {isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
                                         </span>
+                                    )}
+                                    {cg.imageUrl ? (
+                                        <img
+                                            src={cg.imageUrl}
+                                            alt={cg.color}
+                                            className="w-7 h-9 rounded object-cover flex-shrink-0"
+                                        />
+                                    ) : (
+                                        <div className="w-7 h-9 rounded bg-stone-200 flex-shrink-0" />
                                     )}
                                     <span className="text-xs font-medium text-stone-700">{cg.color}</span>
                                     {!hasSizes && cg.sizes[0]?.size !== '-' && (
@@ -576,10 +586,10 @@ function ProductsTab({ days }: { days: number }) {
                                                         <img
                                                             src={p.imageUrl}
                                                             alt={p.productTitle}
-                                                            className="w-10 h-10 rounded object-cover flex-shrink-0"
+                                                            className="w-9 h-12 rounded object-cover flex-shrink-0"
                                                         />
                                                     ) : (
-                                                        <div className="w-10 h-10 rounded bg-stone-200 flex items-center justify-center text-xs font-bold text-stone-500 flex-shrink-0">
+                                                        <div className="w-9 h-12 rounded bg-stone-200 flex items-center justify-center text-xs font-bold text-stone-500 flex-shrink-0">
                                                             {initial}
                                                         </div>
                                                     )}
@@ -828,14 +838,17 @@ function GeographyTab({ days }: { days: number }) {
                                         const value = r[metric];
                                         const maxVal = Math.max(...geoRows.map(g => g[metric]), 1);
                                         const pct = (value / maxVal) * 100;
-                                        const regionLabel = r.region ?? r.country ?? 'Unknown';
+                                        const primaryLabel = r.city ?? r.region ?? r.country ?? 'Unknown';
+                                        const secondaryLabel = r.city
+                                            ? [r.region, r.country].filter(Boolean).join(', ')
+                                            : (r.region && r.country ? r.country : null);
                                         const metricColor = metric === 'orders'
                                             ? 'bg-green-500'
                                             : metric === 'atcCount'
                                               ? 'bg-amber-500'
                                               : 'bg-stone-400';
                                         return (
-                                            <div key={`${r.region}-${r.country}-${i}`} className="relative">
+                                            <div key={`${r.city}-${r.region}-${r.country}-${i}`} className="relative">
                                                 <div
                                                     className={`absolute inset-y-0 left-0 ${metricColor} opacity-10 rounded`}
                                                     style={{ width: `${pct}%` }}
@@ -843,9 +856,9 @@ function GeographyTab({ days }: { days: number }) {
                                                 <div className="relative flex items-center justify-between px-2.5 py-2">
                                                     <div className="flex items-center gap-2 min-w-0">
                                                         <span className="text-[10px] font-mono text-stone-400 w-4 text-right flex-shrink-0">{i + 1}</span>
-                                                        <span className="text-xs text-stone-800 truncate">{regionLabel}</span>
-                                                        {r.region && r.country && r.country !== regionLabel && (
-                                                            <span className="text-[10px] text-stone-400 flex-shrink-0">{r.country}</span>
+                                                        <span className="text-xs text-stone-800 truncate">{primaryLabel}</span>
+                                                        {secondaryLabel && (
+                                                            <span className="text-[10px] text-stone-400 flex-shrink-0 truncate max-w-[80px]">{secondaryLabel}</span>
                                                         )}
                                                     </div>
                                                     <span className={`text-xs font-semibold flex-shrink-0 ml-2 ${
@@ -870,7 +883,8 @@ function GeographyTab({ days }: { days: number }) {
                         <table className="w-full text-sm">
                             <thead>
                                 <tr className="text-xs text-stone-500 uppercase tracking-wider border-b border-stone-200">
-                                    <th className="text-left py-3 pr-4">Region</th>
+                                    <th className="text-left py-3 pr-4">City</th>
+                                    <th className="text-left py-3 px-3">Region</th>
                                     <th className="text-left py-3 px-3">Country</th>
                                     <th className="text-right py-3 px-3">Sessions</th>
                                     <th className="text-right py-3 px-3">Views</th>
@@ -881,8 +895,9 @@ function GeographyTab({ days }: { days: number }) {
                             </thead>
                             <tbody>
                                 {geoRows.map((r: GeoBreakdownRow, i: number) => (
-                                    <tr key={`${r.region}-${r.country}-${i}`} className="border-b border-stone-100 hover:bg-stone-50">
-                                        <td className="py-3 pr-4 text-stone-900">{r.region ?? '-'}</td>
+                                    <tr key={`${r.city}-${r.region}-${r.country}-${i}`} className="border-b border-stone-100 hover:bg-stone-50">
+                                        <td className="py-3 pr-4 text-stone-900 font-medium">{r.city ?? '-'}</td>
+                                        <td className="py-3 px-3 text-stone-500">{r.region ?? '-'}</td>
                                         <td className="py-3 px-3 text-stone-500">{r.country ?? '-'}</td>
                                         <td className="text-right py-3 px-3 text-stone-700">{formatNum(r.sessions)}</td>
                                         <td className="text-right py-3 px-3 text-stone-500">{formatNum(r.pageViews)}</td>
@@ -892,7 +907,7 @@ function GeographyTab({ days }: { days: number }) {
                                     </tr>
                                 ))}
                                 {geoRows.length === 0 && (
-                                    <tr><td colSpan={7} className="py-8 text-center text-stone-400">No geo data yet</td></tr>
+                                    <tr><td colSpan={8} className="py-8 text-center text-stone-400">No geo data yet</td></tr>
                                 )}
                             </tbody>
                         </table>

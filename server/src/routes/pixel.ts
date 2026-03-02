@@ -164,6 +164,7 @@ router.post('/events', asyncHandler(async (req: Request, res: Response) => {
     const region = geo.region
         || (req.headers['x-region'] as string)
         || undefined;
+    const city = geo.city || undefined;
 
     // Bulk insert
     const rows = validEvents.map(e => ({
@@ -191,6 +192,7 @@ router.post('/events', asyncHandler(async (req: Request, res: Response) => {
         ...(e.deviceType ? { deviceType: e.deviceType } : {}),
         ...(country ? { country } : {}),
         ...(region ? { region } : {}),
+        ...(city ? { city } : {}),
         rawData: {
             ...(e.rawData || {}),
             ...(e.shopifyEventId ? { shopifyEventId: e.shopifyEventId } : {}),

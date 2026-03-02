@@ -57,6 +57,7 @@ export interface ProductFunnelRow {
 export interface ProductVariantRow {
     color: string;
     size: string;
+    imageUrl: string | null;
     views: number;
     atcCount: number;
     purchases: number;
@@ -103,6 +104,7 @@ export interface CampaignAttributionRow {
 export interface GeoBreakdownRow {
     country: string | null;
     region: string | null;
+    city: string | null;
     sessions: number;
     pageViews: number;
     atcCount: number;
@@ -267,6 +269,7 @@ export async function getProductVariantBreakdown(
         SELECT
             COALESCE(SPLIT_PART(se."variantTitle", ' / ', 1), 'Unknown') AS "color",
             COALESCE(NULLIF(SPLIT_PART(se."variantTitle", ' / ', 2), ''), '-') AS "size",
+            MIN(p."imageUrl") AS "imageUrl",
             COUNT(*) FILTER (WHERE se."eventName" = 'product_viewed')::int AS "views",
             COUNT(*) FILTER (WHERE se."eventName" = 'product_added_to_cart')::int AS "atcCount",
             COUNT(*) FILTER (WHERE se."eventName" = 'checkout_completed')::int AS "purchases",
@@ -366,7 +369,7 @@ export async function getCampaignAttribution(days: number): Promise<CampaignAttr
 }
 
 /**
- * Geographic breakdown — sessions, ATC, orders by country/region.
+ * Geographic breakdown — sessions, ATC, orders by country/region/city.
  */
 export async function getGeoBreakdown(days: number, limit = 10): Promise<GeoBreakdownRow[]> {
     const db = await getKysely();
@@ -376,6 +379,7 @@ export async function getGeoBreakdown(days: number, limit = 10): Promise<GeoBrea
         SELECT
             "country",
             "region",
+            "city",
             COUNT(DISTINCT "sessionId")::int AS "sessions",
             COUNT(*) FILTER (WHERE "eventName" = 'page_viewed')::int AS "pageViews",
             COUNT(*) FILTER (WHERE "eventName" = 'product_added_to_cart')::int AS "atcCount",
@@ -383,7 +387,7 @@ export async function getGeoBreakdown(days: number, limit = 10): Promise<GeoBrea
             COALESCE(SUM("orderValue") FILTER (WHERE "eventName" = 'checkout_completed'), 0)::numeric AS "revenue"
         FROM "StorefrontEvent"
         WHERE "createdAt" >= now() - make_interval(days => ${days})
-        GROUP BY "country", "region"
+        GROUP BY "country", "region", "city"
         ORDER BY COUNT(DISTINCT "sessionId") DESC
         LIMIT ${limit}
     `.execute(db);

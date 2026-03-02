@@ -31,31 +31,33 @@ async function getReader(): Promise<Reader<CityResponse> | null> {
 export interface GeoResult {
     country: string | undefined;
     region: string | undefined;
+    city: string | undefined;
 }
 
 export async function lookupIp(ip: string | undefined): Promise<GeoResult> {
-    if (!ip) return { country: undefined, region: undefined };
+    if (!ip) return { country: undefined, region: undefined, city: undefined };
 
     // Strip IPv6-mapped IPv4 prefix
     const cleanIp = ip.startsWith('::ffff:') ? ip.slice(7) : ip;
 
     // Skip private/loopback IPs
     if (cleanIp === '127.0.0.1' || cleanIp === '::1' || cleanIp.startsWith('10.') || cleanIp.startsWith('192.168.')) {
-        return { country: undefined, region: undefined };
+        return { country: undefined, region: undefined, city: undefined };
     }
 
     const r = await getReader();
-    if (!r) return { country: undefined, region: undefined };
+    if (!r) return { country: undefined, region: undefined, city: undefined };
 
     try {
         const result = r.get(cleanIp);
-        if (!result) return { country: undefined, region: undefined };
+        if (!result) return { country: undefined, region: undefined, city: undefined };
 
         return {
             country: result.country?.names?.en ?? result.country?.iso_code ?? undefined,
             region: result.subdivisions?.[0]?.names?.en ?? undefined,
+            city: result.city?.names?.en ?? undefined,
         };
     } catch {
-        return { country: undefined, region: undefined };
+        return { country: undefined, region: undefined, city: undefined };
     }
 }

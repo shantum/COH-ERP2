@@ -106,10 +106,126 @@ const COUNTRY_COORDS: Record<string, [number, number]> = {
     'Bahrain': [50.56, 26.07],
 };
 
-function getCoords(country: string | null, region: string | null): [number, number] | null {
+/** Major Indian city coordinates */
+const INDIA_CITIES: Record<string, [number, number]> = {
+    'Mumbai': [72.88, 19.08],
+    'New Delhi': [77.21, 28.61],
+    'Delhi': [77.21, 28.61],
+    'Bengaluru': [77.59, 12.97],
+    'Bangalore': [77.59, 12.97],
+    'Hyderabad': [78.47, 17.39],
+    'Chennai': [80.27, 13.08],
+    'Kolkata': [88.36, 22.57],
+    'Pune': [73.86, 18.52],
+    'Ahmedabad': [72.58, 23.02],
+    'Jaipur': [75.79, 26.92],
+    'Lucknow': [80.95, 26.85],
+    'Surat': [72.83, 21.17],
+    'Kochi': [76.27, 9.93],
+    'Chandigarh': [76.77, 30.73],
+    'Indore': [75.86, 22.72],
+    'Bhopal': [77.41, 23.26],
+    'Nagpur': [79.09, 21.15],
+    'Coimbatore': [76.96, 11.0],
+    'Thiruvananthapuram': [76.95, 8.52],
+    'Gurgaon': [77.03, 28.47],
+    'Gurugram': [77.03, 28.47],
+    'Noida': [77.33, 28.57],
+    'Ghaziabad': [77.42, 28.67],
+    'Faridabad': [77.31, 28.41],
+    'Patna': [85.14, 25.61],
+    'Bhubaneswar': [85.83, 20.3],
+    'Visakhapatnam': [83.3, 17.69],
+    'Vadodara': [73.21, 22.31],
+    'Ludhiana': [75.86, 30.9],
+    'Agra': [78.02, 27.18],
+    'Varanasi': [83.0, 25.32],
+    'Madurai': [78.12, 9.92],
+    'Mysuru': [76.66, 12.3],
+    'Mysore': [76.66, 12.3],
+    'Mangaluru': [74.86, 12.87],
+    'Mangalore': [74.86, 12.87],
+    'Ranchi': [85.33, 23.34],
+    'Dehradun': [78.03, 30.32],
+    'Guwahati': [91.75, 26.14],
+    'Raipur': [81.63, 21.25],
+    'Vijayawada': [80.65, 16.51],
+    'Amritsar': [74.87, 31.63],
+    'Panaji': [73.83, 15.5],
+    'Margao': [73.96, 15.27],
+    'Mapusa': [73.81, 15.59],
+    'Vasco da Gama': [73.81, 15.4],
+    'Thane': [72.98, 19.2],
+    'Navi Mumbai': [73.02, 19.03],
+    'Goa Velha': [73.89, 15.44],
+    'Kanpur': [80.35, 26.45],
+    'Jodhpur': [73.02, 26.29],
+    'Udaipur': [73.71, 24.58],
+    'Kota': [75.86, 25.18],
+    'Shimla': [77.17, 31.1],
+    'Rishikesh': [78.27, 30.09],
+    'Haridwar': [78.17, 29.95],
+    'Tiruchirappalli': [78.69, 10.79],
+    'Salem': [78.14, 11.65],
+    'Ernakulam': [76.29, 9.98],
+    'Thrissur': [76.21, 10.53],
+    'Kozhikode': [75.77, 11.25],
+    'Calicut': [75.77, 11.25],
+};
+
+/** Major world city coordinates */
+const WORLD_CITIES: Record<string, [number, number]> = {
+    'New York': [-74.01, 40.71],
+    'Los Angeles': [-118.24, 34.05],
+    'San Francisco': [-122.42, 37.77],
+    'Chicago': [-87.63, 41.88],
+    'London': [-0.13, 51.51],
+    'Dubai': [55.27, 25.2],
+    'Abu Dhabi': [54.37, 24.45],
+    'Singapore': [103.85, 1.29],
+    'Tokyo': [139.69, 35.69],
+    'Sydney': [151.21, -33.87],
+    'Melbourne': [144.96, -37.81],
+    'Toronto': [-79.38, 43.65],
+    'Berlin': [13.4, 52.52],
+    'Paris': [2.35, 48.86],
+    'Amsterdam': [4.9, 52.37],
+    'Hong Kong': [114.17, 22.32],
+    'Kuala Lumpur': [101.69, 3.14],
+    'Bangkok': [100.5, 13.76],
+    'Seattle': [-122.33, 47.61],
+    'Houston': [-95.37, 29.76],
+    'Dallas': [-96.8, 32.78],
+    'Washington': [-77.04, 38.91],
+    'Boston': [-71.06, 42.36],
+    'Atlanta': [-84.39, 33.75],
+    'Miami': [-80.19, 25.76],
+    'Doha': [51.53, 25.29],
+    'Riyadh': [46.72, 24.71],
+    'Muscat': [58.41, 23.59],
+    'Dhaka': [90.41, 23.81],
+    'Colombo': [79.86, 6.93],
+    'Kathmandu': [85.32, 27.72],
+    'Lahore': [74.35, 31.56],
+    'Karachi': [67.01, 24.86],
+    'Cape Town': [18.42, -33.93],
+    'Nairobi': [36.82, -1.29],
+    'Lagos': [3.39, 6.45],
+    'São Paulo': [-46.63, -23.55],
+    'Mexico City': [-99.13, 19.43],
+};
+
+function getCoords(country: string | null, region: string | null, city: string | null): [number, number] | null {
+    // City-level first (most precise)
+    if (city) {
+        if (country === 'India' && INDIA_CITIES[city]) return INDIA_CITIES[city];
+        if (WORLD_CITIES[city]) return WORLD_CITIES[city];
+    }
+    // Fall back to state centroid for India
     if (country === 'India' && region && INDIA_STATES[region]) {
         return INDIA_STATES[region];
     }
+    // Fall back to country centroid
     if (country && COUNTRY_COORDS[country]) {
         return COUNTRY_COORDS[country];
     }
@@ -141,14 +257,17 @@ interface MarkerFeatureProps {
 function buildGeoJSON(data: GeoBreakdownRow[], maxSessions: number): GeoJSON.FeatureCollection<GeoJSON.Point, MarkerFeatureProps> {
     const features: GeoJSON.Feature<GeoJSON.Point, MarkerFeatureProps>[] = [];
     for (const r of data) {
-        const coords = getCoords(r.country, r.region);
+        const coords = getCoords(r.country, r.region, r.city);
         if (!coords) continue;
         const tier = r.orders > 0 ? 2 : r.atcCount > 0 ? 1 : 0;
+        // Build label: "City, State, Country" or whichever parts exist
+        const parts = [r.city, r.region, r.country].filter(Boolean);
+        const label = parts.length > 0 ? parts.join(', ') : 'Unknown';
         features.push({
             type: 'Feature',
             geometry: { type: 'Point', coordinates: coords },
             properties: {
-                label: r.region ? `${r.region}, ${r.country}` : (r.country ?? 'Unknown'),
+                label,
                 sessions: r.sessions,
                 pageViews: r.pageViews,
                 atcCount: r.atcCount,

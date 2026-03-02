@@ -1461,6 +1461,7 @@ export type StorefrontEvent = {
     deviceType: string | null;
     country: string | null;
     region: string | null;
+    city: string | null;
     rawData: unknown | null;
 };
 export type StyleMeasurement = {
