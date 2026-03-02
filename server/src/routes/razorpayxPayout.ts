@@ -63,9 +63,19 @@ function defaultMode(amountInr: number): 'NEFT' | 'RTGS' | 'IMPS' {
   return 'IMPS'; // <2L → IMPS (instant)
 }
 
-/** Sanitize narration for RazorpayX (alphanumeric + spaces only, max 30 chars) */
+/** Sanitize narration for RazorpayX (alphanumeric + spaces + hyphens only, max 30 chars) */
 function sanitizeNarration(text: string): string {
-  return text.replace(/[^a-zA-Z0-9 ]/g, '').trim().slice(0, 30);
+  return text.replace(/[^a-zA-Z0-9 \-]/g, '').trim().slice(0, 30);
+}
+
+/** Build narration: "INV-NUM PartyName" (max 30 chars) */
+function buildNarration(invoiceNumber: string | null, partyName: string): string {
+  const invPart = invoiceNumber ? sanitizeNarration(invoiceNumber.replace(/\//g, '-')) : '';
+  if (!invPart) return sanitizeNarration(partyName);
+  const remaining = 30 - invPart.length - 1; // 1 for space
+  if (remaining <= 0) return invPart.slice(0, 30);
+  const namePart = sanitizeNarration(partyName).slice(0, remaining);
+  return `${invPart} ${namePart}`;
 }
 
 /**
@@ -237,7 +247,17 @@ router.post('/payout', requireAdmin, asyncHandler(async (req: Request, res: Resp
   // Create the payout
   const payoutAmount = Math.round(invoice.balanceDue * 100); // INR → paise
   const payoutMode = mode || defaultMode(invoice.balanceDue);
-  const payoutNarration = narration || sanitizeNarration(invoice.party.name);
+  const payoutNarration = narration || buildNarration(invoice.invoiceNumber, invoice.party.name);
+
+  const billingLabel = invoice.billingPeriod
+    ? new Date(`${invoice.billingPeriod}-01`).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })
+    : '';
+  const payoutNotes: Record<string, string> = {
+    invoiceId: invoice.id,
+    partyId: invoice.party.id,
+    invoice: [invoice.invoiceNumber, billingLabel].filter(Boolean).join(' — '),
+    party: invoice.party.name,
+  };
 
   const payout = await createPayout({
     fund_account_id: fundAccountId,
@@ -247,11 +267,7 @@ router.post('/payout', requireAdmin, asyncHandler(async (req: Request, res: Resp
     purpose: 'vendor bill',
     reference_id: invoice.id,
     narration: payoutNarration,
-    notes: {
-      invoiceId: invoice.id,
-      partyId: invoice.party.id,
-      ...(invoice.invoiceNumber ? { invoiceNumber: invoice.invoiceNumber } : {}),
-    },
+    notes: payoutNotes,
     ...(queueIfLowBalance ? { queue_if_low_balance: true } : {}),
   });
 
@@ -343,6 +359,10 @@ router.post('/payout/bulk', requireAdmin, asyncHandler(async (req: Request, res:
       const payoutAmount = Math.round(invoice.balanceDue * 100);
       const payoutMode = mode || defaultMode(invoice.balanceDue);
 
+      const bulkBillingLabel = invoice.billingPeriod
+        ? new Date(`${invoice.billingPeriod}-01`).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })
+        : '';
+
       const payout = await createPayout({
         fund_account_id: fundAccountId,
         amount: payoutAmount,
@@ -350,11 +370,12 @@ router.post('/payout/bulk', requireAdmin, asyncHandler(async (req: Request, res:
         mode: payoutMode,
         purpose: 'vendor bill',
         reference_id: invoice.id,
-        narration: sanitizeNarration(invoice.party.name),
+        narration: buildNarration(invoice.invoiceNumber, invoice.party.name),
         notes: {
           invoiceId: invoice.id,
           partyId: invoice.party.id,
-          ...(invoice.invoiceNumber ? { invoiceNumber: invoice.invoiceNumber } : {}),
+          invoice: [invoice.invoiceNumber, bulkBillingLabel].filter(Boolean).join(' — '),
+          party: invoice.party.name,
         },
         ...(queueIfLowBalance ? { queue_if_low_balance: true } : {}),
       });
