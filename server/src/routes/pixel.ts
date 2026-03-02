@@ -1,7 +1,6 @@
 import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { z } from 'zod';
-import type { Prisma } from '@prisma/client';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import prisma from '../lib/prisma.js';
 
@@ -22,15 +21,30 @@ setInterval(() => {
     }
 }, 5 * 60_000);
 
+// Allowed event names (whitelist to reject spam payloads)
+const VALID_EVENTS = new Set([
+    'page_viewed', 'product_viewed', 'collection_viewed',
+    'product_added_to_cart', 'cart_viewed',
+    'checkout_started', 'checkout_completed',
+    'search_submitted',
+    'checkout_address_info_submitted',
+    'checkout_contact_info_submitted',
+    'checkout_shipping_info_submitted',
+]);
+
 // ============================================
 // Zod schemas
 // ============================================
 
 const storefrontEventSchema = z.object({
     eventName: z.string().min(1).max(100),
-    eventTime: z.string().datetime(),
+    eventTime: z.string(),
     sessionId: z.string().min(1).max(100),
     visitorId: z.string().min(1).max(100),
+    shopifyEventId: z.string().max(100).optional(),
+    shopifyClientId: z.string().max(100).optional(),
+    shopifyTimestamp: z.string().optional(),
+    shopifySeq: z.number().int().optional(),
     pageUrl: z.string().max(2000).optional(),
     referrer: z.string().max(2000).optional(),
     utmSource: z.string().max(200).optional(),
@@ -72,13 +86,6 @@ router.post('/events', asyncHandler(async (req: Request, res: Response) => {
         return;
     }
 
-    // Shared secret check (via query param — sendBeacon can't set headers)
-    const secret = process.env.PIXEL_SHARED_SECRET;
-    if (secret && req.headers['x-pixel-secret'] !== secret && req.query.secret !== secret) {
-        res.status(401).end();
-        return;
-    }
-
     // Rate limiting
     const ip = req.ip || 'unknown';
     const now = Date.now();
@@ -100,6 +107,13 @@ router.post('/events', asyncHandler(async (req: Request, res: Response) => {
         return;
     }
 
+    // Filter to only valid event names (reject spam)
+    const validEvents = parsed.data.events.filter(e => VALID_EVENTS.has(e.eventName));
+    if (validEvents.length === 0) {
+        res.status(204).end();
+        return;
+    }
+
     // Geo from reverse proxy headers (Cloudflare / Caddy)
     const country = (req.headers['cf-ipcountry'] as string)
         || (req.headers['x-country'] as string)
@@ -107,9 +121,9 @@ router.post('/events', asyncHandler(async (req: Request, res: Response) => {
     const region = (req.headers['x-region'] as string) || undefined;
 
     // Bulk insert
-    const rows = parsed.data.events.map(e => ({
+    const rows = validEvents.map(e => ({
         eventName: e.eventName,
-        eventTime: new Date(e.eventTime),
+        eventTime: new Date(e.shopifyTimestamp || e.eventTime),
         sessionId: e.sessionId,
         visitorId: e.visitorId,
         ...(e.pageUrl ? { pageUrl: e.pageUrl } : {}),
@@ -134,7 +148,14 @@ router.post('/events', asyncHandler(async (req: Request, res: Response) => {
         ...(e.deviceType ? { deviceType: e.deviceType } : {}),
         ...(country ? { country } : {}),
         ...(region ? { region } : {}),
-        ...(e.rawData ? { rawData: e.rawData } : {}),
+        // Pack Shopify metadata + any extra data into rawData
+        rawData: {
+            ...(e.rawData || {}),
+            ...(e.shopifyEventId ? { shopifyEventId: e.shopifyEventId } : {}),
+            ...(e.shopifyClientId ? { shopifyClientId: e.shopifyClientId } : {}),
+            ...(e.shopifyTimestamp ? { shopifyTimestamp: e.shopifyTimestamp } : {}),
+            ...(e.shopifySeq != null ? { shopifySeq: e.shopifySeq } : {}),
+        },
     }));
 
     try {
