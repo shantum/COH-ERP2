@@ -130,6 +130,12 @@ function flush(retryCount) {
   isFlushing = true;
   retryCount = retryCount || 0;
 
+  // Cancel any pending lazy timer — we're flushing now
+  if (flushTimer) {
+    clearTimeout(flushTimer);
+    flushTimer = null;
+  }
+
   const batch = eventQueue.splice(0, MAX_BATCH_SIZE);
   const body = JSON.stringify({ events: batch });
 
@@ -140,12 +146,13 @@ function flush(retryCount) {
     keepalive: true,
   }).then(response => {
     isFlushing = false;
-    if (!response.ok && retryCount < MAX_RETRIES) {
-      // Requeue on server error (5xx) or rate limit (429)
+    // Retry once on server errors (5xx) or rate limiting (429)
+    // Don't retry 4xx client errors — payload is invalid, retrying won't help
+    const retryable = response.status >= 500 || response.status === 429;
+    if (retryable && retryCount < MAX_RETRIES) {
       eventQueue.unshift(...batch);
       setTimeout(() => flush(retryCount + 1), 1000);
     }
-    // Schedule next flush if queue still has events
     if (eventQueue.length > 0) startFlushTimer();
   }).catch(() => {
     isFlushing = false;
