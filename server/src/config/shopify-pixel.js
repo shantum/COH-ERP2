@@ -108,7 +108,20 @@ async function enqueue(eventName, extraData, event) {
   // Flush immediately for high-value events (user may leave)
   if (IMMEDIATE_FLUSH_EVENTS.has(eventName) || eventQueue.length >= MAX_BATCH_SIZE) {
     flush();
+  } else {
+    startFlushTimer();
   }
+}
+
+// Lazy flush timer — only runs when the queue has events
+let flushTimer = null;
+
+function startFlushTimer() {
+  if (flushTimer) return;
+  flushTimer = setTimeout(() => {
+    flushTimer = null;
+    flush();
+  }, FLUSH_INTERVAL_MS);
 }
 
 function flush(retryCount) {
@@ -124,18 +137,17 @@ function flush(retryCount) {
     body,
     keepalive: true,
   }).catch(() => {
-    // One retry on failure, then drop
     if (retryCount < MAX_RETRIES) {
-      // Put events back and retry after a short delay
       eventQueue.unshift(...batch);
       setTimeout(() => flush(retryCount + 1), 1000);
     }
-    // After max retries, events are dropped (non-blocking by design)
   });
-}
 
-// Flush on interval
-setInterval(flush, FLUSH_INTERVAL_MS);
+  // If queue still has events after splice, keep the timer going
+  if (eventQueue.length > 0) {
+    startFlushTimer();
+  }
+}
 
 // --- Privacy gating ---
 // Only send events if the customer has consented to analytics
