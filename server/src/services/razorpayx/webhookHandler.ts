@@ -93,17 +93,17 @@ export interface HandlerResult {
 // HELPERS
 // ============================================
 
-function sha256(input: string): string {
+export function sha256(input: string): string {
   return createHash('sha256').update(input).digest('hex');
 }
 
 /** Convert paise to INR */
-function paiseToInr(paise: number): number {
+export function paiseToInr(paise: number): number {
   return Math.round(paise) / 100;
 }
 
 /** Check if a BankTransaction with this hash already exists */
-async function txnExists(prisma: PrismaClient, txnHash: string): Promise<boolean> {
+export async function txnExists(prisma: PrismaClient, txnHash: string): Promise<boolean> {
   const existing = await prisma.bankTransaction.findUnique({
     where: { txnHash },
     select: { id: true },
@@ -502,7 +502,7 @@ async function handleTransactionCreated(
  * Resolve Party ID from payout metadata.
  * Priority: notes.partyId → razorpayContactId lookup → name match
  */
-async function resolvePartyId(
+export async function resolvePartyId(
   prisma: PrismaClient,
   payout: RazorpayXPayout,
 ): Promise<string | null> {
@@ -546,7 +546,7 @@ async function resolvePartyId(
 /**
  * Map payout purpose to chart of accounts.
  */
-function resolvePayoutAccounting(purpose: string, hasParty: boolean): {
+export function resolvePayoutAccounting(purpose: string, hasParty: boolean): {
   debitAccount: string;
   creditAccount: string;
   category: string | undefined;
