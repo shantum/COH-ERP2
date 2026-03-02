@@ -5,7 +5,7 @@
 // Permission: Required (data collection for analytics)
 // ================================================
 
-const ENDPOINT = 'https://erp.creaturesofhabit.in/api/pixel/events';
+const ENDPOINT = 'https://www.coh.one/api/pixel/events';
 const FLUSH_INTERVAL_MS = 2000;
 const MAX_BATCH_SIZE = 20;
 const MAX_RETRIES = 1;

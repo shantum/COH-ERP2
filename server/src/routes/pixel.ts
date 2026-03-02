@@ -79,7 +79,7 @@ const pixelBatchSchema = z.object({
 router.post('/events', asyncHandler(async (req: Request, res: Response) => {
     // Origin validation — only accept from our store in production
     const origin = req.headers.origin || req.headers.referer || '';
-    const isAllowedOrigin = /creaturesofhabit\.in/i.test(origin)
+    const isAllowedOrigin = /creaturesofhabit\.in|coh\.one/i.test(origin)
         || process.env.NODE_ENV !== 'production';
     if (!isAllowedOrigin) {
         res.status(403).end();
