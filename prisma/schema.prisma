@@ -566,6 +566,14 @@ model Order {
   paymentConfirmedBy   String?
   paymentStatus        String?            @default("pending")
   channelOrderId       String?            // BT Order Id for channel imports (e.g., "16557031119098")
+  // UTM attribution fields (extracted from Shopify note_attributes)
+  utmSource            String?
+  utmMedium            String?
+  utmCampaign          String?
+  utmTerm              String?
+  fbclid               String?
+  gclid                String?
+  landingPage          String?
   customer             Customer?          @relation(fields: [customerId], references: [id])
   shopifyCache         ShopifyOrderCache? @relation(fields: [shopifyOrderId], references: [id])
   orderLines           OrderLine[]
@@ -2595,6 +2603,25 @@ model EmailLog {
   @@index([messageId])
 }
 
+/// Saved audience segment for campaigns and targeting
+model Audience {
+  id            String   @id @default(uuid())
+  name          String
+  description   String?
+  filters       Json     // AudienceFilters — see audienceFilters.ts for schema
+  customerCount Int      @default(0)
+
+  // Audit
+  createdById   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  campaigns     EmailCampaign[]
+
+  @@index([createdAt])
+}
+
 /// Email marketing campaign
 model EmailCampaign {
   id                String    @id @default(uuid())
@@ -2612,6 +2639,8 @@ model EmailCampaign {
 
   // Audience
   audienceFilter    Json?     // { tiers: [], tags: [], lastPurchaseDays: number }
+  audienceId        String?   // FK to saved Audience
+  audience          Audience? @relation(fields: [audienceId], references: [id])
   recipientCount    Int       @default(0)
 
   // Stats (denormalized, updated by webhooks)

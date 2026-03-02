@@ -30,6 +30,16 @@ export type AttendanceRecord = {
     createdAt: Generated<Timestamp>;
     updatedAt: Timestamp;
 };
+export type Audience = {
+    id: Generated<string>;
+    name: string;
+    description: string | null;
+    filters: unknown;
+    customerCount: Generated<number>;
+    createdById: string | null;
+    createdAt: Generated<Timestamp>;
+    updatedAt: Timestamp;
+};
 export type BankImportBatch = {
     id: Generated<string>;
     bank: string;
@@ -273,6 +283,7 @@ export type EmailCampaign = {
     sourceId: string | null;
     status: Generated<string>;
     audienceFilter: unknown | null;
+    audienceId: string | null;
     recipientCount: Generated<number>;
     sentCount: Generated<number>;
     deliveredCount: Generated<number>;
@@ -798,6 +809,13 @@ export type Order = {
     paymentConfirmedBy: string | null;
     paymentStatus: Generated<string | null>;
     channelOrderId: string | null;
+    utmSource: string | null;
+    utmMedium: string | null;
+    utmCampaign: string | null;
+    utmTerm: string | null;
+    fbclid: string | null;
+    gclid: string | null;
+    landingPage: string | null;
 };
 export type OrderLine = {
     id: Generated<string>;
@@ -1614,6 +1632,7 @@ export type WriteOffLog = {
 export type DB = {
     Allocation: Allocation;
     AttendanceRecord: AttendanceRecord;
+    Audience: Audience;
     BankImportBatch: BankImportBatch;
     BankTransaction: BankTransaction;
     ChannelImportBatch: ChannelImportBatch;

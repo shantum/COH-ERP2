@@ -190,6 +190,50 @@ export function extractInternalNote(
     return noteEntry?.value || null;
 }
 
+/**
+ * Extract UTM attribution fields from Shopify note_attributes.
+ * Shopify stores UTM params and click IDs as note attributes when
+ * the customer arrives via a tracked link.
+ */
+export interface UtmFields {
+    utmSource: string | null;
+    utmMedium: string | null;
+    utmCampaign: string | null;
+    utmTerm: string | null;
+    fbclid: string | null;
+    gclid: string | null;
+    landingPage: string | null;
+}
+
+const UTM_FIELD_MAP: Record<string, keyof UtmFields> = {
+    utm_source: 'utmSource',
+    utm_medium: 'utmMedium',
+    utm_campaign: 'utmCampaign',
+    utm_term: 'utmTerm',
+    fbclid: 'fbclid',
+    gclid: 'gclid',
+    landing_page: 'landingPage',
+    '_landing_page': 'landingPage',
+};
+
+export function extractUtmFields(
+    noteAttributes: NoteAttribute[] | undefined
+): UtmFields {
+    const result: UtmFields = {
+        utmSource: null, utmMedium: null, utmCampaign: null,
+        utmTerm: null, fbclid: null, gclid: null, landingPage: null,
+    };
+    if (!noteAttributes || noteAttributes.length === 0) return result;
+
+    for (const attr of noteAttributes) {
+        const key = UTM_FIELD_MAP[attr.name?.toLowerCase()];
+        if (key && attr.value) {
+            result[key] = attr.value;
+        }
+    }
+    return result;
+}
+
 // ============================================
 // PRICE CALCULATION
 // ============================================

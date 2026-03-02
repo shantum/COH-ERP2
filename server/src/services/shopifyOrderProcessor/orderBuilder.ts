@@ -9,7 +9,7 @@ import type { PrismaClient, Prisma } from '@prisma/client';
 import shopifyClient from '../shopify/index.js';
 import type { ShopifyAddress, ShopifyCustomer } from '../shopify/index.js';
 import type { ShopifyCustomerData } from '../../utils/customerUtils.js';
-import { detectPaymentMethod, extractInternalNote, calculateEffectiveUnitPrice } from '../../utils/shopifyHelpers.js';
+import { detectPaymentMethod, extractInternalNote, extractUtmFields, calculateEffectiveUnitPrice } from '../../utils/shopifyHelpers.js';
 import { syncLogger } from '../../utils/logger.js';
 import { recomputeOrderStatus } from '../../utils/orderStatus.js';
 import { deferredExecutor } from '../deferredExecutor.js';
@@ -141,6 +141,7 @@ export function buildOrderData(
     const customerName = buildCustomerName(shippingAddress, customer);
     const paymentMethod = detectPaymentMethod(shopifyOrder, existingOrder?.paymentMethod);
     const internalNote = extractInternalNote(shopifyOrder.note_attributes);
+    const utm = extractUtmFields(shopifyOrder.note_attributes);
 
     let internalNotes = existingOrder?.internalNotes || internalNote || null;
 
@@ -171,6 +172,8 @@ export function buildOrderData(
         paymentMethod,
         paymentGateway: shopifyOrder.payment_gateway_names?.join(', ') || null,
         syncedAt: new Date(),
+        // UTM attribution
+        ...utm,
         // Prepaid: customer already paid at checkout
         ...(isPrepaid ? {
             paymentStatus: 'paid',

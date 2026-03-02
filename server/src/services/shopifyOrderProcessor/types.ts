@@ -188,6 +188,14 @@ export interface OrderDataPayload {
     paymentMethod: string;
     paymentGateway: string | null;
     syncedAt: Date;
+    // UTM attribution fields
+    utmSource: string | null;
+    utmMedium: string | null;
+    utmCampaign: string | null;
+    utmTerm: string | null;
+    fbclid: string | null;
+    gclid: string | null;
+    landingPage: string | null;
     // Prepaid settlement fields (set at import for prepaid orders)
     paymentStatus?: string;
     paymentConfirmedAt?: Date | null;
