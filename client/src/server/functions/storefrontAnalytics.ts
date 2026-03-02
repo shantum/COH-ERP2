@@ -25,6 +25,11 @@ export type {
     TopPageRow,
     TopSearchRow,
     DeviceBreakdownRow,
+    VisitorSummary,
+    VisitorEvent,
+    VisitorSession,
+    VisitorDetail,
+    ClickIdBreakdown,
 } from '@coh/shared/services/db/queries/storefront';
 
 // ============================================
@@ -48,6 +53,21 @@ const variantInputSchema = z.object({
     productTitle: z.string().min(1),
     gender: z.string().nullable().default(null),
     days: z.number().int().min(1).max(365).default(1),
+});
+
+const visitorListInputSchema = z.object({
+    days: z.number().int().min(1).max(365).default(1),
+    limit: z.number().int().min(1).max(200).default(50),
+    offset: z.number().int().min(0).default(0),
+    filter: z.object({
+        status: z.string().optional(),
+        source: z.string().optional(),
+        deviceType: z.string().optional(),
+    }).optional(),
+});
+
+const visitorDetailInputSchema = z.object({
+    visitorId: z.string().min(1),
 });
 
 // ============================================
@@ -147,4 +167,28 @@ export const getStorefrontProductVariants = createServerFn({ method: 'POST' })
     .handler(async ({ data }) => {
         const { getProductVariantBreakdown } = await getQueries();
         return getProductVariantBreakdown(data.productTitle, data.gender, data.days);
+    });
+
+export const getStorefrontVisitorList = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => visitorListInputSchema.parse(input))
+    .handler(async ({ data }) => {
+        const { getVisitorList } = await getQueries();
+        return getVisitorList(data.days, data.limit, data.offset, data.filter);
+    });
+
+export const getStorefrontVisitorDetail = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => visitorDetailInputSchema.parse(input))
+    .handler(async ({ data }) => {
+        const { getVisitorDetail } = await getQueries();
+        return getVisitorDetail(data.visitorId);
+    });
+
+export const getStorefrontClickIdBreakdown = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => daysInputSchema.parse(input))
+    .handler(async ({ data }) => {
+        const { getClickIdBreakdown } = await getQueries();
+        return getClickIdBreakdown(data.days);
     });

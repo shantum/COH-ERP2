@@ -19,6 +19,9 @@ import {
     getStorefrontTopPages,
     getStorefrontTopSearches,
     getStorefrontDeviceBreakdown,
+    getStorefrontVisitorList,
+    getStorefrontVisitorDetail,
+    getStorefrontClickIdBreakdown,
 } from '../server/functions/storefrontAnalytics';
 
 const LIVE_STALE = 10_000;       // 10s
@@ -122,6 +125,34 @@ export function useDeviceBreakdown(days: number) {
     const fn = useServerFn(getStorefrontDeviceBreakdown);
     return useQuery({
         queryKey: ['storefront', 'device', days],
+        queryFn: () => fn({ data: { days } }),
+        staleTime: AGGREGATE_STALE,
+    });
+}
+
+export function useVisitorList(days: number, limit = 50, offset = 0, filter?: { status?: string; source?: string; deviceType?: string }) {
+    const fn = useServerFn(getStorefrontVisitorList);
+    return useQuery({
+        queryKey: ['storefront', 'visitor-list', days, limit, offset, filter],
+        queryFn: () => fn({ data: { days, limit, offset, ...(filter ? { filter } : {}) } }),
+        staleTime: AGGREGATE_STALE,
+    });
+}
+
+export function useVisitorDetail(visitorId: string | null) {
+    const fn = useServerFn(getStorefrontVisitorDetail);
+    return useQuery({
+        queryKey: ['storefront', 'visitor-detail', visitorId],
+        queryFn: () => fn({ data: { visitorId: visitorId! } }),
+        staleTime: AGGREGATE_STALE,
+        enabled: !!visitorId,
+    });
+}
+
+export function useClickIdBreakdown(days: number) {
+    const fn = useServerFn(getStorefrontClickIdBreakdown);
+    return useQuery({
+        queryKey: ['storefront', 'click-id-breakdown', days],
         queryFn: () => fn({ data: { days } }),
         staleTime: AGGREGATE_STALE,
     });

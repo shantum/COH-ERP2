@@ -257,7 +257,10 @@ interface MarkerFeatureProps {
 function buildGeoJSON(data: GeoBreakdownRow[], maxSessions: number): GeoJSON.FeatureCollection<GeoJSON.Point, MarkerFeatureProps> {
     const features: GeoJSON.Feature<GeoJSON.Point, MarkerFeatureProps>[] = [];
     for (const r of data) {
-        const coords = getCoords(r.country, r.region, r.city);
+        // Prefer real lat/long from Cloudflare Worker when available
+        const coords = (r.latitude && r.longitude)
+            ? [parseFloat(r.longitude), parseFloat(r.latitude)] as [number, number]
+            : getCoords(r.country, r.region, r.city);
         if (!coords) continue;
         const tier = r.orders > 0 ? 2 : r.atcCount > 0 ? 1 : 0;
         // Build label: "City, State, Country" or whichever parts exist

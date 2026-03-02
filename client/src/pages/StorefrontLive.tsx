@@ -10,6 +10,7 @@ import {
     Eye, ShoppingCart, CreditCard, Search, ArrowRight,
     Smartphone, Monitor, Tablet, TrendingUp, TrendingDown, Activity,
     ChevronDown, ChevronRight, Map, List,
+    Globe, Shield, Wifi,
 } from 'lucide-react';
 
 const GeoMap = lazy(() => import('../components/GeoMap').then(m => ({ default: m.GeoMap })));
@@ -17,19 +18,21 @@ import {
     useHeroMetrics, useOnSiteNow, useProductFunnel, useProductVariants, useLiveFeed,
     useTrafficSources, useCampaignAttribution, useGeoBreakdown,
     useTopPages, useTopSearches, useDeviceBreakdown,
+    useVisitorList, useVisitorDetail, useClickIdBreakdown,
 } from '../hooks/useStorefrontAnalytics';
 import { formatCurrency } from '../utils/formatting';
 import type {
     LiveFeedEvent, ProductFunnelRow, ProductVariantRow, TrafficSourceRow,
     CampaignAttributionRow, GeoBreakdownRow, TopPageRow,
     TopSearchRow, DeviceBreakdownRow,
+    VisitorDetail,
 } from '../server/functions/storefrontAnalytics';
 
 // ============================================
 // TYPES & CONSTANTS
 // ============================================
 
-type Tab = 'overview' | 'products' | 'acquisition' | 'geography';
+type Tab = 'overview' | 'products' | 'acquisition' | 'geography' | 'visitors';
 type DayRange = 1 | 7 | 30 | 90;
 
 const TABS: { key: Tab; label: string }[] = [
@@ -37,6 +40,7 @@ const TABS: { key: Tab; label: string }[] = [
     { key: 'products', label: 'Products' },
     { key: 'acquisition', label: 'Acquisition' },
     { key: 'geography', label: 'Geography' },
+    { key: 'visitors', label: 'Visitors' },
 ];
 
 const DAY_OPTIONS: { value: DayRange; label: string }[] = [
@@ -401,10 +405,32 @@ function LiveFeed({ events, isLoading }: { events: LiveFeedEvent[]; isLoading: b
                                     </div>
                                 )}
 
+                                {/* Page title for non-product events */}
+                                {e.pageTitle && !hasProduct && !hasCollection && (
+                                    <p className="text-[11px] text-stone-400 mt-0.5 truncate">{e.pageTitle}</p>
+                                )}
+
                                 {/* Meta line — location, device, source, value */}
                                 <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-1 text-[11px] text-stone-400">
                                     {location && <span>{location}</span>}
-                                    {e.deviceType && <span className="capitalize">{e.deviceType}</span>}
+                                    {e.deviceType && (
+                                        <span className="capitalize flex items-center gap-0.5">
+                                            {e.browser && <span>{e.browser}</span>}
+                                            {!e.browser && e.deviceType}
+                                            {e.os && <span className="text-stone-300">/ {e.os}</span>}
+                                        </span>
+                                    )}
+                                    {e.asOrganization && (
+                                        <span className="flex items-center gap-0.5">
+                                            <Wifi size={9} />
+                                            {e.asOrganization.length > 20 ? e.asOrganization.slice(0, 20) + '...' : e.asOrganization}
+                                        </span>
+                                    )}
+                                    {e.isVpn && (
+                                        <span className="font-medium text-red-500 flex items-center gap-0.5">
+                                            <Shield size={9} />VPN
+                                        </span>
+                                    )}
                                     {e.utmSource && (
                                         <span className="font-medium" style={{ color: sourceColor(e.utmSource) }}>
                                             {e.utmSource}
@@ -685,14 +711,24 @@ function ProductsTab({ days }: { days: number }) {
 // ACQUISITION TAB
 // ============================================
 
+const PLATFORM_COLORS: Record<string, string> = {
+    facebook: '#a855f7',
+    google: '#3b82f6',
+    'google (app)': '#60a5fa',
+    tiktok: '#06b6d4',
+    microsoft: '#f97316',
+};
+
 function AcquisitionTab({ days }: { days: number }) {
     const sources = useTrafficSources(days);
     const campaigns = useCampaignAttribution(days);
+    const clickIds = useClickIdBreakdown(days);
 
     if (sources.isLoading) return <SectionSkeleton />;
 
     const srcRows = sources.data ?? [];
     const totalSessions = srcRows.reduce((s: number, r: TrafficSourceRow) => s + r.sessions, 0);
+    const clickIdRows = clickIds.data ?? [];
 
     return (
         <div className="space-y-6">
@@ -727,6 +763,32 @@ function AcquisitionTab({ days }: { days: number }) {
                     )}
                 </div>
             </div>
+
+            {/* Ad Platform Click IDs */}
+            {clickIdRows.length > 0 && (
+                <div className="bg-white rounded-lg border border-stone-200 shadow-sm p-4 sm:p-6">
+                    <h3 className="text-sm font-medium text-stone-700 mb-4">Ad Platform Click IDs</h3>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+                        {clickIdRows.map(c => (
+                            <div key={c.platform} className="rounded-lg border border-stone-100 p-3">
+                                <div className="flex items-center gap-2 mb-2">
+                                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: PLATFORM_COLORS[c.platform] ?? '#78716c' }} />
+                                    <span className="text-xs font-medium text-stone-700 capitalize">{c.platform}</span>
+                                </div>
+                                <div className="text-lg font-semibold text-stone-900">{formatNum(c.sessions)}</div>
+                                <div className="text-[11px] text-stone-400">sessions</div>
+                                <div className="flex gap-3 mt-1.5 text-[11px]">
+                                    <span className="text-amber-600">{c.atcCount} ATC</span>
+                                    <span className="text-green-600">{c.orders} orders</span>
+                                </div>
+                                {c.revenue > 0 && (
+                                    <div className="text-xs font-medium text-stone-700 mt-0.5">{formatCurrency(c.revenue)}</div>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
 
             {/* Campaign Attribution */}
             <div className="bg-white rounded-lg border border-stone-200 shadow-sm p-4 sm:p-6">
@@ -1008,6 +1070,286 @@ function GeographyTab({ days }: { days: number }) {
 }
 
 // ============================================
+// VISITORS TAB
+// ============================================
+
+function funnelStepBadge(step: number) {
+    switch (step) {
+        case 3: return <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-green-100 text-green-700">Purchased</span>;
+        case 2: return <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-orange-100 text-orange-700">Checkout</span>;
+        case 1: return <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">ATC</span>;
+        default: return <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-stone-100 text-stone-500">Browsing</span>;
+    }
+}
+
+function VisitorsTab({ days }: { days: number }) {
+    const [selectedVisitorId, setSelectedVisitorId] = useState<string | null>(null);
+    const [statusFilter, setStatusFilter] = useState<string | undefined>();
+    const [sourceFilter, setSourceFilter] = useState<string | undefined>();
+
+    const filter = {
+        ...(statusFilter ? { status: statusFilter } : {}),
+        ...(sourceFilter ? { source: sourceFilter } : {}),
+    };
+    const hasFilter = Object.keys(filter).length > 0;
+
+    const visitors = useVisitorList(days, 50, 0, hasFilter ? filter : undefined);
+    const detail = useVisitorDetail(selectedVisitorId);
+
+    const visitorList = visitors.data ?? [];
+
+    // Auto-select first visitor when list loads
+    React.useEffect(() => {
+        if (!selectedVisitorId && visitorList.length > 0) {
+            setSelectedVisitorId(visitorList[0].visitorId);
+        }
+    }, [visitorList, selectedVisitorId]);
+
+    return (
+        <div className="flex gap-4 h-[calc(100vh-220px)]">
+            {/* LEFT: Visitor List */}
+            <div className="w-[380px] flex-shrink-0 flex flex-col bg-white rounded-lg border border-stone-200 shadow-sm overflow-hidden">
+                {/* Filters */}
+                <div className="p-3 border-b border-stone-100 flex flex-wrap gap-2">
+                    <select
+                        value={statusFilter ?? ''}
+                        onChange={e => { setStatusFilter(e.target.value || undefined); setSelectedVisitorId(null); }}
+                        className="text-xs border border-stone-200 rounded-md px-2 py-1.5 bg-white text-stone-700"
+                    >
+                        <option value="">All status</option>
+                        <option value="converted">Purchased</option>
+                        <option value="atc">ATC / Checkout</option>
+                        <option value="browsing">Browsing</option>
+                    </select>
+                    <select
+                        value={sourceFilter ?? ''}
+                        onChange={e => { setSourceFilter(e.target.value || undefined); setSelectedVisitorId(null); }}
+                        className="text-xs border border-stone-200 rounded-md px-2 py-1.5 bg-white text-stone-700"
+                    >
+                        <option value="">All sources</option>
+                        <option value="paid">Paid</option>
+                        <option value="direct">Direct</option>
+                    </select>
+                    <span className="text-[11px] text-stone-400 self-center ml-auto">
+                        {visitorList.length} visitors
+                    </span>
+                </div>
+
+                {/* Visitor rows */}
+                <div className="flex-1 overflow-y-auto">
+                    {visitors.isLoading && <div className="p-4"><SectionSkeleton /></div>}
+                    {visitorList.map(v => (
+                        <button
+                            key={v.visitorId}
+                            onClick={() => setSelectedVisitorId(v.visitorId)}
+                            className={`w-full text-left px-3 py-2.5 border-b border-stone-100 hover:bg-stone-50 transition-colors ${
+                                selectedVisitorId === v.visitorId ? 'bg-stone-100' : ''
+                            }`}
+                        >
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2 min-w-0">
+                                    {funnelStepBadge(v.maxFunnelStep)}
+                                    <span className="text-xs text-stone-500 truncate">
+                                        {v.visitorId.slice(0, 8)}...
+                                    </span>
+                                </div>
+                                <span className="text-[11px] text-stone-400 whitespace-nowrap">{timeAgo(v.lastSeen)}</span>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-1 text-[11px] text-stone-400">
+                                {(v.city || v.country) && (
+                                    <span>{[v.city, v.country].filter(Boolean).join(', ')}</span>
+                                )}
+                                {v.deviceType && <span className="capitalize">{v.deviceType}</span>}
+                                {v.source && (
+                                    <span className="font-medium" style={{ color: sourceColor(v.source) }}>{v.source}</span>
+                                )}
+                                <span>{v.eventCount} events</span>
+                                {v.sessionCount > 1 && <span>{v.sessionCount} sessions</span>}
+                            </div>
+                            {v.totalOrderValue != null && v.totalOrderValue > 0 && (
+                                <div className="mt-0.5 text-[11px] font-semibold text-green-600">
+                                    Order: {formatCurrency(v.totalOrderValue)}
+                                </div>
+                            )}
+                        </button>
+                    ))}
+                    {!visitors.isLoading && visitorList.length === 0 && (
+                        <p className="text-sm text-stone-400 p-4 text-center">No visitors found</p>
+                    )}
+                </div>
+            </div>
+
+            {/* RIGHT: Journey Timeline */}
+            <div className="flex-1 bg-white rounded-lg border border-stone-200 shadow-sm overflow-hidden flex flex-col">
+                {!selectedVisitorId ? (
+                    <div className="flex-1 flex items-center justify-center text-sm text-stone-400">
+                        Select a visitor to see their journey
+                    </div>
+                ) : detail.isLoading ? (
+                    <div className="p-4"><SectionSkeleton /></div>
+                ) : detail.data ? (
+                    <VisitorJourney detail={detail.data} />
+                ) : (
+                    <div className="flex-1 flex items-center justify-center text-sm text-stone-400">
+                        No data found
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+}
+
+function VisitorJourney({ detail }: { detail: VisitorDetail }) {
+    const { sessions, events, matchedOrders } = detail;
+
+    // Group events by sessionId
+    const eventsBySession: Record<string, typeof events> = {};
+    for (const e of events) {
+        const list = eventsBySession[e.sessionId] ?? [];
+        list.push(e);
+        eventsBySession[e.sessionId] = list;
+    }
+
+    return (
+        <div className="flex-1 overflow-y-auto">
+            {/* Matched orders banner */}
+            {matchedOrders.length > 0 && (
+                <div className="p-3 bg-green-50 border-b border-green-100">
+                    <div className="flex items-center gap-2 text-sm text-green-800">
+                        <CreditCard size={14} />
+                        <span className="font-medium">Converted</span>
+                    </div>
+                    {matchedOrders.map(o => (
+                        <div key={o.orderId} className="mt-1 text-xs text-green-700">
+                            Order #{o.orderNumber} — {o.customerName} — {formatCurrency(o.amount)}
+                        </div>
+                    ))}
+                </div>
+            )}
+
+            {/* Sessions */}
+            {sessions.map((session, si) => {
+                const sessionEvents = eventsBySession[session.sessionId] ?? [];
+                return (
+                    <div key={session.sessionId}>
+                        {/* Session header */}
+                        <div className="sticky top-0 z-10 px-4 py-2.5 bg-stone-50 border-b border-stone-200 flex flex-wrap items-center gap-2">
+                            <span className="text-[11px] font-semibold text-stone-600 uppercase tracking-wider">
+                                Session {si + 1}
+                            </span>
+                            <span className="text-[11px] text-stone-400">
+                                {new Date(session.startTime).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                            {session.source && (
+                                <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full"
+                                    style={{ color: sourceColor(session.source), backgroundColor: sourceColor(session.source) + '18' }}>
+                                    {session.source}
+                                    {session.campaign && <span className="font-normal opacity-70"> / {session.campaign}</span>}
+                                </span>
+                            )}
+                            {session.deviceType && (
+                                <span className="text-[11px] text-stone-400 capitalize flex items-center gap-1">
+                                    {session.deviceType === 'mobile' ? <Smartphone size={11} /> : session.deviceType === 'desktop' ? <Monitor size={11} /> : <Tablet size={11} />}
+                                    {session.deviceType}
+                                </span>
+                            )}
+                            {session.city && (
+                                <span className="text-[11px] text-stone-400 flex items-center gap-1">
+                                    <Globe size={11} />
+                                    {[session.city, session.country].filter(Boolean).join(', ')}
+                                </span>
+                            )}
+                            {session.browser && (
+                                <span className="text-[11px] text-stone-400">{session.browser}/{session.os}</span>
+                            )}
+                            {session.asOrganization && (
+                                <span className="text-[11px] text-stone-400 flex items-center gap-1">
+                                    <Wifi size={10} />
+                                    {session.asOrganization.length > 25 ? session.asOrganization.slice(0, 25) + '...' : session.asOrganization}
+                                </span>
+                            )}
+                            {session.isVpn && (
+                                <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-red-100 text-red-600 flex items-center gap-1">
+                                    <Shield size={10} />VPN
+                                </span>
+                            )}
+                        </div>
+
+                        {/* Landing URL */}
+                        {session.landingUrl && (
+                            <div className="px-4 py-1.5 bg-stone-50/50 border-b border-stone-100 text-[11px] text-stone-400 truncate">
+                                <span className="text-stone-500 font-medium">Landing: </span>
+                                {truncateUrl(session.landingUrl)}
+                            </div>
+                        )}
+
+                        {/* Event timeline */}
+                        <div className="relative pl-8 pr-4">
+                            {/* Vertical line */}
+                            <div className="absolute left-5 top-0 bottom-0 w-px bg-stone-200" />
+
+                            {sessionEvents.map((e) => {
+                                const hasProduct = !!e.productTitle;
+                                return (
+                                    <div key={e.id} className="relative py-2 flex items-start gap-3">
+                                        {/* Timeline dot */}
+                                        <div className={`absolute left-[-12px] top-3 w-2.5 h-2.5 rounded-full border-2 border-white z-10 ${
+                                            e.eventName === 'checkout_completed' ? 'bg-green-500' :
+                                            e.eventName === 'product_added_to_cart' ? 'bg-amber-500' :
+                                            e.eventName === 'checkout_started' ? 'bg-orange-500' :
+                                            e.eventName === 'product_viewed' ? 'bg-blue-400' :
+                                            'bg-stone-300'
+                                        }`} />
+
+                                        {/* Thumbnail */}
+                                        {hasProduct && e.imageUrl ? (
+                                            <img src={e.imageUrl} alt={e.productTitle ?? ''} className="w-8 h-10 rounded object-cover flex-shrink-0" />
+                                        ) : null}
+
+                                        {/* Event content */}
+                                        <div className="flex-1 min-w-0">
+                                            <p className="text-sm text-stone-800 leading-snug">
+                                                <span className="font-medium">{eventLabel(e.eventName)}</span>
+                                                {hasProduct && <span className="text-stone-600"> — {e.productTitle}</span>}
+                                                {e.collectionTitle && !hasProduct && <span className="text-stone-600"> — {e.collectionTitle}</span>}
+                                                {e.searchQuery && <span className="text-purple-600"> "{e.searchQuery}"</span>}
+                                            </p>
+                                            {hasProduct && e.variantTitle && (
+                                                <p className="text-[11px] text-stone-500 mt-0.5">{e.variantTitle}</p>
+                                            )}
+                                            {e.pageTitle && !hasProduct && (
+                                                <p className="text-[11px] text-stone-400 mt-0.5 truncate">{e.pageTitle}</p>
+                                            )}
+                                            <div className="flex items-center gap-2 mt-0.5 text-[11px] text-stone-400">
+                                                <span>
+                                                    {new Date(e.eventTime).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                                                </span>
+                                                {e.orderValue != null && e.orderValue > 0 && (
+                                                    <span className="text-green-600 font-semibold">{formatCurrency(e.orderValue)}</span>
+                                                )}
+                                                {e.cartValue != null && e.cartValue > 0 && (
+                                                    <span className="text-amber-600">Cart: {formatCurrency(e.cartValue)}</span>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                );
+            })}
+
+            {sessions.length === 0 && (
+                <div className="flex-1 flex items-center justify-center text-sm text-stone-400 p-8">
+                    No sessions found for this visitor
+                </div>
+            )}
+        </div>
+    );
+}
+
+// ============================================
 // HEADER
 // ============================================
 
@@ -1081,6 +1423,7 @@ export default function StorefrontLive() {
                 {tab === 'products' && <ProductsTab days={days} />}
                 {tab === 'acquisition' && <AcquisitionTab days={days} />}
                 {tab === 'geography' && <GeographyTab days={days} />}
+                {tab === 'visitors' && <VisitorsTab days={days} />}
             </div>
         </div>
     );

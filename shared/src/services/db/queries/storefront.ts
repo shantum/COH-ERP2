@@ -72,6 +72,7 @@ export interface LiveFeedEvent {
     sessionId: string;
     visitorId: string;
     pageUrl: string | null;
+    pageTitle: string | null;
     productTitle: string | null;
     variantTitle: string | null;
     collectionTitle: string | null;
@@ -86,6 +87,10 @@ export interface LiveFeedEvent {
     utmSource: string | null;
     utmCampaign: string | null;
     imageUrl: string | null;
+    asOrganization: string | null;
+    isVpn: boolean | null;
+    browser: string | null;
+    os: string | null;
 }
 
 export interface TrafficSourceRow {
@@ -111,6 +116,8 @@ export interface GeoBreakdownRow {
     country: string | null;
     region: string | null;
     city: string | null;
+    latitude: string | null;
+    longitude: string | null;
     sessions: number;
     pageViews: number;
     atcCount: number;
@@ -132,6 +139,71 @@ export interface TopSearchRow {
 export interface DeviceBreakdownRow {
     deviceType: string;
     sessions: number;
+}
+
+export interface VisitorSummary {
+    visitorId: string;
+    sessionCount: number;
+    eventCount: number;
+    firstSeen: Date;
+    lastSeen: Date;
+    lastEvent: string;
+    source: string | null;
+    campaign: string | null;
+    deviceType: string | null;
+    city: string | null;
+    country: string | null;
+    maxFunnelStep: number;  // 0=browse, 1=ATC, 2=checkout, 3=purchased
+    totalCartValue: number | null;
+    totalOrderValue: number | null;
+    fbclid: string | null;
+    gclid: string | null;
+}
+
+export interface VisitorEvent {
+    id: string;
+    eventName: string;
+    eventTime: Date;
+    sessionId: string;
+    pageUrl: string | null;
+    pageTitle: string | null;
+    productTitle: string | null;
+    variantTitle: string | null;
+    collectionTitle: string | null;
+    searchQuery: string | null;
+    cartValue: number | null;
+    orderValue: number | null;
+    imageUrl: string | null;
+}
+
+export interface VisitorSession {
+    sessionId: string;
+    source: string | null;
+    campaign: string | null;
+    deviceType: string | null;
+    city: string | null;
+    country: string | null;
+    landingUrl: string | null;
+    asOrganization: string | null;
+    isVpn: boolean | null;
+    browser: string | null;
+    os: string | null;
+    startTime: Date;
+}
+
+export interface VisitorDetail {
+    visitorId: string;
+    sessions: VisitorSession[];
+    events: VisitorEvent[];
+    matchedOrders: { orderId: string; orderNumber: string; customerName: string; amount: number; orderDate: Date }[];
+}
+
+export interface ClickIdBreakdown {
+    platform: string;
+    sessions: number;
+    atcCount: number;
+    orders: number;
+    revenue: number;
 }
 
 // ============================================
@@ -304,12 +376,13 @@ export async function getLiveFeed(limit = 20): Promise<LiveFeedEvent[]> {
 
     const result = await sql<LiveFeedEvent>`
         SELECT se."id", se."eventName", se."eventTime", se."createdAt",
-               se."sessionId", se."visitorId", se."pageUrl",
+               se."sessionId", se."visitorId", se."pageUrl", se."pageTitle",
                se."productTitle", se."variantTitle", se."collectionTitle",
                se."productId", se."searchQuery",
                se."cartValue", se."orderValue",
                se."deviceType", se."country", se."region", se."city",
                se."utmSource", se."utmCampaign",
+               se."asOrganization", se."isVpn", se."browser", se."os",
                p."imageUrl"
         FROM "StorefrontEvent" se
         LEFT JOIN "Product" p ON se."productId" = p."shopifyProductId"
@@ -396,6 +469,8 @@ export async function getGeoBreakdown(days: number, limit = 10): Promise<GeoBrea
             "country",
             "region",
             "city",
+            (array_agg(latitude ORDER BY "eventTime" DESC) FILTER (WHERE latitude IS NOT NULL))[1] AS "latitude",
+            (array_agg(longitude ORDER BY "eventTime" DESC) FILTER (WHERE longitude IS NOT NULL))[1] AS "longitude",
             COUNT(DISTINCT "sessionId")::int AS "sessions",
             COUNT(*) FILTER (WHERE "eventName" = 'page_viewed')::int AS "pageViews",
             COUNT(*) FILTER (WHERE "eventName" = 'product_added_to_cart')::int AS "atcCount",
@@ -476,4 +551,201 @@ export async function getDeviceBreakdown(days: number): Promise<DeviceBreakdownR
     `.execute(db);
 
     return result.rows;
+}
+
+/**
+ * Visitor list — paginated, aggregated visitor summaries with optional filters.
+ * Filters are applied in application code to avoid dynamic SQL injection risks.
+ */
+export async function getVisitorList(
+    days: number,
+    limit = 50,
+    offset = 0,
+    filter?: { status?: string; source?: string; deviceType?: string },
+): Promise<VisitorSummary[]> {
+    const db = await getKysely();
+    const { sql } = await import('kysely');
+
+    // Fetch a generous batch from the CTE, then filter + paginate in JS.
+    // The CTE is bounded by the day range so the result set is manageable.
+    const batchLimit = 2000;
+
+    const result = await sql<VisitorSummary>`
+        WITH visitor_agg AS (
+            SELECT
+                "visitorId",
+                COUNT(DISTINCT "sessionId")::int AS "sessionCount",
+                COUNT(*)::int AS "eventCount",
+                MIN("eventTime") AS "firstSeen",
+                MAX("eventTime") AS "lastSeen",
+                CASE
+                    WHEN COUNT(*) FILTER (WHERE "eventName" = 'checkout_completed') > 0 THEN 3
+                    WHEN COUNT(*) FILTER (WHERE "eventName" = 'checkout_started') > 0 THEN 2
+                    WHEN COUNT(*) FILTER (WHERE "eventName" = 'product_added_to_cart') > 0 THEN 1
+                    ELSE 0
+                END AS "maxFunnelStep",
+                MAX("cartValue") AS "totalCartValue",
+                MAX("orderValue") AS "totalOrderValue",
+                (array_agg("utmSource" ORDER BY "eventTime") FILTER (WHERE "utmSource" IS NOT NULL))[1] AS "source",
+                (array_agg("utmCampaign" ORDER BY "eventTime") FILTER (WHERE "utmCampaign" IS NOT NULL))[1] AS "campaign",
+                (array_agg("deviceType" ORDER BY "eventTime") FILTER (WHERE "deviceType" IS NOT NULL))[1] AS "deviceType",
+                (array_agg("city" ORDER BY "eventTime" DESC) FILTER (WHERE "city" IS NOT NULL))[1] AS "city",
+                (array_agg("country" ORDER BY "eventTime" DESC) FILTER (WHERE "country" IS NOT NULL))[1] AS "country",
+                (array_agg(fbclid ORDER BY "eventTime") FILTER (WHERE fbclid IS NOT NULL))[1] AS "fbclid",
+                (array_agg(gclid ORDER BY "eventTime") FILTER (WHERE gclid IS NOT NULL))[1] AS "gclid",
+                (array_agg("eventName" ORDER BY "eventTime" DESC))[1] AS "lastEvent"
+            FROM "StorefrontEvent"
+            WHERE "createdAt" >= now() - make_interval(days => ${days})
+            GROUP BY "visitorId"
+        )
+        SELECT * FROM visitor_agg
+        ORDER BY "lastSeen" DESC
+        LIMIT ${batchLimit}
+    `.execute(db);
+
+    // Apply filters in application code
+    let filtered = result.rows.map(r => ({
+        ...r,
+        maxFunnelStep: Number(r.maxFunnelStep),
+        totalCartValue: r.totalCartValue != null ? Number(r.totalCartValue) : null,
+        totalOrderValue: r.totalOrderValue != null ? Number(r.totalOrderValue) : null,
+    }));
+
+    if (filter?.status === 'converted') {
+        filtered = filtered.filter(r => r.maxFunnelStep === 3);
+    } else if (filter?.status === 'atc') {
+        filtered = filtered.filter(r => r.maxFunnelStep === 1 || r.maxFunnelStep === 2);
+    } else if (filter?.status === 'browsing') {
+        filtered = filtered.filter(r => r.maxFunnelStep === 0);
+    }
+
+    if (filter?.source === 'paid') {
+        filtered = filtered.filter(r => r.source != null);
+    } else if (filter?.source === 'direct') {
+        filtered = filtered.filter(r => r.source == null && r.fbclid == null && r.gclid == null);
+    }
+
+    if (filter?.deviceType) {
+        filtered = filtered.filter(r => r.deviceType === filter.deviceType);
+    }
+
+    return filtered.slice(offset, offset + limit);
+}
+
+/**
+ * Visitor detail — full event history, session metadata, and matched orders for a single visitor.
+ */
+export async function getVisitorDetail(visitorId: string): Promise<VisitorDetail> {
+    const db = await getKysely();
+    const { sql } = await import('kysely');
+
+    // 1. All events for this visitor
+    const eventsResult = await sql<VisitorEvent>`
+        SELECT
+            se."id",
+            se."eventName",
+            se."eventTime",
+            se."sessionId",
+            se."pageUrl",
+            se."pageTitle",
+            se."productTitle",
+            se."variantTitle",
+            se."collectionTitle",
+            se."searchQuery",
+            se."cartValue",
+            se."orderValue",
+            p."imageUrl"
+        FROM "StorefrontEvent" se
+        LEFT JOIN "Product" p ON se."productId" = p."shopifyProductId"
+        WHERE se."visitorId" = ${visitorId}
+        ORDER BY se."eventTime" ASC
+    `.execute(db);
+
+    const events = eventsResult.rows.map(r => ({
+        ...r,
+        cartValue: r.cartValue != null ? Number(r.cartValue) : null,
+        orderValue: r.orderValue != null ? Number(r.orderValue) : null,
+    }));
+
+    // 2. Session metadata — first event per session for source/device/geo
+    const sessionsResult = await sql<VisitorSession>`
+        SELECT DISTINCT ON ("sessionId")
+            "sessionId",
+            "utmSource" AS "source",
+            "utmCampaign" AS "campaign",
+            "deviceType",
+            "city",
+            "country",
+            "pageUrl" AS "landingUrl",
+            "asOrganization",
+            "isVpn",
+            "browser",
+            "os",
+            "eventTime" AS "startTime"
+        FROM "StorefrontEvent"
+        WHERE "visitorId" = ${visitorId}
+        ORDER BY "sessionId", "eventTime" ASC
+    `.execute(db);
+
+    // 3. Match orders — find orders where checkout_completed events have an orderId in rawData
+    const ordersResult = await sql<{ orderId: string; orderNumber: string; customerName: string; amount: number; orderDate: Date }>`
+        SELECT DISTINCT
+            o."id" AS "orderId",
+            o."orderNumber"::text AS "orderNumber",
+            COALESCE(o."customerFirstName" || ' ' || o."customerLastName", '') AS "customerName",
+            o."totalPrice"::numeric AS "amount",
+            o."orderDate"
+        FROM "StorefrontEvent" se
+        JOIN "Order" o ON o."shopifyOrderId" = (se."rawData"->>'orderId')::bigint
+        WHERE se."visitorId" = ${visitorId}
+          AND se."eventName" = 'checkout_completed'
+          AND se."rawData"->>'orderId' IS NOT NULL
+    `.execute(db);
+
+    const matchedOrders = ordersResult.rows.map(r => ({
+        ...r,
+        amount: Number(r.amount),
+    }));
+
+    return {
+        visitorId,
+        sessions: sessionsResult.rows,
+        events,
+        matchedOrders,
+    };
+}
+
+/**
+ * Click ID breakdown — sessions, ATC, orders, revenue grouped by click ID platform.
+ */
+export async function getClickIdBreakdown(days: number): Promise<ClickIdBreakdown[]> {
+    const db = await getKysely();
+    const { sql } = await import('kysely');
+
+    const result = await sql<ClickIdBreakdown>`
+        SELECT
+            platform,
+            COUNT(DISTINCT "sessionId")::int AS "sessions",
+            COUNT(*) FILTER (WHERE "eventName" = 'product_added_to_cart')::int AS "atcCount",
+            COUNT(*) FILTER (WHERE "eventName" = 'checkout_completed')::int AS "orders",
+            COALESCE(SUM("orderValue") FILTER (WHERE "eventName" = 'checkout_completed'), 0)::numeric AS "revenue"
+        FROM (
+            SELECT *,
+                CASE
+                    WHEN fbclid IS NOT NULL THEN 'facebook'
+                    WHEN gclid IS NOT NULL THEN 'google'
+                    WHEN ttclid IS NOT NULL THEN 'tiktok'
+                    WHEN msclkid IS NOT NULL THEN 'microsoft'
+                    WHEN gbraid IS NOT NULL OR wbraid IS NOT NULL THEN 'google (app)'
+                    ELSE 'none'
+                END AS platform
+            FROM "StorefrontEvent"
+            WHERE "createdAt" >= now() - make_interval(days => ${days})
+        ) sub
+        WHERE platform != 'none'
+        GROUP BY platform
+        ORDER BY COUNT(DISTINCT "sessionId") DESC
+    `.execute(db);
+
+    return result.rows.map(r => ({ ...r, revenue: Number(r.revenue) }));
 }
